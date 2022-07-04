@@ -1,0 +1,10 @@
+
+[tasks.decode]
+command = "echo"
+args = ["Env:", "${CARGO_MAKE_PROFILE}", "Decoded:"]
+
+[tasks.post-build]
+script_runner = "@duckscript"
+script = '''
+mkdir packages/
+'''
