@@ -110,8 +110,10 @@ int main() {
           printf(" %lf ", *(double*)value);
           break;
         case TSDB_DATA_TYPE_TIMESTAMP:
-          char* ts = ws_timestamp_to_rfc3339(*(int64_t*)value, precision, true);
-          printf("\"%s\"", ts);
+          {
+            char* ts = ws_timestamp_to_rfc3339(*(int64_t*)value, precision, true);
+            printf("\"%s\"", ts);
+          }
           break;
         case TSDB_DATA_TYPE_VARCHAR:
           memset(tmp, 0, 4096);
