@@ -2,9 +2,9 @@ name: build
 
 on:
   push:
-    branches: [ develop ]
+    branches: [ main ]
   pull_request:
-    branches: [ develop ]
+    branches: [ main ]
 
 env:
   TOOLS_BUILD_TYPE: Release
@@ -65,11 +65,16 @@ jobs:
       - name: Build & Install TDengine
         run: |
           sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config -y
-          cd TDengine && mkdir release && cd release && cmake .. -DBUILD_JDBC=false -DBUILD_TOOLS=true -DTOOLS_BUILD_TYPE=Release -DBUILD_HTTP=false -DWEBSOCKET=true && make -j8 && sudo make install
+          cd TDengine && mkdir release && cd release && cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true && make -j8 && sudo make install
+          nohup sudo taosd > /dev/null 2>&1 &
+          sleep 5
+          nohup sudo taosadapter > /dev/null 2>&1 &
 
       - name: Run examples
         run: |
-          cd TDengine/src/plugins/taosws-rs/target/libtaos-ws
+          cd TDengine/src/plugins/taosws-rs
+          ./taos-ws-sys/ci/package.sh
+          cd ./target/libtaosws
           make
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./
           ./show-databases || exit 1
