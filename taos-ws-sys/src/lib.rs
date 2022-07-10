@@ -102,7 +102,7 @@ type WsTaos = Result<WsClient, WsError>;
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct WS_FIELD_V2 {
-    pub name: [u8; 65usize],
+    pub name: [c_char; 65usize],
     pub r#type: u8,
     pub bytes: u16,
 }
@@ -123,8 +123,8 @@ impl WS_FIELD_V2 {
 impl From<&Field> for WS_FIELD_V2 {
     fn from(field: &Field) -> Self {
         let f_name = field.name();
-        let mut name = [0; 65usize];
-        unsafe { std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr(), f_name.len()) };
+        let mut name = [0 as c_char; 65usize];
+        unsafe { std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len()) };
         Self {
             name,
             r#type: field.ty() as u8,
@@ -137,7 +137,7 @@ impl From<&Field> for WS_FIELD_V2 {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct WS_FIELD {
-    pub name: [u8; 65usize],
+    pub name: [c_char; 65usize],
     pub r#type: u8,
     pub bytes: u32,
 }
@@ -168,8 +168,8 @@ impl Debug for WS_FIELD {
 impl From<&Field> for WS_FIELD {
     fn from(field: &Field) -> Self {
         let f_name = field.name();
-        let mut name = [0; 65usize];
-        unsafe { std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr(), f_name.len()) };
+        let mut name = [0 as c_char; 65usize];
+        unsafe { std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len()) };
         Self {
             name,
             r#type: field.ty() as u8,
