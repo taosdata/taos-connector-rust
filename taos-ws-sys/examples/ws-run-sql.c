@@ -3,8 +3,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <argp.h>
 
-int main() {
+int main(int argc, char *argv[]) {
+  if ((argc < 2) || (strlen(argv[1]) == 0)) {
+    printf("please input a SQL command to query\n");
+    exit(1);
+  }
   char *dsn = getenv("TAOS_DSN");
   if (dsn == NULL) {
     dsn = "ws://localhost:6041";
@@ -18,7 +23,7 @@ int main() {
     return 0;
   }
 
-  WS_RES *rs = ws_query(taos, "show databases");
+  WS_RES *rs = ws_query(taos, argv[1]);
   code = ws_query_errno(rs);
   if (code != 0) {
     const char *errstr = ws_connect_errstr(taos);
