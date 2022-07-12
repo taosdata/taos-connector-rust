@@ -15,18 +15,17 @@ int main(int argc, char *argv[]) {
     dsn = "ws://localhost:6041";
   }
   WS_TAOS *taos = ws_connect_with_dsn(dsn);
-  int32_t code = ws_connect_errno(taos);
-  if (code != 0) {
-    const char *errstr = ws_connect_errstr(taos);
+  if (taos == NULL) {
+    int code = ws_errno(NULL);
+    const char *errstr = ws_errstr(NULL);
     dprintf(2, "Error [%6x]: %s", code, errstr);
-    ws_close(taos);
     return 0;
   }
 
   WS_RES *rs = ws_query(taos, argv[1]);
-  code = ws_query_errno(rs);
+  int code = ws_errno(rs);
   if (code != 0) {
-    const char *errstr = ws_connect_errstr(taos);
+    const char *errstr = ws_errstr(taos);
     dprintf(2, "Error [%6x]: %s", code, errstr);
     ws_free_result(rs);
     ws_close(taos);

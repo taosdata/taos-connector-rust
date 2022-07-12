@@ -30,7 +30,7 @@ jobs:
           submodules: recursive
           repository: 'taosdata/TDengine'
           path: 'TDengine'
-          ref: 'chore/sangshuduo/TD-15140-libtaos-ws-submodule'
+          ref: 'develop'
 
       - name: Change time zone
         run: |
@@ -65,7 +65,8 @@ jobs:
       - name: Build & Install TDengine
         run: |
           sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config -y
-          cd TDengine && mkdir release && cd release && cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true && make -j8 && sudo make install
+          cd TDengine && mkdir release && cd release && cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true && make -j8 || exit 1
+          sudo make install
           nohup sudo taosd > /dev/null 2>&1 &
           sleep 5
           nohup sudo taosadapter > /dev/null 2>&1 &
