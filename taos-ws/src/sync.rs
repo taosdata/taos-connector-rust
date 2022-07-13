@@ -129,8 +129,24 @@ impl WsClient {
         let (mut async_sender, mut async_reader) = ws.split();
 
         rt.block_on(async_sender.send(WsSend::Version.to_msg()))?;
-        let version = if let Some(Ok(message)) = rt.block_on(async_reader.next()) {
-            match message {
+
+        let duration = Duration::from_secs(2);
+
+        let get_version = async {
+            let sleep = tokio::time::sleep(Duration::from_secs(1));
+            tokio::pin!(sleep);
+            tokio::select! {
+                _ = &mut sleep, if !sleep.is_elapsed() => {
+                   log::debug!("get server version timed out");
+                   return None;
+                }
+                message = async_reader.next() => {
+                    return message
+                }
+            };
+        };
+        let version = match rt.block_on(get_version) {
+            Some(Ok(message)) => match message {
                 Message::Text(text) => {
                     let v: WsRecv = serde_json::from_str(&text).unwrap();
                     let (_, data, ok) = v.ok();
@@ -139,13 +155,12 @@ impl WsClient {
                             ok?;
                             version
                         }
-                        _ => unreachable!(),
+                        _ => "version undetermined".to_string(),
                     }
                 }
-                _ => unreachable!(),
-            }
-        } else {
-            unreachable!()
+                _ => "version undetermined".to_string(),
+            },
+            _ => "version undetermined".to_string(),
         };
 
         let req_id = 0;

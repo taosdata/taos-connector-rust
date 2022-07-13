@@ -157,23 +157,24 @@ impl WsAsyncClient {
 
         let version = WsSend::Version;
         sender.send(version.to_msg()).await?;
-        let version = if let Some(Ok(message)) = reader.next().await {
-            match message {
+
+        let duration = Duration::from_secs(2);
+        let version = match tokio::time::timeout(duration, reader.next()).await {
+            Ok(Some(Ok(message))) => match message {
                 Message::Text(text) => {
                     let v: WsRecv = serde_json::from_str(&text).unwrap();
-                    let (req_id, data, ok) = v.ok();
+                    let (_, data, ok) = v.ok();
                     match data {
                         WsRecvData::Version { version } => {
                             ok?;
                             version
                         }
-                        _ => unreachable!(),
+                        _ => "version undetermined".to_string(),
                     }
                 }
-                _ => unreachable!(),
-            }
-        } else {
-            unreachable!()
+                _ => "version undetermined".to_string(),
+            },
+            _ => "version undetermined".to_string(),
         };
 
         let login = WsSend::Conn {
@@ -570,6 +571,8 @@ async fn test_client() -> anyhow::Result<()> {
     // pretty_env_logger::init();
 
     let client = WsAsyncClient::from_dsn(dsn).await?;
+
+    let version = client.version();
     assert_eq!(client.exec("drop database if exists abc_a").await?, 0);
     assert_eq!(client.exec("create database abc_a").await?, 0);
     assert_eq!(
@@ -630,10 +633,8 @@ async fn test_client_cloud() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
 async fn ws_show_databases() -> anyhow::Result<()> {
     use taos_query::{Fetchable, Queryable};
-    let client = WsAsyncClient::from_dsn(
-        "https://gw-aws.cloud.tdengine.com?token=8c7a628b568b7d32cc50f36b0f2d6273ffd060fc",
-    )
-    .await?;
+    let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+    let client = WsAsyncClient::from_dsn(dsn).await?;
     let mut rs = client.query("show databases").await?;
     let values = rs.to_records();
 
