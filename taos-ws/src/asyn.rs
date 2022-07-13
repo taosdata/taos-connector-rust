@@ -31,6 +31,7 @@ type WsSender = tokio::sync::mpsc::Sender<Message>;
 pub struct WsAsyncClient {
     req_id: Arc<AtomicU64>,
     ws: WsSender,
+    version: String,
     close_signal: watch::Sender<bool>,
     queries:
         Arc<HashMap<ReqId, oneshot::Sender<std::result::Result<WsQueryResp, taos_error::Error>>>>,
@@ -154,6 +155,27 @@ impl WsAsyncClient {
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 
+        let version = WsSend::Version;
+        sender.send(version.to_msg()).await?;
+        let version = if let Some(Ok(message)) = reader.next().await {
+            match message {
+                Message::Text(text) => {
+                    let v: WsRecv = serde_json::from_str(&text).unwrap();
+                    let (req_id, data, ok) = v.ok();
+                    match data {
+                        WsRecvData::Version { version } => {
+                            ok?;
+                            version
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            unreachable!()
+        };
+
         let login = WsSend::Conn {
             req_id,
             req: info.to_conn_request(),
@@ -228,7 +250,6 @@ impl WsAsyncClient {
                                     let v: WsRecv = serde_json::from_str(&text).unwrap();
                                     let (req_id, data, ok) = v.ok();
                                     match data {
-                                        WsRecvData::Conn => todo!(),
                                         WsRecvData::Query(query) => {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
@@ -255,7 +276,7 @@ impl WsAsyncClient {
                                             }
                                         }
                                         // Block type is for binary.
-                                        WsRecvData::Block(_) => unreachable!(),
+                                        _ => unreachable!(),
                                     }
                                 }
                                 Message::Binary(block) => {
@@ -317,6 +338,7 @@ impl WsAsyncClient {
             req_id: Arc::new(AtomicU64::new(req_id + 1)),
             queries,
             fetches,
+            version,
             ws,
             close_signal: tx,
         })
@@ -396,6 +418,10 @@ impl WsAsyncClient {
         }
         let resp = rx.await??;
         Ok(resp.affected_rows)
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
     }
 }
 
