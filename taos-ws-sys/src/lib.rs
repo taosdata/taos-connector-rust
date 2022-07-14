@@ -40,6 +40,7 @@ pub struct WsError {
     source: Option<Box<dyn std::error::Error + 'static>>,
 }
 
+#[derive(Debug)]
 pub struct WsMaybeError<T> {
     error: Option<WsError>,
     data: *mut T,
@@ -145,17 +146,12 @@ where
     }
 }
 
-#[test]
-fn test_ws_res() {
-    let v: Box<i32> = unsafe { Box::from_raw(std::ptr::null_mut()) };
-}
-
 pub type WsResult<T> = Result<T, WsError>;
 
 impl WsError {
     fn new(code: Code, message: &str) -> Self {
         Self {
-            code: Code::Failed,
+            code,
             message: CString::new(message).unwrap(),
             source: None,
         }
@@ -218,7 +214,7 @@ type WsTaos = Result<WsClient, WsError>;
 /// It means that the struct has the same memory layout with the `TAOS_FIELD` struct
 /// in taos.h of TDengine 2.x
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct WS_FIELD_V2 {
     pub name: [c_char; 65usize],
     pub r#type: u8,
@@ -300,6 +296,7 @@ impl From<&Field> for WS_FIELD {
     }
 }
 
+#[derive(Debug)]
 struct WsResultSet {
     rs: ResultSet,
     block: Option<Block>,
@@ -480,7 +477,9 @@ unsafe fn query_with_sql_timeout(
 ///
 /// Please always use `ws_errno` to check it work and `ws_free_result` to free memory.
 pub unsafe extern "C" fn ws_query(taos: *mut WS_TAOS, sql: *const c_char) -> *mut WS_RES {
+    log::debug!("query {:?}", CStr::from_ptr(sql));
     let res: WsMaybeError<WsResultSet> = query_with_sql(taos, sql).into();
+    log::debug!("query done: {:?}", res);
     Box::into_raw(Box::new(res)) as _
 }
 

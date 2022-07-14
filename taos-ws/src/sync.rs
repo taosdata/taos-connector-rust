@@ -60,6 +60,7 @@ impl Drop for WsClient {
     }
 }
 
+#[derive(Debug)]
 pub struct ResultSet {
     rt: Arc<tokio::runtime::Runtime>,
     timeout: Duration,
