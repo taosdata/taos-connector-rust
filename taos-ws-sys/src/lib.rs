@@ -434,10 +434,16 @@ pub unsafe extern "C" fn ws_connect_with_dsn(dsn: *const c_char) -> *mut WS_TAOS
 #[no_mangle]
 /// Same to taos_close. This should always be called after everything done with the connection.
 pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char {
-    (taos as *mut WsClient)
-        .as_mut()
-        .map(|taos| taos.version().as_ptr() as *const c_char)
-        .unwrap_or(std::ptr::null())
+    static mut VERSION_INFO: [u8; 128] = [0; 128];
+    if VERSION_INFO[0] == 0 {
+        if let Some(taos) = (taos as *mut WsClient).as_mut() {
+            let v = taos.version();
+            std::ptr::copy_nonoverlapping(v.as_ptr(), VERSION_INFO.as_mut_ptr(), v.len());
+        }
+        VERSION_INFO.as_ptr() as *const c_char
+    } else {
+        VERSION_INFO.as_ptr() as *const c_char
+    }
 }
 
 #[no_mangle]
