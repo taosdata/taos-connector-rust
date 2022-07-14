@@ -396,7 +396,7 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
 /// To show debug logs:
 ///
 /// ```bash
-/// export RUST_LOG=debug ./a.out
+/// RUST_LOG=debug ./a.out
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn ws_enable_log() {
