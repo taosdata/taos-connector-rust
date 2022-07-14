@@ -277,6 +277,7 @@ impl WsClient {
                                 match data {
                                     WsRecvData::Conn => todo!(),
                                     WsRecvData::Query(query) => {
+                                        log::info!("query result: {:?}", query);
                                         if let Some(sender) = queries_sender.remove(&req_id) {
                                             sender.1.send(ok.map(|_| query)).unwrap();
                                         }
@@ -305,7 +306,7 @@ impl WsClient {
                                     log::debug!("parse v3 raw block");
                                     if let Some(v) = fetches_sender.read(&res_id, |_, v| v.clone())
                                     {
-                                        log::info!("send data to fetches with id {}", res_id);
+                                        log::debug!("send data to fetches with id {}", res_id);
                                         v.send(Ok(WsFetchData::Block(block[8..].to_vec()).clone()))
                                             .unwrap();
                                     }
@@ -314,7 +315,7 @@ impl WsClient {
                                     log::warn!("the block is in format v2");
                                     if let Some(v) = fetches_sender.read(&res_id, |_, v| v.clone())
                                     {
-                                        log::info!("send data to fetches with id {}", res_id);
+                                        log::debug!("send data to fetches with id {}", res_id);
                                         v.send(Ok(WsFetchData::BlockV2(block[8..].to_vec())))
                                             .unwrap();
                                     }
@@ -387,6 +388,7 @@ impl WsClient {
         self.s_query_timeout(sql, self.timeout)
     }
     pub fn s_query_timeout(&self, sql: &str, timeout: Duration) -> Result<ResultSet> {
+        log::info!("query with sql: {sql}");
         let req_id = self.req_id();
         let action = WsSend::Query {
             req_id,
@@ -410,6 +412,7 @@ impl WsClient {
                 .zip(bytes)
                 .map(|((name, ty), bytes)| Field::new(name, ty, bytes))
                 .collect();
+
             let (tx, rx) = std::sync::mpsc::sync_channel(100);
             {
                 self.fetches.insert(resp.id, tx).unwrap();
