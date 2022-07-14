@@ -44,12 +44,13 @@ pub struct WsError {
 pub struct WsMaybeError<T> {
     error: Option<WsError>,
     data: *mut T,
-    type_id: TypeId,
+    type_id: &'static str,
 }
 
 impl<T> Drop for WsMaybeError<T> {
     fn drop(&mut self) {
         if !self.data.is_null() {
+            log::debug!("dropping obj {}", self.type_id);
             let _ = unsafe { self.data.read() };
         }
     }
@@ -91,7 +92,7 @@ impl<T: 'static> From<T> for WsMaybeError<T> {
         Self {
             error: None,
             data: Box::into_raw(Box::new(value)),
-            type_id: std::any::TypeId::of::<T>(),
+            type_id: std::any::type_name::<T>(),
         }
     }
 }
@@ -101,7 +102,7 @@ impl<T: 'static> From<Box<T>> for WsMaybeError<T> {
         Self {
             error: None,
             data: Box::into_raw(value),
-            type_id: std::any::TypeId::of::<T>(),
+            type_id: std::any::type_name::<T>(),
         }
     }
 }
@@ -115,12 +116,12 @@ where
             Ok(value) => Self {
                 error: None,
                 data: Box::into_raw(Box::new(value)),
-                type_id: std::any::TypeId::of::<T>(),
+                type_id: std::any::type_name::<T>(),
             },
             Err(err) => Self {
                 error: Some(err.into()),
                 data: std::ptr::null_mut(),
-                type_id: std::any::TypeId::of::<T>(),
+                type_id: std::any::type_name::<T>(),
             },
         }
     }
@@ -135,12 +136,12 @@ where
             Ok(value) => Self {
                 error: None,
                 data: Box::into_raw(value),
-                type_id: std::any::TypeId::of::<T>(),
+                type_id: std::any::type_name::<T>(),
             },
             Err(err) => Self {
                 error: Some(err.into()),
                 data: std::ptr::null_mut(),
-                type_id: std::any::TypeId::of::<T>(),
+                type_id: std::any::type_name::<T>(),
             },
         }
     }
@@ -435,6 +436,9 @@ pub unsafe extern "C" fn ws_connect_with_dsn(dsn: *const c_char) -> *mut WS_TAOS
 /// Same to taos_close. This should always be called after everything done with the connection.
 pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char {
     static mut VERSION_INFO: [u8; 128] = [0; 128];
+    if taos.is_null() {
+        return VERSION_INFO.as_ptr() as *const c_char;
+    }
     if VERSION_INFO[0] == 0 {
         if let Some(taos) = (taos as *mut WsClient).as_mut() {
             let v = taos.version();
@@ -449,9 +453,12 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
 #[no_mangle]
 /// Same to taos_close. This should always be called after everything done with the connection.
 pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) {
-    let client = Box::from_raw(taos as *mut WsClient);
-    client.close();
-    drop(client);
+    if !taos.is_null() {
+        log::debug!("close connection {taos:p}");
+        let client = Box::from_raw(taos as *mut WsClient);
+        client.close();
+        drop(client);
+    }
 }
 
 unsafe fn query_with_sql(taos: *mut WS_TAOS, sql: *const c_char) -> WsResult<WsResultSet> {
@@ -699,8 +706,6 @@ pub fn init_env() {
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Read, num};
-
     use super::*;
     #[test]
     fn dsn_error() {
@@ -732,7 +737,12 @@ mod tests {
             let err = CStr::from_ptr(ws_errstr(rs) as _);
             // Incomplete SQL statement
             assert!(code != 0);
-            assert!(err.to_str().unwrap().match_indices("Incomplete SQL statement").next().is_some());
+            assert!(err
+                .to_str()
+                .unwrap()
+                .match_indices("Incomplete SQL statement")
+                .next()
+                .is_some());
         }
     }
 

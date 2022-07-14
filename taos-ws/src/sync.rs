@@ -55,7 +55,7 @@ pub struct WsClient {
 
 impl Drop for WsClient {
     fn drop(&mut self) {
-        print!("dropping client");
+        log::debug!("dropping client");
         // send close signal to reader/writer spawned tasks.
     }
 }
@@ -254,8 +254,7 @@ impl WsClient {
                     },
 
                     _ = close_recv.changed() => {
-                        println!("close all");
-                        log::info!("close sender task");
+                        log::error!("close sender task");
                         break;
                     }
                 }
@@ -322,7 +321,10 @@ impl WsClient {
                                     }
                                 }
                             }
-                            Message::Close(_) => break,
+                            Message::Close(_) => {
+                                log::error!("received close message, stop");
+                                break;
+                            },
                             Message::Ping(bytes) => {
                                 // let mut writer = tx2recv.lock().unwrap();
                                 tx2recv.send(WsSend::Pong(bytes)).await.unwrap()

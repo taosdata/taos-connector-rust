@@ -669,6 +669,10 @@ impl Raw {
         }
     }
 
+    unsafe fn get_col_unchecked(&self, col: usize) -> &ColumnView {
+        self.columns.get_unchecked(col)
+    }
+
     pub fn write<W: std::io::Write>(&self, wtr: W) -> std::io::Result<usize> {
         todo!()
     }
