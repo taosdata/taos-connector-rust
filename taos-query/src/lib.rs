@@ -301,8 +301,7 @@ pub trait Queryable<'q>: Debug {
 pub trait AsyncFetchable
 where
     Self: Sized + Send,
-    Self::BlockStream: futures::stream::Stream + Send,
-    <Self::BlockStream as futures::stream::Stream>::Item: BlockExt + Send,
+    Self::BlockStream: futures::stream::Stream<Item = Raw> + Send,
 {
     type BlockStream;
     // type Block: for<'b> BlockExt;
