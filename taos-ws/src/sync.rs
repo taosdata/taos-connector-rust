@@ -324,13 +324,15 @@ impl WsClient {
                             Message::Close(_) => {
                                 log::error!("received close message, stop");
                                 break;
-                            },
+                            }
                             Message::Ping(bytes) => {
                                 // let mut writer = tx2recv.lock().unwrap();
                                 tx2recv.send(WsSend::Pong(bytes)).await.unwrap()
                             }
                             _ => {
                                 // do nothing
+                                log::error!("unexpected message, stop");
+                                break;
                             }
                         }
                     } else {
