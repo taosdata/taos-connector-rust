@@ -325,7 +325,7 @@ impl WsClient {
         });
 
         Ok(Self {
-            timeout: Duration::from_secs(10),
+            timeout: Duration::from_secs(5),
             req_id: Arc::new(AtomicU64::new(req_id + 1)),
             queries,
             fetches,
@@ -360,7 +360,7 @@ impl WsClient {
         let (tx, rx) = std::sync::mpsc::sync_channel(2);
         {
             self.queries.insert(req_id, tx).unwrap();
-            self.sender.blocking_send(action).unwrap();
+            self.rt.block_on(self.sender.send_timeout(action, self.timeout))?;
         }
         let resp = rx.recv_timeout(self.timeout)??;
 
