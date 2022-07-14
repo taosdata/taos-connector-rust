@@ -725,14 +725,14 @@ mod tests {
             let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
             assert!(!taos.is_null(), "client pointer is not null when success");
 
-            let sql = b"show databasess\0" as *const u8 as _;
+            let sql = b"show x\0" as *const u8 as _;
             let rs = ws_query(taos, sql);
 
             let code = ws_errno(rs);
             let err = CStr::from_ptr(ws_errstr(rs) as _);
             // Incomplete SQL statement
             assert!(code != 0);
-            assert!(err.to_str().unwrap() == "Incomplete SQL statement");
+            assert!(err.to_str().unwrap().match_indices("Incomplete SQL statement").next().is_some());
         }
     }
 
