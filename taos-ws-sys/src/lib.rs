@@ -544,7 +544,7 @@ pub unsafe extern "C" fn ws_affected_rows(rs: *const WS_RES) -> i32 {
 
 #[no_mangle]
 /// Returns number of fields in current result set.
-pub unsafe extern "C" fn ws_num_of_fields(rs: *const WS_RES) -> i32 {
+pub unsafe extern "C" fn ws_field_count(rs: *const WS_RES) -> i32 {
     match (rs as *mut WsMaybeError<WsResultSet>).as_ref() {
         Some(rs) => rs.num_of_fields(),
         _ => 0,
@@ -800,12 +800,12 @@ mod tests {
             let affected_rows = ws_affected_rows(rs);
             assert!(affected_rows == 0);
 
-            let num_of_fields = ws_num_of_fields(rs);
-            dbg!(num_of_fields);
+            let cols = ws_field_count(rs);
+            dbg!(cols);
             // assert!(num_of_fields == 21);
             let fields = ws_fetch_fields(rs);
 
-            for field in std::slice::from_raw_parts(fields, num_of_fields as usize) {
+            for field in std::slice::from_raw_parts(fields, cols as usize) {
                 dbg!(field);
             }
 
@@ -816,7 +816,7 @@ mod tests {
 
             dbg!(rows);
             for row in 0..rows {
-                for col in 0..num_of_fields {
+                for col in 0..cols {
                     let mut ty: Ty = Ty::Null;
                     let mut len = 0u32;
                     let v =
