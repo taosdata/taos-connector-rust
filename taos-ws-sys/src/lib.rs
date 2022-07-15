@@ -354,6 +354,7 @@ impl WsResultSet {
     }
 
     unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
+        log::debug!("fetch block with ptr {ptr:p}");
         self.block = self.rs.fetch_block()?;
         if let Some(block) = self.block.as_ref() {
             *ptr = block.as_raw_bytes().as_ptr() as _;
@@ -361,6 +362,7 @@ impl WsResultSet {
         } else {
             *rows = 0;
         }
+        log::debug!("fetch block with ptr {ptr:p} with rows {}", *rows);
         Ok(())
     }
 
@@ -602,10 +604,16 @@ pub unsafe extern "C" fn ws_fetch_block(
         },
         _ => {
             *rows = 0;
-            0
+
+            C_ERRNO = Code::Failed;
+            let dst = C_ERROR_CONTAINER.as_mut_ptr();
+            const NULL_PTR_RES: &'static str = "WS_RES is null";
+            std::ptr::copy_nonoverlapping(NULL_PTR_RES.as_ptr(), dst, NULL_PTR_RES.len());
+            Code::Failed.into()
         }
     }
 }
+
 #[no_mangle]
 /// Same to taos_free_result. Every websocket result-set object should be freed with this method.
 pub unsafe extern "C" fn ws_free_result(rs: *mut WS_RES) {
