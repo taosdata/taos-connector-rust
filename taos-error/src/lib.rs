@@ -28,7 +28,7 @@ _impl_fmt!(UpperHex);
 /// TDengine error code.
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[repr(C)]
+#[repr(transparent)]
 pub struct Code(i32);
 
 impl Display for Code {
@@ -172,5 +172,4 @@ fn test_code() {
 fn test_display() {
     let err = Error::new(Code::Success, "Success");
     assert_eq!(format!("{err}"), "[0x0000] Success");
-
 }

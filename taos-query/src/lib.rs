@@ -19,11 +19,11 @@ mod insert;
 mod iter;
 pub mod util;
 
-pub use iter::*;
 #[cfg(feature = "async")]
 use async_trait::async_trait;
 use common::*;
 use helpers::*;
+pub use iter::*;
 
 pub enum CodecOpts {
     Raw,
@@ -76,7 +76,7 @@ pub trait BlockExt: Debug + Sized {
     /// **DO NOT** call it directly.
     unsafe fn cell_unchecked(&self, row: usize, col: usize) -> (&Field, BorrowedValue);
 
-    unsafe fn get_col_unchecked(&self, col: usize) -> BorrowedColumn;
+    unsafe fn get_col_unchecked(&self, col: usize) -> &ColumnView;
 
     /// Query by rows.
     fn iter_rows(&self) -> RowsIter<'_, Self> {
@@ -157,11 +157,11 @@ pub trait BlockExt: Debug + Sized {
     }
 }
 
-pub trait Fetchable
-where
-    Self: Sized,
-    for<'r> &'r mut Self: Iterator,
-    for<'b, 'r> <&'r mut Self as Iterator>::Item: BlockExt,
+pub trait Fetchable: Sized + Iterator<Item = Raw>
+// where
+//     Self: Sized,
+//     for<'r> &'r mut Self: Iterator,
+//     for<'b, 'r> <&'r mut Self as Iterator>::Item: BlockExt,
 {
     // type Block: for<'b> BlockExt;
 
@@ -187,13 +187,9 @@ where
             .collect()
     }
 
-    fn rows_iter<'r>(
-        &'r mut self,
-    ) -> std::iter::FlatMap<
-        &'r mut Self,
-        IntoRowsIter<<&'r mut Self as Iterator>::Item>,
-        fn(<&'r mut Self as Iterator>::Item) -> IntoRowsIter<<&'r mut Self as Iterator>::Item>,
-    > {
+    fn rows_iter(
+        &mut self,
+    ) -> std::iter::FlatMap<&mut Self, IntoRowsIter<Raw>, fn(Raw) -> IntoRowsIter<Raw>> {
         self.flat_map(|block| block.into_iter_rows())
     }
 
@@ -212,13 +208,9 @@ where
 }
 
 /// The synchronous query trait for TDengine connection.
-pub trait Queryable<'q>: Debug
-where
-    for<'r> &'r mut Self::ResultSet: Iterator,
-    for<'b, 'r> <&'r mut Self::ResultSet as Iterator>::Item: BlockExt,
-{
+pub trait Queryable<'q>: Debug {
     type Error: Debug + From<serde::de::value::Error>;
-    // type B: for<'b> BlockExt<'b, 'b>;
+
     type ResultSet: Fetchable;
 
     fn query<T: AsRef<str>>(&'q self, sql: T) -> Result<Self::ResultSet, Self::Error>;
@@ -309,8 +301,7 @@ where
 pub trait AsyncFetchable
 where
     Self: Sized + Send,
-    Self::BlockStream: futures::stream::Stream + Send,
-    <Self::BlockStream as futures::stream::Stream>::Item: BlockExt + Send,
+    Self::BlockStream: futures::stream::Stream<Item = Raw> + Send,
 {
     type BlockStream;
     // type Block: for<'b> BlockExt;
@@ -363,7 +354,6 @@ where
     }
 }
 
-
 #[cfg(feature = "async")]
 /// The synchronous query trait for TDengine connection.
 #[async_trait]
@@ -390,7 +380,7 @@ where
 
     async fn exec_many<T, I>(&'q self, input: I) -> Result<usize, Self::Error>
     where
-        T: AsRef<str> + Send+ Sync,
+        T: AsRef<str> + Send + Sync,
         I::IntoIter: Send,
         I: IntoIterator<Item = T> + Send,
     {
@@ -416,7 +406,7 @@ where
     /// let one: (i32, String, Timestamp) =
     ///    taos.query_one("select c1,c2,c3 from table1 limit 1")?.unwrap_or_default();
     /// ```
-    async fn query_one<T: AsRef<str> + Send+ Sync, O: DeserializeOwned + Send>(
+    async fn query_one<T: AsRef<str> + Send + Sync, O: DeserializeOwned + Send>(
         &'q self,
         sql: T,
     ) -> Result<Option<O>, Self::Error> {
@@ -432,7 +422,7 @@ where
             .map_or(Ok(None), |v| v.map(Some).map_err(Into::into))
     }
 
-    async fn create_topic<N: AsRef<str> + Send+ Sync, S: AsRef<str> + Send>(
+    async fn create_topic<N: AsRef<str> + Send + Sync, S: AsRef<str> + Send>(
         &'q self,
         name: N,
         sql: S,
@@ -446,7 +436,7 @@ where
 
     async fn create_topic_as_database(
         &'q self,
-        name: impl AsRef<str> + Send+ Sync + 'async_trait,
+        name: impl AsRef<str> + Send + Sync + 'async_trait,
         db: impl std::fmt::Display + Send + 'async_trait,
     ) -> Result<(), Self::Error> {
         let name = name.as_ref();
@@ -490,11 +480,11 @@ where
         ))
     }
 
-    fn exec_sync<T: AsRef<str> + Send+ Sync>(&'q self, sql: T) -> Result<usize, Self::Error> {
+    fn exec_sync<T: AsRef<str> + Send + Sync>(&'q self, sql: T) -> Result<usize, Self::Error> {
         futures::executor::block_on(self.exec(sql))
     }
 
-    fn query_sync<T: AsRef<str> + Send+ Sync>(
+    fn query_sync<T: AsRef<str> + Send + Sync>(
         &'q self,
         sql: T,
     ) -> Result<Self::AsyncResultSet, Self::Error> {
@@ -728,20 +718,40 @@ mod tests {
             }
         }
 
-        unsafe fn get_col_unchecked(&self, _col: usize) -> BorrowedColumn {
+        unsafe fn get_col_unchecked(&self, _col: usize) -> &ColumnView {
             todo!()
         }
     }
 
-    impl<'r, 'q> Iterator for &'r mut MyResultSet<'q> {
-        type Item = Block<'r, 'q>;
+    // impl<'r, 'q> Iterator for &'r mut MyResultSet<'q> {
+    //     type Item = Block<'r, 'q>;
+
+    //     fn next(&mut self) -> Option<Self::Item> {
+    //         static mut AVAILABLE: bool = true;
+    //         if unsafe { AVAILABLE } {
+    //             unsafe { AVAILABLE = false };
+
+    //             Some(Block(PhantomData))
+    //         } else {
+    //             None
+    //         }
+    //     }
+    // }
+    impl<'q> Iterator for MyResultSet<'q> {
+        type Item = Raw;
 
         fn next(&mut self) -> Option<Self::Item> {
             static mut AVAILABLE: bool = true;
             if unsafe { AVAILABLE } {
                 unsafe { AVAILABLE = false };
 
-                Some(Block(PhantomData))
+                Some(Raw::parse_from_raw_block_v2(
+                    [1].as_slice(),
+                    &[Field::new("a", Ty::TinyInt, 1)],
+                    &[1],
+                    1,
+                    Precision::Millisecond,
+                ))
             } else {
                 None
             }

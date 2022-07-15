@@ -1,18 +1,21 @@
-use std::{fmt::Debug, ops::Deref, ffi::c_void};
+use std::{ffi::c_void, fmt::Debug};
 
 use super::Offsets;
-use crate::{util::InlineStr, common::{Ty, BorrowedValue}};
+use crate::{
+    common::{BorrowedValue, Ty},
+    util::InlineJson,
+};
 
 use bytes::Bytes;
 
-#[derive(Debug)]
-pub struct VarCharView {
+#[derive(Debug, Clone)]
+pub struct JsonView {
     // version: Version,
     pub offsets: Offsets,
     pub data: Bytes,
 }
 
-impl VarCharView {
+impl JsonView {
     pub fn len(&self) -> usize {
         self.offsets.len()
     }
@@ -31,10 +34,10 @@ impl VarCharView {
         *self.offsets.get_unchecked(row) < 0
     }
 
-    pub unsafe fn get_unchecked(&self, row: usize) -> Option<&InlineStr> {
+    pub unsafe fn get_unchecked(&self, row: usize) -> Option<&InlineJson> {
         let offset = self.offsets.get_unchecked(row);
         if *offset >= 0 {
-            Some(InlineStr::<u16>::from_ptr(
+            Some(InlineJson::<u16>::from_ptr(
                 self.data.as_ptr().offset(*offset as isize),
             ))
         } else {
@@ -43,14 +46,15 @@ impl VarCharView {
     }
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
+        // todo: use simd_json::BorrowedValue as Json.
         self.get_unchecked(row)
-            .map(|s| BorrowedValue::VarChar(s.as_str()))
+            .map(|s| BorrowedValue::Json(s.as_bytes().into()))
             .unwrap_or(BorrowedValue::Null)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
         match self.get_unchecked(row) {
-            Some(s) => (Ty::VarChar, s.len() as _, s.as_ptr() as _),
+            Some(json) => (Ty::Json, json.len() as _, json.as_ptr() as _),
             None => (Ty::Null, 0, std::ptr::null()),
         }
     }
@@ -67,12 +71,12 @@ impl VarCharView {
 }
 
 pub struct VarCharIter<'a> {
-    view: &'a VarCharView,
+    view: &'a JsonView,
     row: usize,
 }
 
 impl<'a> Iterator for VarCharIter<'a> {
-    type Item = Option<&'a InlineStr>;
+    type Item = Option<&'a InlineJson>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.row <= self.view.len() {

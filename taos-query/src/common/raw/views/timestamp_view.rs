@@ -1,28 +1,40 @@
 use std::ffi::c_void;
 
-use crate::common::{BorrowedValue, Ty};
+use crate::common::{BorrowedValue, Precision, Timestamp, Ty};
 
 use super::{NullBits, NullsIter};
 
 use bytes::Bytes;
 
-type Target = i8;
+type Target = i64;
 
-#[derive(Debug)]
-pub struct TinyIntView {
+pub struct Millis(i64);
+
+pub struct Micros(i64);
+
+pub struct Nanos(i64);
+
+#[derive(Debug, Clone)]
+pub struct TimestampView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
+    pub(crate) precision: Precision,
 }
 
-impl TinyIntView {
+impl TimestampView {
     /// Rows
     pub fn len(&self) -> usize {
-        self.data.len()
+        self.data.len() / std::mem::size_of::<Target>()
     }
 
     /// Raw slice of target type.
-    unsafe fn as_raw_slice(&self) -> &[Target] {
-        std::slice::from_raw_parts(self.data.as_ptr() as *const Target, self.len())
+    pub fn as_raw_slice(&self) -> &[Target] {
+        unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const Target, self.len()) }
+    }
+
+    /// Build a nulls vector.
+    pub fn to_nulls_vec(&self) -> Vec<bool> {
+        self.is_null_iter().collect()
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
@@ -49,7 +61,7 @@ impl TinyIntView {
     }
 
     /// Get nullable value at `row` index.
-    pub fn get(&self, row: usize) -> Option<Target> {
+    pub fn get(&self, row: usize) -> Option<Timestamp> {
         if row < self.len() {
             unsafe { self.get_unchecked(row) }
         } else {
@@ -58,11 +70,14 @@ impl TinyIntView {
     }
 
     /// Get nullable value at `row` index.
-    pub unsafe fn get_unchecked(&self, row: usize) -> Option<Target> {
+    pub unsafe fn get_unchecked(&self, row: usize) -> Option<Timestamp> {
         if self.nulls.is_null_unchecked(row) {
             None
         } else {
-            Some(*self.as_raw_slice().get_unchecked(row))
+            Some(Timestamp::new(
+                *self.as_raw_slice().get_unchecked(row),
+                self.precision,
+            ))
         }
     }
 
@@ -76,7 +91,7 @@ impl TinyIntView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|v| BorrowedValue::TinyInt(v))
+            .map(|v| BorrowedValue::Timestamp(v))
             .unwrap_or(BorrowedValue::Null)
     }
 
@@ -89,7 +104,7 @@ impl TinyIntView {
             )
         } else {
             (
-                Ty::TinyInt,
+                Ty::Timestamp,
                 std::mem::size_of::<Target>() as _,
                 self.as_raw_slice().get_unchecked(row) as *const Target as _,
             )
@@ -97,23 +112,23 @@ impl TinyIntView {
     }
 
     /// A iterator to nullable values of current row.
-    pub fn iter(&self) -> TinyIntViewIter {
-        TinyIntViewIter { view: self, row: 0 }
+    pub fn iter(&self) -> TimestampViewIter {
+        TimestampViewIter { view: self, row: 0 }
     }
 
     /// Convert data to a vector of all nullable values.
-    pub fn to_vec(&self) -> Vec<Option<Target>> {
+    pub fn to_vec(&self) -> Vec<Option<Timestamp>> {
         self.iter().collect()
     }
 }
 
-pub struct TinyIntViewIter<'a> {
-    view: &'a TinyIntView,
+pub struct TimestampViewIter<'a> {
+    view: &'a TimestampView,
     row: usize,
 }
 
-impl<'a> Iterator for TinyIntViewIter<'a> {
-    type Item = Option<Target>;
+impl<'a> Iterator for TimestampViewIter<'a> {
+    type Item = Option<Timestamp>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.row < self.view.len() {

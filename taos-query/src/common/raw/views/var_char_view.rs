@@ -1,21 +1,21 @@
-use std::{ffi::c_void, fmt::Debug};
+use std::{ffi::c_void, fmt::Debug, ops::Deref};
 
 use super::Offsets;
 use crate::{
     common::{BorrowedValue, Ty},
-    util::InlineJson,
+    util::InlineStr,
 };
 
 use bytes::Bytes;
 
-#[derive(Debug)]
-pub struct JsonView {
+#[derive(Debug, Clone)]
+pub struct VarCharView {
     // version: Version,
     pub offsets: Offsets,
     pub data: Bytes,
 }
 
-impl JsonView {
+impl VarCharView {
     pub fn len(&self) -> usize {
         self.offsets.len()
     }
@@ -34,10 +34,10 @@ impl JsonView {
         *self.offsets.get_unchecked(row) < 0
     }
 
-    pub unsafe fn get_unchecked(&self, row: usize) -> Option<&InlineJson> {
+    pub unsafe fn get_unchecked(&self, row: usize) -> Option<&InlineStr> {
         let offset = self.offsets.get_unchecked(row);
         if *offset >= 0 {
-            Some(InlineJson::<u16>::from_ptr(
+            Some(InlineStr::<u16>::from_ptr(
                 self.data.as_ptr().offset(*offset as isize),
             ))
         } else {
@@ -46,15 +46,14 @@ impl JsonView {
     }
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
-        // todo: use simd_json::BorrowedValue as Json.
         self.get_unchecked(row)
-            .map(|s| BorrowedValue::Json(s.as_bytes().into()))
+            .map(|s| BorrowedValue::VarChar(s.as_str()))
             .unwrap_or(BorrowedValue::Null)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
         match self.get_unchecked(row) {
-            Some(json) => (Ty::Json, json.len() as _, json.as_ptr() as _),
+            Some(s) => (Ty::VarChar, s.len() as _, s.as_ptr() as _),
             None => (Ty::Null, 0, std::ptr::null()),
         }
     }
@@ -71,12 +70,12 @@ impl JsonView {
 }
 
 pub struct VarCharIter<'a> {
-    view: &'a JsonView,
+    view: &'a VarCharView,
     row: usize,
 }
 
 impl<'a> Iterator for VarCharIter<'a> {
-    type Item = Option<&'a InlineJson>;
+    type Item = Option<&'a InlineStr>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.row <= self.view.len() {

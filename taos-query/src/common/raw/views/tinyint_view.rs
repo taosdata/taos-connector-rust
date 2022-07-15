@@ -1,28 +1,33 @@
 use std::ffi::c_void;
 
-use crate::common::{Ty, BorrowedValue};
+use crate::common::{BorrowedValue, Ty};
 
 use super::{NullBits, NullsIter};
 
 use bytes::Bytes;
 
-type Target = i32;
+type Target = i8;
 
-#[derive(Debug)]
-pub struct IntView {
+#[derive(Debug, Clone)]
+pub struct TinyIntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
 }
 
-impl IntView {
+impl TinyIntView {
     /// Rows
     pub fn len(&self) -> usize {
-        self.data.len() / std::mem::size_of::<Target>()
+        self.data.len()
     }
 
     /// Raw slice of target type.
-    unsafe fn as_raw_slice(&self) -> &[Target] {
-        std::slice::from_raw_parts(self.data.as_ptr() as *const Target, self.len())
+    pub fn as_raw_slice(&self) -> &[Target] {
+        unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const Target, self.len()) }
+    }
+
+    /// Build a nulls vector.
+    pub fn to_nulls_vec(&self) -> Vec<bool> {
+        self.is_null_iter().collect()
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
@@ -74,19 +79,22 @@ impl IntView {
         }
     }
 
-
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|v| BorrowedValue::Int(v))
+            .map(|v| BorrowedValue::TinyInt(v))
             .unwrap_or(BorrowedValue::Null)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
         if self.nulls.is_null_unchecked(row) {
-            (Ty::Null, std::mem::size_of::<Target>() as _, std::ptr::null())
+            (
+                Ty::Null,
+                std::mem::size_of::<Target>() as _,
+                std::ptr::null(),
+            )
         } else {
             (
-                Ty::Int,
+                Ty::TinyInt,
                 std::mem::size_of::<Target>() as _,
                 self.as_raw_slice().get_unchecked(row) as *const Target as _,
             )
@@ -94,8 +102,8 @@ impl IntView {
     }
 
     /// A iterator to nullable values of current row.
-    pub fn iter(&self) -> IntViewIter {
-        IntViewIter { view: self, row: 0 }
+    pub fn iter(&self) -> TinyIntViewIter {
+        TinyIntViewIter { view: self, row: 0 }
     }
 
     /// Convert data to a vector of all nullable values.
@@ -104,12 +112,12 @@ impl IntView {
     }
 }
 
-pub struct IntViewIter<'a> {
-    view: &'a IntView,
+pub struct TinyIntViewIter<'a> {
+    view: &'a TinyIntView,
     row: usize,
 }
 
-impl<'a> Iterator for IntViewIter<'a> {
+impl<'a> Iterator for TinyIntViewIter<'a> {
     type Item = Option<Target>;
 
     fn next(&mut self) -> Option<Self::Item> {

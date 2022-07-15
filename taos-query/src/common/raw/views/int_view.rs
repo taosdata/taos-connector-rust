@@ -1,26 +1,33 @@
 use std::ffi::c_void;
 
-use crate::common::{Ty, BorrowedValue};
+use crate::common::{BorrowedValue, Ty};
 
 use super::{NullBits, NullsIter};
 
 use bytes::Bytes;
 
-#[derive(Debug)]
-pub struct BoolView {
+type Target = i32;
+
+#[derive(Debug, Clone)]
+pub struct IntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
 }
 
-impl BoolView {
+impl IntView {
     /// Rows
     pub fn len(&self) -> usize {
-        self.data.len()
+        self.data.len() / std::mem::size_of::<Target>()
     }
 
-    /// Raw slice of `bool` type.
-    unsafe fn as_raw_slice(&self) -> &[bool] {
-        std::slice::from_raw_parts(self.data.as_ptr() as *const bool, self.len())
+    /// Raw slice of target type.
+    pub fn as_raw_slice(&self) -> &[Target] {
+        unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const Target, self.len()) }
+    }
+
+    /// Build a nulls vector.
+    pub fn to_nulls_vec(&self) -> Vec<bool> {
+        self.is_null_iter().collect()
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
@@ -47,7 +54,7 @@ impl BoolView {
     }
 
     /// Get nullable value at `row` index.
-    pub fn get(&self, row: usize) -> Option<bool> {
+    pub fn get(&self, row: usize) -> Option<Target> {
         if row < self.len() {
             unsafe { self.get_unchecked(row) }
         } else {
@@ -56,7 +63,7 @@ impl BoolView {
     }
 
     /// Get nullable value at `row` index.
-    pub unsafe fn get_unchecked(&self, row: usize) -> Option<bool> {
+    pub unsafe fn get_unchecked(&self, row: usize) -> Option<Target> {
         if self.nulls.is_null_unchecked(row) {
             None
         } else {
@@ -64,7 +71,7 @@ impl BoolView {
         }
     }
 
-    pub unsafe fn get_ref_unchecked(&self, row: usize) -> Option<*const bool> {
+    pub unsafe fn get_ref_unchecked(&self, row: usize) -> Option<*const Target> {
         if self.nulls.is_null_unchecked(row) {
             None
         } else {
@@ -74,40 +81,44 @@ impl BoolView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|v| BorrowedValue::Bool(v))
+            .map(|v| BorrowedValue::Int(v))
             .unwrap_or(BorrowedValue::Null)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
         if self.nulls.is_null_unchecked(row) {
-            (Ty::Null, std::mem::size_of::<bool>() as _, std::ptr::null())
+            (
+                Ty::Null,
+                std::mem::size_of::<Target>() as _,
+                std::ptr::null(),
+            )
         } else {
             (
-                Ty::Bool,
-                std::mem::size_of::<bool>() as _,
-                self.as_raw_slice().get_unchecked(row) as *const bool as _,
+                Ty::Int,
+                std::mem::size_of::<Target>() as _,
+                self.as_raw_slice().get_unchecked(row) as *const Target as _,
             )
         }
     }
 
     /// A iterator to nullable values of current row.
-    pub fn iter(&self) -> BoolViewIter {
-        BoolViewIter { view: self, row: 0 }
+    pub fn iter(&self) -> IntViewIter {
+        IntViewIter { view: self, row: 0 }
     }
 
     /// Convert data to a vector of all nullable values.
-    pub fn to_vec(&self) -> Vec<Option<bool>> {
+    pub fn to_vec(&self) -> Vec<Option<Target>> {
         self.iter().collect()
     }
 }
 
-pub struct BoolViewIter<'a> {
-    view: &'a BoolView,
+pub struct IntViewIter<'a> {
+    view: &'a IntView,
     row: usize,
 }
 
-impl<'a> Iterator for BoolViewIter<'a> {
-    type Item = Option<bool>;
+impl<'a> Iterator for IntViewIter<'a> {
+    type Item = Option<Target>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.row < self.view.len() {

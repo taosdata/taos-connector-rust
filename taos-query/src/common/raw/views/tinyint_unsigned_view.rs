@@ -1,6 +1,6 @@
 use std::ffi::c_void;
 
-use crate::common::{Ty, BorrowedValue};
+use crate::common::{BorrowedValue, Ty};
 
 use super::{NullBits, NullsIter};
 
@@ -8,7 +8,7 @@ use bytes::Bytes;
 
 type Target = u8;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UTinyIntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
@@ -21,8 +21,13 @@ impl UTinyIntView {
     }
 
     /// Raw slice of target type.
-    unsafe fn as_raw_slice(&self) -> &[Target] {
-        std::slice::from_raw_parts(self.data.as_ptr() as *const Target, self.len())
+    pub fn as_raw_slice(&self) -> &[Target] {
+        unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const Target, self.len()) }
+    }
+
+    /// Build a nulls vector.
+    pub fn to_nulls_vec(&self) -> Vec<bool> {
+        self.is_null_iter().collect()
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
@@ -82,7 +87,11 @@ impl UTinyIntView {
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
         if self.nulls.is_null_unchecked(row) {
-            (Ty::Null, std::mem::size_of::<Target>() as _, std::ptr::null())
+            (
+                Ty::Null,
+                std::mem::size_of::<Target>() as _,
+                std::ptr::null(),
+            )
         } else {
             (
                 Ty::UTinyInt,

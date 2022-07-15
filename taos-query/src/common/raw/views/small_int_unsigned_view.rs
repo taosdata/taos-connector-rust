@@ -6,23 +6,28 @@ use super::{NullBits, NullsIter};
 
 use bytes::Bytes;
 
-type Target = f64;
+type Target = u16;
 
-#[derive(Debug)]
-pub struct DoubleView {
+#[derive(Debug, Clone)]
+pub struct USmallIntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
 }
 
-impl DoubleView {
+impl USmallIntView {
     /// Rows
     pub fn len(&self) -> usize {
         self.data.len() / std::mem::size_of::<Target>()
     }
 
     /// Raw slice of target type.
-    unsafe fn as_raw_slice(&self) -> &[Target] {
-        std::slice::from_raw_parts(self.data.as_ptr() as *const Target, self.len())
+    pub fn as_raw_slice(&self) -> &[Target] {
+        unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const Target, self.len()) }
+    }
+
+    /// Build a nulls vector.
+    pub fn to_nulls_vec(&self) -> Vec<bool> {
+        self.is_null_iter().collect()
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
@@ -76,7 +81,7 @@ impl DoubleView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|v| BorrowedValue::Double(v))
+            .map(|v| BorrowedValue::USmallInt(v))
             .unwrap_or(BorrowedValue::Null)
     }
 
@@ -89,15 +94,16 @@ impl DoubleView {
             )
         } else {
             (
-                Ty::Double,
+                Ty::USmallInt,
                 std::mem::size_of::<Target>() as _,
                 self.as_raw_slice().get_unchecked(row) as *const Target as _,
             )
         }
     }
+
     /// A iterator to nullable values of current row.
-    pub fn iter(&self) -> DoubleViewIter {
-        DoubleViewIter { view: self, row: 0 }
+    pub fn iter(&self) -> USmallIntViewIter {
+        USmallIntViewIter { view: self, row: 0 }
     }
 
     /// Convert data to a vector of all nullable values.
@@ -106,12 +112,12 @@ impl DoubleView {
     }
 }
 
-pub struct DoubleViewIter<'a> {
-    view: &'a DoubleView,
+pub struct USmallIntViewIter<'a> {
+    view: &'a USmallIntView,
     row: usize,
 }
 
-impl<'a> Iterator for DoubleViewIter<'a> {
+impl<'a> Iterator for USmallIntViewIter<'a> {
     type Item = Option<Target>;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -14,6 +14,7 @@ int main(int argc, char *argv[]) {
   if (dsn == NULL) {
     dsn = "ws://localhost:6041";
   }
+  ws_enable_log();
   WS_TAOS *taos = ws_connect_with_dsn(dsn);
   if (taos == NULL) {
     int code = ws_errno(NULL);
@@ -33,7 +34,7 @@ int main(int argc, char *argv[]) {
   }
 
   int precision = ws_result_precision(rs);
-  int cols = ws_num_of_fields(rs);
+  int cols = ws_field_count(rs);
   const struct WS_FIELD_V2 *fields = ws_fetch_fields_v2(rs);
   for (int col = 0; col < cols; col++) {
     const struct WS_FIELD_V2 *field = &fields[col];

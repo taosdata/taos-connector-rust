@@ -9,6 +9,7 @@ int main() {
   if (dsn == NULL) {
     dsn = "ws://localhost:6041";
   }
+  ws_enable_log();
   WS_TAOS *taos = ws_connect_with_dsn(dsn);
   if (taos == NULL) {
     int code = ws_errno(NULL);
@@ -16,6 +17,9 @@ int main() {
     dprintf(2, "Error [%6x]: %s", code, errstr);
     return 0;
   }
+
+  const char* version = ws_get_server_info(taos);
+  dprintf(2, "Server version: %s\n", version);
 
   WS_RES *rs = ws_query(taos, "show databases");
   int code = ws_errno(rs);
@@ -28,7 +32,7 @@ int main() {
   }
 
   int precision = ws_result_precision(rs);
-  int cols = ws_num_of_fields(rs);
+  int cols = ws_field_count(rs);
   const struct WS_FIELD_V2 *fields = ws_fetch_fields_v2(rs);
   for (int col = 0; col < cols; col++) {
     const struct WS_FIELD_V2 *field = &fields[col];
