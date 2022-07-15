@@ -25,6 +25,8 @@ use common::*;
 use helpers::*;
 pub use iter::*;
 
+pub use common::Raw;
+
 pub enum CodecOpts {
     Raw,
     Parquet,
@@ -323,10 +325,6 @@ where
     }
 
     fn block_stream(&mut self) -> Self::BlockStream;
-
-    fn into_blocks(mut self) -> Self::BlockStream {
-        self.block_stream()
-    }
 
     /// Records is a row-based 2-dimension matrix of values.
     fn to_records(&mut self) -> Vec<Vec<Value>> {

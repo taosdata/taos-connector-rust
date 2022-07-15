@@ -74,6 +74,68 @@ impl Debug for ColumnView {
     }
 }
 
+impl ColumnView {
+    pub fn into_column(&self) -> Column {
+        match self {
+            ColumnView::Bool(view) => Column::Bool(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.as_raw_slice().to_vec(),
+            ),
+            ColumnView::TinyInt(view) => Column::TinyInt(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.as_raw_slice().to_vec(),
+            ),
+            ColumnView::SmallInt(view) => Column::SmallInt(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.as_raw_slice().to_vec(),
+            ),
+            ColumnView::Int(view) => Column::Int(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.as_raw_slice().to_vec(),
+            ),
+            ColumnView::BigInt(view) => Column::BigInt(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.as_raw_slice().to_vec(),
+            ),
+            ColumnView::Float(view) => Column::Float(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.as_raw_slice().to_vec(),
+            ),
+            ColumnView::Double(view) => Column::Double(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.as_raw_slice().to_vec(),
+            ),
+            ColumnView::VarChar(view) => Column::VarBinary(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.iter()
+                    .map(|v| v.map(|s| s.as_bytes().to_vec()).unwrap_or_default())
+                    .collect(),
+            ),
+            ColumnView::Timestamp(_) => todo!(),
+            ColumnView::NChar(view) => {
+                Column::NChar(view.iter().map(|s| s.map(|s| s.to_string())).collect())
+            }
+            ColumnView::UTinyInt(view) => Column::UTinyInt(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.as_raw_slice().to_vec(),
+            ),
+            ColumnView::USmallInt(view) => Column::USmallInt(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.as_raw_slice().to_vec(),
+            ),
+            ColumnView::UInt(view) => Column::UInt(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.as_raw_slice().to_vec(),
+            ),
+            ColumnView::UBigInt(view) => Column::UBigInt(
+                bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
+                view.as_raw_slice().to_vec(),
+            ),
+            ColumnView::Json(_) => todo!(),
+        }
+    }
+}
+
 /// Raw data block format (B for bytes):
 ///
 /// ```text,ignore
