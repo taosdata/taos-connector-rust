@@ -8,7 +8,7 @@ use bytes::Bytes;
 
 type Target = u16;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct USmallIntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,

@@ -8,7 +8,7 @@ use bytes::Bytes;
 
 type Target = i8;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TinyIntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,

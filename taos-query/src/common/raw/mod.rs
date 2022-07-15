@@ -33,6 +33,7 @@ mod views;
 pub use views::*;
 
 // #[derive(Debug)]
+#[derive(Clone)]
 pub enum ColumnView {
     Bool(BoolView),           // 1
     TinyInt(TinyIntView),     // 2
@@ -96,6 +97,8 @@ pub struct Raw {
     cols: usize,
     /// Timestamp precision in current data block.
     precision: Precision,
+    /// Database name, if is tmq message.
+    database: Option<String>,
     /// Table name of current data block.
     table: Option<String>,
     /// Field names of current data block.
@@ -369,6 +372,7 @@ impl Raw {
             schemas,
             lengths: data_lengths.into_lengths(),
             precision,
+            database: None,
             table: None,
             fields: Vec::new(),
             columns,
@@ -495,6 +499,7 @@ impl Raw {
             group_id,
             schemas,
             lengths,
+            database: None,
             table: None,
             fields: Vec::new(),
             raw_fields: Vec::new(),
@@ -502,6 +507,11 @@ impl Raw {
         }
     }
 
+    /// Set table name of the block
+    pub fn with_database_name(&mut self, name: impl Into<String>) -> &mut Self {
+        self.database = Some(name.into());
+        self
+    }
     /// Set table name of the block
     pub fn with_table_name(&mut self, name: impl Into<String>) -> &mut Self {
         self.table = Some(name.into());
@@ -570,7 +580,7 @@ impl Raw {
     // todo: db name?
     #[inline]
     pub fn tmq_db_name(&self) -> Option<&str> {
-        self.table.as_ref().map(|s| s.as_str())
+        self.database.as_ref().map(|s| s.as_str())
     }
 
     #[inline]
@@ -702,8 +712,8 @@ impl BlockExt for Raw {
         )
     }
 
-    unsafe fn get_col_unchecked(&self, col: usize) -> crate::common::BorrowedColumn {
-        todo!()
+    unsafe fn get_col_unchecked(&self, col: usize) -> &ColumnView {
+        self.get_col_unchecked(col)
     }
 }
 

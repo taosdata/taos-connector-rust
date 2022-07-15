@@ -6,7 +6,7 @@ use super::{NullBits, NullsIter};
 
 use bytes::Bytes;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoolView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,

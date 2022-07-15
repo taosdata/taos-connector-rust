@@ -8,7 +8,7 @@ use bytes::Bytes;
 
 type Target = f32;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FloatView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,

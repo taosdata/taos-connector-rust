@@ -8,7 +8,7 @@ use bytes::Bytes;
 
 type Target = i32;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,

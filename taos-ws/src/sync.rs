@@ -491,11 +491,11 @@ impl WsClient {
 }
 
 impl ResultSet {
-    async fn fetch_block_a(&mut self) -> Result<Option<Raw>> {
+    async fn fetch_block_a(&self) -> Result<Option<Raw>> {
         if self.receiver.is_none() {
             return Ok(None);
         }
-        let rx = self.receiver.as_mut().unwrap();
+        let rx = self.receiver.as_ref().unwrap();
         let fetch = WsSend::Fetch(self.args);
 
         self.sender.send_timeout(fetch, self.timeout).await?;
@@ -554,7 +554,9 @@ impl ResultSet {
         }
     }
     pub fn fetch_block(&mut self) -> Result<Option<Raw>> {
-        self.rt.clone().block_on(self.fetch_block_a())
+        let rt = &self.rt;
+        let future = self.fetch_block_a();
+        rt.block_on(future)
     }
 }
 impl Iterator for ResultSet {

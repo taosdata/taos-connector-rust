@@ -8,7 +8,7 @@ use bytes::Bytes;
 
 type Target = f64;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DoubleView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,

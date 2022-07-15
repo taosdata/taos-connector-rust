@@ -14,7 +14,7 @@ pub struct Micros(i64);
 
 pub struct Nanos(i64);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TimestampView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,

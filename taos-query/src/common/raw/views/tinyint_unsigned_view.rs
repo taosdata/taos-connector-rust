@@ -8,7 +8,7 @@ use bytes::Bytes;
 
 type Target = u8;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UTinyIntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
