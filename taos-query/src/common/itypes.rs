@@ -245,7 +245,7 @@ impl IsValue for IVarChar {
 
     #[inline]
     fn as_var_char(&self) -> &str {
-        &self
+        &self.0
     }
 }
 
@@ -254,7 +254,7 @@ impl IsValue for INChar {
 
     #[inline]
     fn as_nchar(&self) -> &str {
-        &self
+        &self.0
     }
 }
 
@@ -264,7 +264,7 @@ pub trait IsVarChar {
 
 impl IsVarChar for IVarChar {
     fn as_var_char(&self) -> &str {
-        &self
+        &self.0
     }
 }
 
@@ -274,7 +274,7 @@ pub trait IsNChar {
 
 impl IsNChar for INChar {
     fn as_nchar(&self) -> &str {
-        &self
+        &self.0
     }
 }
 
@@ -294,7 +294,7 @@ pub trait IsMediumBlob {
 
 impl IsMediumBlob for IMediumBlob {
     fn as_medium_blob(&self) -> &[u8] {
-        &self
+        &self.0
     }
 }
 
@@ -304,7 +304,7 @@ pub trait IsBlob {
 
 impl IsBlob for IBlob {
     fn as_blob(&self) -> &[u8] {
-        &self
+        &self.0
     }
 }
 

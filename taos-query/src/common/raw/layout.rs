@@ -7,7 +7,7 @@ use crate::common::Precision;
 bitflags! {
     /// Inline memory layout for raw block.
     #[repr(transparent)]
-    struct Layout: u16 {
+    pub struct Layout: u16 {
         // Lowest 4 bits for layout components.
 
         /// With table name in the block.

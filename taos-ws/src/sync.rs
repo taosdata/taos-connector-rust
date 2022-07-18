@@ -1,6 +1,6 @@
 use once_cell::sync::{Lazy, OnceCell};
 use taos_error::Code;
-use taos_query::common::{Field, Precision, Raw};
+use taos_query::common::{Field, Precision, RawData};
 use taos_query::{DeError, Dsn, DsnError, Fetchable, IntoDsn, Queryable};
 use thiserror::Error;
 use tokio::sync::watch;
@@ -12,7 +12,7 @@ use crate::{infra::*, stmt, WsInfo};
 
 use std::any;
 use std::fmt::Debug;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{mpsc::Sender, Arc, Mutex};
 use std::time::Duration;
 
@@ -51,6 +51,7 @@ pub struct WsClient {
     stmt: OnceCell<WsSyncStmtClient>,
     rt: Arc<tokio::runtime::Runtime>,
     close_signal: watch::Sender<bool>,
+    alive: Arc<AtomicBool>,
 }
 
 impl Drop for WsClient {
@@ -72,6 +73,7 @@ pub struct ResultSet {
     fields_count: usize,
     affected_rows: usize,
     precision: Precision,
+    alive: Arc<AtomicBool>,
 }
 
 impl Debug for WsClient {
@@ -230,6 +232,10 @@ impl WsClient {
         // let msg_receiver = MsgReceiver(msg_receiver);
 
         let (close_signal, mut close_recv) = watch::channel(false);
+
+        let alive = Arc::new(AtomicBool::new(true));
+        let alive1 = alive.clone();
+        let alive2 = alive.clone();
         rt.spawn(async move {
             loop {
                 tokio::select! {
@@ -260,6 +266,7 @@ impl WsClient {
                 }
                 // match msg_receiver.recv().await {}
             }
+            alive1.fetch_and(false, std::sync::atomic::Ordering::SeqCst);
         });
 
         let is_v3 = version.starts_with("3");
@@ -360,6 +367,7 @@ impl WsClient {
                     }
                 }
             }
+            alive2.fetch_and(false, std::sync::atomic::Ordering::SeqCst);
         });
 
         Ok(Self {
@@ -373,6 +381,7 @@ impl WsClient {
             stmt: OnceCell::<WsSyncStmtClient>::new(),
             info: info.clone(),
             close_signal,
+            alive,
         })
     }
 
@@ -395,6 +404,9 @@ impl WsClient {
     pub fn s_query_timeout(&self, sql: &str, timeout: Duration) -> Result<ResultSet> {
         log::info!("query with sql: {sql}");
         let req_id = self.req_id();
+        if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::ConnClosed);
+        }
         let action = WsSend::Query {
             req_id,
             sql: sql.to_string(),
@@ -436,6 +448,7 @@ impl WsClient {
                     req_id,
                     id: resp.id,
                 },
+                alive: self.alive.clone(),
             })
         } else {
             Ok(ResultSet {
@@ -452,6 +465,7 @@ impl WsClient {
                 fields: None,
                 fields_count: 0,
                 precision: resp.precision,
+                alive: self.alive.clone(),
             })
         }
     }
@@ -460,6 +474,9 @@ impl WsClient {
         self.s_exec_timeout(sql, self.timeout)
     }
     pub fn s_exec_timeout(&self, sql: &str, timeout: Duration) -> Result<usize> {
+        if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::ConnClosed);
+        }
         let req_id = self.req_id();
         let action = WsSend::Query {
             req_id,
@@ -480,6 +497,9 @@ impl WsClient {
     }
 
     pub fn stmt_init(&self) -> Result<WsSyncStmt> {
+        if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::ConnClosed);
+        }
         // let rt = rt.clone();
         let client = self
             .stmt
@@ -491,9 +511,12 @@ impl WsClient {
 }
 
 impl ResultSet {
-    async fn fetch_block_a(&self) -> Result<Option<Raw>> {
+    async fn fetch_block_a(&self) -> Result<Option<RawData>> {
         if self.receiver.is_none() {
             return Ok(None);
+        }
+        if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::ConnClosed);
         }
         let rx = self.receiver.as_ref().unwrap();
         let fetch = WsSend::Fetch(self.args);
@@ -516,7 +539,7 @@ impl ResultSet {
 
         match rx.recv_timeout(self.timeout)?? {
             WsFetchData::Block(raw) => {
-                let mut raw = Raw::parse_from_raw_block(
+                let mut raw = RawData::parse_from_raw_block(
                     raw,
                     fetch_resp.rows,
                     self.fields_count,
@@ -533,7 +556,7 @@ impl ResultSet {
                 Ok(Some(raw))
             }
             WsFetchData::BlockV2(raw) => {
-                let mut raw = Raw::parse_from_raw_block_v2(
+                let mut raw = RawData::parse_from_raw_block_v2(
                     raw,
                     self.fields.as_ref().unwrap(),
                     fetch_resp.lengths.as_ref().unwrap(),
@@ -553,14 +576,14 @@ impl ResultSet {
             _ => Ok(None),
         }
     }
-    pub fn fetch_block(&mut self) -> Result<Option<Raw>> {
+    pub fn fetch_block(&mut self) -> Result<Option<RawData>> {
         let rt = &self.rt;
         let future = self.fetch_block_a();
         rt.block_on(future)
     }
 }
 impl Iterator for ResultSet {
-    type Item = Raw;
+    type Item = RawData;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.fetch_block().unwrap_or_default()
