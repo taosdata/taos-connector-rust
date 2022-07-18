@@ -16,6 +16,7 @@ use taos_ws::stmt::sync::WsSyncStmt;
 
 use crate::*;
 
+/// Opaque STMT type alias.
 pub type WS_STMT = c_void;
 
 unsafe fn stmt_init(taos: *const WS_TAOS) -> WsResult<WsSyncStmt> {
@@ -25,22 +26,27 @@ unsafe fn stmt_init(taos: *const WS_TAOS) -> WsResult<WsSyncStmt> {
     Ok(client.stmt_init()?)
 }
 
+/// Create new stmt object.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_init(taos: *const WS_TAOS) -> *mut WS_STMT {
     let stmt: WsMaybeError<WsSyncStmt> = stmt_init(taos).into();
     Box::into_raw(Box::new(stmt)) as _
 }
 
+/// Prepare with sql command
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_prepare(
     stmt: *mut WS_STMT,
     sql: *const c_char,
-    length: c_ulong,
+    len: c_ulong,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<WsSyncStmt>).as_mut() {
         Some(stmt) => {
-            let sql =
-                std::str::from_utf8_unchecked(std::slice::from_raw_parts(sql as _, length as _));
+            let sql = std::str::from_utf8_unchecked(std::slice::from_raw_parts(sql as _, len as _));
+
+            if let Some(no) = stmt.errno() {
+                return no;
+            }
 
             if let Err(e) = stmt.prepare(sql) {
                 let errno = e.errno();
@@ -54,6 +60,7 @@ pub unsafe extern "C" fn ws_stmt_prepare(
     }
 }
 
+/// Set table name.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_char) -> c_int {
     match (stmt as *mut WsMaybeError<WsSyncStmt>).as_mut() {
@@ -70,6 +77,41 @@ pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_c
         }
         _ => 0,
     }
+}
+
+/// Set table name and tags.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
+    stmt: *mut WS_STMT,
+    name: *const c_char,
+    bind: *const WS_MULTI_BIND,
+    len: u32,
+) -> c_int {
+    match (stmt as *mut WsMaybeError<WsSyncStmt>).as_mut() {
+        Some(stmt) => {
+            let name = CStr::from_ptr(name).to_str().unwrap();
+            let tags = std::slice::from_raw_parts(bind, len as usize)
+                .iter()
+                .map(|bind| bind.first_to_json())
+                .collect();
+
+            if let Err(e) = stmt.set_tbname_tags(name, tags) {
+                let errno = e.errno();
+                stmt.error = Some(e.into());
+                errno.into()
+            } else {
+                0
+            }
+        }
+        _ => 0,
+    }
+}
+
+/// Currently only insert sql is supported.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_is_insert(stmt: *mut WS_STMT, insert: *mut c_int) -> c_int {
+    *insert = 1;
+    0
 }
 
 #[derive(Debug)]
@@ -397,6 +439,7 @@ pub unsafe extern "C" fn ws_stmt_add_batch(stmt: *mut WS_STMT) -> c_int {
     }
 }
 
+/// Execute the bind batch, get inserted rows in `affected_row` pointer.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut i32) -> c_int {
     match (stmt as *mut WsMaybeError<WsSyncStmt>).as_mut() {
@@ -415,6 +458,7 @@ pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut
     }
 }
 
+/// Get inserted rows in current statement.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
     match (stmt as *mut WsMaybeError<WsSyncStmt>).as_mut() {
@@ -423,6 +467,13 @@ pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
     }
 }
 
+/// Equivalent to ws_errstr
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_errstr(stmt: *mut WS_STMT) -> *const c_char {
+    ws_errstr(stmt as _)
+}
+
+/// Same to taos_stmt_close
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_close(stmt: *mut WS_STMT) {
     let _ = Box::from_raw(stmt as *mut WsMaybeError<WsSyncStmt>);
@@ -461,6 +512,7 @@ mod tests {
             query!(b"create table ws_stmt_i.s1 (ts timestamp, v int, b binary(100))\0");
 
             let stmt = ws_stmt_init(taos);
+
             let sql = "insert into ws_stmt_i.s1 values(?, ?, ?)";
             let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
             if code != 0 {

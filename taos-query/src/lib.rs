@@ -25,6 +25,8 @@ use common::*;
 use helpers::*;
 pub use iter::*;
 
+pub use common::RawData;
+
 pub enum CodecOpts {
     Raw,
     Parquet,
@@ -157,7 +159,7 @@ pub trait BlockExt: Debug + Sized {
     }
 }
 
-pub trait Fetchable: Sized + Iterator<Item = Raw>
+pub trait Fetchable: Sized + Iterator<Item = RawData>
 // where
 //     Self: Sized,
 //     for<'r> &'r mut Self: Iterator,
@@ -189,7 +191,7 @@ pub trait Fetchable: Sized + Iterator<Item = Raw>
 
     fn rows_iter(
         &mut self,
-    ) -> std::iter::FlatMap<&mut Self, IntoRowsIter<Raw>, fn(Raw) -> IntoRowsIter<Raw>> {
+    ) -> std::iter::FlatMap<&mut Self, IntoRowsIter<RawData>, fn(RawData) -> IntoRowsIter<RawData>> {
         self.flat_map(|block| block.into_iter_rows())
     }
 
@@ -301,7 +303,7 @@ pub trait Queryable<'q>: Debug {
 pub trait AsyncFetchable
 where
     Self: Sized + Send,
-    Self::BlockStream: futures::stream::Stream<Item = Raw> + Send,
+    Self::BlockStream: futures::stream::Stream<Item = RawData> + Send,
 {
     type BlockStream;
     // type Block: for<'b> BlockExt;
@@ -323,10 +325,6 @@ where
     }
 
     fn block_stream(&mut self) -> Self::BlockStream;
-
-    fn into_blocks(mut self) -> Self::BlockStream {
-        self.block_stream()
-    }
 
     /// Records is a row-based 2-dimension matrix of values.
     fn to_records(&mut self) -> Vec<Vec<Value>> {
@@ -738,14 +736,14 @@ mod tests {
     //     }
     // }
     impl<'q> Iterator for MyResultSet<'q> {
-        type Item = Raw;
+        type Item = RawData;
 
         fn next(&mut self) -> Option<Self::Item> {
             static mut AVAILABLE: bool = true;
             if unsafe { AVAILABLE } {
                 unsafe { AVAILABLE = false };
 
-                Some(Raw::parse_from_raw_block_v2(
+                Some(RawData::parse_from_raw_block_v2(
                     [1].as_slice(),
                     &[Field::new("a", Ty::TinyInt, 1)],
                     &[1],
