@@ -16,6 +16,7 @@ use taos_ws::stmt::sync::WsSyncStmt;
 
 use crate::*;
 
+/// Opaque STMT type alias.
 pub type WS_STMT = c_void;
 
 unsafe fn stmt_init(taos: *const WS_TAOS) -> WsResult<WsSyncStmt> {
@@ -25,22 +26,23 @@ unsafe fn stmt_init(taos: *const WS_TAOS) -> WsResult<WsSyncStmt> {
     Ok(client.stmt_init()?)
 }
 
+/// Create new stmt object.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_init(taos: *const WS_TAOS) -> *mut WS_STMT {
     let stmt: WsMaybeError<WsSyncStmt> = stmt_init(taos).into();
     Box::into_raw(Box::new(stmt)) as _
 }
 
+/// Prepare with sql command
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_prepare(
     stmt: *mut WS_STMT,
     sql: *const c_char,
-    length: c_ulong,
+    len: c_ulong,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<WsSyncStmt>).as_mut() {
         Some(stmt) => {
-            let sql =
-                std::str::from_utf8_unchecked(std::slice::from_raw_parts(sql as _, length as _));
+            let sql = std::str::from_utf8_unchecked(std::slice::from_raw_parts(sql as _, len as _));
 
             if let Some(no) = stmt.errno() {
                 return no;
@@ -58,6 +60,7 @@ pub unsafe extern "C" fn ws_stmt_prepare(
     }
 }
 
+/// Set table name.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_char) -> c_int {
     match (stmt as *mut WsMaybeError<WsSyncStmt>).as_mut() {
@@ -76,6 +79,7 @@ pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_c
     }
 }
 
+/// Set table name and tags.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
     stmt: *mut WS_STMT,
@@ -103,8 +107,10 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
     }
 }
 
+/// Currently only insert sql is supported.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_is_insert(stmt: *mut WS_STMT, insert: *mut c_int) -> c_int {
+    *insert = 1;
     0
 }
 

@@ -286,17 +286,31 @@ impl WsClient {
                                     WsRecvData::Query(query) => {
                                         log::info!("query result: {:?}", query);
                                         if let Some(sender) = queries_sender.remove(&req_id) {
-                                            sender.1.send(ok.map(|_| query)).unwrap();
+                                            if let Err(err) = sender.1.send(ok.map(|_| query)) {
+                                                log::error!(
+                                                    "Receiver lost for query {}: {}",
+                                                    req_id,
+                                                    err
+                                                );
+                                            }
                                         }
                                     }
                                     WsRecvData::Fetch(fetch) => {
+                                        let res_id = fetch.id;
                                         log::info!("fetch result: {:?}", fetch);
                                         if let Some(sender) = fetches_sender
                                             .read(&fetch.id, |_, sender| sender.clone())
                                         {
-                                            sender
-                                                .send(ok.map(|_| WsFetchData::Fetch(fetch)))
-                                                .unwrap();
+                                            if let Err(err) =
+                                                sender.send(ok.map(|_| WsFetchData::Fetch(fetch)))
+                                            {
+                                                log::error!(
+                                                    "Receiver lost for result set ({}, {}): {}",
+                                                    req_id,
+                                                    res_id,
+                                                    err
+                                                );
+                                            }
                                         }
                                     }
                                     // Block type is for binary.
