@@ -405,7 +405,10 @@ impl WsClient {
         log::info!("query with sql: {sql}");
         let req_id = self.req_id();
         if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Error::ConnClosed);
+            Err(taos_error::Error::new(
+                Code::new(WS_ERROR_NO::CONN_CLOSED as _),
+                "connection closed",
+            ))?;
         }
         let action = WsSend::Query {
             req_id,
@@ -475,7 +478,10 @@ impl WsClient {
     }
     pub fn s_exec_timeout(&self, sql: &str, timeout: Duration) -> Result<usize> {
         if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Error::ConnClosed);
+            Err(taos_error::Error::new(
+                Code::new(WS_ERROR_NO::CONN_CLOSED as _),
+                "connection closed",
+            ))?;
         }
         let req_id = self.req_id();
         let action = WsSend::Query {
@@ -498,7 +504,10 @@ impl WsClient {
 
     pub fn stmt_init(&self) -> Result<WsSyncStmt> {
         if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Error::ConnClosed);
+            Err(taos_error::Error::new(
+                Code::new(WS_ERROR_NO::CONN_CLOSED as _),
+                "connection closed",
+            ))?;
         }
         // let rt = rt.clone();
         let client = self
@@ -516,7 +525,10 @@ impl ResultSet {
             return Ok(None);
         }
         if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Error::ConnClosed);
+            Err(taos_error::Error::new(
+                Code::new(WS_ERROR_NO::CONN_CLOSED as _),
+                "connection closed",
+            ))?;
         }
         let rx = self.receiver.as_ref().unwrap();
         let fetch = WsSend::Fetch(self.args);

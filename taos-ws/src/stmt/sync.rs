@@ -59,6 +59,11 @@ impl WsSyncStmt {
         self.rt.block_on(self.stmt.set_tags(tags))
     }
 
+    pub fn set_tbname_tags(&mut self, name: &str, tags: Vec<serde_json::Value>) -> Result<()> {
+        self.set_tbname(name)?;
+        self.set_tags(tags)
+    }
+
     pub fn exec(&mut self) -> Result<usize> {
         let rows = self.rt.block_on(self.stmt.exec())?;
         self.affected_rows += rows;

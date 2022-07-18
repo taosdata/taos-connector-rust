@@ -76,6 +76,38 @@ pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_c
     }
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
+    stmt: *mut WS_STMT,
+    name: *const c_char,
+    bind: *const WS_MULTI_BIND,
+    len: u32,
+) -> c_int {
+    match (stmt as *mut WsMaybeError<WsSyncStmt>).as_mut() {
+        Some(stmt) => {
+            let name = CStr::from_ptr(name).to_str().unwrap();
+            let tags = std::slice::from_raw_parts(bind, len as usize)
+                .iter()
+                .map(|bind| bind.first_to_json())
+                .collect();
+
+            if let Err(e) = stmt.set_tbname_tags(name, tags) {
+                let errno = e.errno();
+                stmt.error = Some(e.into());
+                errno.into()
+            } else {
+                0
+            }
+        }
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_is_insert(stmt: *mut WS_STMT, insert: *mut c_int) -> c_int {
+    0
+}
+
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct WS_BIND(TaosMultiBind);
@@ -401,6 +433,7 @@ pub unsafe extern "C" fn ws_stmt_add_batch(stmt: *mut WS_STMT) -> c_int {
     }
 }
 
+/// Execute the bind batch, get inserted rows in `affected_row` pointer.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut i32) -> c_int {
     match (stmt as *mut WsMaybeError<WsSyncStmt>).as_mut() {
@@ -419,6 +452,7 @@ pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut
     }
 }
 
+/// Get inserted rows in current statement.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
     match (stmt as *mut WsMaybeError<WsSyncStmt>).as_mut() {
@@ -427,6 +461,13 @@ pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
     }
 }
 
+/// Equivalent to ws_errstr
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_errstr(stmt: *mut WS_STMT) -> *const c_char {
+    ws_errstr(stmt as _)
+}
+
+/// Same to taos_stmt_close
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_close(stmt: *mut WS_STMT) {
     let _ = Box::from_raw(stmt as *mut WsMaybeError<WsSyncStmt>);
