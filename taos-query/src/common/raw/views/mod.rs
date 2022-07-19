@@ -57,9 +57,9 @@ pub(crate) use offsets::*;
 mod lengths;
 pub(crate) use lengths::*;
 
-use crate::common::{BorrowedValue, Column};
+use crate::common::{BorrowedValue, Column, Ty};
 
-use std::{fmt::Debug, iter::FusedIterator};
+use std::{ffi::c_void, fmt::Debug, iter::FusedIterator};
 
 /// Compatible version for var char.
 pub(crate) enum Version {
@@ -185,6 +185,28 @@ impl ColumnView {
         }
     }
 
+    /// Check if a value at `row` is null
+    #[inline]
+    pub(super) unsafe fn is_null_unchecked(&self, row: usize) -> bool {
+        match self {
+            ColumnView::Bool(view) => view.is_null_unchecked(row),
+            ColumnView::TinyInt(view) => view.is_null_unchecked(row),
+            ColumnView::SmallInt(view) => view.is_null_unchecked(row),
+            ColumnView::Int(view) => view.is_null_unchecked(row),
+            ColumnView::BigInt(view) => view.is_null_unchecked(row),
+            ColumnView::Float(view) => view.is_null_unchecked(row),
+            ColumnView::Double(view) => view.is_null_unchecked(row),
+            ColumnView::VarChar(view) => view.is_null_unchecked(row),
+            ColumnView::Timestamp(view) => view.is_null_unchecked(row),
+            ColumnView::NChar(view) => view.is_null_unchecked(row),
+            ColumnView::UTinyInt(view) => view.is_null_unchecked(row),
+            ColumnView::USmallInt(view) => view.is_null_unchecked(row),
+            ColumnView::UInt(view) => view.is_null_unchecked(row),
+            ColumnView::UBigInt(view) => view.is_null_unchecked(row),
+            ColumnView::Json(view) => view.is_null_unchecked(row),
+        }
+    }
+
     /// Get one value at `row` index of the column view.
     #[inline]
     pub(super) unsafe fn get_ref_unchecked(&self, row: usize) -> BorrowedValue {
@@ -204,6 +226,28 @@ impl ColumnView {
             ColumnView::UInt(view) => view.get_value_unchecked(row),
             ColumnView::UBigInt(view) => view.get_value_unchecked(row),
             ColumnView::Json(view) => view.get_value_unchecked(row),
+        }
+    }
+
+    /// Get pointer to value.
+    #[inline]
+    pub(super) unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
+        match self {
+            ColumnView::Bool(view) => view.get_raw_value_unchecked(row),
+            ColumnView::TinyInt(view) => view.get_raw_value_unchecked(row),
+            ColumnView::SmallInt(view) => view.get_raw_value_unchecked(row),
+            ColumnView::Int(view) => view.get_raw_value_unchecked(row),
+            ColumnView::BigInt(view) => view.get_raw_value_unchecked(row),
+            ColumnView::Float(view) => view.get_raw_value_unchecked(row),
+            ColumnView::Double(view) => view.get_raw_value_unchecked(row),
+            ColumnView::VarChar(view) => view.get_raw_value_unchecked(row),
+            ColumnView::Timestamp(view) => view.get_raw_value_unchecked(row),
+            ColumnView::NChar(view) => view.get_raw_value_unchecked(row),
+            ColumnView::UTinyInt(view) => view.get_raw_value_unchecked(row),
+            ColumnView::USmallInt(view) => view.get_raw_value_unchecked(row),
+            ColumnView::UInt(view) => view.get_raw_value_unchecked(row),
+            ColumnView::UBigInt(view) => view.get_raw_value_unchecked(row),
+            ColumnView::Json(view) => view.get_raw_value_unchecked(row),
         }
     }
 

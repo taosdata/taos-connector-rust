@@ -7,46 +7,34 @@ use bitvec::macros::internal::funty::Numeric;
 use bytes::{Buf, Bytes, BytesMut};
 use itertools::Itertools;
 use once_cell::unsync::OnceCell;
+use serde::Deserialize;
 
-use std::{borrow::Cow, ffi::c_void, ops::Deref, slice};
+use std::{borrow::Cow, collections::HashMap, ffi::c_void, hash::Hash, ops::Deref, slice};
 use std::{fmt::Debug, mem::size_of, mem::transmute};
 
 pub mod layout;
+pub mod meta;
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub enum Layout {
-    V2Ptr,
-    V2Raw,
-    Ref,
-    Owned,
-}
-
-impl Layout {
-    pub fn decode_nchar(&mut self) {
-        // match self {
-        // }
-    }
-}
+use layout::Layout;
+// #[derive(Debug, Clone, Copy)]
+// #[repr(C)]
+// pub enum Layout {
+//     V2Ptr,
+//     V2Raw,
+//     Ref,
+//     Owned,
+// }
 
 pub mod views;
+
 pub use views::ColumnView;
 use views::*;
 
-#[derive(Debug)]
-pub struct RawMeta {
-    data: Bytes,
-    raw_meta_type: i16,
-}
+pub use meta::*;
 
-impl RawMeta {
-    pub fn new(ptr: *const c_void) -> Self {
-        Self {
-            data: Bytes::new(),
-            raw_meta_type: 0,
-        }
-    }
-}
+mod de;
+mod rows;
+use rows::*;
 
 /// Raw data block format (B for bytes):
 ///
@@ -119,7 +107,7 @@ impl RawData {
         let len = *(ptr as *const u32) as usize;
         let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
         let bytes = BytesMut::from(bytes);
-        Self::parse_from_raw_block(bytes, rows, cols, precision).with_layout(Layout::Ref)
+        Self::parse_from_raw_block(bytes, rows, cols, precision).with_layout(Layout::default())
     }
 
     pub fn parse_from_ptr_v2(
@@ -340,7 +328,7 @@ impl RawData {
         }
 
         Self {
-            layout: Layout::V2Raw,
+            layout: Layout::INLINE_DEFAULT,
             data: bytes,
             rows,
             cols,
@@ -349,7 +337,7 @@ impl RawData {
             precision,
             database: None,
             table: None,
-            fields: Vec::new(),
+            fields: fields.iter().map(|s| s.name().to_string()).collect(),
             columns,
             group_id: 0,
             raw_fields: Vec::new(),
@@ -466,7 +454,7 @@ impl RawData {
         }
         // dbg!(&columns);
         RawData {
-            layout: Layout::Owned,
+            layout: Layout::INLINE_DEFAULT,
             data: bytes,
             rows,
             cols,
@@ -568,10 +556,26 @@ impl RawData {
         &self.fields
     }
 
-    /// Get view in columns.
+    /// Data view in columns.
     #[inline]
-    pub fn columns(&self) -> &[ColumnView] {
-        &self.columns
+    pub fn columns(&self) -> std::slice::Iter<ColumnView> {
+        self.columns.iter()
+    }
+
+    /// Data view in rows.
+    #[inline]
+    pub fn rows(&self) -> RowsIter {
+        RowsIter { raw: self, row: 0 }
+    }
+
+    #[inline]
+    pub fn deserialize<'de, 'a: 'de, T>(
+        &'a self,
+    ) -> std::iter::Map<rows::RowsIter<'_>, fn(RowView<'a>) -> Result<T, DeError>>
+    where
+        T: Deserialize<'de>,
+    {
+        self.rows().map(|mut row| T::deserialize(&mut row))
     }
 
     pub fn as_raw_bytes(&self) -> &[u8] {
@@ -582,26 +586,7 @@ impl RawData {
         if row >= self.nrows() || col >= self.ncols() {
             return true;
         }
-        unsafe {
-            let view = self.columns.get_unchecked(col);
-            match view {
-                ColumnView::Bool(view) => view.is_null_unchecked(row),
-                ColumnView::TinyInt(view) => view.is_null_unchecked(row),
-                ColumnView::SmallInt(view) => view.is_null_unchecked(row),
-                ColumnView::Int(view) => view.is_null_unchecked(row),
-                ColumnView::BigInt(view) => view.is_null_unchecked(row),
-                ColumnView::Float(view) => view.is_null_unchecked(row),
-                ColumnView::Double(view) => view.is_null_unchecked(row),
-                ColumnView::VarChar(view) => view.is_null_unchecked(row),
-                ColumnView::Timestamp(view) => view.is_null_unchecked(row),
-                ColumnView::NChar(view) => view.is_null_unchecked(row),
-                ColumnView::UTinyInt(view) => view.is_null_unchecked(row),
-                ColumnView::USmallInt(view) => view.is_null_unchecked(row),
-                ColumnView::UInt(view) => view.is_null_unchecked(row),
-                ColumnView::UBigInt(view) => view.is_null_unchecked(row),
-                ColumnView::Json(view) => view.is_null_unchecked(row),
-            }
-        }
+        unsafe { self.columns.get_unchecked(col).is_null_unchecked(row) }
     }
 
     #[inline]
@@ -612,23 +597,14 @@ impl RawData {
         col: usize,
     ) -> (Ty, u32, *const c_void) {
         let view = self.columns.get_unchecked(col);
-        match view {
-            ColumnView::Bool(view) => view.get_raw_value_unchecked(row),
-            ColumnView::TinyInt(view) => view.get_raw_value_unchecked(row),
-            ColumnView::SmallInt(view) => view.get_raw_value_unchecked(row),
-            ColumnView::Int(view) => view.get_raw_value_unchecked(row),
-            ColumnView::BigInt(view) => view.get_raw_value_unchecked(row),
-            ColumnView::Float(view) => view.get_raw_value_unchecked(row),
-            ColumnView::Double(view) => view.get_raw_value_unchecked(row),
-            ColumnView::VarChar(view) => view.get_raw_value_unchecked(row),
-            ColumnView::Timestamp(view) => view.get_raw_value_unchecked(row),
-            ColumnView::NChar(view) => view.get_raw_value_unchecked(row),
-            ColumnView::UTinyInt(view) => view.get_raw_value_unchecked(row),
-            ColumnView::USmallInt(view) => view.get_raw_value_unchecked(row),
-            ColumnView::UInt(view) => view.get_raw_value_unchecked(row),
-            ColumnView::UBigInt(view) => view.get_raw_value_unchecked(row),
-            ColumnView::Json(view) => view.get_raw_value_unchecked(row),
+        view.get_raw_value_unchecked(row)
+    }
+
+    pub fn get_ref(&self, row: usize, col: usize) -> Option<BorrowedValue> {
+        if row >= self.nrows() || col >= self.ncols() {
+            return None;
         }
+        Some(unsafe { self.get_ref_unchecked(row, col) })
     }
 
     #[inline]
@@ -697,6 +673,10 @@ fn test_block_parser() {
 
 #[test]
 fn test_raw_from_v2() {
+    pretty_env_logger::formatted_builder()
+        .filter_level(log::LevelFilter::Trace)
+        .init();
+    use serde::Deserialize;
     let bytes = b"\x10\x86\x1aA \xcc)AB\xc2\x14AZ],A\xa2\x8d$A\x87\xb9%A\xf5~\x0fA\x96\xf7,AY\xee\x17A1|\x15As\x00\x00\x00q\x00\x00\x00s\x00\x00\x00t\x00\x00\x00u\x00\x00\x00t\x00\x00\x00n\x00\x00\x00n\x00\x00\x00n\x00\x00\x00r\x00\x00\x00";
 
     let block = RawData::parse_from_raw_block_v2(
@@ -724,7 +704,19 @@ fn test_raw_from_v2() {
         10,
         Precision::Millisecond,
     );
-    dbg!(block);
+
+    #[derive(Debug, serde::Deserialize)]
+    struct Record {
+        ts: String,
+        current: f32,
+        voltage: i32,
+        phase: f32,
+        group_id: i32,
+        location: String,
+    }
+    let rows: Vec<Record> = block.deserialize().try_collect().unwrap();
+    dbg!(rows);
+    // dbg!(block);
 }
 
 #[test]
