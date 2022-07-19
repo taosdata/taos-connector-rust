@@ -609,14 +609,15 @@ impl ResultSet {
     }
 }
 impl Iterator for ResultSet {
-    type Item = RawData;
+    type Item = Result<RawData>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.fetch_block().unwrap_or_default()
+        self.fetch_block().transpose()
     }
 }
 
 impl Fetchable for ResultSet {
+    type Error = Error;
     fn affected_rows(&self) -> i32 {
         self.affected_rows as i32
     }

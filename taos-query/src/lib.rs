@@ -159,12 +159,11 @@ pub trait BlockExt: Debug + Sized {
     }
 }
 
-pub trait Fetchable: Sized + Iterator<Item = RawData>
-// where
-//     Self: Sized,
-//     for<'r> &'r mut Self: Iterator,
-//     for<'b, 'r> <&'r mut Self as Iterator>::Item: BlockExt,
+pub trait Fetchable: Sized
+where
+    Self: Iterator<Item = Result<RawData, Self::Error>>,
 {
+    type Error;
     // type Block: for<'b> BlockExt;
 
     fn affected_rows(&self) -> i32;
@@ -183,16 +182,25 @@ pub trait Fetchable: Sized + Iterator<Item = RawData>
         self
     }
 
-    fn to_rows_vec(&mut self) -> Vec<Vec<Value>> {
-        self.rows_iter()
-            .map(|row| row.into_iter().map(|(_, v)| v.into_value()).collect())
-            .collect()
+    fn to_rows_vec(&mut self) -> Result<Vec<Vec<Value>>, Self::Error> {
+        self.map_ok(|raw| raw.to_records())
+            .flatten_ok()
+            .try_collect()
     }
+
+    // fn records(&mut self) -> RecordsIter {
+    //     RecordsIter {
+    //         blocks: &self,
+
+    //     }
+    // }
 
     fn rows_iter(
         &mut self,
-    ) -> std::iter::FlatMap<&mut Self, IntoRowsIter<RawData>, fn(RawData) -> IntoRowsIter<RawData>> {
-        self.flat_map(|block| block.into_iter_rows())
+    ) -> std::iter::FlatMap<&mut Self, IntoRowsIter<RawData>, fn(RawData) -> IntoRowsIter<RawData>>
+    {
+        todo!()
+        // self.flat_map(|block| block.into_iter_rows())
     }
 
     fn deserialize<T>(
@@ -205,12 +213,16 @@ pub trait Fetchable: Sized + Iterator<Item = RawData>
     where
         T: serde::de::DeserializeOwned,
     {
-        self.flat_map(|block| block.deserialize_into_vec())
+        todo!()
+        // self.map_ok(|block| block.deserialize_into_vec())
     }
 }
 
 /// The synchronous query trait for TDengine connection.
-pub trait Queryable<'q>: Debug {
+pub trait Queryable<'q>: Debug
+// where
+//     Self::ResultSet: Iterator<Item = Result<RawData, Self::Error>>,
+{
     type Error: Debug + From<serde::de::value::Error>;
 
     type ResultSet: Fetchable;
@@ -736,27 +748,28 @@ mod tests {
     //     }
     // }
     impl<'q> Iterator for MyResultSet<'q> {
-        type Item = RawData;
+        type Item = Result<RawData, Error>;
 
         fn next(&mut self) -> Option<Self::Item> {
             static mut AVAILABLE: bool = true;
             if unsafe { AVAILABLE } {
                 unsafe { AVAILABLE = false };
 
-                Some(RawData::parse_from_raw_block_v2(
+                Some(Ok(RawData::parse_from_raw_block_v2(
                     [1].as_slice(),
                     &[Field::new("a", Ty::TinyInt, 1)],
                     &[1],
                     1,
                     Precision::Millisecond,
-                ))
+                )))
             } else {
                 None
             }
         }
     }
 
-    impl<'r, 'q> crate::Fetchable for MyResultSet<'q> {
+    impl<'q> crate::Fetchable for MyResultSet<'q> {
+        type Error = Error;
         fn fields(&self) -> &[Field] {
             todo!()
         }
@@ -812,6 +825,7 @@ mod tests {
 
         let mut set = conn.query("abc").unwrap();
         for block in &mut set {
+            let block = block.unwrap();
             for record in block.deserialize::<(i32, &str, u8)>() {
                 dbg!(record.unwrap());
             }
@@ -827,6 +841,7 @@ mod tests {
         let mut set = conn.query("abc").unwrap();
 
         for block in &mut set {
+            let block = block.unwrap();
             for record in block.deserialize::<(String, &str, u8)>() {
                 dbg!(record.unwrap());
             }
@@ -845,6 +860,7 @@ mod tests {
 
         for block in &mut set {
             for record in block
+                .unwrap()
                 .deserialize_stream::<(String, &str, u8)>()
                 .next()
                 .await
@@ -864,7 +880,7 @@ mod tests {
 
         for block in &mut set {
             // todo
-            for row in block.iter_rows() {
+            for row in block.unwrap().iter_rows() {
                 for value in row {
                     println!("{:?}", value);
                 }
