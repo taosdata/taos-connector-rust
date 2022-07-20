@@ -316,7 +316,7 @@ impl RawData {
                         }
                     }));
 
-                    columns.push(dbg!(ColumnView::Json(JsonView { offsets, data })));
+                    columns.push(ColumnView::Json(JsonView { offsets, data }));
 
                     data_lengths[i] = *length as u32 * rows as u32;
                 }
