@@ -1,26 +1,41 @@
+use std::{marker::PhantomData, ptr::NonNull};
+
 use serde::{
     de::{DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor},
     Deserializer,
 };
 
-use crate::{common::BorrowedValue, RawData};
+use crate::{
+    common::{BorrowedValue, Value},
+    RawData,
+};
+
+pub struct IntoRowsIter<'a> {
+    pub(crate) raw: RawData,
+    pub(crate) row: usize,
+    pub(crate) _marker: PhantomData<&'a bool>,
+}
 
 pub struct RowsIter<'a> {
-    pub(super) raw: &'a RawData,
+    pub(super) raw: NonNull<RawData>,
     pub(super) row: usize,
+    pub(crate) _marker: PhantomData<&'a usize>,
 }
+
+unsafe impl<'a> Send for RowsIter<'a> {}
+unsafe impl<'a> Sync for RowsIter<'a> {}
 
 impl<'a> Iterator for RowsIter<'a> {
     type Item = RowView<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.row >= self.raw.nrows() {
+        if self.row >= unsafe { self.raw.as_mut() }.nrows() {
             None
         } else {
             let row = self.row;
             self.row += 1;
             Some(RowView {
-                raw: self.raw,
+                raw: unsafe { self.raw.as_mut() },
                 row: row,
                 col: 0,
             })
@@ -29,16 +44,16 @@ impl<'a> Iterator for RowsIter<'a> {
 }
 
 impl<'a> RowsIter<'a> {
-    pub fn values(&self) -> ValueIter {
+    pub fn values(&mut self) -> ValueIter {
         ValueIter {
-            raw: self.raw,
+            raw: unsafe { self.raw.as_mut() },
             row: self.row,
             col: 0,
         }
     }
-    pub fn named_values(&self) -> RowView {
+    pub fn named_values(&mut self) -> RowView {
         RowView {
-            raw: self.raw,
+            raw: unsafe { self.raw.as_mut() },
             row: self.row,
             col: 0,
         }
@@ -106,6 +121,10 @@ impl<'a> RowView<'a> {
     }
     fn peek_value(&self) -> Option<BorrowedValue<'a>> {
         self.raw.get_ref(self.row, self.col)
+    }
+
+    pub fn into_values(self) -> Vec<Value> {
+        self.map(|(_, b)| b.to_value()).collect()
     }
 }
 

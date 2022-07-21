@@ -1,7 +1,6 @@
 use crate::{
     common::{BorrowedValue, Column, Field, Precision, Timestamp, Ty, Value},
     util::{Inlinable, InlinableRead, InlinableWrite, InlineStr},
-    BlockExt,
 };
 use bitvec::macros::internal::funty::Numeric;
 use bytes::{Buf, Bytes, BytesMut};
@@ -9,7 +8,9 @@ use itertools::Itertools;
 use once_cell::unsync::OnceCell;
 use serde::Deserialize;
 
-use std::{borrow::Cow, collections::HashMap, ffi::c_void, hash::Hash, ops::Deref, slice};
+use std::{
+    borrow::Cow, collections::HashMap, ffi::c_void, hash::Hash, ops::Deref, ptr::NonNull, slice,
+};
 use std::{fmt::Debug, mem::size_of, mem::transmute};
 
 pub mod layout;
@@ -34,7 +35,7 @@ pub use meta::*;
 
 mod de;
 mod rows;
-use rows::*;
+pub use rows::*;
 
 /// Raw data block format (B for bytes):
 ///
@@ -106,7 +107,7 @@ impl RawData {
     ) -> Self {
         let len = *(ptr as *const u32) as usize;
         let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
-        let bytes = BytesMut::from(bytes);
+        let bytes = Bytes::from(bytes);
         Self::parse_from_raw_block(bytes, rows, cols, precision).with_layout(Layout::default())
     }
 
@@ -564,8 +565,24 @@ impl RawData {
 
     /// Data view in rows.
     #[inline]
-    pub fn rows(&self) -> RowsIter {
-        RowsIter { raw: self, row: 0 }
+    pub fn rows<'a>(&self) -> RowsIter<'a> {
+        RowsIter {
+            raw: NonNull::new(self as *const Self as *mut Self).unwrap(),
+            row: 0,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    #[inline]
+    pub fn into_rows<'a>(self) -> IntoRowsIter<'a>
+    where
+        Self: 'a,
+    {
+        IntoRowsIter {
+            raw: self,
+            row: 0,
+            _marker: std::marker::PhantomData,
+        }
     }
 
     #[inline]
@@ -617,39 +634,43 @@ impl RawData {
         self.columns.get_unchecked(col)
     }
 
+    pub fn to_values(&self) -> Vec<Vec<Value>> {
+        self.rows().map(|row| row.into_values()).collect_vec()
+    }
+
     pub fn write<W: std::io::Write>(&self, wtr: W) -> std::io::Result<usize> {
         todo!()
     }
 }
 
-impl BlockExt for RawData {
-    fn num_of_rows(&self) -> usize {
-        self.nrows()
-    }
+// impl BlockExt for RawData {
+//     fn num_of_rows(&self) -> usize {
+//         self.nrows()
+//     }
 
-    fn fields(&self) -> &[Field] {
-        &self.raw_fields
-    }
+//     fn fields(&self) -> &[Field] {
+//         &self.raw_fields
+//     }
 
-    fn precision(&self) -> Precision {
-        self.precision()
-    }
+//     fn precision(&self) -> Precision {
+//         self.precision()
+//     }
 
-    fn is_null(&self, row: usize, col: usize) -> bool {
-        self.is_null(row, col)
-    }
+//     fn is_null(&self, row: usize, col: usize) -> bool {
+//         self.is_null(row, col)
+//     }
 
-    unsafe fn cell_unchecked(&self, row: usize, col: usize) -> (&Field, BorrowedValue) {
-        (
-            self.get_field_unchecked(col),
-            self.get_ref_unchecked(row, col),
-        )
-    }
+//     unsafe fn cell_unchecked(&self, row: usize, col: usize) -> (&Field, BorrowedValue) {
+//         (
+//             self.get_field_unchecked(col),
+//             self.get_ref_unchecked(row, col),
+//         )
+//     }
 
-    unsafe fn get_col_unchecked(&self, col: usize) -> &ColumnView {
-        self.get_col_unchecked(col)
-    }
-}
+//     unsafe fn get_col_unchecked(&self, col: usize) -> &ColumnView {
+//         self.get_col_unchecked(col)
+//     }
+// }
 
 impl Inlinable for RawData {
     fn read_inlined<R: std::io::Read>(reader: R) -> std::io::Result<Self> {

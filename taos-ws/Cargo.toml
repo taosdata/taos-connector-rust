@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1"
 # backtrace = "0.3"
 itertools = "0.10.3"
 log = "0.4"
@@ -30,7 +31,6 @@ tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.17", features = ["native-tls"] }
 
 [dev-dependencies]
-anyhow = "1"
 pretty_env_logger = "*"
 
 [features]
