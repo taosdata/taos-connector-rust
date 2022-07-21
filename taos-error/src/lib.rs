@@ -144,6 +144,12 @@ impl FromStr for Error {
     }
 }
 
+// impl<T: std::error::Error> From<T> for Error {
+//     fn from(_: T) -> Self {
+//         todo!()
+//     }
+// }
+
 impl Display for Error {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
