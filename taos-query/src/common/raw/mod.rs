@@ -131,17 +131,63 @@ impl RawData {
         use bytes::BufMut;
         debug_assert_eq!(fields.len(), lengths.len());
 
-        const BOOL_NULL: u8 = 0x2;
-        const TINY_INT_NULL: i8 = i8::MIN;
-        const SMALL_INT_NULL: i16 = i16::MIN;
-        const INT_NULL: i32 = i32::MIN;
-        const BIG_INT_NULL: i64 = i64::MIN;
-        const FLOAT_NULL: f32 = f32::NAN;
-        const DOUBLE_NULL: f64 = f64::NAN;
-        const U_TINY_INT_NULL: u8 = u8::MAX;
-        const U_SMALL_INT_NULL: u16 = u16::MAX;
-        const U_INT_NULL: u32 = u32::MAX;
-        const U_BIG_INT_NULL: u64 = u64::MAX;
+        const BOOL_NULL: u64 = 0x02;
+        const TINY_INT_NULL: u64 = 0x80;
+        const SMALL_INT_NULL: u64 = 0x8000;
+        const INT_NULL: u64 = 0x80000000;
+        const BIG_INT_NULL: u64 = 0x8000000000000000;
+        const FLOAT_NULL: u64 = 0x7FF00000;
+        const DOUBLE_NULL: u64 = 0x7FFFFF0000000000;
+        const U_TINY_INT_NULL: u64 = 0xFF;
+        const U_SMALL_INT_NULL: u64 = 0xFFFF;
+        const U_INT_NULL: u64 = 0xFFFFFFFF;
+        const U_BIG_INT_NULL: u64 = 0xFFFFFFFFFFFFFFFF;
+
+        const fn bool_is_null(v: *const bool) -> bool {
+            unsafe { *(v as *const u8) == 0x02 }
+        }
+        const fn tiny_int_is_null(v: *const i8) -> bool {
+            unsafe { *(v as *const u8) == 0x80 }
+        }
+        const fn small_int_is_null(v: *const i16) -> bool {
+            unsafe { *(v as *const u16) == 0x8000 }
+        }
+        const fn int_is_null(v: *const i32) -> bool {
+            unsafe { *(v as *const u32) == 0x80000000 }
+        }
+        const fn big_int_is_null(v: *const i64) -> bool {
+            unsafe { *(v as *const u64) == 0x8000000000000000 }
+        }
+        const fn u_tiny_int_is_null(v: *const u8) -> bool {
+            unsafe { *(v as *const u8) == 0xFF }
+        }
+        const fn u_small_int_is_null(v: *const u16) -> bool {
+            unsafe { *(v as *const u16) == 0xFFFF }
+        }
+        const fn u_int_is_null(v: *const u32) -> bool {
+            unsafe { *(v as *const u32) == 0xFFFFFFFF }
+        }
+        const fn u_big_int_is_null(v: *const u64) -> bool {
+            unsafe { *(v as *const u64) == 0xFFFFFFFFFFFFFFFF }
+        }
+        const fn float_is_null(v: *const f32) -> bool {
+            unsafe { *(v as *const u32) == 0x7FF00000 }
+        }
+        const fn double_is_null(v: *const f64) -> bool {
+            unsafe { *(v as *const u64) == 0x7FFFFF0000000000 }
+        }
+
+        // const BOOL_NULL: u8 = 0x2;
+        // const TINY_INT_NULL: i8 = i8::MIN;
+        // const SMALL_INT_NULL: i16 = i16::MIN;
+        // const INT_NULL: i32 = i32::MIN;
+        // const BIG_INT_NULL: i64 = i64::MIN;
+        // const FLOAT_NULL: f32 = 0x7FF00000i32 as f32;
+        // const DOUBLE_NULL: f64 = 0x7FFFFF0000000000i64 as f64;
+        // const U_TINY_INT_NULL: u8 = u8::MAX;
+        // const U_SMALL_INT_NULL: u16 = u16::MAX;
+        // const U_INT_NULL: u32 = u32::MAX;
+        // const U_BIG_INT_NULL: u64 = u64::MAX;
 
         let bytes = bytes.into();
         let cols = fields.len();
@@ -182,7 +228,8 @@ impl RawData {
                     let nulls = NullsMut::from_bools(
                         value_slice
                             .iter()
-                            .map(|b| *b == paste::paste! { [<$ty:snake:upper _NULL>] }),
+                            .map(|v| paste::paste!{ [<$ty:snake _is_null>](v as _) })
+                            // .map(|b| *b as u64 == paste::paste! { [<$ty:snake:upper _NULL>] }),
                     )
                     .into_nulls();
                     // build column view
@@ -203,8 +250,8 @@ impl RawData {
                     // Bool column data end
                     offset += rows; // bool size is 1
                     let data = bytes.slice(start..offset);
-                    let nulls =
-                        NullsMut::from_bools(data.iter().map(|b| *b == BOOL_NULL)).into_nulls();
+                    let nulls = NullsMut::from_bools(data.iter().map(|b| *b as u64 == BOOL_NULL))
+                        .into_nulls();
 
                     data_lengths[i] = data.len() as u32;
                     // build column view
@@ -265,7 +312,7 @@ impl RawData {
 
                     // generate nulls bitmap.
                     let nulls =
-                        NullsMut::from_bools(value_slice.iter().map(|b| *b == BIG_INT_NULL))
+                        NullsMut::from_bools(value_slice.iter().map(|b| *b as u64 == BIG_INT_NULL))
                             .into_nulls();
                     // build column view
                     let column = ColumnView::Timestamp(TimestampView {
@@ -317,7 +364,7 @@ impl RawData {
                         }
                     }));
 
-                    columns.push(ColumnView::Json(JsonView { offsets, data }));
+                    columns.push(dbg!(ColumnView::Json(JsonView { offsets, data })));
 
                     data_lengths[i] = *length as u32 * rows as u32;
                 }
@@ -786,6 +833,30 @@ fn test_v2_full() {
     dbg!(block);
 }
 
+#[test]
+fn test_v2_null() {
+    let raw = RawData::parse_from_raw_block_v2(
+        [0, 0, 0, 0x80].as_slice(),
+        &[Field::new("a", Ty::Int, 4)],
+        &[4],
+        1,
+        Precision::Millisecond,
+    );
+    dbg!(&raw);
+    let (ty, len, null) = unsafe { raw.get_raw_value_unchecked(0, 0) };
+    assert!(null.is_null());
+
+    let raw = RawData::parse_from_raw_block_v2(
+        [0, 0, 0xf0, 0x7f].as_slice(),
+        &[Field::new("a", Ty::Float, 4)],
+        &[4],
+        1,
+        Precision::Millisecond,
+    );
+    let (ty, len, null) = unsafe { raw.get_raw_value_unchecked(0, 0) };
+    dbg!(raw);
+    assert!(null.is_null());
+}
 #[test]
 fn test_from_v2() {
     let raw = RawData::parse_from_raw_block_v2(

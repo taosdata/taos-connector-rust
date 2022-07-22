@@ -180,6 +180,10 @@ pub mod sync {
             self.query(sql).map(|res| res.affected_rows() as _)
         }
 
+        fn write_meta(&self, _: RawMeta) -> Result<(), Self::Error> {
+            todo!()
+        }
+
         fn exec_many<T: AsRef<str>, I: IntoIterator<Item = T>>(
             &self,
             input: I,
@@ -462,6 +466,10 @@ mod r#async {
             self.query(sql).await.map(|res| res.affected_rows() as _)
         }
 
+        async fn write_meta(&self, _: RawMeta) -> Result<(), Self::Error> {
+            todo!()
+        }
+
         async fn exec_many<T, I>(&self, input: I) -> Result<usize, Self::Error>
         where
             T: AsRef<str> + Send + Sync,
@@ -470,6 +478,7 @@ mod r#async {
         {
             let mut aff = 0;
             for sql in input {
+                log::debug!("exec sql: {}", sql.as_ref());
                 aff += self.exec(sql).await?;
             }
             Ok(aff)
