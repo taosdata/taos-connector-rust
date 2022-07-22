@@ -75,7 +75,7 @@ impl NCharView {
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
         match self.get_unchecked(row) {
             Some(s) => (Ty::NChar, s.len() as _, s.as_ptr() as _),
-            None => (Ty::Null, 0, std::ptr::null()),
+            None => (Ty::NChar, 0, std::ptr::null()),
         }
     }
 

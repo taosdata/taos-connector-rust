@@ -1,5 +1,7 @@
 use std::fmt::{Debug, Display};
 
+use serde::{Deserialize, Serialize};
+
 use crate::util::{Inlinable, InlinableRead, InlinableWrite};
 
 use super::ty::Ty;
@@ -15,11 +17,14 @@ use super::ty::Ty;
 /// 2. `{ name: "n", ty: NChar, bytes: 100 }`, a `NCHAR` filed with name `n`,
 ///    bytes length 100 which is the length of the variable-length data.
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Field {
-    name: String,
-    ty: Ty,
-    bytes: u32,
+    pub(crate) name: String,
+    #[serde(rename = "type")]
+    pub(crate) ty: Ty,
+    #[serde(default)]
+    #[serde(rename = "length")]
+    pub(crate) bytes: u32,
 }
 
 impl Inlinable for Field {
@@ -74,20 +79,21 @@ impl Field {
     pub fn sql_repr(&self) -> String {
         let ty = self.ty();
         if ty.is_var_type() {
-            format!("{}({})", ty.name(), self.bytes())
+            format!("`{}` {}({})", self.name(), ty.name(), self.bytes())
         } else {
-            ty.name().to_string()
+            format!("`{}` {}", self.name(), ty.name())
         }
     }
+
 }
 
 impl Display for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ty = self.ty();
         if ty.is_var_type() {
-            write!(f, "({}: {}({}))", self.name(), ty.name(), self.bytes())
+            write!(f, "`{}` {}({})", self.name(), ty.name(), self.bytes())
         } else {
-            write!(f, "({}: {})", self.name(), ty.name())
+            write!(f, "`{}` {}", self.name(), ty.name())
         }
     }
 }

@@ -12,7 +12,7 @@ use once_cell::sync::{Lazy, OnceCell};
 use asyn::WsAsyncClient;
 use sync::WsClient;
 
-use taos_query::{Connectable, Dsn, DsnError, IntoDsn, Queryable};
+use taos_query::{common::RawMeta, Connectable, Dsn, DsnError, IntoDsn, Queryable};
 
 pub mod infra;
 
@@ -20,6 +20,9 @@ pub mod infra;
 pub mod asyn;
 pub mod stmt;
 pub mod sync; // todo: if use name `async`, rust-analyzer does not recognize the tests.
+
+// pub mod tmq;
+pub mod consumer;
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
@@ -230,6 +233,18 @@ impl taos_query::AsyncQueryable for Ws {
             self.async_client
                 .get_or_init(|| async_client)
                 .s_query(sql.as_ref())
+                .await
+        }
+    }
+
+    async fn write_meta(&self, raw: RawMeta) -> Result<(), Self::Error> {
+        if let Some(ws) = self.async_client.get() {
+            ws.write_meta(raw).await
+        } else {
+            let async_client = WsAsyncClient::from_wsinfo(&self.dsn).await?;
+            self.async_client
+                .get_or_init(|| async_client)
+                .write_meta(raw)
                 .await
         }
     }

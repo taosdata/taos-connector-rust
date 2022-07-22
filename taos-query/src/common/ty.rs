@@ -4,6 +4,7 @@ use std::{
 };
 
 use serde::de::Visitor;
+use serde_repr::Deserialize_repr;
 
 // todo: useful?
 // pub const TY_NULL: Ty = Ty::Null; // 1 bytes
@@ -102,6 +103,12 @@ pub enum Ty {
     Blob, // 18
     /// 19, Not supported now.
     MediumBlob, // 19
+}
+
+impl Default for Ty {
+    fn default() -> Self {
+        Ty::Null
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for Ty {
