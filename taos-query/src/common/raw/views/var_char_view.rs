@@ -1,4 +1,4 @@
-use std::{ffi::c_void, fmt::Debug, ops::Deref};
+use std::{ffi::c_void, fmt::Debug};
 
 use super::Offsets;
 use crate::{

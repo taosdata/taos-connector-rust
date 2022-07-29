@@ -4,7 +4,6 @@ use std::{
 };
 
 use serde::de::Visitor;
-use serde_repr::Deserialize_repr;
 
 // todo: useful?
 // pub const TY_NULL: Ty = Ty::Null; // 1 bytes
@@ -213,10 +212,20 @@ impl Ty {
         matches!(self, Ty::Null)
     }
 
-    /// Var type which is one of [Ty::VarChar], [Ty::VarBinary], [Ty::NChar] or [Ty::Json].
+    /// Var type which is one of [Ty::VarChar], [Ty::VarBinary], [Ty::NChar].
     pub const fn is_var_type(&self) -> bool {
         use Ty::*;
-        matches!(self, VarChar | VarBinary | NChar | Json)
+        matches!(self, VarChar | VarBinary | NChar)
+    }
+
+    /// Check if the data type need quotes, means one of [Ty::VarChar], [Ty::NChar], [Ty::Json].
+    pub const fn is_quote(&self) -> bool {
+        use Ty::*;
+        matches!(self, Json)
+    }
+
+    pub const fn is_json(&self) -> bool {
+        matches!(self, Ty::Json)
     }
 
     /// Is one of boolean/integers/float/double/decimal
