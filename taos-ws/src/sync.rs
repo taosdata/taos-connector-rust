@@ -1,20 +1,20 @@
-use once_cell::sync::{Lazy, OnceCell};
+use once_cell::sync::OnceCell;
 use taos_error::Code;
-use taos_query::common::{Field, Precision, RawData};
-use taos_query::{DeError, Dsn, DsnError, Fetchable, IntoDsn, Queryable};
+use taos_query::common::{Field, Precision, RawBlock, RawMeta};
+use taos_query::{DeError, DsnError, Fetchable, IntoDsn, Queryable};
 use thiserror::Error;
 use tokio::sync::watch;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::stmt::sync::{WsSyncStmt, WsSyncStmtClient};
-use crate::{infra::*, stmt, WsInfo};
+use crate::{infra::*, stmt, TaosBuilder};
 
-use std::any;
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
+use std::ops::AddAssign;
 use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::{mpsc::Sender, Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use scc::HashMap;
@@ -42,7 +42,7 @@ pub struct WsAuth {
 }
 
 pub struct WsClient {
-    info: WsInfo,
+    info: TaosBuilder,
     timeout: Duration,
     version: String,
     req_id: Arc<AtomicU64>,
@@ -75,6 +75,7 @@ pub struct ResultSet {
     affected_rows: usize,
     precision: Precision,
     alive: Arc<AtomicBool>,
+    timing: UnsafeCell<Duration>,
     summary: UnsafeCell<(usize, usize)>,
 }
 
@@ -146,11 +147,11 @@ impl WsClient {
     ///
     pub fn from_dsn(dsn: impl IntoDsn) -> Result<Self> {
         let dsn = dsn.into_dsn()?;
-        let info = WsInfo::from_dsn(dsn)?;
+        let info = TaosBuilder::from_dsn(dsn)?;
         Self::from_wsinfo(&info)
     }
 
-    pub(crate) fn from_wsinfo(info: &WsInfo) -> Result<Self> {
+    pub(crate) fn from_wsinfo(info: &TaosBuilder) -> Result<Self> {
         use futures::SinkExt;
         use futures::StreamExt;
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -163,7 +164,7 @@ impl WsClient {
 
         rt.block_on(async_sender.send(WsSend::Version.to_msg()))?;
 
-        let duration = Duration::from_secs(2);
+        let _duration = Duration::from_secs(2);
 
         let get_version = async {
             let sleep = tokio::time::sleep(Duration::from_secs(1));
@@ -323,6 +324,8 @@ impl WsClient {
                                 log::debug!("fetch block with {} bytes.", block.len());
                                 let mut slice = block.as_slice();
                                 use taos_query::util::InlinableRead;
+                                let timing = slice.read_u64().unwrap();
+                                let timing = Duration::from_nanos(timing as _);
                                 let res_id = slice.read_u64().unwrap();
                                 if is_v3 {
                                     // v3
@@ -330,7 +333,11 @@ impl WsClient {
                                     if let Some(v) = fetches_sender.read(&res_id, |_, v| v.clone())
                                     {
                                         log::debug!("send data to fetches with id {}", res_id);
-                                        v.send(Ok(WsFetchData::Block(block[8..].to_vec()).clone()))
+                                        v.send(Ok(WsFetchData::Block(
+                                            timing,
+                                            block[16..].to_vec(),
+                                        )
+                                        .clone()))
                                             .unwrap();
                                     }
                                 } else {
@@ -339,8 +346,11 @@ impl WsClient {
                                     if let Some(v) = fetches_sender.read(&res_id, |_, v| v.clone())
                                     {
                                         log::debug!("send data to fetches with id {}", res_id);
-                                        v.send(Ok(WsFetchData::BlockV2(block[8..].to_vec())))
-                                            .unwrap();
+                                        v.send(Ok(WsFetchData::BlockV2(
+                                            timing,
+                                            block[16..].to_vec(),
+                                        )))
+                                        .unwrap();
                                     }
                                 }
                             }
@@ -469,6 +479,7 @@ impl WsClient {
                 },
                 alive: self.alive.clone(),
                 summary: UnsafeCell::default(),
+                timing: UnsafeCell::new(resp.timing),
             })
         } else {
             Ok(ResultSet {
@@ -487,12 +498,18 @@ impl WsClient {
                 precision: resp.precision,
                 alive: self.alive.clone(),
                 summary: UnsafeCell::default(),
+                timing: UnsafeCell::new(resp.timing),
             })
         }
     }
 
     pub fn s_exec(&self, sql: &str) -> Result<usize> {
         self.s_exec_timeout(sql, self.timeout)
+    }
+
+    pub fn s_write_meta(&self, _: RawMeta) -> Result<()> {
+        // todo: unimplemented
+        todo!()
     }
     pub fn s_exec_timeout(&self, sql: &str, timeout: Duration) -> Result<usize> {
         if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
@@ -546,7 +563,7 @@ impl ResultSet {
         summary.0 += 1;
         summary.1 += nrows;
     }
-    async fn fetch_block_a(&self) -> Result<Option<RawData>> {
+    async fn fetch_block_a(&self) -> Result<Option<RawBlock>> {
         if self.receiver.is_none() {
             return Ok(None);
         }
@@ -567,6 +584,11 @@ impl ResultSet {
             unreachable!()
         };
 
+        unsafe {
+            let t = &mut *self.timing.get();
+            t.add_assign(fetch_resp.timing);
+        }
+
         if fetch_resp.completed {
             return Ok(None);
         }
@@ -576,8 +598,8 @@ impl ResultSet {
         self.sender.send_timeout(fetch_block, self.timeout).await?;
 
         match rx.recv_timeout(self.timeout)?? {
-            WsFetchData::Block(raw) => {
-                let mut raw = RawData::parse_from_raw_block(
+            WsFetchData::Block(timing, raw) => {
+                let mut raw = RawBlock::parse_from_raw_block(
                     raw,
                     fetch_resp.rows,
                     self.fields_count,
@@ -590,11 +612,16 @@ impl ResultSet {
                         log::debug!("({}, {}): {:?}", row, col, v);
                     }
                 }
-                raw.with_fields(self.fields.as_ref().unwrap().to_vec());
+                raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
+
+                unsafe {
+                    let t = &mut *self.timing.get();
+                    t.add_assign(timing);
+                }
                 Ok(Some(raw))
             }
-            WsFetchData::BlockV2(raw) => {
-                let mut raw = RawData::parse_from_raw_block_v2(
+            WsFetchData::BlockV2(timing, raw) => {
+                let mut raw = RawBlock::parse_from_raw_block_v2(
                     raw,
                     self.fields.as_ref().unwrap(),
                     fetch_resp.lengths.as_ref().unwrap(),
@@ -608,20 +635,32 @@ impl ResultSet {
                         log::debug!("({}, {}): {:?}", row, col, v);
                     }
                 }
-                raw.with_fields(self.fields.as_ref().unwrap().to_vec());
+
+                raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
+
+                unsafe {
+                    let t = &mut *self.timing.get();
+                    t.add_assign(timing);
+                }
                 Ok(Some(raw))
             }
             _ => Ok(None),
         }
     }
-    pub fn fetch_block(&mut self) -> Result<Option<RawData>> {
+    pub fn fetch_block(&mut self) -> Result<Option<RawBlock>> {
         let rt = &self.rt;
         let future = self.fetch_block_a();
         rt.block_on(future)
     }
+
+    pub fn take_timing(&mut self) -> Duration {
+        let timing = *self.timing.get_mut();
+        self.timing = UnsafeCell::new(Duration::ZERO);
+        timing
+    }
 }
 impl Iterator for ResultSet {
-    type Item = Result<RawData>;
+    type Item = Result<RawBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.fetch_block().transpose()
@@ -654,7 +693,7 @@ impl Fetchable for ResultSet {
         self.update_summary(nrows)
     }
 
-    fn fetch_raw_block(&mut self) -> Result<Option<RawData>> {
+    fn fetch_raw_block(&mut self) -> Result<Option<RawBlock>> {
         self.fetch_block()
     }
 }
@@ -670,6 +709,10 @@ impl Queryable for WsClient {
 
     fn exec<T: AsRef<str>>(&self, sql: T) -> std::result::Result<usize, Self::Error> {
         self.s_exec(sql.as_ref())
+    }
+
+    fn write_meta(&self, raw: taos_query::common::RawMeta) -> std::result::Result<(), Self::Error> {
+        self.s_write_meta(raw)
     }
 }
 
