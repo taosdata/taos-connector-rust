@@ -156,27 +156,46 @@ impl TaosMultiBind {
     pub fn to_json(&self) -> serde_json::Value {
         use serde_json::json;
         use serde_json::Value;
+        assert!(self.num > 0, "invalid bind value");
+        let len = self.num as usize;
+
+        macro_rules! _nulls {
+            () => {
+                json!(std::iter::repeat(Value::Null).take(len).collect::<Vec<_>>())
+            };
+        }
+        if self.buffer.is_null() {
+            return _nulls!();
+        }
+
         macro_rules! _impl_primitive {
             ($t:ty) => {{
-                let len = self.num as usize;
                 let slice = std::slice::from_raw_parts(self.buffer as *const $t, len);
-                if self.is_null.is_null() {
-                    return json!(slice);
+                match self.is_null.is_null() {
+                    true => json!(slice),
+                    false => {
+                        let nulls = std::slice::from_raw_parts(self.is_null as *const bool, len);
+                        let column: Vec<_> = slice
+                            .iter()
+                            .zip(nulls)
+                            .map(
+                                |(value, is_null)| {
+                                    if *is_null {
+                                        None
+                                    } else {
+                                        Some(*value)
+                                    }
+                                },
+                            )
+                            .collect();
+                        json!(column)
+                    }
                 }
-                let nulls = std::slice::from_raw_parts(self.is_null as *const bool, len);
-                let column: Vec<_> = slice
-                    .iter()
-                    .zip(nulls)
-                    .map(|(value, is_null)| if *is_null { None } else { Some(*value) })
-                    .collect();
-                json!(column)
             }};
         }
         unsafe {
             match Ty::from(self.buffer_type as u8) {
-                Ty::Null => {
-                    json!(Vec::from_iter(std::iter::repeat(Value::Null)))
-                }
+                Ty::Null => _nulls!(),
                 Ty::Bool => _impl_primitive!(bool),
                 Ty::TinyInt => _impl_primitive!(i8),
                 Ty::SmallInt => _impl_primitive!(i16),
@@ -278,9 +297,7 @@ impl TaosMultiBind {
                                     .offset(self.buffer_length as isize * i as isize);
                                 let len = *self.length.offset(i as isize) as usize;
                                 let bytes = std::slice::from_raw_parts(ptr, len);
-                                Some(
-                                    serde_json::from_slice::<serde_json::Value>(bytes).unwrap()
-                                )
+                                Some(serde_json::from_slice::<serde_json::Value>(bytes).unwrap())
                             }
                         })
                         .collect::<Vec<_>>();
@@ -652,6 +669,112 @@ mod tests {
             // query!(b"drop database ws_stmt_i\0");
         }
     }
+
+    #[test]
+    fn stmt_tiny_int_null() {
+        use crate::*;
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! query {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            query!(b"drop database if exists ws_stmt_i\0");
+            query!(b"create database ws_stmt_i keep 36500\0");
+            query!(b"use ws_stmt_i\0");
+            query!(b"create table st(ts timestamp, c1 TINYINT UNSIGNED) tags(utntag TINYINT UNSIGNED)\0");
+            query!(b"create table t1 using st tags(0)\0");
+            query!(b"create table t2 using st tags(255)\0");
+            query!(b"create table t3 using st tags(NULL)\0");
+
+            let stmt = ws_stmt_init(taos);
+
+            let sql = "insert into ? values(?,?)";
+            let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+                panic!()
+            }
+
+            for tbname in ["t1", "t2", "t3"] {
+                let name = format!("ws_stmt_i.`{}`\0", tbname);
+                let code = ws_stmt_set_tbname(stmt, name.as_ptr() as _);
+
+                if code != 0 {
+                    dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+                    panic!()
+                }
+                let params = vec![
+                    TaosMultiBind::from_raw_timestamps(vec![false], &[0]),
+                    TaosMultiBind::from_primitives(vec![true], &[0u8]),
+                ];
+                let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
+                if code != 0 {
+                    dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+                    panic!()
+                }
+
+                ws_stmt_add_batch(stmt);
+                let mut rows = 0;
+                ws_stmt_execute(stmt, &mut rows);
+                assert_eq!(rows, 1);
+
+                let sql = format!("select * from st where tbname = '{tbname}'\0");
+                let rs = ws_query(taos, sql.as_bytes().as_ptr() as _);
+                let code = ws_errno(rs);
+                loop {
+                    let mut ptr = std::ptr::null();
+                    let mut rows = 0;
+                    ws_fetch_block(rs, &mut ptr, &mut rows);
+                    if rows == 0 {
+                        break;
+                    }
+                    for row in 0..rows {
+                        print!("{tbname} row {row}: ");
+                        for col in 0..3 {
+                            let mut ty = Ty::Null;
+                            let mut len = 0;
+                            let v = ws_get_value_in_block(
+                                rs,
+                                row,
+                                col,
+                                &mut ty as *mut _ as _,
+                                &mut len,
+                            );
+                            if v.is_null() {
+                                print!(",NULL");
+                            } else {
+                                match ty {
+                                    Ty::Timestamp => print!("ts: {}", *(v as *const i64)),
+                                    _ => print!(",{}", *(v as *const u8)),
+                                }
+                            }
+                        }
+                        println!("");
+                    }
+                }
+            }
+
+            ws_stmt_close(stmt);
+            // query!(b"drop database ws_stmt_i\0");
+        }
+    }
+
     #[test]
     fn stmt_with_tags() {
         use crate::*;
@@ -716,4 +839,12 @@ mod tests {
             ws_close(taos)
         }
     }
+}
+
+#[test]
+fn json_test() {
+    use serde_json::json;
+
+    let s = json!(vec![Option::<u8>::None]);
+    assert_eq!(dbg!(serde_json::to_string(&s).unwrap()), "[null]");
 }

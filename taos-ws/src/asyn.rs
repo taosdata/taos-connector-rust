@@ -787,7 +787,6 @@ async fn test_client_cloud() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
 async fn ws_show_databases() -> anyhow::Result<()> {
-    use taos_query::Queryable;
     let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
     let client = WsTaos::from_dsn(dsn).await?;
     let mut rs = client.query("show databases").await?;

@@ -412,7 +412,16 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn ws_enable_log() {
-    pretty_env_logger::init();
+    static ONCE_INIT: std::sync::Once = std::sync::Once::new();
+    ONCE_INIT.call_once(|| {
+        let mut builder = pretty_env_logger::formatted_timed_builder();
+        builder.format_timestamp_nanos();
+        if let Ok(s) = ::std::env::var("RUST_LOG") {
+            builder.parse_filters(&s);
+        }
+        builder.init();
+    });
+    log::debug!("enable logger to stdout");
 }
 
 /// Connect via dsn string, returns NULL if failed.
@@ -744,11 +753,8 @@ pub unsafe fn ws_print_row(rs: *mut WS_RES, row: i32) {
 
 #[cfg(test)]
 pub fn init_env() {
-    static ONCE_INIT: std::sync::Once = std::sync::Once::new();
-    ONCE_INIT.call_once(|| {
-        pretty_env_logger::init();
-        std::env::set_var("RUST_DEBUG", "debug");
-    });
+    std::env::set_var("RUST_LOG", "debug");
+    unsafe { ws_enable_log() };
 }
 
 #[cfg(test)]
