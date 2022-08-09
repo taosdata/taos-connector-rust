@@ -244,7 +244,7 @@ impl Ty {
             UInt => 4,
             UBigInt => 8,
             Decimal => 16,
-            _ => usize::MAX,
+            _ => 0,
         }
     }
 

@@ -3,7 +3,7 @@ use std::{ffi::c_void, fmt::Debug};
 use super::Offsets;
 use crate::{
     common::{BorrowedValue, Ty},
-    util::InlineJson,
+    util::InlineJson, prelude::InlinableWrite,
 };
 
 use bytes::Bytes;
@@ -71,14 +71,35 @@ impl JsonView {
 
     /// Write column data as raw bytes.
     pub(crate) fn write_raw_into<W: std::io::Write>(&self, mut wtr: W) -> std::io::Result<usize> {
-        let offsets = self.offsets.as_bytes();
-        wtr.write_all(offsets)?;
-        wtr.write_all(&self.data)?;
-        Ok(offsets.len() + self.data.len())
+        let mut offsets = Vec::new();
+        let mut bytes: Vec<u8> = Vec::new();
+        for v in self.iter() {
+            if let Some(v) = v {
+                offsets.push(bytes.len() as i32);
+                bytes.write_inlined_str::<2>(v.as_str()).unwrap();
+            } else {
+                offsets.push(-1);
+            }
+        }
+        unsafe {
+            dbg!(&offsets);
+            let offsets_bytes = std::slice::from_raw_parts(
+                offsets.as_ptr() as *const u8,
+                offsets.len() * std::mem::size_of::<i32>(),
+            );
+            wtr.write_all(offsets_bytes)?;
+            wtr.write_all(&bytes)?;
+            return Ok(offsets_bytes.len() + bytes.len());
+        }
+        // let offsets = self.offsets.as_bytes();
+        // wtr.write_all(offsets)?;
+        // wtr.write_all(&self.data)?;
+        // Ok(offsets.len() + self.data.len())
     }
 
-
-    pub fn from_iter<S: Into<String>, T: Into<Option<S>>, I: ExactSizeIterator<Item = T>>(iter: I) -> Self {
+    pub fn from_iter<S: Into<String>, T: Into<Option<S>>, I: ExactSizeIterator<Item = T>>(
+        iter: I,
+    ) -> Self {
         todo!()
     }
 }
@@ -92,7 +113,7 @@ impl<'a> Iterator for VarCharIter<'a> {
     type Item = Option<&'a InlineJson>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.row <= self.view.len() {
+        if self.row < self.view.len() {
             let row = self.row;
             self.row += 1;
             Some(unsafe { self.view.get_unchecked(row) })
@@ -117,4 +138,3 @@ impl<'a> ExactSizeIterator for VarCharIter<'a> {
         self.view.len() - self.row
     }
 }
-

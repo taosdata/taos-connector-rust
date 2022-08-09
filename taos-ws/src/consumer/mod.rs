@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use futures::{FutureExt, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
 use scc::HashMap;
 
@@ -10,7 +10,7 @@ use taos_query::tmq::{
     Timeout,
 };
 use taos_query::util::InlinableRead;
-use taos_query::{AsyncFetchable, DeError, DsnError, IntoDsn, RawBlock, TBuilder};
+use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
 use tokio::sync::{oneshot, watch};
 
@@ -51,11 +51,6 @@ impl WsTmqSender {
     }
     async fn send_recv_timeout(&self, msg: TmqSend, timeout: Duration) -> Result<TmqRecvData> {
         let send_timeout = Duration::from_millis(500);
-        if let TmqSend::Close = msg {
-            log::debug!("send close message");
-            self.sender.send(Message::Close(None)).await?;
-            return Ok(TmqRecvData::Close);
-        }
         let req_id = msg.req_id();
         let (tx, rx) = oneshot::channel();
 
@@ -174,10 +169,7 @@ impl WsMessageBase {
         let data = self.sender.send_recv(msg).await?;
         if let TmqRecvData::FetchJsonMeta { data } = data {
             let json: JsonMeta = serde_json::from_value(data)?;
-            dbg!(&json);
             return Ok(json);
-            // dbg!(data);
-            // Ok(data)
         }
         unreachable!()
     }
@@ -542,15 +534,15 @@ impl TmqBuilder {
 
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                sender.send(ok.map(|_|recv)).unwrap();
+                                                let _ = sender.send(ok.map(|_|recv));
                                             }  else {
                                                 log::warn!("subscribe message received but no receiver alive");
                                             }
                                         },
-                                        TmqRecvData::Poll(poll) => {
+                                        TmqRecvData::Poll(_) => {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                sender.send(ok.map(|_|recv)).unwrap();
+                                                let _ = sender.send(ok.map(|_|recv));
                                             }  else {
                                                 log::warn!("poll message received but no receiver alive");
                                             }
@@ -559,7 +551,7 @@ impl TmqBuilder {
                                             log::debug!("fetch json meta data: {:?}", data);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                sender.send(ok.map(|_|recv)).unwrap();
+                                                let _ = sender.send(ok.map(|_|recv));
                                             }  else {
                                                 log::warn!("poll message received but no receiver alive");
                                             }
@@ -567,7 +559,7 @@ impl TmqBuilder {
                                         TmqRecvData::FetchRaw { meta: _ }=> {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                sender.send(ok.map(|_|recv)).unwrap();
+                                                let _ = sender.send(ok.map(|_|recv));
                                             }  else {
                                                 log::warn!("poll message received but no receiver alive");
                                             }
@@ -663,7 +655,6 @@ impl TmqBuilder {
             },
             // fetches,
             close_signal: tx,
-            timeout: Duration::from_secs(5),
         })
     }
 }
@@ -673,7 +664,6 @@ pub struct Consumer {
     tmq_conf: TmqInit,
     sender: WsTmqSender,
     close_signal: watch::Sender<bool>,
-    timeout: Duration,
 }
 
 impl Drop for Consumer {

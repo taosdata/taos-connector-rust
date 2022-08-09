@@ -44,7 +44,6 @@ pub struct WsTaos {
 
 pub struct ResultSet {
     ws: WsSender,
-    timeout: Duration,
     fetches: Arc<HashMap<ResId, FetchSender>>,
     receiver: Option<FetchReceiver>,
     args: WsResArgs,
@@ -317,7 +316,6 @@ impl WsTaos {
                                     };
 
                                     let res_id = slice.read_u64().unwrap();
-                                    let len = (&block[offset..offset + 4]).read_u32().unwrap();
                                     if is_v3 {
                                         // v3
                                         if let Some(_) = fetches_sender.read(&res_id, |_, v| {
@@ -504,7 +502,6 @@ impl WsTaos {
             let (sender, receiver) = std::sync::mpsc::sync_channel(2);
             self.fetches.insert(resp.id, sender).unwrap();
             Ok(ResultSet {
-                timeout: self.timeout,
                 ws: self.ws.clone(),
                 fetches: self.fetches.clone(),
                 receiver: Some(receiver),
@@ -520,7 +517,6 @@ impl WsTaos {
             })
         } else {
             Ok(ResultSet {
-                timeout: self.timeout,
                 affected_rows: resp.affected_rows,
                 ws: self.ws.clone(),
                 fetches: self.fetches.clone(),
@@ -589,7 +585,7 @@ impl ResultSet {
 
         log::info!("receiving block...");
         match self.receiver.as_mut().unwrap().recv()?? {
-            WsFetchData::Block(timing, raw) => {
+            WsFetchData::Block(_timing, raw) => {
                 let mut raw = RawBlock::parse_from_raw_block(
                     raw,
                     fetch_resp.rows,
@@ -597,17 +593,10 @@ impl ResultSet {
                     self.precision,
                 );
 
-                // for row in 0..raw.nrows() {
-                //     for col in 0..raw.ncols() {
-                //         log::debug!("at ({}, {})", row, col);
-                //         let v = unsafe { raw.get_ref_unchecked(row, col) };
-                //         println!("({}, {}): {:?}", row, col, v);
-                //     }
-                // }
                 raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
                 Ok(Some(raw))
             }
-            WsFetchData::BlockV2(timing, raw) => {
+            WsFetchData::BlockV2(_timing, raw) => {
                 let mut raw = RawBlock::parse_from_raw_block_v2(
                     raw,
                     self.fields.as_ref().unwrap(),
@@ -616,13 +605,6 @@ impl ResultSet {
                     self.precision,
                 );
 
-                for row in 0..raw.nrows() {
-                    for col in 0..raw.ncols() {
-                        log::debug!("at ({}, {})", row, col);
-                        let v = unsafe { raw.get_ref_unchecked(row, col) };
-                        println!("({}, {}): {:?}", row, col, v);
-                    }
-                }
                 raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
                 Ok(Some(raw))
             }

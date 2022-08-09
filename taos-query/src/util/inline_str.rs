@@ -64,8 +64,8 @@ macro_rules! _impl_inline_str {
             }
 
             impl InlineStr<$ty> {
-                #[inline]
-                pub const fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
+
+                pub fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
                     unsafe { &*std::mem::transmute::<*const u8, *const InlineStr<$ty>>(ptr) }
                 }
 
@@ -77,6 +77,9 @@ macro_rules! _impl_inline_str {
                 #[inline]
                 #[rustversion::attr(nightly, const)]
                 pub fn as_bytes(&self) -> &[u8] {
+                    if self.len() == 0 {
+                        return &[]
+                    }
                     unsafe { std::slice::from_raw_parts(self.data.as_ptr(), self.len()) }
                 }
 
@@ -125,4 +128,10 @@ fn test_inline_str() {
         b"\x04\x00\x00\x00\x00\x00\x00\x00abcd",
         "\\x04\\x00\\x00\\x00\\x00\\x00\\x00\\x00abcd"
     );
+}
+
+#[test]
+fn test_empty_inline() {
+    let inline = InlineStr::<u8>::from_ptr(b"\0".as_ptr());
+    dbg!(inline);
 }

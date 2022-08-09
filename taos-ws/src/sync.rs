@@ -36,12 +36,6 @@ pub struct MsgReceiver(std::sync::mpsc::Receiver<WsSend>);
 unsafe impl Send for MsgReceiver {}
 unsafe impl Sync for MsgReceiver {}
 
-pub struct WsAuth {
-    user: Option<String>,
-    password: Option<String>,
-    token: Option<String>,
-}
-
 pub struct WsClient {
     info: TaosBuilder,
     timeout: Duration,

@@ -42,7 +42,7 @@ pub mod sync {
     {
         iter: IBlockIter<'a, T>,
         block: Option<RawBlock>,
-        row: usize,
+        // row: usize,
         rows: Option<RowsIter<'a>>,
     }
 
@@ -146,7 +146,7 @@ pub mod sync {
             IRowsIter {
                 iter: self.blocks(),
                 block: None,
-                row: 0,
+                // row: 0,
                 rows: None,
             }
         }

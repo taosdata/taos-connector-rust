@@ -104,11 +104,16 @@ impl Bindable<super::Taos> for Stmt {
         &mut self,
         params: &[taos_query::common::ColumnView],
     ) -> StdResult<&mut Self, Self::Error> {
+
+        // fixme: raw block has bug currently, revert to use json instead.
         let columns = params
             .into_iter()
-            .map(|view| view.to_json_value())
+            .map(|tag| tag.to_json_value())
             .collect_vec();
-        block_in_place_or_global(self.stmt_bind_block(params))?;
+
+        block_in_place_or_global(self.stmt_bind(columns))?;
+        // todo: use raw block?
+        // block_in_place_or_global(self.stmt_bind_block(params))?;
         Ok(self)
     }
 
@@ -267,8 +272,6 @@ impl Stmt {
         let mut close_listener = rx.clone();
 
         tokio::spawn(async move {
-            let mut interval = time::interval(Duration::from_secs(1));
-
             loop {
                 tokio::select! {
                     Some(msg) = msg_recv.recv() => {
@@ -316,7 +319,6 @@ impl Stmt {
                                                 log::error!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
-                                        _ => unreachable!("unknown stmt response"),
                                     }
                                 }
                                 Message::Binary(_) => {
@@ -469,11 +471,23 @@ impl Stmt {
         bytes.write_u64_le(2)?; // bind: 2
         bytes.write_u64_le(columns.len() as u64)?;
         let rows = columns.first().map(|c| c.len()).unwrap_or_default() as u64;
+        let cols = columns.len();
         bytes.write_u64_le(rows)?;
 
         let block = views_to_raw_block(columns);
 
         bytes.extend(&block);
+        log::debug!("block: {:?}", block);
+        // dbg!(bytes::Bytes::copy_from_slice(&block));
+        log::debug!(
+            "{:#?}",
+            RawBlock::parse_from_raw_block(
+                block,
+                rows as _,
+                cols,
+                taos_query::prelude::Precision::Millisecond
+            )
+        );
 
         self.ws.send(Message::Binary(bytes)).await?;
         let _ = self

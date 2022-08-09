@@ -4,6 +4,7 @@ pub use bool_view::BoolView;
 
 mod tinyint_view;
 
+use bytes::Bytes;
 use itertools::Itertools;
 pub use tinyint_view::TinyIntView;
 
@@ -425,8 +426,10 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
     let mut bytes = Vec::new();
     // len
     bytes.write_u32_le(0).unwrap();
+    debug_assert_eq!(bytes.len(), 4);
     // group id
     bytes.write_u64_le(0).unwrap();
+    debug_assert_eq!(bytes.len(), 4 + 8);
     let schemas = views
         .iter()
         .map(|view| {
@@ -444,26 +447,58 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
         )
     };
     bytes.write(schema_bytes).unwrap();
+
+    debug_assert_eq!(bytes.len(), 4 + 8 + 6 * ncols);
+
     let length_offset = bytes.len();
     bytes.resize(bytes.len() + ncols * std::mem::size_of::<u32>(), 0);
+    debug_assert_eq!(bytes.len(), 4 + 8 + 6 * ncols + 4 * ncols);
 
-    let lengths = unsafe {
-        std::slice::from_raw_parts_mut(
-            bytes.as_mut_ptr().offset(length_offset as isize) as *mut u32,
-            views.len(),
-        )
-    };
+    let mut lengths = Vec::with_capacity(ncols);
+    lengths.resize(ncols, 0);
+    let mut data_len = 0;
     for (i, view) in views.iter().enumerate() {
+        log::debug!("bytes: {:?}", bytes);
+        let cur = bytes.len();
         let n = view.write_raw_into(&mut bytes).unwrap();
-        if view.as_ty().is_var_type() {
+        let len = bytes.len();
+        debug_assert!(cur + n == len);
+        // match view.as_ty() {
+        //     Ty::VarChar => {
+        //         let lengths = Offsets::from(Bytes::copy_from_slice(&bytes[cur..cur + 4 * nrows]));
+        //         let data = Bytes::copy_from_slice(&bytes[cur + 4 * nrows..cur + n]);
+        //         dbg!(VarCharView {
+        //             offsets: lengths,
+        //             data: data.into()
+        //         }
+        //         .to_vec());
+        //     }
+        //     _ => (),
+        // }
+        if !view.as_ty().is_primitive() {
             lengths[i] = (n - nrows * 4) as _;
+            debug_assert!(lengths[i] != 0);
+            data_len += n;
+            debug_assert_eq!(
+                bytes.len(),
+                4 + 8 + 6 * ncols + 4 * ncols + data_len as usize
+            );
         } else {
             lengths[i] = (nrows * view.as_ty().fixed_length()) as _;
+            data_len += lengths[i] as usize + (nrows + 7) / 8;
+            debug_assert_eq!(
+                bytes.len(),
+                4 + 8 + 6 * ncols + 4 * ncols + data_len as usize
+            );
         }
     }
     unsafe {
         *(bytes.as_mut_ptr() as *mut u32) = bytes.len() as _;
+        std::ptr::copy(
+            lengths.as_ptr(),
+            bytes.as_mut_ptr().offset(length_offset as isize) as *mut u32,
+            lengths.len(),
+        );
     }
-
     bytes
 }

@@ -94,10 +94,30 @@ impl VarCharView {
 
     /// Write column data as raw bytes.
     pub(crate) fn write_raw_into<W: std::io::Write>(&self, mut wtr: W) -> std::io::Result<usize> {
-        let offsets = self.offsets.as_bytes();
-        wtr.write_all(offsets)?;
-        wtr.write_all(&self.data)?;
-        Ok(offsets.len() + self.data.len())
+        let mut offsets = Vec::with_capacity(self.len());
+        let mut bytes: Vec<u8> = Vec::new();
+        for v in self.iter() {
+            if let Some(v) = v {
+                offsets.push(bytes.len() as i32);
+                bytes.write_inlined_str::<2>(v.as_str()).unwrap();
+            } else {
+                offsets.push(-1);
+            }
+        }
+        unsafe {
+            let offsets_bytes = std::slice::from_raw_parts(
+                offsets.as_ptr() as *const u8,
+                offsets.len() * std::mem::size_of::<i32>(),
+            );
+            wtr.write_all(offsets_bytes)?;
+            wtr.write_all(&bytes)?;
+            return Ok(offsets_bytes.len() + bytes.len());
+        }
+        // let offsets = self.offsets.as_bytes();
+        // dbg!(self, offsets);
+        // wtr.write_all(offsets)?;
+        // wtr.write_all(&self.data)?;
+        // Ok(offsets.len() + self.data.len())
     }
 
     pub fn from_iter<
@@ -108,10 +128,11 @@ impl VarCharView {
     >(
         iter: V,
     ) -> Self {
-        let mut offsets = Vec::new();
+        let iter = iter.into_iter();
+        let mut offsets = Vec::with_capacity(iter.len());
         let mut data = Vec::new();
 
-        for i in iter.into_iter().map(|v| v.into()) {
+        for i in iter.map(|v| v.into()) {
             if let Some(s) = i {
                 let s: &str = s.as_ref();
                 offsets.push(data.len() as i32);
@@ -120,6 +141,7 @@ impl VarCharView {
                 offsets.push(-1);
             }
         }
+        // dbg!(&offsets);
         let offsets_bytes = unsafe {
             Vec::from_raw_parts(
                 offsets.as_mut_ptr() as *mut u8,
@@ -144,7 +166,7 @@ impl<'a> Iterator for VarCharIter<'a> {
     type Item = Option<&'a InlineStr>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.row <= self.view.len() {
+        if self.row < self.view.len() {
             let row = self.row;
             self.row += 1;
             Some(unsafe { self.view.get_unchecked(row) })
@@ -169,7 +191,7 @@ impl<'a> Iterator for VarCharNullsIter<'a> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.row <= self.view.len() {
+        if self.row < self.view.len() {
             let row = self.row;
             self.row += 1;
             Some(unsafe { self.view.is_null_unchecked(row) })

@@ -3,8 +3,41 @@ members = [
   "mdsn",
   "taos-error",
   "taos-query",
+  "taos-macros",
+  "taos-sys",
   "taos-ws",
   "taos-ws-sys",
   "taos-ws-py",
 ]
 
+[package]
+name = "taos"
+version = "0.1.0"
+categories = ["database", "api-bindings", "asynchronous"]
+edition = "2021"
+keywords = ["timeseries", "database", "tdengine", "taosdata", "connection"]
+license = "MIT"
+description = "Driver for TDengine - a timeseries database and analysis platform"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+taos-query = { path = "./taos-query" }
+taos-sys = { path = "./taos-sys", optional = true }
+taos-ws = { path = "./taos-ws", optional = true }
+thiserror = "1"
+
+[dev-dependencies]
+itertools = "0.10.3"
+pretty_env_logger = "0.4.0"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+
+[features]
+default = ["ws", "native"]
+ws = ["taos-ws"]
+native = ["taos-sys"]
+r2d2 = ["taos-query/r2d2"]
+test = []
