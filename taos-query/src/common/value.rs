@@ -89,10 +89,7 @@ impl<'b> BorrowedValue<'b> {
             UBigInt(v) => Ok(format!("{v}")),
             Float(v) => Ok(format!("{v}")),
             Double(v) => Ok(format!("{v}")),
-            Timestamp(v) => Ok(v
-                .to_naive_datetime()
-                .format("%Y-%m-%dT%H:%M:%S%.f")
-                .to_string()),
+            Timestamp(v) => Ok(v.to_datetime_with_tz().to_rfc3339()),
             _ => unreachable!("un supported type to string"),
         }
     }
@@ -382,10 +379,7 @@ impl Value {
             UBigInt(v) => Ok(format!("{v}")),
             Float(v) => Ok(format!("{v}")),
             Double(v) => Ok(format!("{v}")),
-            Timestamp(v) => Ok(v
-                .to_naive_datetime()
-                .format("%Y-%m-%dT%H:%M:%S%.f")
-                .to_string()),
+            Timestamp(v) => Ok(v.to_datetime_with_tz().to_rfc3339()),
             _ => unreachable!("un supported type to string"),
         }
     }

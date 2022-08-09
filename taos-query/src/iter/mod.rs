@@ -172,14 +172,14 @@ pub struct RowsIter<'b, T: BlockExt> {
     row: usize,
 }
 
-impl<'b, T> RowsIter<'b, T>
-where
-    T: BlockExt,
-{
-    pub(crate) fn new(block: &'b T) -> Self {
-        Self { block, row: 0 }
-    }
-}
+// impl<'b, T> RowsIter<'b, T>
+// where
+//     T: BlockExt,
+// {
+//     pub(crate) fn new(block: &'b T) -> Self {
+//         Self { block, row: 0 }
+//     }
+// }
 
 impl<'b, T> Iterator for RowsIter<'b, T>
 where
@@ -208,17 +208,17 @@ pub struct IntoRowsIter<T: BlockExt> {
     row: usize,
 }
 
-impl<T> IntoRowsIter<T>
-where
-    T: BlockExt,
-{
-    pub(crate) fn new(block: T) -> Self {
-        Self {
-            block: Rc::new(block),
-            row: 0,
-        }
-    }
-}
+// impl<T> IntoRowsIter<T>
+// where
+//     T: BlockExt,
+// {
+//     pub(crate) fn new(block: T) -> Self {
+//         Self {
+//             block: Rc::new(block),
+//             row: 0,
+//         }
+//     }
+// }
 
 pub struct QueryRowIter<T: BlockExt> {
     block: Rc<T>,

@@ -272,7 +272,6 @@ impl Ty {
             Decimal => "DECIMAL",
             Blob => "BLOB",
             MediumBlob => "MEDIUMBLOB",
-            _ => panic!("not a type"),
         }
     }
 
@@ -299,7 +298,6 @@ impl Ty {
             Decimal => "decimal",
             Blob => "blob",
             MediumBlob => "mediumblob",
-            _ => panic!("not a type"),
         }
     }
 

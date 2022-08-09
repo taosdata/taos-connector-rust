@@ -3,7 +3,8 @@ use std::{ffi::c_void, fmt::Debug};
 use super::Offsets;
 use crate::{
     common::{BorrowedValue, Ty},
-    util::InlineJson, prelude::InlinableWrite,
+    prelude::InlinableWrite,
+    util::InlineJson,
 };
 
 use bytes::Bytes;
@@ -100,6 +101,7 @@ impl JsonView {
     pub fn from_iter<S: Into<String>, T: Into<Option<S>>, I: ExactSizeIterator<Item = T>>(
         iter: I,
     ) -> Self {
+        let _ = iter;
         todo!()
     }
 }

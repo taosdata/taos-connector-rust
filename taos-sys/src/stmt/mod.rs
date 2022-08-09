@@ -232,7 +232,7 @@ impl RawStmt {
 
 #[cfg(test)]
 mod tests {
-    use taos_query::{prelude::ColumnView, TBuilder, Fetchable};
+    use taos_query::{prelude::ColumnView, Fetchable, TBuilder};
 
     use crate::TaosBuilder;
 

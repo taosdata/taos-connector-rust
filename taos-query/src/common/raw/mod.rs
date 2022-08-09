@@ -420,7 +420,7 @@ impl RawBlock {
             // go for each column
             let length = unsafe { *(lengths.deref().get_unchecked(col)) } as usize;
             let schema = unsafe { schemas.get_unchecked(col) };
-            log::info!("col: {}, length: {}, schema: {:?}", col, length, schema);
+            log::debug!("col: {}, length: {}, schema: {:?}", col, length, schema);
 
             macro_rules! _primitive_value {
                 ($ty:ident, $prim:ty) => {{
@@ -501,7 +501,7 @@ impl RawBlock {
                     unreachable!("unsupported type: {ty}")
                 }
             };
-            log::info!("column: {:#?}", column);
+            log::debug!("column: {:#?}", column);
             columns.push(column);
             debug_assert!(data_offset <= len);
         }

@@ -180,7 +180,7 @@ pub mod sync {
         fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error>;
 
         fn exec<T: AsRef<str>>(&self, sql: T) -> Result<usize, Self::Error> {
-            log::info!("execute sql: {}", sql.as_ref());
+            log::debug!("execute sql: {}", sql.as_ref());
 
             self.query(sql).map(|res| res.affected_rows() as _)
         }
@@ -204,7 +204,7 @@ pub mod sync {
             &self,
             sql: T,
         ) -> Result<Option<O>, Self::Error> {
-            log::info!("query one: {}", sql.as_ref());
+            log::debug!("query one: {}", sql.as_ref());
             self.query(sql)?
                 .deserialize::<O>()
                 .next()

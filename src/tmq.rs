@@ -309,7 +309,7 @@ impl AsAsyncConsumer for Consumer {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{time::Duration, str::FromStr};
 
     use super::*;
     use crate::*;
@@ -317,8 +317,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let mut dsn = Dsn::from_str(&dsn)?;
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
         taos.exec_many([
             "drop topic if exists ws_abc1",
             "drop database if exists ws_abc1",
@@ -394,7 +396,8 @@ mod tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::from_dsn("taos+ws://localhost?group.id=10&timeout=1000ms")?;
+        dsn.params.insert("group.id".to_string(), "abc".to_string());
+        let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_abc1"]).await?;
 

@@ -2,8 +2,7 @@ use bytes::Bytes;
 
 use futures::{FutureExt, SinkExt, StreamExt};
 use scc::HashMap;
-// use std::sync::Mutex;
-use taos_query::common::{Field, Precision, RawBlock, RawMeta, Ty};
+use taos_query::common::{Field, Precision, RawBlock, RawMeta};
 use taos_query::util::InlinableWrite;
 use taos_query::{
     block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
@@ -241,7 +240,7 @@ impl WsTaos {
                     }
                     _ = rx.changed() => {
                         let _ = sender.close().await;
-                        log::info!("close sender task");
+                        log::debug!("close sender task");
                         break;
                     }
                 }
@@ -281,7 +280,7 @@ impl WsTaos {
                                             }
                                             let data = ok.map(|_|WsFetchData::Fetch(fetch));
                                             if let Some(v) = fetches_sender.read(&id, |_, v| v.clone()) {
-                                                log::info!("send data to fetches with id {}", id);
+                                                log::debug!("send data to fetches with id {}", id);
                                                 v.send(data).unwrap();
                                             }
                                         }
@@ -319,7 +318,7 @@ impl WsTaos {
                                     if is_v3 {
                                         // v3
                                         if let Some(_) = fetches_sender.read(&res_id, |_, v| {
-                                            log::info!("send data to fetches with id {}", res_id);
+                                            log::debug!("send data to fetches with id {}", res_id);
                                             // let raw = slice.read_inlinable::<RawBlock>().unwrap();
                                             v.send(Ok(WsFetchData::Block(timing, block[offset..].to_vec()).clone())).unwrap();
                                         }) {
@@ -329,7 +328,7 @@ impl WsTaos {
                                         // v2
                                         log::warn!("the block is in format v2");
                                         if let Some(_) = fetches_sender.read(&res_id, |_, v| {
-                                            log::info!("send data to fetches with id {}", res_id);
+                                            log::debug!("send data to fetches with id {}", res_id);
                                             v.send(Ok(WsFetchData::BlockV2(timing, block[offset..].to_vec()))).unwrap();
                                         }) {
                                             log::error!("result not found: {res_id}");
@@ -363,7 +362,7 @@ impl WsTaos {
                         }
                     }
                     _ = close_listener.changed() => {
-                        log::info!("close reader task");
+                        log::debug!("close reader task");
                         break
                     }
                 }
@@ -557,9 +556,9 @@ impl ResultSet {
     async fn fetch(&mut self) -> Result<Option<RawBlock>> {
         let fetch = WsSend::Fetch(self.args);
         {
-            log::info!("send fetch message: {fetch:?}");
+            log::debug!("send fetch message: {fetch:?}");
             self.ws.send(fetch.to_msg()).await?;
-            log::info!("send done");
+            log::debug!("send done");
             // unlock mutex when out of scope.
         }
         log::debug!("wait for fetch message");
@@ -572,18 +571,18 @@ impl ResultSet {
             return Ok(None);
         }
 
-        log::info!("fetch with: {fetch_resp:?}");
+        log::debug!("fetch with: {fetch_resp:?}");
 
         let fetch_block = WsSend::FetchBlock(self.args);
         {
             // prepare for receiving.
-            log::info!("send fetch message: {fetch_block:?}");
+            log::debug!("send fetch message: {fetch_block:?}");
             self.ws.send(fetch_block.to_msg()).await?;
-            log::info!("send done");
+            log::debug!("send done");
             // unlock mutex when out of scope.
         }
 
-        log::info!("receiving block...");
+        log::debug!("receiving block...");
         match self.receiver.as_mut().unwrap().recv()?? {
             WsFetchData::Block(_timing, raw) => {
                 let mut raw = RawBlock::parse_from_raw_block(
@@ -782,8 +781,8 @@ async fn ws_write_raw_block() -> anyhow::Result<()> {
     let mut raw = RawBlock::parse_from_raw_block_v2(
         &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
         &[
-            Field::new("ts", Ty::Timestamp, 8),
-            Field::new("v", Ty::Bool, 1),
+            Field::new("ts", taos_query::common::Ty::Timestamp, 8),
+            Field::new("v", taos_query::common::Ty::Bool, 1),
         ],
         &[8, 1],
         1,

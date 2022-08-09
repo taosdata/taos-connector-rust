@@ -637,12 +637,12 @@ impl TmqBuilder {
                         }
                     }
                     _ = close_listener.changed() => {
-                        log::info!("close reader task");
+                        log::debug!("close reader task");
                         break
                     }
                 }
             }
-            log::info!("end consumer loop");
+            log::debug!("end consumer loop");
         });
         Ok(Consumer {
             conn: self.info.to_conn_request(),
@@ -854,11 +854,11 @@ mod tests {
                         let sql = dbg!(json.to_string());
                         if let Err(err) = taos.exec(sql).await {
                             match err.errno() {
-                                Code::TAG_ALREADY_EXIST => log::info!("tag already exists"),
+                                Code::TAG_ALREADY_EXIST => log::debug!("tag already exists"),
                                 Code::TAG_NOT_EXIST => log::debug!("tag not exist"),
-                                Code::COLUMN_EXISTS => log::info!("column already exists"),
+                                Code::COLUMN_EXISTS => log::debug!("column already exists"),
                                 Code::COLUMN_NOT_EXIST => log::debug!("column not exists"),
-                                Code::INVALID_COLUMN_NAME => log::info!("invalid column name"),
+                                Code::INVALID_COLUMN_NAME => log::debug!("invalid column name"),
                                 Code::MODIFIED_ALREADY => log::debug!("modified already done"),
                                 Code::TABLE_NOT_EXIST => log::debug!("table does not exists"),
                                 Code::STABLE_NOT_EXIST => log::debug!("stable does not exists"),
@@ -1002,11 +1002,11 @@ mod tests {
                     let sql = dbg!(json.to_string());
                     if let Err(err) = taos.exec(sql) {
                         match err.errno() {
-                            Code::TAG_ALREADY_EXIST => log::info!("tag already exists"),
+                            Code::TAG_ALREADY_EXIST => log::debug!("tag already exists"),
                             Code::TAG_NOT_EXIST => log::debug!("tag not exist"),
-                            Code::COLUMN_EXISTS => log::info!("column already exists"),
+                            Code::COLUMN_EXISTS => log::debug!("column already exists"),
                             Code::COLUMN_NOT_EXIST => log::debug!("column not exists"),
-                            Code::INVALID_COLUMN_NAME => log::info!("invalid column name"),
+                            Code::INVALID_COLUMN_NAME => log::debug!("invalid column name"),
                             Code::MODIFIED_ALREADY => log::debug!("modified already done"),
                             Code::TABLE_NOT_EXIST => log::debug!("table does not exists"),
                             Code::STABLE_NOT_EXIST => log::debug!("stable does not exists"),

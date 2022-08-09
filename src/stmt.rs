@@ -102,13 +102,17 @@ impl Bindable<super::Taos> for Stmt {
 #[cfg(test)]
 mod tests {
     use serde::Deserialize;
+    use std::str::FromStr;
 
     #[test]
     fn test_bindable_sync() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
         pretty_env_logger::init();
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+
         use crate::sync::*;
-        let taos = TaosBuilder::from_dsn("taos+ws://localhost:6041")?.build()?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
         taos.exec_many([
             "drop database if exists test_bindable",
             "create database test_bindable keep 36500",
@@ -176,7 +180,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_bindable() -> anyhow::Result<()> {
         use crate::*;
-        let taos = TaosBuilder::from_dsn("taosws://")?.build()?;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let taos = TaosBuilder::from_dsn(dsn)?.build()?;
         taos.exec_many([
             "drop database if exists test_bindable",
             "create database test_bindable keep 36500",

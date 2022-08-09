@@ -21,7 +21,11 @@ where
 
     fn set_tags(&mut self, tags: &[Value]) -> Result<&mut Self, Self::Error>;
 
-    fn set_tbname_tags<S: AsRef<str>>(&mut self, name: S, tags: &[Value]) -> Result<&mut Self, Self::Error> {
+    fn set_tbname_tags<S: AsRef<str>>(
+        &mut self,
+        name: S,
+        tags: &[Value],
+    ) -> Result<&mut Self, Self::Error> {
         self.set_tbname(name)?.set_tags(tags)
     }
 

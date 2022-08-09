@@ -4,7 +4,6 @@ pub use bool_view::BoolView;
 
 mod tinyint_view;
 
-use bytes::Bytes;
 use itertools::Itertools;
 pub use tinyint_view::TinyIntView;
 

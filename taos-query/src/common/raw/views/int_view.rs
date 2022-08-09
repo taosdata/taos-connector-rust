@@ -89,11 +89,7 @@ impl IntView {
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
         if self.nulls.is_null_unchecked(row) {
-            (
-                Ty::Int,
-                std::mem::size_of::<Item>() as _,
-                std::ptr::null(),
-            )
+            (Ty::Int, std::mem::size_of::<Item>() as _, std::ptr::null())
         } else {
             (
                 Ty::Int,

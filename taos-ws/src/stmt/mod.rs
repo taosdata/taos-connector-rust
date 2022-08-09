@@ -6,15 +6,9 @@ use taos_query::common::views::views_to_raw_block;
 use taos_query::common::ColumnView;
 use taos_query::prelude::InlinableWrite;
 use taos_query::stmt::Bindable;
-use taos_query::{
-    block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn, RawBlock,
-    TBuilder,
-};
-use thiserror::Error;
+use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 use tokio::sync::{oneshot, watch};
 
-use tokio::time;
-use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 use crate::infra::ToMessage;
@@ -104,7 +98,6 @@ impl Bindable<super::Taos> for Stmt {
         &mut self,
         params: &[taos_query::common::ColumnView],
     ) -> StdResult<&mut Self, Self::Error> {
-
         // fixme: raw block has bug currently, revert to use json instead.
         let columns = params
             .into_iter()
@@ -406,7 +399,7 @@ impl Stmt {
     pub async fn s_stmt(&mut self, sql: &str) -> Result<&mut Self> {
         let stmt = self.stmt_init().await?;
         stmt.stmt_prepare(sql).await?;
-        Ok(stmt)
+        Ok(self)
     }
 
     pub fn set_timeout(&mut self, timeout: Duration) -> &mut Self {

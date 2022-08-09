@@ -32,16 +32,16 @@ impl FromIterator<bool> for NullBits {
 }
 
 impl NullBits {
-    pub const fn new(bytes: Bytes) -> Self {
-        Self(bytes)
-    }
+    // pub const fn new(bytes: Bytes) -> Self {
+    //     Self(bytes)
+    // }
 
-    pub fn with_capacity(capacity: usize) -> Self {
-        let len = null_bits_len(capacity);
-        let mut inner = Vec::with_capacity(len);
-        inner.resize(len, 0u8);
-        Self::new(inner.into())
-    }
+    // pub fn with_capacity(capacity: usize) -> Self {
+    //     let len = null_bits_len(capacity);
+    //     let mut inner = Vec::with_capacity(len);
+    //     inner.resize(len, 0u8);
+    //     Self::new(inner.into())
+    // }
 
     pub unsafe fn is_null_unchecked(&self, row: usize) -> bool {
         const BIT_LOC_SHIFT: usize = 3;
@@ -100,11 +100,11 @@ impl FromIterator<bool> for NullsMut {
     }
 }
 impl NullsMut {
-    pub fn with_capacity(cap: usize) -> Self {
-        let bytes_len = (cap + 7) / 8;
-        let bytes = BytesMut::with_capacity(bytes_len);
-        Self(bytes)
-    }
+    // pub fn with_capacity(cap: usize) -> Self {
+    //     let bytes_len = (cap + 7) / 8;
+    //     let bytes = BytesMut::with_capacity(bytes_len);
+    //     Self(bytes)
+    // }
 
     pub fn new(len: usize) -> Self {
         let bytes_len = (len + 7) / 8;

@@ -52,9 +52,9 @@ impl TBuilder for TaosBuilder {
             dsn.driver.as_str(),
             dsn.protocol.as_ref().map(|s| s.as_str()),
         ) {
-            ("ws" | "wss" | "http" | "https" | "taosws" |"taoswss", _) => Ok(Self(TaosBuilderInner::Ws(
-                taos_ws::TaosBuilder::from_dsn(dsn)?,
-            ))),
+            ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(
+                TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
+            )),
             ("taos" | "tmq", None) => Ok(Self(TaosBuilderInner::Native(
                 taos_sys::TaosBuilder::from_dsn(dsn)?,
             ))),
@@ -288,25 +288,30 @@ impl taos_query::Queryable for Taos {
 #[cfg(test)]
 mod tests {
 
+    use std::str::FromStr;
+
     use super::TaosBuilder;
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn sync_json_test_native() -> anyhow::Result<()> {
-        sync_json_test("taos:///")
-    }
     #[test]
-    fn sync_json_test_ws() -> anyhow::Result<()> {
-        sync_json_test("ws://localhost:6041/")
+    fn sync_json_test_native() -> anyhow::Result<()> {
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        sync_json_test(&dsn)
     }
-    #[test]
-    fn sync_json_test_taosws() -> anyhow::Result<()> {
-        sync_json_test("taosws://localhost:6041/")
-    }
+    // #[test]
+    // fn sync_json_test_ws() -> anyhow::Result<()> {
+    //     sync_json_test("ws://localhost:6041/")
+    // }
+    // #[test]
+    // fn sync_json_test_taosws() -> anyhow::Result<()> {
+    //     sync_json_test("taosws://localhost:6041/")
+    // }
 
     #[test]
     fn null_test() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        let taos = TaosBuilder::from_dsn("taosws://localhost:6041")?.build()?;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
         taos.exec_many(["drop database if exists db", "create database db", "use db"])?;
 
         taos.exec(

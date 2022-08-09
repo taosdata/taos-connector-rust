@@ -132,32 +132,35 @@ impl NCharView {
     /// Write column data as raw bytes.
     pub(crate) fn write_raw_into<W: std::io::Write>(&self, mut wtr: W) -> std::io::Result<usize> {
         // if self.layout.borrow().nchar_is_decoded() {
-            let mut offsets = Vec::new();
-            let mut bytes: Vec<u8> = Vec::new();
-            for v in self.iter() {
-                if let Some(v) = v {
-                    // dbg!(v);
-                    let chars = v.chars().collect_vec();
-                    offsets.push(bytes.len() as i32);
-                    let chars = unsafe {
-                        std::slice::from_raw_parts(chars.as_ptr() as *const u8, chars.len() * std::mem::size_of::<char>())
-                    };
-                    // dbg!(chars);
-                    bytes.write_inlined_bytes::<2>(chars).unwrap();
-                } else {
-                    offsets.push(-1);
-                }
+        let mut offsets = Vec::new();
+        let mut bytes: Vec<u8> = Vec::new();
+        for v in self.iter() {
+            if let Some(v) = v {
+                // dbg!(v);
+                let chars = v.chars().collect_vec();
+                offsets.push(bytes.len() as i32);
+                let chars = unsafe {
+                    std::slice::from_raw_parts(
+                        chars.as_ptr() as *const u8,
+                        chars.len() * std::mem::size_of::<char>(),
+                    )
+                };
+                // dbg!(chars);
+                bytes.write_inlined_bytes::<2>(chars).unwrap();
+            } else {
+                offsets.push(-1);
             }
-            unsafe {
-                dbg!(&offsets);
-                let offsets_bytes = std::slice::from_raw_parts(
-                    offsets.as_ptr() as *const u8,
-                    offsets.len() * std::mem::size_of::<i32>(),
-                );
-                wtr.write_all(offsets_bytes)?;
-                wtr.write_all(&bytes)?;
-                return Ok(offsets_bytes.len() + bytes.len());
-            }
+        }
+        unsafe {
+            dbg!(&offsets);
+            let offsets_bytes = std::slice::from_raw_parts(
+                offsets.as_ptr() as *const u8,
+                offsets.len() * std::mem::size_of::<i32>(),
+            );
+            wtr.write_all(offsets_bytes)?;
+            wtr.write_all(&bytes)?;
+            return Ok(offsets_bytes.len() + bytes.len());
+        }
         // }
         // let offsets = self.offsets.as_bytes();
         // wtr.write_all(offsets)?;

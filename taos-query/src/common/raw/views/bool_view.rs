@@ -2,7 +2,7 @@ use std::{ffi::c_void, io::Write};
 
 use crate::common::{BorrowedValue, Ty};
 
-use super::{NullBits, NullsIter, NullsMut};
+use super::{NullBits, NullsIter};
 
 use bytes::Bytes;
 

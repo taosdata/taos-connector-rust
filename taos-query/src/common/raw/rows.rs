@@ -37,7 +37,6 @@ impl<'a> Iterator for IntoRowsIter<'a> {
     }
 }
 
-
 pub struct RowsIter<'a> {
     pub(super) raw: NonNull<RawBlock>,
     pub(super) row: usize,

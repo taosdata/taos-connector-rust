@@ -7,8 +7,7 @@ use once_cell::sync::OnceCell;
 use asyn::WsTaos;
 
 use taos_query::{
-    block_in_place_or_global, common::RawMeta, AsyncQueryable, DsnError, IntoDsn, Queryable,
-    TBuilder,
+    block_in_place_or_global, common::RawMeta, AsyncQueryable, DsnError, IntoDsn, TBuilder,
 };
 
 mod infra;

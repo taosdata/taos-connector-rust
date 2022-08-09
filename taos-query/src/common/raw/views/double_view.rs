@@ -158,7 +158,7 @@ impl<'a> ExactSizeIterator for DoubleViewIter<'a> {
     }
 }
 
-impl<A: Into<Option<Item>>> FromIterator<A> for DoubleView {
+impl<A: Into<Option<Item>>> FromIterator<A> for View {
     fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
         let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
             .into_iter()

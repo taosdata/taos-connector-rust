@@ -157,7 +157,7 @@ impl AsyncTmqBuilder {
         // };
         // sender.send(init.to_msg()).await?;
 
-        // log::info!("");
+        // log::debug!("");
 
         // let recv = reader.next().await.unwrap()?;
         // println!("received");
@@ -210,7 +210,7 @@ impl AsyncTmqBuilder {
                         sender.send(msg).await.unwrap();
                     }
                     _ = rx.changed() => {
-                        log::info!("close sender task");
+                        log::debug!("close sender task");
                         break;
                     }
                 }
@@ -265,7 +265,7 @@ impl AsyncTmqBuilder {
                                         //     }
                                         //     let data = ok.map(|_|TmqMsgData::Fetch(fetch));
                                         //     if let Some(_) = fetches_sender.read(&id, |_, v| {
-                                        //         log::info!("send data to fetches with id {}", id);
+                                        //         log::debug!("send data to fetches with id {}", id);
                                         //         v.send(data.clone()).unwrap();
                                         //     }) {}
                                         // }
@@ -281,7 +281,7 @@ impl AsyncTmqBuilder {
                                     let res_id = slice.read_u64().unwrap();
 
                                     if let Some(_) = messages_sender.read(&res_id, |_, v| {
-                                        log::info!("send data to fetches with id {}", res_id);
+                                        log::debug!("send data to fetches with id {}", res_id);
                                         let raw = slice.read_inlinable::<RawBlock>().unwrap();
                                         v.send(Ok(TmqMsgData::Block(dbg!(raw)).clone())).unwrap();
                                     }) {}
@@ -309,7 +309,7 @@ impl AsyncTmqBuilder {
                         }
                     }
                     _ = close_listener.changed() => {
-                        log::info!("close reader task");
+                        log::debug!("close reader task");
                         break
                     }
                 }

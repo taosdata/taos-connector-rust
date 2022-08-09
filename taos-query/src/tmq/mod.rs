@@ -1,6 +1,5 @@
 use std::{fmt::Debug, pin::Pin, str::FromStr, time::Duration};
 
-use futures::Stream;
 use itertools::Itertools;
 
 use crate::{
@@ -89,6 +88,21 @@ where
         match self {
             Self::Meta(m) => f.debug_tuple("Meta").field(m).finish(),
             Self::Data(d) => f.debug_tuple("Data").field(d).finish(),
+        }
+    }
+}
+
+impl<M, D> MessageSet<M, D> {
+    pub fn into_meta(self) -> Option<M> {
+        match self {
+            MessageSet::Meta(m) => Some(m),
+            MessageSet::Data(_) => None,
+        }
+    }
+    pub fn into_data(self) -> Option<D> {
+        match self {
+            MessageSet::Meta(_) => None,
+            MessageSet::Data(d) => Some(d),
         }
     }
 }
