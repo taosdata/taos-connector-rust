@@ -1,17 +1,20 @@
 use std::{
     cell::{RefCell, UnsafeCell},
     ffi::c_void,
-    fmt::Debug, sync::Arc,
+    fmt::Debug,
+    sync::Arc,
 };
 
 use super::{Offsets, Version};
 
 use crate::{
     common::{layout::Layout, BorrowedValue, Ty},
+    prelude::InlinableWrite,
     util::{InlineNChar, InlineStr},
 };
 
 use bytes::Bytes;
+use itertools::Itertools;
 
 #[derive(Debug)]
 pub struct NCharView {
@@ -23,7 +26,6 @@ pub struct NCharView {
     pub(crate) version: Version,
     /// Layout should set as NCHAR_DECODED when raw data decoded.
     pub(crate) layout: Arc<RefCell<Layout>>,
-
 }
 
 impl NCharView {
@@ -129,10 +131,80 @@ impl NCharView {
 
     /// Write column data as raw bytes.
     pub(crate) fn write_raw_into<W: std::io::Write>(&self, mut wtr: W) -> std::io::Result<usize> {
+        if self.layout.borrow().nchar_is_decoded() {
+            let mut offsets = Vec::new();
+            let mut bytes: Vec<u8> = Vec::new();
+            for v in self.iter() {
+                if let Some(v) = v {
+                    let chars = v.chars().collect_vec();
+                    offsets.push(bytes.len() as i32);
+                    let chars = unsafe {
+                        std::slice::from_raw_parts(chars.as_ptr() as *mut u8, chars.len() * std::mem::size_of::<char>())
+                    };
+                    bytes.write_inlined_bytes::<2>(chars).unwrap();
+                } else {
+                    offsets.push(-1);
+                }
+            }
+            unsafe {
+                let offsets_bytes = std::slice::from_raw_parts(
+                    offsets.as_ptr() as *const u8,
+                    offsets.len() * std::mem::size_of::<i32>(),
+                );
+                let data_bytes = std::slice::from_raw_parts(
+                    bytes.as_ptr() as *const u8,
+                    bytes.len() * std::mem::size_of::<char>(),
+                );
+                wtr.write_all(offsets_bytes)?;
+                wtr.write_all(data_bytes)?;
+                return Ok(offsets_bytes.len() + data_bytes.len());
+            }
+        }
         let offsets = self.offsets.as_bytes();
         wtr.write_all(offsets)?;
         wtr.write_all(&self.data)?;
         Ok(offsets.len() + self.data.len())
+    }
+
+    pub fn from_iter<
+        S: AsRef<str>,
+        T: Into<Option<S>>,
+        I: ExactSizeIterator<Item = T>,
+        V: IntoIterator<Item = T, IntoIter = I>,
+    >(
+        iter: V,
+    ) -> Self {
+        let mut offsets = Vec::new();
+        let mut data = Vec::new();
+
+        for i in iter.into_iter().map(|v| v.into()) {
+            if let Some(s) = i {
+                let s: &str = s.as_ref();
+                offsets.push(data.len() as i32);
+                data.write_inlined_str::<2>(&s).unwrap();
+            } else {
+                offsets.push(-1);
+            }
+        }
+        let offsets_bytes = unsafe {
+            Vec::from_raw_parts(
+                offsets.as_mut_ptr() as *mut u8,
+                offsets.len() * 4,
+                offsets.capacity() * 4,
+            )
+        };
+        std::mem::forget(offsets);
+        NCharView {
+            offsets: Offsets(offsets_bytes.into()),
+            data: data.into(),
+            is_chars: UnsafeCell::new(false),
+            version: Version::V2,
+            layout: Arc::new(RefCell::new({
+                let mut layout = Layout::default();
+                layout.with_nchar_decoded();
+                layout
+            })),
+        }
     }
 }
 
@@ -152,5 +224,21 @@ impl<'a> Iterator for NCharViewIter<'a> {
         } else {
             None
         }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.row < self.view.len() {
+            let len = self.view.len() - self.row;
+            (len, Some(len))
+        } else {
+            (0, Some(0))
+        }
+    }
+}
+
+impl<'a> ExactSizeIterator for NCharViewIter<'a> {
+    fn len(&self) -> usize {
+        self.view.len() - self.row
     }
 }

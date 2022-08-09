@@ -76,6 +76,11 @@ impl JsonView {
         wtr.write_all(&self.data)?;
         Ok(offsets.len() + self.data.len())
     }
+
+
+    pub fn from_iter<S: Into<String>, T: Into<Option<S>>, I: ExactSizeIterator<Item = T>>(iter: I) -> Self {
+        todo!()
+    }
 }
 
 pub struct VarCharIter<'a> {
@@ -95,4 +100,21 @@ impl<'a> Iterator for VarCharIter<'a> {
             None
         }
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.row < self.view.len() {
+            let len = self.view.len() - self.row;
+            (len, Some(len))
+        } else {
+            (0, Some(0))
+        }
+    }
 }
+
+impl<'a> ExactSizeIterator for VarCharIter<'a> {
+    fn len(&self) -> usize {
+        self.view.len() - self.row
+    }
+}
+
