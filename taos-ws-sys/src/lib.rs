@@ -1,5 +1,4 @@
 use std::{
-    any::TypeId,
     ffi::{c_void, CStr, CString},
     fmt::{Debug, Display},
     ops::{Deref, DerefMut},
@@ -40,6 +39,15 @@ pub struct WsError {
     source: Option<Box<dyn std::error::Error + 'static>>,
 }
 
+impl WsError {
+    fn from_err(err: Box<dyn std::error::Error + 'static>) -> Self {
+        Self {
+            code: Code::Failed,
+            message: CString::new(err.to_string()).unwrap(),
+            source: Some(err),
+        }
+    }
+}
 #[derive(Debug)]
 pub struct WsMaybeError<T> {
     error: Option<WsError>,
@@ -194,16 +202,6 @@ impl From<&WsError> for WsError {
         Self {
             code: e.code,
             message: e.message.clone(),
-            source: None,
-        }
-    }
-}
-
-impl From<taos_ws::stmt::Error> for WsError {
-    fn from(e: taos_ws::stmt::Error) -> Self {
-        Self {
-            code: e.errno(),
-            message: CString::new(e.errstr()).unwrap(),
             source: None,
         }
     }
@@ -741,6 +739,7 @@ pub unsafe extern "C" fn ws_timestamp_to_rfc3339(
 #[no_mangle]
 /// Unimplemented currently.
 pub unsafe fn ws_print_row(rs: *mut WS_RES, row: i32) {
+    let (_, _) = (rs, row);
     todo!()
     // match (rs as *mut WsResultSet).as_mut() {
     //     Some(rs) => rs.fetch_block(ptr, rows),
