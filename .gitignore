@@ -12,3 +12,4 @@ tarpaulin-report.json
 rust-toolchain
 sync.sh
 .cargo
+.cache-cargo
