@@ -47,6 +47,7 @@ jobs:
           go-version: 1.14
 
       - name: Set up Rust
+        id: setup-rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -59,7 +60,15 @@ jobs:
           nohup sudo taosd > /dev/null 2>&1 &
           sleep 5
           nohup sudo taosadapter > /dev/null 2>&1 &
-
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            TDengine/tools/taosws-rs/target/
+          key: ${{ runner.os }}-cargo-${{ steps.setup-rust.outputs.rustc_hash }}
       - name: Run examples
         run: |
           cd TDengine/tools/taosws-rs

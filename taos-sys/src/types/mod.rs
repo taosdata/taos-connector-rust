@@ -212,26 +212,23 @@ pub trait BindFrom: Sized {
     }
     fn from_value(v: &Value) -> Self {
         match v {
-            Value::Null => todo!(),
-            Value::Bool(_) => todo!(),
-            Value::TinyInt(_) => todo!(),
-            Value::SmallInt(_) => todo!(),
-            Value::Int(_) => todo!(),
-            Value::BigInt(_) => todo!(),
-            Value::Float(_) => todo!(),
-            Value::Double(_) => todo!(),
-            Value::VarChar(_) => todo!(),
-            Value::Timestamp(_) => todo!(),
-            Value::NChar(_) => todo!(),
-            Value::UTinyInt(_) => todo!(),
-            Value::USmallInt(_) => todo!(),
-            Value::UInt(_) => todo!(),
-            Value::UBigInt(_) => todo!(),
-            Value::Json(_) => todo!(),
-            Value::VarBinary(_) => todo!(),
-            Value::Decimal(_) => todo!(),
-            Value::Blob(_) => todo!(),
-            Value::MediumBlob(_) => todo!(),
+            Value::Null => Self::null(),
+            Value::Bool(v) => Self::from_primitive(v),
+            Value::TinyInt(v) => Self::from_primitive(v),
+            Value::SmallInt(v) => Self::from_primitive(v),
+            Value::Int(v) => Self::from_primitive(v),
+            Value::BigInt(v) => Self::from_primitive(v),
+            Value::Float(v) => Self::from_primitive(v),
+            Value::Double(v) => Self::from_primitive(v),
+            Value::VarChar(v) => Self::from_varchar(v),
+            Value::Timestamp(v) => Self::from_timestamp(v.as_raw_i64()),
+            Value::NChar(v) => Self::from_nchar(v),
+            Value::UTinyInt(v) => Self::from_primitive(v),
+            Value::USmallInt(v) => Self::from_primitive(v),
+            Value::UInt(v) => Self::from_primitive(v),
+            Value::UBigInt(v) => Self::from_primitive(v),
+            Value::Json(v) => Self::from_json(&v.to_string()),
+            _ => unimplemented!(),
         }
     }
 }
@@ -398,12 +395,14 @@ impl TaosMultiBind {
 impl Drop for TaosMultiBind {
     fn drop(&mut self) {
         let ty = Ty::from(self.buffer_type as u8);
-        if ty == Ty::VarChar || ty == Ty::NChar {
-            let len = self.buffer_length * self.num as usize;
-            unsafe { Vec::from_raw_parts(self.buffer as *mut u8, len, len as _) };
-            unsafe { Vec::from_raw_parts(self.length as *mut i32, self.num as _, self.num as _) };
+        // if ty == Ty::VarChar || ty == Ty::NChar {
+        //     let len = self.buffer_length * self.num as usize;
+        //     unsafe { Vec::from_raw_parts(self.buffer as *mut u8, len, len as _) };
+        //     unsafe { Vec::from_raw_parts(self.length as *mut i32, self.num as _, self.num as _) };
+        // }
+        if self.is_null.is_null() {
+            unsafe { Vec::from_raw_parts(self.is_null as *mut i8, self.num as _, self.num as _) };
         }
-        unsafe { Vec::from_raw_parts(self.is_null as *mut i8, self.num as _, self.num as _) };
     }
 }
 

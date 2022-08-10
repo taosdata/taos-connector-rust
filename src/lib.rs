@@ -1,5 +1,4 @@
 pub use taos_query::prelude::*;
-pub use taos_query::Manager;
 
 #[cfg(any(feature = "ws", feature = "native"))]
 pub mod sync {

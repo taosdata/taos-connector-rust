@@ -1,12 +1,21 @@
+use std::time::Duration;
+
 use chrono::{DateTime, Local};
 use taos::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let dsn = "taos://localhost:6030";
-    let builder = TaosBuilder::from_dsn(dsn)?;
 
-    let taos = builder.build()?;
+    let opts = PoolBuilder::new()
+        .max_size(5000) // max connections
+        .max_lifetime(Some(Duration::from_secs(60 * 60))) // lifetime of each connection
+        .min_idle(Some(1000)) // minimal idle connections
+        .connection_timeout(Duration::from_secs(2));
+
+    let pool = TaosBuilder::from_dsn(dsn)?.with_pool_builder(opts)?;
+
+    let taos = pool.get()?;
 
     let db = "query";
 
@@ -34,6 +43,8 @@ async fn main() -> anyhow::Result<()> {
     ]).await?;
 
     assert_eq!(inserted, 6);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     let mut result = taos.query("select * from `meters`").await?;
 
     for field in result.fields() {
@@ -42,10 +53,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Query option 1, use rows stream.
     let mut rows = result.rows();
+    let mut nrows = 0;
     while let Some(row) = rows.try_next().await? {
-        for (name, value) in row {
-            println!("got value of {}: {}", name, value);
+        for (col, (name, value)) in row.enumerate() {
+            println!(
+                "[{}] got value in col {} (named `{:>8}`): {}",
+                nrows, col, name, value
+            );
         }
+        nrows += 1;
     }
 
     // Query options 2, use deserialization with serde.
