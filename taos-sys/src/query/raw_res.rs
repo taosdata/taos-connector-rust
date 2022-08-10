@@ -141,8 +141,6 @@ impl RawRes {
                 let mut raw = unsafe {
                     RawBlock::parse_from_ptr(
                         current.block as _,
-                        current.num as usize,
-                        fields.len(),
                         precision,
                     )
                 };
@@ -197,7 +195,7 @@ impl RawRes {
             return None;
         }
         let mut raw = unsafe {
-            RawBlock::parse_from_ptr(block as _, num as usize, fields.len(), self.precision())
+            RawBlock::parse_from_ptr(block as _, self.precision())
         };
 
         raw.with_field_names(fields.iter().map(Field::name));
@@ -221,8 +219,6 @@ impl RawRes {
                     tmq_res_t::TMQ_RES_INVALID => {
                         let mut raw = RawBlock::parse_from_ptr(
                             block as _,
-                            num as usize,
-                            self.field_count(),
                             self.precision(),
                         );
                         raw.with_field_names(self.fetch_fields().iter().map(Field::name));
@@ -233,8 +229,6 @@ impl RawRes {
 
                         let mut raw = RawBlock::parse_from_ptr(
                             block as _,
-                            num as usize,
-                            fields.len(),
                             self.precision(),
                         );
 

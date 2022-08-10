@@ -152,7 +152,7 @@ impl NCharView {
             }
         }
         unsafe {
-            dbg!(&offsets);
+            // dbg!(&offsets);
             let offsets_bytes = std::slice::from_raw_parts(
                 offsets.as_ptr() as *const u8,
                 offsets.len() * std::mem::size_of::<i32>(),

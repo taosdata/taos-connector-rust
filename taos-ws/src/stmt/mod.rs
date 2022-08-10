@@ -464,7 +464,6 @@ impl Stmt {
         bytes.write_u64_le(2)?; // bind: 2
         bytes.write_u64_le(columns.len() as u64)?;
         let rows = columns.first().map(|c| c.len()).unwrap_or_default() as u64;
-        let cols = columns.len();
         bytes.write_u64_le(rows)?;
 
         let block = views_to_raw_block(columns);
@@ -476,8 +475,6 @@ impl Stmt {
             "{:#?}",
             RawBlock::parse_from_raw_block(
                 block,
-                rows as _,
-                cols,
                 taos_query::prelude::Precision::Millisecond
             )
         );

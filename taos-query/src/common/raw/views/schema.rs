@@ -7,7 +7,7 @@ use crate::common::{Field, Ty};
 // use packed(2) because [Ty] is int16_t in raw block.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
-#[repr(packed(2))]
+#[repr(packed(1))]
 pub struct ColSchema {
     pub(crate) ty: Ty,
     pub(crate) len: u32,
@@ -27,12 +27,12 @@ impl ColSchema {
     }
     #[inline]
     pub(crate) fn as_bytes(&self) -> &[u8] {
-        unsafe { std::mem::transmute::<&Self, &[u8; 6]>(self) }
+        unsafe { std::mem::transmute::<&Self, &[u8; 5]>(self) }
     }
 
     #[inline]
-    pub fn into_bytes(self) -> [u8; 6] {
-        unsafe { std::mem::transmute::<Self, [u8; 6]>(self) }
+    pub fn into_bytes(self) -> [u8; 5] {
+        unsafe { std::mem::transmute::<Self, [u8; 5]>(self) }
     }
 }
 
@@ -42,10 +42,10 @@ fn col_schema() {
         ty: Ty::BigInt,
         len: 1,
     };
-    let bytes: [u8; 6] = unsafe { std::mem::transmute_copy(&col) };
+    let bytes: [u8; 5] = unsafe { std::mem::transmute_copy(&col) };
     dbg!(&bytes);
 
-    let bytes: [u8; 6] = [4, 0, 1, 0, 0, 0];
+    let bytes: [u8; 5] = [4, 1, 0, 0, 0];
     let col2: ColSchema = unsafe { std::mem::transmute_copy(&bytes) };
     dbg!(col2);
 }

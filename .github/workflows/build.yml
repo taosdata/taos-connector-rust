@@ -40,8 +40,10 @@ jobs:
       - name: Checkout Rust connector
         if: github.event_name == 'pull_request'
         run: |
-          sed -E "s/GIT_TAG.*/GIT_TAG ${GITHUB_SHA}/"
-          cd TDengine && mkdir release && cd release
+          cd TDengine
+          echo use commit ${GITHUB_REF_NAME}
+          sed -iE "s/GIT_TAG.*/GIT_TAG ${GITHUB_REF_NAME}/" cmake/taosws_CMakeLists.txt.in
+          mkdir release && cd release
           cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true
 
       - name: Set up Go

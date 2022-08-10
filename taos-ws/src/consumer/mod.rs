@@ -140,8 +140,6 @@ impl WsMessageBase {
         if let TmqRecvData::Bytes(bytes) = data {
             let mut raw = RawBlock::parse_from_raw_block(
                 bytes,
-                fetch.rows,
-                fetch.fields_count as _,
                 fetch.precision,
             );
 

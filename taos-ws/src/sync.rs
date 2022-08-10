@@ -590,8 +590,6 @@ impl ResultSet {
             WsFetchData::Block(timing, raw) => {
                 let mut raw = RawBlock::parse_from_raw_block(
                     raw,
-                    fetch_resp.rows,
-                    self.fields_count,
                     self.precision,
                 );
 

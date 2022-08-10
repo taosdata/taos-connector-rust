@@ -75,8 +75,6 @@ impl Stream for Blocks {
                 let mut raw = unsafe {
                     RawBlock::parse_from_ptr(
                         state.block as _,
-                        state.num as usize,
-                        self.fields.len(),
                         self.precision,
                     )
                 };
