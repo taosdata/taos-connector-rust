@@ -585,10 +585,7 @@ impl ResultSet {
         log::debug!("receiving block...");
         match self.receiver.as_mut().unwrap().recv()?? {
             WsFetchData::Block(_timing, raw) => {
-                let mut raw = RawBlock::parse_from_raw_block(
-                    raw,
-                    self.precision,
-                );
+                let mut raw = RawBlock::parse_from_raw_block(raw, self.precision);
 
                 raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
                 Ok(Some(raw))

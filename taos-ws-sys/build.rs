@@ -1,7 +1,7 @@
 extern crate cbindgen;
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();

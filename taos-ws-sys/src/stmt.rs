@@ -155,7 +155,7 @@ impl TaosMultiBind {
             return Value::Null;
         }
         match Ty::from(self.buffer_type) {
-            Ty::Null => unsafe { Value::Null },
+            Ty::Null => Value::Null,
             Ty::Bool => unsafe { Value::Bool(*(self.buffer as *const bool)) },
             Ty::TinyInt => unsafe { Value::TinyInt(*(self.buffer as *const i8)) },
             Ty::SmallInt => unsafe { Value::SmallInt(*(self.buffer as *const i16)) },

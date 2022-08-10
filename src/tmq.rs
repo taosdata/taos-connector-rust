@@ -309,7 +309,7 @@ impl AsAsyncConsumer for Consumer {
 
 #[cfg(test)]
 mod tests {
-    use std::{time::Duration, str::FromStr};
+    use std::{str::FromStr, time::Duration};
 
     use super::*;
     use crate::*;

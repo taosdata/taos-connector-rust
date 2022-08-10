@@ -40,7 +40,7 @@ pub struct WsError {
 }
 
 impl WsError {
-    fn from_err(err: Box<dyn std::error::Error + 'static>) -> Self {
+    pub fn from_err(err: Box<dyn std::error::Error + 'static>) -> Self {
         Self {
             code: Code::Failed,
             message: CString::new(err.to_string()).unwrap(),

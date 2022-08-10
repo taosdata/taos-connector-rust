@@ -138,12 +138,7 @@ impl RawRes {
 
             if current.num > 0 {
                 // has next block.
-                let mut raw = unsafe {
-                    RawBlock::parse_from_ptr(
-                        current.block as _,
-                        precision,
-                    )
-                };
+                let mut raw = unsafe { RawBlock::parse_from_ptr(current.block as _, precision) };
                 raw.with_field_names(fields.iter().map(|f| f.name()));
                 if current.num < 100 {
                     // finish fetch loop fast.
@@ -194,9 +189,7 @@ impl RawRes {
         if num == 0 || block.is_null() {
             return None;
         }
-        let mut raw = unsafe {
-            RawBlock::parse_from_ptr(block as _, self.precision())
-        };
+        let mut raw = unsafe { RawBlock::parse_from_ptr(block as _, self.precision()) };
 
         raw.with_field_names(fields.iter().map(Field::name));
 
@@ -217,20 +210,14 @@ impl RawRes {
             if num > 0 {
                 match self.tmq_message_type() {
                     tmq_res_t::TMQ_RES_INVALID => {
-                        let mut raw = RawBlock::parse_from_ptr(
-                            block as _,
-                            self.precision(),
-                        );
+                        let mut raw = RawBlock::parse_from_ptr(block as _, self.precision());
                         raw.with_field_names(self.fetch_fields().iter().map(Field::name));
                         Some(raw)
                     }
                     tmq_res_t::TMQ_RES_DATA => {
                         let fields = self.fetch_fields();
 
-                        let mut raw = RawBlock::parse_from_ptr(
-                            block as _,
-                            self.precision(),
-                        );
+                        let mut raw = RawBlock::parse_from_ptr(block as _, self.precision());
 
                         raw.with_field_names(fields.iter().map(Field::name));
 

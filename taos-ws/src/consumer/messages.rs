@@ -213,7 +213,7 @@ fn test_serde_recv_data() {
         "req_id": 1
     }"#;
     let d: TmqRecv = serde_json::from_str(&json).unwrap();
-    dbg!(d.ok());
+    let _ = dbg!(d.ok());
 }
 
 impl ToMessage for TmqSend {}

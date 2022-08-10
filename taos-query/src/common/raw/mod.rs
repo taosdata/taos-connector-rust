@@ -11,7 +11,6 @@ use serde::Deserialize;
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
     ffi::c_void,
-    mem::size_of,
     ops::Deref,
     ptr::NonNull,
     sync::Arc,
@@ -69,9 +68,11 @@ impl Header {
             std::slice::from_raw_parts(ptr as *const u8, len)
         }
     }
-    fn version(&self) -> u32 {
-        self.version
+
+    fn len(&self) -> usize {
+        self.length as _
     }
+
     fn nrows(&self) -> usize {
         self.nrows as _
     }
@@ -415,14 +416,6 @@ impl RawBlock {
     }
 
     pub fn parse_from_raw_block(bytes: impl Into<Bytes>, precision: Precision) -> Self {
-        // const VERSION_OFFSET: usize = 0;
-        // const LENGTH_OFFSET: usize = VERSION_OFFSET + std::mem::size_of::<u32>();
-        // const ROWS_OFFSET: usize = LENGTH_OFFSET + std::mem::size_of::<u32>();
-        // const COLS_OFFSET: usize = ROWS_OFFSET + std::mem::size_of::<u32>();
-        // const HAS_COLUMNS_SCHEMA_OFFSET: usize = COLS_OFFSET + std::mem::size_of::<u32>();
-        // const GROUP_ID_OFFSET: usize = HAS_COLUMNS_SCHEMA_OFFSET + std::mem::size_of::<u32>();
-        // const SCHEMA_OFFSET: usize = GROUP_ID_OFFSET + std::mem::size_of::<u32>() as usize;
-        // assert_eq!(std::mem::size_of::<Header>(), 24);
         let schema_start: usize = std::mem::size_of::<Header>();
 
         let layout = Arc::new(RefCell::new(Layout::INLINE_DEFAULT.into()));
@@ -432,9 +425,9 @@ impl RawBlock {
 
         let header = unsafe { &*(ptr as *const Header) };
 
-        let rows = header.nrows as usize;
-        let cols = header.ncols as usize;
-        let len = header.length as usize;
+        let rows = header.nrows();
+        let cols = header.ncols();
+        let len = header.len();
         debug_assert_eq!(bytes.len(), len);
         let group_id = header.group_id as u64;
 
@@ -835,7 +828,6 @@ impl Inlinable for RawBlock {
 
         let precision = layout.precision();
 
-        let rows = reader.read_u32()? as usize;
         let cols = reader.read_u32()? as usize;
 
         // let mut table_name = None;
@@ -848,8 +840,6 @@ impl Inlinable for RawBlock {
         let names: Vec<_> = (0..cols as usize)
             .map(|_| reader.read_inlined_str::<1>())
             .try_collect()?;
-
-        let version = reader.read_u32()?;
 
         let raw: InlineBlock = reader.read_inlinable()?;
         let mut raw = Self::parse_from_raw_block(raw.0, precision);
@@ -881,7 +871,6 @@ impl Inlinable for RawBlock {
 
         let precision = layout.precision();
 
-        let rows = reader.read_u32()? as usize;
         let cols = reader.read_u32()? as usize;
 
         // let mut table_name = None;
@@ -894,8 +883,6 @@ impl Inlinable for RawBlock {
         let names: Vec<_> = (0..cols as usize)
             .map(|_| reader.read_inlined_str::<1>())
             .try_collect()?;
-
-        let bytes = reader.read_inlined_bytes::<4>()?;
 
         let raw: InlineBlock = reader.read_inlinable()?;
         let mut raw = Self::parse_from_raw_block(raw.0, precision);
@@ -913,7 +900,6 @@ impl Inlinable for RawBlock {
     fn write_inlined<W: std::io::Write>(&self, wtr: &mut W) -> std::io::Result<usize> {
         let mut l = wtr.write_u32_le(self.layout.borrow().as_inner())?;
 
-        l += wtr.write_len_with_width::<4>(self.nrows())?;
         l += wtr.write_len_with_width::<4>(self.ncols())?;
 
         if let Some(name) = self.table.as_ref() {
@@ -957,7 +943,6 @@ impl crate::prelude::AsyncInlinable for RawBlock {
 
         let precision = layout.precision();
 
-        let rows = reader.read_u32_le().await? as usize;
         let cols = reader.read_u32_le().await? as usize;
 
         // let mut table_name = None;
@@ -995,7 +980,6 @@ impl crate::prelude::AsyncInlinable for RawBlock {
 
         let precision = layout.precision();
 
-        let rows = reader.read_u32_le().await? as usize;
         let cols = reader.read_u32_le().await? as usize;
 
         // let mut table_name = None;

@@ -72,12 +72,7 @@ impl Stream for Blocks {
 
             if state.num > 0 {
                 // has next block.
-                let mut raw = unsafe {
-                    RawBlock::parse_from_ptr(
-                        state.block as _,
-                        self.precision,
-                    )
-                };
+                let mut raw = unsafe { RawBlock::parse_from_ptr(state.block as _, self.precision) };
                 raw.with_field_names(self.fields.iter().map(|f| f.name()));
 
                 if state.num > 100 {

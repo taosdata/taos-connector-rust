@@ -60,10 +60,7 @@ pub(crate) use lengths::*;
 
 mod from;
 
-use crate::{
-    common::{BorrowedValue, Column, Ty},
-    prelude::InlinableWrite,
-};
+use crate::common::{BorrowedValue, Column, Ty};
 
 use std::{ffi::c_void, fmt::Debug, io::Write, iter::FusedIterator};
 

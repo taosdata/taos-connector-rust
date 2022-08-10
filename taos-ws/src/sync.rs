@@ -59,7 +59,6 @@ pub struct ResultSet {
     receiver: Option<FetchReceiver>,
     args: WsResArgs,
     fields: Option<Vec<Field>>,
-    fields_count: usize,
     affected_rows: usize,
     precision: Precision,
     alive: Arc<AtomicBool>,
@@ -460,7 +459,6 @@ impl WsClient {
                 fetches: self.fetches.clone(),
                 receiver: Some(rx),
                 fields: Some(fields),
-                fields_count: resp.fields_count,
                 precision: resp.precision,
                 affected_rows: resp.affected_rows,
                 args: WsResArgs {
@@ -485,7 +483,6 @@ impl WsClient {
                     id: resp.id,
                 },
                 fields: None,
-                fields_count: 0,
                 precision: resp.precision,
                 alive: self.alive.clone(),
                 summary: UnsafeCell::default(),
@@ -588,10 +585,7 @@ impl ResultSet {
 
         match rx.recv_timeout(self.timeout)?? {
             WsFetchData::Block(timing, raw) => {
-                let mut raw = RawBlock::parse_from_raw_block(
-                    raw,
-                    self.precision,
-                );
+                let mut raw = RawBlock::parse_from_raw_block(raw, self.precision);
 
                 for row in 0..raw.nrows() {
                     for col in 0..raw.ncols() {

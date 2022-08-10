@@ -138,10 +138,7 @@ impl WsMessageBase {
         });
         let data = self.sender.send_recv(msg).await?;
         if let TmqRecvData::Bytes(bytes) = data {
-            let mut raw = RawBlock::parse_from_raw_block(
-                bytes,
-                fetch.precision,
-            );
+            let mut raw = RawBlock::parse_from_raw_block(bytes, fetch.precision);
 
             for row in 0..raw.nrows() {
                 for col in 0..raw.ncols() {

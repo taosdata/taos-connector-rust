@@ -526,10 +526,7 @@ mod r#async {
         }
 
         /// Short for `CREATE DATABASE IF NOT EXISTS {name}`.
-        async fn create_database<N: AsRef<str> + Send>(
-            &self,
-            name: N,
-        ) -> Result<(), Self::Error> {
+        async fn create_database<N: AsRef<str> + Send>(&self, name: N) -> Result<(), Self::Error> {
             let query = format!("CREATE DATABASE IF NOT EXISTS {}", name.as_ref());
 
             self.query(query).await?;
@@ -537,10 +534,7 @@ mod r#async {
         }
 
         /// Short for `USE {name}`.
-        async fn use_database<N: AsRef<str> + Send>(
-            &self,
-            name: N,
-        ) -> Result<(), Self::Error> {
+        async fn use_database<N: AsRef<str> + Send>(&self, name: N) -> Result<(), Self::Error> {
             let query = format!("USE {}", name.as_ref());
 
             self.query(query).await?;

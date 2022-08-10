@@ -473,10 +473,7 @@ impl Stmt {
         // dbg!(bytes::Bytes::copy_from_slice(&block));
         log::debug!(
             "{:#?}",
-            RawBlock::parse_from_raw_block(
-                block,
-                taos_query::prelude::Precision::Millisecond
-            )
+            RawBlock::parse_from_raw_block(block, taos_query::prelude::Precision::Millisecond)
         );
 
         self.ws.send(Message::Binary(bytes)).await?;
