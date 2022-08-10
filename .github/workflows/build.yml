@@ -48,7 +48,7 @@ jobs:
           cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
           go-version: 1.14
 
@@ -59,14 +59,21 @@ jobs:
           toolchain: stable
 
       - uses: actions/cache@v3
+        id: cache-rust
         with:
           path: |
             ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            TDengine/tools/taosws-rs/target/
           key: ${{ runner.os }}-cargo-${{ steps.setup-rust.outputs.rustc_hash }}
+
+      - uses: actions/cache@v3
+        id: cache-rust-target
+        with:
+          path: |
+            TDengine/tools/taosws-rs/target/
+          key: ${{ runner.os }}-cargo-target-${{ steps.setup-rust.outputs.rustc_hash }}
 
       - name: Build & Install TDengine
         run: |
