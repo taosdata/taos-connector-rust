@@ -38,7 +38,6 @@ jobs:
           sudo date
 
       - name: Checkout Rust connector
-        if: github.event_name == 'pull_request'
         env:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
