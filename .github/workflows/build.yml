@@ -30,7 +30,7 @@ jobs:
           submodules: recursive
           repository: 'taosdata/TDengine'
           path: 'TDengine'
-          ref: 'develop'
+          ref: '3.0'
 
       - name: Change time zone
         run: |
