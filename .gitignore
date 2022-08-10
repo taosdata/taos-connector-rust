@@ -10,3 +10,5 @@ lcov.info
 tarpaulin-report.html
 tarpaulin-report.json
 rust-toolchain
+sync.sh
+.cargo

@@ -365,39 +365,39 @@ impl IValue for ITimestamp {
     }
 }
 
-macro_rules! impl_wrapper_struct {
-    ($($ty:ident)*) => {
-        $(paste::paste! {
-            impl IValue for [<I $ty>] {
-                const TY: Ty = Ty::$ty;
-                #[inline]
-                fn into_value(self) -> Value {
-                    Value::$ty(self.0)
-                }
-            }
-        })*
-    };
-    ($($ty:ident, $inner:ty;)*) => {
-        $(paste::paste! {
-            #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Deserialize, Serialize)]
-            pub struct [<I $ty>]($inner);
+// macro_rules! impl_wrapper_struct {
+//     ($($ty:ident)*) => {
+//         $(paste::paste! {
+//             impl IValue for [<I $ty>] {
+//                 const TY: Ty = Ty::$ty;
+//                 #[inline]
+//                 fn into_value(self) -> Value {
+//                     Value::$ty(self.0)
+//                 }
+//             }
+//         })*
+//     };
+//     ($($ty:ident, $inner:ty;)*) => {
+//         $(paste::paste! {
+//             #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Deserialize, Serialize)]
+//             pub struct [<I $ty>]($inner);
 
-            impl Deref for [<I $ty>] {
-                type Target = $inner;
+//             impl Deref for [<I $ty>] {
+//                 type Target = $inner;
 
-                #[inline]
-                fn deref(&self) -> &Self::Target {
-                        &self.0
-                }
-            }
+//                 #[inline]
+//                 fn deref(&self) -> &Self::Target {
+//                         &self.0
+//                 }
+//             }
 
-            impl IValue for [<I $ty>] {
-                const TY: Ty = Ty::$ty;
-                #[inline]
-                fn into_value(self) -> Value {
-                    Value::$ty(self.0)
-                }
-            }
-        })*
-    };
-}
+//             impl IValue for [<I $ty>] {
+//                 const TY: Ty = Ty::$ty;
+//                 #[inline]
+//                 fn into_value(self) -> Value {
+//                     Value::$ty(self.0)
+//                 }
+//             }
+//         })*
+//     };
+// }

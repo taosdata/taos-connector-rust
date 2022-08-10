@@ -11,7 +11,8 @@ use serde::Deserialize;
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
     ffi::c_void,
-    ops::{Deref, DerefMut},
+    mem::size_of,
+    ops::Deref,
     ptr::NonNull,
     sync::Arc,
 };
@@ -35,6 +36,49 @@ pub use meta::*;
 mod de;
 mod rows;
 pub use rows::*;
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed(4))]
+struct Header {
+    version: u32,
+    length: u32,
+    nrows: u32,
+    ncols: u32,
+    flag: u32,
+    group_id: u64,
+}
+
+impl Default for Header {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            length: Default::default(),
+            nrows: Default::default(),
+            ncols: Default::default(),
+            flag: u32::MAX,
+            group_id: Default::default(),
+        }
+    }
+}
+
+impl Header {
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            let ptr = self as *const Self;
+            let len = std::mem::size_of::<Self>();
+            std::slice::from_raw_parts(ptr as *const u8, len)
+        }
+    }
+    fn version(&self) -> u32 {
+        self.version
+    }
+    fn nrows(&self) -> usize {
+        self.nrows as _
+    }
+    fn ncols(&self) -> usize {
+        self.ncols as _
+    }
+}
 
 /// Raw data block format (B for bytes):
 ///
@@ -102,16 +146,12 @@ impl Debug for RawBlock {
 }
 
 impl RawBlock {
-    pub unsafe fn parse_from_ptr(
-        ptr: *mut c_void,
-        rows: usize,
-        cols: usize,
-        precision: Precision,
-    ) -> Self {
-        let len = *(ptr as *const u32) as usize;
+    pub unsafe fn parse_from_ptr(ptr: *mut c_void, precision: Precision) -> Self {
+        let header = &*(ptr as *const Header);
+        let len = header.length as usize;
         let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
         let bytes = Bytes::from(bytes);
-        Self::parse_from_raw_block(bytes, rows, cols, precision).with_layout(Layout::default())
+        Self::parse_from_raw_block(bytes, precision).with_layout(Layout::default())
     }
 
     pub fn parse_from_ptr_v2(
@@ -186,6 +226,7 @@ impl RawBlock {
 
         let bytes = bytes.into();
         let cols = fields.len();
+
         let mut schemas_bytes =
             bytes::BytesMut::with_capacity(rows * std::mem::size_of::<ColSchema>());
         fields
@@ -235,24 +276,6 @@ impl RawBlock {
 
             match field.ty() {
                 Ty::Null => unreachable!(),
-
-                // Booleans column view.
-                // Ty::Bool => {
-                //     debug_assert_eq!(field.bytes(), *length);
-                //     debug_assert_eq!(field.bytes() as usize, std::mem::size_of::<bool>());
-
-                //     let start = offset;
-                //     // Bool column data end
-                //     offset += rows; // bool size is 1
-                //     let data = bytes.slice(start..offset);
-                //     let nulls = NullsMut::from_bools(data.iter().map(|b| bool_is_null(b as _)))
-                //         .into_nulls();
-
-                //     data_lengths[i] = data.len() as u32;
-                //     // build column view
-                //     let column = ColumnView::Bool(BoolView { nulls, data });
-                //     columns.push(column);
-                // }
 
                 // Signed integers columns.
                 Ty::Bool => _primitive_view!(Bool, bool),
@@ -362,7 +385,7 @@ impl RawBlock {
                         }
                     }));
 
-                    columns.push(dbg!(ColumnView::Json(JsonView { offsets, data })));
+                    columns.push(ColumnView::Json(JsonView { offsets, data }));
 
                     data_lengths[i] = *length as u32 * rows as u32;
                 }
@@ -391,25 +414,32 @@ impl RawBlock {
         }
     }
 
-    pub fn parse_from_raw_block(
-        bytes: impl Into<Bytes>,
-        rows: usize,
-        cols: usize,
-        precision: Precision,
-    ) -> Self {
-        const GROUP_ID_OFFSET: isize = std::mem::size_of::<u32>() as isize;
-        const SCHEMA_OFFSET: usize = GROUP_ID_OFFSET as usize + std::mem::size_of::<u64>() as usize;
+    pub fn parse_from_raw_block(bytes: impl Into<Bytes>, precision: Precision) -> Self {
+        // const VERSION_OFFSET: usize = 0;
+        // const LENGTH_OFFSET: usize = VERSION_OFFSET + std::mem::size_of::<u32>();
+        // const ROWS_OFFSET: usize = LENGTH_OFFSET + std::mem::size_of::<u32>();
+        // const COLS_OFFSET: usize = ROWS_OFFSET + std::mem::size_of::<u32>();
+        // const HAS_COLUMNS_SCHEMA_OFFSET: usize = COLS_OFFSET + std::mem::size_of::<u32>();
+        // const GROUP_ID_OFFSET: usize = HAS_COLUMNS_SCHEMA_OFFSET + std::mem::size_of::<u32>();
+        // const SCHEMA_OFFSET: usize = GROUP_ID_OFFSET + std::mem::size_of::<u32>() as usize;
+        // assert_eq!(std::mem::size_of::<Header>(), 24);
+        let schema_start: usize = std::mem::size_of::<Header>();
 
         let layout = Arc::new(RefCell::new(Layout::INLINE_DEFAULT.into()));
 
         let bytes = bytes.into();
         let ptr = bytes.as_ptr();
 
-        let len = unsafe { *(ptr as *const u32) as usize };
-        let group_id = unsafe { *(ptr.offset(GROUP_ID_OFFSET) as *const u64) };
+        let header = unsafe { &*(ptr as *const Header) };
 
-        let schema_end = SCHEMA_OFFSET + cols * std::mem::size_of::<ColSchema>();
-        let schemas = Schemas::from(bytes.slice(SCHEMA_OFFSET..schema_end));
+        let rows = header.nrows as usize;
+        let cols = header.ncols as usize;
+        let len = header.length as usize;
+        debug_assert_eq!(bytes.len(), len);
+        let group_id = header.group_id as u64;
+
+        let schema_end = schema_start + cols * std::mem::size_of::<ColSchema>();
+        let schemas = Schemas::from(bytes.slice(schema_start..schema_end));
         // dbg!(&schemas);
         let lengths_end = schema_end + std::mem::size_of::<u32>() * cols;
         let lengths = Lengths::from(bytes.slice(schema_end..lengths_end));
@@ -420,6 +450,7 @@ impl RawBlock {
             // go for each column
             let length = unsafe { *(lengths.deref().get_unchecked(col)) } as usize;
             let schema = unsafe { schemas.get_unchecked(col) };
+            log::debug!("col: {}, length: {}, schema: {:?}", col, length, schema);
 
             macro_rules! _primitive_value {
                 ($ty:ident, $prim:ty) => {{
@@ -500,6 +531,7 @@ impl RawBlock {
                     unreachable!("unsupported type: {ty}")
                 }
             };
+            log::debug!("column: {:#?}", column);
             columns.push(column);
             debug_assert!(data_offset <= len);
         }
@@ -710,9 +742,9 @@ impl RawBlock {
         self.columns.get_unchecked(col).get_ref_unchecked(row)
     }
 
-    unsafe fn get_col_unchecked(&self, col: usize) -> &ColumnView {
-        self.columns.get_unchecked(col)
-    }
+    // unsafe fn get_col_unchecked(&self, col: usize) -> &ColumnView {
+    //     self.columns.get_unchecked(col)
+    // }
 
     pub fn to_values(&self) -> Vec<Vec<Value>> {
         self.rows().map(|row| row.into_values()).collect_vec()
@@ -720,6 +752,79 @@ impl RawBlock {
 
     pub fn write<W: std::io::Write>(&self, _wtr: W) -> std::io::Result<usize> {
         todo!()
+    }
+}
+
+struct InlineBlock(Bytes);
+
+impl Inlinable for InlineBlock {
+    fn read_inlined<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self>
+    where
+        Self: Sized,
+    {
+        let version = reader.read_u32()?;
+        let len = reader.read_u32()?;
+        let mut bytes = Vec::with_capacity(len as usize);
+        bytes.resize(len as usize, 0);
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                version.to_le_bytes().as_ptr(),
+                bytes.as_mut_ptr(),
+                std::mem::size_of::<u32>(),
+            );
+            std::ptr::copy_nonoverlapping(
+                len.to_le_bytes().as_ptr(),
+                bytes.as_mut_ptr().offset(4),
+                std::mem::size_of::<u32>(),
+            );
+        }
+        let buf = &mut bytes[8..];
+        reader.read_exact(buf)?;
+        Ok(Self(bytes.into()))
+    }
+
+    fn write_inlined<W: std::io::Write>(&self, wtr: &mut W) -> std::io::Result<usize> {
+        wtr.write_all(self.0.as_ref())?;
+        Ok(self.0.len())
+    }
+}
+#[async_trait::async_trait]
+impl crate::prelude::AsyncInlinable for InlineBlock {
+    async fn read_inlined<R: tokio::io::AsyncRead + Send + Unpin>(
+        reader: &mut R,
+    ) -> std::io::Result<Self>
+    where
+        Self: Sized,
+    {
+        use tokio::io::*;
+        let version = reader.read_u32().await?;
+        let len = reader.read_u32().await?;
+        let mut bytes = Vec::with_capacity(len as usize);
+        bytes.resize(len as usize, 0);
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                version.to_le_bytes().as_ptr(),
+                bytes.as_mut_ptr(),
+                std::mem::size_of::<u32>(),
+            );
+            std::ptr::copy_nonoverlapping(
+                len.to_le_bytes().as_ptr(),
+                bytes.as_mut_ptr().offset(4),
+                std::mem::size_of::<u32>(),
+            );
+        }
+        let buf = &mut bytes[8..];
+        reader.read_exact(buf).await?;
+        Ok(Self(bytes.into()))
+    }
+
+    async fn write_inlined<W: tokio::io::AsyncWrite + Send + Unpin>(
+        &self,
+        wtr: &mut W,
+    ) -> std::io::Result<usize> {
+        use tokio::io::*;
+        wtr.write_all(self.0.as_ref()).await?;
+        Ok(self.0.len())
     }
 }
 
@@ -744,9 +849,10 @@ impl Inlinable for RawBlock {
             .map(|_| reader.read_inlined_str::<1>())
             .try_collect()?;
 
-        let bytes = reader.read_inlined_bytes::<4>()?;
+        let version = reader.read_u32()?;
 
-        let mut raw = Self::parse_from_raw_block(bytes, rows, cols, precision);
+        let raw: InlineBlock = reader.read_inlinable()?;
+        let mut raw = Self::parse_from_raw_block(raw.0, precision);
 
         if let Some(name) = table_name {
             raw.with_table_name(name);
@@ -791,7 +897,8 @@ impl Inlinable for RawBlock {
 
         let bytes = reader.read_inlined_bytes::<4>()?;
 
-        let mut raw = Self::parse_from_raw_block(bytes, rows, cols, precision);
+        let raw: InlineBlock = reader.read_inlinable()?;
+        let mut raw = Self::parse_from_raw_block(raw.0, precision);
 
         if let Some(name) = table_name {
             raw.with_table_name(name);
@@ -865,9 +972,8 @@ impl crate::prelude::AsyncInlinable for RawBlock {
             names.push(reader.read_inlined_str::<1>().await?);
         }
 
-        let bytes = reader.read_inlined_bytes::<4>().await?;
-
-        let mut raw = Self::parse_from_raw_block(bytes, rows, cols, precision);
+        let raw: InlineBlock = reader.read_inlinable().await?;
+        let mut raw = Self::parse_from_raw_block(raw.0, precision);
 
         if let Some(name) = table_name {
             raw.with_table_name(name);
@@ -904,13 +1010,8 @@ impl crate::prelude::AsyncInlinable for RawBlock {
             names.push(reader.read_inlined_str::<1>().await?);
         }
 
-        // let names: Vec<_> = (0..cols as usize)
-        //     .map(|_| async { reader.read_inlined_str::<1>().await })
-        //     .try_collect()?;
-
-        let bytes = reader.read_inlined_bytes::<4>().await?;
-
-        let mut raw = Self::parse_from_raw_block(bytes, rows, cols, precision);
+        let raw: InlineBlock = reader.read_inlinable().await?;
+        let mut raw = Self::parse_from_raw_block(raw.0, precision);
 
         if let Some(name) = table_name {
             raw.with_table_name(name);
@@ -952,29 +1053,10 @@ impl crate::prelude::AsyncInlinable for RawBlock {
 }
 
 #[test]
-fn test_block_parser() {
-    let rows = 3;
-    let cols = 15;
-    let precision = Precision::Millisecond;
-    static BYTES: &[u8; 460] = b"\xcc\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\t\x00\x08\x00\x00\x00\x01\x00\x01\x00\x00\x00\x02\x00\x01\x00\x00\x00\x03\x00\x02\x00\x00\x00\x04\x00\x04\x00\x00\x00\x05\x00\x08\x00\x00\x00\x0b\x00\x01\x00\x00\x00\x0c\x00\x02\x00\x00\x00\r\x00\x04\x00\x00\x00\x0e\x00\x08\x00\x00\x00\x06\x00\x04\x00\x00\x00\x07\x00\x08\x00\x00\x00\x08\x00f\x00\x00\x00\n\x00\x92\x01\x00\x00\x0f\x00\x00@\x00\x00\x18\x00\x00\x00\x03\x00\x00\x00\x03\x00\x00\x00\x06\x00\x00\x00\x0c\x00\x00\x00\x18\x00\x00\x00\x03\x00\x00\x00\x06\x00\x00\x00\x0c\x00\x00\x00\x18\x00\x00\x00\x0c\x00\x00\x00\x18\x00\x00\x00\x05\x00\x00\x00\x16\x00\x00\x004\x00\x00\x00\x00?\x8c\xfa\x84\x81\x01\x00\x00>\x8c\xfa\x84\x81\x01\x00\x00?\x8c\xfa\x84\x81\x01\x00\x00\xc0\x00\x00\x01\xc0\x00\x00\xff\xc0\x00\x00\x00\x00\xff\xff\xc0\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xff\xff\xc0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\xc0\x00\x00\x01\xc0\x00\x00\x00\x00\x01\x00\xc0\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\xc0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\xc0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xc0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x03\x00abc\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00\x14\x00\x9bm\x00\x00\x1d`\x00\x00\x1e\xd1\x01\x00pe\x00\x00nc\x00\x00\xff\xff\xff\xff\x00\x00\x00\x00\x1a\x00\x00\x00\x18\x00{\"a\":\"\xe6\xb6\x9b\xe6\x80\x9d\xf0\x9d\x84\x9e\xe6\x95\xb0\xe6\x8d\xae\"}\x18\x00{\"a\":\"\xe6\xb6\x9b\xe6\x80\x9d\xf0\x9d\x84\x9e\xe6\x95\xb0\xe6\x8d\xae\"}\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-
-    let mut raw = RawBlock::parse_from_raw_block(Bytes::from_static(BYTES), rows, cols, precision);
-    raw.with_field_names((0..cols).map(|col| format!("c{col}")).collect_vec());
-
-    let mut bytes = raw.inlined();
-
-    let reader = bytes.as_mut_slice();
-
-    // let raw = RawData::read_inlined(&mut reader).unwrap();
-    // assert_eq!(BYTES, raw.as_raw_bytes());
-    // dbg!(raw);
-}
-
-#[test]
 fn test_raw_from_v2() {
-    pretty_env_logger::formatted_builder()
-        .filter_level(log::LevelFilter::Trace)
-        .init();
+    // pretty_env_logger::formatted_builder()
+    //     .filter_level(log::LevelFilter::Trace)
+    //     .init();
     let bytes = b"\x10\x86\x1aA \xcc)AB\xc2\x14AZ],A\xa2\x8d$A\x87\xb9%A\xf5~\x0fA\x96\xf7,AY\xee\x17A1|\x15As\x00\x00\x00q\x00\x00\x00s\x00\x00\x00t\x00\x00\x00u\x00\x00\x00t\x00\x00\x00n\x00\x00\x00n\x00\x00\x00n\x00\x00\x00r\x00\x00\x00";
 
     let block = RawBlock::parse_from_raw_block_v2(
@@ -1004,6 +1086,7 @@ fn test_raw_from_v2() {
     );
 
     #[derive(Debug, serde::Deserialize)]
+    #[allow(dead_code)]
     struct Record {
         ts: String,
         current: f32,
@@ -1015,6 +1098,9 @@ fn test_raw_from_v2() {
     let rows: Vec<Record> = block.deserialize().try_collect().unwrap();
     dbg!(rows);
     // dbg!(block);
+    let bytes = views_to_raw_block(&block.columns);
+    let raw2 = RawBlock::parse_from_raw_block(bytes, block.precision);
+    dbg!(raw2);
 }
 
 #[test]
@@ -1060,7 +1146,9 @@ fn test_v2_full() {
         4,
         Precision::Millisecond,
     );
-    dbg!(block);
+    let bytes = views_to_raw_block(&block.columns);
+    let raw2 = RawBlock::parse_from_raw_block(bytes, block.precision);
+    dbg!(raw2);
 }
 
 #[test]
@@ -1073,6 +1161,9 @@ fn test_v2_null() {
         Precision::Millisecond,
     );
     dbg!(&raw);
+    let bytes = views_to_raw_block(&raw.columns);
+    let raw2 = RawBlock::parse_from_raw_block(bytes, raw.precision);
+    dbg!(raw2);
     let (_ty, _len, null) = unsafe { raw.get_raw_value_unchecked(0, 0) };
     assert!(null.is_null());
     let (_ty, _len, null) = unsafe { raw.get_raw_value_unchecked(1, 0) };
@@ -1122,7 +1213,7 @@ fn test_from_v2() {
     );
     let bytes = raw.as_raw_bytes();
     let bytes = Bytes::copy_from_slice(bytes);
-    let raw2 = RawBlock::parse_from_raw_block(bytes, raw.nrows(), raw.ncols(), raw.precision());
+    let raw2 = RawBlock::parse_from_raw_block(bytes, raw.precision());
     dbg!(&raw, raw2);
     // dbg!(raw.as_bytes());
     // let v = unsafe { raw.get_ref_unchecked(0, 0) };

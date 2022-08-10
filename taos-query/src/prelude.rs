@@ -5,7 +5,10 @@ mod _priv {
     pub use crate::util::{Inlinable, InlinableRead, InlinableWrite};
     pub use crate::TBuilder;
     #[cfg(feature = "r2d2")]
-    pub use crate::{Manager, Pool, PoolBuilder};
+    pub use crate::{Pool, PoolBuilder};
+    #[cfg(feature = "r2d2")]
+    pub use r2d2::ManageConnection;
+
     pub use itertools::Itertools;
     pub use mdsn::{Dsn, DsnError, IntoDsn};
     pub use taos_error::{Code, Error as RawError};
@@ -42,7 +45,7 @@ pub mod sync {
     {
         iter: IBlockIter<'a, T>,
         block: Option<RawBlock>,
-        row: usize,
+        // row: usize,
         rows: Option<RowsIter<'a>>,
     }
 
@@ -146,7 +149,7 @@ pub mod sync {
             IRowsIter {
                 iter: self.blocks(),
                 block: None,
-                row: 0,
+                // row: 0,
                 rows: None,
             }
         }
@@ -180,7 +183,7 @@ pub mod sync {
         fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error>;
 
         fn exec<T: AsRef<str>>(&self, sql: T) -> Result<usize, Self::Error> {
-            log::info!("execute sql: {}", sql.as_ref());
+            log::debug!("execute sql: {}", sql.as_ref());
 
             self.query(sql).map(|res| res.affected_rows() as _)
         }
@@ -204,7 +207,7 @@ pub mod sync {
             &self,
             sql: T,
         ) -> Result<Option<O>, Self::Error> {
-            log::info!("query one: {}", sql.as_ref());
+            log::debug!("query one: {}", sql.as_ref());
             self.query(sql)?
                 .deserialize::<O>()
                 .next()
@@ -522,6 +525,29 @@ mod r#async {
                 .map_or(Ok(None), |v| v.map(Some).map_err(Into::into))
         }
 
+        /// Short for `CREATE DATABASE IF NOT EXISTS {name}`.
+        async fn create_database<N: AsRef<str> + Send>(
+            &self,
+            name: N,
+        ) -> Result<(), Self::Error> {
+            let query = format!("CREATE DATABASE IF NOT EXISTS {}", name.as_ref());
+
+            self.query(query).await?;
+            Ok(())
+        }
+
+        /// Short for `USE {name}`.
+        async fn use_database<N: AsRef<str> + Send>(
+            &self,
+            name: N,
+        ) -> Result<(), Self::Error> {
+            let query = format!("USE {}", name.as_ref());
+
+            self.query(query).await?;
+            Ok(())
+        }
+
+        /// Short for `CREATE TOPIC IF NOT EXISTS {name} AS {sql}`.
         async fn create_topic<N: AsRef<str> + Send + Sync, S: AsRef<str> + Send>(
             &self,
             name: N,
@@ -534,6 +560,7 @@ mod r#async {
             Ok(())
         }
 
+        /// Short for `CREATE TOPIC IF NOT EXISTS {name} WITH META AS DATABASE {db}`.
         async fn create_topic_as_database(
             &self,
             name: impl AsRef<str> + Send + Sync + 'async_trait,
@@ -546,10 +573,11 @@ mod r#async {
             Ok(())
         }
 
+        /// Short for `SHOW DATABASES`.
         async fn databases(&self) -> Result<Vec<ShowDatabase>, Self::Error> {
             use futures::stream::TryStreamExt;
             Ok(self
-                .query("show databases")
+                .query("SHOW DATABASES")
                 .await?
                 .deserialize()
                 .try_collect()

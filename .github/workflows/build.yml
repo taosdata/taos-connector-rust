@@ -27,30 +27,26 @@ jobs:
       - name: Checkout tdengine
         uses: actions/checkout@v2
         with:
-          submodules: recursive
           repository: 'taosdata/TDengine'
           path: 'TDengine'
-          ref: 'develop'
+          ref: '3.0'
 
-      - name: Change time zone
+      - name: Prepare development tools
         run: |
+          sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config -y
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
 
-          #- name: Checkout TDengine with same branch of taos-tools
-          #run: |
-          #cd TDengine
-          #git pull
-          #git branch -a | grep -w ${{ github.head_ref }} && git checkout ${{ github.head_ref }} || echo "${{ github.head_ref }} not found in TDengine"
-          #git submodule update --init --recursive
-          #if: github.event_name == 'pull_request'
-
-      - name: Checkout TDengine's taos-tools to PR number
+      - name: Checkout Rust connector
         if: github.event_name == 'pull_request'
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
-          cd TDengine/src/plugins/taosws-rs
-          git fetch origin +refs/pull/${{env.PR_NUMBER}}/merge
-          git checkout -qf FETCH_HEAD
+          cd TDengine
+          echo use commit ${BRANCH_NAME}
+          sed -iE "s#GIT_TAG.*#GIT_TAG ${BRANCH_NAME}#" cmake/taosws_CMakeLists.txt.in
+          mkdir release && cd release
+          cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true
 
       - name: Set up Go
         uses: actions/setup-go@v2
@@ -58,14 +54,25 @@ jobs:
           go-version: 1.14
 
       - name: Set up Rust
+        id: setup-rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
 
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            TDengine/tools/taosws-rs/target/
+          key: ${{ runner.os }}-cargo-${{ steps.setup-rust.outputs.rustc_hash }}
+
       - name: Build & Install TDengine
         run: |
-          sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config -y
-          cd TDengine && mkdir release && cd release && cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true && make -j8 || exit 1
+          cd TDengine/release/
+          make -j8 || exit 1
           sudo make install
           nohup sudo taosd > /dev/null 2>&1 &
           sleep 5
@@ -73,7 +80,7 @@ jobs:
 
       - name: Run examples
         run: |
-          cd TDengine/src/plugins/taosws-rs
+          cd TDengine/tools/taosws-rs
           ./taos-ws-sys/ci/package.sh
           cd ./target/libtaosws
           make

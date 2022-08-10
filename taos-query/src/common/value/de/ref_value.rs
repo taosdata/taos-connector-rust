@@ -599,7 +599,7 @@ mod tests {
 
         macro_rules! _de_prim {
             ($v:ident, $ty:ty, $inner:literal) => {
-                log::info!(
+                log::debug!(
                     "ty: {}, prim: {}",
                     stringify!($v),
                     std::any::type_name::<$ty>()

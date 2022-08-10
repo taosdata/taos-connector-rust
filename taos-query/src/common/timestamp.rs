@@ -28,7 +28,7 @@ impl Debug for Timestamp {
 
 impl Display for Timestamp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.to_naive_datetime(), f)
+        Display::fmt(&self.to_datetime_with_tz().to_rfc3339(), f)
     }
 }
 

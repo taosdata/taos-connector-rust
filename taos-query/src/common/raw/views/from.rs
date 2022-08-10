@@ -1,4 +1,4 @@
-use crate::common::itypes::{IJson, INChar, IVarChar};
+use crate::common::itypes::{INChar, IVarChar};
 
 use super::*;
 
@@ -136,7 +136,9 @@ impl From<Vec<Option<f64>>> for ColumnView {
 
 impl From<Vec<Option<IVarChar>>> for ColumnView {
     fn from(values: Vec<Option<IVarChar>>) -> Self {
-        ColumnView::VarChar(VarCharView::from_iter::<IVarChar, _, _, _>(values.into_iter()))
+        ColumnView::VarChar(VarCharView::from_iter::<IVarChar, _, _, _>(
+            values.into_iter(),
+        ))
     }
 }
 

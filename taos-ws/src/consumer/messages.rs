@@ -79,7 +79,6 @@ pub enum TmqSend {
     Fetch(MessageArgs),
     FetchBlock(MessageArgs),
     Commit(MessageArgs),
-    Close,
 }
 
 unsafe impl Send for TmqSend {}
@@ -103,7 +102,6 @@ impl TmqSend {
             TmqSend::Fetch(args) => args.req_id,
             TmqSend::FetchBlock(args) => args.req_id,
             TmqSend::Commit(args) => args.req_id,
-            TmqSend::Close => unreachable!(),
         }
     }
 }
@@ -149,14 +147,6 @@ impl TmqFetch {
             })
             .collect_vec()
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum TmqMsgData {
-    Fetch(TmqFetch),
-    Block(Vec<u8>),
-    JsonMeta(Value),
-    RawMeta(Vec<u8>),
 }
 
 #[derive(Debug, Deserialize, Clone)]

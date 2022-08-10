@@ -176,4 +176,3 @@ impl<A: Into<Option<Item>>> FromIterator<A> for View {
         }
     }
 }
-

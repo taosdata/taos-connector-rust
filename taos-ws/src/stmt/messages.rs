@@ -113,7 +113,6 @@ pub enum StmtSend {
     },
     AddBatch(StmtArgs),
     Exec(StmtArgs),
-    Close(StmtArgs),
 }
 
 impl ToMessage for StmtSend {}

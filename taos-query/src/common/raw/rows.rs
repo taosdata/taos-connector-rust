@@ -16,6 +16,27 @@ pub struct IntoRowsIter<'a> {
     pub(crate) _marker: PhantomData<&'a bool>,
 }
 
+unsafe impl<'a> Send for IntoRowsIter<'a> {}
+unsafe impl<'a> Sync for IntoRowsIter<'a> {}
+
+impl<'a> Iterator for IntoRowsIter<'a> {
+    type Item = RowView<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.row >= self.raw.nrows() {
+            None
+        } else {
+            let row = self.row;
+            self.row += 1;
+            Some(RowView {
+                raw: unsafe { &*(&self.raw as *const RawBlock) },
+                row: row,
+                col: 0,
+            })
+        }
+    }
+}
+
 pub struct RowsIter<'a> {
     pub(super) raw: NonNull<RawBlock>,
     pub(super) row: usize,
@@ -112,16 +133,16 @@ impl<'a> RowView<'a> {
         self.next().map(|(_, v)| v)
     }
 
-    fn walk(&mut self) {
-        self.col += 1;
-    }
+    // fn walk(&mut self) {
+    //     self.col += 1;
+    // }
 
     fn peek_name(&self) -> Option<&'a str> {
         self.raw.fields.get(self.col).map(|s| s.as_str())
     }
-    fn peek_value(&self) -> Option<BorrowedValue<'a>> {
-        self.raw.get_ref(self.row, self.col)
-    }
+    // fn peek_value(&self) -> Option<BorrowedValue<'a>> {
+    //     self.raw.get_ref(self.row, self.col)
+    // }
 
     pub fn into_values(self) -> Vec<Value> {
         self.map(|(_, b)| b.to_value()).collect()

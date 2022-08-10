@@ -1,5 +1,4 @@
 use std::{
-    ffi::c_void,
     fmt::{Display, Write},
     ops::Deref,
 };
@@ -12,8 +11,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use crate::{
     common::{Field, Ty},
-    // prelude::AsyncInlinable,
-    util::{Inlinable, InlinableRead},
+    util::Inlinable,
 };
 
 use super::RawData;

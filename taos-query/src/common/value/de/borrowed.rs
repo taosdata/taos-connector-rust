@@ -193,11 +193,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 Cow::Borrowed(v) => visitor.visit_borrowed_str(v),
                 Cow::Owned(v) => visitor.visit_str(&v),
             },
-            Timestamp(v) => visitor.visit_string(
-                v.to_naive_datetime()
-                    .format("%Y-%m-%dT%H:%M:%S%.f")
-                    .to_string(),
-            ),
+            Timestamp(v) => visitor.visit_string(v.to_datetime_with_tz().to_rfc3339()),
             _ => Err(<Self::Error as de::Error>::custom(
                 "unsupported type to deserialize",
             )),

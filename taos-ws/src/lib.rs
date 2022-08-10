@@ -7,8 +7,7 @@ use once_cell::sync::OnceCell;
 use asyn::WsTaos;
 
 use taos_query::{
-    block_in_place_or_global, common::RawMeta, AsyncQueryable, DsnError, IntoDsn, Queryable,
-    TBuilder,
+    block_in_place_or_global, common::RawMeta, AsyncQueryable, DsnError, IntoDsn, TBuilder,
 };
 
 mod infra;
@@ -22,6 +21,7 @@ pub mod sync;
 
 // pub mod tmq;
 pub mod consumer;
+pub use consumer::{Consumer, TmqBuilder};
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
@@ -102,7 +102,13 @@ impl TaosBuilder {
         let token = dsn.params.remove("token");
 
         let addr = match dsn.addresses.first() {
-            Some(addr) => addr.to_string(),
+            Some(addr) => {
+                if addr.host.as_ref().map(|s| s.as_str()) == Some("localhost") {
+                    "localhost:6041".to_string()
+                } else {
+                    addr.to_string()
+                }
+            }
             None => "localhost:6041".to_string(),
         };
 

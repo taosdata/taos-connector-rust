@@ -1,4 +1,3 @@
-use once_cell::sync::OnceCell;
 use taos_error::Code;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta};
 use taos_query::{DeError, DsnError, Fetchable, IntoDsn, Queryable};
@@ -9,7 +8,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::stmt::Stmt;
 // use crate::stmt::sync::{WsSyncStmt, WsSyncStmtClient};
-use crate::{infra::*, stmt, TaosBuilder};
+use crate::{infra::*, TaosBuilder};
 
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
@@ -35,12 +34,6 @@ type MsgSender = tokio::sync::mpsc::Sender<WsSend>;
 pub struct MsgReceiver(std::sync::mpsc::Receiver<WsSend>);
 unsafe impl Send for MsgReceiver {}
 unsafe impl Sync for MsgReceiver {}
-
-pub struct WsAuth {
-    user: Option<String>,
-    password: Option<String>,
-    token: Option<String>,
-}
 
 pub struct WsClient {
     info: TaosBuilder,
@@ -103,6 +96,7 @@ pub enum Error {
 }
 
 #[repr(C)]
+#[allow(non_camel_case_types)]
 pub enum WS_ERROR_NO {
     DSN_ERROR = 0xE000,
     WEBSOCKET_ERROR = 0xE001,
@@ -281,7 +275,7 @@ impl WsClient {
                                 match data {
                                     WsRecvData::Conn => todo!(),
                                     WsRecvData::Query(query) => {
-                                        log::info!("query result: {:?}", query);
+                                        log::debug!("query result: {:?}", query);
                                         if let Some(sender) = queries_sender.remove(&req_id) {
                                             if let Err(err) = sender.1.send(ok.map(|_| query)) {
                                                 log::error!(
@@ -294,7 +288,7 @@ impl WsClient {
                                     }
                                     WsRecvData::Fetch(fetch) => {
                                         let res_id = fetch.id;
-                                        log::info!("fetch result: {:?}", fetch);
+                                        log::debug!("fetch result: {:?}", fetch);
                                         if let Some(sender) = fetches_sender
                                             .read(&fetch.id, |_, sender| sender.clone())
                                         {
@@ -423,7 +417,7 @@ impl WsClient {
         self.s_query_timeout(sql, self.timeout)
     }
     pub fn s_query_timeout(&self, sql: &str, timeout: Duration) -> Result<ResultSet> {
-        log::info!("query with sql: {sql}");
+        log::debug!("query with sql: {sql}");
         let req_id = self.req_id();
         if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
             Err(taos_error::Error::new(
@@ -596,8 +590,6 @@ impl ResultSet {
             WsFetchData::Block(timing, raw) => {
                 let mut raw = RawBlock::parse_from_raw_block(
                     raw,
-                    fetch_resp.rows,
-                    self.fields_count,
                     self.precision,
                 );
 

@@ -81,8 +81,8 @@ macro_rules! _impl_inline_str {
                     self.len() / std::mem::size_of::<char>()
                 }
 
-                #[inline]
-                #[rustversion::attr(nightly, const)]
+                // #[inline]
+                // #[rustversion::attr(nightly, const)]
                 pub fn chars(&self) -> &[char] {
                     unsafe { std::slice::from_raw_parts(self.data.as_ptr() as _, self.chars_len()) }
                 }
@@ -100,7 +100,8 @@ macro_rules! _impl_inline_str {
                     for c in chars {
                         let mut b = [0; 4];
                         let s = c.encode_utf8(&mut b);
-                        std::ptr::copy_nonoverlapping(s.as_ptr(), ptr.offset(len as isize), s.len());
+                        // dbg!(c, &s);
+                        std::ptr::copy(s.as_ptr(), ptr.offset(len as isize), s.len());
                         len += s.len();
                     }
                     v.set_len(len);
