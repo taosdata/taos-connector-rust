@@ -36,7 +36,7 @@ jobs:
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
 
-      - name: Checkout TDengine's taos-tools to PR number
+      - name: Checkout TDengine's rust connector to PR number
         if: github.event_name == 'pull_request'
         run: |
           sed -E "s/GIT_TAG.*/GIT_TAG ${GITHUB_SHA}/"
