@@ -2,6 +2,9 @@
 name = "taos-macros"
 version = "0.2.0"
 edition = "2021"
+keywords = ["taos", "TDengine", "proc-macro"]
+license = "MIT OR Apache-2.0"
+description = "TDengine connector internal macros"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
@@ -13,6 +16,6 @@ quote = "1.0.18"
 syn = { version = "1", features = ["full"] }
 
 [dev-dependencies]
-anyhow = "*"
-log = "*"
-tokio = "*"
+anyhow = "1"
+log = "0.4"
+tokio = "1"
