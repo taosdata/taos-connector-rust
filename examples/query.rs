@@ -44,8 +44,11 @@ async fn main() -> anyhow::Result<()> {
 
     assert_eq!(inserted, 6);
     loop {
-        let count: usize = taos.query_one("select count(*) from `meters`").await?.unwrap_or_default();
-        
+        let count: usize = taos
+            .query_one("select count(*) from `meters`")
+            .await?
+            .unwrap_or_default();
+
         if count >= 6 {
             break;
         } else {

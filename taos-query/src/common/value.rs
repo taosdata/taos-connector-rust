@@ -7,7 +7,7 @@ use super::{Timestamp, Ty};
 
 #[derive(Debug, Clone)]
 pub enum BorrowedValue<'b> {
-    Null(Ty),        // 0
+    Null(Ty),    // 0
     Bool(bool),  // 1
     TinyInt(i8), // 2
     SmallInt(i16),
@@ -215,7 +215,7 @@ unsafe impl<'b> Send for BorrowedValue<'b> {}
 // #[derive(Debug, Clone)]
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub enum Value {
-    Null(Ty),        // 0
+    Null(Ty),    // 0
     Bool(bool),  // 1
     TinyInt(i8), // 2
     SmallInt(i16),

@@ -3,7 +3,7 @@ use itertools::Itertools;
 use scc::HashMap;
 
 use taos_query::common::views::views_to_raw_block;
-use taos_query::common::{ColumnView};
+use taos_query::common::ColumnView;
 use taos_query::prelude::InlinableWrite;
 use taos_query::stmt::Bindable;
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
@@ -98,7 +98,6 @@ impl Bindable<super::Taos> for Stmt {
         &mut self,
         params: &[taos_query::common::ColumnView],
     ) -> StdResult<&mut Self, Self::Error> {
-
         // This json method for bind
 
         // let columns = params
