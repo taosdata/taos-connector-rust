@@ -2,6 +2,13 @@
 name = "taos-error"
 version = "0.2.0"
 edition = "2021"
+homepage = "https://github.com/taosdata/taos-connector-rust"
+documentation = "https://docs.rs/taos-query"
+repository = "https://github.com/taosdata/taos-connector-rust/tree/main/taos-error"
+keywords = ["taos", "TDengine", "timeseries"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+description = "M-DSN: A Multi-address DSN(Data Source Name) parser."
 
 build = "build.rs"
 
@@ -9,7 +16,7 @@ build = "build.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
-mdsn = { path = "../mdsn"}
+mdsn = { path = "../mdsn", version = "0.2"}
 thiserror = "1.0"
 
 [build-dependencies]

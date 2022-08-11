@@ -3,8 +3,7 @@ use serde_json::Value;
 use serde_with::serde_as;
 use serde_with::NoneAsEmptyString;
 
-use taos_error::Error;
-
+use taos_query::prelude::RawError as Error;
 use crate::infra::ToMessage;
 use crate::infra::WsConnReq;
 
@@ -176,7 +175,7 @@ impl StmtRecv {
     pub(crate) fn ok(self) -> StmtOk {
         macro_rules! _e {
             () => {
-                Err(taos_error::Error::new(
+                Err(Error::new(
                     if self.code == 65536 { -1 } else { self.code },
                     self.message.unwrap_or_default(),
                 ))
