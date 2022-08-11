@@ -148,14 +148,14 @@ pub struct TmqRecv {
 }
 
 impl TmqRecv {
-    pub(crate) fn ok(self) -> (TmqArgs, TmqRecvData, Result<(), taos_error::Error>) {
+    pub(crate) fn ok(self) -> (TmqArgs, TmqRecvData, Result<(), RawError>) {
         (
             self.args,
             self.data,
             if self.code == 0 {
                 Ok(())
             } else {
-                Err(taos_error::Error::new(
+                Err(RawError::new(
                     self.code,
                     self.message.unwrap_or_default(),
                 ))

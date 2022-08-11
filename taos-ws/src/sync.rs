@@ -1,5 +1,5 @@
-use taos_error::Code;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta};
+use taos_query::prelude::{RawError, Code};
 use taos_query::{DeError, DsnError, Fetchable, IntoDsn, Queryable};
 use thiserror::Error;
 use tokio::sync::watch;
@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use scc::HashMap;
 
-type WsFetchResult = std::result::Result<WsFetchData, taos_error::Error>;
-type WsQueryResult = std::result::Result<WsQueryResp, taos_error::Error>;
+type WsFetchResult = std::result::Result<WsFetchData, RawError>;
+type WsQueryResult = std::result::Result<WsQueryResp, RawError>;
 
 type QuerySender = std::sync::mpsc::SyncSender<WsQueryResult>;
 
@@ -83,7 +83,7 @@ pub enum Error {
     #[error(transparent)]
     TungsteniteError(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("{0}")]
-    TaosError(#[from] taos_error::Error),
+    TaosError(#[from] RawError),
     #[error(transparent)]
     RecvTimeout(#[from] std::sync::mpsc::RecvTimeoutError),
     #[error(transparent)]
@@ -105,7 +105,7 @@ pub enum WS_ERROR_NO {
 }
 
 impl Error {
-    pub const fn errno(&self) -> taos_error::Code {
+    pub const fn errno(&self) -> Code {
         match self {
             Error::TaosError(error) => error.code(),
             Error::Dsn(_) => Code::new(WS_ERROR_NO::DSN_ERROR as _),
@@ -113,7 +113,7 @@ impl Error {
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
             Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
             // Error::RecvFetchError(_) => Code::new(WS_ERROR_NO::RECV_TIMEOUT_FETCH as _),
-            _ => taos_error::Code::Failed,
+            _ => Code::Failed,
         }
     }
     pub fn errstr(&self) -> String {
@@ -361,7 +361,7 @@ impl WsClient {
                         log::error!("connection seems closed: {}", err);
                         queries_sender
                             .retain_async(|_, v| {
-                                let _ = v.send(Err(taos_error::Error::new(
+                                let _ = v.send(Err(RawError::new(
                                     Code::new(WS_ERROR_NO::CONN_CLOSED as _),
                                     err.to_string(),
                                 )));
@@ -370,7 +370,7 @@ impl WsClient {
                             .await;
                         fetches_sender
                             .retain_async(|_, v| {
-                                let _ = v.send(Err(taos_error::Error::new(
+                                let _ = v.send(Err(RawError::new(
                                     Code::new(WS_ERROR_NO::CONN_CLOSED as _),
                                     err.to_string(),
                                 )));
@@ -419,7 +419,7 @@ impl WsClient {
         log::debug!("query with sql: {sql}");
         let req_id = self.req_id();
         if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
-            Err(taos_error::Error::new(
+            Err(RawError::new(
                 Code::new(WS_ERROR_NO::CONN_CLOSED as _),
                 "connection closed",
             ))?;
@@ -501,7 +501,7 @@ impl WsClient {
     }
     pub fn s_exec_timeout(&self, sql: &str, timeout: Duration) -> Result<usize> {
         if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
-            Err(taos_error::Error::new(
+            Err(RawError::new(
                 Code::new(WS_ERROR_NO::CONN_CLOSED as _),
                 "connection closed",
             ))?;
@@ -527,7 +527,7 @@ impl WsClient {
 
     pub fn stmt_init(&self) -> Result<Stmt> {
         if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
-            Err(taos_error::Error::new(
+            Err(RawError::new(
                 Code::new(WS_ERROR_NO::CONN_CLOSED as _),
                 "connection closed",
             ))?;
@@ -554,7 +554,7 @@ impl ResultSet {
             return Ok(None);
         }
         if !self.alive.load(std::sync::atomic::Ordering::SeqCst) {
-            Err(taos_error::Error::new(
+            Err(RawError::new(
                 Code::new(WS_ERROR_NO::CONN_CLOSED as _),
                 "connection closed",
             ))?;
@@ -643,7 +643,7 @@ impl ResultSet {
     pub fn stop_query(&mut self) {
         if let Some((_, sender)) = self.fetches.remove(&self.id) {
             sender
-                .send(Err(taos_error::Error::from_string("").into()))
+                .send(Err(RawError::from_string("").into()))
                 .unwrap();
         }
     }
