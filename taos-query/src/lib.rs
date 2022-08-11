@@ -1,6 +1,5 @@
 //! This is the common query traits/types for TDengine connectors.
 //!
-#![cfg_attr(nightly, feature(const_slice_from_raw_parts))]
 #![cfg_attr(nightly, feature(const_slice_index))]
 
 use std::{
