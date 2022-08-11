@@ -75,11 +75,11 @@ impl Stream for Blocks {
                 let mut raw = unsafe { RawBlock::parse_from_ptr(state.block as _, self.precision) };
                 raw.with_field_names(self.fields.iter().map(|f| f.name()));
 
-                if state.num > 100 {
+                if state.num > 0 {
                     state.num = 0;
                     state.done = false;
                 } else {
-                    state.num = 0; // finish fast
+                    state.num = 0; // finish
                 }
                 Poll::Ready(Some(Ok(raw)))
             } else {

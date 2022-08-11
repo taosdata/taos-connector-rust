@@ -84,7 +84,7 @@ impl IntView {
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
             .map(|v| BorrowedValue::Int(v))
-            .unwrap_or(BorrowedValue::Null)
+            .unwrap_or(BorrowedValue::Null(Ty::Int))
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {

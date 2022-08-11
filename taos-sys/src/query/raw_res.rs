@@ -140,8 +140,8 @@ impl RawRes {
                 // has next block.
                 let mut raw = unsafe { RawBlock::parse_from_ptr(current.block as _, precision) };
                 raw.with_field_names(fields.iter().map(|f| f.name()));
-                if current.num < 100 {
-                    // finish fetch loop fast.
+                if current.num == 0 {
+                    // finish fetch loop.
                     current.done = true;
                     current.num = 0;
                 } else {

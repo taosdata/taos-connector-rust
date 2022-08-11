@@ -118,7 +118,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
         use BorrowedValue::*;
         // todo!()
         match self {
-            Null => visitor.visit_none(),
+            Null(_) => visitor.visit_none(),
             Bool(v) => visitor.visit_bool(v),
             TinyInt(v) => visitor.visit_i8(v),
             SmallInt(v) => visitor.visit_i16(v),
@@ -168,7 +168,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
         log::trace!("call deserialize_str: {self:?}");
         use BorrowedValue::*;
         match self {
-            Null => visitor.visit_borrowed_str(""), // todo: empty string or error?
+            Null(_) => visitor.visit_borrowed_str(""), // todo: empty string or error?
             Bool(v) => visitor.visit_string(format!("{v}")),
             TinyInt(v) => visitor.visit_string(format!("{v}")),
             SmallInt(v) => visitor.visit_string(format!("{v}")),
@@ -237,7 +237,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
         }
         // todo!()
         match self {
-            Null => visitor.visit_none(),
+            Null(_) => visitor.visit_none(),
             Bool(v) => _v_!(v),
             TinyInt(v) => _v_!(v),
             SmallInt(v) => _v_!(v),
@@ -284,7 +284,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
         log::trace!("call deserialize seq by value");
         use BorrowedValue::*;
         match self {
-            Null => Vec::<u8>::new()
+            Null(_) => Vec::<u8>::new()
                 .into_deserializer()
                 .deserialize_seq(visitor),
             Json(v) => v.to_vec().into_deserializer().deserialize_seq(visitor),
@@ -457,7 +457,7 @@ mod tests {
         }
 
         _de_value!(
-            Null, Option<u8>, None
+            Null(Ty::UTinyInt), Option<u8>, None
             TinyInt(-1), i8, -1
             SmallInt(-1), i16, -1
             Int(0x0fff_ffff), i32, 0x0fff_ffff
@@ -520,7 +520,7 @@ mod tests {
             Json(json!("abc").to_string().into_bytes().into()), is_err
             Timestamp(crate::Timestamp::Milliseconds(0)), is_err
             ;
-            Null, ""
+            Null(Ty::VarChar), ""
             VarChar("String"), "String"
             VarChar("你好，世界"), "你好，世界"
         };
@@ -561,7 +561,7 @@ mod tests {
             // UBigInt(1), is_err
             // ;
 
-            Null, ""
+            Null(Ty::VarChar), ""
             TinyInt(-1), "-1"
             Timestamp(crate::Timestamp::Milliseconds(0)), "1970-01-01T00:00:00"
             VarChar("String"), "String"

@@ -50,7 +50,7 @@ impl JsonView {
         // todo: use simd_json::BorrowedValue as Json.
         self.get_unchecked(row)
             .map(|s| BorrowedValue::Json(s.as_bytes().into()))
-            .unwrap_or(BorrowedValue::Null)
+            .unwrap_or(BorrowedValue::Null(Ty::Json))
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {

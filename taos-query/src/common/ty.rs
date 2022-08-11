@@ -223,6 +223,7 @@ impl Ty {
                 | UBigInt
                 | Float
                 | Double
+                | Timestamp
                 | Decimal
         )
     }

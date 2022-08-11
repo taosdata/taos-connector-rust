@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
     let mut stmt = Stmt::init(&taos)?;
     stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
     let params = vec![
-        ColumnView::from_millis_timestamp(vec![164000000000]),
+        ColumnView::from_millis_timestamp(vec![0]),
         ColumnView::from_bools(vec![true]),
         ColumnView::from_tiny_ints(vec![i8::MAX]),
         ColumnView::from_small_ints(vec![i16::MAX]),
