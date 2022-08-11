@@ -6,6 +6,7 @@ use std::{error::Error, io::BufReader};
 
 use heck::*;
 use regex::Regex;
+use rustc_version::{version, Version};
 
 fn code_from_header(
     header: impl AsRef<Path>,
@@ -110,7 +111,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     match rustc_version::version_meta().unwrap().channel {
         rustc_version::Channel::Dev => (),
         rustc_version::Channel::Nightly => {
-            println!("cargo:rustc-cfg=nightly");
+            if dbg!(version().unwrap()) < Version::parse("1.65.0-nightly").unwrap() {
+                println!("cargo:rustc-cfg=nightly");
+            }
         }
         rustc_version::Channel::Beta => (),
         rustc_version::Channel::Stable => (),

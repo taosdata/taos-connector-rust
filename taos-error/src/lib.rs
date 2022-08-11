@@ -11,7 +11,6 @@ use std::{
 use std::backtrace::Backtrace;
 
 use mdsn::DsnError;
-use thiserror::Error;
 
 macro_rules! _impl_fmt {
     ($fmt:ident) => {
@@ -109,7 +108,7 @@ mod code {
     include!(concat!(env!("OUT_DIR"), "/code.rs"));
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub struct Error {
     code: Code,
     err: Cow<'static, str>,
