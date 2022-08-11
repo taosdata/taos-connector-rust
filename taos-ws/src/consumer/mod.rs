@@ -5,6 +5,7 @@ use scc::HashMap;
 
 use taos_query::block_in_place_or_global;
 use taos_query::common::{JsonMeta, RawMeta};
+use taos_query::prelude::{RawError, Code};
 use taos_query::tmq::{
     AsAsyncConsumer, AsConsumer, IsAsyncData, IsAsyncMeta, IsOffset, MessageSet, SyncOnAsync,
     Timeout,
@@ -31,7 +32,7 @@ use std::time::Duration;
 mod messages;
 
 type WsSender = tokio::sync::mpsc::Sender<Message>;
-type WsTmqAgent = Arc<HashMap<ReqId, oneshot::Sender<StdResult<TmqRecvData, taos_error::Error>>>>;
+type WsTmqAgent = Arc<HashMap<ReqId, oneshot::Sender<StdResult<TmqRecvData, RawError>>>>;
 
 #[derive(Debug, Clone)]
 struct WsTmqSender {
@@ -707,7 +708,7 @@ pub enum Error {
     #[error("{0}")]
     WsError(#[from] WsError),
     #[error("{0}")]
-    TaosError(#[from] taos_error::Error),
+    TaosError(#[from] RawError),
     #[error("Receive timeout in {0}")]
     QueryTimeout(String),
 }
@@ -716,10 +717,10 @@ unsafe impl Send for Error {}
 unsafe impl Sync for Error {}
 
 impl Error {
-    pub const fn errno(&self) -> taos_error::Code {
+    pub const fn errno(&self) -> Code {
         match self {
             Error::TaosError(error) => error.code(),
-            _ => taos_error::Code::Failed,
+            _ => Code::Failed,
         }
     }
     pub fn errstr(&self) -> String {

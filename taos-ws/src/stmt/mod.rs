@@ -4,7 +4,7 @@ use scc::HashMap;
 
 use taos_query::common::views::views_to_raw_block;
 use taos_query::common::ColumnView;
-use taos_query::prelude::InlinableWrite;
+use taos_query::prelude::{InlinableWrite, RawError};
 use taos_query::stmt::Bindable;
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 use tokio::sync::{oneshot, watch};
@@ -24,7 +24,7 @@ use std::time::Duration;
 
 mod messages;
 
-type StmtResult = StdResult<Option<usize>, taos_error::Error>;
+type StmtResult = StdResult<Option<usize>, RawError>;
 type StmtSender = std::sync::mpsc::SyncSender<StmtResult>;
 type StmtReceiver = std::sync::mpsc::Receiver<StmtResult>;
 
@@ -129,7 +129,7 @@ pub struct Stmt {
     timeout: Duration,
     ws: WsSender,
     close_signal: watch::Sender<bool>,
-    queries: Arc<HashMap<ReqId, oneshot::Sender<StdResult<StmtId, taos_error::Error>>>>,
+    queries: Arc<HashMap<ReqId, oneshot::Sender<StdResult<StmtId, RawError>>>>,
     fetches: Arc<HashMap<StmtId, StmtSender>>,
     receiver: Option<StmtReceiver>,
     args: Option<StmtArgs>,
@@ -195,7 +195,7 @@ use super::asyn::Error;
 //     #[error("{0}")]
 //     WsError(#[from] WsError),
 //     #[error("{0}")]
-//     TaosError(#[from] taos_error::Error),
+//     TaosError(#[from] RawError),
 // }
 
 // impl Error {
