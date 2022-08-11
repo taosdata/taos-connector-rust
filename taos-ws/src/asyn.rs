@@ -3,6 +3,7 @@ use bytes::Bytes;
 use futures::{FutureExt, SinkExt, StreamExt};
 use scc::HashMap;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta};
+use taos_query::prelude::{RawError, Code};
 use taos_query::util::InlinableWrite;
 use taos_query::{
     block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
@@ -24,7 +25,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 
-type WsFetchResult = std::result::Result<WsFetchData, taos_error::Error>;
+type WsFetchResult = std::result::Result<WsFetchData, RawError>;
 type FetchSender = std::sync::mpsc::SyncSender<WsFetchResult>;
 type FetchReceiver = std::sync::mpsc::Receiver<WsFetchResult>;
 
@@ -37,7 +38,7 @@ pub struct WsTaos {
     version: String,
     close_signal: watch::Sender<bool>,
     queries:
-        Arc<HashMap<ReqId, oneshot::Sender<std::result::Result<WsQueryResp, taos_error::Error>>>>,
+        Arc<HashMap<ReqId, oneshot::Sender<std::result::Result<WsQueryResp, RawError>>>>,
     fetches: Arc<HashMap<ResId, FetchSender>>,
 }
 
@@ -111,7 +112,7 @@ pub enum Error {
     #[error("Query timed out with sql: {0}")]
     QueryTimeout(String),
     #[error("{0}")]
-    TaosError(#[from] taos_error::Error),
+    TaosError(#[from] RawError),
     #[error("{0}")]
     DeError(#[from] DeError),
     #[error("{0}")]
@@ -121,10 +122,10 @@ pub enum Error {
 }
 
 impl Error {
-    pub const fn errno(&self) -> taos_error::Code {
+    pub const fn errno(&self) -> Code {
         match self {
             Error::TaosError(error) => error.code(),
-            _ => taos_error::Code::Failed,
+            _ => Code::Failed,
         }
     }
     pub fn errstr(&self) -> String {

@@ -9,6 +9,7 @@ use serde_with::NoneAsEmptyString;
 use taos_query::common::Field;
 use taos_query::common::Precision;
 use taos_query::common::Ty;
+use taos_query::prelude::RawError;
 use taos_query::tmq::VGroupId;
 
 use crate::infra::ToMessage;
@@ -188,14 +189,14 @@ pub struct TmqRecv {
 }
 
 impl TmqRecv {
-    pub(crate) fn ok(self) -> (ReqId, TmqRecvData, Result<(), taos_error::Error>) {
+    pub(crate) fn ok(self) -> (ReqId, TmqRecvData, Result<(), RawError>) {
         (
             self.req_id,
             self.data,
             if self.code == 0 {
                 Ok(())
             } else {
-                Err(taos_error::Error::new(
+                Err(RawError::new(
                     self.code,
                     self.message.unwrap_or_default(),
                 ))
