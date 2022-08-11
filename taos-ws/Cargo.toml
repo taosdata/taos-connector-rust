@@ -2,6 +2,10 @@
 name = "taos-ws"
 version = "0.2.0"
 edition = "2021"
+keywords = ["taos", "TDengine", "timeseries", "database"]
+license = "MIT OR Apache-2.0"
+readme = "../README.md"
+description = "TDengine connector with websocket protocol"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -18,14 +22,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 serde_repr = "0.1.8"
 serde_with = "2.0.0"
-taos-error = { path = "../taos-error" }
-taos-query = { path = "../taos-query" }
+taos-query = { path = "../taos-query", version = "0.*" }
 thiserror = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.17", features = ["native-tls"] }
 
 [dev-dependencies]
-pretty_env_logger = "*"
+pretty_env_logger = "0.4.0"
 
 [features]
 default = ["tmq"]

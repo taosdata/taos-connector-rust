@@ -26,14 +26,14 @@ use std::time::Duration;
 pub(crate) mod message;
 use message::*;
 
-type WsFetchResult = std::result::Result<(), taos_error::Error>;
+type WsFetchResult = std::result::Result<(), RawError>;
 type PollSender = std::sync::mpsc::SyncSender<WsFetchResult>;
 type PollReceiver = std::sync::mpsc::Receiver<WsFetchResult>;
 // type TmqSenderStream = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 
 type TmqSender = tokio::sync::mpsc::Sender<Message>;
 
-type TmqMsgResult = std::result::Result<TmqMsgData, taos_error::Error>;
+type TmqMsgResult = std::result::Result<TmqMsgData, RawError>;
 type TmqMsgSender = tokio::sync::mpsc::Sender<TmqMsgResult>;
 
 #[test]
@@ -53,7 +53,7 @@ pub struct AsyncTmqBuilder {
     req_id: Arc<AtomicU64>,
     ws: TmqSender,
     close_signal: watch::Sender<bool>,
-    queries: Arc<HashMap<ReqId, oneshot::Sender<std::result::Result<TmqPoll, taos_error::Error>>>>,
+    queries: Arc<HashMap<ReqId, oneshot::Sender<std::result::Result<TmqPoll, RawError>>>>,
     fetches: Arc<HashMap<ResId, PollSender>>,
     messages: Arc<HashMap<TmqArgs, TmqMsgSender>>,
 }
@@ -127,7 +127,7 @@ pub enum Error {
     #[error("{0}")]
     RecvError(#[from] std::sync::mpsc::RecvError),
     #[error("{0}")]
-    TaosError(#[from] taos_error::Error),
+    TaosError(#[from] RawError),
     #[error("{0}")]
     DeError(#[from] DeError),
     #[error("{0}")]
