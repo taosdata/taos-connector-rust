@@ -37,7 +37,7 @@ mod rows;
 pub use rows::*;
 
 #[derive(Debug, Clone, Copy)]
-#[repr(C, packed(4))]
+#[repr(C, packed(1))]
 struct Header {
     version: u32,
     length: u32,

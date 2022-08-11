@@ -158,7 +158,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
         use Value::*;
         // todo!()
         match self {
-            Null => visitor.visit_none(),
+            Null(_) => visitor.visit_none(),
             Bool(v) => visitor.visit_bool(*v),
             TinyInt(v) => visitor.visit_i8(*v),
             SmallInt(v) => visitor.visit_i16(*v),
@@ -200,7 +200,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
         log::trace!("call deserialize_str");
         use Value::*;
         match self {
-            Null => visitor.visit_borrowed_str(""), // todo: empty string or error?
+            Null(_) => visitor.visit_borrowed_str(""), // todo: empty string or error?
             Bool(v) => visitor.visit_bool(*v),
             TinyInt(v) => visitor.visit_i8(*v),
             SmallInt(v) => visitor.visit_i16(*v),
@@ -261,7 +261,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
             };
         }
         match self {
-            Null => visitor.visit_none(),
+            Null(_) => visitor.visit_none(),
             Bool(v) => _v_!(v),
             TinyInt(v) => _v_!(v),
             SmallInt(v) => _v_!(v),
@@ -302,7 +302,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
         log::trace!("call deserialize seq by value");
         use Value::*;
         match self {
-            Null => Vec::<u8>::new()
+            Null(_) => Vec::<u8>::new()
                 .into_deserializer()
                 .deserialize_seq(visitor),
             Json(v) => v
@@ -396,7 +396,7 @@ mod tests {
             }
         }
         _de_value!(
-            Null Bool(true) TinyInt(0xf) SmallInt(0xfff) Int(0xffff) BigInt(-1) Float(1.0) Double(1.0)
+            Null(Ty::Bool) Bool(true) TinyInt(0xf) SmallInt(0xfff) Int(0xffff) BigInt(-1) Float(1.0) Double(1.0)
             UTinyInt(0xf) USmallInt(0xfff) UInt(0xffff) UBigInt(0xffffffff)
             Timestamp(crate::common::timestamp::Timestamp::Milliseconds(0)) VarChar("anything".to_string())
             NChar("你好，世界".to_string()) VarBinary(vec![1,2,3]) Blob(vec![1,2, 3]) MediumBlob(vec![1,2,3])
@@ -420,7 +420,7 @@ mod tests {
         }
 
         _de_value!(
-            Null, Option<u8>, None
+            Null(Ty::USmallInt), Option<u8>, None
             TinyInt(-1), i8, -1
             SmallInt(-1), i16, -1
             Int(0x0fff_ffff), i32, 0x0fff_ffff
@@ -483,7 +483,7 @@ mod tests {
             Json(json!("abc")), is_err
             Timestamp(crate::Timestamp::Milliseconds(0)), is_err
             ;
-            Null, ""
+            Null(Ty::VarChar), ""
             VarChar("String".to_string()), "String"
             VarChar("你好，世界".to_string()), "你好，世界"
         };
@@ -528,7 +528,7 @@ mod tests {
             UBigInt(1), is_err
             ;
 
-            Null, ""
+            Null(Ty::VarChar), ""
             Timestamp(crate::Timestamp::Milliseconds(0)), "1970-01-01T00:00:00"
             VarChar("String".to_string()), "String"
             VarChar("你好，世界".to_string()), "你好，世界"

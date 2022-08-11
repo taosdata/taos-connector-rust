@@ -1,4 +1,3 @@
-mod column;
 mod describe;
 mod field;
 // mod opts;
@@ -8,7 +7,6 @@ mod timestamp;
 mod ty;
 mod value;
 
-pub use column::*;
 pub use describe::*;
 pub use field::*;
 // pub use opts::*;

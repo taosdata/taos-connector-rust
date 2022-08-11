@@ -3,7 +3,7 @@ use itertools::Itertools;
 use scc::HashMap;
 
 use taos_query::common::views::views_to_raw_block;
-use taos_query::common::ColumnView;
+use taos_query::common::{ColumnView};
 use taos_query::prelude::InlinableWrite;
 use taos_query::stmt::Bindable;
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
@@ -98,15 +98,16 @@ impl Bindable<super::Taos> for Stmt {
         &mut self,
         params: &[taos_query::common::ColumnView],
     ) -> StdResult<&mut Self, Self::Error> {
-        // fixme: raw block has bug currently, revert to use json instead.
-        let columns = params
-            .into_iter()
-            .map(|tag| tag.to_json_value())
-            .collect_vec();
 
-        block_in_place_or_global(self.stmt_bind(columns))?;
-        // todo: use raw block?
-        // block_in_place_or_global(self.stmt_bind_block(params))?;
+        // This json method for bind
+
+        // let columns = params
+        //     .into_iter()
+        //     .map(|tag| tag.to_json_value())
+        //     .collect_vec();
+        // block_in_place_or_global(self.stmt_bind(columns))?;
+
+        block_in_place_or_global(self.stmt_bind_block(params))?;
         Ok(self)
     }
 
@@ -396,7 +397,7 @@ impl Stmt {
         Ok(self)
     }
 
-    pub async fn s_stmt(&mut self, sql: &str) -> Result<&mut Self> {
+    pub async fn s_stmt<'a>(&'a mut self, sql: &'a str) -> Result<&mut Self> {
         let stmt = self.stmt_init().await?;
         stmt.stmt_prepare(sql).await?;
         Ok(self)
@@ -449,22 +450,17 @@ impl Stmt {
         Ok(())
     }
 
-    pub async fn stmt_bind_block(&mut self, columns: &[ColumnView]) -> Result<()> {
+    async fn stmt_bind_block(&mut self, columns: &[ColumnView]) -> Result<()> {
         let args = self.args.unwrap();
 
         let mut bytes = Vec::new();
         // p0 uin64  req_id
         // p0+8 uint64 stmt_id
         // p0+16 uint64 (1 (set tag) 2 (bind))
-        // p0+24 uint64 rows
-        // p0+32 uint64 cols
-        // p0+40 raw block
+        // p0+24 raw block
         bytes.write_u64_le(args.req_id)?;
         bytes.write_u64_le(args.stmt_id)?;
         bytes.write_u64_le(2)?; // bind: 2
-        bytes.write_u64_le(columns.len() as u64)?;
-        let rows = columns.first().map(|c| c.len()).unwrap_or_default() as u64;
-        bytes.write_u64_le(rows)?;
 
         let block = views_to_raw_block(columns);
 

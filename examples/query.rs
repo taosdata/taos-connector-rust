@@ -5,7 +5,7 @@ use taos::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let dsn = "taos://localhost:6030";
+    let dsn = "taos://";
 
     let opts = PoolBuilder::new()
         .max_size(5000) // max connections
@@ -43,9 +43,17 @@ async fn main() -> anyhow::Result<()> {
     ]).await?;
 
     assert_eq!(inserted, 6);
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    loop {
+        let count: usize = taos.query_one("select count(*) from `meters`").await?.unwrap_or_default();
+        
+        if count >= 6 {
+            break;
+        } else {
+            println!("waiting for data");
+        }
+    }
 
-    let mut result = taos.query("select * from `meters`").await?;
+    let mut result = taos.query("select tbname, * from `meters`").await?;
 
     for field in result.fields() {
         println!("got field: {}", field.name());
@@ -68,6 +76,7 @@ async fn main() -> anyhow::Result<()> {
     #[derive(Debug, serde::Deserialize)]
     #[allow(dead_code)]
     struct Record {
+        tbname: String,
         // deserialize timestamp to chrono::DateTime<Local>
         ts: DateTime<Local>,
         // float to f32
@@ -81,12 +90,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let records: Vec<Record> = taos
-        .query("select * from `meters`")
+        .query("select tbname, * from `meters`")
         .await?
         .deserialize()
         .try_collect()
         .await?;
 
+    dbg!(result.summary());
+    assert_eq!(records.len(), 6);
     dbg!(records);
     Ok(())
 }

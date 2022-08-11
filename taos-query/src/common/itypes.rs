@@ -195,7 +195,7 @@ impl IValue for INull {
         true
     }
     fn into_value(self) -> Value {
-        Value::Null
+        Value::Null(Ty::Null)
     }
 
     type Inner = ();

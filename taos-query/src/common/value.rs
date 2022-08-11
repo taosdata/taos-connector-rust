@@ -7,7 +7,7 @@ use super::{Timestamp, Ty};
 
 #[derive(Debug, Clone)]
 pub enum BorrowedValue<'b> {
-    Null,        // 0
+    Null(Ty),        // 0
     Bool(bool),  // 1
     TinyInt(i8), // 2
     SmallInt(i16),
@@ -34,7 +34,7 @@ impl<'b> BorrowedValue<'b> {
     pub const fn ty(&self) -> Ty {
         use BorrowedValue::*;
         match self {
-            Null => Ty::Null,
+            Null(ty) => *ty,
             Bool(_) => Ty::Bool,
             TinyInt(_) => Ty::TinyInt,
             SmallInt(_) => Ty::SmallInt,
@@ -59,7 +59,7 @@ impl<'b> BorrowedValue<'b> {
 
     /// Check if the value is null.
     pub const fn is_null(&self) -> bool {
-        matches!(self, BorrowedValue::Null)
+        matches!(self, BorrowedValue::Null(_))
     }
     /// Only VarChar, NChar, Json could be treated as [&str].
     fn strict_as_str(&self) -> &str {
@@ -67,7 +67,7 @@ impl<'b> BorrowedValue<'b> {
         match self {
             VarChar(v) => *v,
             NChar(v) => &v,
-            Null => panic!("expect str but value is null"),
+            Null(_) => panic!("expect str but value is null"),
             Timestamp(_) => panic!("expect str but value is timestamp"),
             _ => panic!("expect str but only varchar/binary/nchar is supported"),
         }
@@ -75,7 +75,7 @@ impl<'b> BorrowedValue<'b> {
     pub fn to_string(&self) -> Result<String, Utf8Error> {
         use BorrowedValue::*;
         match self {
-            Null => Ok(String::new()),
+            Null(_) => Ok(String::new()),
             VarChar(v) => Ok(v.to_string()),
             Json(v) => Ok(unsafe { std::str::from_utf8_unchecked(v) }.to_string()),
             NChar(v) => Ok(v.to_string()),
@@ -97,7 +97,7 @@ impl<'b> BorrowedValue<'b> {
     pub fn to_value(&self) -> Value {
         use BorrowedValue::*;
         match self {
-            Null => Value::Null,
+            Null(ty) => Value::Null(*ty),
             Bool(v) => Value::Bool(*v),
             TinyInt(v) => Value::TinyInt(*v),
             SmallInt(v) => Value::SmallInt(*v),
@@ -125,7 +125,7 @@ impl<'b> BorrowedValue<'b> {
     pub fn to_json_value(&self) -> serde_json::Value {
         use BorrowedValue::*;
         match self {
-            Null => serde_json::Value::Null,
+            Null(_) => serde_json::Value::Null,
             Bool(v) => serde_json::Value::Bool(*v),
             TinyInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             SmallInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
@@ -156,7 +156,7 @@ impl<'b> BorrowedValue<'b> {
     pub fn into_value(self) -> Value {
         use BorrowedValue::*;
         match self {
-            Null => Value::Null,
+            Null(ty) => Value::Null(ty),
             Bool(v) => Value::Bool(v),
             TinyInt(v) => Value::TinyInt(v),
             SmallInt(v) => Value::SmallInt(v),
@@ -186,7 +186,7 @@ impl<'b> Display for BorrowedValue<'b> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use BorrowedValue::*;
         match self {
-            Null => f.write_str("NULL"),
+            Null(_) => f.write_str("NULL"),
             Bool(v) => f.write_fmt(format_args!("{v}")),
             TinyInt(v) => f.write_fmt(format_args!("{v}")),
             SmallInt(v) => f.write_fmt(format_args!("{v}")),
@@ -215,7 +215,7 @@ unsafe impl<'b> Send for BorrowedValue<'b> {}
 // #[derive(Debug, Clone)]
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub enum Value {
-    Null,        // 0
+    Null(Ty),        // 0
     Bool(bool),  // 1
     TinyInt(i8), // 2
     SmallInt(i16),
@@ -241,7 +241,7 @@ impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Value::*;
         match self {
-            Null => f.write_str("NULL"),
+            Null(_) => f.write_str("NULL"),
             Bool(v) => f.write_fmt(format_args!("{v}")),
             TinyInt(v) => f.write_fmt(format_args!("{v}")),
             SmallInt(v) => f.write_fmt(format_args!("{v}")),
@@ -270,7 +270,7 @@ impl Value {
     pub const fn ty(&self) -> Ty {
         use Value::*;
         match self {
-            Null => Ty::Null,
+            Null(ty) => *ty,
             Bool(_) => Ty::Bool,
             TinyInt(_) => Ty::TinyInt,
             SmallInt(_) => Ty::SmallInt,
@@ -296,7 +296,7 @@ impl Value {
     pub fn to_borrowed_value(&self) -> BorrowedValue {
         use Value::*;
         match self {
-            Null => BorrowedValue::Null,
+            Null(ty) => BorrowedValue::Null(*ty),
             Bool(v) => BorrowedValue::Bool(*v),
             TinyInt(v) => BorrowedValue::TinyInt(*v),
             SmallInt(v) => BorrowedValue::SmallInt(*v),
@@ -321,7 +321,7 @@ impl Value {
 
     /// Check if the value is null.
     pub const fn is_null(&self) -> bool {
-        matches!(self, Value::Null)
+        matches!(self, Value::Null(_))
     }
     /// Only VarChar, NChar, Json could be treated as [&str].
     pub fn strict_as_str(&self) -> &str {
@@ -330,7 +330,7 @@ impl Value {
             VarChar(v) => v.as_str(),
             NChar(v) => v.as_str(),
             Json(v) => v.as_str().expect("invalid str type"),
-            Null => "Null",
+            Null(_) => "Null",
             Timestamp(_) => panic!("expect str but value is timestamp"),
             _ => panic!("expect str but only varchar/binary/json/nchar is supported"),
         }
@@ -339,7 +339,7 @@ impl Value {
     pub fn to_sql_value(&self) -> String {
         use Value::*;
         match self {
-            Null => "NULL".to_string(),
+            Null(_) => "NULL".to_string(),
             Bool(v) => format!("{v}"),
             TinyInt(v) => format!("{v}"),
             SmallInt(v) => format!("{v}"),
@@ -365,7 +365,7 @@ impl Value {
     pub fn to_string(&self) -> Result<String, Utf8Error> {
         use Value::*;
         match self {
-            Null => Ok(String::new()),
+            Null(_) => Ok(String::new()),
             VarChar(v) => Ok(v.to_string()),
             Json(v) => Ok(v.to_string()),
             NChar(v) => Ok(v.to_string()),
@@ -387,7 +387,7 @@ impl Value {
     pub fn to_json_value(&self) -> serde_json::Value {
         use Value::*;
         match self {
-            Null => serde_json::Value::Null,
+            Null(_) => serde_json::Value::Null,
             Bool(v) => serde_json::Value::Bool(*v),
             TinyInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             SmallInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),

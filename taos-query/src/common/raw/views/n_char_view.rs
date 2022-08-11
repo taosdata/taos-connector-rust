@@ -108,7 +108,7 @@ impl NCharView {
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
             .map(|s| BorrowedValue::NChar(s.into()))
-            .unwrap_or(BorrowedValue::Null)
+            .unwrap_or(BorrowedValue::Null(Ty::NChar))
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
