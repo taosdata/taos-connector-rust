@@ -328,8 +328,8 @@ mod tests {
         for row in rs.rows() {
             let row = row?;
             let values = row.into_values();
-            assert_eq!(values[1], Value::Null);
-            assert_eq!(values[2], Value::Null);
+            assert_eq!(values[1], Value::Null(Ty::UTinyInt));
+            assert_eq!(values[2], Value::Null(Ty::UTinyInt));
         }
         Ok(())
     }

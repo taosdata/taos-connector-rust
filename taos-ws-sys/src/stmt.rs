@@ -147,15 +147,19 @@ impl TaosMultiBind {
         }
     }
 
+    pub fn ty(&self) -> Ty {
+        self.buffer_type.into()
+    }
+
     pub fn first_to_json(&self) -> serde_json::Value {
         self.to_json().as_array().unwrap().first().unwrap().clone()
     }
     pub fn to_tag_value(&self) -> Value {
         if !self.is_null.is_null() && unsafe { self.is_null.read() != 0 } {
-            return Value::Null;
+            return Value::Null(self.ty());
         }
         match Ty::from(self.buffer_type) {
-            Ty::Null => Value::Null,
+            Ty::Null => Value::Null(self.ty()),
             Ty::Bool => unsafe { Value::Bool(*(self.buffer as *const bool)) },
             Ty::TinyInt => unsafe { Value::TinyInt(*(self.buffer as *const i8)) },
             Ty::SmallInt => unsafe { Value::SmallInt(*(self.buffer as *const i16)) },

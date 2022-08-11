@@ -421,7 +421,7 @@ mod tests {
         }
 
         _de_value!(
-            Null, Option<u8>, None
+            Null(Ty::UTinyInt), Option<u8>, None
             TinyInt(-1), i8, -1
             SmallInt(-1), i16, -1
             Int(0x0fff_ffff), i32, 0x0fff_ffff
@@ -480,7 +480,7 @@ mod tests {
             UBigInt(1), is_err
             ;
 
-            Null, ""
+            Null(Ty::VarChar), ""
             Timestamp(crate::Timestamp::Milliseconds(0)), "1970-01-01T00:00:00"
             VarChar("String".to_string()), "String"
             VarChar("你好，世界".to_string()), "你好，世界"
