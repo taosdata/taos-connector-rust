@@ -12,7 +12,7 @@ members = [
 
 [package]
 name = "taos"
-version = "0.2.1"
+version = "0.2.2"
 categories = ["database", "api-bindings", "asynchronous"]
 edition = "2021"
 keywords = ["timeseries", "database", "tdengine", "taosdata", "connection"]
