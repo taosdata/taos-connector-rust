@@ -20,6 +20,9 @@ license = "MIT OR Apache-2.0"
 description = "Driver for TDengine - a timeseries database and analysis platform"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package.metadata.docs.rs]
+features = ["ws"]
+no-default-features = true
 
 [dependencies]
 anyhow = "1"
@@ -43,3 +46,4 @@ ws = ["taos-ws"]
 native = ["taos-sys"]
 r2d2 = ["taos-query/r2d2"]
 test = []
+
