@@ -200,8 +200,6 @@ fn test_layout() {
     let mut default = Layout::default();
     assert_eq!(default, Layout::INLINE_DEFAULT);
 
-    assert!(default.expect_table_name());
-    assert!(!default.expect_field_names());
     assert!(default.with_field_names().expect_field_names());
 
     assert_eq!(default.precision(), Precision::Millisecond);

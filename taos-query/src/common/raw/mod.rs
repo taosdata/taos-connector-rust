@@ -674,28 +674,8 @@ impl RawBlock {
 
     pub fn as_raw_bytes(&self) -> &[u8] {
         if self.layout.borrow().schema_changed() {
-            let mut bytes = Vec::new();
-            // 4 bytes total length placeholder.
-            bytes.extend(0u32.to_le_bytes());
-            // 8 bytes group id.
-            bytes.extend(self.group_id.to_le_bytes());
-            // `ncols * std::mem::size_of::<ColSchema>()` bytes schemas.
-            bytes.extend(self.schemas.as_bytes());
-            // `ncols * std::mem::size_of::<u32>()` bytes lengths.
-            bytes.extend(self.lengths.as_bytes());
-            // data for each column
-            for col in self.columns() {
-                col.write_raw_into(&mut bytes).unwrap();
-            }
-            bytes.len();
-            unsafe {
-                *(bytes.as_mut_ptr() as *mut u32) = bytes.len() as u32;
-            }
-            debug_assert_eq!(
-                unsafe { *(bytes.as_ptr() as *const u32) },
-                bytes.len() as u32
-            );
-            let bytes = Bytes::from(bytes);
+            let bytes = views_to_raw_block(&self.columns);
+            let bytes = bytes.into();
             self.data.replace(bytes);
             self.layout.borrow_mut().set_schema_changed(false);
             unsafe { &*self.data.as_ptr() }

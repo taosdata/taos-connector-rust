@@ -3,7 +3,7 @@ use bytes::Bytes;
 use futures::{FutureExt, SinkExt, StreamExt};
 use scc::HashMap;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta};
-use taos_query::prelude::{RawError, Code};
+use taos_query::prelude::{Code, RawError};
 use taos_query::util::InlinableWrite;
 use taos_query::{
     block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
@@ -37,8 +37,7 @@ pub struct WsTaos {
     ws: WsSender,
     version: String,
     close_signal: watch::Sender<bool>,
-    queries:
-        Arc<HashMap<ReqId, oneshot::Sender<std::result::Result<WsQueryResp, RawError>>>>,
+    queries: Arc<HashMap<ReqId, oneshot::Sender<std::result::Result<WsQueryResp, RawError>>>>,
     fetches: Arc<HashMap<ResId, FetchSender>>,
 }
 
@@ -292,6 +291,12 @@ impl WsTaos {
                                             }
                                         }
                                         WsRecvData::WriteRaw => {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                sender.send(ok.map(|_| WsQueryResp::default())).unwrap();
+                                            }
+                                        }
+                                        WsRecvData::WriteRawBlock => {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 sender.send(ok.map(|_| WsQueryResp::default())).unwrap();
@@ -798,6 +803,7 @@ async fn ws_write_raw_block() -> anyhow::Result<()> {
 
     client
         .exec_many([
+            "drop database if exists write_raw_block_test",
             "create database write_raw_block_test keep 36500",
             "use write_raw_block_test",
             "create table if not exists tb1(ts timestamp, v bool)",
@@ -806,7 +812,6 @@ async fn ws_write_raw_block() -> anyhow::Result<()> {
 
     client.write_raw_block(&raw).await?;
 
-    // // let mut rs = client.s_query("select * from abc_a.tb1").unwrap().unwrap();
     let mut rs = client.query("select * from tb1").await?;
 
     #[derive(Debug, serde::Deserialize)]

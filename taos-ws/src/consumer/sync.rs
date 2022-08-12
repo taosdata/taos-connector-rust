@@ -89,7 +89,7 @@ fn test_stmt_stable() -> anyhow::Result<()> {
     taos.exec("create table stmt_s.stb (ts timestamp, v int) tags(t1 binary(100))")?;
 
     std::env::set_var("RUST_LOG", "debug");
-    pretty_env_logger::init();
+    // pretty_env_logger::init();
 
     let mut stmt = taos.stmt_init()?;
 
@@ -130,7 +130,7 @@ fn test_stmt_table() -> anyhow::Result<()> {
     taos.exec("create table stmt_c.tb1 (ts timestamp, v int)")?;
 
     std::env::set_var("RUST_LOG", "debug");
-    pretty_env_logger::init();
+    // pretty_env_logger::init();
 
     let mut stmt = taos.stmt_init()?;
 

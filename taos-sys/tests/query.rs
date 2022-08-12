@@ -83,7 +83,7 @@ fn ws_sync_json() -> anyhow::Result<()> {
     assert_eq!(
         values[0],
         A {
-            ts: "1970-01-01T00:00:00".to_string(),
+            ts: "1970-01-01T08:00:00+08:00".to_string(),
             b1: true,
             c8i1: -1,
             c16i1: -2,

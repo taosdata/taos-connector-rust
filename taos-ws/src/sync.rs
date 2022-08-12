@@ -1,5 +1,5 @@
 use taos_query::common::{Field, Precision, RawBlock, RawMeta};
-use taos_query::prelude::{RawError, Code};
+use taos_query::prelude::{Code, RawError};
 use taos_query::{DeError, DsnError, Fetchable, IntoDsn, Queryable};
 use thiserror::Error;
 use tokio::sync::watch;
@@ -642,9 +642,7 @@ impl ResultSet {
 
     pub fn stop_query(&mut self) {
         if let Some((_, sender)) = self.fetches.remove(&self.id) {
-            sender
-                .send(Err(RawError::from_string("").into()))
-                .unwrap();
+            sender.send(Err(RawError::from_string("").into())).unwrap();
         }
     }
 }
@@ -707,21 +705,27 @@ impl Queryable for WsClient {
 
 #[test]
 fn test_client() -> anyhow::Result<()> {
-    std::env::set_var("RUST_LOG", "taos-query=trace,main=trace");
-    pretty_env_logger::init();
     let client = WsClient::from_dsn("ws://localhost:6041/")?;
     let version = client.version();
     dbg!(version);
 
-    assert_eq!(client.exec("create database if not exists abc")?, 0);
+    let db = "ws_sync_test_client";
+
     assert_eq!(
-        client.exec("create table if not exists abc.tb1(ts timestamp, v int)")?,
+        client.exec_many([
+            format!("create database if not exists {db}"),
+            format!("use {db}")
+        ])?,
         0
     );
-    assert_eq!(client.exec("insert into abc.tb1 values(now, 1)")?, 1);
+    assert_eq!(
+        client.exec("create table if not exists tb1(ts timestamp, v int)")?,
+        0
+    );
+    assert_eq!(client.exec("insert into tb1 values(now, 1)")?, 1);
 
     // let mut rs = client.s_query("select * from abc.tb1").unwrap().unwrap();
-    let mut rs = client.query("select * from abc.tb1")?;
+    let mut rs = client.query("select * from tb1")?;
 
     #[derive(Debug, serde::Deserialize)]
     #[allow(dead_code)]
@@ -737,6 +741,6 @@ fn test_client() -> anyhow::Result<()> {
 
     assert_eq!(rs.summary(), (1, 1), "should got 1 block with 1 row");
 
-    assert_eq!(client.exec("drop database abc")?, 0);
+    assert_eq!(client.exec(format!("drop database {db}"))?, 0);
     Ok(())
 }

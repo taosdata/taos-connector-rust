@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(no_coverage))]
+
 //! M-DSN: A Multi-address DSN(Data Source Name) parser.
 //!
 //! M-DSN support two kind of DSN format:
@@ -73,6 +75,9 @@ use pest;
 use pest::Parser;
 use pest_derive::Parser;
 use thiserror::Error;
+
+#[cfg(test)]
+use coverage_helper::test;
 
 #[derive(Parser)]
 #[grammar = "dsn.pest"]
@@ -189,11 +194,30 @@ fn addr_parse() {
     let s = "taosdata:6030";
     let addr = Address::from_str(s).unwrap();
     assert_eq!(addr.to_string(), s);
+    assert!(!addr.is_empty());
 
     let s = "/var/lib/taos";
     let addr = Address::from_str(&urlencoding::encode(s)).unwrap();
     assert_eq!(addr.path.as_ref().unwrap(), s);
     assert_eq!(addr.to_string(), urlencoding::encode(s));
+
+    assert_eq!(
+        Address::new("localhost", 6030).to_string(),
+        "localhost:6030"
+    );
+    assert_eq!(Address::from_host("localhost").to_string(), "localhost");
+    assert_eq!(
+        Address::from_path("/path/unix.sock").to_string(),
+        "%2Fpath%2Funix.sock"
+    );
+
+    let none = Address {
+        host: None,
+        port: None,
+        path: None,
+    };
+    assert!(none.is_empty());
+    assert_eq!(none.to_string(), "");
 }
 
 /// A DSN(**Data Source Name**) parser.
@@ -283,17 +307,30 @@ impl Display for Dsn {
 }
 
 impl Dsn {
-    /// Parse from a DSN string.
     #[inline]
-    pub fn parse(dsn: impl AsRef<str>) -> Result<Self, DsnError> {
-        dsn.as_ref().parse()
+    pub fn drain_params(&mut self) -> BTreeMap<String, String> {
+        let drained = self
+            .params
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        self.params.clear();
+        drained
     }
 
     #[inline]
-    pub fn split_params(mut self) -> (Dsn, BTreeMap<String, String>) {
-        let params = self.params;
-        self.params = BTreeMap::new();
-        (self, params)
+    pub fn set(&mut self, key: impl Into<String>, value: impl Into<String>) -> Option<String> {
+        self.params.insert(key.into(), value.into())
+    }
+
+    #[inline]
+    pub fn get(&self, key: impl AsRef<str>) -> Option<&String> {
+        self.params.get(key.as_ref())
+    }
+
+    #[inline]
+    pub fn remove(&mut self, key: impl AsRef<str>) -> Option<String> {
+        self.params.remove(key.as_ref())
     }
 }
 
@@ -416,6 +453,43 @@ impl FromStr for Dsn {
         }
         Ok(to)
     }
+}
+
+#[test]
+fn test_into_dsn() {
+    let _ = "taos://".into_dsn().unwrap();
+    let _ = "taos://".to_string().into_dsn().unwrap();
+    let _ = (&"taos://".to_string()).into_dsn().unwrap();
+
+    let a: Dsn = "taos://".parse().unwrap();
+    let b = a.into_dsn().unwrap();
+    let c = (&b).into_dsn().unwrap();
+
+    let d: Dsn = (&c).try_into().unwrap();
+    let _: Dsn = (d).try_into().unwrap();
+    let _: Dsn = ("taos://").try_into().unwrap();
+    let _: Dsn = ("taos://".to_string()).try_into().unwrap();
+    let _: Dsn = (&"taos://:password@".parse::<Dsn>().unwrap().to_string())
+        .try_into()
+        .unwrap();
+}
+
+#[test]
+fn test_methods() {
+    let mut dsn: Dsn = "taos://localhost:6030/test?debugFlag=135".parse().unwrap();
+
+    let flag = dsn.get("debugFlag").unwrap();
+    assert_eq!(flag, "135");
+
+    dsn.set("configDir", "/tmp/taos");
+    assert_eq!(dsn.get("configDir").unwrap(), "/tmp/taos");
+    let config = dsn.remove("configDir").unwrap();
+    assert_eq!(config, "/tmp/taos");
+
+    let params = dsn.drain_params();
+    assert!(dsn.params.is_empty());
+    assert!(params.contains_key("debugFlag"));
+    assert!(params.len() == 1);
 }
 
 #[test]
@@ -770,10 +844,10 @@ fn fragment() {
             username: Some("root".to_string()),
             password: Some("pass".to_string()),
             fragment: Some("/full/unix/path/to/file.db".to_string()),
-            params: BTreeMap::from_iter(vec![
+            params: (BTreeMap::from_iter(vec![
                 ("mode".to_string(), "0666".to_string()),
                 ("readonly".to_string(), "true".to_string())
-            ]),
+            ])),
             ..Default::default()
         }
     );
@@ -788,7 +862,7 @@ fn params() {
         dsn,
         Dsn {
             driver: "taos".to_string(),
-            params: BTreeMap::from_iter(vec![("abc".to_string(), "abc".to_string())]),
+            params: (BTreeMap::from_iter(vec![("abc".to_string(), "abc".to_string())])),
             ..Default::default()
         }
     );
@@ -802,7 +876,7 @@ fn params() {
             driver: "taos".to_string(),
             username: Some("root".to_string()),
             addresses: vec![Address::from_host("localhost")],
-            params: BTreeMap::from_iter(vec![("abc".to_string(), "abc".to_string())]),
+            params: (BTreeMap::from_iter(vec![("abc".to_string(), "abc".to_string())])),
             ..Default::default()
         }
     );

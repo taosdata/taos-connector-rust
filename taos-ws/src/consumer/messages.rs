@@ -196,10 +196,7 @@ impl TmqRecv {
             if self.code == 0 {
                 Ok(())
             } else {
-                Err(RawError::new(
-                    self.code,
-                    self.message.unwrap_or_default(),
-                ))
+                Err(RawError::new(self.code, self.message.unwrap_or_default()))
             },
         )
     }

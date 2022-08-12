@@ -5,7 +5,7 @@ use scc::HashMap;
 
 use taos_query::block_in_place_or_global;
 use taos_query::common::{JsonMeta, RawMeta};
-use taos_query::prelude::{RawError, Code};
+use taos_query::prelude::{Code, RawError};
 use taos_query::tmq::{
     AsAsyncConsumer, AsConsumer, IsAsyncData, IsAsyncMeta, IsOffset, MessageSet, SyncOnAsync,
     Timeout,
@@ -742,17 +742,17 @@ mod tests {
     #[tokio::test]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
-        pretty_env_logger::formatted_builder()
-            .filter_level(log::LevelFilter::Debug)
-            .init();
+        // pretty_env_logger::formatted_builder()
+        //     .filter_level(log::LevelFilter::Debug)
+        //     .init();
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
         taos.exec_many([
-            "drop topic if exists ws_abc1",
-            "drop database if exists ws_abc1",
-            "create database ws_abc1",
-            "create topic ws_abc1 with meta as database ws_abc1",
-            "use ws_abc1",
+            "drop topic if exists ws_tmq_meta",
+            "drop database if exists ws_tmq_meta",
+            "create database ws_tmq_meta",
+            "create topic ws_tmq_meta with meta as database ws_tmq_meta",
+            "use ws_tmq_meta",
             // kind 1: create super table using all types
             "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
             c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
@@ -816,15 +816,15 @@ mod tests {
         .await?;
 
         taos.exec_many([
-            "drop database if exists db2",
-            "create database if not exists db2",
-            "use db2",
+            "drop database if exists ws_tmq_meta2",
+            "create database if not exists ws_tmq_meta2",
+            "use ws_tmq_meta2",
         ])
         .await?;
 
         let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms")?;
         let mut consumer = builder.build_consumer().await?;
-        consumer.subscribe(["ws_abc1"]).await?;
+        consumer.subscribe(["ws_tmq_meta"]).await?;
 
         {
             let mut stream = consumer.stream_with_timeout(Timeout::from_secs(5));
@@ -881,9 +881,9 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         taos.exec_many([
-            "drop database db2",
-            "drop topic ws_abc1",
-            "drop database ws_abc1",
+            "drop database ws_tmq_meta2",
+            "drop topic ws_tmq_meta",
+            "drop database ws_tmq_meta",
         ])
         .await?;
         Ok(())
@@ -892,17 +892,17 @@ mod tests {
     #[test]
     fn test_ws_tmq_meta_sync() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        pretty_env_logger::formatted_builder()
-            .filter_level(log::LevelFilter::Debug)
-            .init();
+        // pretty_env_logger::formatted_builder()
+        //     .filter_level(log::LevelFilter::Debug)
+        //     .init();
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
         taos.exec_many([
-            "drop topic if exists ws_abc1",
-            "drop database if exists ws_abc1",
-            "create database ws_abc1",
-            "create topic ws_abc1 with meta as database ws_abc1",
-            "use ws_abc1",
+            "drop topic if exists ws_tmq_meta_sync",
+            "drop database if exists ws_tmq_meta_sync",
+            "create database ws_tmq_meta_sync",
+            "create topic ws_tmq_meta_sync with meta as database ws_tmq_meta_sync",
+            "use ws_tmq_meta_sync",
             // kind 1: create super table using all types
             "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
             c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
@@ -965,14 +965,14 @@ mod tests {
         ])?;
 
         taos.exec_many([
-            "drop database if exists db2",
-            "create database if not exists db2",
-            "use db2",
+            "drop database if exists ws_tmq_meta_sync2",
+            "create database if not exists ws_tmq_meta_sync2",
+            "use ws_tmq_meta_sync2",
         ])?;
 
         let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms")?;
         let mut consumer = builder.build()?;
-        consumer.subscribe(["ws_abc1"])?;
+        consumer.subscribe(["ws_tmq_meta_sync"])?;
 
         let iter = consumer.iter_with_timeout(Timeout::from_secs(5));
 
@@ -1029,9 +1029,9 @@ mod tests {
         std::thread::sleep(Duration::from_secs(2));
 
         taos.exec_many([
-            "drop database db2",
-            "drop topic ws_abc1",
-            "drop database ws_abc1",
+            "drop database ws_tmq_meta_sync2",
+            "drop topic ws_tmq_meta_sync",
+            "drop database ws_tmq_meta_sync",
         ])?;
         Ok(())
     }

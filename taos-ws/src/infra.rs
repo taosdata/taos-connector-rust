@@ -144,6 +144,7 @@ pub enum WsRecvData {
     },
     WriteMeta,
     WriteRaw,
+    WriteRawBlock,
 }
 
 #[serde_as]
@@ -166,10 +167,7 @@ impl WsRecv {
             if self.code == 0 {
                 Ok(())
             } else {
-                Err(RawError::new(
-                    self.code,
-                    self.message.unwrap_or_default(),
-                ))
+                Err(RawError::new(self.code, self.message.unwrap_or_default()))
             },
         )
     }
@@ -207,5 +205,4 @@ mod tests {
     fn dsn_error() {
         TaosBuilder::from_dsn("").unwrap_err();
     }
-
 }

@@ -3,9 +3,9 @@ use serde_json::Value;
 use serde_with::serde_as;
 use serde_with::NoneAsEmptyString;
 
-use taos_query::prelude::RawError as Error;
 use crate::infra::ToMessage;
 use crate::infra::WsConnReq;
+use taos_query::prelude::RawError as Error;
 
 pub type ReqId = u64;
 

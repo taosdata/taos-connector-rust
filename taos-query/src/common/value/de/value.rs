@@ -219,8 +219,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
             VarChar(v) | NChar(v) => visitor.visit_string(v),
             Json(v) => visitor.visit_string(v.to_string()),
             Timestamp(v) => visitor.visit_string(
-                v.to_naive_datetime()
-                    .format("%Y-%m-%dT%H:%M:%S%.f")
+                v.to_datetime_with_tz().to_rfc3339()
                     .to_string(),
             ),
             _ => Err(<Self::Error as de::Error>::custom(
@@ -398,7 +397,7 @@ mod tests {
             }
         }
         _de_value!(
-                Null(Ty::Bool) Bool(true) TinyInt(0xf) SmallInt(0xfff) Int(0xffff) BigInt(-1) Float(1.0) Double(1.0)
+                Bool(true) TinyInt(0xf) SmallInt(0xfff) Int(0xffff) BigInt(-1) Float(1.0) Double(1.0)
                 UTinyInt(0xf) USmallInt(0xfff) UInt(0xffff) UBigInt(0xffffffff)
                 Timestamp(crate::common::timestamp::Timestamp::Milliseconds(0)) VarChar("anything".to_string())
                 NChar("你好，世界".to_string()) VarBinary(vec![1,2,3]) Blob(vec![1,2, 3]) MediumBlob(vec![1,2,3])
@@ -481,7 +480,7 @@ mod tests {
             ;
 
             Null(Ty::VarChar), ""
-            Timestamp(crate::Timestamp::Milliseconds(0)), "1970-01-01T00:00:00"
+            Timestamp(crate::Timestamp::Milliseconds(0)), "1970-01-01T08:00:00+08:00"
             VarChar("String".to_string()), "String"
             VarChar("你好，世界".to_string()), "你好，世界"
             Json(json!("abc")), json!("abc").to_string()
