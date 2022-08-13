@@ -92,6 +92,6 @@ mod tests {
         let ts = Timestamp::new(0, Precision::Millisecond);
         assert_eq!(format!("{:?}", ts), "1970-01-01T00:00:00");
         assert_eq!(format!("{:#?}", ts), "Milliseconds(\n    0,\n)");
-        assert_eq!(format!("{}", ts), "1970-01-01 00:00:00");
+        assert_eq!(format!("{}", ts), "1970-01-01T08:00:00+08:00");
     }
 }

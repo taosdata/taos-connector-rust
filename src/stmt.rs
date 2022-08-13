@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn test_bindable_sync() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
 
@@ -175,24 +175,28 @@ mod tests {
         assert_eq!(row.c12, "ABC");
         assert_eq!(row.c13, "涛思数据");
 
+        taos.exec("drop database test_bindable")?;
+
         Ok(())
     }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_bindable() -> anyhow::Result<()> {
         use crate::*;
-        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let taos = TaosBuilder::from_dsn(dsn)?.build()?;
         taos.exec_many([
-            "drop database if exists test_bindable",
-            "create database test_bindable keep 36500",
-            "use test_bindable",
+            "drop database if exists test_bindable2",
+            "create database test_bindable2 keep 36500",
+            "use test_bindable2",
             "create table tb1 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
             c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
             c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
         ])
         .await?;
-        let mut stmt = Stmt::init(&taos)?;
+        let mut stmt = Stmt::init(&taos).unwrap();
         stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
         let params = vec![
             ColumnView::from_millis_timestamp(vec![0]),
@@ -210,7 +214,13 @@ mod tests {
             ColumnView::from_varchar(vec!["ABC"]),
             ColumnView::from_nchar(vec!["涛思数据"]),
         ];
-        let rows = stmt.bind(&params)?.add_batch()?.execute()?;
+        let rows = stmt
+            .bind(&params)
+            .unwrap()
+            .add_batch()
+            .unwrap()
+            .execute()
+            .unwrap();
         assert_eq!(rows, 1);
 
         #[derive(Debug, Deserialize)]
@@ -237,12 +247,15 @@ mod tests {
             .await?
             .deserialize()
             .try_collect()
-            .await?;
+            .await
+            .unwrap();
         let row = &rows[0];
         dbg!(&row);
         assert_eq!(row.c11, f64::MAX);
         assert_eq!(row.c12, "ABC");
         assert_eq!(row.c13, "涛思数据");
+
+        taos.exec("drop database test_bindable2").await.unwrap();
 
         Ok(())
     }

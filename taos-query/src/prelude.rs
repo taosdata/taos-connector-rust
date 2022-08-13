@@ -183,8 +183,6 @@ pub mod sync {
         fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error>;
 
         fn exec<T: AsRef<str>>(&self, sql: T) -> Result<usize, Self::Error> {
-            log::debug!("execute sql: {}", sql.as_ref());
-
             self.query(sql).map(|res| res.affected_rows() as _)
         }
 
@@ -487,7 +485,6 @@ mod r#async {
         {
             let mut aff = 0;
             for sql in input {
-                log::debug!("exec sql: {}", sql.as_ref());
                 aff += self.exec(sql).await?;
             }
             Ok(aff)

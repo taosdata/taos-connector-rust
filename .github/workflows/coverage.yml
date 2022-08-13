@@ -1,0 +1,90 @@
+name: Coverage
+
+on:
+  push:
+
+env:
+  TOOLS_BUILD_TYPE: Release
+  TAOS_SUPPORT_VNODES: "256"
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Rust
+        id: setup-rust
+        uses: actions-rs/toolchain@v1
+        with:
+          components: rustfmt, clippy, llvm-tools-preview
+          toolchain: nightly
+          default: true
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ steps.setup-rust.outputs.rustc_hash }}
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            target
+          key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
+
+      - name: Prepare development tools
+        run: |
+          sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config -y
+          sudo timedatectl set-timezone Asia/Shanghai
+          sudo date
+
+      - name: Checkout tdengine
+        uses: actions/checkout@v2
+        with:
+          repository: "taosdata/TDengine"
+          path: "TDengine"
+          ref: "3.0"
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            TDengine/release/
+            TDengine/contrib/cJson
+            TDengine/contrib/cpp-stub
+            TDengine/contrib/deps-download
+            TDengine/contrib/googletest
+            TDengine/contrib/libuv
+            TDengine/contrib/lz4
+            TDengine/contrib/zlib
+          key: ${{ runner.os }}-TDengine-build-${{ steps.setup-rust.outputs.rustc_hash }}
+
+      - name: Build & Install TDengine
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          cd TDengine
+          [ -d release ] || mkdir release
+          cd release
+          cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=false
+          make -j8
+          sudo make install
+          nohup sudo sh -c 'TAOS_SUPPORT_VNODES=256 taosd' > /dev/null 2>&1 &
+          sleep 5
+          nohup sudo taosadapter > /dev/null 2>&1 &
+
+      - name: Generate code coverage
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: lcov.info
+          fail_ci_if_error: true

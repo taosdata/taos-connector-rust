@@ -457,6 +457,7 @@ mod tests {
         let port = 0;
         let taos = RawTaos::connect(host, user, pass, db, port)?;
         let db = "tmq_meta";
+        taos.query(format!("drop topic if exists {db}"))?;
         taos.query(format!("drop database if exists {db}"))?;
         taos.query(format!("create database {db} keep 36500"))?;
         taos.query(format!("use {db}"))?;
@@ -523,33 +524,42 @@ mod tests {
             let _ = consumer.commit(offset);
         }
 
+        consumer.unsubscribe();
+
         let query = taos.query("describe stb1")?;
         for row in query {
             let raw = row?;
             dbg!(raw);
         }
 
+
+        taos.query("drop database tmq_meta2")?;
+        taos.query("drop topic tmq_meta").unwrap();
+        taos.query("drop database tmq_meta")?;
         Ok(())
     }
 
     #[test]
-    fn test_ws_tmq_meta_sync() -> anyhow::Result<()> {
-        use taos_query::prelude::sync::*;
-        pretty_env_logger::formatted_builder()
-            .filter_level(log::LevelFilter::Debug)
-            .init();
+    fn test_tmq_meta_sync() -> anyhow::Result<()> {
+        use crate::sync::*;
+        // pretty_env_logger::formatted_builder()
+        //     .filter_level(log::LevelFilter::Debug)
+        //     .init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
         taos.exec_many([
-            "drop database if exists ws_abc1",
-            "create database ws_abc1",
-            "create topic ws_abc1 with meta as database ws_abc1",
-            "use ws_abc1",
+            "drop topic if exists sys_tmq_meta_sync",
+            "drop database if exists sys_tmq_meta_sync",
+            "create database sys_tmq_meta_sync vgroups 1",
+            "use sys_tmq_meta_sync",
+            "show databases",
+            "select database()",
             // kind 1: create super table using all types
             "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
             c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
             c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
             tags(t1 json)",
+            "describe stb1",
             // kind 2: create child table with json tag
             "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
             "create table tb1 using stb1 tags(NULL)",
@@ -604,17 +614,18 @@ mod tests {
             // kind 11: drop super table
             "drop table `stb2`",
             "drop table `stb1`",
+            "create topic if not exists sys_tmq_meta_sync with meta as database sys_tmq_meta_sync",
         ])?;
 
         taos.exec_many([
-            "drop database if exists db2",
-            "create database if not exists db2",
-            "use db2",
+            "drop database if exists sys_tmq_meta_sync2",
+            "create database if not exists sys_tmq_meta_sync2",
+            "use sys_tmq_meta_sync2",
         ])?;
 
         let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms")?;
         let mut consumer = builder.build()?;
-        consumer.subscribe(["ws_abc1"])?;
+        consumer.subscribe(["sys_tmq_meta_sync"])?;
 
         let iter = consumer.iter_with_timeout(Timeout::from_millis(500));
 
@@ -706,7 +717,11 @@ mod tests {
 
         consumer.unsubscribe();
 
-        taos.exec_many(["drop database db2", "drop database ws_abc1"])?;
+        taos.exec_many([
+            "drop database sys_tmq_meta_sync2",
+            "drop topic sys_tmq_meta_sync",
+            "drop database sys_tmq_meta_sync",
+        ])?;
         Ok(())
     }
 
@@ -721,10 +736,10 @@ mod tests {
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
         taos.exec_many([
-            "drop database if exists ws_abc1",
-            "create database ws_abc1",
-            "create topic ws_abc1 with meta as database ws_abc1",
-            "use ws_abc1",
+            "drop topic if exists sys_tmq_meta",
+            "drop database if exists sys_tmq_meta",
+            "create database sys_tmq_meta",
+            "use sys_tmq_meta",
             // kind 1: create super table using all types
             "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
             c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
@@ -784,19 +799,20 @@ mod tests {
             // kind 11: drop super table
             "drop table `stb2`",
             "drop table `stb1`",
+            "create topic if not exists sys_tmq_meta with meta as database sys_tmq_meta",
         ])
         .await?;
 
         taos.exec_many([
-            "drop database if exists db2",
-            "create database if not exists db2",
-            "use db2",
+            "drop database if exists sys_tmq_meta2",
+            "create database if not exists sys_tmq_meta2",
+            "use sys_tmq_meta2",
         ])
         .await?;
 
         let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms")?;
         let mut consumer = builder.build()?;
-        consumer.subscribe(["ws_abc1"]).await?;
+        consumer.subscribe(["sys_tmq_meta"]).await?;
 
         consumer
             .stream_with_timeout(Timeout::from_millis(500))
@@ -859,9 +875,9 @@ mod tests {
         consumer.unsubscribe().await;
 
         taos.exec_many([
-            "drop database db2",
-            "drop topic ws_abc1",
-            "drop database ws_abc1",
+            "drop database sys_tmq_meta2",
+            "drop topic sys_tmq_meta",
+            "drop database sys_tmq_meta",
         ])
         .await?;
         Ok(())

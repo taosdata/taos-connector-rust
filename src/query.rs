@@ -290,21 +290,34 @@ mod tests {
 
     use std::str::FromStr;
 
+    use taos_query::{common::Timestamp, TBuilder};
+
     use super::TaosBuilder;
 
     #[test]
-    fn sync_json_test_native() -> anyhow::Result<()> {
-        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        sync_json_test(&dsn)
+    fn builder() {
+        let builder = TaosBuilder::from_dsn("taos://").unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
     }
-    // #[test]
-    // fn sync_json_test_ws() -> anyhow::Result<()> {
-    //     sync_json_test("ws://localhost:6041/")
-    // }
-    // #[test]
-    // fn sync_json_test_taosws() -> anyhow::Result<()> {
-    //     sync_json_test("taosws://localhost:6041/")
-    // }
+
+    #[test]
+    fn sync_json_test_native() -> anyhow::Result<()> {
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://".to_string());
+        sync_json_test(&dsn, "taos")
+    }
+    #[cfg(feature = "ws")]
+    #[test]
+    fn sync_json_test_ws() -> anyhow::Result<()> {
+        sync_json_test("ws://", "ws")
+    }
+    #[cfg(feature = "ws")]
+    #[test]
+    fn sync_json_test_taosws() -> anyhow::Result<()> {
+        sync_json_test("taosws://", "taosws")
+    }
 
     #[test]
     fn null_test() -> anyhow::Result<()> {
@@ -334,14 +347,13 @@ mod tests {
         Ok(())
     }
 
-    fn sync_json_test(dsn: &str) -> anyhow::Result<()> {
+    fn sync_json_test(dsn: &str, db: &str) -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
 
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
         use taos_query::{Fetchable, Queryable};
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
-        let db = "ws_sync_json";
         assert_eq!(client.exec(format!("drop database if exists {db}"))?, 0);
         assert_eq!(client.exec(format!("create database {db} keep 36500"))?, 0);
         assert_eq!(
@@ -418,7 +430,10 @@ mod tests {
         assert_eq!(
             values[0],
             A {
-                ts: "1970-01-01T00:00:00".to_string(),
+                ts: format!(
+                    "{}",
+                    Value::Timestamp(Timestamp::new(0, Precision::Millisecond))
+                ),
                 b1: true,
                 c8i1: -1,
                 c16i1: -2,

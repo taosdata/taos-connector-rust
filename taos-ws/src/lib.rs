@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
         use taos_query::{Fetchable, Queryable};
         let client = TaosBuilder::from_dsn("taosws://localhost:6041/")?.build()?;
         let db = "ws_sync_json";
@@ -295,7 +295,7 @@ mod tests {
             2
         );
 
-        // let mut rs = client.s_query("select * from wsabc.tb1").unwrap().unwrap();
+        // let mut rs = client.s_query("select * from ws_sync.tb1").unwrap().unwrap();
         let mut rs = client.query(format!("select * from {db}.tb1 order by ts limit 1"))?;
 
         #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
@@ -335,7 +335,7 @@ mod tests {
         assert_eq!(
             values[0],
             A {
-                ts: "1970-01-01T00:00:00".to_string(),
+                ts: "1970-01-01T08:00:00+08:00".to_string(),
                 b1: true,
                 c8i1: -1,
                 c16i1: -2,
@@ -368,11 +368,11 @@ mod tests {
     fn ws_sync() -> anyhow::Result<()> {
         use taos_query::{Fetchable, Queryable};
         let client = TaosBuilder::from_dsn("ws://localhost:6041/")?.build()?;
-        assert_eq!(client.exec("drop database if exists wsabc")?, 0);
-        assert_eq!(client.exec("create database wsabc keep 36500")?, 0);
+        assert_eq!(client.exec("drop database if exists ws_sync")?, 0);
+        assert_eq!(client.exec("create database ws_sync keep 36500")?, 0);
         assert_eq!(
             client.exec(
-                "create table wsabc.tb1(ts timestamp,\
+                "create table ws_sync.tb1(ts timestamp,\
                     c8i1 tinyint, c16i1 smallint, c32i1 int, c64i1 bigint,\
                     c8u1 tinyint unsigned, c16u1 smallint unsigned, c32u1 int unsigned, c64u1 bigint unsigned,\
                     cb1 binary(100), cn1 nchar(10),
@@ -385,15 +385,14 @@ mod tests {
         );
         assert_eq!(
             client.exec(
-                "insert into wsabc.tb1 values(65535,\
+                "insert into ws_sync.tb1 values(65535,\
                 -1,-2,-3,-4, 1,2,3,4, 'abc', '涛思',\
                 -5,-6,-7,-8, 5,6,7,8, 'def', '数据')"
             )?,
             1
         );
 
-        // let mut rs = client.s_query("select * from wsabc.tb1").unwrap().unwrap();
-        let mut rs = client.query("select * from wsabc.tb1")?;
+        let mut rs = client.query("select * from ws_sync.tb1")?;
 
         #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
         #[allow(dead_code)]
@@ -431,7 +430,7 @@ mod tests {
         assert_eq!(
             values[0],
             A {
-                ts: "1970-01-01T00:01:05.535".to_string(),
+                ts: "1970-01-01T08:01:05.535+08:00".to_string(),
                 c8i1: -1,
                 c16i1: -2,
                 c32i1: -3,
@@ -455,7 +454,7 @@ mod tests {
             }
         );
 
-        assert_eq!(client.exec("drop database wsabc")?, 0);
+        assert_eq!(client.exec("drop database ws_sync")?, 0);
         Ok(())
     }
 
@@ -476,32 +475,32 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_client() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
         use futures::TryStreamExt;
         use taos_query::{AsyncFetchable, AsyncQueryable};
 
         let client = TaosBuilder::from_dsn("ws://localhost:6041/")?.build()?;
         assert_eq!(
             client
-                .exec("create database if not exists ws_abc_a")
+                .exec("create database if not exists ws_test_client")
                 .await?,
             0
         );
         assert_eq!(
             client
-                .exec("create table if not exists ws_abc_a.tb1(ts timestamp, v int)")
+                .exec("create table if not exists ws_test_client.tb1(ts timestamp, v int)")
                 .await?,
             0
         );
         assert_eq!(
             client
-                .exec("insert into ws_abc_a.tb1 values(1655793421375, 1)")
+                .exec("insert into ws_test_client.tb1 values(1655793421375, 1)")
                 .await?,
             1
         );
 
-        // let mut rs = client.s_query("select * from ws_abc_a.tb1").unwrap().unwrap();
-        let mut rs = client.query("select * from ws_abc_a.tb1").await?;
+        // let mut rs = client.s_query("select * from ws_test_client.tb1").unwrap().unwrap();
+        let mut rs = client.query("select * from ws_test_client.tb1").await?;
 
         #[derive(Debug, serde::Deserialize)]
         #[allow(dead_code)]
@@ -514,7 +513,7 @@ mod tests {
 
         dbg!(values);
 
-        assert_eq!(client.exec("drop database ws_abc_a").await?, 0);
+        assert_eq!(client.exec("drop database ws_test_client").await?, 0);
         Ok(())
     }
 }

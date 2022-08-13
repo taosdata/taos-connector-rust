@@ -13,3 +13,4 @@ rust-toolchain
 sync.sh
 .cargo
 .cache-cargo
+default.profraw

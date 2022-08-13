@@ -38,18 +38,89 @@ pub struct TaosBindV2 {
     pub allocated: c_uint,
 }
 
+impl TaosBindV2 {}
+
 impl Debug for TaosBindV2 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TaosBindV2")
-            .field("buffer_type", &self.buffer_type)
-            .field("buffer", &self.buffer)
-            .field("buffer_length", &self.buffer_length)
-            .field("length", &self.length)
-            .field("is_null", &self.is_null)
-            .field("is_unsigned", &self.is_unsigned)
-            .field("error", &self.error)
-            .field("allocated", &self.allocated)
-            .finish()
+        match (self.is_null.is_null(), self.buffer.is_null()) {
+            (true, true) => unreachable!(),
+            (false, true) => f.write_str("NULL"),
+            (no_is_null, _) => unsafe {
+                if !no_is_null && *(self.is_null as *const bool) {
+                    f.write_str("NULL")
+                } else {
+                    match self.ty() {
+                        Ty::Bool => (self.buffer as *const bool).read().fmt(f),
+                        Ty::TinyInt => f
+                            .debug_tuple("TinyInt")
+                            .field(&*(self.buffer as *const i8))
+                            .finish(),
+                        Ty::SmallInt => f
+                            .debug_tuple("TinyInt")
+                            .field(&*(self.buffer as *const i16))
+                            .finish(),
+                        Ty::Int => f
+                            .debug_tuple("TinyInt")
+                            .field(&*(self.buffer as *const i32))
+                            .finish(),
+                        Ty::BigInt => f
+                            .debug_tuple("TinyInt")
+                            .field(&*(self.buffer as *const i64))
+                            .finish(),
+                        Ty::UTinyInt => f
+                            .debug_tuple("TinyInt")
+                            .field(&*(self.buffer as *const u8))
+                            .finish(),
+                        Ty::USmallInt => f
+                            .debug_tuple("TinyInt")
+                            .field(&*(self.buffer as *const u16))
+                            .finish(),
+                        Ty::UInt => f
+                            .debug_tuple("TinyInt")
+                            .field(&*(self.buffer as *const u32))
+                            .finish(),
+                        Ty::UBigInt => f
+                            .debug_tuple("TinyInt")
+                            .field(&*(self.buffer as *const u64))
+                            .finish(),
+                        Ty::Float => f
+                            .debug_tuple("TinyInt")
+                            .field(&*(self.buffer as *const f32))
+                            .finish(),
+                        Ty::Double => f
+                            .debug_tuple("TinyInt")
+                            .field(&*(self.buffer as *const f64))
+                            .finish(),
+                        Ty::Timestamp => f
+                            .debug_tuple("TinyInt")
+                            .field(&*(self.buffer as *const i64))
+                            .finish(),
+                        Ty::VarChar => f
+                            .debug_tuple("VarChar")
+                            .field(&bytes::Bytes::from(std::slice::from_raw_parts(
+                                self.buffer as *const u8,
+                                *self.length,
+                            )))
+                            .finish(),
+                        Ty::NChar => f
+                            .debug_tuple("NChar")
+                            .field(&bytes::Bytes::from(std::slice::from_raw_parts(
+                                self.buffer as *const u8,
+                                *self.length,
+                            )))
+                            .finish(),
+                        Ty::Json => f
+                            .debug_tuple("VarChar")
+                            .field(&bytes::Bytes::from(std::slice::from_raw_parts(
+                                self.buffer as *const u8,
+                                *self.length,
+                            )))
+                            .finish(),
+                        _ => unreachable!(),
+                    }
+                }
+            },
+        }
     }
 }
 #[repr(C)]
@@ -102,11 +173,10 @@ impl BindFrom for TaosBindV3 {
         })
     }
 
-    fn from_primitive<T: IsValue>(v: &T) -> Self {
+    fn from_primitive<T: IsValue + Clone>(v: &T) -> Self {
         let mut param = TaosMultiBind::new(T::TY);
         param.buffer_length = v.fixed_length();
         param.buffer = box_into_raw(v.clone()) as *const T as _;
-        param.length = box_into_raw(param.buffer_length) as _;
         param.is_null = box_into_raw(0) as _;
         Self(param)
     }
@@ -185,24 +255,66 @@ impl TaosBindV2 {
 
     #[inline]
     unsafe fn free(&mut self) {
-        if self.ty() == Ty::Json && !self.buffer.is_null() {
-            Vec::from_raw_parts(self.buffer as _, *self.length, *self.length);
-        }
+        let ty = self.ty();
+        match ty {
+            Ty::Bool => {
+                let _ = Box::from_raw(self.buffer as *mut bool);
+            }
+            Ty::TinyInt => {
+                let _ = Box::from_raw(self.buffer as *mut i8);
+            }
+            Ty::SmallInt => {
+                let _ = Box::from_raw(self.buffer as *mut i16);
+            }
+            Ty::Int => {
+                let _ = Box::from_raw(self.buffer as *mut i32);
+            }
+            Ty::BigInt => {
+                let _ = Box::from_raw(self.buffer as *mut i64);
+            }
+            Ty::UTinyInt => {
+                let _ = Box::from_raw(self.buffer as *mut u8);
+            }
+            Ty::USmallInt => {
+                let _ = Box::from_raw(self.buffer as *mut u16);
+            }
+            Ty::UInt => {
+                let _ = Box::from_raw(self.buffer as *mut u32);
+            }
+            Ty::UBigInt => {
+                let _ = Box::from_raw(self.buffer as *mut u64);
+            }
+            Ty::Float => {
+                let _ = Box::from_raw(self.buffer as *mut f32);
+            }
+            Ty::Double => {
+                let _ = Box::from_raw(self.buffer as *mut f64);
+            }
+            Ty::Timestamp => {
+                let _ = Box::from_raw(self.buffer as *mut i64);
+            }
+            // Ty::VarChar |
+            // Ty::NChar |
+            // Ty::Json => {
+            //     Vec::from_raw_parts(self.buffer as _, *self.length, *self.length);
+            // }
+            _ => (),
+        };
         if !self.length.is_null() {
-            Box::from_raw(self.length);
+            let _ = Box::from_raw(self.length);
         }
         if !self.is_null.is_null() {
-            Box::from_raw(self.is_null);
+            let _ = Box::from_raw(self.is_null);
         }
         if !self.error.is_null() {
-            Box::from_raw(self.error);
+            let _ = Box::from_raw(self.error);
         }
     }
 }
 
 pub trait BindFrom: Sized {
     fn null() -> Self;
-    fn from_primitive<T: IsValue>(v: &T) -> Self;
+    fn from_primitive<T: IsValue + Clone>(v: &T) -> Self;
     fn from_timestamp(v: i64) -> Self;
     fn from_varchar(v: &str) -> Self;
     fn from_nchar(v: &str) -> Self;
@@ -278,8 +390,7 @@ impl BindFrom for TaosBindV2 {
     fn from_primitive<T: IsValue>(v: &T) -> Self {
         let mut param = Self::new(T::TY);
         param.buffer_length = v.fixed_length();
-        param.buffer = v as *const T as _;
-        param.length = box_into_raw(param.buffer_length) as _;
+        param.buffer = box_into_raw(v.clone()) as *const T as _;
         param
     }
 }

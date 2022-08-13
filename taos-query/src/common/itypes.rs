@@ -101,7 +101,7 @@ impl IVarChar {
         Self(String::with_capacity(cap))
     }
 }
-pub trait IsValue: Sized {
+pub trait IsValue: Sized + Clone {
     const TY: Ty;
 
     fn is_null(&self) -> bool {

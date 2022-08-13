@@ -8,7 +8,7 @@ fn box_into_raw<T>(v: T) -> *mut T {
 
 impl<T> From<&T> for TaosBindV2
 where
-    T: IsValue,
+    T: IsValue + Clone,
 {
     #[inline(always)]
     fn from(v: &T) -> Self {
@@ -42,7 +42,7 @@ where
 
 impl<T> From<&T> for TaosBindV3
 where
-    T: IsValue,
+    T: IsValue + Clone,
 {
     #[inline(always)]
     fn from(v: &T) -> Self {
@@ -74,7 +74,7 @@ where
     }
 }
 
-pub trait ToBind: IsValue {
+pub trait ToBind: IsValue + Clone {
     fn to_bind(&self) -> TaosBind {
         macro_rules! as_is {
             () => {
@@ -122,8 +122,8 @@ mod tests_v2 {
         for v in [true, false] {
             let bind = TaosBind::from(&v);
             dbg!(&bind);
-            let v1 = unsafe { (bind.buffer as *const bool).read() };
-            assert!(v1 == v);
+            let v1 = unsafe { *(bind.buffer as *const bool) };
+            assert_eq!(v1, v);
         }
     }
 
@@ -133,7 +133,7 @@ mod tests_v2 {
             let bind = TaosBind::from(v);
             dbg!(&bind);
             let v1 = unsafe { (bind.buffer as *const i8).read() };
-            assert!(v1.eq(v));
+            assert_eq!(*v, v1);
         }
     }
     #[test]
@@ -163,7 +163,7 @@ mod tests_v3 {
             let bind = TaosBind::from(v);
             dbg!(&bind);
             let v1 = unsafe { (bind.buffer() as *const bool).read() };
-            assert!(v1.eq(v));
+            assert_eq!(v1, *v);
         }
     }
 
@@ -173,7 +173,7 @@ mod tests_v3 {
             let bind = TaosBind::from(v);
             dbg!(&bind);
             let v1 = unsafe { (bind.buffer() as *const i8).read() };
-            assert!(v1.eq(v));
+            assert_eq!(v1, *v);
         }
     }
     #[test]

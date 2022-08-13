@@ -418,6 +418,7 @@ mod tests {
         let row = &rows[0];
         assert_eq!(row.12, "ABC");
         assert_eq!(row.13, "涛思数据");
+        taos.query("drop database test_bindable")?;
 
         Ok(())
     }

@@ -17,6 +17,11 @@ use query::blocks::SharedState;
 use taos_error::Error as RawError;
 // use taos_query::{AsyncFetchable, AsyncQueryable, DsnError, Fetchable, Queryable, TBuilder};
 
+pub mod sync {
+    pub use super::{Taos, TaosBuilder, Consumer, TmqBuilder, Stmt};
+    pub use taos_query::prelude::sync::*;
+}
+
 mod into_c_str;
 pub mod stmt;
 
@@ -137,11 +142,10 @@ impl AsyncQueryable for Taos {
 /// ### Synchronous
 ///
 /// ```rust
-/// use taos_sys::Builder;
-/// use taos_query::prelude::sync::*;
+/// use taos_sys::sync::*;
 /// fn main() -> anyhow::Result<()> {
-///     let builder = Builder::from_dsn("taos://localhost:6030")?;
-///     let taos = builder.connect()?;
+///     let builder = TaosBuilder::from_dsn("taos://localhost:6030")?;
+///     let taos = builder.build()?;
 ///     let mut query = taos.query("show databases")?;
 ///     for row in query.rows() {
 ///         println!("{:?}", row?.into_values());
@@ -153,13 +157,12 @@ impl AsyncQueryable for Taos {
 /// ### Async
 ///
 /// ```rust
-/// use taos_sys::Builder;
-/// use taos_query::prelude::*;
+/// use taos_sys::*;
 ///
 /// #[tokio::main]
 /// async fn main() -> anyhow::Result<()> {
-///     let builder = Builder::from_dsn("taos://localhost:6030")?;
-///     let taos = builder.connect()?;
+///     let builder = TaosBuilder::from_dsn("taos://localhost:6030")?;
+///     let taos = builder.build()?;
 ///     let mut query = taos.query("show databases").await?;
 ///
 ///     while let Some(row) = query.rows().try_next().await? {

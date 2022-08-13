@@ -1,4 +1,5 @@
 #![cfg_attr(nightly, feature(backtrace))]
+#![cfg_attr(nightly, feature(no_coverage))]
 
 use std::{
     borrow::Cow,
@@ -104,6 +105,7 @@ impl Code {
 }
 
 #[allow(non_upper_case_globals, non_snake_case)]
+#[cfg_attr(feature = "no_coverage", no_coverage)]
 mod code {
     include!(concat!(env!("OUT_DIR"), "/code.rs"));
 }
@@ -131,6 +133,7 @@ impl Error {
             code: code.into(),
             err: err.into(),
             #[cfg(nightly)]
+            #[cfg_attr(nightly, no_coverage)]
             backtrace: Backtrace::capture(),
         }
     }
@@ -174,12 +177,6 @@ impl FromStr for Error {
     }
 }
 
-// impl<T: std::error::Error> From<T> for Error {
-//     fn from(_: T) -> Self {
-//         todo!()
-//     }
-// }
-
 impl Display for Error {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -206,10 +203,39 @@ fn test_code() {
     let c = Code::from(0).to_string();
     assert_eq!(c, "0x0000");
     dbg!(Code::from(0x200));
+
+    let c: i8 = Code::new(0).into();
+    let mut c: Code = c.into();
+
+    let _: &i32 = c.deref();
+    let _: &mut i32 = c.deref_mut();
 }
 
 #[test]
 fn test_display() {
     let err = Error::new(Code::Success, "Success");
     assert_eq!(format!("{err}"), "[0x0000] Success");
+    let err = Error::new(Code::Failed, "failed");
+    assert_eq!(format!("{err}"), "failed");
+}
+
+#[test]
+fn test_error() {
+    let err = Error::new(Code::Success, "success");
+    assert_eq!(err.code(), err.errno());
+    assert_eq!(err.message(), "success");
+
+    let _ = Error::from_code(1);
+    assert_eq!(Error::from_any("any").to_string(), "any");
+    assert_eq!(Error::from_string("any").to_string(), "any");
+
+    let _ = Error::from(DsnError::InvalidDriver("".to_string()));
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn test_serde_error() {
+    use serde::de::Error as DeError;
+
+    let _ = Error::custom("");
 }

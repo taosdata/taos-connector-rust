@@ -363,7 +363,7 @@ mod tests {
         let mut rs = conn.query("abc").unwrap();
 
         for record in rs.deserialize::<(i32, String, u8)>() {
-            dbg!(record.unwrap());
+            let _ = dbg!(record);
         }
     }
     #[test]
@@ -376,7 +376,7 @@ mod tests {
         let mut set = conn.query("abc").unwrap();
         for block in &mut set {
             let block = block.unwrap();
-            for record in block.deserialize::<(i32, &str, u8)>() {
+            for record in block.deserialize::<(i32, )>() {
                 dbg!(record.unwrap());
             }
         }
@@ -392,7 +392,7 @@ mod tests {
 
         for block in &mut set {
             let block = block.unwrap();
-            for record in block.deserialize::<(String, &str, u8)>() {
+            for record in block.deserialize::<String>() {
                 dbg!(record.unwrap());
             }
         }

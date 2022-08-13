@@ -15,3 +15,6 @@ pest_derive = "2.1"
 itertools = "0.10.3"
 thiserror = "1.0.30"
 urlencoding = "2.1.0"
+
+[dev-dependencies]
+coverage-helper = "0.1"

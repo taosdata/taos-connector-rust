@@ -563,7 +563,7 @@ mod tests {
 
             Null(Ty::VarChar), ""
             TinyInt(-1), "-1"
-            Timestamp(crate::Timestamp::Milliseconds(0)), "1970-01-01T00:00:00"
+            Timestamp(crate::Timestamp::Milliseconds(0)), "1970-01-01T08:00:00+08:00"
             VarChar("String"), "String"
             VarChar("你好，世界"), "你好，世界"
             Json(json!("abc").to_string().into_bytes().into()), json!("abc").to_string()
