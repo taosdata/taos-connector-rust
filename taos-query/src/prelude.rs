@@ -243,13 +243,13 @@ pub mod sync {
                 .map_err(Into::into)
         }
 
-        /// Topics information by `show topics` sql.
+        /// Topics information by `SELECT * FROM performance_schema.perf_topics` sql.
         ///
         /// ## Compatibility
         ///
         /// This is a 3.x-only API.
         fn topics(&self) -> Result<Vec<Topic>, Self::Error> {
-            self.query("show topics")?
+            self.query("SELECT * FROM performance_schema.perf_topics")?
                 .deserialize()
                 .try_collect()
                 .map_err(Into::into)
@@ -575,15 +575,15 @@ mod r#async {
                 .await?)
         }
 
-        /// Topics information by `show topics` sql.
+        /// Topics information by `SELECT * FROM performance_schema.perf_topics` sql.
         ///
         /// ## Compatibility
         ///
         /// This is a 3.x-only API.
         async fn topics(&self) -> Result<Vec<Topic>, Self::Error> {
-            log::debug!("query one with sql: show topics");
+            log::debug!("query one with sql");
             Ok(self
-                .query("show topics")
+                .query("SELECT * FROM performance_schema.perf_topics")
                 .await?
                 .deserialize()
                 .try_collect()
@@ -593,7 +593,7 @@ mod r#async {
         /// Get table meta information.
         async fn describe(&self, table: &str) -> Result<Describe, Self::Error> {
             Ok(Describe(
-                self.query(format!("describe {table}"))
+                self.query(format!("DESCRIBE {table}"))
                     .await?
                     .deserialize()
                     .try_collect()
@@ -605,7 +605,7 @@ mod r#async {
         async fn database_exists(&self, name: &str) -> Result<bool, Self::Error> {
             Ok(self
                 .query_one::<_, String>(format!(
-                    "select name from information_schema.ins_databases where name='{name}'"
+                    "SELECT name FROM information_schema.ins_databases WHERE name='{name}'"
                 ))
                 .await?
                 .is_some())

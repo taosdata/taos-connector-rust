@@ -45,12 +45,12 @@ async fn main() -> anyhow::Result<()> {
 
     // prepare database
     taos.exec_many([
-        format!("DROP TOPIC IF EXISTS tmq_meters"),
+        "DROP TOPIC IF EXISTS tmq_meters".to_string(),
         format!("DROP DATABASE IF EXISTS `{db}`"),
         format!("CREATE DATABASE `{db}`"),
         format!("USE `{db}`"),
         // create super table
-        format!("CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) TAGS (`groupid` INT, `location` BINARY(16))"),
+        "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) TAGS (`groupid` INT, `location` BINARY(16))".to_string(),
         // create topic for subscription
         format!("CREATE TOPIC tmq_meters with META AS DATABASE {db}")
     ])

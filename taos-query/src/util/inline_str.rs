@@ -65,8 +65,8 @@ macro_rules! _impl_inline_str {
 
             impl InlineStr<$ty> {
 
-                pub fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
-                    unsafe { &*std::mem::transmute::<*const u8, *const InlineStr<$ty>>(ptr) }
+                pub unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
+                    &*std::mem::transmute::<*const u8, *const InlineStr<$ty>>(ptr)
                 }
 
                 #[inline]
@@ -108,7 +108,7 @@ macro_rules! _impl_test_inline_str {
     ($ty:ty, $bytes:literal, $print:literal) => {{
         let bytes = $bytes;
         use super::Inlinable;
-        let inline = InlineStr::<$ty>::from_ptr(bytes.as_ptr());
+        let inline = unsafe { InlineStr::<$ty>::from_ptr(bytes.as_ptr()) };
         dbg!(inline);
         assert_eq!(inline.len(), 4);
         assert_eq!(inline.as_ref(), "abcd");
@@ -132,6 +132,6 @@ fn test_inline_str() {
 
 #[test]
 fn test_empty_inline() {
-    let inline = InlineStr::<u8>::from_ptr(b"\0".as_ptr());
+    let inline = unsafe { InlineStr::<u8>::from_ptr(b"\0".as_ptr()) };
     dbg!(inline);
 }

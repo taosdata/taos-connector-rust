@@ -36,10 +36,7 @@ impl Bindable<super::Taos> for Stmt {
     }
 
     fn set_tags(&mut self, tags: &[taos_query::common::Value]) -> Result<&mut Self, Self::Error> {
-        let tags = tags
-            .into_iter()
-            .map(|v| TaosBind::from_value(v))
-            .collect_vec();
+        let tags = tags.iter().map(TaosBind::from_value).collect_vec();
         self.raw.set_tags(&tags)?;
         Ok(self)
     }
@@ -48,7 +45,7 @@ impl Bindable<super::Taos> for Stmt {
         &mut self,
         params: &[taos_query::common::ColumnView],
     ) -> Result<&mut Self, Self::Error> {
-        let params = params.into_iter().map(|c| c.into()).collect_vec();
+        let params = params.iter().map(|c| c.into()).collect_vec();
         self.raw.bind_param_batch(&params)?;
         Ok(self)
     }

@@ -127,8 +127,28 @@ impl<'a> Iterator for RowView<'a> {
         }
     }
 }
+pub struct RowViewOfValue<'a>(RowView<'a>);
+
+impl<'a> Iterator for RowViewOfValue<'a> {
+    type Item = BorrowedValue<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.0.col >= self.0.raw.ncols() {
+            None
+        } else {
+            unsafe {
+                let col = self.0.col;
+                self.0.col += 1;
+                Some(self.0.raw.get_ref_unchecked(self.0.row, col))
+            }
+        }
+    }
+}
 
 impl<'a> RowView<'a> {
+    pub fn into_value_iter(self) -> RowViewOfValue<'a> {
+        RowViewOfValue(self)
+    }
     fn walk_next(&mut self) -> Option<BorrowedValue<'a>> {
         self.next().map(|(_, v)| v)
     }

@@ -51,8 +51,8 @@ macro_rules! _impl_inline_str {
 
             impl InlineJson<$ty> {
                 #[inline]
-                pub fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
-                    unsafe { std::mem::transmute::<*const u8, &InlineJson<$ty>>(ptr) }
+                pub unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
+                    { std::mem::transmute::<*const u8, &InlineJson<$ty>>(ptr) }
                 }
 
                 #[inline]
@@ -98,7 +98,7 @@ fn test_inline_str() {
     let bytes =
         b"\x18\0{\"a\":\"\xe6\xb6\x9b\xe6\x80\x9d\xf0\x9d\x84\x9e\xe6\x95\xb0\xe6\x8d\xae\"}";
     let json = "{\"a\":\"涛思𝄞数据\"}";
-    let inline = InlineJson::<u16>::from_ptr(bytes.as_ptr());
+    let inline = unsafe { InlineJson::<u16>::from_ptr(bytes.as_ptr()) };
     dbg!(inline);
     assert_eq!(inline.len(), 24);
     assert_eq!(inline.as_ref(), json);

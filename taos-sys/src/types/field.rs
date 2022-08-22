@@ -27,22 +27,23 @@ impl TAOS_FIELD {
     }
 }
 
-impl Into<Field> for &TAOS_FIELD {
-    fn into(self) -> Field {
+impl From<&TAOS_FIELD> for Field {
+    fn from(field: &TAOS_FIELD) -> Field {
         Field::new(
-            self.name()
+            field
+                .name()
                 .to_str()
                 .expect("invalid utf-8 field name")
                 .to_string(),
-            self.type_(),
-            self.bytes(),
+            field.type_(),
+            field.bytes(),
         )
     }
 }
 
-pub fn from_raw_fields<'a>(ptr: *const TAOS_FIELD, len: usize) -> Vec<Field> {
+pub fn from_raw_fields(ptr: *const TAOS_FIELD, len: usize) -> Vec<Field> {
     unsafe { std::slice::from_raw_parts(ptr, len) }
-        .into_iter()
+        .iter()
         .map(Into::into)
         .collect()
 }

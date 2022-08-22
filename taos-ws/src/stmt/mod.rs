@@ -116,7 +116,7 @@ impl Bindable<super::Taos> for Stmt {
     }
 
     fn execute(&mut self) -> StdResult<usize, Self::Error> {
-        Ok(block_in_place_or_global(self.stmt_exec())?)
+        block_in_place_or_global(self.stmt_exec())
     }
 
     fn affected_rows(&self) -> usize {

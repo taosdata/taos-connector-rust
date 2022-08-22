@@ -443,7 +443,7 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
             ncols * std::mem::size_of::<ColSchema>(),
         )
     };
-    bytes.write(schema_bytes).unwrap();
+    bytes.write_all(schema_bytes).unwrap();
 
     let length_offset = bytes.len();
     bytes.resize(bytes.len() + ncols * std::mem::size_of::<u32>(), 0);

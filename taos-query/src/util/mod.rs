@@ -25,7 +25,7 @@ pub trait InlinableWrite: Write {
     #[inline]
     /// Write `usize` length as little endian `N` bytes.
     fn write_len_with_width<const N: usize>(&mut self, len: usize) -> std::io::Result<usize> {
-        self.write(&len.to_le_bytes()[0..N])?;
+        self.write_all(&len.to_le_bytes()[0..N])?;
         Ok(N)
     }
 
@@ -104,6 +104,7 @@ pub trait InlinableWrite: Write {
 }
 
 impl<T> InlinableWrite for T where T: Write {}
+impl<T> InlinableRead for T where T: Read {}
 
 macro_rules! _impl_read_exact {
     ($ty: ty, $N: literal) => {
@@ -208,7 +209,7 @@ pub trait InlinableRead: Read {
     fn read_inlined_bytes<const N: usize>(&mut self) -> std::io::Result<Vec<u8>> {
         let len = self.read_len_with_width::<N>()?;
         let mut buf = Vec::with_capacity(len);
-        unsafe { buf.set_len(len) };
+        buf.resize(len, 0);
         self.read_exact(&mut buf)?;
         Ok(buf)
     }
@@ -240,8 +241,6 @@ pub trait InlinableRead: Read {
         T::read_inlined(self)
     }
 }
-
-impl<T> InlinableRead for T where T: Read {}
 
 pub struct InlineOpts {
     pub opts: BTreeMap<String, String>,

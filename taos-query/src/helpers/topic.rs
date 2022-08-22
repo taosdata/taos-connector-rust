@@ -1,4 +1,4 @@
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Local};
 
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct Topic {
     topic_name: String,
     db_name: String,
-    create_time: NaiveDateTime,
+    create_time: DateTime<Local>,
     sql: String,
 }
 
@@ -23,8 +23,8 @@ impl Topic {
     }
 
     /// Created time of the topic
-    pub fn create_time(&self) -> NaiveDateTime {
-        self.create_time
+    pub fn create_time(&self) -> &DateTime<Local> {
+        &self.create_time
     }
 
     /// The create sql for the topic

@@ -18,7 +18,7 @@ use taos_error::Error as RawError;
 // use taos_query::{AsyncFetchable, AsyncQueryable, DsnError, Fetchable, Queryable, TBuilder};
 
 pub mod sync {
-    pub use super::{Taos, TaosBuilder, Consumer, TmqBuilder, Stmt};
+    pub use super::{Consumer, Stmt, Taos, TaosBuilder, TmqBuilder};
     pub use taos_query::prelude::sync::*;
 }
 
@@ -120,10 +120,7 @@ impl AsyncQueryable for Taos {
         &self,
         sql: T,
     ) -> Result<Self::AsyncResultSet, Self::Error> {
-        self.raw
-            .query_async(sql.as_ref())
-            .await
-            .map(|raw| ResultSet::new(raw))
+        self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
     }
 
     async fn write_raw_meta(&self, meta: taos_query::common::RawMeta) -> Result<(), Self::Error> {
@@ -208,8 +205,8 @@ impl TBuilder for TaosBuilder {
     type Error = Error;
 
     fn available_params() -> &'static [&'static str] {
-        const PARAMS: &'static [&'static str] = &["configDir"];
-        &PARAMS
+        const PARAMS: &[&str] = &["configDir"];
+        PARAMS
     }
 
     fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
@@ -304,7 +301,7 @@ impl ResultSet {
     }
 
     pub fn fields(&self) -> &[Field] {
-        &self.fields.get_or_init(|| self.raw.fetch_fields())
+        self.fields.get_or_init(|| self.raw.fetch_fields())
     }
 
     pub fn ncols(&self) -> usize {
@@ -334,7 +331,7 @@ impl ResultSet {
     }
 
     pub(crate) fn fetch_raw_block(&self) -> Result<Option<RawBlock>, RawError> {
-        Ok(self.raw.fetch_raw_block(self.fields())?)
+        self.raw.fetch_raw_block(self.fields())
     }
 
     pub(crate) fn fetch_raw_block_async(
@@ -411,7 +408,7 @@ impl AsyncFetchable for ResultSet {
     }
 
     fn fetch_raw_block(
-        self: &mut Self,
+        &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<Option<RawBlock>, Self::Error>> {
         self.fetch_raw_block_async(cx)

@@ -437,11 +437,11 @@ impl AsConsumer for Consumer {
         &self,
         timeout: Timeout,
     ) -> StdResult<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>, Self::Error> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::recv_timeout(&self, timeout))
+        block_in_place_or_global(<Consumer as AsAsyncConsumer>::recv_timeout(self, timeout))
     }
 
     fn commit(&self, offset: Self::Offset) -> StdResult<(), Self::Error> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(&self, offset))
+        block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(self, offset))
     }
 }
 
@@ -453,7 +453,7 @@ impl TmqBuilder {
             .params
             .get("group.id")
             .map(ToString::to_string)
-            .ok_or(DsnError::RequireParam("group.id".to_string()))?;
+            .ok_or_else(|| DsnError::RequireParam("group.id".to_string()))?;
         let client_id = dsn.params.get("client.id").map(ToString::to_string);
         let offset_reset = dsn.params.get("auto.offset.reset").map(ToString::to_string);
 

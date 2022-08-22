@@ -41,13 +41,12 @@ impl<'a> Future for QueryFuture<'a> {
                 res: *mut TAOS_RES,
                 code: c_int,
             ) {
-                println!("async query callback {:?}", code);
                 let param = param as *mut (&UnsafeCell<State>, Waker);
                 let state = param.read();
                 let mut s = { &mut *state.0.get() };
 
-                (*s).result = res;
-                (*s).code = code;
+                s.result = res;
+                s.code = code;
                 state.1.wake();
             }
 

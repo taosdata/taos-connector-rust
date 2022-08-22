@@ -1,7 +1,4 @@
-use crate::{
-    common::{BorrowedValue, Field, Precision, Ty, Value},
-    util::{Inlinable, InlinableRead, InlinableWrite},
-};
+use crate::common::{BorrowedValue, Field, Precision, Ty, Value};
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -524,7 +521,7 @@ impl RawBlock {
                     unreachable!("unsupported type: {ty}")
                 }
             };
-            log::debug!("column: {:#?}", column);
+            log::debug!("column: {:?}", column);
             columns.push(column);
             debug_assert!(data_offset <= len);
         }
@@ -558,17 +555,6 @@ impl RawBlock {
         self
     }
 
-    // /// Set fields directly
-    // pub fn with_fields(&mut self, fields: Vec<Field>) -> &mut Self {
-    //     self.raw_fields = fields;
-    //     self.fields = self
-    //         .raw_fields
-    //         .iter()
-    //         .map(|f| f.name().to_string())
-    //         .collect();
-    //     self
-    // }
-
     /// Set field names of the block
     pub fn with_field_names<S: Into<String>, I: IntoIterator<Item = S>>(
         &mut self,
@@ -576,12 +562,6 @@ impl RawBlock {
     ) -> &mut Self {
         self.fields = names.into_iter().map(|name| name.into()).collect();
         self.layout.borrow_mut().with_field_names();
-        // self.raw_fields = self
-        //     .fields
-        //     .iter()
-        //     .zip(self.schemas())
-        //     .map(|(name, schema)| Field::new(name, schema.ty, schema.len))
-        //     .collect();
         self
     }
 
@@ -726,15 +706,26 @@ impl RawBlock {
     pub fn write<W: std::io::Write>(&self, _wtr: W) -> std::io::Result<usize> {
         todo!()
     }
+
+    fn layout(&self) -> Layout {
+        Layout::from_bits(self.layout.borrow().as_inner()).unwrap()
+    }
 }
 
 struct InlineBlock(Bytes);
 
-impl Inlinable for InlineBlock {
+impl From<InlineBlock> for Bytes {
+    fn from(raw: InlineBlock) -> Self {
+        raw.0
+    }
+}
+
+impl crate::prelude::sync::Inlinable for InlineBlock {
     fn read_inlined<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self>
     where
         Self: Sized,
     {
+        use crate::prelude::sync::InlinableRead;
         let version = reader.read_u32()?;
         let len = reader.read_u32()?;
         let mut bytes = Vec::with_capacity(len as usize);
@@ -770,8 +761,9 @@ impl crate::prelude::AsyncInlinable for InlineBlock {
         Self: Sized,
     {
         use tokio::io::*;
-        let version = reader.read_u32().await?;
-        let len = reader.read_u32().await?;
+
+        let version = reader.read_u32_le().await?;
+        let len = reader.read_u32_le().await?;
         let mut bytes = Vec::with_capacity(len as usize);
         bytes.resize(len as usize, 0);
         unsafe {
@@ -801,98 +793,83 @@ impl crate::prelude::AsyncInlinable for InlineBlock {
     }
 }
 
-impl Inlinable for RawBlock {
+impl crate::prelude::sync::Inlinable for RawBlock {
     fn read_inlined<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        use crate::prelude::sync::InlinableRead;
         let layout = reader.read_u32()?;
         let layout = Layout::from_bits(layout).expect("should be layout");
 
         let precision = layout.precision();
-
-        let cols = reader.read_u32()? as usize;
-
-        // let mut table_name = None;
-        let table_name = if layout.expect_table_name() {
-            Some(reader.read_inlined_str::<2>()?)
-        } else {
-            None
-        };
-
-        let names: Vec<_> = (0..cols as usize)
-            .map(|_| reader.read_inlined_str::<1>())
-            .try_collect()?;
-
         let raw: InlineBlock = reader.read_inlinable()?;
         let mut raw = Self::parse_from_raw_block(raw.0, precision);
+        let cols = raw.ncols();
 
-        if let Some(name) = table_name {
+        if layout.expect_table_name() {
+            let name = reader.read_inlined_str::<2>()?;
             raw.with_table_name(name);
         }
-
-        raw.with_field_names(names);
+        if layout.expect_field_names() {
+            let names: Vec<_> = (0..cols as usize)
+                .map(|_| reader.read_inlined_str::<1>())
+                .try_collect()?;
+            raw.with_field_names(names);
+        }
 
         Ok(raw)
     }
 
     fn read_optional_inlined<R: std::io::Read>(reader: &mut R) -> std::io::Result<Option<Self>> {
+        use crate::prelude::sync::InlinableRead;
         let layout = reader.read_u32()?;
-        println!("0x{:X}", layout);
+        log::debug!("parse layout 0x{:X}", layout);
         if layout == 0xFFFFFFFF {
-            let eol = reader.read_u32()?;
-            if eol == 0 {
-                return Ok(None);
-            } else {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "invalid raw data format",
-                ));
-            }
+            return Ok(None);
         }
         let layout = Layout::from_bits(layout).expect("should be layout");
 
         let precision = layout.precision();
-
-        let cols = reader.read_u32()? as usize;
-
-        // let mut table_name = None;
-        let table_name = if dbg!(layout.expect_table_name()) {
-            Some(reader.read_inlined_str::<2>()?)
-        } else {
-            None
-        };
-
-        let names: Vec<_> = (0..cols as usize)
-            .map(|_| reader.read_inlined_str::<1>())
-            .try_collect()?;
-
         let raw: InlineBlock = reader.read_inlinable()?;
         let mut raw = Self::parse_from_raw_block(raw.0, precision);
 
-        if let Some(name) = table_name {
+        if layout.expect_table_name() {
+            let name = reader.read_inlined_str::<2>()?;
             raw.with_table_name(name);
         }
-
-        raw.with_field_names(names);
-        dbg!(&raw.table_name(), raw.ncols(), raw.nrows());
+        if layout.expect_field_names() {
+            let names: Vec<_> = (0..raw.ncols() as usize)
+                .map(|_| reader.read_inlined_str::<1>())
+                .try_collect()?;
+            raw.with_field_names(names);
+        }
+        log::debug!(
+            "table name: {}, cols: {}, rows: {}",
+            &raw.table_name().unwrap_or("(?)"),
+            raw.ncols(),
+            raw.nrows()
+        );
 
         Ok(Some(raw))
     }
 
     fn write_inlined<W: std::io::Write>(&self, wtr: &mut W) -> std::io::Result<usize> {
-        let mut l = wtr.write_u32_le(self.layout.borrow().as_inner())?;
+        use crate::prelude::sync::InlinableWrite;
+        let layout = self.layout();
+        let mut l = wtr.write_u32_le(layout.as_inner())?;
 
-        l += wtr.write_len_with_width::<4>(self.ncols())?;
+        let raw = self.as_raw_bytes();
+        wtr.write_all(raw)?;
+        l += raw.len();
 
-        if let Some(name) = self.table.as_ref() {
+        if layout.expect_table_name() {
+            let name = self.table_name().expect("table name should be known");
             l += wtr.write_inlined_bytes::<2>(name.as_bytes())?;
         }
-        if self.fields.len() > 0 {
+        if layout.expect_field_names() {
+            debug_assert_eq!(self.field_names().len(), self.ncols());
             for field in self.field_names() {
                 l += wtr.write_inlined_str::<1>(field)?;
             }
         }
-        let raw = self.as_raw_bytes();
-        l += wtr.write_inlined_bytes::<4>(raw)?;
-
         Ok(l)
     }
 }
@@ -908,44 +885,26 @@ impl crate::prelude::AsyncInlinable for RawBlock {
         log::debug!("layout: 0x{:X}", layout);
         if layout == 0xFFFFFFFF {
             return Ok(None);
-            // todo: keep old code
-            // let eol = reader.read_u32_le().await?;
-            // if eol == 0 {
-            //     return Ok(None);
-            // } else {
-            //     return Err(std::io::Error::new(
-            //         std::io::ErrorKind::InvalidData,
-            //         "invalid raw data format",
-            //     ));
-            // }
         }
-        let layout = Layout::from_bits(layout).expect("should be layout");
+        let layout = Layout::from_bits(layout).expect("invalid layout");
 
         let precision = layout.precision();
 
-        let cols = reader.read_u32_le().await? as usize;
-
-        // let mut table_name = None;
-        let table_name = if layout.expect_table_name() {
-            Some(reader.read_inlined_str::<2>().await?)
-        } else {
-            None
-        };
-
-        let mut names = Vec::with_capacity(cols as usize);
-        for _ in 0..cols {
-            names.push(reader.read_inlined_str::<1>().await?);
-        }
-
-        let raw: InlineBlock = reader.read_inlinable().await?;
+        let raw: InlineBlock =
+            <InlineBlock as crate::prelude::AsyncInlinable>::read_inlined(reader).await?;
         let mut raw = Self::parse_from_raw_block(raw.0, precision);
 
-        if let Some(name) = table_name {
+        if layout.expect_table_name() {
+            let name = reader.read_inlined_str::<2>().await?;
             raw.with_table_name(name);
         }
-
-        raw.with_field_names(names);
-        // dbg!(&raw.table_name(), raw.ncols(), raw.nrows());
+        if layout.expect_field_names() {
+            let mut names = Vec::with_capacity(raw.ncols());
+            for _ in 0..raw.ncols() {
+                names.push(reader.read_inlined_str::<1>().await?);
+            }
+            raw.with_field_names(names);
+        }
 
         Ok(Some(raw))
     }
@@ -953,37 +912,12 @@ impl crate::prelude::AsyncInlinable for RawBlock {
     async fn read_inlined<R: tokio::io::AsyncRead + Send + Unpin>(
         reader: &mut R,
     ) -> std::io::Result<Self> {
-        use crate::util::AsyncInlinableRead;
-        use tokio::io::*;
-        let layout = reader.read_u32_le().await?;
-        let layout = Layout::from_bits(layout).expect("should be layout");
-
-        let precision = layout.precision();
-
-        let cols = reader.read_u32_le().await? as usize;
-
-        // let mut table_name = None;
-        let table_name = if layout.expect_table_name() {
-            Some(reader.read_inlined_str::<2>().await?)
-        } else {
-            None
-        };
-
-        let mut names = Vec::with_capacity(cols as usize);
-        for _ in 0..cols {
-            names.push(reader.read_inlined_str::<1>().await?);
-        }
-
-        let raw: InlineBlock = reader.read_inlinable().await?;
-        let mut raw = Self::parse_from_raw_block(raw.0, precision);
-
-        if let Some(name) = table_name {
-            raw.with_table_name(name);
-        }
-
-        raw.with_field_names(names);
-
-        Ok(raw)
+        <Self as crate::prelude::AsyncInlinable>::read_optional_inlined(reader)
+            .await?
+            .ok_or(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid raw data format",
+            ))
     }
 
     async fn write_inlined<W: tokio::io::AsyncWrite + Send + Unpin>(
@@ -993,31 +927,32 @@ impl crate::prelude::AsyncInlinable for RawBlock {
         use crate::util::AsyncInlinableWrite;
         use tokio::io::*;
 
-        let layout = self.layout.borrow().as_inner();
-        wtr.write_u32_le(layout).await?;
+        let layout = self.layout();
+        wtr.write_u32_le(layout.as_inner()).await?;
 
-        let mut l = std::mem::size_of::<u32>();
+        let raw = self.as_raw_bytes();
+        wtr.write_all(raw).await?;
 
-        l += wtr.write_len_with_width::<4>(self.nrows()).await?;
-        l += wtr.write_len_with_width::<4>(self.ncols()).await?;
+        let mut l = std::mem::size_of::<u32>() + raw.len();
 
-        if let Some(name) = self.table.as_ref() {
+        if layout.expect_table_name() {
+            let name = self.table_name().expect("table name should be known");
             l += wtr.write_inlined_bytes::<2>(name.as_bytes()).await?;
         }
-        if self.fields.len() > 0 {
+        if layout.expect_field_names() {
+            debug_assert_eq!(self.field_names().len(), self.ncols());
             for field in self.field_names() {
                 l += wtr.write_inlined_str::<1>(field).await?;
             }
         }
-        let raw = self.as_raw_bytes();
-        l += wtr.write_inlined_bytes::<4>(raw).await?;
 
         Ok(l)
     }
 }
 
-#[test]
-fn test_raw_from_v2() {
+#[tokio::test(flavor = "multi_thread")]
+async fn test_raw_from_v2() {
+    use crate::prelude::AsyncInlinable;
     // pretty_env_logger::formatted_builder()
     //     .filter_level(log::LevelFilter::Trace)
     //     .init();
@@ -1064,7 +999,26 @@ fn test_raw_from_v2() {
     // dbg!(block);
     let bytes = views_to_raw_block(&block.columns);
     let raw2 = RawBlock::parse_from_raw_block(bytes, block.precision);
-    dbg!(raw2);
+    dbg!(&raw2);
+    let inlined = raw2.inlined().await;
+    dbg!(&inlined);
+    let mut raw3 = RawBlock::read_inlined(&mut inlined.as_slice())
+        .await
+        .unwrap();
+    raw3.with_field_names(["ts", "current", "voltage", "phase", "group_id", "location"])
+        .with_table_name("meters");
+    dbg!(&raw3);
+
+    let raw4 = RawBlock::read_inlined(&mut raw3.inlined().await.as_slice())
+        .await
+        .unwrap();
+    dbg!(&raw4);
+    assert_eq!(raw3.table_name(), raw4.table_name());
+
+    let raw5 = RawBlock::read_optional_inlined(&mut raw3.inlined().await.as_slice())
+        .await
+        .unwrap();
+    dbg!(raw5);
 }
 
 #[test]

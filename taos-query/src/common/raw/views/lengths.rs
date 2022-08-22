@@ -65,7 +65,15 @@ impl LengthsMut {
         Self(bytes)
     }
     /// As a [i32] slice.
-    fn as_slice(&self) -> &mut [u32] {
+    fn as_slice(&self) -> &[u32] {
+        unsafe {
+            std::slice::from_raw_parts(
+                self.0.as_ptr() as *const u32,
+                self.0.len() / std::mem::size_of::<u32>(),
+            )
+        }
+    }
+    fn as_slice_mut(&mut self) -> &mut [u32] {
         unsafe {
             std::slice::from_raw_parts_mut(
                 self.0.as_ptr() as *mut u32,
@@ -88,7 +96,7 @@ impl Deref for LengthsMut {
 
 impl DerefMut for LengthsMut {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.as_slice()
+        self.as_slice_mut()
     }
 }
 

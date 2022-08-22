@@ -86,8 +86,7 @@ impl RawTaos {
     pub fn query<'a, S: IntoCStr<'a>>(&self, sql: S) -> Result<ResultSet, Error> {
         let sql = sql.into_c_str();
         log::info!("query with sql: {:?}", sql);
-        RawRes::from_ptr(unsafe { taos_query(self.as_ptr(), sql.as_ptr()) })
-            .map(ResultSet::new)
+        RawRes::from_ptr(unsafe { taos_query(self.as_ptr(), sql.as_ptr()) }).map(ResultSet::new)
     }
 
     #[inline]
@@ -109,11 +108,11 @@ impl RawTaos {
     pub fn validate_sql(self, sql: *const c_char) -> Result<(), Error> {
         let code: Code = unsafe { taos_validate_sql(self.as_ptr(), sql) }.into();
         if code.success() {
-            return Ok(());
+            Ok(())
         } else {
             let err = unsafe { taos_errstr(std::ptr::null_mut()) };
             let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
-            return Err(Error::new(code, err));
+            Err(Error::new(code, err))
         }
     }
 
@@ -142,7 +141,7 @@ impl RawTaos {
         let nrows = block.nrows();
         let name = block
             .table_name()
-            .ok_or(Error::new(Code::Failed, "raw block should have table name"))?;
+            .ok_or_else(|| Error::new(Code::Failed, "raw block should have table name"))?;
         let ptr = block.as_raw_bytes().as_ptr();
         err_or!(taos_write_raw_block(
             self.as_ptr(),

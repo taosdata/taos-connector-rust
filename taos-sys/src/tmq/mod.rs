@@ -147,7 +147,7 @@ impl TBuilder for TmqBuilder {
     fn build(&self) -> Result<Self::Target, Self::Error> {
         self.conf.build().map(|tmq| Consumer {
             tmq,
-            timeout: self.timeout.clone(),
+            timeout: self.timeout,
         })
     }
 }
@@ -531,7 +531,6 @@ mod tests {
             let raw = row?;
             dbg!(raw);
         }
-
 
         taos.query("drop database tmq_meta2")?;
         taos.query("drop topic tmq_meta").unwrap();

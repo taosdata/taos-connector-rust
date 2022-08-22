@@ -181,7 +181,7 @@ pub(super) mod conf {
             }
 
             // todo: do explicitly param name filter.
-            conf.with(dsn.params.iter().filter(|(k, _)| k.contains(".")))
+            conf.with(dsn.params.iter().filter(|(k, _)| k.contains('.')))
         }
 
         pub(crate) fn with_group_id(mut self, id: &str) -> Self {
@@ -255,7 +255,7 @@ pub(super) mod conf {
             }
         }
 
-        pub(crate) fn with_auto_commit_cb(&mut self, cb: tmq_commit_cb, param: *mut c_void) -> () {
+        pub(crate) fn with_auto_commit_cb(&mut self, cb: tmq_commit_cb, param: *mut c_void) {
             unsafe {
                 tmq_conf_set_auto_commit_cb(self.0, cb, param);
             }

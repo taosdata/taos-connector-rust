@@ -153,7 +153,7 @@ impl RawRes {
                 Poll::Ready(Ok(None))
             }
         } else {
-            let param = Box::new((&*state, cx.waker().clone()));
+            let param = Box::new((state, cx.waker().clone()));
             unsafe extern "C" fn async_fetch_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
@@ -253,7 +253,7 @@ impl RawRes {
             if num > 0 {
                 let raw = RawBlock::parse_from_ptr_v2(
                     block as _,
-                    &fields,
+                    fields,
                     lengths,
                     num as usize,
                     self.precision(),
@@ -266,7 +266,7 @@ impl RawRes {
     }
 
     pub fn to_blocks(&self) -> Blocks {
-        Blocks::new(self.clone())
+        Blocks::new(*self)
     }
 
     // // #[inline]
@@ -276,7 +276,7 @@ impl RawRes {
 
     // #[inline]
     pub fn fetch_raw_message_async(&self) -> MessageStream {
-        MessageStream::new(self.clone())
+        MessageStream::new(*self)
     }
 
     #[inline]

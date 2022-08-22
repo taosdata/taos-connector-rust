@@ -34,8 +34,8 @@ macro_rules! _impl_inline_lines {
 
             impl InlineBytes<$ty> {
                 #[inline]
-                pub fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
-                    unsafe { std::mem::transmute::<*const u8, &InlineBytes<$ty>>(ptr) }
+                pub unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
+                    std::mem::transmute::<*const u8, &InlineBytes<$ty>>(ptr)
                 }
                 #[inline]
                 #[rustversion::attr(nightly, const)]
@@ -70,7 +70,7 @@ _impl_inline_lines!(u8 u16 u32 u64 usize);
 macro_rules! _impl_test_inline_lines {
     ($ty:ty, $bytes:literal) => {{
         let bytes = $bytes;
-        let inline = InlineBytes::<$ty>::from_ptr(bytes.as_ptr());
+        let inline = unsafe { InlineBytes::<$ty>::from_ptr(bytes.as_ptr()) };
         dbg!(inline);
         assert_eq!(inline.len(), 4);
         assert_eq!(inline.as_ref(), b"abcd");

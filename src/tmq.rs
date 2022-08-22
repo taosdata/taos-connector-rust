@@ -46,10 +46,7 @@ impl TBuilder for TmqBuilder {
     fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
         let dsn = dsn.into_dsn()?;
         // dbg!(&dsn);
-        match (
-            dsn.driver.as_str(),
-            dsn.protocol.as_ref().map(|s| s.as_str()),
-        ) {
+        match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "wss" | "http" | "https" | "taosws", _) => Ok(Self(TmqBuilderInner::Ws(
                 taos_ws::consumer::TmqBuilder::from_dsn(dsn)?,
             ))),
@@ -314,6 +311,17 @@ mod tests {
     use super::*;
     use crate::*;
 
+    #[test]
+    fn builder() -> anyhow::Result<()> {
+        let mut dsn: Dsn = "taos://".parse()?;
+        dsn.set("group.id", "group1");
+        dsn.set("client.id", "test");
+        dsn.set("auto.offset.reset", "earliest");
+
+        let _tmq = TmqBuilder::from_dsn(dsn)?;
+        Ok(())
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
@@ -424,7 +432,7 @@ mod tests {
                         let json = meta.as_json_meta().await?;
                         let sql = json.to_string();
                         if let Err(err) = taos.exec(sql).await {
-                            println!("maybe error: {}", err.to_string());
+                            println!("maybe error: {}", err);
                         }
                     }
                     MessageSet::Data(data) => {

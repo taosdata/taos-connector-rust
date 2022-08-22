@@ -89,10 +89,7 @@ impl TBuilder for TaosBuilder {
 impl TaosBuilder {
     pub fn from_dsn(dsn: impl IntoDsn) -> Result<Self, DsnError> {
         let mut dsn = dsn.into_dsn()?;
-        let scheme = match (
-            dsn.driver.as_str(),
-            dsn.protocol.as_ref().map(|s| s.as_str()),
-        ) {
+        let scheme = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "http", _) => "ws",
             ("wss" | "https", _) => "wss",
             ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => "ws",
@@ -103,7 +100,7 @@ impl TaosBuilder {
 
         let addr = match dsn.addresses.first() {
             Some(addr) => {
-                if addr.host.as_ref().map(|s| s.as_str()) == Some("localhost") {
+                if addr.host.as_deref() == Some("localhost") {
                     "localhost:6041".to_string()
                 } else {
                     addr.to_string()
@@ -120,8 +117,8 @@ impl TaosBuilder {
                 database: dsn.database,
             })
         } else {
-            let username = dsn.username.unwrap_or("root".to_string());
-            let password = dsn.password.unwrap_or("taosdata".to_string());
+            let username = dsn.username.unwrap_or_else(|| "root".to_string());
+            let password = dsn.password.unwrap_or_else(|| "taosdata".to_string());
             Ok(TaosBuilder {
                 scheme,
                 addr,

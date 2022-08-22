@@ -168,20 +168,17 @@ impl WsClient {
             };
         };
         let version = match rt.block_on(get_version) {
-            Some(Ok(message)) => match message {
-                Message::Text(text) => {
-                    let v: WsRecv = serde_json::from_str(&text).unwrap();
-                    let (_, data, ok) = v.ok();
-                    match data {
-                        WsRecvData::Version { version } => {
-                            ok?;
-                            version
-                        }
-                        _ => "2.x".to_string(),
+            Some(Ok(Message::Text(text))) => {
+                let v: WsRecv = serde_json::from_str(&text).unwrap();
+                let (_, data, ok) = v.ok();
+                match data {
+                    WsRecvData::Version { version } => {
+                        ok?;
+                        version
                     }
+                    _ => "2.x".to_string(),
                 }
-                _ => "2.x".to_string(),
-            },
+            }
             _ => "2.x".to_string(),
         };
 
@@ -259,7 +256,7 @@ impl WsClient {
             alive1.fetch_and(false, std::sync::atomic::Ordering::SeqCst);
         });
 
-        let is_v3 = version.starts_with("3");
+        let is_v3 = version.starts_with('3');
 
         // message handler for query/fetch/fetch_block
         rt.spawn(async move {
@@ -454,7 +451,7 @@ impl WsClient {
             Ok(ResultSet {
                 id: resp.id,
                 rt: self.rt.clone(),
-                timeout: self.timeout.clone(),
+                timeout: self.timeout,
                 sender: self.sender.clone(),
                 fetches: self.fetches.clone(),
                 receiver: Some(rx),
@@ -473,7 +470,7 @@ impl WsClient {
             Ok(ResultSet {
                 id: resp.id,
                 rt: self.rt.clone(),
-                timeout: self.timeout.clone(),
+                timeout: self.timeout,
                 affected_rows: resp.affected_rows,
                 sender: self.sender.clone(),
                 fetches: self.fetches.clone(),
@@ -642,7 +639,7 @@ impl ResultSet {
 
     pub fn stop_query(&mut self) {
         if let Some((_, sender)) = self.fetches.remove(&self.id) {
-            sender.send(Err(RawError::from_string("").into())).unwrap();
+            sender.send(Err(RawError::from_string(""))).unwrap();
         }
     }
 }
@@ -666,10 +663,7 @@ impl Fetchable for ResultSet {
 
     fn fields(&self) -> &[Field] {
         static EMPTY: Vec<Field> = Vec::new();
-        self.fields
-            .as_ref()
-            .map(|v| v.as_slice())
-            .unwrap_or(EMPTY.as_slice())
+        self.fields.as_deref().unwrap_or(EMPTY.as_slice())
     }
 
     fn summary(&self) -> (usize, usize) {

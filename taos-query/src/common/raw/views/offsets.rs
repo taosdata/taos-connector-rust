@@ -99,7 +99,7 @@ impl OffsetsMut {
         }
     }
     /// As a i32 slice.
-    pub fn as_slice_mut(&self) -> &mut [i32] {
+    pub fn as_slice_mut(&mut self) -> &mut [i32] {
         unsafe {
             std::slice::from_raw_parts_mut(
                 self.0.as_ptr() as *mut i32,

@@ -400,7 +400,7 @@ impl WsTaos {
         meta.write_u64_le(req_id)?;
         meta.write_u64_le(message_id)?;
         meta.write_u64_le(raw_meta_message as u64)?;
-        meta.write(&raw.as_bytes())?;
+        meta.write_all(&raw.as_bytes())?;
 
         log::debug!(
             "write meta with req_id: {}, message_id: {}, raw data: {:?}",
@@ -440,7 +440,7 @@ impl WsTaos {
         meta.write_u64_le(raw_block_message as u64)?;
         meta.write_u32_le(raw.nrows() as u32)?;
         meta.write_inlined_str::<2>(raw.table_name().unwrap())?;
-        meta.write(&raw.as_raw_bytes())?;
+        meta.write_all(raw.as_raw_bytes())?;
 
         log::debug!(
             "write meta with req_id: {}, message_id: {}, raw data: {:?}",

@@ -376,7 +376,7 @@ mod tests {
         let mut set = conn.query("abc").unwrap();
         for block in &mut set {
             let block = block.unwrap();
-            for record in block.deserialize::<(i32, )>() {
+            for record in block.deserialize::<(i32,)>() {
                 dbg!(record.unwrap());
             }
         }

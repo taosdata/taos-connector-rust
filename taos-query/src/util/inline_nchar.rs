@@ -59,8 +59,8 @@ macro_rules! _impl_inline_str {
 
             impl InlineNChar<$ty> {
                 #[inline]
-                pub fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
-                    unsafe { std::mem::transmute::<*const u8, &InlineNChar<$ty>>(ptr) }
+                pub unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
+                    std::mem::transmute::<*const u8, &InlineNChar<$ty>>(ptr)
                 }
                 #[inline]
                 #[rustversion::attr(nightly, const)]
@@ -117,7 +117,7 @@ macro_rules! _impl_test_inline_str {
     ($ty:ty, $bytes:literal, $print:literal) => {{
         let bytes = $bytes.to_vec();
         let bytes = bytes.as_slice();
-        let inline = InlineNChar::<$ty>::from_ptr(bytes.as_ptr());
+        let inline = unsafe { InlineNChar::<$ty>::from_ptr(bytes.as_ptr()) };
         dbg!(inline);
         assert_eq!(inline.len(), 16);
         assert_eq!(format!("{}", inline), "abcd");

@@ -48,10 +48,7 @@ impl TBuilder for TaosBuilder {
     fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
         let dsn = dsn.into_dsn()?;
         // dbg!(&dsn);
-        match (
-            dsn.driver.as_str(),
-            dsn.protocol.as_ref().map(|s| s.as_str()),
-        ) {
+        match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(
                 TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
             )),
@@ -142,7 +139,7 @@ impl AsyncFetchable for ResultSet {
     }
 
     fn fetch_raw_block(
-        self: &mut Self,
+        &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<Option<RawBlock>, Self::Error>> {
         match &mut self.0 {
