@@ -48,12 +48,11 @@ bitvec_simd = { version = "0.20.5", features = ["use_serde"] }
 
 r2d2 = { version = "0.8.9", optional = true }
 
-tokio = { version = "1", features = ["rt-multi-thread", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "io-util", "macros"] }
 [dev-dependencies]
 flate2 = "1"
 pretty_env_logger = "0.4.0"
 rand = "0.8.5"
-tokio = { version = "1", features = ["full"] }
 
 [build-dependencies]
 rustc_version = "0.4.0"
