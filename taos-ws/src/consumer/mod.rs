@@ -141,13 +141,13 @@ impl WsMessageBase {
         if let TmqRecvData::Bytes(bytes) = data {
             let mut raw = RawBlock::parse_from_raw_block(bytes, fetch.precision);
 
-            for row in 0..raw.nrows() {
-                for col in 0..raw.ncols() {
-                    log::debug!("at ({}, {})", row, col);
-                    let v = unsafe { raw.get_ref_unchecked(row, col) };
-                    println!("({}, {}): {:?}", row, col, v);
-                }
-            }
+            // for row in 0..raw.nrows() {
+            //     for col in 0..raw.ncols() {
+            //         log::debug!("at ({}, {})", row, col);
+            //         let v = unsafe { raw.get_ref_unchecked(row, col) };
+            //         println!("({}, {}): {:?}", row, col, v);
+            //     }
+            // }
             raw.with_field_names(fetch.fields().iter().map(|f| f.name()));
             if let Some(name) = fetch.table_name {
                 raw.with_table_name(name);
