@@ -149,6 +149,7 @@ pub(super) mod conf {
             Self(unsafe { tmq_conf_new() })
                 .disable_auto_commit()
                 .enable_heartbeat_background()
+                .enable_snapshot()
                 .with_table_name()
         }
 
@@ -209,6 +210,18 @@ pub(super) mod conf {
         pub(crate) fn enable_heartbeat_background(mut self) -> Self {
             self.set("enable.heartbeat.background", "true")
                 .expect("set heartbeat at background");
+            self
+        }
+
+        pub(crate) fn enable_snapshot(mut self) -> Self {
+            self.set("experimental.snapshot.enable", "true")
+                .expect("enable experimental snapshot");
+            self
+        }
+
+        pub fn disable_snapshot(mut self) -> Self {
+            self.set("experimental.snapshot.enable", "false")
+                .expect("enable experimental snapshot");
             self
         }
 
