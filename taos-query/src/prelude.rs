@@ -243,13 +243,13 @@ pub mod sync {
                 .map_err(Into::into)
         }
 
-        /// Topics information by `SELECT * FROM performance_schema.perf_topics` sql.
+        /// Topics information by `SELECT * FROM information_schema.ins_topics` sql.
         ///
         /// ## Compatibility
         ///
         /// This is a 3.x-only API.
         fn topics(&self) -> Result<Vec<Topic>, Self::Error> {
-            self.query("SELECT * FROM performance_schema.perf_topics")?
+            self.query("SELECT * FROM information_schema.ins_topics")?
                 .deserialize()
                 .try_collect()
                 .map_err(Into::into)
@@ -575,7 +575,7 @@ mod r#async {
                 .await?)
         }
 
-        /// Topics information by `SELECT * FROM performance_schema.perf_topics` sql.
+        /// Topics information by `SELECT * FROM information_schema.ins_topics` sql.
         ///
         /// ## Compatibility
         ///
@@ -583,7 +583,7 @@ mod r#async {
         async fn topics(&self) -> Result<Vec<Topic>, Self::Error> {
             log::debug!("query one with sql");
             Ok(self
-                .query("SELECT * FROM performance_schema.perf_topics")
+                .query("SELECT * FROM information_schema.ins_topics")
                 .await?
                 .deserialize()
                 .try_collect()

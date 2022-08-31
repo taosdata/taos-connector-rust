@@ -521,7 +521,7 @@ impl RawBlock {
                     unreachable!("unsupported type: {ty}")
                 }
             };
-            log::debug!("column: {:?}", column);
+            // log::debug!("column: {:?}", column);
             columns.push(column);
             debug_assert!(data_offset <= len);
         }
@@ -709,6 +709,21 @@ impl RawBlock {
 
     fn layout(&self) -> Layout {
         Layout::from_bits(self.layout.borrow().as_inner()).unwrap()
+    }
+
+    fn fields(&self) -> Vec<Field> {
+        self.schemas()
+            .iter()
+            .zip(self.field_names())
+            .map(|(schema, name)| Field::new(name, schema.ty, schema.len))
+            .collect_vec()
+    }
+
+    pub fn to_create(&self) -> Option<MetaCreate> {
+        self.table_name().map(|table_name| MetaCreate::Normal {
+            table_name: table_name.to_string(),
+            columns: self.fields(),
+        })
     }
 }
 
