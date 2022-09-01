@@ -1,5 +1,4 @@
-use bytes::Bytes;
-
+use futures::stream::SplitStream;
 use futures::{FutureExt, SinkExt, StreamExt};
 use scc::HashMap;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta};
@@ -10,11 +9,13 @@ use taos_query::{
 };
 use thiserror::Error;
 
+use tokio::net::TcpStream;
 use tokio::sync::{oneshot, watch};
 
 use tokio::time;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::{infra::*, TaosBuilder};
 
@@ -28,7 +29,10 @@ use std::time::Duration;
 type WsFetchResult = std::result::Result<WsFetchData, RawError>;
 type FetchSender = std::sync::mpsc::SyncSender<WsFetchResult>;
 type FetchReceiver = std::sync::mpsc::Receiver<WsFetchResult>;
+type FetchesSenderMap = Arc<HashMap<ResId, FetchSender>>;
 
+type QuerySender = oneshot::Sender<std::result::Result<WsQueryResp, RawError>>;
+type QueriesSenderMap = Arc<HashMap<ReqId, QuerySender>>;
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 
 pub struct WsTaos {
@@ -144,6 +148,140 @@ impl Drop for WsTaos {
     }
 }
 
+async fn read_queries(
+    mut reader: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    queries_sender: QueriesSenderMap,
+    fetches_sender: FetchesSenderMap,
+    ws2: WsSender,
+    is_v3: bool,
+    mut close_listener: watch::Receiver<bool>,
+) {
+    loop {
+        tokio::select! {
+            Some(message) = reader.next() => {
+                match message {
+                    Ok(message) => match message {
+                        Message::Text(text) => {
+                            // dbg!(&text);
+                            let v: WsRecv = serde_json::from_str(&text).unwrap();
+                            let (req_id, data, ok) = v.ok();
+                            match data {
+                                WsRecvData::Query(query) => {
+                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                    {
+                                        sender.send(ok.map(|_|query)).unwrap();
+                                    }
+                                }
+                                WsRecvData::Fetch(fetch) => {
+                                    let id = fetch.id;
+                                    if fetch.completed {
+                                        ws2.send(
+                                            WsSend::Close(WsResArgs {
+                                                req_id,
+                                                id,
+                                            })
+                                            .to_msg(),
+                                        )
+                                        .await
+                                        .unwrap();
+                                    }
+                                    let data = ok.map(|_|WsFetchData::Fetch(fetch));
+                                    if let Some(v) = fetches_sender.read(&id, |_, v| v.clone()) {
+                                        log::debug!("send data to fetches with id {}", id);
+                                        v.send(data).unwrap();
+                                    }
+                                }
+                                WsRecvData::WriteMeta => {
+                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                    {
+                                        sender.send(ok.map(|_| WsQueryResp::default())).unwrap();
+                                    }
+                                }
+                                WsRecvData::WriteRaw => {
+                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                    {
+                                        sender.send(ok.map(|_| WsQueryResp::default())).unwrap();
+                                    }
+                                }
+                                WsRecvData::WriteRawBlock => {
+                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                    {
+                                        sender.send(ok.map(|_| WsQueryResp::default())).unwrap();
+                                    }
+                                }
+
+                                // Block type is for binary.
+                                _ => unreachable!(),
+                            }
+                        }
+                        Message::Binary(block) => {
+                            // dbg!(block.len());
+                            let mut slice = block.as_slice();
+                            use taos_query::util::InlinableRead;
+                            let offset = if is_v3 { 16 } else { 8 };
+
+                            let timing = if is_v3 {
+                                let timing = slice.read_u64().unwrap();
+                                Duration::from_nanos(timing as _)
+                            } else {
+                                Duration::ZERO
+                            };
+
+                            let res_id = slice.read_u64().unwrap();
+                            if is_v3 {
+                                // v3
+                                if let Some(_) = fetches_sender.read(&res_id, |_, v| {
+                                    log::debug!("send data to fetches with id {}", res_id);
+                                    // let raw = slice.read_inlinable::<RawBlock>().unwrap();
+                                    v.send(Ok(WsFetchData::Block(timing, block[offset..].to_vec()).clone())).unwrap();
+                                }) {
+                                    // log::error!("result not found: {res_id}");
+                                }
+                            } else {
+                                // v2
+                                log::warn!("the block is in format v2");
+                                if let Some(_) = fetches_sender.read(&res_id, |_, v| {
+                                    log::debug!("send data to fetches with id {}", res_id);
+                                    v.send(Ok(WsFetchData::BlockV2(timing, block[offset..].to_vec()))).unwrap();
+                                }) {
+                                    // log::error!("result not found: {res_id}");
+                                }
+                            }
+
+
+
+                        }
+                        Message::Close(_) => {
+                            log::warn!("websocket connection is closed (unexpected?)");
+                            break;
+                        }
+                        Message::Ping(bytes) => {
+                            ws2.send(Message::Pong(bytes)).await.unwrap();
+                        }
+                        Message::Pong(_) => {
+                            // do nothing
+                            log::warn!("received (unexpected) pong message, do nothing");
+                        }
+                        Message::Frame(frame) => {
+                            // do nothing
+                            log::warn!("received (unexpected) frame message, do nothing");
+                            log::debug!("* frame data: {frame:?}");
+                        }
+                    },
+                    Err(err) => {
+                        log::error!("{}", err);
+                        break;
+                    }
+                }
+            }
+            _ = close_listener.changed() => {
+                log::debug!("close reader task");
+                break
+            }
+        }
+    }
+}
+
 impl WsTaos {
     /// Build TDengine websocket client from dsn.
     ///
@@ -220,7 +358,7 @@ impl WsTaos {
 
         // Connection watcher
         let (tx, mut rx) = watch::channel(false);
-        let mut close_listener = rx.clone();
+        let close_listener = rx.clone();
 
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(10));
@@ -247,132 +385,16 @@ impl WsTaos {
             }
         });
 
-        // message handler for query/fetch/fetch_block
         tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    Some(message) = reader.next() => {
-                        match message {
-                            Ok(message) => match message {
-                                Message::Text(text) => {
-                                    // dbg!(&text);
-                                    let v: WsRecv = serde_json::from_str(&text).unwrap();
-                                    let (req_id, data, ok) = v.ok();
-                                    match data {
-                                        WsRecvData::Query(query) => {
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
-                                                sender.send(ok.map(|_|query)).unwrap();
-                                            }
-                                        }
-                                        WsRecvData::Fetch(fetch) => {
-                                            let id = fetch.id;
-                                            if fetch.completed {
-                                                ws2.send(
-                                                    WsSend::Close(WsResArgs {
-                                                        req_id,
-                                                        id,
-                                                    })
-                                                    .to_msg(),
-                                                )
-                                                .await
-                                                .unwrap();
-                                            }
-                                            let data = ok.map(|_|WsFetchData::Fetch(fetch));
-                                            if let Some(v) = fetches_sender.read(&id, |_, v| v.clone()) {
-                                                log::debug!("send data to fetches with id {}", id);
-                                                v.send(data).unwrap();
-                                            }
-                                        }
-                                        WsRecvData::WriteMeta => {
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
-                                                sender.send(ok.map(|_| WsQueryResp::default())).unwrap();
-                                            }
-                                        }
-                                        WsRecvData::WriteRaw => {
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
-                                                sender.send(ok.map(|_| WsQueryResp::default())).unwrap();
-                                            }
-                                        }
-                                        WsRecvData::WriteRawBlock => {
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
-                                                sender.send(ok.map(|_| WsQueryResp::default())).unwrap();
-                                            }
-                                        }
-
-                                        // Block type is for binary.
-                                        _ => unreachable!(),
-                                    }
-                                }
-                                Message::Binary(block) => {
-                                    // dbg!(block.len());
-                                    let mut slice = block.as_slice();
-                                    use taos_query::util::InlinableRead;
-                                    let offset = if is_v3 { 16 } else { 8 };
-
-                                    let timing = if is_v3 {
-                                        let timing = slice.read_u64().unwrap();
-                                        Duration::from_nanos(timing as _)
-                                    } else {
-                                        Duration::ZERO
-                                    };
-
-                                    let res_id = slice.read_u64().unwrap();
-                                    if is_v3 {
-                                        // v3
-                                        if let Some(_) = fetches_sender.read(&res_id, |_, v| {
-                                            log::debug!("send data to fetches with id {}", res_id);
-                                            // let raw = slice.read_inlinable::<RawBlock>().unwrap();
-                                            v.send(Ok(WsFetchData::Block(timing, block[offset..].to_vec()).clone())).unwrap();
-                                        }) {
-                                            log::error!("result not found: {res_id}");
-                                        }
-                                    } else {
-                                        // v2
-                                        log::warn!("the block is in format v2");
-                                        if let Some(_) = fetches_sender.read(&res_id, |_, v| {
-                                            log::debug!("send data to fetches with id {}", res_id);
-                                            v.send(Ok(WsFetchData::BlockV2(timing, block[offset..].to_vec()))).unwrap();
-                                        }) {
-                                            log::error!("result not found: {res_id}");
-                                        }
-                                    }
-
-
-
-                                }
-                                Message::Close(_) => {
-                                    log::warn!("websocket connection is closed (unexpected?)");
-                                    break;
-                                }
-                                Message::Ping(bytes) => {
-                                    ws2.send(Message::Pong(bytes)).await.unwrap();
-                                }
-                                Message::Pong(_) => {
-                                    // do nothing
-                                    log::warn!("received (unexpected) pong message, do nothing");
-                                }
-                                Message::Frame(frame) => {
-                                    // do nothing
-                                    log::warn!("received (unexpected) frame message, do nothing");
-                                    log::debug!("* frame data: {frame:?}");
-                                }
-                            },
-                            Err(err) => {
-                                log::error!("{}", err);
-                                break;
-                            }
-                        }
-                    }
-                    _ = close_listener.changed() => {
-                        log::debug!("close reader task");
-                        break
-                    }
-                }
-            }
+            read_queries(
+                reader,
+                queries_sender,
+                fetches_sender,
+                ws2,
+                is_v3,
+                close_listener,
+            )
+            .await
         });
 
         Ok(Self {
@@ -403,10 +425,10 @@ impl WsTaos {
         meta.write_all(&raw.as_bytes())?;
 
         log::debug!(
-            "write meta with req_id: {}, message_id: {}, raw data: {:?}",
+            "write meta with req_id: {}, message_id: {}, raw data length: {:?}",
             req_id,
             message_id,
-            Bytes::copy_from_slice(&meta)
+            meta.len()
         );
 
         let (tx, rx) = oneshot::channel();
@@ -443,10 +465,10 @@ impl WsTaos {
         meta.write_all(raw.as_raw_bytes())?;
 
         log::debug!(
-            "write meta with req_id: {}, message_id: {}, raw data: {:?}",
+            "write meta with req_id: {}, message_id: {}, raw data len: {:?}",
             req_id,
             message_id,
-            Bytes::copy_from_slice(&meta)
+            meta.len()
         );
 
         let (tx, rx) = oneshot::channel();
