@@ -28,10 +28,10 @@ impl Lengths {
         }
     }
 
-    /// As a [u8] slice.
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0.as_ref()
-    }
+    // /// As a [u8] slice.
+    // pub fn as_bytes(&self) -> &[u8] {
+    //     &self.0.as_ref()
+    // }
 }
 
 impl Deref for Lengths {

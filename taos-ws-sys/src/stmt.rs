@@ -330,8 +330,9 @@ impl TaosMultiBind {
                                     .offset(self.buffer_length as isize * i as isize);
                                 let len = *self.length.offset(i as isize) as usize;
                                 let bytes = std::slice::from_raw_parts(ptr, len);
-                                serde_json::from_slice::<serde_json::Value>(bytes)
-                                    .expect("input should be valid json format")
+                                std::str::from_utf8_unchecked(bytes)
+                                // serde_json::from_slice::<serde_json::Value>(bytes)
+                                //     .expect("input should be valid json format")
                             })
                             .collect::<Vec<_>>();
                         return json!(column);
@@ -851,7 +852,7 @@ mod tests {
             execute!(b"drop database if exists ws_stmt_t\0");
             execute!(b"create database ws_stmt_t keep 36500\0");
             execute!(
-                b"create table ws_stmt_t.s1 (ts timestamp, v int, b binary(100)) tags(jt json)\0"
+                b"create table ws_stmt_t.s1 (tshttps://jira.taosdata.com:18080/browse/TD-18825 timestamp, v int, b binary(100)) tags(jt json)\0"
             );
 
             let stmt = ws_stmt_init(taos);

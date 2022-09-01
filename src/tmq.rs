@@ -324,6 +324,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
+        // pretty_env_logger::formatted_timed_builder()
+        //     .filter_level(log::LevelFilter::Debug)
+        //     .init();
         use taos_query::prelude::*;
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let mut dsn = Dsn::from_str(&dsn)?;
@@ -425,8 +428,8 @@ mod tests {
                 // 2. data
                 match message {
                     MessageSet::Meta(meta) => {
-                        let _raw = meta.as_raw_meta().await?;
-                        // taos.write_meta(raw).await?;
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(raw).await?;
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
