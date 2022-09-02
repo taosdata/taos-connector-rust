@@ -1,6 +1,6 @@
 [package]
 name = "taos-error"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 homepage = "https://github.com/taosdata/taos-connector-rust"
 documentation = "https://docs.rs/taos-query"
