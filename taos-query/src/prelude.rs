@@ -545,7 +545,7 @@ mod r#async {
             sql: S,
         ) -> Result<(), Self::Error> {
             let (name, sql) = (name.as_ref(), sql.as_ref());
-            let query = format!("create topic if not exists {name} as {sql}");
+            let query = format!("CREATE TOPIC IF NOT EXISTS {name} AS {sql}");
 
             self.query(query).await?;
             Ok(())
@@ -581,9 +581,10 @@ mod r#async {
         ///
         /// This is a 3.x-only API.
         async fn topics(&self) -> Result<Vec<Topic>, Self::Error> {
-            log::debug!("query one with sql");
+            let sql = "SELECT * FROM information_schema.ins_topics";
+            log::debug!("query one with sql: {sql}");
             Ok(self
-                .query("SELECT * FROM information_schema.ins_topics")
+                .query(sql)
                 .await?
                 .deserialize()
                 .try_collect()

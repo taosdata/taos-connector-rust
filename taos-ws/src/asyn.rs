@@ -244,7 +244,10 @@ async fn read_queries(
                                     log::debug!("send data to fetches with id {}", res_id);
                                     v.send(Ok(WsFetchData::BlockV2(timing, block[offset..].to_vec()))).unwrap();
                                 }) {
+                                    log::debug!("result sent with id {res_id}");
                                     // log::error!("result not found: {res_id}");
+                                } else {
+                                    log::warn!("result id not found: {res_id}");
                                 }
                             }
 
@@ -320,7 +323,7 @@ impl WsTaos {
             },
             _ => "2.x".to_string(),
         };
-        let is_v3 = version.starts_with("3");
+        let is_v3 = !version.starts_with("2");
 
         let login = WsSend::Conn {
             req_id,
@@ -398,7 +401,7 @@ impl WsTaos {
         });
 
         Ok(Self {
-            timeout: Duration::from_secs(10),
+            timeout: Duration::from_secs(60 * 5), // default timeout 5min.
             req_id: Arc::new(AtomicU64::new(req_id + 1)),
             queries,
             fetches,
