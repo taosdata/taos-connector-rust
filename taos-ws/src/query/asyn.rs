@@ -1,3 +1,4 @@
+use derive_more::Deref;
 use futures::stream::SplitStream;
 use futures::{FutureExt, SinkExt, StreamExt};
 use scc::HashMap;
@@ -10,17 +11,18 @@ use taos_query::{
 use thiserror::Error;
 
 use tokio::net::TcpStream;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::watch;
 
 use tokio::time;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::{infra::*, TaosBuilder};
+use super::{infra::*, TaosBuilder};
 
 use std::fmt::Debug;
 use std::io::Write;
+// use std::io::Write;
 use std::result::Result as StdResult;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -31,24 +33,101 @@ type FetchSender = std::sync::mpsc::SyncSender<WsFetchResult>;
 type FetchReceiver = std::sync::mpsc::Receiver<WsFetchResult>;
 type FetchesSenderMap = Arc<HashMap<ResId, FetchSender>>;
 
-type QuerySender = oneshot::Sender<std::result::Result<WsQueryResp, RawError>>;
+type QuerySender = tokio::sync::oneshot::Sender<std::result::Result<WsQueryResp, RawError>>;
 type QueriesSenderMap = Arc<HashMap<ReqId, QuerySender>>;
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 
-pub struct WsTaos {
-    timeout: Duration,
+use futures::channel::oneshot;
+use oneshot::channel as query_channel;
+type QueryChannelSender = oneshot::Sender<StdResult<WsRecvData, RawError>>;
+// use tokio::sync::mpsc::unbounded_channel as query_channel;
+// type QueryChannelSender = tokio::sync::mpsc::UnboundedSender<StdResult<WsRecvData, RawError>>;
+type QueryInner = HashMap<ReqId, QueryChannelSender>;
+type QueryAgent = Arc<QueryInner>;
+type QueryResMapper = HashMap<ResId, ReqId>;
+
+#[derive(Debug, Clone, Deref)]
+struct Version(String);
+
+impl Version {
+    pub fn is_v3(&self) -> bool {
+        !self.0.starts_with("2")
+    }
+}
+#[derive(Debug, Clone)]
+struct WsQuerySender {
+    version: Version,
     req_id: Arc<AtomicU64>,
-    ws: WsSender,
-    version: String,
+    results: Arc<QueryResMapper>,
+    sender: WsSender,
+    queries: QueryAgent,
+    timeout: Duration,
+}
+
+impl WsQuerySender {
+    fn req_id(&self) -> ReqId {
+        self.req_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+    async fn send_recv(&self, msg: WsSend) -> Result<WsRecvData> {
+        let send_timeout = Duration::from_millis(1000);
+        let req_id = msg.req_id();
+        let (tx, rx) = query_channel();
+
+        self.queries.insert(req_id, tx).unwrap();
+
+        match msg {
+            WsSend::FetchBlock(args) => {
+                log::debug!("prepare req_id: {req_id} with message: {msg:?}");
+                if self.results.contains(&args.id) {
+                    panic!("there's a result with id {}", args.id);
+                }
+                self.results.insert(args.id, args.req_id).unwrap();
+
+                self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
+                //
+            }
+            WsSend::Binary(bytes) => {
+                self.sender
+                    .send_timeout(Message::Binary(bytes), send_timeout)
+                    .await?;
+            }
+            _ => {
+                log::debug!("prepare req_id: {req_id} with message: {msg:?}");
+                self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
+            }
+        }
+        Ok(block_in_place_or_global(rx).unwrap()?)
+    }
+    async fn send_only(&self, msg: WsSend) -> Result<()> {
+        let send_timeout = Duration::from_millis(1000);
+        self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
+        Ok(())
+    }
+    async fn send_recv_timeout(&self, msg: WsSend, timeout: Duration) -> Result<WsRecvData> {
+        let sleep = tokio::time::sleep(timeout);
+        tokio::pin!(sleep);
+        let data = tokio::select! {
+            _ = &mut sleep, if !sleep.is_elapsed() => {
+               log::debug!("poll timed out");
+               Err(Error::QueryTimeout("poll".to_string()))?
+            }
+            message = self.send_recv(msg) => {
+                message?
+            }
+        };
+        Ok(data)
+    }
+}
+
+#[derive(Debug)]
+pub struct WsTaos {
     close_signal: watch::Sender<bool>,
-    queries: Arc<HashMap<ReqId, oneshot::Sender<std::result::Result<WsQueryResp, RawError>>>>,
-    fetches: Arc<HashMap<ResId, FetchSender>>,
+    sender: WsQuerySender,
 }
 
 pub struct ResultSet {
-    ws: WsSender,
-    fetches: Arc<HashMap<ResId, FetchSender>>,
-    receiver: Option<FetchReceiver>,
+    sender: WsQuerySender,
     args: WsResArgs,
     fields: Option<Vec<Field>>,
     fields_count: usize,
@@ -63,9 +142,6 @@ unsafe impl Send for ResultSet {}
 impl Debug for ResultSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResultSet")
-            .field("ws", &"...")
-            .field("fetches", &"...")
-            .field("receiver", &self.receiver)
             .field("args", &self.args)
             .field("fields", &self.fields)
             .field("fields_count", &self.fields_count)
@@ -77,31 +153,21 @@ impl Debug for ResultSet {
 
 impl Drop for ResultSet {
     fn drop(&mut self) {
-        if self.receiver.is_some() {
-            self.fetches.remove(&self.args.id);
-            let args = self.args;
-            let ws = self.ws.clone();
-            block_in_place_or_global(async move {
-                let _ = ws.send(WsSend::Close(args).to_msg()).await;
-            });
+        if let Some((_, req_id)) = self.sender.results.remove(&self.args.id) {
+            self.sender.queries.remove(&req_id);
         }
+        block_in_place_or_global(async move {
+            let _ = self.sender.send_only(WsSend::Close(self.args)).await;
+        });
     }
 }
 
-impl Debug for WsTaos {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WsClient")
-            .field("req_id", &self.req_id)
-            .field("...", &"...")
-            .finish()
-    }
-}
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("{0}")]
     Dsn(#[from] DsnError),
     #[error("{0}")]
-    FetchError(#[from] oneshot::error::RecvError),
+    FetchError(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("{0}")]
     SendError(#[from] tokio::sync::mpsc::error::SendError<Message>),
     #[error("{0}")]
@@ -150,8 +216,8 @@ impl Drop for WsTaos {
 
 async fn read_queries(
     mut reader: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-    queries_sender: QueriesSenderMap,
-    fetches_sender: FetchesSenderMap,
+    queries_sender: QueryAgent,
+    fetches_sender: Arc<QueryResMapper>,
     ws2: WsSender,
     is_v3: bool,
     mut close_listener: watch::Receiver<bool>,
@@ -162,14 +228,15 @@ async fn read_queries(
                 match message {
                     Ok(message) => match message {
                         Message::Text(text) => {
-                            // dbg!(&text);
                             let v: WsRecv = serde_json::from_str(&text).unwrap();
                             let (req_id, data, ok) = v.ok();
-                            match data {
-                                WsRecvData::Query(query) => {
+                            match &data {
+                                WsRecvData::Query(_) => {
                                     if let Some((_, sender)) = queries_sender.remove(&req_id)
                                     {
-                                        sender.send(ok.map(|_|query)).unwrap();
+                                        sender.send(ok.map(|_| data)).unwrap();
+                                    } else {
+                                        log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
                                 }
                                 WsRecvData::Fetch(fetch) => {
@@ -185,28 +252,36 @@ async fn read_queries(
                                         .await
                                         .unwrap();
                                     }
-                                    let data = ok.map(|_|WsFetchData::Fetch(fetch));
-                                    if let Some(v) = fetches_sender.read(&id, |_, v| v.clone()) {
-                                        log::debug!("send data to fetches with id {}", id);
-                                        v.send(data).unwrap();
+                                    // dbg!(&queries_sender);
+                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                    {
+                                        sender.send(ok.map(|_| data)).unwrap();
+                                    } else {
+                                        log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
                                 }
                                 WsRecvData::WriteMeta => {
                                     if let Some((_, sender)) = queries_sender.remove(&req_id)
                                     {
-                                        sender.send(ok.map(|_| WsQueryResp::default())).unwrap();
+                                        sender.send(ok.map(|_| data)).unwrap();
+                                    } else {
+                                        log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
                                 }
                                 WsRecvData::WriteRaw => {
                                     if let Some((_, sender)) = queries_sender.remove(&req_id)
                                     {
-                                        sender.send(ok.map(|_| WsQueryResp::default())).unwrap();
+                                        sender.send(ok.map(|_| data)).unwrap();
+                                    } else {
+                                        log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
                                 }
                                 WsRecvData::WriteRawBlock => {
                                     if let Some((_, sender)) = queries_sender.remove(&req_id)
                                     {
-                                        sender.send(ok.map(|_| WsQueryResp::default())).unwrap();
+                                        sender.send(ok.map(|_| data)).unwrap();
+                                    } else {
+                                        log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
                                 }
 
@@ -215,7 +290,6 @@ async fn read_queries(
                             }
                         }
                         Message::Binary(block) => {
-                            // dbg!(block.len());
                             let mut slice = block.as_slice();
                             use taos_query::util::InlinableRead;
                             let offset = if is_v3 { 16 } else { 8 };
@@ -228,31 +302,29 @@ async fn read_queries(
                             };
 
                             let res_id = slice.read_u64().unwrap();
-                            if is_v3 {
-                                // v3
-                                if let Some(_) = fetches_sender.read(&res_id, |_, v| {
-                                    log::debug!("send data to fetches with id {}", res_id);
-                                    // let raw = slice.read_inlinable::<RawBlock>().unwrap();
-                                    v.send(Ok(WsFetchData::Block(timing, block[offset..].to_vec()).clone())).unwrap();
-                                }) {
-                                    // log::error!("result not found: {res_id}");
+                            if let Some((_, req_id)) =  fetches_sender.remove(&res_id) {
+                                if is_v3 {
+                                    // v3
+                                    if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                        log::debug!("send data to fetches with id {}", res_id);
+                                        // let raw = slice.read_inlinable::<RawBlock>().unwrap();
+                                        sender.send(Ok(WsRecvData::Block { timing, raw: block[offset..].to_vec() })).unwrap();
+                                    } else {
+                                        log::warn!("req_id {res_id} not detected, message might be lost");
+                                    }
+                                } else {
+                                    // v2
+                                    if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                        log::debug!("send data to fetches with id {}", res_id);
+                                        // let raw = slice.read_inlinable::<RawBlock>().unwrap();
+                                        sender.send(Ok(WsRecvData::BlockV2 { timing, raw: block[offset..].to_vec() })).unwrap();
+                                    } else {
+                                        log::warn!("req_id {res_id} not detected, message might be lost");
+                                    }
                                 }
                             } else {
-                                // v2
-                                log::warn!("the block is in format v2");
-                                if let Some(_) = fetches_sender.read(&res_id, |_, v| {
-                                    log::debug!("send data to fetches with id {}", res_id);
-                                    v.send(Ok(WsFetchData::BlockV2(timing, block[offset..].to_vec()))).unwrap();
-                                }) {
-                                    log::debug!("result sent with id {res_id}");
-                                    // log::error!("result not found: {res_id}");
-                                } else {
-                                    log::warn!("result id not found: {res_id}");
-                                }
+                                log::warn!("result id {res_id} not found");
                             }
-
-
-
                         }
                         Message::Close(_) => {
                             log::warn!("websocket connection is closed (unexpected?)");
@@ -346,15 +418,12 @@ impl WsTaos {
 
         use std::collections::hash_map::RandomState;
 
-        let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new(
-            100,
-            RandomState::new(),
-        ));
+        let queries2 = Arc::new(QueryInner::new(100, RandomState::new()));
 
-        let fetches = Arc::new(HashMap::<ResId, FetchSender>::new(100, RandomState::new()));
+        let fetches_sender = Arc::new(QueryResMapper::new(100, RandomState::new()));
+        let results = fetches_sender.clone();
 
-        let queries_sender = queries.clone();
-        let fetches_sender = fetches.clone();
+        let queries2_cloned = queries2.clone();
 
         let (ws, mut msg_recv) = tokio::sync::mpsc::channel(100);
         let ws2 = ws.clone();
@@ -389,35 +458,25 @@ impl WsTaos {
         });
 
         tokio::spawn(async move {
-            read_queries(
-                reader,
-                queries_sender,
-                fetches_sender,
-                ws2,
-                is_v3,
-                close_listener,
-            )
-            .await
+            read_queries(reader, queries2, fetches_sender, ws2, is_v3, close_listener).await
         });
+        let ws_cloned = ws.clone();
 
         Ok(Self {
-            timeout: Duration::from_secs(60 * 5), // default timeout 5min.
-            req_id: Arc::new(AtomicU64::new(req_id + 1)),
-            queries,
-            fetches,
-            version,
-            ws,
             close_signal: tx,
+            sender: WsQuerySender {
+                version: Version(version),
+                req_id: Default::default(),
+                sender: ws_cloned,
+                queries: queries2_cloned,
+                results,
+                timeout: Duration::from_secs(60 * 5),
+            },
         })
     }
 
-    fn req_id(&self) -> u64 {
-        self.req_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-    }
-
     pub async fn write_meta(&self, raw: RawMeta) -> Result<()> {
-        let req_id = self.req_id();
+        let req_id = self.sender.req_id();
         let message_id = req_id;
         let raw_meta_message = 3; // magic number from taosAdapter.
 
@@ -434,28 +493,34 @@ impl WsTaos {
             meta.len()
         );
 
-        let (tx, rx) = oneshot::channel();
-        {
-            self.queries.insert(req_id, tx).unwrap();
-            self.ws
-                .send_timeout(Message::Binary(meta), self.timeout)
-                .await?;
+        match self.sender.send_recv(WsSend::Binary(meta)).await? {
+            WsRecvData::WriteMeta => Ok(()),
+            WsRecvData::WriteRaw => Ok(()),
+            _ => unreachable!(),
         }
-        let sleep = tokio::time::sleep(self.timeout);
-        tokio::pin!(sleep);
-        let _resp = tokio::select! {
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-               log::debug!("get server version timed out");
-               Err(Error::QueryTimeout("write meta".to_string()))?
-            }
-            message = rx => {
-                message??
-            }
-        };
-        Ok(())
+
+        // let (tx, rx) = oneshot::channel();
+        // {
+        //     self.queries.insert(req_id, tx).unwrap();
+        //     self.ws
+        //         .send_timeout(Message::Binary(meta), self.timeout)
+        //         .await?;
+        // }
+        // let sleep = tokio::time::sleep(self.timeout);
+        // tokio::pin!(sleep);
+        // let _resp = tokio::select! {
+        //     _ = &mut sleep, if !sleep.is_elapsed() => {
+        //        log::debug!("get server version timed out");
+        //        Err(Error::QueryTimeout("write meta".to_string()))?
+        //     }
+        //     message = rx => {
+        //         message??
+        //     }
+        // };
+        // Ok(())
     }
     async fn s_write_raw_block(&self, raw: &RawBlock) -> Result<()> {
-        let req_id = self.req_id();
+        let req_id = self.sender.req_id();
         let message_id = req_id;
         let raw_block_message = 4; // action number from `taosAdapter/controller/rest/const.go:L56`.
 
@@ -474,48 +539,43 @@ impl WsTaos {
             meta.len()
         );
 
-        let (tx, rx) = oneshot::channel();
-        {
-            self.queries.insert(req_id, tx).unwrap();
-            self.ws
-                .send_timeout(Message::Binary(meta), self.timeout)
-                .await?;
+        match self.sender.send_recv(WsSend::Binary(meta)).await? {
+            WsRecvData::WriteRawBlock => Ok(()),
+            _ => unreachable!(),
         }
-        let sleep = tokio::time::sleep(self.timeout);
-        tokio::pin!(sleep);
-        let _resp = tokio::select! {
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-               log::debug!("get server version timed out");
-               Err(Error::QueryTimeout("write meta".to_string()))?
-            }
-            message = rx => {
-                message??
-            }
-        };
-        Ok(())
+        // let (tx, rx) = oneshot::channel();
+        // {
+        //     self.queries.insert(req_id, tx).unwrap();
+        //     self.ws
+        //         .send_timeout(Message::Binary(meta), self.timeout)
+        //         .await?;
+        // }
+        // let sleep = tokio::time::sleep(self.timeout);
+        // tokio::pin!(sleep);
+        // let _resp = tokio::select! {
+        //     _ = &mut sleep, if !sleep.is_elapsed() => {
+        //        log::debug!("get server version timed out");
+        //        Err(Error::QueryTimeout("write meta".to_string()))?
+        //     }
+        //     message = rx => {
+        //         message??
+        //     }
+        // };
+        // Ok(())
     }
 
     pub async fn s_query(&self, sql: &str) -> Result<ResultSet> {
-        let req_id = self.req_id();
+        let req_id = self.sender.req_id();
         let action = WsSend::Query {
             req_id,
             sql: sql.to_string(),
         };
-        let (tx, rx) = oneshot::channel();
-        {
-            self.queries.insert(req_id, tx).unwrap();
-            self.ws.send_timeout(action.to_msg(), self.timeout).await?;
-        }
-        let sleep = tokio::time::sleep(self.timeout);
-        tokio::pin!(sleep);
-        let resp = tokio::select! {
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-               log::debug!("get server version timed out");
-               Err(Error::QueryTimeout(sql.to_string()))?
-            }
-            message = rx => {
-                message??
-            }
+
+        let req = self.sender.send_recv(action).await?;
+
+        let resp = match req {
+            WsRecvData::Query(resp) => resp,
+            _ => unreachable!(),
         };
 
         if resp.fields_count > 0 {
@@ -528,13 +588,7 @@ impl WsTaos {
                 .zip(bytes)
                 .map(|((name, ty), bytes)| Field::new(name, ty, bytes))
                 .collect();
-
-            let (sender, receiver) = std::sync::mpsc::sync_channel(2);
-            self.fetches.insert(resp.id, sender).unwrap();
             Ok(ResultSet {
-                ws: self.ws.clone(),
-                fetches: self.fetches.clone(),
-                receiver: Some(receiver),
                 fields: Some(fields),
                 fields_count: resp.fields_count,
                 precision: resp.precision,
@@ -544,13 +598,11 @@ impl WsTaos {
                     id: resp.id,
                 },
                 summary: (0, 0),
+                sender: self.sender.clone(),
             })
         } else {
             Ok(ResultSet {
                 affected_rows: resp.affected_rows,
-                ws: self.ws.clone(),
-                fetches: self.fetches.clone(),
-                receiver: None,
                 args: WsResArgs {
                     req_id,
                     id: resp.id,
@@ -559,42 +611,39 @@ impl WsTaos {
                 fields_count: 0,
                 precision: resp.precision,
                 summary: (0, 0),
+                sender: self.sender.clone(),
             })
         }
     }
 
     pub async fn s_exec(&self, sql: &str) -> Result<usize> {
-        let req_id = self.req_id();
+        let req_id = self.sender.req_id();
         let action = WsSend::Query {
             req_id,
             sql: sql.to_string(),
         };
-        let (tx, rx) = oneshot::channel();
-        {
-            self.queries.insert(req_id, tx).unwrap();
-            self.ws.send_timeout(action.to_msg(), self.timeout).await?;
+        match self.sender.send_recv(action).await? {
+            WsRecvData::Query(query) => Ok(query.affected_rows),
+            _ => unreachable!(),
         }
-        let resp = rx.await??;
-        Ok(resp.affected_rows)
     }
 
     pub fn version(&self) -> &str {
-        &self.version
+        &self.sender.version
     }
 }
 
 impl ResultSet {
     async fn fetch(&mut self) -> Result<Option<RawBlock>> {
-        let fetch = WsSend::Fetch(self.args);
-        {
-            log::debug!("send fetch message: {fetch:?}");
-            self.ws.send(fetch.to_msg()).await?;
-            log::debug!("send done");
-            // unlock mutex when out of scope.
-        }
-        log::debug!("wait for fetch message");
-        let fetch_resp = match self.receiver.as_mut().unwrap().recv()?? {
-            WsFetchData::Fetch(fetch) => fetch,
+        let args = WsResArgs {
+            req_id: self.sender.req_id(),
+            id: self.args.id,
+        };
+        let fetch = WsSend::Fetch(args);
+        let fetch = self.sender.send_recv(fetch).await?;
+
+        let fetch_resp = match fetch {
+            WsRecvData::Fetch(fetch) => fetch,
             data => panic!("unexpected result {data:?}"),
         };
 
@@ -602,26 +651,21 @@ impl ResultSet {
             return Ok(None);
         }
 
-        log::debug!("fetch with: {fetch_resp:?}");
+        let args = WsResArgs {
+            req_id: self.sender.req_id(),
+            id: self.args.id,
+        };
 
-        let fetch_block = WsSend::FetchBlock(self.args);
-        {
-            // prepare for receiving.
-            log::debug!("send fetch message: {fetch_block:?}");
-            self.ws.send(fetch_block.to_msg()).await?;
-            log::debug!("send done");
-            // unlock mutex when out of scope.
-        }
+        let fetch_block = WsSend::FetchBlock(args);
 
-        log::debug!("receiving block...");
-        match self.receiver.as_mut().unwrap().recv()?? {
-            WsFetchData::Block(_timing, raw) => {
+        match self.sender.send_recv(fetch_block).await? {
+            WsRecvData::Block { timing: _, raw } => {
                 let mut raw = RawBlock::parse_from_raw_block(raw, self.precision);
 
                 raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
                 Ok(Some(raw))
             }
-            WsFetchData::BlockV2(_timing, raw) => {
+            WsRecvData::BlockV2 { timing: _, raw } => {
                 let mut raw = RawBlock::parse_from_raw_block_v2(
                     raw,
                     self.fields.as_ref().unwrap(),
@@ -633,7 +677,7 @@ impl ResultSet {
                 raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
                 Ok(Some(raw))
             }
-            _ => Ok(None),
+            _ => unreachable!(),
         }
     }
 }
@@ -791,8 +835,10 @@ async fn test_client_cloud() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+#[tokio::test(flavor = "multi_thread")]
 async fn ws_show_databases() -> anyhow::Result<()> {
+    std::env::set_var("RUST_LOG", "debug");
+    pretty_env_logger::init_timed();
     let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
     let client = WsTaos::from_dsn(dsn).await?;
     let mut rs = client.query("show databases").await?;

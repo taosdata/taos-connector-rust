@@ -8,7 +8,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::stmt::Stmt;
 // use crate::stmt::sync::{WsSyncStmt, WsSyncStmtClient};
-use crate::{infra::*, TaosBuilder};
+use super::{infra::*, TaosBuilder};
 
 use std::cell::UnsafeCell;
 use std::fmt::Debug;

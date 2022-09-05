@@ -19,8 +19,8 @@ use tokio::time;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
-use crate::infra::ToMessage;
-use crate::{infra::WsConnReq, TaosBuilder};
+use crate::query::infra::{ToMessage, WsConnReq};
+use crate::TaosBuilder;
 use messages::*;
 
 use std::fmt::Debug;
@@ -739,7 +739,7 @@ mod tests {
 
     use super::{TaosBuilder, TmqBuilder};
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
         // pretty_env_logger::formatted_builder()
@@ -896,7 +896,7 @@ mod tests {
         //     .filter_level(log::LevelFilter::Debug)
         //     .init();
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?.build()?;
         taos.exec_many([
             "drop topic if exists ws_tmq_meta_sync",
             "drop database if exists ws_tmq_meta_sync",

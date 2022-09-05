@@ -57,7 +57,22 @@ pub enum WsSend {
     },
     Fetch(WsResArgs),
     FetchBlock(WsResArgs),
+    Binary(Vec<u8>),
     Close(WsResArgs),
+}
+
+impl WsSend {
+    pub(crate) fn req_id(&self) -> ReqId {
+        match self {
+            WsSend::Conn { req_id, req: _ } => *req_id,
+            WsSend::Query { req_id, sql: _ } => *req_id,
+            WsSend::Fetch(args) => args.req_id,
+            WsSend::FetchBlock(args) => args.req_id,
+            WsSend::Close(args) => args.req_id,
+            WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
+            _ => unreachable!(),
+        }
+    }
 }
 
 unsafe impl Send for WsSend {}
@@ -140,7 +155,13 @@ pub enum WsRecvData {
         #[serde(default)]
         #[serde_as(as = "serde_with::DurationNanoSeconds")]
         timing: Duration,
-        block: Vec<u32>,
+        raw: Vec<u8>,
+    },
+    BlockV2 {
+        #[serde(default)]
+        #[serde_as(as = "serde_with::DurationNanoSeconds")]
+        timing: Duration,
+        raw: Vec<u8>,
     },
     WriteMeta,
     WriteRaw,

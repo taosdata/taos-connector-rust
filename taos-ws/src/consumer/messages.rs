@@ -12,8 +12,8 @@ use taos_query::common::Ty;
 use taos_query::prelude::RawError;
 use taos_query::tmq::VGroupId;
 
-use crate::infra::ToMessage;
-use crate::infra::WsConnReq;
+use crate::query::infra::ToMessage;
+use crate::query::infra::WsConnReq;
 
 pub type ReqId = u64;
 
