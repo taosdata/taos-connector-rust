@@ -140,6 +140,11 @@ pub enum WsFetchData {
     BlockV2(Duration, Vec<u8>),
 }
 
+pub enum WsAction {
+    Conn { a: String },
+    Close { b: String },
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde_as]
 #[serde(tag = "action")]

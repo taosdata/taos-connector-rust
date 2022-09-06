@@ -10,13 +10,17 @@ use std::{
 use taos_error::Code;
 
 use taos_query::{
+    block_in_place_or_global,
     common::{Field, RawBlock as Block, Timestamp},
     common::{Precision, Ty},
-    Fetchable,
+    DsnError, Fetchable, Queryable, TBuilder,
 };
-use taos_ws::query::sync::*;
+use taos_ws::{
+    query::{Error, ResultSet, Taos},
+    TaosBuilder,
+};
 
-pub use taos_ws::query::sync::WS_ERROR_NO;
+pub use taos_ws::query::asyn::WS_ERROR_NO;
 
 pub mod stmt;
 
@@ -207,7 +211,27 @@ impl From<&WsError> for WsError {
     }
 }
 
-type WsTaos = Result<WsClient, WsError>;
+impl From<taos_ws::Error> for WsError {
+    fn from(e: taos_ws::Error) -> Self {
+        Self {
+            code: e.errno(),
+            message: CString::new(e.errstr()).unwrap(),
+            source: None,
+        }
+    }
+}
+
+impl From<DsnError> for WsError {
+    fn from(e: DsnError) -> Self {
+        Self {
+            code: WS_ERROR_NO::DSN_ERROR.as_code(),
+            message: CString::new(e.to_string()).unwrap(),
+            source: None,
+        }
+    }
+}
+
+type WsTaos = Result<Taos, WsError>;
 
 /// Only useful for developers who use along with TDengine 2.x `TAOS_FIELD` struct.
 /// It means that the struct has the same memory layout with the `TAOS_FIELD` struct
@@ -353,7 +377,7 @@ impl WsResultSet {
 
     unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
         log::debug!("fetch block with ptr {ptr:p}");
-        self.block = self.rs.fetch_block()?;
+        self.block = self.rs.fetch_raw_block()?;
         if let Some(block) = self.block.as_ref() {
             *ptr = block.as_raw_bytes().as_ptr() as _;
             *rows = block.nrows() as _;
@@ -386,13 +410,17 @@ impl WsResultSet {
     }
 
     fn stop_query(&mut self) {
-        self.rs.stop_query()
+        block_in_place_or_global(self.rs.stop());
     }
 }
 
 unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     let dsn = CStr::from_ptr(dsn).to_str()?;
-    Ok(WsClient::from_dsn(dsn)?)
+    let builder = TaosBuilder::from_dsn(dsn)?;
+    let mut taos = builder.build()?;
+    
+    builder.ping(&mut taos)?;
+    Ok(taos)
 }
 
 /// Enable inner log to stdout with environment RUST_LOG.
@@ -461,7 +489,7 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
         return VERSION_INFO.as_ptr() as *const c_char;
     }
     if VERSION_INFO[0] == 0 {
-        if let Some(taos) = (taos as *mut WsClient).as_mut() {
+        if let Some(taos) = (taos as *mut Taos).as_mut() {
             let v = taos.version();
             std::ptr::copy_nonoverlapping(v.as_ptr(), VERSION_INFO.as_mut_ptr(), v.len());
         }
@@ -476,19 +504,19 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
 pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) {
     if !taos.is_null() {
         log::debug!("close connection {taos:p}");
-        let client = Box::from_raw(taos as *mut WsClient);
-        client.close();
+        let client = Box::from_raw(taos as *mut Taos);
+        // client.close();
         drop(client);
     }
 }
 
 unsafe fn query_with_sql(taos: *mut WS_TAOS, sql: *const c_char) -> WsResult<WsResultSet> {
-    let client = (taos as *mut WsClient)
+    let client = (taos as *mut Taos)
         .as_mut()
         .ok_or(WsError::new(Code::Failed, "client pointer it null"))?;
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
-    let rs = client.s_query(sql)?;
+    let rs = client.query(sql)?;
     Ok(WsResultSet::new(rs))
 }
 
@@ -497,12 +525,12 @@ unsafe fn query_with_sql_timeout(
     sql: *const c_char,
     timeout: Duration,
 ) -> WsResult<WsResultSet> {
-    let client = (taos as *mut WsClient)
+    let client = (taos as *mut Taos)
         .as_mut()
         .ok_or(WsError::new(Code::Failed, "client pointer it null"))?;
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
-    let rs = client.s_query_timeout(sql, timeout)?;
+    let rs = client.query(sql)?;
     Ok(WsResultSet::new(rs))
 }
 

@@ -1,14 +1,15 @@
 use once_cell::sync::OnceCell;
+use taos_query::IntoDsn;
 use taos_query::{block_in_place_or_global, common::RawMeta, AsyncQueryable};
 
 pub mod asyn;
 pub(crate) mod infra;
-pub mod sync;
+// pub mod sync;
 
 pub use asyn::Error;
 pub use asyn::ResultSet;
-pub use asyn::WsTaos;
-pub use infra::WsConnReq;
+pub(crate) use asyn::WsTaos;
+pub(crate) use infra::WsConnReq;
 
 use crate::TaosBuilder;
 
@@ -16,6 +17,21 @@ use crate::TaosBuilder;
 pub struct Taos {
     pub(crate) dsn: TaosBuilder,
     pub(crate) async_client: OnceCell<WsTaos>,
+}
+
+impl Taos {
+    pub fn version(&self) -> &str {
+        block_in_place_or_global(self.client()).version()
+    }
+
+    async fn client(&self) -> &WsTaos {
+        if let Some(ws) = self.async_client.get() {
+            ws
+        } else {
+            let async_client = WsTaos::from_wsinfo(&self.dsn).await.unwrap();
+            self.async_client.get_or_init(|| async_client)
+        }
+    }
 }
 
 unsafe impl Send for Taos {}

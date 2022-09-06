@@ -20,6 +20,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use super::{infra::*, TaosBuilder};
 
+use std::cell::UnsafeCell;
 use std::fmt::Debug;
 use std::io::Write;
 // use std::io::Write;
@@ -134,6 +135,7 @@ pub struct ResultSet {
     affected_rows: usize,
     precision: Precision,
     summary: (usize, usize),
+    timing: Duration,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -190,10 +192,32 @@ pub enum Error {
     IoError(#[from] std::io::Error),
 }
 
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub enum WS_ERROR_NO {
+    DSN_ERROR = 0xE000,
+    WEBSOCKET_ERROR = 0xE001,
+    CONN_CLOSED = 0xE002,
+    SEND_MESSAGE_TIMEOUT = 0xE003,
+    RECV_MESSAGE_TIMEOUT = 0xE004,
+    IO_ERROR = 0xE005,
+}
+
+impl WS_ERROR_NO {
+    pub fn as_code(&self) -> Code {
+        Code::new(*self as _)
+    }
+}
+
 impl Error {
     pub const fn errno(&self) -> Code {
         match self {
             Error::TaosError(error) => error.code(),
+            Error::Dsn(_) => Code::new(WS_ERROR_NO::DSN_ERROR as _),
+            Error::IoError(_) => Code::new(WS_ERROR_NO::IO_ERROR as _),
+            Error::WsError(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
+            Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
+            Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
             _ => Code::Failed,
         }
     }
@@ -599,6 +623,7 @@ impl WsTaos {
                 },
                 summary: (0, 0),
                 sender: self.sender.clone(),
+                timing: resp.timing,
             })
         } else {
             Ok(ResultSet {
@@ -612,6 +637,7 @@ impl WsTaos {
                 precision: resp.precision,
                 summary: (0, 0),
                 sender: self.sender.clone(),
+                timing: resp.timing,
             })
         }
     }
@@ -648,6 +674,7 @@ impl ResultSet {
         };
 
         if fetch_resp.completed {
+            self.timing = fetch_resp.timing;
             return Ok(None);
         }
 
@@ -659,26 +686,39 @@ impl ResultSet {
         let fetch_block = WsSend::FetchBlock(args);
 
         match self.sender.send_recv(fetch_block).await? {
-            WsRecvData::Block { timing: _, raw } => {
+            WsRecvData::Block { timing, raw } => {
                 let mut raw = RawBlock::parse_from_raw_block(raw, self.precision);
 
                 raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
+                self.timing = timing + fetch_resp.timing;
                 Ok(Some(raw))
             }
-            WsRecvData::BlockV2 { timing: _, raw } => {
+            WsRecvData::BlockV2 { timing, raw } => {
                 let mut raw = RawBlock::parse_from_raw_block_v2(
                     raw,
                     self.fields.as_ref().unwrap(),
-                    dbg!(fetch_resp.lengths.as_ref().unwrap()),
+                    fetch_resp.lengths.as_ref().unwrap(),
                     fetch_resp.rows,
                     self.precision,
                 );
 
                 raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
+                self.timing = timing + fetch_resp.timing;
                 Ok(Some(raw))
             }
             _ => unreachable!(),
         }
+    }
+    pub fn take_timing(&self) -> Duration {
+        self.timing
+    }
+
+    pub async fn stop(&self) {
+        if let Some((_, req_id)) = self.sender.results.remove(&self.args.id) {
+            self.sender.queries.remove(&req_id);
+        }
+
+        let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
     }
 }
 
@@ -726,7 +766,8 @@ impl taos_query::Fetchable for ResultSet {
     }
 
     fn fields(&self) -> &[Field] {
-        self.fields.as_ref().unwrap()
+        static EMPTY: Vec<Field> = Vec::new();
+        self.fields.as_deref().unwrap_or(EMPTY.as_slice())
     }
 
     fn summary(&self) -> (usize, usize) {
