@@ -59,12 +59,11 @@ jobs:
             TDengine/release/
             TDengine/contrib/cJson
             TDengine/contrib/cpp-stub
-            TDengine/contrib/deps-download
             TDengine/contrib/googletest
             TDengine/contrib/libuv
             TDengine/contrib/lz4
             TDengine/contrib/zlib
-          key: ${{ runner.os }}-TDengine-build-${{ steps.setup-rust.outputs.rustc_hash }}
+          key: ${{ runner.os }}-TDengine-build
 
       - name: Build & Install TDengine
         env:
