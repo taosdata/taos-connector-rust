@@ -192,6 +192,7 @@ pub enum Error {
     IoError(#[from] std::io::Error),
 }
 
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 #[allow(non_camel_case_types)]
 pub enum WS_ERROR_NO {
