@@ -11,7 +11,7 @@ pub enum Error {
     #[error(transparent)]
     Ws(#[from] taos_ws::Error),
     #[error(transparent)]
-    WsQueryError(#[from] taos_ws::asyn::Error),
+    WsQueryError(#[from] taos_ws::query::asyn::Error),
     #[error(transparent)]
     WsTmqError(#[from] taos_ws::consumer::Error),
     #[error(transparent)]

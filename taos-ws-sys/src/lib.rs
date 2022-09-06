@@ -14,9 +14,9 @@ use taos_query::{
     common::{Precision, Ty},
     Fetchable,
 };
-use taos_ws::sync::*;
+use taos_ws::query::sync::*;
 
-pub use taos_ws::sync::WS_ERROR_NO;
+pub use taos_ws::query::sync::WS_ERROR_NO;
 
 pub mod stmt;
 

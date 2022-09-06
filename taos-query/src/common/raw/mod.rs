@@ -440,7 +440,7 @@ impl RawBlock {
             // go for each column
             let length = unsafe { *(lengths.deref().get_unchecked(col)) } as usize;
             let schema = unsafe { schemas.get_unchecked(col) };
-            log::debug!("col: {}, length: {}, schema: {:?}", col, length, schema);
+            log::trace!("col: {}, length: {}, schema: {:?}", col, length, schema);
 
             macro_rules! _primitive_value {
                 ($ty:ident, $prim:ty) => {{
@@ -897,7 +897,7 @@ impl crate::prelude::AsyncInlinable for RawBlock {
         use crate::util::AsyncInlinableRead;
         use tokio::io::*;
         let layout = reader.read_u32_le().await?;
-        log::debug!("layout: 0x{:X}", layout);
+        log::trace!("layout: 0x{:X}", layout);
         if layout == 0xFFFFFFFF {
             return Ok(None);
         }

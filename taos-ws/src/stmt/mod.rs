@@ -11,7 +11,8 @@ use tokio::sync::{oneshot, watch};
 
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
-use crate::infra::ToMessage;
+use crate::query::asyn::Error;
+use crate::query::infra::ToMessage;
 use crate::{Taos, TaosBuilder};
 use messages::*;
 
@@ -173,7 +174,6 @@ impl Debug for Stmt {
     }
 }
 
-use super::asyn::Error;
 // #[derive(Debug, Error)]
 // pub enum Error {
 //     #[error("{0}")]
