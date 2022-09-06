@@ -3,7 +3,8 @@ use std::fmt::{Debug, Display};
 
 use once_cell::sync::OnceCell;
 
-use taos_query::{DsnError, IntoDsn, TBuilder};
+use taos_query::prelude::Code;
+use taos_query::{AsyncQueryable, DsnError, IntoDsn, TBuilder};
 
 mod stmt;
 pub use stmt::Stmt;
@@ -34,7 +35,17 @@ pub struct TaosBuilder {
 
 #[derive(Debug, thiserror::Error)]
 pub struct Error {
+    code: Code,
     source: anyhow::Error,
+}
+
+impl Error {
+    pub const fn errno(&self) -> Code {
+        self.code
+    }
+    pub fn errstr(&self) -> String {
+        self.source.to_string()
+    }
 }
 
 impl Display for Error {
@@ -45,7 +56,10 @@ impl Display for Error {
 
 impl From<DsnError> for Error {
     fn from(err: DsnError) -> Self {
-        Error { source: err.into() }
+        Error {
+            code: Code::Failed,
+            source: err.into(),
+        }
     }
 }
 
@@ -65,8 +79,13 @@ impl TBuilder for TaosBuilder {
     fn client_version() -> &'static str {
         "0"
     }
-    fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error> {
-        Ok(())
+    fn ping(&self, taos: &mut Self::Target) -> Result<(), Self::Error> {
+        taos_query::Queryable::exec(taos, "SELECT 1")
+            .map_err(|e| Error {
+                code: e.errno(),
+                source: e.into(),
+            })
+            .map(|_| ())
     }
 
     fn ready(&self) -> bool {
