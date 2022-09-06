@@ -28,13 +28,13 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 
-type WsFetchResult = std::result::Result<WsFetchData, RawError>;
-type FetchSender = std::sync::mpsc::SyncSender<WsFetchResult>;
-type FetchReceiver = std::sync::mpsc::Receiver<WsFetchResult>;
-type FetchesSenderMap = Arc<HashMap<ResId, FetchSender>>;
+// type WsFetchResult = std::result::Result<WsFetchData, RawError>;
+// type FetchSender = std::sync::mpsc::SyncSender<WsFetchResult>;
+// type FetchReceiver = std::sync::mpsc::Receiver<WsFetchResult>;
+// type FetchesSenderMap = Arc<HashMap<ResId, FetchSender>>;
 
-type QuerySender = tokio::sync::oneshot::Sender<std::result::Result<WsQueryResp, RawError>>;
-type QueriesSenderMap = Arc<HashMap<ReqId, QuerySender>>;
+// type QuerySender = tokio::sync::oneshot::Sender<std::result::Result<WsQueryResp, RawError>>;
+// type QueriesSenderMap = Arc<HashMap<ReqId, QuerySender>>;
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 
 use futures::channel::oneshot;
@@ -157,7 +157,7 @@ impl Drop for ResultSet {
             self.sender.queries.remove(&req_id);
         }
         block_in_place_or_global(async move {
-            let _ = self.sender.send_only(WsSend::Close(self.args)).await;
+            let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
         });
     }
 }
@@ -243,7 +243,7 @@ async fn read_queries(
                                     let id = fetch.id;
                                     if fetch.completed {
                                         ws2.send(
-                                            WsSend::Close(WsResArgs {
+                                            WsSend::FreeResult(WsResArgs {
                                                 req_id,
                                                 id,
                                             })

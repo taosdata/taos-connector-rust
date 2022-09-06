@@ -58,7 +58,7 @@ pub enum WsSend {
     Fetch(WsResArgs),
     FetchBlock(WsResArgs),
     Binary(Vec<u8>),
-    Close(WsResArgs),
+    FreeResult(WsResArgs),
 }
 
 impl WsSend {
@@ -68,7 +68,7 @@ impl WsSend {
             WsSend::Query { req_id, sql: _ } => *req_id,
             WsSend::Fetch(args) => args.req_id,
             WsSend::FetchBlock(args) => args.req_id,
-            WsSend::Close(args) => args.req_id,
+            WsSend::FreeResult(args) => args.req_id,
             WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
             _ => unreachable!(),
         }
