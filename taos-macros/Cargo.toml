@@ -1,6 +1,6 @@
 [package]
 name = "taos-macros"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 keywords = ["taos", "TDengine", "proc-macro"]
 license = "MIT OR Apache-2.0"
