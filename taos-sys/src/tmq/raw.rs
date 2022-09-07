@@ -299,7 +299,8 @@ pub(super) mod conf {
 }
 
 pub(super) mod list {
-    use std::ffi::{CStr, c_char};
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
 
     use taos_query::prelude::{Code, RawError};
 
