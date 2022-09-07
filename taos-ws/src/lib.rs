@@ -4,7 +4,7 @@ use std::fmt::{Debug, Display};
 use once_cell::sync::OnceCell;
 
 use taos_query::prelude::Code;
-use taos_query::{AsyncQueryable, DsnError, IntoDsn, TBuilder};
+use taos_query::{DsnError, IntoDsn, TBuilder};
 
 mod stmt;
 pub use stmt::Stmt;
