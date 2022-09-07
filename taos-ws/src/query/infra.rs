@@ -20,19 +20,20 @@ pub struct WsConnReq {
     pub(crate) db: Option<String>,
 }
 
-// impl WsConnReq {
-//     pub fn new(user: impl Into<String>, password: impl Into<String>) -> Self {
-//         Self {
-//             user: Some(user.into()),
-//             password: Some(password.into()),
-//             db: None,
-//         }
-//     }
-//     pub fn with_database(mut self, db: impl Into<String>) -> Self {
-//         self.db = Some(db.into());
-//         self
-//     }
-// }
+impl WsConnReq {
+    #[cfg(test)]
+    pub fn new(user: impl Into<String>, password: impl Into<String>) -> Self {
+        Self {
+            user: Some(user.into()),
+            password: Some(password.into()),
+            db: None,
+        }
+    }
+    // pub fn with_database(mut self, db: impl Into<String>) -> Self {
+    //     self.db = Some(db.into());
+    //     self
+    // }
+}
 
 #[derive(Debug, Serialize, Clone, Copy)]
 pub struct WsResArgs {
