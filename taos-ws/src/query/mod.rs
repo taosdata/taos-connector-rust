@@ -1,5 +1,4 @@
 use once_cell::sync::OnceCell;
-use taos_query::IntoDsn;
 use taos_query::{block_in_place_or_global, common::RawMeta, AsyncQueryable};
 
 pub mod asyn;

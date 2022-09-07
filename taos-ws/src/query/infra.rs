@@ -20,19 +20,19 @@ pub struct WsConnReq {
     pub(crate) db: Option<String>,
 }
 
-impl WsConnReq {
-    pub fn new(user: impl Into<String>, password: impl Into<String>) -> Self {
-        Self {
-            user: Some(user.into()),
-            password: Some(password.into()),
-            db: None,
-        }
-    }
-    pub fn with_database(mut self, db: impl Into<String>) -> Self {
-        self.db = Some(db.into());
-        self
-    }
-}
+// impl WsConnReq {
+//     pub fn new(user: impl Into<String>, password: impl Into<String>) -> Self {
+//         Self {
+//             user: Some(user.into()),
+//             password: Some(password.into()),
+//             db: None,
+//         }
+//     }
+//     pub fn with_database(mut self, db: impl Into<String>) -> Self {
+//         self.db = Some(db.into());
+//         self
+//     }
+// }
 
 #[derive(Debug, Serialize, Clone, Copy)]
 pub struct WsResArgs {
@@ -45,7 +45,7 @@ pub struct WsResArgs {
 #[serde(rename_all = "snake_case")]
 pub enum WsSend {
     Version,
-    Pong(Vec<u8>),
+    // Pong(Vec<u8>),
     Conn {
         req_id: ReqId,
         #[serde(flatten)]
@@ -131,18 +131,6 @@ pub struct WsFetchResp {
     #[serde(default)]
     #[serde_as(as = "serde_with::DurationNanoSeconds")]
     pub timing: Duration,
-}
-
-#[derive(Debug, Clone)]
-pub enum WsFetchData {
-    Fetch(WsFetchResp),
-    Block(Duration, Vec<u8>),
-    BlockV2(Duration, Vec<u8>),
-}
-
-pub enum WsAction {
-    Conn { a: String },
-    Close { b: String },
 }
 
 #[derive(Debug, Deserialize, Clone)]

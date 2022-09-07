@@ -20,7 +20,6 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use super::{infra::*, TaosBuilder};
 
-use std::cell::UnsafeCell;
 use std::fmt::Debug;
 use std::io::Write;
 // use std::io::Write;
@@ -50,11 +49,11 @@ type QueryResMapper = HashMap<ResId, ReqId>;
 #[derive(Debug, Clone, Deref)]
 struct Version(String);
 
-impl Version {
-    pub fn is_v3(&self) -> bool {
-        !self.0.starts_with("2")
-    }
-}
+// impl Version {
+//     pub fn is_v3(&self) -> bool {
+//         !self.0.starts_with("2")
+//     }
+// }
 #[derive(Debug, Clone)]
 struct WsQuerySender {
     version: Version,
@@ -62,7 +61,7 @@ struct WsQuerySender {
     results: Arc<QueryResMapper>,
     sender: WsSender,
     queries: QueryAgent,
-    timeout: Duration,
+    // timeout: Duration,
 }
 
 impl WsQuerySender {
@@ -105,20 +104,20 @@ impl WsQuerySender {
         self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
         Ok(())
     }
-    async fn send_recv_timeout(&self, msg: WsSend, timeout: Duration) -> Result<WsRecvData> {
-        let sleep = tokio::time::sleep(timeout);
-        tokio::pin!(sleep);
-        let data = tokio::select! {
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-               log::debug!("poll timed out");
-               Err(Error::QueryTimeout("poll".to_string()))?
-            }
-            message = self.send_recv(msg) => {
-                message?
-            }
-        };
-        Ok(data)
-    }
+    // async fn send_recv_timeout(&self, msg: WsSend, timeout: Duration) -> Result<WsRecvData> {
+    //     let sleep = tokio::time::sleep(timeout);
+    //     tokio::pin!(sleep);
+    //     let data = tokio::select! {
+    //         _ = &mut sleep, if !sleep.is_elapsed() => {
+    //            log::debug!("poll timed out");
+    //            Err(Error::QueryTimeout("poll".to_string()))?
+    //         }
+    //         message = self.send_recv(msg) => {
+    //             message?
+    //         }
+    //     };
+    //     Ok(data)
+    // }
 }
 
 #[derive(Debug)]
@@ -495,7 +494,7 @@ impl WsTaos {
                 sender: ws_cloned,
                 queries: queries2_cloned,
                 results,
-                timeout: Duration::from_secs(60 * 5),
+                // timeout: Duration::from_secs(60 * 5),
             },
         })
     }
