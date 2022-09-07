@@ -295,7 +295,7 @@ impl RawRes {
     }
 
     #[inline]
-    pub fn select_db(&self, db: *const i8) -> Result<(), Error> {
+    pub fn select_db(&self, db: *const c_char) -> Result<(), Error> {
         crate::err_or!(self, taos_select_db(self.as_ptr(), db))
     }
 

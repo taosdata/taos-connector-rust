@@ -299,7 +299,7 @@ pub(super) mod conf {
 }
 
 pub(super) mod list {
-    use std::ffi::CStr;
+    use std::ffi::{CStr, c_char};
 
     use taos_query::prelude::{Code, RawError};
 
@@ -365,7 +365,7 @@ pub(super) mod list {
 
     ///
     pub struct Iter<'a> {
-        inner: &'a [*mut i8],
+        inner: &'a [*mut c_char],
         len: usize,
         index: usize,
     }
