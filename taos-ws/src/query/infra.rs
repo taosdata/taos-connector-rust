@@ -126,8 +126,11 @@ pub struct WsQueryResp {
 #[derive(Debug, Deserialize, Clone)]
 pub struct WsFetchResp {
     pub id: ResId,
+    #[serde(default)]
     pub completed: bool,
+    #[serde(default)]
     pub lengths: Option<Vec<u32>>,
+    #[serde(default)]
     pub rows: usize,
     #[serde(default)]
     #[serde_as(as = "serde_with::DurationNanoSeconds")]
@@ -145,6 +148,8 @@ pub enum WsRecvData {
     },
     Query(WsQueryResp),
     Fetch(WsFetchResp),
+    /// Will only produced by error
+    FetchBlock,
     Block {
         #[serde(default)]
         #[serde_as(as = "serde_with::DurationNanoSeconds")]

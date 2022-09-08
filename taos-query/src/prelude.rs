@@ -583,12 +583,7 @@ mod r#async {
         async fn topics(&self) -> Result<Vec<Topic>, Self::Error> {
             let sql = "SELECT * FROM information_schema.ins_topics";
             log::debug!("query one with sql: {sql}");
-            Ok(self
-                .query(sql)
-                .await?
-                .deserialize()
-                .try_collect()
-                .await?)
+            Ok(self.query(sql).await?.deserialize().try_collect().await?)
         }
 
         /// Get table meta information.

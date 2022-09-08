@@ -151,28 +151,6 @@ impl AsyncTmqBuilder {
         let (ws, _) = connect_async(info.to_stmt_url()).await?;
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
-        // let init = TmqSend::Init {
-        //     req_id: 0,
-        //     req: info.to_tmq_init()?,
-        // };
-        // sender.send(init.to_msg()).await?;
-
-        // log::debug!("");
-
-        // let recv = reader.next().await.unwrap()?;
-        // println!("received");
-        // let args = match recv {
-        //     Message::Text(text) => {
-        //         let v: TmqRecv = serde_json::from_str(&text).unwrap();
-        //         let (args, data, ok) = dbg!(v.ok());
-        //         let _ = ok?;
-        //         match data {
-        //             TmqRecvData::Init => args,
-        //             _ => unreachable!(),
-        //         }
-        //     }
-        //     _ => unreachable!(),
-        // };
 
         use std::collections::hash_map::RandomState;
 
@@ -249,29 +227,6 @@ impl AsyncTmqBuilder {
                                             }) {}
                                         }
                                         _ => unreachable!()
-
-                                        // TmqRecvData::Fetch(fetch) => {
-                                        //     let id = fetch;
-                                        //     if fetch.completed {
-                                        //         ws2.send(
-                                        //             TmqSend::Close(TmqArgs {
-                                        //                 req_id,
-                                        //                 consumer_id,
-                                        //             })
-                                        //             .to_msg(),
-                                        //         )
-                                        //         .await
-                                        //         .unwrap();
-                                        //     }
-                                        //     let data = ok.map(|_|TmqMsgData::Fetch(fetch));
-                                        //     if let Some(_) = fetches_sender.read(&id, |_, v| {
-                                        //         log::debug!("send data to fetches with id {}", id);
-                                        //         v.send(data.clone()).unwrap();
-                                        //     }) {}
-                                        // }
-                                        // // Block type is for binary.
-                                        // TmqRecvData::Block(_) => unreachable!(),
-
                                     }
                                 }
                                 Message::Binary(block) => {
@@ -314,6 +269,7 @@ impl AsyncTmqBuilder {
                     }
                 }
             }
+            
         });
 
         Ok(Self {
@@ -339,118 +295,4 @@ impl AsyncTmqBuilder {
         self.req_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
-
-    pub async fn s_query(&self, sql: &str) -> Result<ResultSet> {
-        todo!()
-        // let req_id = self.req_id();
-        // let action = TmqSend::Subscribe {
-        //     req_id,
-        //     sql: sql.to_string(),
-        // };
-        // let (tx, rx) = oneshot::channel();
-        // {
-        //     self.queries.insert(req_id, tx).unwrap();
-        //     self.ws.send(action.to_msg()).await?;
-        // }
-        // let resp = rx.await??;
-
-        // if resp.fields_count > 0 {
-        //     let names = resp.fields_names.unwrap();
-        //     let types = resp.fields_types.unwrap();
-        //     let bytes = resp.fields_lengths.unwrap();
-        //     let fields: Vec<_> = names
-        //         .into_iter()
-        //         .zip(types)
-        //         .zip(bytes)
-        //         .map(|((name, ty), bytes)| Field::new(name, ty, bytes))
-        //         .collect();
-
-        //     let (sender, receiver) = std::sync::mpsc::sync_channel(2);
-        //     self.fetches.insert(resp.id, sender).unwrap();
-        //     Ok(ResultSet {
-        //         ws: self.ws.clone(),
-        //         fetches: self.fetches.clone(),
-        //         receiver: Some(receiver),
-        //         fields: Some(fields),
-        //         fields_count: resp.fields_count,
-        //         precision: resp.precision,
-        //         affected_rows: resp.affected_rows,
-        //         args: TmqArgs {
-        //             req_id,
-        //             consumer_id: resp.id,
-        //         },
-        //     })
-        // } else {
-        //     Ok(ResultSet {
-        //         affected_rows: resp.affected_rows,
-        //         ws: self.ws.clone(),
-        //         fetches: self.fetches.clone(),
-        //         receiver: None,
-        //         args: TmqArgs {
-        //             req_id,
-        //             consumer_id: resp.id,
-        //         },
-        //         fields: None,
-        //         fields_count: 0,
-        //         precision: resp.precision,
-        //     })
-        // }
-    }
-
-    pub async fn s_exec(&self, sql: &str) -> Result<usize> {
-        todo!()
-        // let req_id = self.req_id();
-        // let action = TmqSend::Query {
-        //     req_id,
-        //     sql: sql.to_string(),
-        // };
-        // let (tx, rx) = oneshot::channel();
-        // {
-        //     self.queries.insert(req_id, tx).unwrap();
-        //     self.ws.send(action.to_msg()).await?;
-        // }
-        // let resp = rx.await??;
-        // Ok(resp.affected_rows)
-    }
-}
-
-// Websocket tests should always use `multi_thread`
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-async fn test_client() -> anyhow::Result<()> {
-    // use futures::TryStreamExt;
-    // std::env::set_var("RUST_LOG", "debug");
-    // pretty_env_logger::init();
-    // let client = WsAsyncTmq::from_dsn("ws://localhost:6041/").await?;
-    // assert_eq!(client.exec("drop database if exists abc_a").await?, 0);
-    // assert_eq!(client.exec("create database abc_a").await?, 0);
-    // assert_eq!(
-    //     client
-    //         .exec("create table abc_a.tb1(ts timestamp, v int)")
-    //         .await?,
-    //     0
-    // );
-    // assert_eq!(
-    //     client
-    //         .exec("insert into abc_a.tb1 values(1655793421375, 1)")
-    //         .await?,
-    //     1
-    // );
-
-    // // let mut rs = client.s_query("select * from abc_a.tb1").unwrap().unwrap();
-    // let mut rs = client.query("select * from abc_a.tb1").await?;
-
-    // #[derive(Debug, serde::Deserialize)]
-    // #[allow(dead_code)]
-    // struct A {
-    //     ts: String,
-    //     v: i32,
-    // }
-
-    // let values: Vec<A> = rs.deserialize_stream().try_collect().await?;
-
-    // dbg!(values);
-
-    // assert_eq!(client.exec("drop database abc_a").await?, 0);
-    Ok(())
 }
