@@ -418,7 +418,7 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     let dsn = CStr::from_ptr(dsn).to_str()?;
     let builder = TaosBuilder::from_dsn(dsn)?;
     let mut taos = builder.build()?;
-    
+
     builder.ping(&mut taos)?;
     Ok(taos)
 }
