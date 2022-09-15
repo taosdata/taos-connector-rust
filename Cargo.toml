@@ -27,7 +27,7 @@ no-default-features = true
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-taos-query = { path = "./taos-query", version = "0.2.6" }
+taos-query = { path = "./taos-query", version = "0.2.7" }
 taos-sys = { path = "./taos-sys", version = "0.2.4", optional = true }
 taos-ws = { path = "./taos-ws", version = "0.2.6", optional = true }
 thiserror = "1"
