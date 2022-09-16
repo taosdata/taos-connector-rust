@@ -1,6 +1,6 @@
 [package]
 name = "taos"
-version = "0.2.10"
+version = "0.2.11"
 categories = ["database", "api-bindings", "asynchronous"]
 edition = "2021"
 keywords = ["timeseries", "database", "tdengine", "taosdata", "connection"]
@@ -16,8 +16,8 @@ no-default-features = true
 anyhow = "1"
 async-trait = "0.1"
 taos-query = { path = "../taos-query", version = "0.2.7" }
-taos-sys = { path = "../taos-sys", version = "0.2.4", optional = true }
-taos-ws = { path = "../taos-ws", version = "0.2.6", optional = true }
+taos-sys = { path = "../taos-sys", version = "0.2.5", optional = true }
+taos-ws = { path = "../taos-ws", version = "0.2.7", optional = true }
 thiserror = "1"
 
 [dev-dependencies]
