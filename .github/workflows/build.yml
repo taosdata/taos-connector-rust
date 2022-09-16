@@ -50,7 +50,7 @@ jobs:
           key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
       
       - run: |
-          cargo build --no-default-features --features ws
+          cargo build -p taos --no-default-features --features ws
           cargo build -p taos-ws-sys
           cargo build -p taos-ws-py
 
