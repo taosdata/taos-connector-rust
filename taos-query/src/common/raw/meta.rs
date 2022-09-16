@@ -159,8 +159,8 @@ impl crate::util::AsyncInlinable for RawMeta {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TagWithValue {
     #[serde(flatten)]
-    field: Field,
-    value: serde_json::Value,
+    pub field: Field,
+    pub value: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
