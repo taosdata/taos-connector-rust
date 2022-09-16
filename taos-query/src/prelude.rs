@@ -1,6 +1,7 @@
 mod _priv {
     pub use crate::common::{
-        BorrowedValue, ColumnView, Field, Precision, RawBlock, RawMeta, Ty, Value,
+        BorrowedValue, ColumnView, Field, JsonMeta, MetaAlter, MetaCreate, MetaDrop, Precision,
+        RawBlock, RawMeta, TagWithValue, Ty, Value,
     };
     pub use crate::util::{Inlinable, InlinableRead, InlinableWrite};
     pub use crate::TBuilder;
