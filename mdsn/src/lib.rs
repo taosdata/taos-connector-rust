@@ -247,7 +247,6 @@ impl Dsn {
     }
 }
 
-
 #[cfg(feature = "pest")]
 #[derive(Parser)]
 #[grammar = "dsn.pest"]
@@ -327,29 +326,43 @@ impl Address {
     }
 }
 
-#[cfg(feature = "pest")]
 impl FromStr for Address {
     type Err = DsnError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut addr = Self::default();
-        if let Some(dsn) = DsnParser::parse(Rule::address, &s)?.next() {
-            for inner in dsn.into_inner() {
-                match inner.as_rule() {
-                    Rule::host => addr.host = Some(inner.as_str().to_string()),
-                    Rule::port => addr.port = Some(inner.as_str().parse()?),
-                    Rule::path => {
-                        addr.path = Some(
-                            urlencoding::decode(inner.as_str())
-                                .expect("UTF-8")
-                                .to_string(),
-                        )
+        #[cfg(feature = "pest")]
+        {
+            let mut addr = Self::default();
+            if let Some(dsn) = DsnParser::parse(Rule::address, &s)?.next() {
+                for inner in dsn.into_inner() {
+                    match inner.as_rule() {
+                        Rule::host => addr.host = Some(inner.as_str().to_string()),
+                        Rule::port => addr.port = Some(inner.as_str().parse()?),
+                        Rule::path => {
+                            addr.path = Some(
+                                urlencoding::decode(inner.as_str())
+                                    .expect("UTF-8")
+                                    .to_string(),
+                            )
+                        }
+                        _ => unreachable!(),
                     }
-                    _ => unreachable!(),
                 }
             }
+            Ok(addr)
         }
-        Ok(addr)
+        #[cfg(not(feature = "pest"))]
+        {
+            if s.is_empty() {
+                Ok(Self::default())
+            } else if let Some((host, port)) = s.split_once(':') {
+                Ok(Address::new(host, port.parse().unwrap()))
+            } else if s.contains('%') {
+                Ok(Address::from_path(urlencoding::decode(s).unwrap()))
+            } else {
+                Ok(Address::from_host(s))
+            }
+        }
     }
 }
 
