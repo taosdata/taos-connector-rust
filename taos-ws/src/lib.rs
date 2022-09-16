@@ -136,7 +136,7 @@ impl TaosBuilder {
                 scheme,
                 addr,
                 auth: WsAuth::Token(token),
-                database: dsn.database,
+                database: dsn.subject,
                 timeout,
             })
         } else {
@@ -146,7 +146,7 @@ impl TaosBuilder {
                 scheme,
                 addr,
                 auth: WsAuth::Plain(username, password),
-                database: dsn.database,
+                database: dsn.subject,
                 timeout,
             })
         }

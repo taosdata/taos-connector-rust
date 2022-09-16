@@ -220,7 +220,7 @@ impl TBuilder for TaosBuilder {
                 builder.port = port;
             }
         }
-        if let Some(db) = dsn.database {
+        if let Some(db) = dsn.subject {
             builder.db.replace(CString::new(db).unwrap());
         }
         if let Some(user) = dsn.username {

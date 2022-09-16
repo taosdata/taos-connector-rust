@@ -170,7 +170,7 @@ pub(super) mod conf {
 
             _set_opt!(username, "user");
             _set_opt!(password, "pass");
-            _set_opt!(database, "db");
+            _set_opt!(subject, "db");
 
             if let Some(addr) = dsn.addresses.first() {
                 if let Some(host) = addr.host.as_ref() {

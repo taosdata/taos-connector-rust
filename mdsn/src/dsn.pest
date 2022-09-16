@@ -24,6 +24,7 @@ paths = { path | ("," ~ path)}
 
 fchar = { char | ":" }
 fragment = { "./" ~ fchar+  ~ ("/" ~ fchar+)? | ("/" ~ fchar+) ~ ("/" ~ fchar+)+ }
+path_like = { (fchar | "/" )+ }
 
 protocol_with_addresses = { protocol ~ "(" ~ addresses ~ ")" | addresses }
 
@@ -38,7 +39,7 @@ database = { database_char+ }
 dsn = {
   SOI ~
   scheme ~ (SCHEME_IDENT ~
-      username_with_password* ~ protocol_with_addresses ~ (fragment | "/" ~ database?)? | ":" ~ fragment)
+      username_with_password* ~ protocol_with_addresses ~ (fragment | "/" ~ database?)? | ":" ~ path_like)
      ~ ("?" ~ param ~ ("&" ~ param)*)? ~
   EOI
 }

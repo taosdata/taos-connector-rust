@@ -14,16 +14,17 @@
 //!
 //! ```rust
 //! use mdsn::Dsn;
+//! use std::str::FromStr;
 //!
 //! # fn main() -> Result<(), mdsn::DsnError> {
 //! // The two styles are equivalent.
-//! let dsn = Dsn::parse("taos://root:taosdata@host1:6030,host2:6030/db")?;
+//! let dsn = Dsn::from_str("taos://root:taosdata@host1:6030,host2:6030/db")?;
 //! let dsn: Dsn = "taos://root:taosdata@host1:6030,host2:6030/db".parse()?;
 //!
 //! assert_eq!(dsn.driver, "taos");
 //! assert_eq!(dsn.username.unwrap(), "root");
 //! assert_eq!(dsn.password.unwrap(), "taosdata");
-//! assert_eq!(dsn.database.unwrap(), "db");
+//! assert_eq!(dsn.subject.unwrap(), "db");
 //! assert_eq!(dsn.addresses.len(), 2);
 //! assert_eq!(dsn.addresses, vec![
 //!     mdsn::Address::new("host1", 6030),
@@ -71,14 +72,183 @@ use std::num::ParseIntError;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use pest;
+#[cfg(feature = "pest")]
 use pest::Parser;
+#[cfg(feature = "pest")]
 use pest_derive::Parser;
+use regex::Regex;
 use thiserror::Error;
 
-#[cfg(test)]
-use coverage_helper::test;
+impl Dsn {
+    pub fn from_regex(input: &str) -> Result<Self, DsnError> {
+        lazy_static::lazy_static! {
+            static ref RE: Regex = Regex::new(r"(?x)
+                (?P<driver>[\w.-]+)(\+(?P<protocol>[\w.-]+))?: # abc
+                (
+                    # url-like dsn
+                    //((?P<username>[\w.-]+)?(:(?P<password>[\w.-]+))?@)? # for authorization
+                        (((?P<protocol2>[\w.-]+)\()?
+                            (?P<addr>[\w\-_%.:]*(:\d{0,5})?(,[\w\-:_.]*(:\d{0,5})?)*)?  # for addresses
+                        \)?)?
+                        (/(?P<subject>[\w %$@./-]+)?)?                             # for subject
+                    | # or
+                    # path-like dsn
+                    (?P<path>([\\/.~]$|/\w+[\w %$@:.\\\-/]*|[\.~\w]?[\w %$@:.\\\-/]+))
+                ) # abc
+                (\?(?P<params>.*))?").unwrap();
+        }
 
+        let cap = RE
+            .captures(input)
+            .ok_or_else(|| DsnError::InvalidConnection(input.to_string()))?;
+
+        let driver = cap.name("driver").unwrap().as_str().to_string();
+        let protocol = cap.name("protocol").map(|m| m.as_str().to_string());
+        let protocol2 = cap.name("protocol2").map(|m| m.as_str().to_string());
+        let protocol = match (protocol, protocol2) {
+            (Some(_), Some(_)) => Err(DsnError::InvalidProtocol("".to_string()))?,
+            (Some(p), None) | (None, Some(p)) => Some(p),
+            _ => None,
+        };
+        let username = cap.name("username").map(|m| m.as_str().to_string());
+        let password = cap.name("password").map(|m| m.as_str().to_string());
+        let subject = cap.name("subject").map(|m| m.as_str().to_string());
+        let path = cap.name("path").map(|m| m.as_str().to_string());
+        let addresses = if let Some(addr) = cap.name("addr") {
+            let addr = addr.as_str();
+            if addr.is_empty() {
+                vec![]
+            } else {
+                addr.split(',')
+                    .filter_map(|s| {
+                        if s.is_empty() {
+                            None
+                        } else if let Some((host, port)) = s.split_once(':') {
+                            Some(Address::new(host, port.parse().unwrap()))
+                        } else if s.contains('%') {
+                            Some(Address::from_path(urlencoding::decode(s).unwrap()))
+                        } else {
+                            Some(Address::from_host(s))
+                        }
+                    })
+                    .collect()
+            }
+        } else {
+            vec![]
+        };
+        let mut params = BTreeMap::new();
+        if let Some(p) = cap.name("params") {
+            for p in p.as_str().split_terminator('&') {
+                if let Some((k, v)) = p.split_once('=') {
+                    params.insert(k.to_string(), v.to_string());
+                }
+            }
+        }
+        Ok(Dsn {
+            driver,
+            protocol,
+            username,
+            password,
+            addresses,
+            path,
+            subject,
+            params,
+        })
+    }
+
+    #[cfg(feature = "pest")]
+    pub fn from_pest(input: &str) -> Result<Self, DsnError> {
+        let dsn = DsnParser::parse(Rule::dsn, input)?.next().unwrap();
+
+        let mut to = Dsn::default();
+        for pair in dsn.into_inner() {
+            match pair.as_rule() {
+                Rule::scheme => {
+                    for inner in pair.into_inner() {
+                        match inner.as_rule() {
+                            Rule::driver => to.driver = inner.as_str().to_string(),
+                            Rule::protocol => to.protocol = Some(inner.as_str().to_string()),
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+                Rule::SCHEME_IDENT => (),
+                Rule::username_with_password => {
+                    for inner in pair.into_inner() {
+                        match inner.as_rule() {
+                            Rule::username => to.username = Some(inner.as_str().to_string()),
+                            Rule::password => to.password = Some(inner.as_str().to_string()),
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+                Rule::protocol_with_addresses => {
+                    for inner in pair.into_inner() {
+                        match inner.as_rule() {
+                            Rule::addresses => {
+                                for inner in inner.into_inner() {
+                                    match inner.as_rule() {
+                                        Rule::address => {
+                                            let mut addr = Address::default();
+                                            for inner in inner.into_inner() {
+                                                match inner.as_rule() {
+                                                    Rule::host => {
+                                                        addr.host = Some(inner.as_str().to_string())
+                                                    }
+                                                    Rule::port => {
+                                                        addr.port = Some(inner.as_str().parse()?)
+                                                    }
+                                                    Rule::path => {
+                                                        addr.path = Some(
+                                                            urlencoding::decode(inner.as_str())
+                                                                .expect("UTF-8")
+                                                                .to_string(),
+                                                        )
+                                                    }
+                                                    _ => unreachable!(),
+                                                }
+                                            }
+                                            to.addresses.push(addr);
+                                        }
+                                        _ => unreachable!(),
+                                    }
+                                }
+                            }
+                            Rule::protocol => to.protocol = Some(inner.as_str().to_string()),
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+                Rule::database => {
+                    to.subject = Some(pair.as_str().to_string());
+                }
+                Rule::fragment => {
+                    to.path = Some(pair.as_str().to_string());
+                }
+                Rule::path_like => {
+                    to.path = Some(pair.as_str().to_string());
+                }
+                Rule::param => {
+                    let (mut name, mut value) = ("".to_string(), "".to_string());
+                    for inner in pair.into_inner() {
+                        match inner.as_rule() {
+                            Rule::name => name = inner.as_str().to_string(),
+                            Rule::value => value = inner.as_str().to_string(),
+                            _ => unreachable!(),
+                        }
+                    }
+                    to.params.insert(name, value);
+                }
+                Rule::EOI => {}
+                _ => unreachable!(),
+            }
+        }
+        Ok(to)
+    }
+}
+
+
+#[cfg(feature = "pest")]
 #[derive(Parser)]
 #[grammar = "dsn.pest"]
 struct DsnParser;
@@ -86,6 +256,7 @@ struct DsnParser;
 /// Error caused by [pest] DSN parser.
 #[derive(Debug, Error)]
 pub enum DsnError {
+    #[cfg(feature = "pest")]
     #[error("{0}")]
     ParseErr(#[from] pest::error::Error<Rule>),
     #[error("unable to parse port from {0}")]
@@ -121,17 +292,22 @@ impl Address {
     /// Construct server address with host and port.
     #[inline]
     pub fn new(host: impl Into<String>, port: u16) -> Self {
+        let host = host.into();
+        let host = if host.is_empty() { None } else { Some(host) };
         Self {
-            host: Some(host.into()),
+            host,
             port: Some(port),
             ..Default::default()
         }
     }
+    // ident: Ident,
     /// Construct server address with host or ip address only.
     #[inline]
     pub fn from_host(host: impl Into<String>) -> Self {
+        let host = host.into();
+        let host = if host.is_empty() { None } else { Some(host) };
         Self {
-            host: Some(host.into()),
+            host,
             ..Default::default()
         }
     }
@@ -151,6 +327,7 @@ impl Address {
     }
 }
 
+#[cfg(feature = "pest")]
 impl FromStr for Address {
     type Err = DsnError;
 
@@ -190,6 +367,7 @@ impl Display for Address {
 }
 
 #[test]
+#[cfg(feature = "pest")]
 fn addr_parse() {
     let s = "taosdata:6030";
     let addr = Address::from_str(s).unwrap();
@@ -228,9 +406,18 @@ pub struct Dsn {
     pub username: Option<String>,
     pub password: Option<String>,
     pub addresses: Vec<Address>,
-    pub fragment: Option<String>,
-    pub database: Option<String>,
+    pub path: Option<String>,
+    pub subject: Option<String>,
     pub params: BTreeMap<String, String>,
+}
+
+impl Dsn {
+    fn is_path_like(&self) -> bool {
+        self.username.is_none()
+            && self.password.is_none()
+            && self.addresses.is_empty()
+            && self.path.is_some()
+    }
 }
 
 pub trait IntoDsn {
@@ -272,13 +459,20 @@ impl Display for Dsn {
         if let Some(protocol) = &self.protocol {
             write!(f, "+{protocol}")?;
         }
-        write!(f, "://")?;
+
+        if self.is_path_like() {
+            write!(f, ":")?;
+        } else {
+            write!(f, "://")?;
+        }
+
         match (&self.username, &self.password) {
             (Some(username), Some(password)) => write!(f, "{username}:{password}@")?,
             (Some(username), None) => write!(f, "{username}@")?,
             (None, Some(password)) => write!(f, ":{password}@")?,
             (None, None) => {}
         }
+
         if !self.addresses.is_empty() {
             write!(
                 f,
@@ -286,11 +480,10 @@ impl Display for Dsn {
                 self.addresses.iter().map(ToString::to_string).join(",")
             )?;
         }
-        if let Some(database) = &self.database {
+        if let Some(database) = &self.subject {
             write!(f, "/{database}")?;
-        }
-        if let Some(fragment) = &self.fragment {
-            write!(f, "{fragment}")?;
+        } else if let Some(path) = &self.path {
+            write!(f, "{path}")?;
         }
         if !self.params.is_empty() {
             write!(
@@ -369,528 +562,454 @@ impl FromStr for Dsn {
     type Err = DsnError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let dsn = DsnParser::parse(Rule::dsn, s)?.next().unwrap();
-
-        let mut to = Dsn::default();
-        for pair in dsn.into_inner() {
-            match pair.as_rule() {
-                Rule::scheme => {
-                    for inner in pair.into_inner() {
-                        match inner.as_rule() {
-                            Rule::driver => to.driver = inner.as_str().to_string(),
-                            Rule::protocol => to.protocol = Some(inner.as_str().to_string()),
-                            _ => unreachable!(),
-                        }
-                    }
-                }
-                Rule::SCHEME_IDENT => (),
-                Rule::username_with_password => {
-                    for inner in pair.into_inner() {
-                        match inner.as_rule() {
-                            Rule::username => to.username = Some(inner.as_str().to_string()),
-                            Rule::password => to.password = Some(inner.as_str().to_string()),
-                            _ => unreachable!(),
-                        }
-                    }
-                }
-                Rule::protocol_with_addresses => {
-                    for inner in pair.into_inner() {
-                        match inner.as_rule() {
-                            Rule::addresses => {
-                                for inner in inner.into_inner() {
-                                    match inner.as_rule() {
-                                        Rule::address => {
-                                            let mut addr = Address::default();
-                                            for inner in inner.into_inner() {
-                                                match inner.as_rule() {
-                                                    Rule::host => {
-                                                        addr.host = Some(inner.as_str().to_string())
-                                                    }
-                                                    Rule::port => {
-                                                        addr.port = Some(inner.as_str().parse()?)
-                                                    }
-                                                    Rule::path => {
-                                                        addr.path = Some(
-                                                            urlencoding::decode(inner.as_str())
-                                                                .expect("UTF-8")
-                                                                .to_string(),
-                                                        )
-                                                    }
-                                                    _ => unreachable!(),
-                                                }
-                                            }
-                                            to.addresses.push(addr);
-                                        }
-                                        _ => unreachable!(),
-                                    }
-                                }
-                            }
-                            Rule::protocol => to.protocol = Some(inner.as_str().to_string()),
-                            _ => unreachable!(),
-                        }
-                    }
-                }
-                Rule::database => {
-                    to.database = Some(pair.as_str().to_string());
-                }
-                Rule::fragment => {
-                    to.fragment = Some(pair.as_str().to_string());
-                }
-                Rule::param => {
-                    let (mut name, mut value) = ("".to_string(), "".to_string());
-                    for inner in pair.into_inner() {
-                        match inner.as_rule() {
-                            Rule::name => name = inner.as_str().to_string(),
-                            Rule::value => value = inner.as_str().to_string(),
-                            _ => unreachable!(),
-                        }
-                    }
-                    to.params.insert(name, value);
-                }
-                Rule::EOI => {}
-                _ => unreachable!(),
-            }
-        }
-        Ok(to)
+        #[cfg(feature = "pest")]
+        return Self::from_pest(s);
+        #[cfg(not(feature = "pest"))]
+        return Self::from_regex(s);
     }
 }
 
-#[test]
-fn test_into_dsn() {
-    let _ = "taos://".into_dsn().unwrap();
-    let _ = "taos://".to_string().into_dsn().unwrap();
-    let _ = (&"taos://".to_string()).into_dsn().unwrap();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let a: Dsn = "taos://".parse().unwrap();
-    let b = a.into_dsn().unwrap();
-    let c = (&b).into_dsn().unwrap();
+    #[test]
+    fn test_into_dsn() {
+        let _ = "taos://".into_dsn().unwrap();
+        let _ = "taos://".to_string().into_dsn().unwrap();
+        let _ = (&"taos://".to_string()).into_dsn().unwrap();
 
-    let d: Dsn = (&c).try_into().unwrap();
-    let _: Dsn = (d).try_into().unwrap();
-    let _: Dsn = ("taos://").try_into().unwrap();
-    let _: Dsn = ("taos://".to_string()).try_into().unwrap();
-    let _: Dsn = (&"taos://:password@".parse::<Dsn>().unwrap().to_string())
-        .try_into()
-        .unwrap();
-}
+        let a: Dsn = "taos://".parse().unwrap();
+        let b = a.into_dsn().unwrap();
+        let c = (&b).into_dsn().unwrap();
 
-#[test]
-fn test_methods() {
-    let mut dsn: Dsn = "taos://localhost:6030/test?debugFlag=135".parse().unwrap();
+        let d: Dsn = (&c).try_into().unwrap();
+        let _: Dsn = (d).try_into().unwrap();
+        let _: Dsn = ("taos://").try_into().unwrap();
+        let _: Dsn = ("taos://".to_string()).try_into().unwrap();
+        let _: Dsn = (&"taos://:password@".parse::<Dsn>().unwrap().to_string())
+            .try_into()
+            .unwrap();
+    }
 
-    let flag = dsn.get("debugFlag").unwrap();
-    assert_eq!(flag, "135");
+    #[test]
+    fn test_methods() {
+        let mut dsn: Dsn = "taos://localhost:6030/test?debugFlag=135".parse().unwrap();
 
-    dsn.set("configDir", "/tmp/taos");
-    assert_eq!(dsn.get("configDir").unwrap(), "/tmp/taos");
-    let config = dsn.remove("configDir").unwrap();
-    assert_eq!(config, "/tmp/taos");
+        let flag = dsn.get("debugFlag").unwrap();
+        assert_eq!(flag, "135");
 
-    let params = dsn.drain_params();
-    assert!(dsn.params.is_empty());
-    assert!(params.contains_key("debugFlag"));
-    assert!(params.len() == 1);
-}
+        dsn.set("configDir", "/tmp/taos");
+        assert_eq!(dsn.get("configDir").unwrap(), "/tmp/taos");
+        let config = dsn.remove("configDir").unwrap();
+        assert_eq!(config, "/tmp/taos");
 
-#[test]
-fn username_with_password() {
-    let s = "taos://";
+        let params = dsn.drain_params();
+        assert!(dsn.params.is_empty());
+        assert!(params.contains_key("debugFlag"));
+        assert!(params.len() == 1);
+    }
 
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
+    #[test]
+    fn username_with_password() {
+        let s = "taos://";
 
-    let s = "taos:///";
-
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), "taos://");
-
-    let s = "taos://root@";
-
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-    let s = "taos://root:taosdata@";
-
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            password: Some("taosdata".to_string()),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-}
-
-#[test]
-fn host_port_mix() {
-    let s = "taos://localhost";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            addresses: vec![Address {
-                host: Some("localhost".to_string()),
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
                 ..Default::default()
-            }],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
 
-    let s = "taos://root@:6030";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            addresses: vec![Address {
-                port: Some(6030),
+        let s = "taos:///";
+
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
                 ..Default::default()
-            }],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
+            }
+        );
+        assert_eq!(dsn.to_string(), "taos://");
 
-    let s = "taos://root@localhost:6030";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            addresses: vec![Address {
-                host: Some("localhost".to_string()),
-                port: Some(6030),
+        let s = "taos://root@";
+
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
                 ..Default::default()
-            }],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-}
-#[test]
-fn username_with_host() {
-    let s = "taos://root@localhost";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            addresses: vec![Address {
-                host: Some("localhost".to_string()),
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+        let s = "taos://root:taosdata@";
+
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                password: Some("taosdata".to_string()),
                 ..Default::default()
-            }],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+    }
 
-    let s = "taos://root@:6030";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            addresses: vec![Address {
-                port: Some(6030),
+    #[test]
+    fn host_port_mix() {
+        let s = "taos://localhost";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                addresses: vec![Address {
+                    host: Some("localhost".to_string()),
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
 
-    let s = "taos://root@localhost:6030";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            addresses: vec![Address::new("localhost", 6030)],
-            ..Default::default()
-        }
-    );
-
-    let s = "taos://root:taosdata@localhost:6030";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            password: Some("taosdata".to_string()),
-            addresses: vec![Address::new("localhost", 6030)],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-}
-
-#[test]
-fn username_with_multi_addresses() {
-    let s = "taos://root@host1.domain:6030,host2.domain:6031";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            addresses: vec![
-                Address::new("host1.domain", 6030),
-                Address::new("host2.domain", 6031)
-            ],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-
-    let s = "taos://root:taosdata@host1:6030,host2:6031";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            password: Some("taosdata".to_string()),
-            addresses: vec![Address::new("host1", 6030), Address::new("host2", 6031)],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-}
-
-#[test]
-fn db_only() {
-    let s = "taos:///db1";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            database: Some("db1".to_string()),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-
-    let s = "taos:///db1";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            database: Some("db1".to_string()),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-}
-
-#[test]
-fn username_with_multi_addresses_database() {
-    let s = "taos://root@host1:6030,host2:6031/db1";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            database: Some("db1".to_string()),
-            addresses: vec![Address::new("host1", 6030), Address::new("host2", 6031)],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-
-    let s = "taos://root:taosdata@host1:6030,host2:6031/db1";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            password: Some("taosdata".to_string()),
-            database: Some("db1".to_string()),
-            addresses: vec![Address::new("host1", 6030), Address::new("host2", 6031)],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-}
-
-#[test]
-fn protocol() {
-    let s = "taos://root@tcp(host1:6030,host2:6031)/db1";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            database: Some("db1".to_string()),
-            protocol: Some("tcp".to_string()),
-            addresses: vec![Address::new("host1", 6030), Address::new("host2", 6031)],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), "taos+tcp://root@host1:6030,host2:6031/db1");
-
-    let s = "taos+tcp://root@host1:6030,host2:6031/db1";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            database: Some("db1".to_string()),
-            protocol: Some("tcp".to_string()),
-            addresses: vec![Address::new("host1", 6030), Address::new("host2", 6031)],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), "taos+tcp://root@host1:6030,host2:6031/db1");
-}
-
-#[test]
-fn fragment() {
-    let s = "postgresql://%2Fvar%2Flib%2Fpostgresql/dbname";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "postgresql".to_string(),
-            database: Some("dbname".to_string()),
-            addresses: vec![Address {
-                path: Some("/var/lib/postgresql".to_string()),
+        let s = "taos://root@:6030";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                addresses: vec![Address {
+                    port: Some(6030),
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }],
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
 
-    let s = "unix:///path/to/unix.sock";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "unix".to_string(),
-            fragment: Some("/path/to/unix.sock".to_string()),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
+        let s = "taos://root@localhost:6030";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                addresses: vec![Address {
+                    host: Some("localhost".to_string()),
+                    port: Some(6030),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+    }
+    #[test]
+    fn username_with_host() {
+        let s = "taos://root@localhost";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                addresses: vec![Address {
+                    host: Some("localhost".to_string()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
 
-    let s = "sqlite:///c:/full/windows/path/to/file.db";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "sqlite".to_string(),
-            fragment: Some("/c:/full/windows/path/to/file.db".to_string()),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
+        let s = "taos://root@:6030";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                addresses: vec![Address {
+                    port: Some(6030),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
 
-    let s = "sqlite://./file.db";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "sqlite".to_string(),
-            fragment: Some("./file.db".to_string()),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
+        let s = "taos://root@localhost:6030";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                addresses: vec![Address::new("localhost", 6030)],
+                ..Default::default()
+            }
+        );
 
-    let s = "sqlite://root:pass@/full/unix/path/to/file.db?mode=0666&readonly=true";
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "sqlite".to_string(),
-            username: Some("root".to_string()),
-            password: Some("pass".to_string()),
-            fragment: Some("/full/unix/path/to/file.db".to_string()),
-            params: (BTreeMap::from_iter(vec![
-                ("mode".to_string(), "0666".to_string()),
-                ("readonly".to_string(), "true".to_string())
-            ])),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-}
+        let s = "taos://root:taosdata@localhost:6030";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                password: Some("taosdata".to_string()),
+                addresses: vec![Address::new("localhost", 6030)],
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+    }
 
-#[test]
-fn params() {
-    let s = r#"taos://?abc=abc"#;
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            params: (BTreeMap::from_iter(vec![("abc".to_string(), "abc".to_string())])),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
+    #[test]
+    fn username_with_multi_addresses() {
+        let s = "taos://root@host1.domain:6030,host2.domain:6031";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                addresses: vec![
+                    Address::new("host1.domain", 6030),
+                    Address::new("host2.domain", 6031)
+                ],
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
 
-    let s = r#"taos://root@localhost?abc=abc"#;
-    let dsn = Dsn::from_str(&s).unwrap();
-    assert_eq!(
-        dsn,
-        Dsn {
-            driver: "taos".to_string(),
-            username: Some("root".to_string()),
-            addresses: vec![Address::from_host("localhost")],
-            params: (BTreeMap::from_iter(vec![("abc".to_string(), "abc".to_string())])),
-            ..Default::default()
-        }
-    );
-    assert_eq!(dsn.to_string(), s);
-}
+        let s = "taos://root:taosdata@host1:6030,host2:6031";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                password: Some("taosdata".to_string()),
+                addresses: vec![Address::new("host1", 6030), Address::new("host2", 6031)],
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+    }
 
-#[test]
-fn parse_taos_tmq() {
-    let s = "taos://root:taosdata@localhost/aa23d04011eca42cf7d8c1dd05a37985?topics=aa23d04011eca42cf7d8c1dd05a37985&group.id=tg2";
-    let _ = Dsn::from_str(&s).unwrap();
-}
+    #[test]
+    fn db_only() {
+        let s = "taos:///db1";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                subject: Some("db1".to_string()),
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
 
-#[test]
-fn tmq_ws_driver() {
-    let dsn = Dsn::from_str("tmq+ws:///abc1?group.id=abc3&timeout=50ms").unwrap();
-    assert_eq!(dsn.driver, "tmq");
+        let s = "taos:///db1";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                subject: Some("db1".to_string()),
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+    }
+
+    #[test]
+    fn username_with_multi_addresses_database() {
+        let s = "taos://root@host1:6030,host2:6031/db1";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                subject: Some("db1".to_string()),
+                addresses: vec![Address::new("host1", 6030), Address::new("host2", 6031)],
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+
+        let s = "taos://root:taosdata@host1:6030,host2:6031/db1";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                password: Some("taosdata".to_string()),
+                subject: Some("db1".to_string()),
+                addresses: vec![Address::new("host1", 6030), Address::new("host2", 6031)],
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+    }
+
+    #[test]
+    fn protocol() {
+        let s = "taos://root@tcp(host1:6030,host2:6031)/db1";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                subject: Some("db1".to_string()),
+                protocol: Some("tcp".to_string()),
+                addresses: vec![Address::new("host1", 6030), Address::new("host2", 6031)],
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), "taos+tcp://root@host1:6030,host2:6031/db1");
+
+        let s = "taos+tcp://root@host1:6030,host2:6031/db1";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                subject: Some("db1".to_string()),
+                protocol: Some("tcp".to_string()),
+                addresses: vec![Address::new("host1", 6030), Address::new("host2", 6031)],
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), "taos+tcp://root@host1:6030,host2:6031/db1");
+    }
+
+    #[test]
+    fn fragment() {
+        let s = "postgresql://%2Fvar%2Flib%2Fpostgresql/dbname";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "postgresql".to_string(),
+                subject: Some("dbname".to_string()),
+                addresses: vec![Address {
+                    path: Some("/var/lib/postgresql".to_string()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+
+        let s = "unix:/path/to/unix.sock";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "unix".to_string(),
+                path: Some("/path/to/unix.sock".to_string()),
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+
+        let s = "sqlite:/c:/full/windows/path/to/file.db";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "sqlite".to_string(),
+                path: Some("/c:/full/windows/path/to/file.db".to_string()),
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+
+        let s = "sqlite:./file.db";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "sqlite".to_string(),
+                path: Some("./file.db".to_string()),
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+
+        let s = "sqlite://root:pass@//full/unix/path/to/file.db?mode=0666&readonly=true";
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "sqlite".to_string(),
+                username: Some("root".to_string()),
+                password: Some("pass".to_string()),
+                subject: Some("/full/unix/path/to/file.db".to_string()),
+                params: (BTreeMap::from_iter(vec![
+                    ("mode".to_string(), "0666".to_string()),
+                    ("readonly".to_string(), "true".to_string())
+                ])),
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+    }
+
+    #[test]
+    fn params() {
+        let s = r#"taos://?abc=abc"#;
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                params: (BTreeMap::from_iter(vec![("abc".to_string(), "abc".to_string())])),
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+
+        let s = r#"taos://root@localhost?abc=abc"#;
+        let dsn = Dsn::from_str(&s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                addresses: vec![Address::from_host("localhost")],
+                params: (BTreeMap::from_iter(vec![("abc".to_string(), "abc".to_string())])),
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+    }
+
+    #[test]
+    fn parse_taos_tmq() {
+        let s = "taos://root:taosdata@localhost/aa23d04011eca42cf7d8c1dd05a37985?topics=aa23d04011eca42cf7d8c1dd05a37985&group.id=tg2";
+        let _ = Dsn::from_str(&s).unwrap();
+    }
+
+    #[test]
+    fn tmq_ws_driver() {
+        let dsn = Dsn::from_str("tmq+ws:///abc1?group.id=abc3&timeout=50ms").unwrap();
+        assert_eq!(dsn.driver, "tmq");
+    }
 }
