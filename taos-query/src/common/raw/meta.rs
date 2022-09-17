@@ -296,13 +296,13 @@ pub enum AlterType {
 // #[serde(tag = "tableType")]
 #[serde(rename_all = "camelCase")]
 pub struct MetaAlter {
-    table_name: String,
-    alter_type: AlterType,
+    pub table_name: String,
+    pub alter_type: AlterType,
     #[serde(flatten, with = "ColField")]
-    field: Field,
-    col_new_name: Option<String>,
-    col_value: Option<String>,
-    col_value_null: Option<bool>,
+    pub field: Field,
+    pub col_new_name: Option<String>,
+    pub col_value: Option<String>,
+    pub col_value_null: Option<bool>,
 }
 
 impl Display for MetaAlter {
