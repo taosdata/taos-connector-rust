@@ -1,6 +1,6 @@
 [package]
 name = "taos-query"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 homepage = "https://github.com/taosdata/taos-connector-rust"
 documentation = "https://docs.rs/taos-query"
