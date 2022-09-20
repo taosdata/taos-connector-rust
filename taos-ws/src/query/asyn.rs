@@ -249,7 +249,7 @@ async fn read_queries(
     is_v3: bool,
     mut close_listener: watch::Receiver<bool>,
 ) {
-    loop {
+    'ws: loop {
         tokio::select! {
             Some(message) = reader.next() => {
                 match message {
@@ -370,7 +370,7 @@ async fn read_queries(
                                 }).await;
                                 for k in keys {
                                     if let Some((_, sender)) = queries_sender.remove(&k) {
-                                        let _ = sender.send(Err(RawError::from_any(close.reason.to_string())));
+                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), close.reason.to_string())));
                                     }
                                 }
                             } else {
@@ -381,11 +381,11 @@ async fn read_queries(
                                 }).await;
                                 for k in keys {
                                     if let Some((_, sender)) = queries_sender.remove(&k) {
-                                        let _ = sender.send(Err(RawError::from_any("websocket connection is closed")));
+                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
                                     }
                                 }
                             }
-                            break;
+                            break 'ws;
                         }
                         Message::Ping(bytes) => {
                             ws2.send(Message::Pong(bytes)).await.unwrap();
@@ -401,14 +401,32 @@ async fn read_queries(
                         }
                     },
                     Err(err) => {
-                        log::error!("{}", err);
-                        break;
+                        log::error!("reading websocket error: {}", err);
+                        let mut keys = Vec::new();
+                        queries_sender.for_each_async(|k, _| {
+                            keys.push(*k);
+                        }).await;
+                        for k in keys {
+                            if let Some((_, sender)) = queries_sender.remove(&k) {
+                                let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
+                            }
+                        }
+                        break 'ws;
                     }
                 }
             }
             _ = close_listener.changed() => {
                 log::debug!("close reader task");
-                break
+                let mut keys = Vec::new();
+                queries_sender.for_each_async(|k, _| {
+                    keys.push(*k);
+                }).await;
+                for k in keys {
+                    if let Some((_, sender)) = queries_sender.remove(&k) {
+                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "close signal received")));
+                    }
+                }
+                break 'ws;
             }
         }
     }
@@ -499,6 +517,7 @@ impl WsTaos {
         let results = fetches_sender.clone();
 
         let queries2_cloned = queries2.clone();
+        let queries3 = queries2.clone();
 
         let (ws, mut msg_recv) = tokio::sync::mpsc::channel(100);
         let ws2 = ws.clone();
@@ -510,7 +529,7 @@ impl WsTaos {
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(10));
 
-            loop {
+            'ws: loop {
                 tokio::select! {
                     _ = interval.tick() => {
                         //
@@ -520,13 +539,22 @@ impl WsTaos {
                         // dbg!(&msg);
                         if let Err(err) = sender.send(msg).await {
                                 log::error!("send websocket message packet error: {}", err);
-                                break;
+                                let mut keys = Vec::new();
+                                queries3.for_each_async(|k, _| {
+                                    keys.push(*k);
+                                }).await;
+                                for k in keys {
+                                    if let Some((_, sender)) = queries3.remove(&k) {
+                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
+                                    }
+                                }
+                                break 'ws;
                             }
                     }
                     _ = rx.changed() => {
                         let _ = sender.close().await;
                         log::debug!("close sender task");
-                        break;
+                        break 'ws;
                     }
                 }
             }

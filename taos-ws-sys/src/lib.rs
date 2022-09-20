@@ -525,6 +525,7 @@ unsafe fn query_with_sql_timeout(
     sql: *const c_char,
     timeout: Duration,
 ) -> WsResult<WsResultSet> {
+    let _ = timeout;
     let client = (taos as *mut Taos)
         .as_mut()
         .ok_or(WsError::new(Code::Failed, "client pointer it null"))?;
