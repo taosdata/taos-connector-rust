@@ -1,6 +1,6 @@
 [package]
 name = "taos-ws"
-version = "0.2.7"
+version = "0.3.0"
 edition = "2021"
 keywords = ["taos", "TDengine", "timeseries", "database"]
 license = "MIT OR Apache-2.0"
