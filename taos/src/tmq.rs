@@ -254,6 +254,12 @@ impl AsAsyncConsumer for Consumer {
                                     taos_sys::MessageSet::Data(data) => {
                                         MessageSet::Data(Data(DataInner::Native(data)))
                                     }
+                                    taos_sys::MessageSet::MetaData(meta, data) => {
+                                        MessageSet::MetaData(
+                                            Meta(MetaInner::Native(meta)),
+                                            Data(DataInner::Native(data)),
+                                        )
+                                    }
                                 },
                             )
                         })
@@ -273,6 +279,12 @@ impl AsAsyncConsumer for Consumer {
                                     }
                                     taos_query::tmq::MessageSet::Data(data) => {
                                         MessageSet::Data(Data(DataInner::Ws(data)))
+                                    }
+                                    taos_query::tmq::MessageSet::MetaData(meta, data) => {
+                                        MessageSet::MetaData(
+                                            Meta(MetaInner::Ws(meta)),
+                                            Data(DataInner::Ws(data)),
+                                        )
                                     }
                                 },
                             )
@@ -439,6 +451,22 @@ mod tests {
                         }
                     }
                     MessageSet::Data(data) => {
+                        // data message may have more than one data block for various tables.
+                        while let Some(data) = data.fetch_raw_block().await? {
+                            dbg!(data.table_name());
+                            dbg!(data);
+                        }
+                    }
+                    MessageSet::MetaData(meta, data) => {
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(raw).await?;
+
+                        // meta data can be write to an database seamlessly by raw or json (to sql).
+                        let json = meta.as_json_meta().await?;
+                        let sql = json.to_string();
+                        if let Err(err) = taos.exec(sql).await {
+                            println!("maybe error: {}", err);
+                        }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
                             dbg!(data.table_name());

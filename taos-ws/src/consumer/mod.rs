@@ -840,6 +840,7 @@ mod tests {
                 //
                 // 1. meta
                 // 2. data
+                // 3. meta + data
                 match message {
                     MessageSet::Meta(meta) => {
                         let _raw = meta.as_raw_meta().await?;
@@ -872,6 +873,7 @@ mod tests {
                             dbg!(data);
                         }
                     }
+                    _ => unreachable!()
                 }
                 consumer.commit(offset).await?;
             }
@@ -1021,6 +1023,7 @@ mod tests {
                         dbg!(block);
                     }
                 }
+                _ => unreachable!()
             }
             consumer.commit(offset)?;
         }
