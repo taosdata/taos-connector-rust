@@ -415,7 +415,12 @@ impl WsResultSet {
 }
 
 unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
-    let dsn = CStr::from_ptr(dsn).to_str()?;
+    let dsn = if dsn.is_null() {
+        CStr::from_bytes_with_nul(b"taos://localhost:6041\0").unwrap()
+    } else {
+        CStr::from_ptr(dsn)
+    };
+    let dsn = dsn.to_str()?;
     let builder = TaosBuilder::from_dsn(dsn)?;
     let mut taos = builder.build()?;
 
@@ -856,6 +861,14 @@ mod tests {
             ws_timestamp_to_rfc3339(ts.as_mut_ptr(), 0, 0, true);
             let s = CStr::from_ptr(ts.as_ptr() as _);
             dbg!(s);
+        }
+    }
+
+    #[test]
+    fn connect_with_null() {
+        unsafe {
+            let taos = ws_connect_with_dsn(std::ptr::null());
+            assert!(!taos.is_null());
         }
     }
     #[test]
