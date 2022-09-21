@@ -214,7 +214,7 @@ impl RawRes {
                         raw.with_field_names(self.fetch_fields().iter().map(Field::name));
                         Some(raw)
                     }
-                    tmq_res_t::TMQ_RES_DATA => {
+                    tmq_res_t::TMQ_RES_DATA | tmq_res_t::TMQ_RES_METADATA => {
                         let fields = self.fetch_fields();
 
                         let mut raw = RawBlock::parse_from_ptr(block as _, self.precision());

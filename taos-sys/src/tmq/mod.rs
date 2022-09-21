@@ -12,7 +12,8 @@ pub(crate) use ffi::*;
 use taos_query::{
     common::{raw_data_t, Precision, RawMeta},
     tmq::{
-        AsAsyncConsumer, AsConsumer, AsyncOnSync, IsAsyncData, IsMeta, IsOffset, Timeout, VGroupId,
+        AsAsyncConsumer, AsConsumer, AsyncOnSync, IsAsyncData, IsMeta, IsOffset, MessageSet,
+        Timeout, VGroupId,
     },
     Dsn, IntoDsn, RawBlock, TBuilder,
 };
@@ -217,12 +218,12 @@ pub struct Messages {
 }
 
 impl Iterator for Messages {
-    type Item = (Offset, MessageSet);
+    type Item = (Offset, MessageSet<Meta, Data>);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.tmq
             .poll_timeout(self.timeout.map(|t| t.as_millis() as i64).unwrap_or(-1))
-            .map(|raw| (Offset(raw), MessageSet::new(raw)))
+            .map(|raw| (Offset(raw), MessageSet::from(raw)))
     }
 }
 
@@ -301,17 +302,18 @@ impl IsAsyncData for Data {
     }
 }
 
-pub enum MessageSet {
-    Meta(Meta),
-    Data(Data),
-}
+// pub enum MessageSet {
+//     Meta(Meta),
+//     Data(Data),
+// }
 
-impl MessageSet {
-    fn new(raw: RawRes) -> Self {
+impl From<RawRes> for MessageSet<Meta, Data> {
+    fn from(raw: RawRes) -> Self {
         match raw.tmq_message_type() {
             tmq_res_t::TMQ_RES_INVALID => unreachable!(),
             tmq_res_t::TMQ_RES_DATA => Self::Data(Data::new(raw)),
             tmq_res_t::TMQ_RES_TABLE_META => Self::Meta(Meta::new(raw)),
+            tmq_res_t::TMQ_RES_METADATA => Self::MetaData(Meta::new(raw), Data::new(raw)),
         }
     }
 }
@@ -330,16 +332,16 @@ impl Iterator for Data {
     }
 }
 
-impl Iterator for MessageSet {
-    type Item = RawBlock;
+// impl Iterator for MessageSet {
+//     type Item = RawBlock;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            MessageSet::Meta(data) => None,
-            MessageSet::Data(data) => data.raw.fetch_raw_message(data.precision),
-        }
-    }
-}
+//     fn next(&mut self) -> Option<Self::Item> {
+//         match self {
+//             MessageSet::Meta(data) => None,
+//             MessageSet::Data(data) => data.raw.fetch_raw_message(data.precision),
+//         }
+//     }
+// }
 
 impl AsConsumer for Consumer {
     type Error = Error;
@@ -376,6 +378,9 @@ impl AsConsumer for Consumer {
                     tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
                     tmq_res_t::TMQ_RES_TABLE_META => {
                         taos_query::tmq::MessageSet::Meta(Meta::new(raw))
+                    }
+                    tmq_res_t::TMQ_RES_METADATA => {
+                        taos_query::tmq::MessageSet::MetaData(Meta::new(raw), Data::new(raw))
                     }
                 },
             )
@@ -426,6 +431,7 @@ impl AsAsyncConsumer for Consumer {
                     tmq_res_t::TMQ_RES_TABLE_META => {
                         taos_query::tmq::MessageSet::Meta(Meta::new(raw))
                     }
+                    tmq_res_t::TMQ_RES_METADATA => todo!(),
                 },
             )
         }))
@@ -445,6 +451,112 @@ mod tests {
 
     use super::TmqBuilder;
 
+    #[test]
+    fn metadata() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+
+        use std::ptr::null;
+        let host = null();
+        let user = null();
+        let pass = null();
+        let db = null();
+        let port = 0;
+        let taos = RawTaos::connect(host, user, pass, db, port)?;
+        let db = "tmq_metadata";
+        taos.query(format!("drop topic if exists {db}"))?;
+        taos.query(format!("drop database if exists {db}"))?;
+        taos.query(format!("create database {db} keep 36500 vgroups 1"))?;
+        taos.query(format!("use {db}"))?;
+        taos.query(
+            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
+            "create stable stb1(ts timestamp, v int) tags(jt int, t1 float)",
+        )?;
+        taos.query(
+            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
+            "insert into tb2 using stb1 tags(2, 2.2) values(now, 0) (now + 1s, 0) tb3 using stb1 tags (3, 3.3) values (now, 3) (now +1s, 3)",
+        )?;
+
+        taos.query(format!("create topic {db} with meta as database {db}"))?;
+
+        taos.query(format!("drop database if exists {db}2"))?;
+        taos.query(format!("create database {db}2"))?;
+        taos.query(format!("use {db}2"))?;
+
+        let builder = TmqBuilder::from_dsn(
+            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false",
+        )?;
+        let mut consumer = builder.build()?;
+
+        consumer.subscribe([db])?;
+
+        for message in consumer.iter_with_timeout(Timeout::from_secs(1)) {
+            let (offset, msg) = message?;
+            println!("offset: {:?}", offset);
+
+            match msg {
+                MessageSet::Meta(meta) => {
+                    let json = meta.to_json();
+                    dbg!(json);
+                    taos.write_raw_meta(meta.to_raw())?;
+                    // taos.w
+                }
+                MessageSet::Data(data) => {
+                    for raw in data {
+                        let raw = raw?;
+                        dbg!(raw.table_name().unwrap());
+                        let (nrows, ncols) = (raw.nrows(), raw.ncols());
+                        for col in raw.columns() {
+                            for value in col {
+                                print!("{}\t", value);
+                            }
+                        }
+                        println!();
+                        taos.write_raw_block(&raw)?;
+                    }
+                }
+                MessageSet::MetaData(meta, data ) => {
+                    // meta
+                    let json = meta.to_json();
+                    dbg!(json);
+                    taos.write_raw_meta(meta.to_raw())?;
+
+                    // data
+                    for raw in data {
+                        let raw = raw?;
+                        dbg!(raw.table_name().unwrap());
+                        let (nrows, ncols) = (raw.nrows(), raw.ncols());
+                        for col in raw.columns() {
+                            for value in col {
+                                print!("{}\t", value);
+                            }
+                        }
+                        println!();
+                        taos.write_raw_block(&raw)?;
+                    }
+                },
+            }
+
+            let _ = consumer.commit(offset);
+        }
+
+        consumer.unsubscribe();
+
+        let query = taos.query("describe stb1")?;
+        for row in query {
+            let raw = row?;
+            dbg!(raw);
+        }
+        let query = taos.query("select count(*) from stb1")?;
+        for row in query {
+            let raw = row?;
+            dbg!(raw);
+        }
+
+        taos.query(format!("drop database {db}2"))?;
+        taos.query(format!("drop topic {db}")).unwrap();
+        taos.query(format!("drop database {db}"))?;
+        Ok(())
+    }
     #[test]
     fn meta() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
@@ -508,6 +620,21 @@ mod tests {
                     // taos.w
                 }
                 MessageSet::Data(data) => {
+                    for raw in data {
+                        let raw = raw?;
+                        let (nrows, ncols) = (raw.nrows(), raw.ncols());
+                        for col in raw.columns() {
+                            for value in col {
+                                print!("{}\t", value);
+                            }
+                        }
+                        println!();
+                    }
+                }
+                MessageSet::MetaData(meta, data) => {
+                    let json = meta.to_json();
+                    dbg!(json);
+                    taos.write_raw_meta(meta.to_raw())?;
                     for raw in data {
                         let raw = raw?;
                         let (nrows, ncols) = (raw.nrows(), raw.ncols());
@@ -710,6 +837,7 @@ mod tests {
                         dbg!(block);
                     }
                 }
+                _ => (),
             }
             consumer.commit(offset)?;
         }
@@ -767,6 +895,9 @@ mod tests {
             "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL)",
+            "insert into tb4 using stb2 tags(false, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)  (ts, c1) values (now, false)",
             // kind 5: create common table
             "create table `table` (ts timestamp, v int)",
             // kind 6: column in super table
@@ -796,8 +927,8 @@ mod tests {
             // kind 10: drop child table
             "drop table `tb2` `tb1`",
             // kind 11: drop super table
-            "drop table `stb2`",
-            "drop table `stb1`",
+            // "drop table `stb2`",
+            // "drop table `stb1`",
             "create topic if not exists sys_tmq_meta with meta as database sys_tmq_meta",
         ])
         .await?;
@@ -833,6 +964,7 @@ mod tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
+                        // dbg!(json);
                         let sql = dbg!(json.to_string());
                         if let Err(err) = taos.exec(sql).await {
                             match err.errno() {
@@ -865,6 +997,7 @@ mod tests {
                             dbg!(data);
                         }
                     }
+                    _ => (),
                 }
                 consumer.commit(offset).await?;
                 Ok(())

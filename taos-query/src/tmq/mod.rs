@@ -77,6 +77,7 @@ impl FromStr for Timeout {
 pub enum MessageSet<M, D> {
     Meta(M),
     Data(D),
+    MetaData(M, D),
 }
 
 impl<M, D> Debug for MessageSet<M, D>
@@ -88,6 +89,7 @@ where
         match self {
             Self::Meta(m) => f.debug_tuple("Meta").field(m).finish(),
             Self::Data(d) => f.debug_tuple("Data").field(d).finish(),
+            Self::MetaData(m, d) => f.debug_tuple("MetaData").field(m).field(d).finish(),
         }
     }
 }
@@ -97,12 +99,14 @@ impl<M, D> MessageSet<M, D> {
         match self {
             MessageSet::Meta(m) => Some(m),
             MessageSet::Data(_) => None,
+            MessageSet::MetaData(m, _) => Some(m),
         }
     }
     pub fn into_data(self) -> Option<D> {
         match self {
             MessageSet::Meta(_) => None,
             MessageSet::Data(d) => Some(d),
+            MessageSet::MetaData(_, d) => Some(d),
         }
     }
 }
@@ -163,6 +167,23 @@ pub trait IsAsyncData {
     async fn fetch_raw_block(&self) -> Result<Option<RawBlock>, Self::Error>;
 }
 
+#[async_trait::async_trait]
+pub trait AsyncMessage {
+    type Error;
+
+    /// Check if the message contains meta.
+    fn has_meta(&self) -> bool;
+    /// Check if the message contains data.
+    fn has_data(&self) -> bool;
+
+    /// Return raw data as bytes.
+    async fn as_raw_data(&self) -> Result<RawData, Self::Error>;
+
+    /// Extract meta message.
+    async fn get_meta(&self) -> Result<Option<RawMeta>, Self::Error>;
+    async fn fetch_raw_block(&self) -> Result<Option<RawBlock>, Self::Error>;
+}
+
 pub type VGroupId = i32;
 
 /// Extract offset information.
@@ -211,10 +232,7 @@ pub trait AsConsumer: Sized {
     ) -> Box<dyn '_ + Iterator<Item = Result<(Self::Offset, Self::Data), Self::Error>>> {
         Box::new(
             self.iter_with_timeout(timeout)
-                .filter_map_ok(|m| match m.1 {
-                    MessageSet::Data(data) => Some((m.0, data)),
-                    MessageSet::Meta(_) => None,
-                }),
+                .filter_map_ok(|m| m.1.into_data().map(|data| (m.0, data))),
         )
     }
 
