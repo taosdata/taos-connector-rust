@@ -17,7 +17,7 @@ pub use stmt::Stmt;
 #[cfg(all(feature = "ws", feature = "native"))]
 mod tmq;
 #[cfg(all(feature = "ws", feature = "native"))]
-pub use tmq::{Consumer, MessageSet, TmqBuilder};
+pub use tmq::{Consumer, MessageSet, TmqBuilder, Meta, Data};
 
 #[cfg(all(feature = "ws", feature = "native"))]
 mod query;
