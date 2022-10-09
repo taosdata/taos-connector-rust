@@ -255,6 +255,7 @@ async fn read_queries(
                 match message {
                     Ok(message) => match message {
                         Message::Text(text) => {
+                            log::debug!("received json response: {text}");
                             let v: WsRecv = serde_json::from_str(&text).unwrap();
                             let (req_id, data, ok) = v.ok();
                             match &data {
