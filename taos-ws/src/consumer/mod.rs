@@ -506,7 +506,7 @@ impl TmqBuilder {
                     }
                     _ = rx.changed() => {
                         let _= sender.send(Message::Close(None)).await;
-                        sender.close().await.unwrap();
+                        let _ = sender.close().await;
                         log::debug!("close tmq sender");
                         break;
                     }
@@ -564,7 +564,7 @@ impl TmqBuilder {
                                             log::debug!("commit done: {:?}", recv);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                sender.send(ok.map(|_|recv)).unwrap();
+                                                let _ = sender.send(ok.map(|_|recv));
                                             }  else {
                                                 log::warn!("poll message received but no receiver alive");
                                             }
@@ -573,7 +573,7 @@ impl TmqBuilder {
                                             log::debug!("fetch done: {:?}", fetch);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                sender.send(ok.map(|_|recv)).unwrap();
+                                                let _ = sender.send(ok.map(|_|recv));
                                             }  else {
                                                 log::warn!("poll message received but no receiver alive");
                                             }
@@ -873,7 +873,7 @@ mod tests {
                             dbg!(data);
                         }
                     }
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 }
                 consumer.commit(offset).await?;
             }
@@ -1023,7 +1023,7 @@ mod tests {
                         dbg!(block);
                     }
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
             consumer.commit(offset)?;
         }
