@@ -501,7 +501,7 @@ impl TmqBuilder {
                             sender.close().await.unwrap();
                             break;
                         }
-                        sender.send(msg).await.unwrap();
+                        let _ = sender.send(msg).await;
                         log::trace!("send done");
                     }
                     _ = rx.changed() => {
