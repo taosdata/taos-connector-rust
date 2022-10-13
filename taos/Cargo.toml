@@ -17,7 +17,7 @@ anyhow = "1"
 async-trait = "0.1"
 taos-query = { path = "../taos-query", version = "0.3.0" }
 taos-sys = { path = "../taos-sys", version = "0.3.0", optional = true }
-taos-ws = { path = "../taos-ws", version = "0.3.2", optional = true }
+taos-ws = { path = "../taos-ws", version = "0.3.3", optional = true }
 thiserror = "1"
 
 [dev-dependencies]
