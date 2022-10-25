@@ -46,7 +46,10 @@ impl TBuilder for TaosBuilder {
     }
 
     fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
-        let dsn = dsn.into_dsn()?;
+        let mut dsn = dsn.into_dsn()?;
+        if dsn.params.contains_key("token") {
+            dsn.protocol = Some("ws".to_string());
+        }
         // dbg!(&dsn);
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(
