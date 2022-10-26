@@ -4,6 +4,7 @@ members = [
   "taos-error",
   "taos-query",
   "taos-macros",
+  "taos-optin",
   "taos-sys",
   "taos-ws",
   "taos-ws-sys",
