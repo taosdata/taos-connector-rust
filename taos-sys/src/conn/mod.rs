@@ -1,7 +1,7 @@
 use std::{ffi::CStr, os::raw::*};
 
-use taos_error::{Code, Error};
 use taos_query::common::raw_data_t;
+use taos_query::prelude::{Code, RawError as Error};
 use taos_query::RawBlock;
 
 use crate::tmq::taos_write_raw_block;

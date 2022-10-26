@@ -6,8 +6,8 @@ use std::{
 };
 
 use futures::Stream;
-use taos_error::Error;
 use taos_query::common::{Field, Precision, RawBlock};
+use taos_query::prelude::RawError as Error;
 
 use crate::ffi::{taos_get_raw_block, TAOS_RES};
 

@@ -14,7 +14,7 @@ use std::{
 
 use once_cell::sync::OnceCell;
 use query::blocks::SharedState;
-use taos_error::Error as RawError;
+pub use taos_query::prelude::*;
 // use taos_query::{AsyncFetchable, AsyncQueryable, DsnError, Fetchable, Queryable, TBuilder};
 
 pub mod sync {
@@ -60,7 +60,7 @@ macro_rules! err_or {
             if code.success() {
                 Ok($ret)
             } else {
-                Err(Error::new(code, $res.err_as_str()))
+                Err(taos_query::prelude::RawError::new(code, $res.err_as_str()))
             }
         }
     };
@@ -183,7 +183,7 @@ pub struct TaosBuilder {
 }
 
 #[derive(Debug)]
-pub struct Error(taos_error::Error);
+pub struct Error(RawError);
 
 impl From<DsnError> for Error {
     fn from(err: DsnError) -> Self {

@@ -96,7 +96,7 @@ impl taos_query::Queryable for Taos {
     }
 
     fn write_raw_block(&self, block: &taos_query::RawBlock) -> Result<(), Self::Error> {
-        block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))        
+        block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))
     }
 }
 
@@ -328,7 +328,7 @@ mod tests {
     }
 
     // #[tokio::test(flavor = "multi_thread")]
-    async fn ws_select_from_meters() -> anyhow::Result<()> {
+    async fn _ws_select_from_meters() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "info");
         pretty_env_logger::init_timed();
         use taos_query::{AsyncFetchable, AsyncQueryable};

@@ -130,11 +130,8 @@ pub(super) mod tmq {
 
 pub(super) mod conf {
     use crate::{tmq::ffi::*, IntoCStr};
-    use taos_error::*;
-
-    use crate::*;
     use std::{ffi::c_void, iter::Iterator};
-    use taos_query::Dsn;
+    use taos_query::prelude::{Dsn, RawError};
 
     use super::RawTmq;
 
@@ -153,7 +150,7 @@ pub(super) mod conf {
                 .with_table_name()
         }
 
-        pub(crate) fn from_dsn(dsn: &Dsn) -> Result<Self> {
+        pub(crate) fn from_dsn(dsn: &Dsn) -> Result<Self, RawError> {
             let mut conf = Self::new();
             macro_rules! _set_opt {
                 ($f:ident, $c:literal) => {
@@ -240,14 +237,18 @@ pub(super) mod conf {
         pub(crate) fn with<K: AsRef<str>, V: AsRef<str>>(
             mut self,
             iter: impl Iterator<Item = (K, V)>,
-        ) -> Result<Self> {
+        ) -> Result<Self, RawError> {
             for (k, v) in iter {
                 self.set(k, v)?;
             }
             Ok(self)
         }
 
-        fn set<K: AsRef<str>, V: AsRef<str>>(&mut self, key: K, value: V) -> Result<&mut Self> {
+        fn set<K: AsRef<str>, V: AsRef<str>>(
+            &mut self,
+            key: K,
+            value: V,
+        ) -> Result<&mut Self, RawError> {
             let ret = unsafe {
                 tmq_conf_set(
                     self.0,
@@ -274,7 +275,7 @@ pub(super) mod conf {
             }
         }
 
-        pub(crate) fn build(&self) -> Result<RawTmq> {
+        pub(crate) fn build(&self) -> Result<RawTmq, RawError> {
             unsafe {
                 let mut err = [0; 256];
                 let tmq = tmq_consumer_new(self.0, err.as_mut_ptr() as _, 255);

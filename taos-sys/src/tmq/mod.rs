@@ -20,7 +20,7 @@ use taos_query::{
 
 use crate::{conn::RawTaos, query::RawRes};
 
-use taos_error::Error;
+use taos_query::prelude::RawError;
 
 mod raw;
 
@@ -114,7 +114,7 @@ unsafe impl Sync for TmqBuilder {}
 impl TBuilder for TmqBuilder {
     type Target = Consumer;
 
-    type Error = Error;
+    type Error = RawError;
 
     fn available_params() -> &'static [&'static str] {
         &["group.id", "client.id", "timeout", "enable.auto.commit"]
@@ -123,10 +123,10 @@ impl TBuilder for TmqBuilder {
     fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
         let mut dsn = dsn
             .into_dsn()
-            .map_err(|e| Error::from_string(format!("Parse dsn error: {}", e)))?;
+            .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
         let conf = Conf::from_dsn(&dsn)?;
         let timeout = if let Some(timeout) = dsn.params.remove("timeout") {
-            Timeout::from_str(&timeout).map_err(Error::from_any)?
+            Timeout::from_str(&timeout).map_err(RawError::from_any)?
         } else {
             Timeout::from_millis(500)
         };
@@ -234,7 +234,7 @@ pub struct Meta {
 impl AsyncOnSync for Meta {}
 
 impl IsMeta for Meta {
-    type Error = Error;
+    type Error = RawError;
 
     fn as_raw_meta(&self) -> Result<RawMeta, Self::Error> {
         let raw = self.raw.tmq_get_raw();
@@ -253,7 +253,7 @@ impl IsMeta for Meta {
 
     fn as_json_meta(&self) -> Result<taos_query::common::JsonMeta, Self::Error> {
         let meta = serde_json::from_slice(self.raw.tmq_get_json_meta().as_bytes())
-            .map_err(|err| Error::from_string(err.to_string()))?;
+            .map_err(|err| RawError::from_string(err.to_string()))?;
         Ok(meta)
     }
 }
@@ -291,7 +291,7 @@ impl Data {
 
 #[async_trait::async_trait]
 impl IsAsyncData for Data {
-    type Error = Error;
+    type Error = RawError;
 
     async fn as_raw_data(&self) -> Result<taos_query::common::RawData, Self::Error> {
         Ok(self.raw.tmq_get_raw().into())
@@ -325,7 +325,7 @@ pub struct MessageSetIter {
 }
 
 impl Iterator for Data {
-    type Item = Result<RawBlock, Error>;
+    type Item = Result<RawBlock, RawError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.raw.fetch_raw_message(self.precision).map(Ok)
@@ -344,7 +344,7 @@ impl Iterator for Data {
 // }
 
 impl AsConsumer for Consumer {
-    type Error = Error;
+    type Error = RawError;
 
     type Offset = Offset;
 
@@ -396,7 +396,7 @@ impl AsConsumer for Consumer {
 
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
-    type Error = Error;
+    type Error = RawError;
 
     type Offset = Offset;
 

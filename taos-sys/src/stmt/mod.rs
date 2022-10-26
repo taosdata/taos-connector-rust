@@ -3,7 +3,7 @@ use crate::{err_or, ffi::*, into_c_str::IntoCStr, RawRes, RawTaos, ResultSet};
 use std::ffi::CStr;
 
 use itertools::Itertools;
-use taos_error::{Code, Error};
+use taos_query::prelude::{Code, RawError};
 use taos_query::{common::Ty, stmt::Bindable, Queryable};
 
 use crate::types::*;
@@ -79,13 +79,13 @@ impl Drop for RawStmt {
 
 impl RawStmt {
     #[inline(always)]
-    fn ok(&self, code: impl Into<Code>) -> Result<(), Error> {
+    fn ok(&self, code: impl Into<Code>) -> Result<(), RawError> {
         let code = code.into();
 
         if code.success() {
             Ok(())
         } else {
-            Err(Error::from_string(self.err_as_str()))
+            Err(RawError::from_string(self.err_as_str()))
         }
     }
 
@@ -113,12 +113,12 @@ impl RawStmt {
         RawStmt(unsafe { taos_stmt_init(taos.as_ptr()) })
     }
     #[inline]
-    pub fn close(&mut self) -> Result<(), Error> {
+    pub fn close(&mut self) -> Result<(), RawError> {
         err_or!(self, taos_stmt_close(self.as_ptr()))
     }
 
     #[inline]
-    pub fn prepare<'c>(&mut self, sql: impl IntoCStr<'c>) -> Result<(), Error> {
+    pub fn prepare<'c>(&mut self, sql: impl IntoCStr<'c>) -> Result<(), RawError> {
         let sql = sql.into_c_str();
         self.ok(unsafe {
             taos_stmt_prepare(self.as_ptr(), sql.as_ptr(), sql.to_bytes().len() as _)
@@ -129,7 +129,7 @@ impl RawStmt {
         &mut self,
         name: impl IntoCStr<'a>,
         tags: &[TaosBind],
-    ) -> Result<(), Error> {
+    ) -> Result<(), RawError> {
         self.ok(unsafe {
             taos_stmt_set_tbname_tags(
                 self.as_ptr(),
@@ -140,22 +140,22 @@ impl RawStmt {
     }
 
     #[inline]
-    pub fn set_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> Result<(), Error> {
+    pub fn set_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> Result<(), RawError> {
         self.ok(unsafe { taos_stmt_set_tbname(self.as_ptr(), name.into_c_str().as_ptr()) })
     }
 
     #[inline]
-    pub fn set_sub_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> Result<(), Error> {
+    pub fn set_sub_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> Result<(), RawError> {
         self.ok(unsafe { taos_stmt_set_sub_tbname(self.as_ptr(), name.into_c_str().as_ptr()) })
     }
 
     #[inline]
-    pub fn set_tags(&mut self, tags: &[TaosBind]) -> Result<(), Error> {
+    pub fn set_tags(&mut self, tags: &[TaosBind]) -> Result<(), RawError> {
         self.ok(unsafe { taos_stmt_set_tags(self.as_ptr(), tags.as_ptr() as _) })
     }
 
     #[inline]
-    pub fn use_result(&mut self) -> Result<ResultSet, Error> {
+    pub fn use_result(&mut self) -> Result<ResultSet, RawError> {
         unsafe { RawRes::from_ptr(taos_stmt_use_result(self.as_ptr())).map(ResultSet::new) }
     }
 
@@ -165,7 +165,7 @@ impl RawStmt {
     }
 
     #[inline]
-    pub fn execute(&self) -> Result<usize, Error> {
+    pub fn execute(&self) -> Result<usize, RawError> {
         let cur = self.affected_rows();
         err_or!(self, taos_stmt_execute(self.as_ptr()))?;
         let new = self.affected_rows();
@@ -173,12 +173,12 @@ impl RawStmt {
     }
 
     #[inline]
-    pub fn add_batch(&self) -> Result<(), Error> {
+    pub fn add_batch(&self) -> Result<(), RawError> {
         err_or!(self, taos_stmt_add_batch(self.as_ptr()))
     }
 
     #[inline]
-    pub fn is_insert(&self) -> Result<bool, Error> {
+    pub fn is_insert(&self) -> Result<bool, RawError> {
         let mut is_insert = 0;
         err_or!(
             self,
@@ -188,7 +188,7 @@ impl RawStmt {
     }
 
     #[inline]
-    pub fn num_params(&self) -> Result<usize, Error> {
+    pub fn num_params(&self) -> Result<usize, RawError> {
         let mut num = 0i32;
         err_or!(
             self,
@@ -198,7 +198,7 @@ impl RawStmt {
     }
 
     #[inline]
-    pub fn get_param(&mut self, idx: i32) -> Result<(Ty, i32), Error> {
+    pub fn get_param(&mut self, idx: i32) -> Result<(Ty, i32), RawError> {
         let (mut type_, mut bytes) = (0, 0);
         err_or!(
             self,
@@ -207,12 +207,12 @@ impl RawStmt {
         )
     }
     #[inline]
-    pub fn bind_param(&mut self, bind: &[TaosBind]) -> Result<(), Error> {
+    pub fn bind_param(&mut self, bind: &[TaosBind]) -> Result<(), RawError> {
         err_or!(self, taos_stmt_bind_param(self.as_ptr(), bind.as_ptr()))
     }
 
     #[inline]
-    pub fn bind_param_batch(&mut self, bind: &[TaosMultiBind]) -> Result<(), Error> {
+    pub fn bind_param_batch(&mut self, bind: &[TaosMultiBind]) -> Result<(), RawError> {
         err_or!(
             self,
             taos_stmt_bind_param_batch(self.as_ptr(), bind.as_ptr())
@@ -220,7 +220,7 @@ impl RawStmt {
     }
 
     #[inline]
-    pub fn bind_single_param_batch(&self, bind: &TaosMultiBind, col: i32) -> Result<(), Error> {
+    pub fn bind_single_param_batch(&self, bind: &TaosMultiBind, col: i32) -> Result<(), RawError> {
         self.ok(unsafe {
             taos_stmt_bind_single_param_batch(self.as_ptr(), bind as *const _ as _, col)
         })
@@ -236,7 +236,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tbname_tags() -> Result<(), Error> {
+    fn test_tbname_tags() -> Result<(), RawError> {
         use std::ptr::null;
         use taos_query::common::itypes::ITimestamp;
 
@@ -298,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tbname_tags_json() -> Result<(), Error> {
+    fn test_tbname_tags_json() -> Result<(), RawError> {
         use std::ptr::null;
         use taos_query::common::itypes::ITimestamp;
         let host = null();
