@@ -153,13 +153,23 @@ impl RawBlock {
     }
 
     pub fn parse_from_ptr_v2(
-        _ptr: *const *const c_void,
-        _fields: &[Field],
-        _lengths: &[u32],
-        _rows: usize,
-        _precision: Precision,
+        ptr: *const *const c_void,
+        fields: &[Field],
+        lengths: &[u32],
+        rows: usize,
+        precision: Precision,
     ) -> Self {
-        todo!()
+        let mut bytes = Vec::new();
+        for i in 0..fields.len() {
+            unsafe {
+                let slice = ptr.offset(i as _).read();
+                bytes.extend_from_slice(std::slice::from_raw_parts(
+                    slice as *const u8,
+                    lengths[i] as usize * rows,
+                ));
+            }
+        }
+        Self::parse_from_raw_block_v2(bytes, fields, lengths, rows, precision)
     }
 
     pub fn parse_from_raw_block_v2(
