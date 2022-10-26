@@ -187,7 +187,9 @@ pub mod sync {
             self.query(sql).map(|res| res.affected_rows() as _)
         }
 
-        fn write_meta(&self, _: RawMeta) -> Result<(), Self::Error>;
+        fn write_raw_meta(&self, _: RawMeta) -> Result<(), Self::Error>;
+
+        fn write_raw_block(&self, _: &RawBlock) -> Result<(), Self::Error>;
 
         fn exec_many<T: AsRef<str>, I: IntoIterator<Item = T>>(
             &self,

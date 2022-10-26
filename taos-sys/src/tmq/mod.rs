@@ -514,7 +514,7 @@ mod tests {
                         taos.write_raw_block(&raw)?;
                     }
                 }
-                MessageSet::MetaData(meta, data ) => {
+                MessageSet::MetaData(meta, data) => {
                     // meta
                     let json = meta.to_json();
                     dbg!(json);
@@ -533,7 +533,7 @@ mod tests {
                         println!();
                         taos.write_raw_block(&raw)?;
                     }
-                },
+                }
             }
 
             let _ = consumer.commit(offset);
@@ -770,7 +770,7 @@ mod tests {
             match message {
                 MessageSet::Meta(meta) => {
                     let raw = meta.as_raw_meta()?;
-                    taos.write_meta(raw)?;
+                    taos.write_raw_meta(raw)?;
 
                     let json = meta.as_json_meta()?;
                     match &json {

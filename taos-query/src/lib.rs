@@ -349,7 +349,11 @@ mod tests {
             Ok(1)
         }
 
-        fn write_meta(&self, _: RawMeta) -> Result<(), Self::Error> {
+        fn write_raw_meta(&self, _: RawMeta) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn write_raw_block(&self, _: &RawBlock) -> Result<(), Self::Error> {
             Ok(())
         }
     }

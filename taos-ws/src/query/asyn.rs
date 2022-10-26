@@ -895,7 +895,7 @@ async fn test_client_cloud() -> anyhow::Result<()> {
     let client = WsTaos::from_dsn(dsn).await?;
     let mut rs = client.query("select * from test.meters limit 10").await?;
 
-    let values = rs.to_records();
+    let values = rs.to_records()?;
     for row in values {
         use itertools::Itertools;
         println!(

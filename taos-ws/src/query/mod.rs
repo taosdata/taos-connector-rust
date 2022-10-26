@@ -91,9 +91,12 @@ impl taos_query::Queryable for Taos {
         let sql = sql.as_ref();
         block_in_place_or_global(<Self as AsyncQueryable>::query(self, sql))
     }
-
-    fn write_meta(&self, meta: RawMeta) -> Result<(), Self::Error> {
+    fn write_raw_meta(&self, meta: RawMeta) -> Result<(), Self::Error> {
         block_in_place_or_global(<Self as AsyncQueryable>::write_raw_meta(self, meta))
+    }
+
+    fn write_raw_block(&self, block: &taos_query::RawBlock) -> Result<(), Self::Error> {
+        block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))        
     }
 }
 

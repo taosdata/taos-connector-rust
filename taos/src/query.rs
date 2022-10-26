@@ -273,14 +273,29 @@ impl taos_query::Queryable for Taos {
         }
     }
 
-    fn write_meta(&self, meta: RawMeta) -> Result<(), Self::Error> {
+
+    fn write_raw_meta(&self, meta: RawMeta) -> Result<(), Self::Error> {
         match &self.0 {
             TaosInner::Native(taos) => {
-                <taos_sys::Taos as taos_query::Queryable>::write_meta(taos, meta)
+                <taos_sys::Taos as taos_query::Queryable>::write_raw_meta(taos, meta)
                     .map_err(Into::into)
             }
             TaosInner::Ws(taos) => {
-                <taos_ws::Taos as taos_query::Queryable>::write_meta(taos, meta).map_err(Into::into)
+                <taos_ws::Taos as taos_query::Queryable>::write_raw_meta(taos, meta)
+                    .map_err(Into::into)
+            }
+        }
+    }
+
+    fn write_raw_block(&self, block: &RawBlock) -> Result<(), Self::Error> {
+        match &self.0 {
+            TaosInner::Native(taos) => {
+                <taos_sys::Taos as taos_query::Queryable>::write_raw_block(taos, block)
+                    .map_err(Into::into)
+            }
+            TaosInner::Ws(taos) => {
+                <taos_ws::Taos as taos_query::Queryable>::write_raw_block(taos, block)
+                    .map_err(Into::into)
             }
         }
     }

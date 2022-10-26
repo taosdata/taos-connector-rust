@@ -127,6 +127,16 @@ impl<'a> Iterator for RowView<'a> {
         }
     }
 }
+
+impl<'a> std::fmt::Debug for RowView<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RowView")
+            .field("raw", &self.raw)
+            .field("row", &self.row)
+            .field("col", &self.col)
+            .finish()
+    }
+}
 pub struct RowViewOfValue<'a>(RowView<'a>);
 
 impl<'a> Iterator for RowViewOfValue<'a> {
