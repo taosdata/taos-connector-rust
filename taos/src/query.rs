@@ -273,7 +273,6 @@ impl taos_query::Queryable for Taos {
         }
     }
 
-
     fn write_raw_meta(&self, meta: RawMeta) -> Result<(), Self::Error> {
         match &self.0 {
             TaosInner::Native(taos) => {

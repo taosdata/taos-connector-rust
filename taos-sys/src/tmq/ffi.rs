@@ -1,7 +1,7 @@
 use std::{borrow::Cow, os::raw::*};
 
 use taos_macros::c_cfg;
-use taos_query::common::raw_data_t;
+use taos_query::{common::raw_data_t, prelude::RawError};
 
 use crate::ffi::{TAOS, TAOS_RES};
 
@@ -16,10 +16,10 @@ impl PartialEq<i32> for tmq_conf_res_t {
 }
 
 impl tmq_resp_err_t {
-    pub fn ok_or(self, s: impl Into<Cow<'static, str>>) -> Result<(), taos_error::Error> {
+    pub fn ok_or(self, s: impl Into<Cow<'static, str>>) -> Result<(), RawError> {
         match self {
             Self(0) => Ok(()),
-            _ => Err(taos_error::Error::from_string(s.into())),
+            _ => Err(RawError::from_string(s.into())),
         }
     }
 }
@@ -54,13 +54,13 @@ pub enum tmq_conf_res_t {
 }
 
 impl tmq_conf_res_t {
-    pub fn ok(self, k: &str, v: &str) -> Result<(), taos_error::Error> {
+    pub fn ok(self, k: &str, v: &str) -> Result<(), RawError> {
         match self {
             Self::Ok => Ok(()),
-            Self::Invalid => Err(taos_error::Error::from_string(format!(
+            Self::Invalid => Err(RawError::from_string(format!(
                 "Invalid key value pair ({k}, {v})"
             ))),
-            Self::Unknown => Err(taos_error::Error::from_string(format!("Unknown key {k}"))),
+            Self::Unknown => Err(RawError::from_string(format!("Unknown key {k}"))),
         }
     }
 }

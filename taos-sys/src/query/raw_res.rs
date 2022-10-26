@@ -3,7 +3,7 @@ use std::ffi::CStr;
 use std::os::raw::*;
 use std::task::{Context, Poll, Waker};
 
-use taos_error::{Code, Error};
+use taos_query::prelude::{Code, RawError as Error};
 use taos_query::{
     common::{Field, Precision},
     RawBlock,

@@ -114,9 +114,9 @@ mod tests {
         use crate::sync::*;
         let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
         taos.exec_many([
-            "drop database if exists test_bindable",
-            "create database test_bindable keep 36500",
-            "use test_bindable",
+            "drop database if exists taos_test_bindable",
+            "create database taos_test_bindable keep 36500",
+            "use taos_test_bindable",
             "create table tb1 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
             c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
             c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
@@ -175,7 +175,7 @@ mod tests {
         assert_eq!(row.c12, "ABC");
         assert_eq!(row.c13, "涛思数据");
 
-        taos.exec("drop database test_bindable")?;
+        taos.exec("drop database taos_test_bindable")?;
 
         Ok(())
     }
