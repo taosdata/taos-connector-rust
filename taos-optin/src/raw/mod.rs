@@ -586,7 +586,9 @@ impl ApiEntry {
 impl Drop for ApiEntry {
     fn drop(&mut self) {
         unsafe {
-            (self.taos_cleanup)();
+            if !self.is_v3() {
+                (self.taos_cleanup)();
+            }
         }
     }
 }

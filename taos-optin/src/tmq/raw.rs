@@ -31,14 +31,10 @@ pub(super) mod tmq {
         }
         pub(crate) fn subscribe(&mut self, topics: &Topics) -> Result<(), RawError> {
             unsafe {
-                dbg!(
-                    dbg!(self.tmq.tmq_subscribe)(dbg!(self.as_ptr()), topics.as_ptr()).ok_or(
-                        format!(
-                            "subscribe failed with topics: [{}]",
-                            topics.iter().join(",")
-                        )
-                    )
-                )
+                (self.tmq.tmq_subscribe)(self.as_ptr(), topics.as_ptr()).ok_or(format!(
+                    "subscribe failed with topics: [{}]",
+                    topics.iter().join(",")
+                ))
             }
         }
 
