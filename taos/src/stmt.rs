@@ -1,5 +1,11 @@
+#[cfg(feature = "optin")]
+use super::taos_sys;
+
+use taos_query::prelude::Value;
 use taos_query::stmt::Bindable;
-use taos_sys::{Stmt as NativeStmt, Value};
+
+use taos_query::prelude::ColumnView;
+use taos_sys::Stmt as NativeStmt;
 use taos_ws::Stmt as WsStmt;
 enum StmtInner {
     Native(NativeStmt),
@@ -60,7 +66,7 @@ impl Bindable<super::Taos> for Stmt {
         Ok(self)
     }
 
-    fn bind(&mut self, params: &[taos_sys::ColumnView]) -> Result<&mut Self, Self::Error> {
+    fn bind(&mut self, params: &[ColumnView]) -> Result<&mut Self, Self::Error> {
         match &mut self.0 {
             StmtInner::Native(stmt) => {
                 stmt.bind(params)?;
