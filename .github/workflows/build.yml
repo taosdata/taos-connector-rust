@@ -62,7 +62,7 @@ jobs:
         with:
           repository: 'taosdata/TDengine'
           path: 'TDengine'
-          ref: 'fix/cargo-not-found-in-ga'
+          ref: '3.0'
 
       - name: Prepare development tools
         run: |
