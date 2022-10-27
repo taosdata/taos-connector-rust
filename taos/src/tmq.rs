@@ -1,5 +1,6 @@
-use taos_query::TBuilder;
-use taos_sys::{AsAsyncConsumer, Timeout};
+#[cfg(feature = "optin")]
+use super::taos_sys;
+use taos_query::prelude::{AsAsyncConsumer, RawMeta, TBuilder, Timeout};
 
 enum TmqBuilderInner {
     Native(taos_sys::TmqBuilder),
@@ -131,7 +132,7 @@ impl taos_query::tmq::IsOffset for Offset {
 impl taos_query::tmq::IsAsyncMeta for Meta {
     type Error = super::Error;
 
-    async fn as_raw_meta(&self) -> Result<taos_sys::RawMeta, Self::Error> {
+    async fn as_raw_meta(&self) -> Result<RawMeta, Self::Error> {
         match &self.0 {
             MetaInner::Native(data) => {
                 <taos_sys::tmq::Meta as taos_query::tmq::IsAsyncMeta>::as_raw_meta(data)
@@ -235,9 +236,8 @@ impl AsAsyncConsumer for Consumer {
 
     async fn recv_timeout(
         &self,
-        timeout: taos_sys::Timeout,
-    ) -> Result<Option<(Self::Offset, taos_sys::MessageSet<Self::Meta, Self::Data>)>, Self::Error>
-    {
+        timeout: Timeout,
+    ) -> Result<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>, Self::Error> {
         match &self.0 {
             ConsumerInner::Native(c) => {
                 <taos_sys::Consumer as AsAsyncConsumer>::recv_timeout(c, timeout)
@@ -248,18 +248,16 @@ impl AsAsyncConsumer for Consumer {
                             (
                                 Offset(OffsetInner::Native(offset)),
                                 match msg {
-                                    taos_sys::MessageSet::Meta(meta) => {
+                                    MessageSet::Meta(meta) => {
                                         MessageSet::Meta(Meta(MetaInner::Native(meta)))
                                     }
-                                    taos_sys::MessageSet::Data(data) => {
+                                    MessageSet::Data(data) => {
                                         MessageSet::Data(Data(DataInner::Native(data)))
                                     }
-                                    taos_sys::MessageSet::MetaData(meta, data) => {
-                                        MessageSet::MetaData(
-                                            Meta(MetaInner::Native(meta)),
-                                            Data(DataInner::Native(data)),
-                                        )
-                                    }
+                                    MessageSet::MetaData(meta, data) => MessageSet::MetaData(
+                                        Meta(MetaInner::Native(meta)),
+                                        Data(DataInner::Native(data)),
+                                    ),
                                 },
                             )
                         })
@@ -330,7 +328,7 @@ mod tests {
         dsn.set("client.id", "test");
         dsn.set("auto.offset.reset", "earliest");
 
-        let _tmq = TmqBuilder::from_dsn(dsn)?;
+        let _tmq = TmqBuilder::from_dsn(dsn)?.build()?;
         Ok(())
     }
 
