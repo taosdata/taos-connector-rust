@@ -586,9 +586,11 @@ impl ApiEntry {
 impl Drop for ApiEntry {
     fn drop(&mut self) {
         unsafe {
-            if !self.is_v3() {
+            // if !self.is_v3() {
+                log::trace!("call taos_cleanup");
                 (self.taos_cleanup)();
-            }
+                log::trace!("run taos_cleanup done");
+            // }
         }
     }
 }
@@ -731,12 +733,16 @@ impl RawTaos {
             .table_name()
             .ok_or_else(|| RawError::new(Code::Failed, "raw block should have table name"))?;
         let ptr = block.as_raw_bytes().as_ptr();
-        err_or!((self.c.taos_write_raw_block.unwrap())(
-            self.as_ptr(),
-            nrows as _,
-            ptr as _,
-            name.into_c_str().as_ptr()
-        ))
+        if let Some(f) = self.c.taos_write_raw_block {
+            err_or!(f(
+                self.as_ptr(),
+                nrows as _,
+                ptr as _,
+                name.into_c_str().as_ptr()
+            ))
+        } else {
+            unimplemented!("2.x does not support write raw block")
+        }
     }
 
     #[inline]
@@ -1207,78 +1213,3 @@ impl Default for SharedState {
         }
     }
 }
-
-// // #[derive(WrapperApi)]
-// // struct Api {
-// //     taos_get_client_info: unsafe extern "C" fn() -> *const c_char,
-// //     taos_options: unsafe extern "C" fn(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int,
-// //     taos_connect: unsafe extern "C" fn(
-// //         ip: *const c_char,
-// //         user: *const c_char,
-// //         pass: *const c_char,
-// //         db: *const c_char,
-// //         port: u16,
-// //     ) -> *mut TAOS,
-// //     taos_close: unsafe extern "C" fn(taos: *mut TAOS),
-
-// //     taos_stmt_init: unsafe extern "C" fn(taos: *mut TAOS) -> *mut TAOS_STMT,
-// //     taos_stmt_prepare: unsafe extern "C" fn(
-// //         taos: *mut TAOS,
-// //         sql: *const c_char,
-// //         length: c_ulong,
-// //     ) -> *mut TAOS_STMT,
-// // 		#[dlopen2_allow_null]
-// //     taos_stmt_get_tag_fields:
-// //         unsafe extern "C" fn(stmt: *mut TAOS_STMT, num: *mut c_int, fields: *mut *mut c_void),
-// // 		#[dlopen2_allow_null]
-// //     taos_stmt_get_col_fields:
-// //         unsafe extern "C" fn(stmt: *mut TAOS_STMT, num: *mut c_int, fields: *mut *mut c_void),
-// // }
-
-// #[cfg(test)]
-// mod raw_tests {
-//     use std::ffi::CStr;
-
-//     const LIB_V2: &str = "tests/libs/libtaos.so.2.6.0.16";
-//     const LIB_V3: &str = "tests/libs/libtaos.so.3.0.1.4";
-//     use super::*;
-//     #[test]
-//     fn version() {
-//         // let v2lib = Library::open(LIB_V2).expect("Could not open library");
-//         let v2api = unsafe { C::dlopen(LIB_V2) }.expect("Could not open library or load symbols");
-
-//         assert_eq!(v2api.version(), "2.6.0.16");
-//         // let v3lib = Library::open(LIB_V3).expect("Could not open library");
-//         let v3api = unsafe { C::dlopen(LIB_V3) }.expect("Could not open library or load symbols");
-
-//         assert_eq!(v3api.version(), "3.0.1.4");
-
-//         // dbg!(v2);
-//         // panic!("{:?}", v2);
-//         // dbg!(v2);
-
-//         // let v2api: Container<Api> = unsafe { Container::load("libtaos.so") }
-//         //     .expect("Could not open library or load symbols");
-
-//         // let v2 = unsafe {
-//         //     CStr::from_ptr(v2api.taos_get_client_info())
-//         //         .to_str()
-//         //         .unwrap()
-//         // };
-//         // // dbg!(v2);
-//         // // panic!("{:?}", v2);
-//         // dbg!(v2);
-
-//         // unsafe {
-//         //     let null = std::ptr::null();
-//         //     let taos = v2api.taos_connect(null, null, null, null, 0);
-//         //     let stmt = v2api.taos_stmt_init(taos);
-//         //     let sql = CStr::from_bytes_with_nul(b"insert into ? values(?, ?)").unwrap();
-//         //     v2api.taos_stmt_prepare(stmt, sql.as_ptr() as _, sql.to_bytes().len() as _);
-
-//         //     let (mut num, mut fields) = (0, std::ptr::null_mut());
-//         //     v2api.taos_stmt_get_col_fields(stmt, &mut num as *mut _, &mut fields as _);
-//         // 		dbg!(num, fields);
-//         // }
-//     }
-// }
