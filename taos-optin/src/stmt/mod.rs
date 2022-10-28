@@ -92,6 +92,8 @@ pub(crate) struct RawStmt {
     tbname: Option<CString>,
 }
 
+unsafe impl Sync for RawStmt {}
+unsafe impl Send for RawStmt {}
 impl Drop for RawStmt {
     fn drop(&mut self) {
         let _ = self.close();
@@ -149,6 +151,7 @@ impl RawStmt {
     #[inline]
     pub fn prepare<'c>(&mut self, sql: impl IntoCStr<'c>) -> Result<(), Error> {
         let sql = sql.into_c_str();
+        log::info!("prepare stmt with sql: {sql:?}");
         self.ok(unsafe {
             (self.api.taos_stmt_prepare)(self.as_ptr(), sql.as_ptr(), sql.to_bytes().len() as _)
         })
@@ -215,7 +218,7 @@ impl RawStmt {
 
     #[inline]
     pub fn affected_rows(&self) -> i32 {
-        dbg!(unsafe { (self.api.taos_stmt_affected_rows)(self.as_ptr()) })
+        unsafe { (self.api.taos_stmt_affected_rows)(self.as_ptr()) }
     }
 
     #[inline]

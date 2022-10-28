@@ -630,6 +630,10 @@ impl RawBlock {
         self.columns.iter()
     }
 
+    pub fn column_views(&self) -> &[ColumnView] {
+        &self.columns
+    }
+
     /// Data view in rows.
     #[inline]
     pub fn rows<'a>(&self) -> RowsIter<'a> {
