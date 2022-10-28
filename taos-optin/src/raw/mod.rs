@@ -209,6 +209,8 @@ impl TmqConfApi {
             Err(RawError::from_string(
                 String::from_utf8_lossy(&err).to_string(),
             ))
+        } else if tmq.is_null() {
+            Err(RawError::from_string("[optin] create new consumer failed"))
         } else {
             Ok(tmq)
         }
@@ -587,9 +589,9 @@ impl Drop for ApiEntry {
     fn drop(&mut self) {
         unsafe {
             // if !self.is_v3() {
-                log::trace!("call taos_cleanup");
-                (self.taos_cleanup)();
-                log::trace!("run taos_cleanup done");
+            log::trace!("call taos_cleanup");
+            (self.taos_cleanup)();
+            log::trace!("run taos_cleanup done");
             // }
         }
     }

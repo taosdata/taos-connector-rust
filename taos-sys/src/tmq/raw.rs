@@ -283,6 +283,8 @@ pub(super) mod conf {
                     Err(RawError::from_string(
                         String::from_utf8_lossy(&err).to_string(),
                     ))
+                } else if tmq.is_null() {
+                    Err(RawError::from_string("[sys] create new consumer failed"))
                 } else {
                     Ok(RawTmq(tmq))
                 }
