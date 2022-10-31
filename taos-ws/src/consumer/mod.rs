@@ -1,3 +1,5 @@
+//! TMQ consumer.
+//!
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
@@ -25,6 +27,7 @@ use messages::*;
 
 use std::fmt::Debug;
 use std::result::Result as StdResult;
+use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
@@ -39,7 +42,8 @@ struct WsTmqSender {
     req_id: Arc<AtomicU64>,
     sender: WsSender,
     queries: WsTmqAgent,
-    timeout: Duration,
+    #[allow(dead_code)]
+    timeout: Timeout,
 }
 
 impl WsTmqSender {
@@ -48,10 +52,10 @@ impl WsTmqSender {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
     async fn send_recv(&self, msg: TmqSend) -> Result<TmqRecvData> {
-        self.send_recv_timeout(msg, self.timeout).await
+        self.send_recv_timeout(msg, Duration::MAX).await
     }
     async fn send_recv_timeout(&self, msg: TmqSend, timeout: Duration) -> Result<TmqRecvData> {
-        let send_timeout = Duration::from_millis(500);
+        let send_timeout = Duration::from_millis(5000);
         let req_id = msg.req_id();
         let (tx, rx) = oneshot::channel();
 
@@ -77,6 +81,7 @@ impl WsTmqSender {
 pub struct TmqBuilder {
     info: TaosBuilder,
     conf: TmqInit,
+    timeout: Timeout,
 }
 
 impl TBuilder for TmqBuilder {
@@ -256,26 +261,14 @@ impl WsMessageSet {
 }
 
 impl Consumer {
-    pub(crate) async fn poll_timeout(
-        &self,
-        timeout: Duration,
-    ) -> Result<Option<(Offset, MessageSet<Meta, Data>)>> {
+    async fn init_poll(&self, timeout: Duration) -> Result<()> {
         let req_id = self.sender.req_id();
         let action = TmqSend::Poll {
             req_id,
-            blocking_time: timeout.as_millis() as _,
+            blocking_time: 0,
         };
 
-        let data = self.sender.send_recv_timeout(action, timeout).await;
-        if data.is_err() {
-            let err = data.unwrap_err();
-            match err {
-                Error::QueryTimeout(_) => return Ok(None),
-                _ => return Err(err),
-            }
-        }
-        let data = data.unwrap();
-
+        let data = self.sender.send_recv_timeout(action, timeout).await?;
         match data {
             TmqRecvData::Poll(TmqPoll {
                 message_id,
@@ -285,28 +278,73 @@ impl Consumer {
                 vgroup_id,
                 message_type,
             }) => {
-                if have_message {
-                    let offset = Offset {
-                        message_id,
-                        database,
-                        topic,
-                        vgroup_id,
-                    };
-                    let message = WsMessageBase {
-                        sender: self.sender.clone(),
-                        message_id,
-                    };
-                    match message_type {
-                        MessageType::Meta => Ok(Some((offset, MessageSet::Meta(Meta(message))))),
-                        MessageType::Data => Ok(Some((offset, MessageSet::Data(Data(message))))),
-                        _ => unreachable!(),
-                    }
-                } else {
-                    Ok(None)
-                }
+                assert!(!have_message);
             }
             _ => unreachable!(),
         }
+        Ok(())
+    }
+    async fn poll_wait(&self) -> Result<(Offset, MessageSet<Meta, Data>)> {
+        let elapsed = tokio::time::Instant::now();
+        loop {
+            let req_id = self.sender.req_id();
+            let action = TmqSend::Poll {
+                req_id,
+                blocking_time: 0,
+            };
+
+            let data = self.sender.send_recv(action).await?;
+
+            match data {
+                TmqRecvData::Poll(TmqPoll {
+                    message_id,
+                    database,
+                    have_message,
+                    topic,
+                    vgroup_id,
+                    message_type,
+                }) => {
+                    if have_message {
+                        let dur = elapsed.elapsed();
+                        let offset = Offset {
+                            message_id,
+                            database,
+                            topic,
+                            vgroup_id,
+                        };
+                        let message = WsMessageBase {
+                            sender: self.sender.clone(),
+                            message_id,
+                        };
+                        log::debug!("Got message in {}ms", dur.as_millis());
+                        break match message_type {
+                            MessageType::Meta => Ok((offset, MessageSet::Meta(Meta(message)))),
+                            MessageType::Data => Ok((offset, MessageSet::Data(Data(message)))),
+                            _ => unreachable!(),
+                        };
+                    } else {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        continue;
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+    pub(crate) async fn poll_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<Option<(Offset, MessageSet<Meta, Data>)>> {
+        let sleep = tokio::time::sleep(timeout);
+        tokio::pin!(sleep);
+        return tokio::select! {
+            _ = &mut sleep, if !sleep.is_elapsed() => {
+               Ok(None)
+            }
+            message = self.poll_wait() => {
+                Ok(Some(message?))
+            }
+        };
     }
 }
 
@@ -332,6 +370,8 @@ impl AsAsyncConsumer for Consumer {
             conn: self.conn.clone(),
         };
         self.sender.send_recv(action).await?;
+
+        self.init_poll(Duration::from_secs(5)).await?;
         Ok(())
     }
 
@@ -346,59 +386,9 @@ impl AsAsyncConsumer for Consumer {
         Self::Error,
     > {
         match timeout {
-            Timeout::Never => loop {
-                if let Some(msg) = self.poll_timeout(Duration::MAX).await? {
-                    return Ok(Some(msg));
-                }
-            },
-            Timeout::None => self.poll_timeout(Duration::MAX).await,
+            Timeout::Never | Timeout::None => self.poll_timeout(Duration::MAX).await,
             Timeout::Duration(timeout) => self.poll_timeout(timeout).await,
         }
-
-        // let data = self
-        //     .sender
-        //     .send_recv_timeout(action, timeout.as_duration())
-        //     .await;
-        // if data.is_err() {
-        //     let err = data.unwrap_err();
-        //     match err {
-        //         Error::QueryTimeout(_) => return Ok(None),
-        //         _ => return Err(err),
-        //     }
-        // }
-        // let data = data.unwrap();
-
-        // match data {
-        //     TmqRecvData::Poll(TmqPoll {
-        //         message_id,
-        //         database,
-        //         have_message,
-        //         topic,
-        //         vgroup_id,
-        //         message_type,
-        //     }) => {
-        //         if have_message {
-        //             let offset = Offset {
-        //                 message_id,
-        //                 database,
-        //                 topic,
-        //                 vgroup_id,
-        //             };
-        //             let message = WsMessageBase {
-        //                 sender: self.sender.clone(),
-        //                 message_id,
-        //             };
-        //             match message_type {
-        //                 MessageType::Meta => Ok(Some((offset, MessageSet::Meta(Meta(message))))),
-        //                 MessageType::Data => Ok(Some((offset, MessageSet::Data(Data(message))))),
-        //                 _ => unreachable!(),
-        //             }
-        //         } else {
-        //             Ok(None)
-        //         }
-        //     }
-        //     _ => unreachable!(),
-        // }
     }
 
     async fn commit(&self, offset: Self::Offset) -> StdResult<(), Self::Error> {
@@ -413,7 +403,7 @@ impl AsAsyncConsumer for Consumer {
     }
 
     fn default_timeout(&self) -> Timeout {
-        Timeout::from_secs(5)
+        self.timeout
     }
 }
 
@@ -456,14 +446,22 @@ impl TmqBuilder {
             .ok_or_else(|| DsnError::RequireParam("group.id".to_string()))?;
         let client_id = dsn.params.get("client.id").map(ToString::to_string);
         let offset_reset = dsn.params.get("auto.offset.reset").map(ToString::to_string);
-
+        let timeout = if let Some(timeout) = dsn.get("timeout") {
+            Timeout::from_str(&timeout).map_err(RawError::from_any)?
+        } else {
+            Timeout::Duration(Duration::from_secs(5))
+        };
         let conf = TmqInit {
             group_id,
             client_id,
             offset_reset,
         };
 
-        Ok(Self { info, conf })
+        Ok(Self {
+            info,
+            conf,
+            timeout,
+        })
     }
 
     async fn build_consumer(&self) -> Result<Consumer> {
@@ -640,18 +638,21 @@ impl TmqBuilder {
             }
             log::debug!("end consumer loop");
         });
-        Ok(Consumer {
+        let consumer = Consumer {
             conn: self.info.to_conn_request(),
             tmq_conf: self.conf.clone(),
             sender: WsTmqSender {
                 req_id: Arc::new(AtomicU64::new(1)),
                 queries,
                 sender: ws,
-                timeout: Duration::from_secs(5),
+                timeout: Timeout::Duration(Duration::MAX),
             },
             // fetches,
             close_signal: tx,
-        })
+            timeout: self.timeout,
+        };
+
+        Ok(consumer)
     }
 }
 
@@ -660,6 +661,7 @@ pub struct Consumer {
     tmq_conf: TmqInit,
     sender: WsTmqSender,
     close_signal: watch::Sender<bool>,
+    timeout: Timeout,
 }
 
 impl Drop for Consumer {
@@ -822,12 +824,12 @@ mod tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms")?;
+        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=500ms")?;
         let mut consumer = builder.build_consumer().await?;
         consumer.subscribe(["ws_tmq_meta"]).await?;
 
         {
-            let mut stream = consumer.stream_with_timeout(Timeout::from_secs(5));
+            let mut stream = consumer.stream();
 
             while let Some((offset, message)) = stream.try_next().await? {
                 // Offset contains information for topic name, database name and vgroup id,
