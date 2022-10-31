@@ -6,6 +6,7 @@ edition = "2021"
 keywords = ["timeseries", "database", "tdengine", "taosdata", "connection"]
 license = "MIT OR Apache-2.0"
 description = "Driver for TDengine - a timeseries database and analysis platform"
+readme = "../README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [package.metadata.docs.rs]
