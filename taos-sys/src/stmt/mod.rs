@@ -16,6 +16,8 @@ pub struct Stmt {
     raw: RawStmt,
 }
 
+unsafe impl Send for Stmt {}
+unsafe impl Sync for Stmt {}
 impl Bindable<super::Taos> for Stmt {
     type Error = super::Error;
 
