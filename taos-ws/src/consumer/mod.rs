@@ -261,29 +261,29 @@ impl WsMessageSet {
 }
 
 impl Consumer {
-    async fn init_poll(&self, timeout: Duration) -> Result<()> {
-        let req_id = self.sender.req_id();
-        let action = TmqSend::Poll {
-            req_id,
-            blocking_time: 0,
-        };
+    // async fn init_poll(&self, timeout: Duration) -> Result<()> {
+    //     let req_id = self.sender.req_id();
+    //     let action = TmqSend::Poll {
+    //         req_id,
+    //         blocking_time: 0,
+    //     };
 
-        let data = self.sender.send_recv_timeout(action, timeout).await?;
-        match data {
-            TmqRecvData::Poll(TmqPoll {
-                message_id,
-                database,
-                have_message,
-                topic,
-                vgroup_id,
-                message_type,
-            }) => {
-                assert!(!have_message);
-            }
-            _ => unreachable!(),
-        }
-        Ok(())
-    }
+    //     let data = self.sender.send_recv_timeout(action, timeout).await?;
+    //     match data {
+    //         TmqRecvData::Poll(TmqPoll {
+    //             message_id,
+    //             database,
+    //             have_message,
+    //             topic,
+    //             vgroup_id,
+    //             message_type,
+    //         }) => {
+    //             assert!(!have_message);
+    //         }
+    //         _ => unreachable!(),
+    //     }
+    //     Ok(())
+    // }
     async fn poll_wait(&self) -> Result<(Offset, MessageSet<Meta, Data>)> {
         let elapsed = tokio::time::Instant::now();
         loop {
@@ -371,7 +371,6 @@ impl AsAsyncConsumer for Consumer {
         };
         self.sender.send_recv(action).await?;
 
-        self.init_poll(Duration::from_secs(5)).await?;
         Ok(())
     }
 
