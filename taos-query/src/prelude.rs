@@ -21,6 +21,7 @@ pub use crate::tmq::{AsAsyncConsumer, IsAsyncData, IsAsyncMeta};
 pub use _priv::*;
 pub use futures::stream::{Stream, StreamExt, TryStreamExt};
 pub use r#async::*;
+pub use tokio;
 
 pub mod sync {
     pub use super::_priv::*;
