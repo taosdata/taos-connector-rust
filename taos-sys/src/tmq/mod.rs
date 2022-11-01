@@ -11,6 +11,7 @@ pub(crate) use ffi::*;
 
 use taos_query::{
     common::{raw_data_t, Precision, RawMeta},
+    prelude::tokio,
     tmq::{
         AsAsyncConsumer, AsConsumer, AsyncOnSync, IsAsyncData, IsMeta, IsOffset, MessageSet,
         Timeout, VGroupId,
@@ -393,7 +394,6 @@ impl AsConsumer for Consumer {
 }
 
 // impl AsyncOnSync for Consumer {}
-
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
     type Error = RawError;
@@ -422,19 +422,68 @@ impl AsAsyncConsumer for Consumer {
         )>,
         Self::Error,
     > {
-        Ok(self.tmq.poll_timeout(timeout.as_raw_timeout()).map(|raw| {
-            (
-                Offset(raw),
-                match raw.tmq_message_type() {
-                    tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                    tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                    tmq_res_t::TMQ_RES_TABLE_META => {
-                        taos_query::tmq::MessageSet::Meta(Meta::new(raw))
+        match timeout {
+            Timeout::Never | Timeout::None => {
+                let timeout = Duration::MAX;
+                let sleep = tokio::time::sleep(timeout);
+                tokio::pin!(sleep);
+                tokio::select! {
+                    _ = &mut sleep, if !sleep.is_elapsed() => {
+                       Ok(None)
                     }
-                    tmq_res_t::TMQ_RES_METADATA => todo!(),
-                },
-            )
-        }))
+                    raw = self.tmq.poll_async() => {
+                        let message =    (
+                            Offset(raw),
+                            match raw.tmq_message_type() {
+                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
+                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
+                                tmq_res_t::TMQ_RES_TABLE_META => {
+                                    taos_query::tmq::MessageSet::Meta(Meta::new(raw))
+                                }
+                                tmq_res_t::TMQ_RES_METADATA => todo!(),
+                            },
+                        );
+                        Ok(Some(message))
+                    }
+                }
+            }
+            Timeout::Duration(timeout) => {
+                let sleep = tokio::time::sleep(timeout);
+                tokio::pin!(sleep);
+                tokio::select! {
+                    _ = &mut sleep, if !sleep.is_elapsed() => {
+                       Ok(None)
+                    }
+                    raw = self.tmq.poll_async() => {
+                        let message =    (
+                            Offset(raw),
+                            match raw.tmq_message_type() {
+                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
+                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
+                                tmq_res_t::TMQ_RES_TABLE_META => {
+                                    taos_query::tmq::MessageSet::Meta(Meta::new(raw))
+                                }
+                                tmq_res_t::TMQ_RES_METADATA => todo!(),
+                            },
+                        );
+                        Ok(Some(message))
+                    }
+                }
+            }
+        }
+        // Ok(self.tmq.poll_timeout(timeout.as_raw_timeout()).map(|raw| {
+        //     (
+        //         Offset(raw),
+        //         match raw.tmq_message_type() {
+        //             tmq_res_t::TMQ_RES_INVALID => unreachable!(),
+        //             tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
+        //             tmq_res_t::TMQ_RES_TABLE_META => {
+        //                 taos_query::tmq::MessageSet::Meta(Meta::new(raw))
+        //             }
+        //             tmq_res_t::TMQ_RES_METADATA => todo!(),
+        //         },
+        //     )
+        // }))
     }
 
     async fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {

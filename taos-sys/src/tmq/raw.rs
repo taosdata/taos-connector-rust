@@ -3,9 +3,10 @@ pub(super) use list::Topics;
 pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
-    use std::os::raw::c_void;
+    use std::{os::raw::c_void, time::Duration};
 
     use itertools::Itertools;
+    use taos_query::prelude::tokio;
 
     use crate::{RawError, RawRes};
 
@@ -109,6 +110,19 @@ pub(super) mod tmq {
                 None
             } else {
                 Some(RawRes(res))
+            }
+        }
+
+        pub async fn poll_async(&self) -> RawRes {
+            let elapsed = std::time::Instant::now();
+            loop {
+                // poll with 50ms timeout.
+                if let Some(res) = self.poll_timeout(500) {
+                    log::debug!("received tmq message in {:?}", elapsed.elapsed());
+                    break res;
+                } else  {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
             }
         }
 
