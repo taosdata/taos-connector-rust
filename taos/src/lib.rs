@@ -34,7 +34,9 @@ pub use taos_sys::*;
 compile_error!("Either feature \"ws\" or \"native\"|"optin" or both must be enabled for this crate.");
 
 #[cfg(all(feature = "optin", feature = "native"))]
-compile_error!("Feature \"optin\" is conflicted with \"native\", choose only one feature for native");
+compile_error!(
+    "Feature \"optin\" is conflicted with \"native\", choose only one feature for native"
+);
 
 #[cfg(feature = "optin")]
 pub use taos_optin as taos_sys;
