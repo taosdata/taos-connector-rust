@@ -120,7 +120,7 @@ pub(super) mod tmq {
                 if let Some(res) = self.poll_timeout(500) {
                     log::debug!("received tmq message in {:?}", elapsed.elapsed());
                     break res;
-                } else  {
+                } else {
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
             }

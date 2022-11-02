@@ -21,6 +21,7 @@ use tokio::time;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
+use crate::query::asyn::WS_ERROR_NO;
 use crate::query::infra::{ToMessage, WsConnReq};
 use crate::TaosBuilder;
 use messages::*;
@@ -30,7 +31,7 @@ use std::result::Result as StdResult;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod messages;
 
@@ -466,7 +467,7 @@ impl TmqBuilder {
     async fn build_consumer(&self) -> Result<Consumer> {
         let url = self.info.to_tmq_url();
         // let (ws, _) = futures::executor::block_on(connect_async(url))?;
-        let (ws, _) = connect_async(url).await?;
+        let (ws, _) = connect_async(&url).await?;
         let (mut sender, mut reader) = ws.split();
 
         use std::collections::hash_map::RandomState;
@@ -476,6 +477,7 @@ impl TmqBuilder {
         ));
 
         let queries_sender = queries.clone();
+        let msg_handler = queries.clone();
 
         let (ws, mut msg_recv) = tokio::sync::mpsc::channel::<Message>(100);
         let ws2 = ws.clone();
@@ -484,22 +486,50 @@ impl TmqBuilder {
         let (tx, mut rx) = watch::channel(false);
         let mut close_listener = rx.clone();
 
+        let sending_url = url.clone();
+        static PING_INTERVAL: u64 = 30;
+        const PING: &'static [u8] = b"TAOSX";
+
         tokio::spawn(async move {
-            let mut interval = time::interval(Duration::from_secs(1));
+            let mut interval = time::interval(Duration::from_secs(PING_INTERVAL));
 
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
                         log::trace!("Check websocket message sender alive");
+                        if let Err(err) = sender.send(Message::Ping(PING.to_vec())).await {
+                            log::error!("sending ping message to {sending_url} error: {err:?}");
+                            let mut keys = Vec::new();
+                            msg_handler.for_each_async(|k, _| {
+                                keys.push(*k);
+                            }).await;
+                            for k in keys {
+                                if let Some((_, sender)) = msg_handler.remove(&k) {
+                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
+                                }
+                            }
+                        }
                     }
                     Some(msg) = msg_recv.recv() => {
                         if msg.is_close() {
-                            sender.send(msg).await.unwrap();
-                            sender.close().await.unwrap();
+                            let _ = sender.send(msg).await;
+                            let _ = sender.close().await;
                             break;
                         }
-                        let _ = sender.send(msg).await;
-                        log::trace!("send done");
+                        log::trace!("send message {msg:?}");
+                        if let Err(err) = sender.send(msg).await {
+                            log::error!("sending message to {sending_url} error: {err:?}");
+                            let mut keys = Vec::new();
+                            msg_handler.for_each_async(|k, _| {
+                                keys.push(*k);
+                            }).await;
+                            for k in keys {
+                                if let Some((_, sender)) = msg_handler.remove(&k) {
+                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
+                                }
+                            }
+                        }
+                        log::trace!("send message done");
                     }
                     _ = rx.changed() => {
                         let _= sender.send(Message::Close(None)).await;
@@ -512,7 +542,8 @@ impl TmqBuilder {
         });
 
         tokio::spawn(async move {
-            loop {
+            let instant = Instant::now();
+            'ws: loop {
                 tokio::select! {
                     Some(message) = reader.next() => {
                         match message {
@@ -606,36 +637,64 @@ impl TmqBuilder {
 
 
                                 }
-                                Message::Close(_) => {
+                                Message::Close(close) => {
                                     log::warn!("websocket connection is closed (unexpected?)");
-                                    break;
+
+                                    let mut keys = Vec::new();
+                                    queries_sender.for_each_async(|k, _| {
+                                        keys.push(*k);
+                                    }).await;
+                                    let err = if let Some(close) = close {
+                                        close.reason.to_string()
+                                    } else {
+                                        "Close without reason".to_string()
+                                    };
+                                    for k in keys {
+                                        if let Some((_, sender)) = queries_sender.remove(&k) {
+                                            let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.clone())));
+                                        }
+                                    }
+                                    break 'ws;
                                 }
                                 Message::Ping(bytes) => {
                                     ws2.send(Message::Pong(bytes)).await.unwrap();
                                 }
-                                Message::Pong(_) => {
-                                    // do nothing
-                                    log::warn!("received (unexpected) pong message, do nothing");
+                                Message::Pong(bytes) => {
+                                    if bytes == PING {
+                                        log::debug!("ping/pong handshake success");
+                                    } else {
+                                        // do nothing
+                                        log::warn!("received (unexpected) pong message, do nothing");
+                                    }
                                 }
                                 Message::Frame(frame) => {
-                                    // do nothing
+                                    // do no`thing
                                     log::warn!("received (unexpected) frame message, do nothing");
                                     log::debug!("* frame data: {frame:?}");
                                 }
                             },
                             Err(err) => {
-                                log::error!("receiving cause error: {err:?}");
-                                break;
+                                log::error!("reading message from {url} error: {err:?}");
+                                let mut keys = Vec::new();
+                                queries_sender.for_each_async(|k, _| {
+                                    keys.push(*k);
+                                }).await;
+                                for k in keys {
+                                    if let Some((_, sender)) = queries_sender.remove(&k) {
+                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
+                                    }
+                                }
+                                break 'ws;
                             }
                         }
                     }
                     _ = close_listener.changed() => {
                         log::debug!("close reader task");
-                        break
+                        break 'ws;
                     }
                 }
             }
-            log::debug!("end consumer loop");
+            log::debug!("Consuming done in {:?}", instant.elapsed());
         });
         let consumer = Consumer {
             conn: self.info.to_conn_request(),
