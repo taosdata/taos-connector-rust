@@ -108,7 +108,6 @@ pub struct WsFetchArgs {
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct WsQueryResp {
-    #[serde(default)]
     pub id: ResId,
     pub is_update: bool,
     pub affected_rows: usize,
@@ -117,22 +116,18 @@ pub struct WsQueryResp {
     pub fields_types: Option<Vec<Ty>>,
     pub fields_lengths: Option<Vec<u32>>,
     pub precision: Precision,
-    #[serde(default)]
     #[serde_as(as = "serde_with::DurationNanoSeconds")]
     pub timing: Duration,
 }
 
 #[serde_as]
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
+#[serde(default)]
 pub struct WsFetchResp {
     pub id: ResId,
-    #[serde(default)]
     pub completed: bool,
-    #[serde(default)]
     pub lengths: Option<Vec<u32>>,
-    #[serde(default)]
     pub rows: usize,
-    #[serde(default)]
     #[serde_as(as = "serde_with::DurationNanoSeconds")]
     pub timing: Duration,
 }
