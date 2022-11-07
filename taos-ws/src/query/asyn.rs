@@ -72,24 +72,15 @@ impl WsQuerySender {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
     async fn send_recv(&self, msg: WsSend) -> Result<WsRecvData> {
-        self.send_recv_timeout(msg, self.timeout).await
-    }
-    async fn send_only(&self, msg: WsSend) -> Result<()> {
-        let send_timeout = Duration::from_millis(1000);
-        self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
-        Ok(())
-    }
-
-    async fn send_recv_timeout(&self, msg: WsSend, timeout: Duration) -> Result<WsRecvData> {
         let send_timeout = Duration::from_millis(1000);
         let req_id = msg.req_id();
-        let (tx, rx) = query_channel();
+        let (tx, mut rx) = query_channel();
 
         self.queries.insert(req_id, tx).unwrap();
 
         match msg {
             WsSend::FetchBlock(args) => {
-                log::debug!("prepare req_id: {req_id} with message: {msg:?}");
+                log::debug!("[req id: {req_id}] prepare message {msg:?}");
                 if self.results.contains(&args.id) {
                     Err(RawError::from_any(format!(
                         "there's a result with id {}",
@@ -107,17 +98,18 @@ impl WsQuerySender {
                     .await?;
             }
             _ => {
-                log::debug!("prepare req_id: {req_id} with message: {msg:?}");
+                log::debug!("[req id: {req_id}] prepare  message: {msg:?}");
                 self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
             }
         }
-        Ok(block_in_place_or_global(tokio::time::timeout(timeout, rx))
-            .map_err(|err| {
-                RawError::from_any(format!(
-                    "Timeout when retrieving message: {err} ({timeout:?})"
-                ))
-            })?
-            .unwrap()?)
+        // handle the error
+        log::debug!("[req id: {req_id}] message sent, wait for receiving");
+        Ok(rx.await.unwrap()?)
+    }
+    async fn send_only(&self, msg: WsSend) -> Result<()> {
+        let send_timeout = Duration::from_millis(1000);
+        self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
+        Ok(())
     }
 }
 
