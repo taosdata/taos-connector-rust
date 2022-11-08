@@ -7,6 +7,8 @@ use taos_query::common::ColumnView;
 use taos_query::prelude::{InlinableWrite, RawError};
 use taos_query::stmt::Bindable;
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
+
+use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
 
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
@@ -536,7 +538,9 @@ mod tests {
 
     use crate::{stmt::Stmt, TaosBuilder};
 
-    // !Websocket tests should always use `multi_thread`
+    use taos_query::prelude::tokio;
+
+    // Websocket tests should always use `multi_thread`
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_client() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;

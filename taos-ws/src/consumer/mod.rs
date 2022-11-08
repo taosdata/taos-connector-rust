@@ -15,6 +15,8 @@ use taos_query::tmq::{
 use taos_query::util::InlinableRead;
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
+
+use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
 
 use tokio::time;
@@ -798,6 +800,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{TaosBuilder, TmqBuilder};
+    use taos_query::prelude::tokio;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {

@@ -1,4 +1,5 @@
 use derive_more::Deref;
+use std::future::Future;
 use futures::stream::SplitStream;
 use futures::{FutureExt, SinkExt, StreamExt};
 use scc::HashMap;
@@ -10,6 +11,8 @@ use taos_query::{
 };
 use thiserror::Error;
 
+
+use taos_query::prelude::tokio;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 
@@ -24,10 +27,13 @@ use super::{infra::*, TaosBuilder};
 
 use std::fmt::Debug;
 use std::io::Write;
+use std::mem::transmute;
+use std::pin::Pin;
 // use std::io::Write;
 use std::result::Result as StdResult;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::task::Poll;
 use std::time::Duration;
 
 // type WsFetchResult = std::result::Result<WsFetchData, RawError>;
@@ -128,6 +134,7 @@ pub struct ResultSet {
     precision: Precision,
     summary: (usize, usize),
     timing: Duration,
+    block_future: Option<Pin<Box<dyn Future<Output = Result<Option<RawBlock>>> + Send>>>,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -648,6 +655,7 @@ impl WsTaos {
                 summary: (0, 0),
                 sender: self.sender.clone(),
                 timing: resp.timing,
+                block_future: None,
             })
         } else {
             Ok(ResultSet {
@@ -662,6 +670,7 @@ impl WsTaos {
                 summary: (0, 0),
                 sender: self.sender.clone(),
                 timing: resp.timing,
+                block_future: None,
             })
         }
     }
@@ -679,7 +688,7 @@ impl WsTaos {
     }
 
     pub fn version(&self) -> &str {
-        &self.sender.version
+        &self.sender.version.0
     }
 }
 
@@ -774,7 +783,30 @@ impl AsyncFetchable for ResultSet {
         self: &mut Self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<StdResult<Option<RawBlock>, Self::Error>> {
-        self.fetch().boxed().poll_unpin(cx)
+        if let Some(mut f) = self.block_future.take() {
+            // let mut f = self.block_future.take().unwrap();
+            let res = f.poll_unpin(cx);
+            match res {
+                std::task::Poll::Ready(v) => Poll::Ready(v),
+                std::task::Poll::Pending => {
+                    self.block_future = Some(f);
+                    Poll::Pending
+                }
+            }
+        } else {
+            let mut f = self.fetch().boxed();
+            let res = f.poll_unpin(cx);
+            match res {
+                std::task::Poll::Ready(v) => Poll::Ready(v),
+                std::task::Poll::Pending => {
+                    self.block_future = Some(unsafe { transmute(f) });
+                    Poll::Pending
+                }
+            }
+        }
+        // let future = self.fetch().boxed();
+        // // .poll_unpin(cx)
+        // todo!()
     }
 }
 
@@ -907,9 +939,12 @@ async fn ws_show_databases() -> anyhow::Result<()> {
     let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
     let client = WsTaos::from_dsn(dsn).await?;
     let mut rs = client.query("show databases").await?;
-    let values = rs.to_records()?;
 
-    dbg!(values);
+    let mut blocks = rs.blocks();
+    while let Some(block) = blocks.try_next().await? {
+        let values = block.to_values();
+        dbg!(values);
+    }
     Ok(())
 }
 
