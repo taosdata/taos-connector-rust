@@ -119,19 +119,28 @@ impl Dsn {
             if addr.is_empty() {
                 vec![]
             } else {
-                addr.split(',')
-                    .filter_map(|s| {
-                        if s.is_empty() {
-                            None
-                        } else if let Some((host, port)) = s.split_once(':') {
-                            Some(Address::new(host, port.parse().unwrap()))
-                        } else if s.contains('%') {
-                            Some(Address::from_path(urlencoding::decode(s).unwrap()))
+                let mut addrs = Vec::new();
+
+                for s in addr.split(',') {
+                    if s.is_empty() {
+                        continue;
+                    }
+                    if let Some((host, port)) = s.split_once(':') {
+                        let port = if port.is_empty() {
+                            0
                         } else {
-                            Some(Address::from_host(s))
-                        }
-                    })
-                    .collect()
+                            port.parse::<u16>().map_err(|err| {
+                                DsnError::InvalidAddresses(s.to_string(), err.to_string())
+                            })?
+                        };
+                        addrs.push(Address::new(host, port));
+                    } else if s.contains('%') {
+                        addrs.push(Address::from_path(urlencoding::decode(s).unwrap()));
+                    } else {
+                        addrs.push(Address::from_host(s));
+                    }
+                }
+                addrs
             }
         } else {
             vec![]
@@ -266,8 +275,8 @@ pub enum DsnError {
     InvalidProtocol(String),
     #[error("invalid connection {0}")]
     InvalidConnection(String),
-    #[error("invalid addresses {0:?}")]
-    InvalidAddresses(Vec<Address>),
+    #[error("invalid addresses: {0}, error: {1}")]
+    InvalidAddresses(String, String),
     #[error("requires database: {0}")]
     RequireDatabase(String),
     #[error("requires parameter: {0}")]

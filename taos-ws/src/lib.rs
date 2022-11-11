@@ -10,6 +10,8 @@ use taos_query::{DsnError, IntoDsn, TBuilder};
 mod stmt;
 pub use stmt::Stmt;
 
+use taos_query::prelude::tokio;
+
 // pub mod tmq;
 pub mod consumer;
 pub use consumer::{Consumer, TmqBuilder};
