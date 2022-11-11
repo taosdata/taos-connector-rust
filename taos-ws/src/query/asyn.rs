@@ -1,16 +1,15 @@
 use derive_more::Deref;
-use std::future::Future;
 use futures::stream::SplitStream;
 use futures::{FutureExt, SinkExt, StreamExt};
 use scc::HashMap;
+use std::future::Future;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta};
 use taos_query::prelude::{Code, RawError};
 use taos_query::util::InlinableWrite;
 use taos_query::{
-    block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
+    block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, Dsn, DsnError, IntoDsn,
 };
 use thiserror::Error;
-
 
 use taos_query::prelude::tokio;
 use tokio::net::TcpStream;
@@ -34,7 +33,7 @@ use std::result::Result as StdResult;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::Poll;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // type WsFetchResult = std::result::Result<WsFetchData, RawError>;
 // type FetchSender = std::sync::mpsc::SyncSender<WsFetchResult>;
@@ -135,6 +134,7 @@ pub struct ResultSet {
     summary: (usize, usize),
     timing: Duration,
     block_future: Option<Pin<Box<dyn Future<Output = Result<Option<RawBlock>>> + Send>>>,
+    closer: Option<oneshot::Sender<()>>,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -157,9 +157,16 @@ impl Drop for ResultSet {
         if let Some((_, req_id)) = self.sender.results.remove(&self.args.id) {
             self.sender.queries.remove(&req_id);
         }
-        block_in_place_or_global(async move {
-            let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
-        });
+
+        self.closer.take().unwrap().send(()).unwrap();
+        // let _ = self
+        //     .sender
+        //     .blocking_send_only(WsSend::FreeResult(self.args));
+
+        // tokio::spawn(async move { sender.send_only(WsSend::FreeResult(self.args)).await });
+        // block_in_place_or_global(async move {
+        //     let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
+        // });
     }
 }
 
@@ -167,6 +174,8 @@ impl Drop for ResultSet {
 pub enum Error {
     #[error("{0}")]
     Dsn(#[from] DsnError),
+    #[error("Authentication failure: \"{0}\"")]
+    Unauthorized(String),
     #[error("{0}")]
     FetchError(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("{0}")]
@@ -185,7 +194,7 @@ pub enum Error {
     TaosError(#[from] RawError),
     #[error("{0}")]
     DeError(#[from] DeError),
-    #[error("{0}")]
+    #[error("WebSocket internal error: {0}")]
     WsError(#[from] WsError),
     #[error(transparent)]
     IoError(#[from] std::io::Error),
@@ -203,6 +212,7 @@ pub enum WS_ERROR_NO {
     SEND_MESSAGE_TIMEOUT = 0xE003,
     RECV_MESSAGE_TIMEOUT = 0xE004,
     IO_ERROR = 0xE005,
+    UNAUTHORIZED = 0xE006,
 }
 
 impl WS_ERROR_NO {
@@ -215,6 +225,7 @@ impl Error {
     pub const fn errno(&self) -> Code {
         match self {
             Error::TaosError(error) => error.code(),
+            Error::Unauthorized(_) => Code::new(WS_ERROR_NO::UNAUTHORIZED as _),
             Error::Dsn(_) => Code::new(WS_ERROR_NO::DSN_ERROR as _),
             Error::IoError(_) => Code::new(WS_ERROR_NO::IO_ERROR as _),
             Error::WsError(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
@@ -463,7 +474,16 @@ impl WsTaos {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = Some(1024 * 1024 * 16);
 
-        let (ws, _) = connect_async_with_config(info.to_query_url(), Some(config)).await?;
+        let (ws, _) = connect_async_with_config(info.to_query_url(), Some(config))
+            .await
+            .map_err(|err| {
+                let err_string = err.to_string();
+                if err_string.contains("401 Unauthorized") {
+                    Error::Unauthorized(info.to_query_url())
+                } else {
+                    err.into()
+                }
+            })?;
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 
@@ -633,6 +653,15 @@ impl WsTaos {
             _ => unreachable!(),
         };
 
+        let result_id = resp.id;
+        //  for drop task.
+        let (closer, rx) = oneshot::channel();
+        tokio::task::spawn(async move {
+            let t = Instant::now();
+            let _ = rx.await;
+            log::debug!("result {result_id} lives {:?}", t.elapsed());
+        });
+
         if resp.fields_count > 0 {
             let names = resp.fields_names.unwrap();
             let types = resp.fields_types.unwrap();
@@ -656,6 +685,7 @@ impl WsTaos {
                 sender: self.sender.clone(),
                 timing: resp.timing,
                 block_future: None,
+                closer: Some(closer),
             })
         } else {
             Ok(ResultSet {
@@ -671,6 +701,7 @@ impl WsTaos {
                 sender: self.sender.clone(),
                 timing: resp.timing,
                 block_future: None,
+                closer: Some(closer),
             })
         }
     }
@@ -935,6 +966,7 @@ async fn test_client_cloud() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn ws_show_databases() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
+    use futures::TryStreamExt;
     pretty_env_logger::init_timed();
     let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
     let client = WsTaos::from_dsn(dsn).await?;
