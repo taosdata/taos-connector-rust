@@ -562,7 +562,19 @@ mod r#async {
             db: impl std::fmt::Display + Send + 'async_trait,
         ) -> Result<(), Self::Error> {
             let name = name.as_ref();
-            let query = format!("CREATE TOPIC IF NOT EXISTS {name} WITH META AS DATABASE {db}");
+            let query = format!("create topic if not exists {name} with meta as database {db}");
+
+            // todo(@huolinhe): cannot set error. we should use a global error type here (?).
+
+            // let sql: Option<String> = self.query_one(format!("SELECT sql FROM information_schema.ins_topics WHERE topic_name = '{name}'")).await?;
+
+            // if let Some(sql) = sql {
+            //     if sql == query {
+            //         Ok(())
+            //     } else {
+            //         Ok(())
+            //     }
+            // }
 
             self.exec(&query).await?;
             Ok(())
