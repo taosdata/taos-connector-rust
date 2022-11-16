@@ -1,7 +1,8 @@
 use derive_more::Deref;
 use futures::stream::SplitStream;
 use futures::{FutureExt, SinkExt, StreamExt};
-use scc::HashMap;
+// use scc::HashMap;
+use dashmap::DashMap as HashMap;
 use std::future::Future;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta};
 use taos_query::prelude::{Code, RawError};
@@ -81,18 +82,18 @@ impl WsQuerySender {
         let req_id = msg.req_id();
         let (tx, mut rx) = query_channel();
 
-        self.queries.insert(req_id, tx).unwrap();
+        self.queries.insert(req_id, tx);
 
         match msg {
             WsSend::FetchBlock(args) => {
                 log::debug!("[req id: {req_id}] prepare message {msg:?}");
-                if self.results.contains(&args.id) {
+                if self.results.contains_key(&args.id) {
                     Err(RawError::from_any(format!(
                         "there's a result with id {}",
                         args.id
                     )))?;
                 }
-                self.results.insert(args.id, args.req_id).unwrap();
+                self.results.insert(args.id, args.req_id);
 
                 self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
                 //
@@ -122,6 +123,13 @@ impl WsQuerySender {
 pub struct WsTaos {
     close_signal: watch::Sender<bool>,
     sender: WsQuerySender,
+}
+impl Drop for WsTaos {
+    fn drop(&mut self) {
+        log::debug!("dropping connection");
+        // send close signal to reader/writer spawned tasks.
+        let _ = self.close_signal.send(true);
+    }
 }
 
 pub struct ResultSet {
@@ -244,13 +252,6 @@ impl Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
-impl Drop for WsTaos {
-    fn drop(&mut self) {
-        // send close signal to reader/writer spawned tasks.
-        let _ = self.close_signal.send(true);
-    }
-}
-
 async fn read_queries(
     mut reader: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     queries_sender: QueryAgent,
@@ -274,6 +275,7 @@ async fn read_queries(
                                     {
                                         sender.send(ok.map(|_| data)).unwrap();
                                     } else {
+                                        debug_assert!(!queries_sender.contains_key(&req_id));
                                         log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
                                 }
@@ -376,9 +378,12 @@ async fn read_queries(
                                 log::warn!("websocket received close frame: {close:?}");
 
                                 let mut keys = Vec::new();
-                                queries_sender.for_each_async(|k, _| {
-                                    keys.push(*k);
-                                }).await;
+                                for e in queries_sender.iter() {
+                                    keys.push(*e.key());
+                                }
+                                // queries_sender.for_each_async(|k, _| {
+                                //     keys.push(*k);
+                                // }).await;
                                 for k in keys {
                                     if let Some((_, sender)) = queries_sender.remove(&k) {
                                         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), close.reason.to_string())));
@@ -387,9 +392,12 @@ async fn read_queries(
                             } else {
                                 log::warn!("websocket connection is closed normally");
                                 let mut keys = Vec::new();
-                                queries_sender.for_each_async(|k, _| {
-                                    keys.push(*k);
-                                }).await;
+                                for e in queries_sender.iter() {
+                                    keys.push(*e.key());
+                                }
+                                // queries_sender.for_each_async(|k, _| {
+                                //     keys.push(*k);
+                                // }).await;
                                 for k in keys {
                                     if let Some((_, sender)) = queries_sender.remove(&k) {
                                         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
@@ -414,9 +422,12 @@ async fn read_queries(
                     Err(err) => {
                         log::error!("reading websocket error: {}", err);
                         let mut keys = Vec::new();
-                        queries_sender.for_each_async(|k, _| {
-                            keys.push(*k);
-                        }).await;
+                        for e in queries_sender.iter() {
+                                    keys.push(*e.key());
+                                }
+                        // queries_sender.for_each_async(|k, _| {
+                        //     keys.push(*k);
+                        // }).await;
                         for k in keys {
                             if let Some((_, sender)) = queries_sender.remove(&k) {
                                 let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
@@ -429,9 +440,12 @@ async fn read_queries(
             _ = close_listener.changed() => {
                 log::debug!("close reader task");
                 let mut keys = Vec::new();
-                queries_sender.for_each_async(|k, _| {
-                    keys.push(*k);
-                }).await;
+                for e in queries_sender.iter() {
+                                    keys.push(*e.key());
+                                }
+                // queries_sender.for_each_async(|k, _| {
+                //     keys.push(*k);
+                // }).await;
                 for k in keys {
                     if let Some((_, sender)) = queries_sender.remove(&k) {
                         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "close signal received")));
@@ -446,11 +460,14 @@ async fn read_queries(
     }
 
     let mut keys = Vec::new();
-    queries_sender
-        .for_each_async(|k, _| {
-            keys.push(*k);
-        })
-        .await;
+    for e in queries_sender.iter() {
+                                    keys.push(*e.key());
+                                }
+    // queries_sender
+    //     .for_each_async(|k, _| {
+    //         keys.push(*k);
+    //     })
+    //     .await;
     for k in keys {
         if let Some((_, sender)) = queries_sender.remove(&k) {
             let _ = sender.send(Err(RawError::from_any("websocket connection is closed")));
@@ -529,11 +546,9 @@ impl WsTaos {
             }
         }
 
-        use std::collections::hash_map::RandomState;
+        let queries2 = Arc::new(QueryInner::new());
 
-        let queries2 = Arc::new(QueryInner::new(100, RandomState::new()));
-
-        let fetches_sender = Arc::new(QueryResMapper::new(100, RandomState::new()));
+        let fetches_sender = Arc::new(QueryResMapper::new());
         let results = fetches_sender.clone();
 
         let queries2_cloned = queries2.clone();
@@ -560,9 +575,10 @@ impl WsTaos {
                         if let Err(err) = sender.send(msg).await {
                                 log::error!("send websocket message packet error: {}", err);
                                 let mut keys = Vec::new();
-                                queries3.for_each_async(|k, _| {
-                                    keys.push(*k);
-                                }).await;
+                                queries3.iter().for_each(|r| keys.push(*r.key()));
+                                // queries3.for_each_async(|k, _| {
+                                //     keys.push(*k);
+                                // }).await;
                                 for k in keys {
                                     if let Some((_, sender)) = queries3.remove(&k) {
                                         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
@@ -867,6 +883,7 @@ impl taos_query::Fetchable for ResultSet {
     }
 
     fn fetch_raw_block(&mut self) -> StdResult<Option<RawBlock>, Self::Error> {
+        
         block_in_place_or_global(self.fetch())
     }
 }

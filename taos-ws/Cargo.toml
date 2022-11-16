@@ -14,12 +14,12 @@ anyhow = "1"
 async-trait = { version = "0.1.56" }
 bytes = "1.1.0"
 derive_more = "0.99"
+dashmap = "5.4.0"
 futures = { version = "0.3" }
 itertools = "0.10.3"
 log = "0.4"
 once_cell = "1"
 parse_duration = "2.1"
-scc = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 serde_repr = "0.1.8"

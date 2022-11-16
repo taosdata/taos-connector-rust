@@ -3,7 +3,8 @@
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
-use scc::HashMap;
+// use scc::HashMap;
+use dashmap::DashMap as HashMap;
 
 use taos_query::block_in_place_or_global;
 use taos_query::common::{JsonMeta, RawMeta};
@@ -62,7 +63,7 @@ impl WsTmqSender {
         let req_id = msg.req_id();
         let (tx, rx) = oneshot::channel();
 
-        self.queries.insert(req_id, tx).unwrap();
+        self.queries.insert(req_id, tx);
 
         self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
 
@@ -472,11 +473,7 @@ impl TmqBuilder {
         let (ws, _) = connect_async(&url).await?;
         let (mut sender, mut reader) = ws.split();
 
-        use std::collections::hash_map::RandomState;
-        let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new(
-            100,
-            RandomState::new(),
-        ));
+        let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new());
 
         let queries_sender = queries.clone();
         let msg_handler = queries.clone();
@@ -501,10 +498,12 @@ impl TmqBuilder {
                         log::trace!("Check websocket message sender alive");
                         if let Err(err) = sender.send(Message::Ping(PING.to_vec())).await {
                             log::error!("sending ping message to {sending_url} error: {err:?}");
-                            let mut keys = Vec::new();
-                            msg_handler.for_each_async(|k, _| {
-                                keys.push(*k);
-                            }).await;
+                            // let mut keys = Vec::new();
+                            let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
+
+                            // msg_handler.for_each_async(|k, _| {
+                            //     keys.push(*k);
+                            // }).await;
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
                                     let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
@@ -521,10 +520,7 @@ impl TmqBuilder {
                         log::trace!("send message {msg:?}");
                         if let Err(err) = sender.send(msg).await {
                             log::error!("sending message to {sending_url} error: {err:?}");
-                            let mut keys = Vec::new();
-                            msg_handler.for_each_async(|k, _| {
-                                keys.push(*k);
-                            }).await;
+                            let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
                                     let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
@@ -642,10 +638,7 @@ impl TmqBuilder {
                                 Message::Close(close) => {
                                     log::warn!("websocket connection is closed (unexpected?)");
 
-                                    let mut keys = Vec::new();
-                                    queries_sender.for_each_async(|k, _| {
-                                        keys.push(*k);
-                                    }).await;
+                                    let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
                                     let err = if let Some(close) = close {
                                         close.reason.to_string()
                                     } else {
@@ -677,10 +670,11 @@ impl TmqBuilder {
                             },
                             Err(err) => {
                                 log::error!("reading message from {url} error: {err:?}");
-                                let mut keys = Vec::new();
-                                queries_sender.for_each_async(|k, _| {
-                                    keys.push(*k);
-                                }).await;
+                                // let mut keys = Vec::new();
+                                let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                // queries_sender.for_each_async(|k, _| {
+                                //     keys.push(*k);
+                                // }).await;
                                 for k in keys {
                                     if let Some((_, sender)) = queries_sender.remove(&k) {
                                         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));

@@ -1,6 +1,7 @@
 use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
-use scc::HashMap;
+// use scc::HashMap;
+use dashmap::DashMap as HashMap;
 
 use taos_query::common::views::views_to_raw_block;
 use taos_query::common::ColumnView;
@@ -248,13 +249,8 @@ impl Stmt {
             }
         }
 
-        let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new(
-            100,
-            RandomState::new(),
-        ));
-
-        use std::collections::hash_map::RandomState;
-        let fetches = Arc::new(HashMap::<StmtId, StmtSender>::new(100, RandomState::new()));
+        let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new());
+        let fetches = Arc::new(HashMap::<StmtId, StmtSender>::new());
 
         let queries_sender = queries.clone();
         let fetches_sender = fetches.clone();
@@ -304,7 +300,7 @@ impl Stmt {
                                             }
                                         }
                                         StmtOk::Stmt(stmt_id, res) => {
-                                            if let Some(sender) = fetches_sender.read(&stmt_id, |_, sender| sender.clone()) {
+                                            if let Some(sender) = fetches_sender.get(&stmt_id) {
                                                 log::debug!("send data to fetches with id {}", stmt_id);
                                                 // let res = res.clone();
                                                 sender.send(res).unwrap();
@@ -383,7 +379,7 @@ impl Stmt {
         let action = StmtSend::Init { req_id };
         let (tx, rx) = oneshot::channel();
         {
-            self.queries.insert(req_id, tx).unwrap();
+            self.queries.insert(req_id, tx);
             self.ws.send(action.to_msg()).await?;
         }
         let stmt_id = rx.await??; // 1. RecvError, 2. TaosError
