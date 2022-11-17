@@ -506,7 +506,8 @@ impl TmqBuilder {
                             // }).await;
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
-                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
+                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                        format!("WebSocket internal error: {err}"))));
                                 }
                             }
                         }
@@ -523,7 +524,8 @@ impl TmqBuilder {
                             let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
-                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
+                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                        format!("WebSocket internal error: {err}"))));
                                 }
                             }
                         }
@@ -640,9 +642,9 @@ impl TmqBuilder {
 
                                     let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
                                     let err = if let Some(close) = close {
-                                        close.reason.to_string()
+                                        format!("WebSocket internal error: {}", close.reason)
                                     } else {
-                                        "Close without reason".to_string()
+                                        "WebSocket internal error, connection is reset by server".to_string()
                                     };
                                     for k in keys {
                                         if let Some((_, sender)) = queries_sender.remove(&k) {
@@ -677,7 +679,10 @@ impl TmqBuilder {
                                 // }).await;
                                 for k in keys {
                                     if let Some((_, sender)) = queries_sender.remove(&k) {
-                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
+                                        let _ = sender.send(Err(RawError::new(
+                                            WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                            format!("WebSocket internal error: {err}")
+                                        )));
                                     }
                                 }
                                 break 'ws;
