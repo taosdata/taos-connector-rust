@@ -907,10 +907,6 @@ mod tests {
     async fn test_ts2035() -> anyhow::Result<()> {
         use taos_query::prelude::*;
 
-        pretty_env_logger::formatted_builder()
-            .filter_level(log::LevelFilter::Debug)
-            .init();
-
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
 
         let ts = std::time::SystemTime::now()
