@@ -496,6 +496,8 @@ impl AsAsyncConsumer for Consumer {
 }
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use crate::RawTaos;
 
     use super::TmqBuilder;
@@ -901,6 +903,74 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ts2035() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        pretty_env_logger::formatted_builder()
+            .filter_level(log::LevelFilter::Debug)
+            .init();
+
+        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
+
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        taos.exec_many([
+            "drop topic if exists sys_ts2035",
+            "drop database if exists sys_ts2035",
+            "create database sys_ts2035",
+            "create topic sys_ts2035 as database sys_ts2035",
+            "use sys_ts2035",
+            "create table tb1 (ts timestamp, c1 int, c2 int)",
+        ])
+        .await?;
+
+        taos.exec_many([
+            format!("insert into tb1 (ts, c1) values({ts}, 0)"),
+            format!("insert into tb1 (ts, c2) values({ts}, 1)"),
+        ])
+        .await?;
+
+        let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false")?;
+        let mut consumer = builder.build()?;
+        consumer.subscribe(["sys_ts2035"]).await?;
+
+        consumer
+            .stream_with_timeout(Timeout::from_millis(500))
+            .try_for_each(|(offset, message)| async {
+                // Offset contains information for topic name, database name and vgroup id,
+                //  similar to kafka topic/partition/offset.
+                let _ = offset.topic();
+                let _ = offset.database();
+                let _ = offset.vgroup_id();
+
+                match message {
+                    MessageSet::Meta(meta) => {
+                        unreachable!()
+                    }
+                    MessageSet::Data(mut data) => {
+                        // data message may have more than one data block for various tables.
+                        while let Some(data) = data.next().transpose()? {
+                            dbg!(data.table_name());
+                            dbg!(data);
+                        }
+                    }
+                    _ => (),
+                }
+                consumer.commit(offset).await?;
+                Ok(())
+            })
+            .await?;
+
+        consumer.unsubscribe().await;
+
+        taos.exec_many(["drop topic sys_ts2035", "drop database sys_ts2035"])
+            .await?;
+        Ok(())
+    }
     #[tokio::test]
     async fn test_tmq_meta() -> anyhow::Result<()> {
         use futures::TryStreamExt;
