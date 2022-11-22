@@ -33,8 +33,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 
 [features]
-default = ["ws", "native", "r2d2"]
+default = ["ws-rustls", "native", "r2d2"]
 ws = ["taos-ws"]
 optin = ["taos-optin"]
 native = ["taos-sys"]
 r2d2 = ["taos-query/r2d2"]
+ws-native-tls = ["taos-ws", "taos-ws/native-tls-vendored"]
+ws-rustls = ["taos-ws", "taos-ws/rustls"]

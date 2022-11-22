@@ -27,12 +27,19 @@ serde_with = "2.0.0"
 taos-query = { path = "../taos-query", version = "0.3.5" }
 thiserror = "1"
 tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = { version = "0.17", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.17" }
+
 [dev-dependencies]
 pretty_env_logger = "0.4.0"
 
+[package.metadata.docs.rs]
+features = ["native-tls", "__rustls-tls"]
+
 [features]
 default = ["tmq"]
-native-tls-vendored = ["tokio-tungstenite/native-tls-vendored"]
+
+rustls = ["tokio-tungstenite/__rustls-tls"]
+native-tls = ["tokio-tungstenite/native-tls"]
+native-tls-vendored = ["tokio-tungstenite/native-tls-vendored","native-tls"]
 sync = []
 tmq = []
