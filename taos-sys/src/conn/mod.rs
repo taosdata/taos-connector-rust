@@ -1,10 +1,12 @@
 use std::{ffi::CStr, os::raw::*};
 
+use cfg_if::cfg_if;
+use itertools::Itertools;
 use taos_query::common::raw_data_t;
 use taos_query::prelude::{Code, RawError as Error};
 use taos_query::RawBlock;
 
-use crate::tmq::taos_write_raw_block;
+use crate::tmq::*;
 use crate::{err_or, into_c_str::IntoCStr, query::QueryFuture};
 use crate::{ffi::*, tmq::ffi::tmq_write_raw, RawRes, ResultSet};
 
@@ -143,12 +145,33 @@ impl RawTaos {
             .table_name()
             .ok_or_else(|| Error::new(Code::Failed, "raw block should have table name"))?;
         let ptr = block.as_raw_bytes().as_ptr();
-        err_or!(taos_write_raw_block(
-            self.as_ptr(),
-            nrows as _,
-            ptr as _,
-            name.into_c_str().as_ptr()
-        ))
+        // block;
+
+        let fields = block
+            .fields()
+            .into_iter()
+            .map(|field| field.into())
+            .collect_vec();
+
+        cfg_if! {
+            if #[cfg(taos_write_raw_block_with_fields)] {
+                err_or!(taos_write_raw_block_with_fields(
+                    self.as_ptr(),
+                    nrows as _,
+                    ptr as _,
+                    name.into_c_str().as_ptr(),
+                    fields.as_ptr(),
+                    fields.len() as _,
+                ))
+            } else {
+                err_or!(taos_write_raw_block(
+                    self.as_ptr(),
+                    nrows as _,
+                    ptr as _,
+                    name.into_c_str().as_ptr()
+                ))
+            }
+        }
     }
 
     #[inline]

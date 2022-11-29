@@ -61,7 +61,8 @@ impl Timestamp {
             Timestamp::Microseconds(raw) => chrono::Duration::microseconds(*raw),
             Timestamp::Nanoseconds(raw) => chrono::Duration::nanoseconds(*raw),
         };
-        chrono::NaiveDateTime::from_timestamp(0, 0)
+        chrono::NaiveDateTime::from_timestamp_opt(0, 0)
+            .expect("timestamp value could always be mapped to a chrono::NaiveDateTime")
             .checked_add_signed(duration)
             .unwrap()
     }

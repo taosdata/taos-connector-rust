@@ -3,7 +3,10 @@ use std::{borrow::Cow, os::raw::*};
 use taos_macros::c_cfg;
 use taos_query::{common::raw_data_t, prelude::RawError};
 
-use crate::ffi::{TAOS, TAOS_RES};
+use crate::{
+    ffi::{TAOS, TAOS_RES},
+    types::TAOS_FIELD,
+};
 
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -141,6 +144,17 @@ extern "C" {
     pub fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t;
 }
 
+#[cfg(taos_write_raw_block_with_fields)]
+extern "C" {
+    pub fn taos_write_raw_block_with_fields(
+        taos: *mut TAOS,
+        nrows: i32,
+        ptr: *const c_char,
+        tbname: *const c_char,
+        fields: *const TAOS_FIELD,
+        num_of_fields: i32,
+    ) -> i32;
+}
 #[cfg(not(taos_tmq))]
 pub unsafe fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
     tmq_res_t::TMQ_RES_INVALID

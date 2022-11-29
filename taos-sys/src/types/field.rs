@@ -47,3 +47,21 @@ pub fn from_raw_fields(ptr: *const TAOS_FIELD, len: usize) -> Vec<Field> {
         .map(Into::into)
         .collect()
 }
+
+impl From<Field> for TAOS_FIELD {
+    fn from(value: Field) -> Self {
+        // let name = value.name().into_c_str().into_owned();
+        let name = value.name().as_bytes();
+        let mut field = TAOS_FIELD {
+            name: [0; 65],
+            type_: value.ty() as _,
+            bytes: value.bytes() as _,
+        };
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(name.as_ptr(), field.name.as_mut_ptr() as _, name.len());
+        }
+
+        field
+    }
+}

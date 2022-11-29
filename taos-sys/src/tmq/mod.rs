@@ -903,6 +903,7 @@ mod tests {
         Ok(())
     }
 
+    /// Partial update a record with different columns.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ts2035() -> anyhow::Result<()> {
         use taos_query::prelude::*;
@@ -962,14 +963,14 @@ mod tests {
                     }
                     MessageSet::Data(mut data) => {
                         let raw = data.as_raw_data().await?;
-                        target
-                            .write_raw_meta(unsafe { std::mem::transmute(raw) })
-                            .await?;
+                        // target
+                        //     .write_raw_meta(unsafe { std::mem::transmute(raw) })
+                        //     .await?;
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.next().transpose()? {
                             dbg!(data.table_name());
                             dbg!(&data);
-                            // target.write_raw_block(&data).await?;
+                            target.write_raw_block(&data).await?;
                         }
                     }
                     _ => (),
@@ -981,16 +982,19 @@ mod tests {
 
         consumer.unsubscribe().await;
 
-        taos.exec_many(["drop topic sys_ts2035", "drop database sys_ts2035"])
-            .await?;
-
         let (c1, c2) = target
             .query_one::<_, (Option<i32>, Option<i32>)>("select c1, c2 from tb1")
             .await?
             .expect("should have data");
-        // todo: comment out for test.
-        // assert_eq!(c1, Some(0));
-        // assert_eq!(c2, Some(1));
+
+        assert_eq!(c1, Some(0));
+        assert_eq!(c2, Some(1));
+
+        taos.exec_many([
+            "drop topic sys_ts2035", // drop topic before dropping database
+            "drop database sys_ts2035",
+        ])
+        .await?;
         target.exec("drop database sys_ts2035_target").await?;
         Ok(())
     }
