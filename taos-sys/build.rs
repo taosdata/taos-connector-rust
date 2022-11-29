@@ -1,5 +1,5 @@
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{c_int, OsString};
 use std::fmt::Display;
 
 fn get_env(name: &str) -> Option<OsString> {
@@ -58,6 +58,15 @@ fn taos_version() -> String {
         unreachable!("the current os is not supported");
     };
     let lib = unsafe { libloading::Library::new(lib_name).unwrap() };
+    if unsafe {
+        lib.get::<libloading::Symbol<unsafe extern "C" fn() -> c_int>>(
+            b"taos_write_raw_block_with_fields\0",
+        )
+    }
+    .is_ok()
+    {
+        println!("cargo:rustc-cfg=taos_write_raw_block_with_fields");
+    }
     let version = unsafe {
         let version: libloading::Symbol<unsafe extern "C" fn() -> *const std::os::raw::c_char> =
             lib.get(b"taos_get_client_info\0").unwrap();
