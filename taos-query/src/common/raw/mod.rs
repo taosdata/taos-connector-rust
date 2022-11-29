@@ -725,7 +725,7 @@ impl RawBlock {
         Layout::from_bits(self.layout.borrow().as_inner()).unwrap()
     }
 
-    fn fields(&self) -> Vec<Field> {
+    pub fn fields(&self) -> Vec<Field> {
         self.schemas()
             .iter()
             .zip(self.field_names())
