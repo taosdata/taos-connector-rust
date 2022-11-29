@@ -8,7 +8,7 @@ use taos_query::common::{Field, Precision, RawBlock, RawMeta};
 use taos_query::prelude::{Code, RawError};
 use taos_query::util::InlinableWrite;
 use taos_query::{
-    block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, Dsn, DsnError, IntoDsn,
+    block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
 };
 use thiserror::Error;
 
@@ -69,7 +69,6 @@ struct WsQuerySender {
     results: Arc<QueryResMapper>,
     sender: WsSender,
     queries: QueryAgent,
-    timeout: Duration,
 }
 
 impl WsQuerySender {
@@ -80,7 +79,7 @@ impl WsQuerySender {
     async fn send_recv(&self, msg: WsSend) -> Result<WsRecvData> {
         let send_timeout = Duration::from_millis(1000);
         let req_id = msg.req_id();
-        let (tx, mut rx) = query_channel();
+        let (tx, rx) = query_channel();
 
         self.queries.insert(req_id, tx);
 
@@ -461,8 +460,8 @@ async fn read_queries(
 
     let mut keys = Vec::new();
     for e in queries_sender.iter() {
-                                    keys.push(*e.key());
-                                }
+        keys.push(*e.key());
+    }
     // queries_sender
     //     .for_each_async(|k, _| {
     //         keys.push(*k);
@@ -609,7 +608,6 @@ impl WsTaos {
                 sender: ws_cloned,
                 queries: queries2_cloned,
                 results,
-                timeout: info.timeout,
             },
         })
     }
@@ -883,7 +881,6 @@ impl taos_query::Fetchable for ResultSet {
     }
 
     fn fetch_raw_block(&mut self) -> StdResult<Option<RawBlock>, Self::Error> {
-        
         block_in_place_or_global(self.fetch())
     }
 }

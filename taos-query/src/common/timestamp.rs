@@ -84,7 +84,9 @@ mod tests {
         for prec in [Millisecond, Microsecond, Nanosecond] {
             let ts = Timestamp::new(0, prec);
             assert!(ts.as_raw_i64() == 0);
-            assert!(ts.to_naive_datetime() == chrono::NaiveDateTime::from_timestamp(0, 0));
+            assert!(
+                ts.to_naive_datetime() == chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
+            );
         }
     }
 

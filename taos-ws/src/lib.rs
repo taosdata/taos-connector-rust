@@ -1,6 +1,5 @@
 #![recursion_limit = "256"]
 use std::fmt::{Debug, Display};
-use std::time::Duration;
 
 use once_cell::sync::OnceCell;
 
@@ -9,8 +8,6 @@ use taos_query::{DsnError, IntoDsn, TBuilder};
 
 mod stmt;
 pub use stmt::Stmt;
-
-use taos_query::prelude::tokio;
 
 // pub mod tmq;
 pub mod consumer;
@@ -34,7 +31,7 @@ pub struct TaosBuilder {
     addr: String,
     auth: WsAuth,
     database: Option<String>,
-    timeout: Duration,
+    // timeout: Duration,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -127,11 +124,11 @@ impl TaosBuilder {
             None => "localhost:6041".to_string(),
         };
 
-        let timeout = dsn
-            .params
-            .remove("timeout")
-            .and_then(|s| parse_duration::parse(&s).ok())
-            .unwrap_or(Duration::from_secs(60 * 5)); // default to 5m
+        // let timeout = dsn
+        //     .params
+        //     .remove("timeout")
+        //     .and_then(|s| parse_duration::parse(&s).ok())
+        //     .unwrap_or(Duration::from_secs(60 * 5)); // default to 5m
 
         if let Some(token) = token {
             Ok(TaosBuilder {
@@ -139,7 +136,7 @@ impl TaosBuilder {
                 addr,
                 auth: WsAuth::Token(token),
                 database: dsn.subject,
-                timeout,
+                // timeout,
             })
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
@@ -149,7 +146,7 @@ impl TaosBuilder {
                 addr,
                 auth: WsAuth::Plain(username, password),
                 database: dsn.subject,
-                timeout,
+                // timeout,
             })
         }
     }
