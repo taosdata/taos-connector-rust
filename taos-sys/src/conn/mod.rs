@@ -146,15 +146,15 @@ impl RawTaos {
             .ok_or_else(|| Error::new(Code::Failed, "raw block should have table name"))?;
         let ptr = block.as_raw_bytes().as_ptr();
         // block;
-
-        let fields = block
-            .fields()
-            .into_iter()
-            .map(|field| field.into())
-            .collect_vec();
-
         cfg_if! {
             if #[cfg(taos_write_raw_block_with_fields)] {
+
+                let fields = block
+                    .fields()
+                    .into_iter()
+                    .map(|field| field.into())
+                    .collect_vec();
+
                 err_or!(taos_write_raw_block_with_fields(
                     self.as_ptr(),
                     nrows as _,
