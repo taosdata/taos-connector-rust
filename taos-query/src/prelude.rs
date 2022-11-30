@@ -473,7 +473,7 @@ mod r#async {
 
         async fn exec<T: AsRef<str> + Send + Sync>(&self, sql: T) -> Result<usize, Self::Error> {
             let sql = sql.as_ref();
-            log::debug!("exec sql: {sql}");
+            // log::debug!("exec sql: {sql}");
             self.query(sql).await.map(|res| res.affected_rows() as _)
         }
 
@@ -514,7 +514,7 @@ mod r#async {
             sql: T,
         ) -> Result<Option<O>, Self::Error> {
             use futures::StreamExt;
-            log::debug!("query one with sql: {}", sql.as_ref());
+            // log::debug!("query one with sql: {}", sql.as_ref());
             self.query(sql)
                 .await?
                 .deserialize::<O>()
@@ -536,7 +536,7 @@ mod r#async {
 
         /// Short for `USE {name}`.
         async fn use_database<N: AsRef<str> + Send>(&self, name: N) -> Result<(), Self::Error> {
-            let query = format!("USE {}", name.as_ref());
+            let query = format!("USE `{}`", name.as_ref());
 
             self.query(query).await?;
             Ok(())
