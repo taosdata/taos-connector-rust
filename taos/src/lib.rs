@@ -1,4 +1,7 @@
 pub use taos_query::prelude::*;
+use taos_query::Manager;
+
+pub type TaosPool = taos_query::prelude::Pool<TaosBuilder>;
 
 #[cfg(any(feature = "ws", feature = "native", feature = "optin"))]
 pub mod sync {

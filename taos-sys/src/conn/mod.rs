@@ -87,7 +87,7 @@ impl RawTaos {
     #[inline]
     pub fn query<'a, S: IntoCStr<'a>>(&self, sql: S) -> Result<ResultSet, Error> {
         let sql = sql.into_c_str();
-        log::info!("query with sql: {:?}", sql);
+        log::debug!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
         RawRes::from_ptr(unsafe { taos_query(self.as_ptr(), sql.as_ptr()) }).map(ResultSet::new)
     }
 

@@ -70,9 +70,12 @@ impl<'a> QueryFuture<'a> {
             code: 0,
         });
 
+        let sql = sql.into_c_str();
+        log::debug!("async query with sql: {:?}", sql);
+
         QueryFuture {
             raw: taos,
-            sql: sql.into_c_str(),
+            sql,
             state,
         }
     }

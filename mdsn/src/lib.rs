@@ -148,8 +148,12 @@ impl Dsn {
         let mut params = BTreeMap::new();
         if let Some(p) = cap.name("params") {
             for p in p.as_str().split_terminator('&') {
-                if let Some((k, v)) = p.split_once('=') {
-                    params.insert(k.to_string(), v.to_string());
+                if p.contains('=') {
+                    if let Some((k, v)) = p.split_once('=') {
+                        params.insert(k.to_string(), v.to_string());
+                    }
+                } else {
+                    params.insert(p.to_string(), "".to_string());
                 }
             }
         }
