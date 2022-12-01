@@ -605,7 +605,7 @@ mod r#async {
         /// Get table meta information.
         async fn describe(&self, table: &str) -> Result<Describe, Self::Error> {
             Ok(Describe(
-                self.query(format!("DESCRIBE {table}"))
+                self.query(format!("DESCRIBE `{table}`"))
                     .await?
                     .deserialize()
                     .try_collect()
