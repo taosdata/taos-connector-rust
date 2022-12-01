@@ -9,6 +9,8 @@ services:
     environment:
       - TAOS_ADAPTER_PORT=16041
     volumes:
+      - data-v2:/tmp/data/v2
+      - log-v2:/tmp/logs/v2
       - ./tests/cfg/v2/taos.cfg:/etc/taos/taos.cfg
   td3:
     image: tdengine/tdengine:3.0.1.5
@@ -19,3 +21,8 @@ services:
       - TAOS_ADAPTER_PORT=26041
     volumes:
       - ./tests/cfg/v3/taos.cfg:/etc/taos/taos.cfg
+
+
+volumes:
+  data-v2:
+  log-v2:
