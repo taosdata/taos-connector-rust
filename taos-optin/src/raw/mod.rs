@@ -2,12 +2,11 @@
 // use dlopen2::symbor::{Library, PtrOrNull, Ref, SymBorApi, Symbol};
 use dlopen2::raw::Library;
 use std::{
-    borrow::Cow,
     cell::UnsafeCell,
     collections::HashMap,
-    ffi::{c_char, c_int, c_ulong, c_void, CStr, CString, OsStr},
+    ffi::{c_char, c_int, c_ulong, c_void, CStr, CString},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
     task::{Context, Poll, Waker},
 };
 
@@ -128,7 +127,7 @@ impl TmqListApi {
         &self,
         iter: impl IntoIterator<Item = T>,
     ) -> Result<*mut tmq_list_t, RawError> {
-        let mut list = self.new();
+        let list = self.new();
         for item in iter {
             self.append(list, item)?;
         }
@@ -1183,7 +1182,7 @@ impl RawRes {
             raw_type: 0,
         };
         unsafe {
-            let code = (self.c.tmq.as_ref().unwrap().tmq_get_raw)(self.as_ptr(), &mut meta as _);
+            let _code = (self.c.tmq.as_ref().unwrap().tmq_get_raw)(self.as_ptr(), &mut meta as _);
         }
         meta
     }

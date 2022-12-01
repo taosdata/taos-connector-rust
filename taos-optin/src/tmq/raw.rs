@@ -39,7 +39,7 @@ pub(super) mod tmq {
         }
 
         pub fn subscription(&self) -> Topics {
-            let mut tl = Topics::new(self.tmq.list_api);
+            let tl = Topics::new(self.tmq.list_api);
 
             unsafe { (self.tmq.tmq_subscription)(self.as_ptr(), &mut tl.as_ptr()) }
                 .ok_or("get topic list failed")
@@ -152,7 +152,6 @@ pub(super) mod tmq {
 
 pub(super) mod conf {
     use crate::{
-        into_c_str::IntoCStr,
         raw::TmqConfApi,
         types::{tmq_commit_cb, tmq_conf_t, tmq_t},
     };
@@ -161,8 +160,6 @@ pub(super) mod conf {
     use crate::*;
     use std::{ffi::c_void, iter::Iterator};
     use taos_query::Dsn;
-
-    use super::RawTmq;
 
     /* tmq conf */
     pub struct Conf {
@@ -314,7 +311,7 @@ pub(super) mod list {
     use std::ffi::CStr;
     use std::os::raw::c_char;
 
-    use taos_query::prelude::{Code, RawError};
+    use taos_query::prelude::RawError;
 
     use crate::{into_c_str::IntoCStr, raw::TmqListApi, types::tmq_list_t};
 

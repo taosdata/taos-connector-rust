@@ -1,5 +1,4 @@
 pub use taos_query::prelude::*;
-use taos_query::Manager;
 
 pub type TaosPool = taos_query::prelude::Pool<TaosBuilder>;
 

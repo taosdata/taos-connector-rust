@@ -1,12 +1,6 @@
 // pub(crate) mod ffi;
 
-use std::{
-    ffi::{CStr, CString},
-    fmt::Debug,
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{fmt::Debug, str::FromStr, sync::Arc, time::Duration};
 
 // pub(crate) use ffi::*;
 
@@ -21,11 +15,7 @@ use taos_query::{
     Dsn, IntoDsn, RawBlock, TBuilder,
 };
 
-use crate::{
-    raw::RawRes,
-    raw::{ApiEntry, RawTaos},
-    types::tmq_res_t,
-};
+use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t};
 
 // use taos_error::Error;
 
