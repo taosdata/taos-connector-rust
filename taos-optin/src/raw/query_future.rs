@@ -73,10 +73,12 @@ impl<'a> QueryFuture<'a> {
             result: std::ptr::null_mut(),
             code: 0,
         });
+        let sql = sql.into_c_str();
+        log::debug!("query with: {}", sql.to_str().unwrap_or("<...>"));
 
         QueryFuture {
             raw: taos,
-            sql: sql.into_c_str(),
+            sql,
             state,
         }
     }

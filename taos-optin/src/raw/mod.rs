@@ -4,9 +4,10 @@ use dlopen2::raw::Library;
 use std::{
     borrow::Cow,
     cell::UnsafeCell,
+    collections::HashMap,
     ffi::{c_char, c_int, c_ulong, c_void, CStr, CString, OsStr},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex, RwLock},
     task::{Context, Poll, Waker},
 };
 
@@ -30,6 +31,10 @@ use crate::{
 use self::query_future::QueryFuture;
 
 mod query_future;
+
+lazy_static::lazy_static! {
+    static ref RAW_LIBRARIES: Mutex<HashMap<PathBuf, Arc<Library>>> = Mutex::new(HashMap::new());
+}
 
 #[derive(Debug)]
 pub struct ApiEntry {
@@ -322,23 +327,9 @@ impl Default for ApiEntry {
         let path = if let Some(path) = std::env::var_os(lib_env) {
             PathBuf::from(path)
         } else {
-            if cfg!(target_os = "windows") {
-                // println!("cargo:rustc-link-search=C:\\TDengine\\driver");
-                "".into()
-            } else {
-                "".into()
-            }
+            PathBuf::from(default_lib_name())
         };
-        let path = if path.is_file() {
-            path
-        } else if path.is_dir() {
-            path.join(default_lib_name())
-        } else {
-            default_lib_name().into()
-        };
-
-        let lib = ApiEntry::dlopen(path).unwrap();
-        lib
+        Self::dlopen(path).unwrap()
     }
 }
 
@@ -349,14 +340,26 @@ impl ApiEntry {
     {
         let path = path.as_ref();
         let path = if path.is_file() {
-            Cow::Borrowed(path)
+            path.to_owned()
         } else if path.is_dir() {
-            Cow::Owned(path.join(default_lib_name()))
+            path.join(default_lib_name())
+        } else if path.as_os_str().is_empty() {
+            PathBuf::from(default_lib_name())
         } else {
-            PathBuf::from(default_lib_name()).into()
+            path.to_path_buf()
         };
         // let path =
-        let lib = Library::open(path.as_os_str())?;
+        let mut guard = RAW_LIBRARIES.lock().unwrap();
+        let lib = if let Some(lib) = guard.get(&path) {
+            lib.clone()
+        } else {
+            let lib = Library::open(path.as_os_str())?;
+
+            let lib = Arc::new(lib);
+            guard.insert(path, lib.clone());
+            lib
+        };
+
         macro_rules! symbol {
             ($($name:ident),*) => {
                 $(let $name = lib.symbol(stringify!($name))?;)*
@@ -509,7 +512,7 @@ impl ApiEntry {
             };
 
             Ok(Self {
-                lib: Arc::new(lib),
+                lib,
                 version: version.to_string(),
                 taos_cleanup,
                 taos_get_client_info,
@@ -581,18 +584,6 @@ impl ApiEntry {
                 std::str::from_utf8_unchecked(CStr::from_ptr((self.taos_errstr)(ptr)).to_bytes())
             };
             Err(RawError::new(code, message))
-        }
-    }
-}
-
-impl Drop for ApiEntry {
-    fn drop(&mut self) {
-        unsafe {
-            // if !self.is_v3() {
-            log::trace!("call taos_cleanup");
-            (self.taos_cleanup)();
-            log::trace!("run taos_cleanup done");
-            // }
         }
     }
 }
@@ -674,7 +665,7 @@ impl RawTaos {
     #[inline]
     pub fn query<'a, S: IntoCStr<'a>>(&self, sql: S) -> Result<RawRes, RawError> {
         let sql = sql.into_c_str();
-        log::info!("query with sql: {:?}", sql);
+        log::debug!("query with sql: {:?}", sql);
         Ok(RawRes {
             c: self.c.clone(),
             ptr: unsafe { (self.c.taos_query)(self.as_ptr(), sql.as_ptr()) },
@@ -1007,11 +998,13 @@ impl RawRes {
                 let param = Box::from_raw(param);
                 let state = &mut *param.0.get();
                 state.done = true;
-                state.block = (param.1.taos_result_block.unwrap())(res).read() as _;
                 if num_of_rows < 0 {
                     state.code = num_of_rows;
                 } else {
                     state.num = num_of_rows as _;
+                    if num_of_rows > 0 {
+                        state.block = (param.1.taos_result_block.unwrap())(res).read() as _;
+                    }
                 }
                 param.2.wake()
             }

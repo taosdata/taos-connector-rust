@@ -298,6 +298,7 @@ impl TBuilder for TaosBuilder {
             log::debug!("using library path: {path}");
             ApiEntry::dlopen(path).unwrap()
         } else {
+            log::debug!("using default library of taos");
             ApiEntry::default()
         };
         let mut auth = Auth::default();
