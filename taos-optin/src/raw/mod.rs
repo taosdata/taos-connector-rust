@@ -12,7 +12,7 @@ use std::{
 
 use taos_query::{
     common::raw_data_t,
-    prelude::{Code, Field, Precision, RawError},
+    prelude::{Code, Field, Precision, RawError, RawMeta},
     RawBlock,
 };
 
@@ -715,7 +715,11 @@ impl RawTaos {
 
     #[inline]
     pub fn write_raw_meta(&self, meta: raw_data_t) -> Result<(), RawError> {
-        err_or!((self.c.tmq_write_raw.unwrap())(self.as_ptr(), meta))
+        if let Some(f) = self.c.tmq_write_raw {
+            err_or!((f)(self.as_ptr(), meta))
+        } else {
+            unimplemented!("2.x does not support write raw meta")
+        }
     }
 
     #[inline]
