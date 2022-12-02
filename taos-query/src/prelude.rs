@@ -615,12 +615,7 @@ mod r#async {
 
         /// Check if database exists
         async fn database_exists(&self, name: &str) -> Result<bool, Self::Error> {
-            Ok(self
-                .query_one::<_, String>(format!(
-                    "SELECT name FROM information_schema.ins_databases WHERE name='{name}'"
-                ))
-                .await?
-                .is_some())
+            Ok(self.exec(format!("use `{name}`")).await.is_ok())
         }
 
         /// Sync version of `exec`.
