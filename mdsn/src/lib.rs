@@ -66,10 +66,12 @@
 //! sqlite://./file.db
 //! ```
 //!
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::num::ParseIntError;
 use std::str::FromStr;
+use std::string::FromUtf8Error;
 
 use itertools::Itertools;
 #[cfg(feature = "pest")]
@@ -83,10 +85,10 @@ impl Dsn {
     pub fn from_regex(input: &str) -> Result<Self, DsnError> {
         lazy_static::lazy_static! {
             static ref RE: Regex = Regex::new(r"(?x)
-                (?P<driver>[\w.-]+)(\+(?P<protocol>[\w.-]+))?: # abc
+                (?P<driver>[\w.-]+)(\+(?P<protocol>[^@/?\#]+))?: # abc
                 (
                     # url-like dsn
-                    //((?P<username>[\w.-]+)?(:(?P<password>[\w.-]+))?@)? # for authorization
+                    //((?P<username>[\w.-]+)?(:(?P<password>[^@/?\#]+))?@)? # for authorization
                         (((?P<protocol2>[\w.-]+)\()?
                             (?P<addr>[\w\-_%.:]*(:\d{0,5})?(,[\w\-:_.]*(:\d{0,5})?)*)?  # for addresses
                         \)?)?
@@ -111,7 +113,15 @@ impl Dsn {
             _ => None,
         };
         let username = cap.name("username").map(|m| m.as_str().to_string());
-        let password = cap.name("password").map(|m| m.as_str().to_string());
+        let password = cap
+            .name("password")
+            .map(|m| {
+                let s = m.as_str();
+                urlencoding::decode(s)
+                    .map(|s| s.to_string())
+                    .map_err(|err| DsnError::InvalidPassword(s.to_string(), err))
+            })
+            .transpose()?;
         let subject = cap.name("subject").map(|m| m.as_str().to_string());
         let path = cap.name("path").map(|m| m.as_str().to_string());
         let addresses = if let Some(addr) = cap.name("addr") {
@@ -150,9 +160,12 @@ impl Dsn {
             for p in p.as_str().split_terminator('&') {
                 if p.contains('=') {
                     if let Some((k, v)) = p.split_once('=') {
+                        let k = urlencoding::decode(k)?;
+                        let v = urlencoding::decode(v)?;
                         params.insert(k.to_string(), v.to_string());
                     }
                 } else {
+                    let p = urlencoding::decode(p)?;
                     params.insert(p.to_string(), "".to_string());
                 }
             }
@@ -277,6 +290,8 @@ pub enum DsnError {
     InvalidDriver(String),
     #[error("invalid protocol {0}")]
     InvalidProtocol(String),
+    #[error("invalid password {0}: {1}")]
+    InvalidPassword(String, FromUtf8Error),
     #[error("invalid connection {0}")]
     InvalidConnection(String),
     #[error("invalid addresses: {0}, error: {1}")]
@@ -287,6 +302,8 @@ pub enum DsnError {
     RequireParam(String),
     #[error("invalid parameter for {0}: {1}")]
     InvalidParam(String, String),
+    #[error("non utf8 character: {0}")]
+    NonUtf8Character(#[from] FromUtf8Error),
 }
 
 /// A simple struct to represent a server address, with host:port or socket path.
@@ -493,9 +510,11 @@ impl Display for Dsn {
         }
 
         match (&self.username, &self.password) {
-            (Some(username), Some(password)) => write!(f, "{username}:{password}@")?,
+            (Some(username), Some(password)) => {
+                write!(f, "{username}:{}@", urlencoding::encode(password))?
+            }
             (Some(username), None) => write!(f, "{username}@")?,
-            (None, Some(password)) => write!(f, ":{password}@")?,
+            (None, Some(password)) => write!(f, ":{}@", urlencoding::encode(password))?,
             (None, None) => {}
         }
 
@@ -511,13 +530,25 @@ impl Display for Dsn {
         } else if let Some(path) = &self.path {
             write!(f, "{path}")?;
         }
+
         if !self.params.is_empty() {
+            fn percent_encode_or_not(v: &str) -> Cow<str> {
+                if v.contains(|c| c == '=' || c == '&' || c == '#' || c == '@') {
+                    urlencoding::encode(v)
+                } else {
+                    v.into()
+                }
+            }
             write!(
                 f,
                 "?{}",
                 self.params
                     .iter()
-                    .map(|(k, v)| format!("{k}={v}"))
+                    .map(|(k, v)| format!(
+                        "{}={}",
+                        percent_encode_or_not(k),
+                        percent_encode_or_not(v)
+                    ))
                     .join("&")
             )?;
         }
@@ -1037,5 +1068,33 @@ mod tests {
     fn tmq_ws_driver() {
         let dsn = Dsn::from_str("tmq+ws:///abc1?group.id=abc3&timeout=50ms").unwrap();
         assert_eq!(dsn.driver, "tmq");
+        assert_eq!(dsn.to_string(), "tmq+ws:///abc1?group.id=abc3&timeout=50ms");
+    }
+
+    #[test]
+    fn password_special_chars() {
+        let p = "!@#$%^&*()";
+        let e = urlencoding::encode(p);
+        dbg!(&e);
+
+        let dsn = Dsn::from_str(&format!("taos://root:{e}@localhost:6030/")).unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.password.as_deref().unwrap(), p);
+        assert_eq!(dsn.to_string(), format!("taos://root:{e}@localhost:6030"));
+    }
+    #[test]
+    fn param_special_chars() {
+        let p = "!@#$%^&*()";
+        let e = urlencoding::encode(p);
+        dbg!(&e);
+
+        let dsn = Dsn::from_str(&format!("taos://root:{e}@localhost:6030?code1={e}")).unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.password.as_deref().unwrap(), p);
+        assert_eq!(dsn.get("code1").as_deref().unwrap(), p);
+        assert_eq!(
+            dsn.to_string(),
+            format!("taos://root:{e}@localhost:6030?code1={e}")
+        );
     }
 }
