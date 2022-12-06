@@ -1,6 +1,6 @@
 [package]
 name = "taos"
-version = "0.4.11"
+version = "0.4.12"
 categories = ["database", "api-bindings", "asynchronous"]
 edition = "2021"
 keywords = ["timeseries", "database", "tdengine", "taosdata", "connection"]
