@@ -496,8 +496,6 @@ impl AsAsyncConsumer for Consumer {
 }
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use crate::RawTaos;
 
     use super::TmqBuilder;
