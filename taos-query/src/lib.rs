@@ -108,9 +108,19 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
     fn build(&self) -> Result<Self::Target, Self::Error>;
 
     /// Build connection pool with [r2d2::Pool]
+    /// 
+    /// Here we will use some default options with [r2d2::Builder]
+    /// 
+    /// - max_lifetime: None,
+    /// - max_size: u32::MAX,
+    /// - min_idle: 2.
     #[cfg(feature = "r2d2")]
     fn pool(self) -> Result<r2d2::Pool<Manager<Self>>, r2d2::Error> {
-        r2d2::Pool::new(Manager::new(self))
+        r2d2::Builder::new()
+            .max_lifetime(None)
+            .min_idle(Some(2))
+            .max_size(u32::MAX)
+            .build(Manager::new(self))
     }
 
     /// Build connection pool with [r2d2::Builder]
