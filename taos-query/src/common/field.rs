@@ -6,6 +6,15 @@ use crate::util::{Inlinable, InlinableRead, InlinableWrite};
 
 use super::ty::Ty;
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+#[allow(non_camel_case_types)]
+pub struct c_field_t {
+    pub name: [u8; 65usize],
+    pub type_: u8,
+    pub bytes: i32,
+}
+
 /// A `Field` represents the name and data type of one column or tag.
 ///
 /// For example, a table as "create table tb1 (ts timestamp, n nchar(100))".
@@ -25,6 +34,29 @@ pub struct Field {
     #[serde(default)]
     #[serde(rename = "length")]
     pub(crate) bytes: u32,
+}
+
+impl From<Field> for c_field_t {
+    fn from(value: Field) -> Self {
+        value.into()
+    }
+}
+impl From<&Field> for c_field_t {
+    fn from(value: &Field) -> Self {
+        // let name = value.name().into_c_str().into_owned();
+        let name = value.name().as_bytes();
+        let mut field = c_field_t {
+            name: [0; 65],
+            type_: value.ty() as _,
+            bytes: value.bytes() as _,
+        };
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(name.as_ptr(), field.name.as_mut_ptr() as _, name.len());
+        }
+
+        field
+    }
 }
 
 impl Inlinable for Field {
@@ -76,6 +108,10 @@ impl Field {
     /// It's the byte-width in other types.
     pub const fn bytes(&self) -> u32 {
         self.bytes
+    }
+
+    pub fn to_c_field(&self) -> c_field_t {
+        self.into()
     }
 
     /// Represent the data type in sql.

@@ -17,6 +17,8 @@ pub struct raw_data_t {
     pub raw_type: u16,
 }
 
+unsafe impl Send for raw_data_t {}
+
 impl raw_data_t {
     fn to_bytes(&self) -> Bytes {
         let cap = // raw data len

@@ -160,6 +160,7 @@ pub enum WsRecvData {
     WriteMeta,
     WriteRaw,
     WriteRawBlock,
+    WriteRawBlockWithFields,
 }
 
 #[serde_as]

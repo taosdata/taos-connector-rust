@@ -3,6 +3,7 @@ use futures::stream::SplitStream;
 use futures::{FutureExt, SinkExt, StreamExt};
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
+use itertools::Itertools;
 use std::future::Future;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta};
 use taos_query::prelude::{Code, RawError};
@@ -324,7 +325,7 @@ async fn read_queries(
                                         log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
                                 }
-                                WsRecvData::WriteRawBlock => {
+                                WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => {
                                     if let Some((_, sender)) = queries_sender.remove(&req_id)
                                     {
                                         sender.send(ok.map(|_| data)).unwrap();
@@ -635,7 +636,7 @@ impl WsTaos {
     async fn s_write_raw_block(&self, raw: &RawBlock) -> Result<()> {
         let req_id = self.sender.req_id();
         let message_id = req_id;
-        let raw_block_message = 4; // action number from `taosAdapter/controller/rest/const.go:L56`.
+        let raw_block_message = 5; // action number from `taosAdapter/controller/rest/const.go:L56`.
 
         let mut meta = Vec::new();
         meta.write_u64_le(req_id)?;
@@ -644,11 +645,19 @@ impl WsTaos {
         meta.write_u32_le(raw.nrows() as u32)?;
         meta.write_inlined_str::<2>(raw.table_name().unwrap())?;
         meta.write_all(raw.as_raw_bytes())?;
+        let fields = raw
+            .fields()
+            .into_iter()
+            .map(|f| f.to_c_field())
+            .collect_vec();
+
+        let fields = unsafe { std::slice::from_raw_parts(fields.as_ptr() as _, fields.len() * 72) };
+        meta.write_all(fields)?;
         let len = meta.len();
         log::debug!("write block with req_id: {req_id}, raw data len: {len}",);
 
         match self.sender.send_recv(WsSend::Binary(meta)).await? {
-            WsRecvData::WriteRawBlock => Ok(()),
+            WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
             _ => unreachable!(),
         }
     }
@@ -996,6 +1005,9 @@ async fn ws_show_databases() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn ws_write_raw_block() -> anyhow::Result<()> {
+    std::env::set_var("RUST_LOG", "debug");
+    pretty_env_logger::init_timed();
+
     let mut raw = RawBlock::parse_from_raw_block_v2(
         &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
         &[
