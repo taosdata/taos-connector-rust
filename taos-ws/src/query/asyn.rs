@@ -1005,9 +1005,6 @@ async fn ws_show_databases() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn ws_write_raw_block() -> anyhow::Result<()> {
-    std::env::set_var("RUST_LOG", "debug");
-    pretty_env_logger::init_timed();
-
     let mut raw = RawBlock::parse_from_raw_block_v2(
         &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
         &[
