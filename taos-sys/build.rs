@@ -1,6 +1,7 @@
 use std::env;
-use std::ffi::{c_int, OsString};
+use std::ffi::OsString;
 use std::fmt::Display;
+use std::path::Path;
 
 fn get_env(name: &str) -> Option<OsString> {
     let var = env::var_os(name);
@@ -42,6 +43,7 @@ fn version2features<V: Into<Version>>(version: V) -> Vec<&'static str> {
 }
 fn taos_version() -> String {
     let lib_env = "TAOS_LIBRARY_PATH";
+
     if let Some(path) = get_env(lib_env) {
         println!("cargo:rustc-link-search={}", path.to_string_lossy());
     }
@@ -57,10 +59,18 @@ fn taos_version() -> String {
     } else {
         unreachable!("the current os is not supported");
     };
-    let lib = unsafe { libloading::Library::new(lib_name).unwrap() };
+    let lib = if let Some(path) = get_env(lib_env) {
+        let path: &Path = path.as_ref();
+        let lib_name = path.join(lib_name);
+        dlopen2::symbor::Library::open(lib_name).unwrap()
+        // lib_name = path.as_ref::<Path>();
+    } else {
+        dlopen2::symbor::Library::open(lib_name).unwrap()
+    };
+    // let lib = unsafe { libloading::Library::new(lib_name).unwrap() };
     if unsafe {
-        lib.get::<libloading::Symbol<unsafe extern "C" fn() -> c_int>>(
-            b"taos_write_raw_block_with_fields\0",
+        lib.symbol::<dlopen2::symbor::Symbol<unsafe extern "C" fn()>>(
+            "taos_write_raw_block_with_fields",
         )
     }
     .is_ok()
@@ -68,8 +78,9 @@ fn taos_version() -> String {
         println!("cargo:rustc-cfg=taos_write_raw_block_with_fields");
     }
     let version = unsafe {
-        let version: libloading::Symbol<unsafe extern "C" fn() -> *const std::os::raw::c_char> =
-            lib.get(b"taos_get_client_info\0").unwrap();
+        let version: dlopen2::symbor::Symbol<
+            unsafe extern "C" fn() -> *const std::os::raw::c_char,
+        > = lib.symbol("taos_get_client_info").unwrap();
         std::ffi::CStr::from_ptr(version()).to_string_lossy()
     };
     println!("cargo:rustc-cfg=taos_version=\"v{}\"", version);
