@@ -115,9 +115,24 @@ pub(super) mod tmq {
 
         pub async fn poll_async(&self) -> RawRes {
             let elapsed = std::time::Instant::now();
+
             loop {
                 // poll with 50ms timeout.
-                if let Some(res) = self.poll_timeout(500) {
+                // let ptr = UnsafeCell::new(self.0);
+                let raw = *self;
+                let res = tokio::task::spawn_blocking(move || {
+                    let raw = raw;
+                    let res = unsafe { tmq_consumer_poll(raw.0, 200) };
+                    if res.is_null() {
+                        None
+                    } else {
+                        Some(RawRes(res))
+                    }
+                    // result
+                })
+                .await
+                .unwrap_or_default();
+                if let Some(res) = res {
                     log::debug!("received tmq message in {:?}", elapsed.elapsed());
                     break res;
                 } else {
