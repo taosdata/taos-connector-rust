@@ -636,29 +636,53 @@ impl WsTaos {
     async fn s_write_raw_block(&self, raw: &RawBlock) -> Result<()> {
         let req_id = self.sender.req_id();
         let message_id = req_id;
-        let raw_block_message = 5; // action number from `taosAdapter/controller/rest/const.go:L56`.
+        // if self.version().starts_with('2') {
+        //     panic!("TDengine v2.x does not support to write_raw_block");
+        // }
+        if self.version().starts_with("3.0.1.") {
+            let raw_block_message = 4; // action number from `taosAdapter/controller/rest/const.go:L56`.
 
-        let mut meta = Vec::new();
-        meta.write_u64_le(req_id)?;
-        meta.write_u64_le(message_id)?;
-        meta.write_u64_le(raw_block_message as u64)?;
-        meta.write_u32_le(raw.nrows() as u32)?;
-        meta.write_inlined_str::<2>(raw.table_name().unwrap())?;
-        meta.write_all(raw.as_raw_bytes())?;
-        let fields = raw
-            .fields()
-            .into_iter()
-            .map(|f| f.to_c_field())
-            .collect_vec();
+            let mut meta = Vec::new();
+            meta.write_u64_le(req_id)?;
+            meta.write_u64_le(message_id)?;
+            meta.write_u64_le(raw_block_message as u64)?;
+            meta.write_u32_le(raw.nrows() as u32)?;
+            meta.write_inlined_str::<2>(raw.table_name().unwrap())?;
+            meta.write_all(raw.as_raw_bytes())?;
 
-        let fields = unsafe { std::slice::from_raw_parts(fields.as_ptr() as _, fields.len() * 72) };
-        meta.write_all(fields)?;
-        let len = meta.len();
-        log::debug!("write block with req_id: {req_id}, raw data len: {len}",);
+            let len = meta.len();
+            log::debug!("write block with req_id: {req_id}, raw data len: {len}",);
 
-        match self.sender.send_recv(WsSend::Binary(meta)).await? {
-            WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
-            _ => unreachable!(),
+            match self.sender.send_recv(WsSend::Binary(meta)).await? {
+                WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
+                _ => Err(RawError::from_string("write raw block error"))?,
+            }
+        } else {
+            let raw_block_message = 5; // action number from `taosAdapter/controller/rest/const.go:L56`.
+
+            let mut meta = Vec::new();
+            meta.write_u64_le(req_id)?;
+            meta.write_u64_le(message_id)?;
+            meta.write_u64_le(raw_block_message as u64)?;
+            meta.write_u32_le(raw.nrows() as u32)?;
+            meta.write_inlined_str::<2>(raw.table_name().unwrap())?;
+            meta.write_all(raw.as_raw_bytes())?;
+            let fields = raw
+                .fields()
+                .into_iter()
+                .map(|f| f.to_c_field())
+                .collect_vec();
+
+            let fields =
+                unsafe { std::slice::from_raw_parts(fields.as_ptr() as _, fields.len() * 72) };
+            meta.write_all(fields)?;
+            let len = meta.len();
+            log::debug!("write block with req_id: {req_id}, raw data len: {len}",);
+
+            match self.sender.send_recv(WsSend::Binary(meta)).await? {
+                WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
+                _ => Err(RawError::from_string("write raw block error"))?,
+            }
         }
     }
 
