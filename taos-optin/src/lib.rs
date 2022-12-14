@@ -325,6 +325,8 @@ impl TBuilder for TaosBuilder {
             lib.options(types::TSDB_OPTION::ConfigDir, dir);
         }
 
+        lib.options(types::TSDB_OPTION::ShellActivityTimer, "3600");
+
         Ok(Self {
             dsn,
             auth,
