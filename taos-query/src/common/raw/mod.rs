@@ -733,6 +733,13 @@ impl RawBlock {
             .collect_vec()
     }
 
+    // pub fn fields_iter(&self) -> impl Iterator<Item = Field> + '_ {
+    //     self.schemas()
+    //         .iter()
+    //         .zip(self.field_names())
+    //         .map(|(schema, name)| Field::new(name, schema.ty, schema.len))
+    // }
+
     pub fn to_create(&self) -> Option<MetaCreate> {
         self.table_name().map(|table_name| MetaCreate::Normal {
             table_name: table_name.to_string(),

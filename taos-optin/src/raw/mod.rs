@@ -11,7 +11,7 @@ use std::{
 };
 
 use taos_query::{
-    common::raw_data_t,
+    common::{c_field_t, raw_data_t},
     prelude::{Code, Field, Precision, RawError, RawMeta},
     RawBlock,
 };
@@ -77,6 +77,16 @@ pub struct ApiEntry {
             nrows: i32,
             ptr: *const c_char,
             tbname: *const c_char,
+        ) -> i32,
+    >,
+    taos_write_raw_block_with_fields: Option<
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            nrows: i32,
+            ptr: *const c_char,
+            tbname: *const c_char,
+            fields: *const c_field_t,
+            fields_count: i32,
         ) -> i32,
     >,
 
@@ -397,6 +407,7 @@ impl ApiEntry {
                 taos_fetch_raw_block_a,
                 tmq_write_raw,
                 taos_write_raw_block,
+                taos_write_raw_block_with_fields,
                 taos_get_raw_block,
                 taos_result_block
             );
@@ -527,6 +538,7 @@ impl ApiEntry {
                 taos_query,
                 tmq_write_raw,
                 taos_write_raw_block,
+                taos_write_raw_block_with_fields,
                 taos_result_block,
 
                 taos_free_result,
@@ -729,7 +741,17 @@ impl RawTaos {
             .table_name()
             .ok_or_else(|| RawError::new(Code::Failed, "raw block should have table name"))?;
         let ptr = block.as_raw_bytes().as_ptr();
-        if let Some(f) = self.c.taos_write_raw_block {
+        if let Some(f) = self.c.taos_write_raw_block_with_fields {
+            let fields: Vec<_> = block.fields().into_iter().map(|f| f.to_c_field()).collect();
+            err_or!(f(
+                self.as_ptr(),
+                nrows as _,
+                ptr as _,
+                name.into_c_str().as_ptr(),
+                fields.as_ptr() as _,
+                fields.len() as _,
+            ))
+        } else if let Some(f) = self.c.taos_write_raw_block {
             err_or!(f(
                 self.as_ptr(),
                 nrows as _,
