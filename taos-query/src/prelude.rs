@@ -24,6 +24,8 @@ pub use r#async::*;
 pub use tokio;
 
 pub mod sync {
+    use std::borrow::Cow;
+
     pub use super::_priv::*;
 
     pub use crate::stmt::Bindable;
@@ -216,6 +218,15 @@ pub mod sync {
                 .map_or(Ok(None), |v| v.map(Some).map_err(Into::into))
         }
 
+
+        /// Short for `SELECT server_version()` as [String].
+        fn server_version(&self) -> Result<Cow<str>, Self::Error> {
+            Ok(self
+                .query_one::<_, String>("SELECT server_version()")?
+                .expect("should always has result")
+                .into())
+        }
+
         fn create_topic(
             &self,
             name: impl AsRef<str>,
@@ -234,7 +245,7 @@ pub mod sync {
             db: impl std::fmt::Display,
         ) -> Result<(), Self::Error> {
             let name = name.as_ref();
-            let query = format!("create topic if not exists {name} as database {db}");
+            let query = format!("create topic if not exists {name} as database `{db}`");
 
             self.exec(&query)?;
             Ok(())
@@ -266,12 +277,19 @@ pub mod sync {
                     .try_collect()?,
             ))
         }
+
+
+        /// Check if database exists
+        fn database_exists(&self, name: &str) -> Result<bool, Self::Error> {
+            Ok(self.exec(format!("show `{name}`.stables")).is_ok())
+        }
     }
 }
 
 mod r#async {
     use itertools::Itertools;
     use serde::de::DeserializeOwned;
+    use std::borrow::Cow;
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use std::{fmt::Debug, marker::PhantomData};
@@ -499,7 +517,7 @@ mod r#async {
         /// - `select count(*) from ...`
         /// - `select last(*) from ...`
         ///
-        /// Type `T` could be `Vec<taos::query::common::Value>`, a tuple, or a struct with serde support.
+        /// Type `T` could be `Vec<Value>`, a tuple, or a struct with serde support.
         ///
         /// ## Example
         ///
@@ -524,6 +542,15 @@ mod r#async {
                 .into_iter()
                 .next()
                 .map_or(Ok(None), |v| v.map(Some).map_err(Into::into))
+        }
+
+        /// Short for `SELECT server_version()` as [String].
+        async fn server_version(&self) -> Result<Cow<str>, Self::Error> {
+            Ok(self
+                .query_one::<_, String>("SELECT server_version()")
+                .await?
+                .expect("should always has result")
+                .into())
         }
 
         /// Short for `CREATE DATABASE IF NOT EXISTS {name}`.
@@ -615,7 +642,7 @@ mod r#async {
 
         /// Check if database exists
         async fn database_exists(&self, name: &str) -> Result<bool, Self::Error> {
-            Ok(self.exec(format!("use `{name}`")).await.is_ok())
+            Ok(self.exec(format!("show `{name}`.stables")).await.is_ok())
         }
 
         /// Sync version of `exec`.
