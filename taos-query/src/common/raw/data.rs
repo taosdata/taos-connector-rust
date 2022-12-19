@@ -10,7 +10,7 @@ const RAW_PTR_OFFSET: usize = std::mem::size_of::<u32>() + std::mem::size_of::<u
 ///
 /// It can be copy/cloned, but should not use it outbound away a offset lifetime.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct raw_data_t {
     pub raw: *const c_void,
     pub raw_len: u32,
@@ -20,12 +20,12 @@ pub struct raw_data_t {
 unsafe impl Send for raw_data_t {}
 
 impl raw_data_t {
-    fn to_bytes(&self) -> Bytes {
+    pub fn to_bytes(&self) -> Bytes {
         let cap = // raw data len
             self.raw_len as usize +
-            // self.raw_mem_len
+            // self.raw_len
             std::mem::size_of::<u32>() +
-            // self.raw_meta
+            // self.raw_type
             std::mem::size_of::<u16>();
         let mut data = Vec::with_capacity(cap);
 

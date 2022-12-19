@@ -99,7 +99,13 @@ impl TimestampView {
             None
         } else {
             Some(Timestamp::new(
-                *self.as_raw_slice().get_unchecked(row),
+                std::ptr::read_unaligned(
+                    self.data
+                        .as_ptr()
+                        .offset((row * std::mem::size_of::<Item>()) as isize)
+                        as _,
+                ),
+                // *self.as_raw_slice().get_unchecked(row),
                 self.precision,
             ))
         }

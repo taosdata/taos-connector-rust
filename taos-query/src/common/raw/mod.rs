@@ -8,7 +8,6 @@ use serde::Deserialize;
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
     ffi::c_void,
-    ops::Deref,
     ptr::NonNull,
     sync::Arc,
 };
@@ -148,7 +147,7 @@ impl RawBlock {
         let header = &*(ptr as *const Header);
         let len = header.length as usize;
         let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
-        let bytes = Bytes::from(bytes);
+        let bytes = Bytes::from(bytes.to_vec());
         Self::parse_from_raw_block(bytes, precision).with_layout(Layout::default())
     }
 
@@ -448,7 +447,7 @@ impl RawBlock {
         let mut columns = Vec::with_capacity(cols);
         for col in 0..cols {
             // go for each column
-            let length = unsafe { *(lengths.deref().get_unchecked(col)) } as usize;
+            let length = unsafe { lengths.get_unchecked(col) } as usize;
             let schema = unsafe { schemas.get_unchecked(col) };
             log::trace!("col: {}, length: {}, schema: {:?}", col, length, schema);
 

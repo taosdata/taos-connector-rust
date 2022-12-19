@@ -48,14 +48,14 @@ impl VarCharView {
 
     /// Unsafe version for [is_null](#method.is_null)
     pub(crate) unsafe fn is_null_unchecked(&self, row: usize) -> bool {
-        *self.offsets.get_unchecked(row) < 0
+        self.offsets.get_unchecked(row) < 0
     }
 
     pub(crate) unsafe fn get_unchecked(&self, row: usize) -> Option<&InlineStr> {
         let offset = self.offsets.get_unchecked(row);
-        if *offset >= 0 {
+        if offset >= 0 {
             Some(InlineStr::<u16>::from_ptr(
-                self.data.as_ptr().offset(*offset as isize),
+                self.data.as_ptr().offset(offset as isize),
             ))
         } else {
             None
