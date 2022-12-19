@@ -101,6 +101,12 @@ impl RawRes {
         }
         meta
     }
+    #[inline]
+    pub(crate) fn tmq_free_raw(&self, raw: raw_data_t)  {
+        unsafe {
+            tmq_free_raw(raw);
+        }
+    }
 }
 
 pub struct TmqBuilder {
@@ -249,6 +255,7 @@ impl IsMeta for Meta {
         data.extend(unsafe {
             std::slice::from_raw_parts(raw.raw as *const u8, raw.raw_len as usize)
         });
+        self.raw.tmq_free_raw(raw);
         Ok(RawMeta::new(data.into()))
     }
 

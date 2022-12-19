@@ -123,6 +123,7 @@ extern "C" {
     );
 
     pub fn tmq_get_raw(res: *mut TAOS_RES, meta: *mut raw_data_t) -> i32;
+    pub fn tmq_free_raw(raw: raw_data_t);
     pub fn tmq_write_raw(taos: *mut TAOS, meta: raw_data_t) -> i32;
 
     pub fn taos_write_raw_block(
