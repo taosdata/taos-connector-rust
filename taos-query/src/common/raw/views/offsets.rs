@@ -36,6 +36,16 @@ impl Offsets {
     pub fn len(&self) -> usize {
         self.0.len() / std::mem::size_of::<i32>()
     }
+
+    pub unsafe fn get_unchecked(&self, index: usize) -> i32 {
+        unsafe {
+            std::ptr::read_unaligned(
+                self.0
+                    .as_ptr()
+                    .offset((index * std::mem::size_of::<i32>()) as isize) as _,
+            )
+        }
+    }
 }
 
 impl<'a> IntoIterator for &'a Offsets {

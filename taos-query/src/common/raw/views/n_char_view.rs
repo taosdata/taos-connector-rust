@@ -44,7 +44,7 @@ impl NCharView {
 
     /// Unsafe version for [methods.is_null]
     pub unsafe fn is_null_unchecked(&self, row: usize) -> bool {
-        *self.offsets.get_unchecked(row) < 0
+        self.offsets.get_unchecked(row) < 0
     }
 
     pub unsafe fn nchar_to_utf8(&self) {
@@ -80,7 +80,7 @@ impl NCharView {
     #[inline]
     pub unsafe fn get_inline_str_unchecked(&self, row: usize) -> Option<&InlineStr> {
         let offset = self.offsets.get_unchecked(row);
-        if *offset >= 0 {
+        if offset >= 0 {
             self.nchar_to_utf8();
             //     // let me: &mut Self = unsafe { std::mem::transmute(&self) };
             //     let is_chars = &mut *self.is_chars.get();
@@ -91,7 +91,7 @@ impl NCharView {
             //     )
             // } else {
             Some(InlineStr::<u16>::from_ptr(
-                self.data.as_ptr().offset(*offset as isize),
+                self.data.as_ptr().offset(offset as isize),
             ))
             // }
         } else {

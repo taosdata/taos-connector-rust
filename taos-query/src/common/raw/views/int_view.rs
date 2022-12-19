@@ -69,8 +69,14 @@ impl IntView {
         if self.nulls.is_null_unchecked(row) {
             None
         } else {
-            Some(*self.as_raw_slice().get_unchecked(row))
+            Some(*self.get_unchecked_inner(row))
         }
+    }
+
+    unsafe fn get_unchecked_inner(&self, row: usize) -> *const Item {
+        self.data
+            .as_ptr()
+            .offset(row as isize * std::mem::size_of::<Item>() as isize) as _
     }
 
     pub unsafe fn get_ref_unchecked(&self, row: usize) -> Option<*const Item> {

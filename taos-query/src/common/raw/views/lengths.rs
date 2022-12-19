@@ -20,10 +20,22 @@ impl Debug for Lengths {
 impl Lengths {
     /// As a [ColSchema] slice.
     pub fn as_slice(&self) -> &[u32] {
+        debug_assert!(self.0.len() % std::mem::size_of::<u32>() == 0);
         unsafe {
             std::slice::from_raw_parts(
                 self.0.as_ptr() as *const u32,
                 self.0.len() / std::mem::size_of::<u32>(),
+            )
+        }
+    }
+
+
+    pub unsafe fn get_unchecked(&self, index: usize) -> u32 {
+        unsafe {
+            std::ptr::read_unaligned(
+                self.0
+                    .as_ptr()
+                    .offset((index * std::mem::size_of::<u32>()) as isize) as _,
             )
         }
     }
