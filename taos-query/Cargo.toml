@@ -48,8 +48,6 @@ r2d2 = { version = "0.8.9", optional = true }
 
 tokio = { version = "1", features = ["full"] }
 
-bytemuck = "*"
-
 [dev-dependencies]
 flate2 = "1"
 pretty_env_logger = "0.4.0"
