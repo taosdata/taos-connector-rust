@@ -41,8 +41,7 @@ impl<'a> Future for QueryFuture<'a> {
                 res: *mut TAOS_RES,
                 code: c_int,
             ) {
-                let param = param as *mut (&UnsafeCell<State>, Waker);
-                let state = param.read();
+                let state = Box::from_raw(param as *mut (&UnsafeCell<State>, Waker));
                 let mut s = { &mut *state.0.get() };
 
                 s.result = res;
