@@ -987,6 +987,7 @@ impl crate::prelude::AsyncInlinable for RawBlock {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_raw_from_v2() {
+    use std::ops::Deref;
     use crate::prelude::AsyncInlinable;
     // pretty_env_logger::formatted_builder()
     //     .filter_level(log::LevelFilter::Trace)
