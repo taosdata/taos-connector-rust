@@ -115,7 +115,7 @@ impl TaosBuilder {
 
         let addr = match dsn.addresses.first() {
             Some(addr) => {
-                if addr.host.as_deref() == Some("localhost") {
+                if addr.port.is_none() && addr.host.as_deref() == Some("localhost") {
                     "localhost:6041".to_string()
                 } else {
                     addr.to_string()
