@@ -102,7 +102,7 @@ impl RawRes {
         meta
     }
     #[inline]
-    pub(crate) fn tmq_free_raw(&self, raw: raw_data_t)  {
+    pub(crate) fn tmq_free_raw(&self, raw: raw_data_t) {
         unsafe {
             tmq_free_raw(raw);
         }
@@ -858,6 +858,7 @@ mod tests {
                         },
                         taos_query::common::JsonMeta::Alter(_) => (),
                         taos_query::common::JsonMeta::Drop(_) => (),
+                        taos_query::common::JsonMeta::Delete(_) => (),
                     }
 
                     // meta data can be write to an database seamlessly by raw or json (to sql).
@@ -1001,6 +1002,113 @@ mod tests {
         ])
         .await?;
         target.exec("drop database sys_ts2035_target").await?;
+        Ok(())
+    }
+
+    /// Partial update a record with different columns.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_delete_meta() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+        // pretty_env_logger::init_timed();
+
+        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
+
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        taos.exec_many([
+            "drop topic if exists sys_delete_meta",
+            "drop database if exists sys_delete_meta",
+            "create database sys_delete_meta",
+            "create topic sys_delete_meta with meta as database sys_delete_meta",
+            "use sys_delete_meta",
+            "create table tb1 (ts timestamp, c1 int, c2 int)",
+        ])
+        .await?;
+
+        taos.exec_many([
+            format!("insert into tb1 (ts, c1) values({ts}, 0) (now)"),
+            format!("delete from tb1 where ts = {ts}"),
+        ])
+        .await?;
+
+        // target
+        let target = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
+        target
+            .exec_many([
+                "drop database if exists sys_delete_meta_target",
+                "create database sys_delete_meta_target",
+                "use sys_delete_meta_target",
+                // "create table tb1 (ts timestamp, c1 int, c2 int)",
+            ])
+            .await?;
+
+        let builder = TmqBuilder::from_dsn(
+            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false",
+        )?;
+        let mut consumer = builder.build()?;
+        consumer.subscribe(["sys_delete_meta"]).await?;
+
+        consumer
+            .stream()
+            .try_for_each(|(offset, message)| async {
+                // Offset contains information for topic name, database name and vgroup id,
+                //  similar to kafka topic/partition/offset.
+                let _ = offset.topic();
+                let _ = offset.database();
+                let _ = offset.vgroup_id();
+
+                match message {
+                    MessageSet::Meta(meta) => {
+                        dbg!(&meta.as_json_meta().await?);
+                        target.write_raw_meta(meta.as_raw_meta().await?).await?;
+                    }
+                    MessageSet::Data(mut data) => {
+                        println!("is data");
+                        let raw = data.as_raw_data().await?;
+                        let mut has_blocks = false;
+                        // target
+                        //     .write_raw_meta(unsafe { std::mem::transmute(raw) })
+                        //     .await?;
+                        // data message may have more than one data block for various tables.
+                        while let Some(data) = data.next().transpose()? {
+                            if !has_blocks {
+                                has_blocks = true;
+                            }
+                            dbg!(data.table_name());
+                            dbg!(&data);
+                            target.write_raw_block(&data).await?;
+                        }
+                        if !has_blocks {
+                            target
+                                .write_raw_meta(unsafe { std::mem::transmute(raw) })
+                                .await?;
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                consumer.commit(offset).await?;
+                Ok(())
+            })
+            .await?;
+
+        consumer.unsubscribe().await;
+
+        assert!(target
+            .query_one::<_, (Option<i32>, Option<i32>)>("select c1, c2 from tb1")
+            .await?
+            .is_none());
+
+        // assert_eq!(c1, None);
+
+        taos.exec_many([
+            "drop topic sys_delete_meta", // drop topic before dropping database
+            "drop database sys_delete_meta",
+        ])
+        .await?;
+        target.exec("drop database sys_delete_meta_target").await?;
         Ok(())
     }
     #[tokio::test]

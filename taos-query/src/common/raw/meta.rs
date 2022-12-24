@@ -398,6 +398,17 @@ impl Display for MetaDrop {
         }
     }
 }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MetaDelete {
+    sql: String,
+}
+
+impl Display for MetaDelete {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.sql)
+    }
+}
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(tag = "type")]
 #[serde(rename_all = "camelCase")]
@@ -405,6 +416,7 @@ pub enum JsonMeta {
     Create(MetaCreate),
     Alter(MetaAlter),
     Drop(MetaDrop),
+    Delete(MetaDelete),
 }
 
 impl Display for JsonMeta {
@@ -413,6 +425,7 @@ impl Display for JsonMeta {
             JsonMeta::Create(meta) => meta.fmt(f),
             JsonMeta::Alter(alter) => alter.fmt(f),
             JsonMeta::Drop(drop) => drop.fmt(f),
+            JsonMeta::Delete(delete) => delete.fmt(f),
             // _ => Ok(()),
         }
     }
