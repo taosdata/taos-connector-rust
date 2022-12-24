@@ -61,10 +61,11 @@ impl RawRes {
     }
 
     #[inline]
-    pub fn with_code(self, code: Code) -> Result<Self, Error> {
+    pub fn with_code(mut self, code: Code) -> Result<Self, Error> {
         if code.success() {
             Ok(self)
         } else {
+            self.free_result();
             Err(Error::new(code, self.err_as_str()))
         }
     }
