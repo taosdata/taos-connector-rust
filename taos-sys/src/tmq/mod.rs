@@ -1029,7 +1029,7 @@ mod tests {
         .await?;
 
         taos.exec_many([
-            format!("insert into tb1 (ts, c1) values({ts}, 0) (now)"),
+            format!("insert into tb1 (ts, c1) values({ts}, 0)"),
             format!("delete from tb1 where ts = {ts}"),
         ])
         .await?;
