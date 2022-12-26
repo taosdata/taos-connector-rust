@@ -589,7 +589,7 @@ mod r#async {
             db: impl std::fmt::Display + Send + 'async_trait,
         ) -> Result<(), Self::Error> {
             let name = name.as_ref();
-            let query = format!("create topic if not exists {name} with meta as database {db}");
+            let query = format!("create topic if not exists {name} with meta as database `{db}`");
 
             // todo(@huolinhe): cannot set error. we should use a global error type here (?).
 
