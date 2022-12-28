@@ -17,6 +17,7 @@ thiserror = "1.0.30"
 urlencoding = "2.1.0"
 regex = "1"
 lazy_static = "1.4.0"
+indexmap = "1.9.2"
 
 [features]
 pest = ["dep:pest", "pest_derive"]

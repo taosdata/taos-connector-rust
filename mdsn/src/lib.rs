@@ -67,12 +67,12 @@
 //! ```
 //!
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::string::FromUtf8Error;
 
+use indexmap::IndexMap;
 use itertools::Itertools;
 #[cfg(feature = "pest")]
 use pest::Parser;
@@ -155,7 +155,7 @@ impl Dsn {
         } else {
             vec![]
         };
-        let mut params = BTreeMap::new();
+        let mut params = IndexMap::new();
         if let Some(p) = cap.name("params") {
             for p in p.as_str().split_terminator('&') {
                 if p.contains('=') {
@@ -451,7 +451,7 @@ pub struct Dsn {
     pub addresses: Vec<Address>,
     pub path: Option<String>,
     pub subject: Option<String>,
-    pub params: BTreeMap<String, String>,
+    pub params: IndexMap<String, String>,
 }
 
 impl Dsn {
@@ -558,7 +558,7 @@ impl Display for Dsn {
 
 impl Dsn {
     #[inline]
-    pub fn drain_params(&mut self) -> BTreeMap<String, String> {
+    pub fn drain_params(&mut self) -> IndexMap<String, String> {
         let drained = self
             .params
             .iter()
@@ -1019,7 +1019,7 @@ mod tests {
                 username: Some("root".to_string()),
                 password: Some("pass".to_string()),
                 subject: Some("/full/unix/path/to/file.db".to_string()),
-                params: (BTreeMap::from_iter(vec![
+                params: (IndexMap::from_iter(vec![
                     ("mode".to_string(), "0666".to_string()),
                     ("readonly".to_string(), "true".to_string())
                 ])),
@@ -1037,7 +1037,7 @@ mod tests {
             dsn,
             Dsn {
                 driver: "taos".to_string(),
-                params: (BTreeMap::from_iter(vec![("abc".to_string(), "abc".to_string())])),
+                params: (IndexMap::from_iter(vec![("abc".to_string(), "abc".to_string())])),
                 ..Default::default()
             }
         );
@@ -1051,7 +1051,7 @@ mod tests {
                 driver: "taos".to_string(),
                 username: Some("root".to_string()),
                 addresses: vec![Address::from_host("localhost")],
-                params: (BTreeMap::from_iter(vec![("abc".to_string(), "abc".to_string())])),
+                params: (IndexMap::from_iter(vec![("abc".to_string(), "abc".to_string())])),
                 ..Default::default()
             }
         );
@@ -1096,5 +1096,30 @@ mod tests {
             dsn.to_string(),
             format!("taos://root:{e}@localhost:6030?code1={e}")
         );
+    }
+
+    #[test]
+    fn params_order() {
+        let cases = vec![
+            (
+                "taos://localhost:6030?c=d&flag&a=b&e=f",
+                vec![("c", "d"), ("flag", ""), ("a", "b"), ("e", "f")],
+            ),
+            (
+                "taos://localhost:6030?--c=d&--flag&--a=b&e=f",
+                vec![("--c", "d"), ("--flag", ""), ("--a", "b"), ("e", "f")],
+            ),
+        ];
+
+        for (dsn, expected_params) in cases {
+            let dsn = Dsn::from_str(dsn).unwrap();
+
+            let actual_params: Vec<_> = dsn
+                .params
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            assert_eq!(actual_params, expected_params, "test params for {}", dsn);
+        }
     }
 }
