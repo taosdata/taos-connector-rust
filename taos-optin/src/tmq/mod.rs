@@ -735,9 +735,23 @@ mod tests {
                                 let desc = taos.describe(table_name.as_str())?;
                                 dbg!(desc);
                             }
+                            taos_query::prelude::MetaCreate::Super {
+                                table_name,
+                                columns,
+                                tags,
+                            } => todo!(),
+                            taos_query::prelude::MetaCreate::Child {
+                                table_name,
+                                using,
+                                tags,
+                                tag_num,
+                            } => todo!(),
+                            taos_query::prelude::MetaCreate::Normal {
+                                table_name,
+                                columns,
+                            } => todo!(),
                         },
-                        taos_query::common::JsonMeta::Alter(_) => (),
-                        taos_query::common::JsonMeta::Drop(_) => (),
+                        _ => (),
                     }
 
                     // meta data can be write to an database seamlessly by raw or json (to sql).

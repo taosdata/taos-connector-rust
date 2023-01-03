@@ -109,6 +109,28 @@ impl<M, D> MessageSet<M, D> {
             MessageSet::MetaData(_, d) => Some(d),
         }
     }
+
+    pub fn has_meta(&self) -> bool {
+        matches!(self, &MessageSet::Meta(_) | &MessageSet::MetaData(_, _))
+    }
+    pub fn has_data(&self) -> bool {
+        matches!(self, &MessageSet::Data(_) | &MessageSet::MetaData(_, _))
+    }
+
+    pub fn meta(&self) -> Option<&M> {
+        match self {
+            MessageSet::Meta(m) => Some(m),
+            MessageSet::Data(_) => None,
+            MessageSet::MetaData(m, _) => Some(m),
+        }
+    }
+    pub fn data(&mut self) -> Option<&mut D> {
+        match self {
+            MessageSet::Meta(_) => None,
+            MessageSet::Data(d) => Some(d),
+            MessageSet::MetaData(_, d) => Some(d),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -165,6 +187,13 @@ pub trait IsAsyncData {
 
     async fn as_raw_data(&self) -> Result<RawData, Self::Error>;
     async fn fetch_raw_block(&self) -> Result<Option<RawBlock>, Self::Error>;
+}
+
+pub trait IsData {
+    type Error;
+
+    fn as_raw_data(&self) -> Result<RawData, Self::Error>;
+    fn fetch_raw_block(&self) -> Result<Option<RawBlock>, Self::Error>;
 }
 
 #[async_trait::async_trait]

@@ -1,11 +1,8 @@
-#[cfg(feature = "optin")]
-use super::taos_sys;
-
 use taos_query::prelude::Value;
 use taos_query::stmt::Bindable;
 
 use taos_query::prelude::ColumnView;
-use taos_sys::Stmt as NativeStmt;
+use crate::sys::Stmt as NativeStmt;
 use taos_ws::Stmt as WsStmt;
 enum StmtInner {
     Native(NativeStmt),

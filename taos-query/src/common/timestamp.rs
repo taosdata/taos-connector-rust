@@ -87,6 +87,7 @@ mod tests {
             assert!(
                 ts.to_naive_datetime() == chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
             );
+            dbg!(ts.to_datetime_with_tz());
         }
     }
 

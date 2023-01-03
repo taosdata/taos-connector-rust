@@ -2,9 +2,9 @@ name: build
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 env:
   TOOLS_BUILD_TYPE: Release
@@ -48,9 +48,9 @@ jobs:
           path: |
             target
           key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
-      
+
       - run: |
-          cargo build -p taos --no-default-features --features ws
+          cargo build -p taos --no-default-features --features ws-rustls
           cargo build -p taos-ws-sys
           cargo build -p taos-ws-py
 
@@ -60,9 +60,9 @@ jobs:
       - name: Checkout tdengine
         uses: actions/checkout@v2
         with:
-          repository: 'taosdata/TDengine'
-          path: 'TDengine'
-          ref: '3.0'
+          repository: "taosdata/TDengine"
+          path: "TDengine"
+          ref: "3.0"
 
       - name: Prepare development tools
         run: |
