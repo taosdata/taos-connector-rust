@@ -14,7 +14,8 @@ jobs:
     strategy:
       matrix:
         target: [x86_64]
-        python: ["3.7", "3.8", "3.9", "3.10"]
+        # python: ["3.7", "3.8", "3.9", "3.10"]
+        python: ["3.9"]
     steps:
       - uses: actions/checkout@v3
         with:
@@ -42,7 +43,7 @@ jobs:
           target: ${{ matrix.target }}
           working-directory: taos-ws-py
           manylinux: auto
-          args: --release -i python${{ matrix.python }} --strip
+          args: --release --strip
 
       - name: Install built wheel
         if: matrix.target == 'x86_64' && steps.rebuild.outputs.any_changed == 'true'
