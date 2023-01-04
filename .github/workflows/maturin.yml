@@ -11,163 +11,149 @@ env:
   PYTHON_VERSION: "3.7" # to build abi3 wheels
 
 jobs:
-  # macos:
-  #   runs-on: macos-latest
-  #   strategy:
-  #     matrix:
-  #       target: [x86_64]
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #       with:
-  #         fetch-depth: 2
-  #     - name: Check if file changes would trigger a rebuild
-  #       id: rebuild
-  #       uses: tj-actions/changed-files@v35
-  #       with:
-  #         files: |
-  #           .github/workflows/maturin.yml
-  #           taos-ws-py/**
-  #           taos/Cargo.toml
-  #     - uses: actions/setup-python@v4
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       with:
-  #         python-version: "3.10"
-  #         architecture: x64
+  macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [x86_64]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+      - name: Check if file changes would trigger a rebuild
+        id: rebuild
+        uses: tj-actions/changed-files@v35
+        with:
+          files: |
+            .github/workflows/maturin.yml
+            taos-ws-py/**
+            taos/Cargo.toml
+      - uses: actions/setup-python@v4
+        if: steps.rebuild.outputs.any_changed == 'true'
+        with:
+          python-version: "3.10"
+          architecture: x64
 
-  #     - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@nightly
 
-  #     - name: Build wheels - x86_64
-  #       uses: PyO3/maturin-action@v1
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       with:
-  #         target: x86_64
-  #         working-directory: taos-ws-py
-  #         args: --release --strip
-  #     - name: Install built wheel - x86_64
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       run: |
-  #         pip install taos-ws-py --no-index --force-reinstall --find-links target/wheels
+      - name: Build wheels - x86_64
+        uses: PyO3/maturin-action@v1
+        if: steps.rebuild.outputs.any_changed == 'true'
+        with:
+          target: x86_64
+          working-directory: taos-ws-py
+          args: --release --strip
+      - name: Install built wheel - x86_64
+        if: steps.rebuild.outputs.any_changed == 'true'
+        run: |
+          pip install taos-ws-py --no-index --force-reinstall --find-links target/wheels
 
-  #     - name: Build wheels - universal2
-  #       uses: PyO3/maturin-action@v1
-  #       with:
-  #         working-directory: taos-ws-py
-  #         args: --release --universal2 --strip
-  #     - name: Install built wheel - universal2
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       run: |
-  #         pip install taos-ws-py --no-index --force-reinstall --find-links target/wheels
-  #     - name: Upload wheels
-  #       uses: actions/upload-artifact@v3
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       with:
-  #         name: wheels
-  #         path: target/wheels/**
-
+      - name: Build wheels - universal2
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: taos-ws-py
+          args: --release --universal2 --strip
+      - name: Install built wheel - universal2
+        if: steps.rebuild.outputs.any_changed == 'true'
+        run: |
+          pip install taos-ws-py --no-index --force-reinstall --find-links target/wheels
+      - name: Upload wheels
+        uses: actions/upload-artifact@v3
+        if: steps.rebuild.outputs.any_changed == 'true'
+        with:
+          name: wheels
+          path: target/wheels/**
 
   windows:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        target: [x64] #, x86
     steps:
-      - name: Build nothing
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+      - name: Check if file changes would trigger a rebuild
+        id: rebuild
+        uses: tj-actions/changed-files@v35
+        with:
+          files: |
+            .github/workflows/maturin.yml
+            taos-ws-py/**
+            taos/Cargo.toml
+      - uses: actions/setup-python@v4
+        if: steps.rebuild.outputs.any_changed == 'true'
+        with:
+          python-version: "3.10"
+          architecture: ${{ matrix.target }}
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        if: steps.rebuild.outputs.any_changed == 'true'
+        with:
+          target: ${{ matrix.target }}
+          working-directory: taos-ws-py
+          args: --release --strip
+
+      - name: Install built wheel
+        if: steps.rebuild.outputs.any_changed == 'true'
         run: |
-          mkdir target
-          mkdir target\wheels
-          echo "" > target\wheels\test.txt
+          pip install taos-ws-py --no-index --force-reinstall --find-links .\target\wheels
+
       - name: Upload wheels
         uses: actions/upload-artifact@v3
+        if: steps.rebuild.outputs.any_changed == 'true'
         with:
-          name: nothing
+          name: wheels
           path: target/wheels/**
 
-  # windows:
-  #   runs-on: windows-latest
-  #   strategy:
-  #     matrix:
-  #       target: [x64] #, x86
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #       with:
-  #         fetch-depth: 2
-  #     - name: Check if file changes would trigger a rebuild
-  #       id: rebuild
-  #       uses: tj-actions/changed-files@v35
-  #       with:
-  #         files: |
-  #           .github/workflows/maturin.yml
-  #           taos-ws-py/**
-  #           taos/Cargo.toml
-  #     - uses: actions/setup-python@v4
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       with:
-  #         python-version: "3.10"
-  #         architecture: ${{ matrix.target }}
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+      - name: Check if file changes would trigger a rebuild
+        id: rebuild
+        uses: tj-actions/changed-files@v35
+        with:
+          files: |
+            .github/workflows/maturin.yml
+            taos-ws-py/**
+            taos/Cargo.toml
+      - uses: actions/setup-python@v4
+        if: steps.rebuild.outputs.any_changed == 'true'
+        with:
+          python-version: "3.10"
+          architecture: x64
 
-  #     - uses: dtolnay/rust-toolchain@nightly
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        if: steps.rebuild.outputs.any_changed == 'true'
+        with:
+          rust-toolchain: nightly
+          target: ${{ matrix.target }}
+          working-directory: taos-ws-py
+          manylinux: auto
+          args: --release --strip
 
-  #     - name: Build wheels
-  #       uses: PyO3/maturin-action@v1
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       with:
-  #         target: ${{ matrix.target }}
-  #         working-directory: taos-ws-py
-  #         args: --release --strip
+      - name: Install built wheel
+        if: matrix.target == 'x86_64' && steps.rebuild.outputs.any_changed == 'true'
+        run: |
+          pip install taos-ws-py --no-index --force-reinstall --find-links target/wheels
 
-  #     - name: Install built wheel
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       run: |
-  #         pip install taos-ws-py --no-index --force-reinstall --find-links .\target\wheels
+      - name: Upload wheels
+        uses: actions/upload-artifact@v3
+        if: steps.rebuild.outputs.any_changed == 'true'
+        with:
+          name: wheels
+          path: target/wheels/**
 
-  #     - name: Upload wheels
-  #       uses: actions/upload-artifact@v3
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       with:
-  #         name: wheels
-  #         path: target/wheels/**
-
-  # linux:
-  #   runs-on: ubuntu-latest
-  #   strategy:
-  #     matrix:
-  #       target: [x86_64]
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #       with:
-  #         fetch-depth: 2
-  #     - name: Check if file changes would trigger a rebuild
-  #       id: rebuild
-  #       uses: tj-actions/changed-files@v35
-  #       with:
-  #         files: |
-  #           .github/workflows/maturin.yml
-  #           taos-ws-py/**
-  #           taos/Cargo.toml
-  #     - uses: actions/setup-python@v4
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       with:
-  #         python-version: "3.10"
-  #         architecture: x64
-
-  #     - name: Build wheels
-  #       uses: PyO3/maturin-action@v1
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       with:
-  #         rust-toolchain: nightly
-  #         target: ${{ matrix.target }}
-  #         working-directory: taos-ws-py
-  #         manylinux: auto
-  #         args: --release --strip
-
-  #     - name: Install built wheel
-  #       if: matrix.target == 'x86_64' && steps.rebuild.outputs.any_changed == 'true'
-  #       run: |
-  #         pip install taos-ws-py --no-index --force-reinstall --find-links target/wheels
-
-  #     - name: Upload wheels
-  #       uses: actions/upload-artifact@v3
-  #       if: steps.rebuild.outputs.any_changed == 'true'
-  #       with:
-  #         name: wheels
-  #         path: target/wheels/**
   linux-cross:
     runs-on: ubuntu-latest
     strategy:
