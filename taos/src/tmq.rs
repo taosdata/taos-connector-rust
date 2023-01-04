@@ -1,28 +1,30 @@
-#[cfg(feature = "optin")]
-use super::taos_sys;
-use taos_query::prelude::{AsAsyncConsumer, RawMeta, TBuilder, Timeout};
+use taos_query::{
+    block_in_place_or_global,
+    prelude::{AsAsyncConsumer, RawMeta, TBuilder, Timeout},
+    RawBlock,
+};
 
 enum TmqBuilderInner {
-    Native(taos_sys::TmqBuilder),
+    Native(crate::sys::TmqBuilder),
     Ws(taos_ws::consumer::TmqBuilder),
 }
 
 enum ConsumerInner {
-    Native(taos_sys::Consumer),
+    Native(crate::sys::Consumer),
     Ws(taos_ws::consumer::Consumer),
 }
 
 enum OffsetInner {
-    Native(taos_sys::tmq::Offset),
+    Native(crate::sys::tmq::Offset),
     Ws(taos_ws::consumer::Offset),
 }
 enum MetaInner {
-    Native(taos_sys::tmq::Meta),
+    Native(crate::sys::tmq::Meta),
     Ws(taos_ws::consumer::Meta),
 }
 
 enum DataInner {
-    Native(taos_sys::tmq::Data),
+    Native(crate::sys::tmq::Data),
     Ws(taos_ws::consumer::Data),
 }
 
@@ -52,7 +54,7 @@ impl TBuilder for TmqBuilder {
                 taos_ws::consumer::TmqBuilder::from_dsn(dsn)?,
             ))),
             ("taos" | "tmq", None) => Ok(Self(TmqBuilderInner::Native(
-                taos_sys::TmqBuilder::from_dsn(dsn)?,
+                crate::sys::TmqBuilder::from_dsn(dsn)?,
             ))),
             ("taos" | "tmq", Some("ws" | "wss" | "http" | "https")) => Ok(Self(
                 TmqBuilderInner::Ws(taos_ws::consumer::TmqBuilder::from_dsn(dsn)?),
@@ -97,7 +99,7 @@ impl taos_query::tmq::IsOffset for Offset {
     fn database(&self) -> &str {
         match &self.0 {
             OffsetInner::Native(offset) => {
-                <taos_sys::tmq::Offset as taos_query::tmq::IsOffset>::database(offset)
+                <crate::sys::tmq::Offset as taos_query::tmq::IsOffset>::database(offset)
             }
             OffsetInner::Ws(offset) => {
                 <taos_ws::consumer::Offset as taos_query::tmq::IsOffset>::database(offset)
@@ -108,7 +110,7 @@ impl taos_query::tmq::IsOffset for Offset {
     fn topic(&self) -> &str {
         match &self.0 {
             OffsetInner::Native(offset) => {
-                <taos_sys::tmq::Offset as taos_query::tmq::IsOffset>::topic(offset)
+                <crate::sys::tmq::Offset as taos_query::tmq::IsOffset>::topic(offset)
             }
             OffsetInner::Ws(offset) => {
                 <taos_ws::consumer::Offset as taos_query::tmq::IsOffset>::topic(offset)
@@ -119,7 +121,7 @@ impl taos_query::tmq::IsOffset for Offset {
     fn vgroup_id(&self) -> taos_query::tmq::VGroupId {
         match &self.0 {
             OffsetInner::Native(offset) => {
-                <taos_sys::tmq::Offset as taos_query::tmq::IsOffset>::vgroup_id(offset)
+                <crate::sys::tmq::Offset as taos_query::tmq::IsOffset>::vgroup_id(offset)
             }
             OffsetInner::Ws(offset) => {
                 <taos_ws::consumer::Offset as taos_query::tmq::IsOffset>::vgroup_id(offset)
@@ -135,7 +137,7 @@ impl taos_query::tmq::IsAsyncMeta for Meta {
     async fn as_raw_meta(&self) -> Result<RawMeta, Self::Error> {
         match &self.0 {
             MetaInner::Native(data) => {
-                <taos_sys::tmq::Meta as taos_query::tmq::IsAsyncMeta>::as_raw_meta(data)
+                <crate::sys::tmq::Meta as taos_query::tmq::IsAsyncMeta>::as_raw_meta(data)
                     .await
                     .map_err(Into::into)
             }
@@ -150,7 +152,7 @@ impl taos_query::tmq::IsAsyncMeta for Meta {
     async fn as_json_meta(&self) -> Result<taos_query::common::JsonMeta, Self::Error> {
         match &self.0 {
             MetaInner::Native(data) => {
-                <taos_sys::tmq::Meta as taos_query::tmq::IsAsyncMeta>::as_json_meta(data)
+                <crate::sys::tmq::Meta as taos_query::tmq::IsAsyncMeta>::as_json_meta(data)
                     .await
                     .map_err(Into::into)
             }
@@ -170,7 +172,7 @@ impl taos_query::tmq::IsAsyncData for Data {
     async fn as_raw_data(&self) -> Result<taos_query::common::RawData, Self::Error> {
         match &self.0 {
             DataInner::Native(data) => {
-                <taos_sys::tmq::Data as taos_query::tmq::IsAsyncData>::as_raw_data(data)
+                <crate::sys::tmq::Data as taos_query::tmq::IsAsyncData>::as_raw_data(data)
                     .await
                     .map_err(Into::into)
             }
@@ -185,7 +187,7 @@ impl taos_query::tmq::IsAsyncData for Data {
     async fn fetch_raw_block(&self) -> Result<Option<taos_query::RawBlock>, Self::Error> {
         match &self.0 {
             DataInner::Native(data) => {
-                <taos_sys::tmq::Data as taos_query::tmq::IsAsyncData>::fetch_raw_block(data)
+                <crate::sys::tmq::Data as taos_query::tmq::IsAsyncData>::fetch_raw_block(data)
                     .await
                     .map_err(Into::into)
             }
@@ -197,6 +199,7 @@ impl taos_query::tmq::IsAsyncData for Data {
         }
     }
 }
+
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
     type Error = super::Error;
@@ -209,7 +212,9 @@ impl AsAsyncConsumer for Consumer {
 
     fn default_timeout(&self) -> Timeout {
         match &self.0 {
-            ConsumerInner::Native(c) => <taos_sys::Consumer as AsAsyncConsumer>::default_timeout(c),
+            ConsumerInner::Native(c) => {
+                <crate::sys::Consumer as AsAsyncConsumer>::default_timeout(c)
+            }
             ConsumerInner::Ws(c) => {
                 <taos_ws::consumer::Consumer as AsAsyncConsumer>::default_timeout(c)
             }
@@ -222,7 +227,7 @@ impl AsAsyncConsumer for Consumer {
     ) -> Result<(), Self::Error> {
         match &mut self.0 {
             ConsumerInner::Native(c) => {
-                <taos_sys::Consumer as AsAsyncConsumer>::subscribe(c, topics)
+                <crate::sys::Consumer as AsAsyncConsumer>::subscribe(c, topics)
                     .await
                     .map_err(Into::into)
             }
@@ -240,7 +245,7 @@ impl AsAsyncConsumer for Consumer {
     ) -> Result<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>, Self::Error> {
         match &self.0 {
             ConsumerInner::Native(c) => {
-                <taos_sys::Consumer as AsAsyncConsumer>::recv_timeout(c, timeout)
+                <crate::sys::Consumer as AsAsyncConsumer>::recv_timeout(c, timeout)
                     .await
                     .map_err(Into::into)
                     .map(|msg| {
@@ -296,7 +301,7 @@ impl AsAsyncConsumer for Consumer {
         match &self.0 {
             ConsumerInner::Native(c) => match offset.0 {
                 OffsetInner::Native(offset) => {
-                    <taos_sys::Consumer as AsAsyncConsumer>::commit(c, offset)
+                    <crate::sys::Consumer as AsAsyncConsumer>::commit(c, offset)
                         .await
                         .map_err(Into::into)
                 }
@@ -314,15 +319,29 @@ impl AsAsyncConsumer for Consumer {
     }
 }
 
+impl taos_query::tmq::SyncOnAsync for Consumer {}
+impl taos_query::tmq::SyncOnAsync for Data {}
+impl taos_query::tmq::SyncOnAsync for Meta {}
+
+impl Iterator for Data {
+    type Item = Result<RawBlock, super::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use taos_query::prelude::IsAsyncData;
+        block_in_place_or_global(self.fetch_raw_block()).transpose()
+    }
+}
+// impl taos_query::tmq::AsConsumer for Consumer {}
 #[cfg(test)]
 mod tests {
     use std::{str::FromStr, time::Duration};
 
-    use super::*;
-    use crate::*;
+    use super::TmqBuilder;
+    use crate::TaosBuilder;
 
     #[test]
     fn builder() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
         let mut dsn: Dsn = "taos://".parse()?;
         dsn.set("group.id", "group1");
         dsn.set("client.id", "test");

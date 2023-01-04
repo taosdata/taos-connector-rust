@@ -7,7 +7,7 @@ pub enum Error {
     #[error(transparent)]
     Raw(#[from] RawError),
     #[error(transparent)]
-    Native(#[from] taos_sys::Error),
+    Native(#[from] crate::sys::Error),
     #[error(transparent)]
     Ws(#[from] taos_ws::Error),
     #[error(transparent)]
@@ -19,16 +19,16 @@ pub enum Error {
 }
 
 enum TaosBuilderInner {
-    Native(taos_sys::TaosBuilder),
+    Native(crate::sys::TaosBuilder),
     Ws(taos_ws::TaosBuilder),
 }
 pub(super) enum TaosInner {
-    Native(taos_sys::Taos),
+    Native(crate::sys::Taos),
     Ws(taos_ws::Taos),
 }
 
 enum ResultSetInner {
-    Native(taos_sys::ResultSet),
+    Native(crate::sys::ResultSet),
     Ws(taos_ws::ResultSet),
 }
 
@@ -56,7 +56,7 @@ impl TBuilder for TaosBuilder {
                 TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
             )),
             ("taos" | "tmq", None) => Ok(Self(TaosBuilderInner::Native(
-                taos_sys::TaosBuilder::from_dsn(dsn)?,
+                crate::sys::TaosBuilder::from_dsn(dsn)?,
             ))),
             ("taos" | "tmq", Some("ws" | "wss" | "http" | "https")) => Ok(Self(
                 TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
@@ -103,7 +103,7 @@ impl AsyncFetchable for ResultSet {
     fn affected_rows(&self) -> i32 {
         match &self.0 {
             ResultSetInner::Native(rs) => {
-                <taos_sys::ResultSet as AsyncFetchable>::affected_rows(rs)
+                <crate::sys::ResultSet as AsyncFetchable>::affected_rows(rs)
             }
             ResultSetInner::Ws(rs) => <taos_ws::ResultSet as AsyncFetchable>::affected_rows(rs),
         }
@@ -111,21 +111,21 @@ impl AsyncFetchable for ResultSet {
 
     fn precision(&self) -> Precision {
         match &self.0 {
-            ResultSetInner::Native(rs) => <taos_sys::ResultSet as AsyncFetchable>::precision(rs),
+            ResultSetInner::Native(rs) => <crate::sys::ResultSet as AsyncFetchable>::precision(rs),
             ResultSetInner::Ws(rs) => <taos_ws::ResultSet as AsyncFetchable>::precision(rs),
         }
     }
 
     fn fields(&self) -> &[Field] {
         match &self.0 {
-            ResultSetInner::Native(rs) => <taos_sys::ResultSet as AsyncFetchable>::fields(rs),
+            ResultSetInner::Native(rs) => <crate::sys::ResultSet as AsyncFetchable>::fields(rs),
             ResultSetInner::Ws(rs) => <taos_ws::ResultSet as AsyncFetchable>::fields(rs),
         }
     }
 
     fn summary(&self) -> (usize, usize) {
         match &self.0 {
-            ResultSetInner::Native(rs) => <taos_sys::ResultSet as AsyncFetchable>::summary(rs),
+            ResultSetInner::Native(rs) => <crate::sys::ResultSet as AsyncFetchable>::summary(rs),
             ResultSetInner::Ws(rs) => <taos_ws::ResultSet as AsyncFetchable>::summary(rs),
         }
     }
@@ -133,7 +133,7 @@ impl AsyncFetchable for ResultSet {
     fn update_summary(&mut self, nrows: usize) {
         match &mut self.0 {
             ResultSetInner::Native(rs) => {
-                <taos_sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
+                <crate::sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
             }
             ResultSetInner::Ws(rs) => {
                 <taos_ws::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
@@ -147,7 +147,7 @@ impl AsyncFetchable for ResultSet {
     ) -> std::task::Poll<Result<Option<RawBlock>, Self::Error>> {
         match &mut self.0 {
             ResultSetInner::Native(rs) => {
-                <taos_sys::ResultSet as AsyncFetchable>::fetch_raw_block(rs, cx).map_err(Into::into)
+                <crate::sys::ResultSet as AsyncFetchable>::fetch_raw_block(rs, cx).map_err(Into::into)
             }
             ResultSetInner::Ws(rs) => {
                 <taos_ws::ResultSet as AsyncFetchable>::fetch_raw_block(rs, cx).map_err(Into::into)
@@ -162,7 +162,7 @@ impl taos_query::Fetchable for ResultSet {
     fn affected_rows(&self) -> i32 {
         match &self.0 {
             ResultSetInner::Native(rs) => {
-                <taos_sys::ResultSet as AsyncFetchable>::affected_rows(rs)
+                <crate::sys::ResultSet as AsyncFetchable>::affected_rows(rs)
             }
             ResultSetInner::Ws(rs) => <taos_ws::ResultSet as AsyncFetchable>::affected_rows(rs),
         }
@@ -170,21 +170,21 @@ impl taos_query::Fetchable for ResultSet {
 
     fn precision(&self) -> Precision {
         match &self.0 {
-            ResultSetInner::Native(rs) => <taos_sys::ResultSet as AsyncFetchable>::precision(rs),
+            ResultSetInner::Native(rs) => <crate::sys::ResultSet as AsyncFetchable>::precision(rs),
             ResultSetInner::Ws(rs) => <taos_ws::ResultSet as AsyncFetchable>::precision(rs),
         }
     }
 
     fn fields(&self) -> &[Field] {
         match &self.0 {
-            ResultSetInner::Native(rs) => <taos_sys::ResultSet as AsyncFetchable>::fields(rs),
+            ResultSetInner::Native(rs) => <crate::sys::ResultSet as AsyncFetchable>::fields(rs),
             ResultSetInner::Ws(rs) => <taos_ws::ResultSet as AsyncFetchable>::fields(rs),
         }
     }
 
     fn summary(&self) -> (usize, usize) {
         match &self.0 {
-            ResultSetInner::Native(rs) => <taos_sys::ResultSet as AsyncFetchable>::summary(rs),
+            ResultSetInner::Native(rs) => <crate::sys::ResultSet as AsyncFetchable>::summary(rs),
             ResultSetInner::Ws(rs) => <taos_ws::ResultSet as AsyncFetchable>::summary(rs),
         }
     }
@@ -192,7 +192,7 @@ impl taos_query::Fetchable for ResultSet {
     fn update_summary(&mut self, nrows: usize) {
         match &mut self.0 {
             ResultSetInner::Native(rs) => {
-                <taos_sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
+                <crate::sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
             }
             ResultSetInner::Ws(rs) => {
                 <taos_ws::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
@@ -203,7 +203,7 @@ impl taos_query::Fetchable for ResultSet {
     fn fetch_raw_block(&mut self) -> Result<Option<RawBlock>, Self::Error> {
         match &mut self.0 {
             ResultSetInner::Native(rs) => {
-                <taos_sys::ResultSet as taos_query::Fetchable>::fetch_raw_block(rs)
+                <crate::sys::ResultSet as taos_query::Fetchable>::fetch_raw_block(rs)
                     .map_err(Into::into)
             }
             ResultSetInner::Ws(rs) => {
@@ -262,7 +262,7 @@ impl taos_query::Queryable for Taos {
 
     fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error> {
         match &self.0 {
-            TaosInner::Native(taos) => <taos_sys::Taos as taos_query::Queryable>::query(taos, sql)
+            TaosInner::Native(taos) => <crate::sys::Taos as taos_query::Queryable>::query(taos, sql)
                 .map(ResultSetInner::Native)
                 .map(ResultSet)
                 .map_err(Into::into),
@@ -276,7 +276,7 @@ impl taos_query::Queryable for Taos {
     fn write_raw_meta(&self, meta: RawMeta) -> Result<(), Self::Error> {
         match &self.0 {
             TaosInner::Native(taos) => {
-                <taos_sys::Taos as taos_query::Queryable>::write_raw_meta(taos, meta)
+                <crate::sys::Taos as taos_query::Queryable>::write_raw_meta(taos, meta)
                     .map_err(Into::into)
             }
             TaosInner::Ws(taos) => {
@@ -289,7 +289,7 @@ impl taos_query::Queryable for Taos {
     fn write_raw_block(&self, block: &RawBlock) -> Result<(), Self::Error> {
         match &self.0 {
             TaosInner::Native(taos) => {
-                <taos_sys::Taos as taos_query::Queryable>::write_raw_block(taos, block)
+                <crate::sys::Taos as taos_query::Queryable>::write_raw_block(taos, block)
                     .map_err(Into::into)
             }
             TaosInner::Ws(taos) => {

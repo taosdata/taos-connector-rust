@@ -7,7 +7,7 @@ pub mod sync {
     pub use taos_query::prelude::sync::*;
 
     pub use super::Stmt;
-    pub use super::{Consumer, MessageSet, TmqBuilder};
+    pub use super::{Consumer, MessageSet, Offset, TmqBuilder};
     pub use super::{Taos, TaosBuilder};
 }
 
@@ -19,7 +19,7 @@ pub use stmt::Stmt;
 #[cfg(all(feature = "ws", any(feature = "native", feature = "optin")))]
 mod tmq;
 #[cfg(all(feature = "ws", any(feature = "native", feature = "optin")))]
-pub use tmq::{Consumer, Data, MessageSet, Meta, TmqBuilder};
+pub use tmq::{Consumer, Data, MessageSet, Meta, Offset, TmqBuilder};
 
 #[cfg(all(feature = "ws", any(feature = "native", feature = "optin")))]
 mod query;
@@ -30,15 +30,19 @@ pub use query::*;
 pub use taos_ws::*;
 
 #[cfg(all(any(feature = "native", feature = "optin"), not(feature = "ws")))]
-pub use taos_sys::*;
+pub use crate::sys::*;
 
 #[cfg(all(not(feature = "ws"), not(feature = "native"), not(feature = "optin")))]
 compile_error!("Either feature \"ws\" or \"native\"|"optin" or both must be enabled for this crate.");
 
-#[cfg(all(feature = "optin", feature = "native"))]
-compile_error!(
-    "Feature \"optin\" is conflicted with \"native\", choose only one feature for native"
-);
+// #[cfg(all(feature = "optin", feature = "native"))]
+// compile_error!(
+//     "Feature \"optin\" is conflicted with \"native\", choose only one feature for native"
+// );
 
 #[cfg(feature = "optin")]
-pub use taos_optin as taos_sys;
+pub(crate) use taos_optin as sys;
+
+#[cfg(not(feature = "optin"))]
+#[cfg(feature = "native")]
+pub(crate) use taos_sys as sys;

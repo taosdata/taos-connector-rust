@@ -11,7 +11,7 @@ pub use stmt::Stmt;
 
 // pub mod tmq;
 pub mod consumer;
-pub use consumer::{Consumer, TmqBuilder};
+pub use consumer::{Consumer, TmqBuilder, Offset};
 
 pub mod query;
 pub use query::ResultSet;
