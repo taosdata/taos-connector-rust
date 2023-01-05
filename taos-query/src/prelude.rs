@@ -603,7 +603,11 @@ mod r#async {
             //     }
             // }
 
-            self.exec(&query).await?;
+            if let Err(err) = self.exec(&query).await {
+                log::trace!("Create topic error: {:?}, try without ``", err);
+                let query = format!("create topic if not exists {name} with meta as database {db}");
+                self.exec(query).await?;
+            }
             Ok(())
         }
 

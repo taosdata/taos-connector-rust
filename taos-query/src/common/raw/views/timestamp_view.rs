@@ -85,9 +85,9 @@ impl TimestampView {
     }
 
     /// Get nullable value at `row` index.
-    pub fn get(&self, row: usize) -> Option<Timestamp> {
+    pub fn get(&self, row: usize) -> Option<Option<Timestamp>> {
         if row < self.len() {
-            unsafe { self.get_unchecked(row) }
+            Some(unsafe { self.get_unchecked(row) })
         } else {
             None
         }
@@ -154,8 +154,14 @@ impl TimestampView {
         }
 
         let nulls = unsafe { self.nulls.slice(range.clone()) };
-        let data = self.data.slice(range.start * ITEM_SIZE..range.end * ITEM_SIZE);
-        Some(Self { nulls, data, precision: self.precision })
+        let data = self
+            .data
+            .slice(range.start * ITEM_SIZE..range.end * ITEM_SIZE);
+        Some(Self {
+            nulls,
+            data,
+            precision: self.precision,
+        })
     }
 
     /// A iterator to nullable values of current row.
@@ -193,6 +199,13 @@ impl<'a> Iterator for TimestampViewIter<'a> {
         } else {
             None
         }
+    }
+
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        self.view.get(self.view.len() - 1)
     }
 }
 
