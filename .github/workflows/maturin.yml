@@ -35,6 +35,7 @@ jobs:
           architecture: x64
 
       - uses: dtolnay/rust-toolchain@nightly
+        if: steps.rebuild.outputs.any_changed == 'true'
 
       - name: Build wheels - x86_64
         uses: PyO3/maturin-action@v1
@@ -50,6 +51,7 @@ jobs:
 
       - name: Build wheels - universal2
         uses: PyO3/maturin-action@v1
+        if: steps.rebuild.outputs.any_changed == 'true'
         with:
           working-directory: taos-ws-py
           args: --release --universal2 --strip
@@ -88,6 +90,7 @@ jobs:
           architecture: ${{ matrix.target }}
 
       - uses: dtolnay/rust-toolchain@nightly
+        if: steps.rebuild.outputs.any_changed == 'true'
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1

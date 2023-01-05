@@ -141,6 +141,23 @@ impl TimestampView {
         }
     }
 
+    /// Create a slice of view.
+    pub fn slice(&self, mut range: std::ops::Range<usize>) -> Option<Self> {
+        if range.start >= self.len() {
+            return None;
+        }
+        if range.end > self.len() {
+            range.end = self.len();
+        }
+        if range.len() == 0 {
+            return None;
+        }
+
+        let nulls = unsafe { self.nulls.slice(range.clone()) };
+        let data = self.data.slice(range.start * ITEM_SIZE..range.end * ITEM_SIZE);
+        Some(Self { nulls, data, precision: self.precision })
+    }
+
     /// A iterator to nullable values of current row.
     pub fn iter(&self) -> TimestampViewIter {
         TimestampViewIter { view: self, row: 0 }
@@ -259,5 +276,27 @@ impl<A: Into<Option<Item>>> FromIterator<A> for TimestampNanosecondView {
             }),
             precision: Precision::Nanosecond,
         })
+    }
+}
+
+#[test]
+fn test_slice() {
+    let data = [0, 1, Item::MIN, Item::MAX];
+    let view = TimestampMillisecondView::from_iter(data).into_inner();
+    dbg!(&view);
+    let slice = view.slice(1..3);
+    dbg!(&slice);
+
+    let ts_min = chrono::NaiveDateTime::MIN.timestamp_millis();
+    let ts_max = chrono::NaiveDateTime::MAX.timestamp_millis();
+    let data = [None, Some(ts_min), Some(ts_max), Some(0)];
+    let view = TimestampMillisecondView::from_iter(data).into_inner();
+    dbg!(&view);
+    let range = 1..4;
+    let slice = view.slice(range.clone()).unwrap();
+    for (v, i) in slice.iter().zip(range) {
+        assert_eq!(v.map(|ts| ts.as_raw_i64()), data[i]);
+        let inner = v.unwrap();
+        dbg!(inner.to_naive_datetime());
     }
 }

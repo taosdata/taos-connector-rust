@@ -1,4 +1,4 @@
-use std::{ffi::c_void, io::Write};
+use std::{ffi::c_void, io::Write, ops::Range};
 
 use crate::common::{BorrowedValue, Ty};
 
@@ -95,6 +95,22 @@ impl BoolView {
         }
     }
 
+    pub fn slice(&self, mut range: Range<usize>) -> Option<Self> {
+        if range.start >= self.len() {
+            return None;
+        }
+        if range.end >= self.len() {
+            range.end = self.len();
+        }
+        if range.len() == 0 {
+            return None;
+        }
+
+        let nulls = unsafe { self.nulls.slice(range.clone()) };
+        let data = self.data.slice(range);
+        Some(Self { nulls, data })
+    }
+
     /// A iterator to nullable values of current row.
     pub fn iter(&self) -> BoolViewIter {
         BoolViewIter { view: self, row: 0 }
@@ -169,4 +185,20 @@ impl<A: Into<Option<bool>>> FromIterator<A> for BoolView {
             }),
         }
     }
+}
+
+#[test]
+fn test_bool_slice() {
+    let data = [true, false, false, true];
+    let view = BoolView::from_iter(data);
+    dbg!(&view);
+    let slice = view.slice(1..3);
+    dbg!(&slice);
+
+
+    let data = [None, Some(false), Some(true), None];
+    let view = BoolView::from_iter(data);
+    dbg!(&view);
+    let slice = view.slice(1..4);
+    dbg!(&slice);
 }
