@@ -75,6 +75,27 @@ impl VarCharView {
         }
     }
 
+    pub fn slice(&self, mut range: std::ops::Range<usize>) -> Option<Self> {
+        if range.start >= self.len() {
+            return None;
+        }
+        if range.end > self.len() {
+            range.end = self.len();
+        }
+        if range.len() == 0 {
+            return None;
+        }
+        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range.clone()) };
+        if let Some(range) = range {
+            let range = range.0 as usize..range.1.map(|v| v as usize).unwrap_or(self.data.len());
+            let data = self.data.slice(range);
+            Some(Self { offsets, data })
+        } else {
+            let data = self.data.slice(0..0);
+            Some(Self { offsets, data })
+        }
+    }
+
     pub fn iter(&self) -> VarCharIter {
         VarCharIter { view: self, row: 0 }
     }
@@ -174,13 +195,14 @@ impl<'a> Iterator for VarCharIter<'a> {
             None
         }
     }
-}
 
-impl<'a> ExactSizeIterator for VarCharIter<'a> {
-    fn len(&self) -> usize {
-        self.view.len() - self.row
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.view.len() - self.row;
+        (len, Some(len))
     }
 }
+
+impl<'a> ExactSizeIterator for VarCharIter<'a> {}
 
 pub struct VarCharNullsIter<'a> {
     view: &'a VarCharView,
@@ -204,5 +226,29 @@ impl<'a> Iterator for VarCharNullsIter<'a> {
 impl<'a> ExactSizeIterator for VarCharNullsIter<'a> {
     fn len(&self) -> usize {
         self.view.len() - self.row
+    }
+}
+
+#[test]
+fn test_slice() {
+    let data = [None, Some(""), Some("abc"), Some("中文"), None, None, Some("a loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooog string")];
+    let view = VarCharView::from_iter::<&str, _, _, _>(data);
+    let slice = view.slice(0..0);
+    assert!(slice.is_none());
+    let slice = view.slice(100..1000);
+    assert!(slice.is_none());
+
+    for start in 0..data.len() {
+        let end = start + 1;
+        for end in end..data.len() {
+            let slice = view.slice(start..end).unwrap();
+            assert_eq!(
+                slice.to_vec().as_slice(),
+                &data[start..end]
+                    .into_iter()
+                    .map(|s| s.map(ToString::to_string))
+                    .collect_vec()
+            );
+        }
     }
 }

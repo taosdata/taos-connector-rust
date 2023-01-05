@@ -315,6 +315,26 @@ impl ColumnView {
         ColumnViewIter { view: self, row: 0 }
     }
 
+    pub fn slice(&self, range: std::ops::Range<usize>) -> Option<Self> {
+        match self {
+            ColumnView::Bool(view) => view.slice(range).map(ColumnView::Bool),
+            ColumnView::TinyInt(view) => view.slice(range).map(ColumnView::TinyInt),
+            ColumnView::SmallInt(view) => view.slice(range).map(ColumnView::SmallInt),
+            ColumnView::Int(view) => view.slice(range).map(ColumnView::Int),
+            ColumnView::BigInt(view) => view.slice(range).map(ColumnView::BigInt),
+            ColumnView::Float(view) => view.slice(range).map(ColumnView::Float),
+            ColumnView::Double(view) => view.slice(range).map(ColumnView::Double),
+            ColumnView::VarChar(view) => view.slice(range).map(ColumnView::VarChar),
+            ColumnView::Timestamp(view) => view.slice(range).map(ColumnView::Timestamp),
+            ColumnView::NChar(view) => view.slice(range).map(ColumnView::NChar),
+            ColumnView::UTinyInt(view) => view.slice(range).map(ColumnView::UTinyInt),
+            ColumnView::USmallInt(view) => view.slice(range).map(ColumnView::USmallInt),
+            ColumnView::UInt(view) => view.slice(range).map(ColumnView::UInt),
+            ColumnView::UBigInt(view) => view.slice(range).map(ColumnView::UBigInt),
+            ColumnView::Json(view) => view.slice(range).map(ColumnView::Json),
+        }
+    }
+
     // pub fn into_column(&self) -> Column {
     //     match self {
     //         ColumnView::Bool(view) => Column::Bool(

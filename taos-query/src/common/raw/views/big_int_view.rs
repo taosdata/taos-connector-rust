@@ -103,6 +103,23 @@ impl BigIntView {
         }
     }
 
+    /// Create a slice of view.
+    pub fn slice(&self, mut range: std::ops::Range<usize>) -> Option<Self> {
+        if range.start >= self.len() {
+            return None;
+        }
+        if range.end >= self.len() {
+            range.end = self.len();
+        }
+        if range.len() == 0 {
+            return None;
+        }
+
+        let nulls = unsafe { self.nulls.slice(range.clone()) };
+        let data = self.data.slice(range.start * ITEM_SIZE..range.end * ITEM_SIZE);
+        Some(Self { nulls, data })
+    }
+
     /// A iterator to nullable values of current row.
     pub fn iter(&self) -> BigIntViewIter {
         BigIntViewIter { view: self, row: 0 }
@@ -177,4 +194,23 @@ impl<A: Into<Option<Item>>> FromIterator<A> for View {
             }),
         }
     }
+}
+
+#[test]
+fn test_slice() {
+    let data = [0, 1, 2, i64::MAX];
+    let view = BigIntView::from_iter(data);
+    dbg!(&view);
+    let slice = view.slice(1..3);
+    dbg!(&slice);
+
+
+    let data = [None, Some(0), Some(i64::MAX), None];
+    let view = BigIntView::from_iter(data);
+    dbg!(&view);
+    let range = 1..4;
+    let slice = view.slice(range.clone()).unwrap();
+    for (v, i) in slice.iter().zip(range) {
+        assert_eq!(v, data[i]);
+    }   
 }

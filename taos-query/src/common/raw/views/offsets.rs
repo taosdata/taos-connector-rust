@@ -3,6 +3,7 @@ use std::{fmt::Debug, ops::DerefMut};
 
 use bytes::{Bytes, BytesMut};
 
+const ITEM_SIZE: usize = std::mem::size_of::<i32>();
 /// A [i32] slice offsets, which will represent the value is NULL (if offset is `-1`) or not.
 #[derive(Clone)]
 pub struct Offsets(pub(super) Bytes);
@@ -45,6 +46,53 @@ impl Offsets {
                     .offset((index * std::mem::size_of::<i32>()) as isize) as _,
             )
         }
+    }
+
+    pub unsafe fn slice_unchecked(
+        &self,
+        range: std::ops::Range<usize>,
+    ) -> (Self, Option<(i32, Option<i32>)>) {
+        let len = range.len();
+        use std::alloc::{alloc, Layout};
+        let ptr = alloc(Layout::from_size_align_unchecked(
+            len * ITEM_SIZE,
+            ITEM_SIZE,
+        ));
+        let slice = ptr as *mut i32;
+        let mut offset0 = None;
+        let start = range.start;
+        for i in range.clone() {
+            let offset = self.get_unchecked(i);
+            let ptr = slice.offset(i as isize - start as isize);
+            if offset == -1 {
+                ptr.write(-1);
+            } else if offset0.is_none() {
+                ptr.write(0);
+                offset0.replace(offset);
+            } else if let Some(offset0) = offset0 {
+                ptr.write(offset - offset0);
+            }
+        }
+
+        let mut offset1 = None;
+        if offset0.is_some() && range.end < self.len() {
+            for i in range.end..self.len() {
+                let offset = self.get_unchecked(i);
+                if offset != -1 && offset1.is_none() {
+                    offset1.replace(offset);
+                    break;
+                }
+            }
+        }
+
+        if offset0 == offset1 {
+            offset1.take();
+        }
+        let bytes: Box<[u8]> = Box::from_raw(std::slice::from_raw_parts_mut(ptr, len * ITEM_SIZE));
+        (
+            Self(bytes.into()),
+            offset0.map(|offset0| (offset0, offset1)),
+        )
     }
 }
 
@@ -165,4 +213,32 @@ impl<'a> IntoIterator for &'a mut OffsetsMut {
     fn into_iter(self) -> Self::IntoIter {
         self.deref_mut().into_iter()
     }
+}
+
+#[test]
+fn test_slice() {
+    let offsets = &[-1i32, 0, 8, 12, -1, -1, 23];
+    let bytes =
+        unsafe { std::slice::from_raw_parts(offsets.as_ptr() as *const u8, offsets.len() * 4) };
+
+    let data = Offsets(bytes.to_vec().into());
+    dbg!(&data);
+    let (slice, range) = unsafe { data.slice_unchecked(2..7) };
+    assert_eq!(range, Some((8, None)));
+    dbg!(&slice);
+    for i in slice.iter() {
+        dbg!(i);
+    }
+    let (_slice, range) = unsafe { data.slice_unchecked(2..6) };
+    assert_eq!(range, Some((8, Some(23))));
+    let (_slice, range) = unsafe { data.slice_unchecked(2..4) };
+    assert_eq!(range, Some((8, Some(23))));
+
+    let (_slice, range) = unsafe { data.slice_unchecked(0..1) };
+    assert_eq!(range, None);
+
+    let (_slice, range) = unsafe { data.slice_unchecked(0..2) };
+    assert_eq!(range, Some((0, Some(8))));
+    let (_slice, range) = unsafe { data.slice_unchecked(4..6) };
+    assert_eq!(range, None);
 }

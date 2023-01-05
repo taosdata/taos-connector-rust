@@ -118,6 +118,32 @@ impl NCharView {
         }
     }
 
+    pub fn slice(&self, mut range: std::ops::Range<usize>) -> Option<Self> {
+        if range.start >= self.len() {
+            return None;
+        }
+        if range.end > self.len() {
+            range.end = self.len();
+        }
+        if range.len() == 0 {
+            return None;
+        }
+        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range.clone()) };
+        let range = if let Some(range) = range {
+            range.0 as usize..range.1.map(|v| v as usize).unwrap_or(self.data.len())
+        } else {
+            0..0
+        };
+        let data = self.data.slice(range);
+        Some(Self {
+            offsets,
+            data,
+            is_chars: UnsafeCell::new(false),
+            version: self.version.clone(),
+            layout: self.layout.clone(),
+        })
+    }
+
     /// Iterator for NCharView.
     #[inline]
     pub fn iter(&self) -> NCharViewIter {
@@ -242,5 +268,26 @@ impl<'a> Iterator for NCharViewIter<'a> {
 impl<'a> ExactSizeIterator for NCharViewIter<'a> {
     fn len(&self) -> usize {
         self.view.len() - self.row
+    }
+}
+
+#[test]
+fn test_slice() {
+    let data = [None, Some(""), Some("abc"), Some("中文"), None, None, Some("a loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooog string")];
+    let view = NCharView::from_iter::<&str, _, _, _>(data);
+    let slice = view.slice(0..0);
+    assert!(slice.is_none());
+    let slice = view.slice(100..1000);
+    assert!(slice.is_none());
+
+    for start in 0..data.len() {
+        let end = start + 1;
+        for end in end..data.len() {
+            let slice = view.slice(start..end).unwrap();
+            assert_eq!(
+                slice.to_vec().as_slice(),
+                &data[start..end]
+            );
+        }
     }
 }

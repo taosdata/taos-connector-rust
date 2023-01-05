@@ -60,6 +60,27 @@ impl JsonView {
         }
     }
 
+    pub fn slice(&self, mut range: std::ops::Range<usize>) -> Option<Self> {
+        if range.start >= self.len() {
+            return None;
+        }
+        if range.end > self.len() {
+            range.end = self.len();
+        }
+        if range.len() == 0 {
+            return None;
+        }
+        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range.clone()) };
+        if let Some(range) = range {
+            let range = range.0 as usize..range.1.map(|v| v as usize).unwrap_or(self.data.len());
+            let data = self.data.slice(range);
+            Some(Self { offsets, data })
+        } else {
+            let data = self.data.slice(0..0);
+            Some(Self { offsets, data })
+        }
+    }
+
     pub fn iter(&self) -> VarCharIter {
         VarCharIter { view: self, row: 0 }
     }
@@ -98,11 +119,40 @@ impl JsonView {
         // Ok(offsets.len() + self.data.len())
     }
 
-    pub fn from_iter<S: Into<String>, T: Into<Option<S>>, I: ExactSizeIterator<Item = T>>(
-        iter: I,
+    pub fn from_iter<
+        S: AsRef<str>,
+        T: Into<Option<S>>,
+        I: ExactSizeIterator<Item = T>,
+        V: IntoIterator<Item = T, IntoIter = I>,
+    >(
+        iter: V,
     ) -> Self {
-        let _ = iter;
-        todo!()
+        let iter = iter.into_iter();
+        let mut offsets = Vec::with_capacity(iter.len());
+        let mut data = Vec::new();
+
+        for i in iter.map(|v| v.into()) {
+            if let Some(s) = i {
+                let s: &str = s.as_ref();
+                offsets.push(data.len() as i32);
+                data.write_inlined_str::<2>(&s).unwrap();
+            } else {
+                offsets.push(-1);
+            }
+        }
+        // dbg!(&offsets);
+        let offsets_bytes = unsafe {
+            Vec::from_raw_parts(
+                offsets.as_mut_ptr() as *mut u8,
+                offsets.len() * 4,
+                offsets.capacity() * 4,
+            )
+        };
+        std::mem::forget(offsets);
+        Self {
+            offsets: Offsets(offsets_bytes.into()),
+            data: data.into(),
+        }
     }
 }
 
@@ -138,5 +188,30 @@ impl<'a> Iterator for VarCharIter<'a> {
 impl<'a> ExactSizeIterator for VarCharIter<'a> {
     fn len(&self) -> usize {
         self.view.len() - self.row
+    }
+}
+
+#[test]
+fn test_slice() {
+    let data = [None, Some(""), Some("abc"), Some("中文"), None, None, Some("a loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooog string")];
+    let view = JsonView::from_iter::<&str, _, _, _>(data);
+    let slice = view.slice(0..0);
+    assert!(slice.is_none());
+    let slice = view.slice(100..1000);
+    assert!(slice.is_none());
+
+    for start in 0..data.len() {
+        let end = start + 1;
+        for end in end..data.len() {
+            let slice = view.slice(start..end).unwrap();
+            assert_eq!(
+                slice.to_vec().as_slice(),
+                &itertools::Itertools::collect_vec(
+                    data[start..end]
+                        .into_iter()
+                        .map(|s| s.map(ToString::to_string))
+                )
+            );
+        }
     }
 }
