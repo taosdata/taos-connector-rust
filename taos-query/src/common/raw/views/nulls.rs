@@ -1,4 +1,4 @@
-use std::{fmt::Debug, ops::Range, alloc::Layout};
+use std::{alloc::Layout, fmt::Debug, ops::Range};
 
 use bytes::{Bytes, BytesMut};
 
@@ -6,7 +6,7 @@ const fn null_bits_len(len: usize) -> usize {
     (len + 7) / 8
 }
 /// A bitmap for nulls.
-/// 
+///
 /// ```text
 ///        +---+---+---+---+---+---+---+---+
 /// byte0: | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
@@ -14,7 +14,7 @@ const fn null_bits_len(len: usize) -> usize {
 /// byte1: | 8 | 9 | 10| 11| 12| 13| 14| 15|
 ///        +---+---+---+---+---+---+---+---+
 /// ```
-/// 
+///
 /// Example, bytes `0b1000_0000` represents a boolean slice:
 /// `[true, false * 7]`
 #[derive(Debug, Clone)]
@@ -68,7 +68,8 @@ impl NullBits {
         let len = range.end - range.start;
         let bytes_len = null_bits_len(len);
         let inner = std::alloc::alloc(Layout::from_size_align_unchecked(bytes_len, 1));
-        let bytes : Box<[u8]>= Box::from_raw(std::slice::from_raw_parts_mut(inner, bytes_len));
+        inner.write_bytes(0, bytes_len);
+        let bytes: Box<[u8]> = Box::from_raw(std::slice::from_raw_parts_mut(inner, bytes_len));
         let nulls = NullBits(bytes.into());
         for i in 0..len {
             if self.is_null_unchecked(i + range.start) {
@@ -120,7 +121,7 @@ impl<'a> Iterator for NullsIter<'a> {
         if self.row + n >= self.len {
             None
         } else {
-            Some(unsafe { self.nulls.is_null_unchecked(self.row + n)})
+            Some(unsafe { self.nulls.is_null_unchecked(self.row + n) })
         }
     }
 
@@ -216,7 +217,6 @@ fn test_null_bits() {
     let nulls = NullBits::from_iter(bools);
     println!("0b{:0b}", nulls.0[0]);
 
-
     // get
     for i in 0..6 {
         assert_eq!(bools[i], unsafe { nulls.is_null_unchecked(i) });
@@ -228,12 +228,12 @@ fn test_null_bits() {
     let len = iter.len();
     dbg!(len);
     // dbg!(iter.len());
-    
+
     // assert_eq!(iter.len(), bools.len());
     let slice = unsafe { nulls.slice(1..5) };
     println!("0b{:0b}", slice.0[0]);
     for i in 0..4 {
-        dbg!(unsafe { slice.is_null_unchecked(i)});
+        dbg!(unsafe { slice.is_null_unchecked(i) });
     }
 
     for i in 0..4 {
@@ -242,4 +242,31 @@ fn test_null_bits() {
     let slice_iter = slice.iter().take(3);
     let bools: Vec<bool> = slice_iter.collect();
     assert_eq!(&bools, &[false, false, true]);
+}
+
+#[test]
+fn test_null_bits_slice() {
+    const SIZE: usize = 1235;
+    let bools: Vec<bool> = (0..SIZE).map(|_| rand::random()).collect();
+    let nulls = NullBits::from_iter(bools.clone());
+
+    for start in (0..SIZE).step_by(3) {
+        for end in (start + 1..SIZE).step_by(7) {
+            let range = start..end;
+            let slice = unsafe { nulls.slice(range) };
+            // let new = slice.is_null_unchecked(row)
+            for i in start..end {
+                let correct = bools[i];
+                let data = unsafe { slice.is_null_unchecked(i - start) };
+                assert_eq!(
+                    correct,
+                    data,
+                    "{} range {:?}. bytes: {:?}",
+                    i,
+                    start..end,
+                    nulls.0
+                );
+            }
+        }
+    }
 }
