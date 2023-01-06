@@ -267,6 +267,14 @@ impl ColumnView {
         }
     }
 
+    pub fn get(&self, row: usize) -> Option<BorrowedValue> {
+        if row < self.len() {
+            Some(unsafe { self.get_ref_unchecked(row) })
+        } else {
+            None
+        }
+    }
+
     /// Get one value at `row` index of the column view.
     #[inline]
     pub(super) unsafe fn get_ref_unchecked(&self, row: usize) -> BorrowedValue {
@@ -432,6 +440,13 @@ impl ColumnView {
             ColumnView::UInt(_) => Ty::UInt,
             ColumnView::UBigInt(_) => Ty::UBigInt,
             ColumnView::Json(_) => Ty::Json,
+        }
+    }
+
+    pub unsafe fn as_timestamp_view(&self) -> &TimestampView {
+        match self {
+            ColumnView::Timestamp(view) => view,
+            _ => unreachable!(),
         }
     }
 }
