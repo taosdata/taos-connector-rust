@@ -19,7 +19,7 @@ async-trait = "0.1"
 taos-query = { path = "../taos-query", version = "0.3.13" }
 taos-optin = { path = "../taos-optin", version = "0.1.10", optional = true }
 taos-sys = { path = "../taos-sys", version = "0.3.11", optional = true }
-taos-ws = { path = "../taos-ws", version = "0.3.16", optional = true }
+taos-ws = { path = "../taos-ws", version = "0.3.17", optional = true }
 
 thiserror = "1"
 
