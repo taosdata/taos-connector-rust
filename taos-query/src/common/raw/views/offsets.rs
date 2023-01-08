@@ -58,6 +58,7 @@ impl Offsets {
             len * ITEM_SIZE,
             ITEM_SIZE,
         ));
+        ptr.write_bytes(0, len * ITEM_SIZE);
         let slice = ptr as *mut i32;
         let mut offset0 = None;
         let start = range.start;
