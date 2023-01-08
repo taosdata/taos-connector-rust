@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.4.18] - 2023-01-08
+
+### Features
+- Taosws PEP-249 fully support
+
+
+### Dependencies
+
+- Use taos-ws v0.3.17
+- Use taos-optin v0.1.10
+- Use taos-query v0.3.13
+
+
 ## [0.4.17] - 2022-12-21
 
 ### Examples
