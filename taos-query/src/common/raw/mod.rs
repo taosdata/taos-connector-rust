@@ -257,24 +257,33 @@ impl RawBlock {
                     offset += rows * std::mem::size_of::<$prim>() as usize;
                     // byte slice from start to end: `[start, end)`.
                     let data = bytes.slice(start..offset);
+                    let nulls = NullBits::from_iter((0..rows).map(|row| unsafe {
+                        paste::paste!{ [<$ty:snake _is_null>] (
+                            &(data
+                                .as_ptr()
+                                .offset(row as isize * std::mem::size_of::<$prim>() as isize)
+                                as *const $prim)
+                                .read_unaligned() as _,
+                        ) }
+                    }));
                     // value as target type
-                    let value_slice = unsafe {
-                        std::slice::from_raw_parts(
-                            transmute::<*const u8, *const $prim>(data.as_ptr()),
-                            rows,
-                        )
-                    };
+                    // let value_slice = unsafe {
+                    //     std::slice::from_raw_parts(
+                    //         transmute::<*const u8, *const $prim>(data.as_ptr()),
+                    //         rows,
+                    //     )
+                    // };
                     // Set data lengths for v3-compatible block.
                     data_lengths[i] = data.len() as u32;
 
                     // generate nulls bitmap.
-                    let nulls = NullsMut::from_bools(
-                        value_slice
-                            .iter()
-                            .map(|v| paste::paste!{ [<$ty:snake _is_null>](v as _) })
-                            // .map(|b| *b as u64 == paste::paste! { [<$ty:snake:upper _NULL>] }),
-                    )
-                    .into_nulls();
+                    // let nulls = NullsMut::from_bools(
+                    //     value_slice
+                    //         .iter()
+                    //         .map(|v| paste::paste!{ [<$ty:snake _is_null>](v as _) })
+                    //         // .map(|b| *b as u64 == paste::paste! { [<$ty:snake:upper _NULL>] }),
+                    // )
+                    // .into_nulls();
                     // build column view
                     let column = paste::paste! { ColumnView::$ty([<$ty View>] { nulls, data }) };
                     columns.push(column);
@@ -327,19 +336,28 @@ impl RawBlock {
                     // byte slice from start to end: `[start, end)`.
                     let data = bytes.slice(start..offset);
                     // value as target type
-                    let value_slice = unsafe {
-                        std::slice::from_raw_parts(
-                            transmute::<*const u8, *const i64>(data.as_ptr()),
-                            rows,
+                    // let value_slice = unsafe {
+                    //     std::slice::from_raw_parts(
+                    //         transmute::<*const u8, *const i64>(data.as_ptr()),
+                    //         rows,
+                    //     )
+                    // };
+                    let nulls = NullBits::from_iter((0..rows).map(|row| unsafe {
+                        big_int_is_null(
+                            &(data
+                                .as_ptr()
+                                .offset(row as isize * std::mem::size_of::<i64>() as isize)
+                                as *const i64)
+                                .read_unaligned() as _,
                         )
-                    };
+                    }));
                     // Set data lengths for v3-compatible block.
                     data_lengths[i] = data.len() as u32;
 
                     // generate nulls bitmap.
-                    let nulls =
-                        NullsMut::from_bools(value_slice.iter().map(|b| big_int_is_null(b as _)))
-                            .into_nulls();
+                    // let nulls =
+                    //     NullsMut::from_bools(value_slice.iter().map(|b| big_int_is_null(b as _)))
+                    //         .into_nulls();
                     // build column view
                     let column = ColumnView::Timestamp(TimestampView {
                         nulls,
@@ -987,8 +1005,8 @@ impl crate::prelude::AsyncInlinable for RawBlock {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_raw_from_v2() {
-    use std::ops::Deref;
     use crate::prelude::AsyncInlinable;
+    use std::ops::Deref;
     // pretty_env_logger::formatted_builder()
     //     .filter_level(log::LevelFilter::Trace)
     //     .init();
