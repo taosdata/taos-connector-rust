@@ -259,11 +259,10 @@ impl RawBlock {
                     let data = bytes.slice(start..offset);
                     let nulls = NullBits::from_iter((0..rows).map(|row| unsafe {
                         paste::paste!{ [<$ty:snake _is_null>] (
-                            &(data
+                            data
                                 .as_ptr()
                                 .offset(row as isize * std::mem::size_of::<$prim>() as isize)
-                                as *const $prim)
-                                .read_unaligned() as _,
+                                as *const $prim,
                         ) }
                     }));
                     // value as target type
