@@ -511,7 +511,7 @@ impl Drop for TaosMultiBind {
         //     unsafe { Vec::from_raw_parts(self.buffer as *mut u8, len, len as _) };
         //     unsafe { Vec::from_raw_parts(self.length as *mut i32, self.num as _, self.num as _) };
         // }
-        if self.is_null.is_null() {
+        if !self.is_null.is_null() {
             unsafe { Vec::from_raw_parts(self.is_null as *mut i8, self.num as _, self.num as _) };
         }
     }
