@@ -13,8 +13,8 @@ description = "TDengine connector with websocket protocol"
 anyhow = "1"
 async-trait = { version = "0.1.56" }
 bytes = "1.1.0"
-derive_more = "0.99"
 dashmap = "5.4.0"
+derive_more = "0.99"
 futures = { version = "0.3" }
 itertools = "0.10.3"
 log = "0.4"
@@ -33,13 +33,13 @@ tokio-tungstenite = { version = "0.17" }
 pretty_env_logger = "0.4.0"
 
 [package.metadata.docs.rs]
-features = ["native-tls", "__rustls-tls"]
+features = ["rustls"]
 
 [features]
 default = ["tmq"]
 
-rustls = ["tokio-tungstenite/__rustls-tls"]
+rustls = ["tokio-tungstenite/rustls-tls-native-roots"]
 native-tls = ["tokio-tungstenite/native-tls"]
-native-tls-vendored = ["tokio-tungstenite/native-tls-vendored","native-tls"]
+native-tls-vendored = ["tokio-tungstenite/native-tls-vendored", "native-tls"]
 sync = []
 tmq = []
