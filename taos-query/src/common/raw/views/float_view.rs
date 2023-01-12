@@ -64,12 +64,17 @@ impl FloatView {
         }
     }
 
+    #[inline(always)]
+    unsafe fn get_raw_at(&self, index: usize) -> *const Item {
+        self.data.as_ptr().offset((index * ITEM_SIZE) as isize) as _
+    }
+
     /// Get nullable value at `row` index.
     pub unsafe fn get_unchecked(&self, row: usize) -> Option<Item> {
         if self.nulls.is_null_unchecked(row) {
             None
         } else {
-            Some(*self.as_raw_slice().get_unchecked(row))
+            Some(*self.get_raw_at(row))
         }
     }
 
@@ -77,7 +82,7 @@ impl FloatView {
         if self.nulls.is_null_unchecked(row) {
             None
         } else {
-            Some(self.as_raw_slice().get_unchecked(row))
+            Some(self.get_raw_at(row))
         }
     }
 
@@ -98,7 +103,7 @@ impl FloatView {
             (
                 Ty::Float,
                 std::mem::size_of::<Item>() as _,
-                self.as_raw_slice().get_unchecked(row) as *const Item as _,
+                self.get_raw_at(row) as *const Item as _,
             )
         }
     }

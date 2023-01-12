@@ -60,12 +60,17 @@ impl BoolView {
         }
     }
 
+    #[inline(always)]
+    unsafe fn get_raw_at(&self, index: usize) -> *const bool {
+        self.data.as_ptr().offset((index) as isize) as _
+    }
+
     /// Get nullable value at `row` index.
     pub unsafe fn get_unchecked(&self, row: usize) -> Option<bool> {
         if self.nulls.is_null_unchecked(row) {
             None
         } else {
-            Some(*self.as_raw_slice().get_unchecked(row))
+            Some(*self.get_raw_at(row))
         }
     }
 
@@ -73,7 +78,7 @@ impl BoolView {
         if self.nulls.is_null_unchecked(row) {
             None
         } else {
-            Some(self.as_raw_slice().get_unchecked(row))
+            Some(self.get_raw_at(row))
         }
     }
 
@@ -90,7 +95,7 @@ impl BoolView {
             (
                 Ty::Bool,
                 std::mem::size_of::<bool>() as _,
-                self.as_raw_slice().get_unchecked(row) as *const bool as _,
+                self.get_raw_at(row) as *const bool as _,
             )
         }
     }

@@ -127,6 +127,19 @@ impl RawRes {
         state: &UnsafeCell<SharedState>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, Error>> {
+        #[cfg(not(taos_v3))]
+        return self.fetch_raw_block_async_v2(fields, precision, state, cx);
+        #[cfg(taos_v3)]
+        return self.fetch_raw_block_async_v3(fields, precision, state, cx);
+    }
+
+    pub fn fetch_raw_block_async_v3(
+        &self,
+        fields: &[Field],
+        precision: Precision,
+        state: &UnsafeCell<SharedState>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<RawBlock>, Error>> {
         let current = unsafe { &mut *state.get() };
 
         if current.done {
@@ -176,6 +189,76 @@ impl RawRes {
                 async_fetch_callback as _,
                 Box::into_raw(param) as *mut _ as _,
             );
+            Poll::Pending
+        }
+    }
+    pub fn fetch_raw_block_async_v2(
+        &self,
+        fields: &[Field],
+        precision: Precision,
+        state: &UnsafeCell<SharedState>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<RawBlock>, Error>> {
+        let current = unsafe { &mut *state.get() };
+
+        if current.done {
+            // handle errors
+            if current.code != 0 {
+                let err = Error::new(current.code, self.err_as_str());
+
+                return Poll::Ready(Err(err));
+            }
+
+            if current.num > 0 {
+                // has next block.
+                let mut raw = RawBlock::parse_from_ptr_v2(
+                    current.block as _,
+                    fields,
+                    self.fetch_lengths(),
+                    current.num as usize,
+                    precision,
+                );
+                // let mut raw = unsafe { RawBlock::parse_from_ptr(current.block as _, precision) };
+                raw.with_field_names(fields.iter().map(|f| f.name()));
+                if current.num == 0 {
+                    // finish fetch loop.
+                    current.done = true;
+                    current.num = 0;
+                } else {
+                    current.done = false;
+                }
+                Poll::Ready(Ok(Some(raw)))
+            } else {
+                // no data todo, stop stream.
+                Poll::Ready(Ok(None))
+            }
+        } else {
+            let param = Box::new((state, cx.waker().clone()));
+            unsafe extern "C" fn async_fetch_callback(
+                param: *mut c_void,
+                res: *mut TAOS_RES,
+                num_of_rows: c_int,
+            ) {
+                let param = param as *mut (&UnsafeCell<SharedState>, Waker);
+                let param = Box::from_raw(param);
+                let state = &mut *param.0.get();
+                state.done = true;
+                if num_of_rows < 0 {
+                    state.code = num_of_rows;
+                } else {
+                    state.num = num_of_rows as _;
+                    if num_of_rows > 0 {
+                        state.block = taos_result_block(res).read() as _;
+                    }
+                }
+                param.1.wake()
+            }
+            unsafe {
+                self.fetch_rows_a(
+                    async_fetch_callback as _,
+                    Box::into_raw(param) as *mut _ as _,
+                )
+            };
             Poll::Pending
         }
     }
