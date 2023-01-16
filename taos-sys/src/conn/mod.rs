@@ -139,6 +139,7 @@ impl RawTaos {
 
     #[inline]
     pub fn write_raw_block(&self, block: &RawBlock) -> Result<(), Error> {
+        use itertools::Itertools;
         let nrows = block.nrows();
         let name = block
             .table_name()

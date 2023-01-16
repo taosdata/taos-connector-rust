@@ -151,7 +151,7 @@ extern "C" {
         nrows: i32,
         ptr: *const c_char,
         tbname: *const c_char,
-        fields: *const TAOS_FIELD,
+        fields: *const crate::types::TAOS_FIELD,
         num_of_fields: i32,
     ) -> i32;
 }
