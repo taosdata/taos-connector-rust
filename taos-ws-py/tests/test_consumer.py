@@ -9,23 +9,19 @@ consumer = Consumer(conf)
 
 consumer.subscribe(["test"])
 
-while 1:
-    message = consumer.poll(timeout=1.0)
-    if message:
-        id = message.vgroup()
-        topic = message.topic()
-        database = message.database()
+while message := consumer.poll(timeout=1.0):
+    id = message.vgroup()
+    topic = message.topic()
+    database = message.database()
 
-        for block in message:
-            nrows = block.nrows()
-            ncols = block.ncols()
-            for row in block:
-                print(row)
-            values = block.fetchall()
-            print(nrows, ncols)
-            
-        # consumer.commit(message)
-    else:
-        break
+    for block in message:
+        nrows = block.nrows()
+        ncols = block.ncols()
+        for row in block:
+            print(row)
+        values = block.fetchall()
+        print(nrows, ncols)
+
+    # consumer.commit(message)
 
 consumer.close()
