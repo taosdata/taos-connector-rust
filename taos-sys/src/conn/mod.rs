@@ -1,7 +1,6 @@
 use std::{ffi::CStr, os::raw::*};
 
 use cfg_if::cfg_if;
-use itertools::Itertools;
 use taos_query::common::raw_data_t;
 use taos_query::prelude::{Code, RawError as Error};
 use taos_query::RawBlock;

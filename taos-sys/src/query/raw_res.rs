@@ -253,12 +253,10 @@ impl RawRes {
                 }
                 param.1.wake()
             }
-            unsafe {
-                self.fetch_rows_a(
-                    async_fetch_callback as _,
-                    Box::into_raw(param) as *mut _ as _,
-                )
-            };
+            self.fetch_rows_a(
+                async_fetch_callback as _,
+                Box::into_raw(param) as *mut _ as _,
+            );
             Poll::Pending
         }
     }

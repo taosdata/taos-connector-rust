@@ -5,7 +5,6 @@ use taos_query::{common::raw_data_t, prelude::RawError};
 
 use crate::{
     ffi::{TAOS, TAOS_RES},
-    types::TAOS_FIELD,
 };
 
 #[repr(transparent)]
