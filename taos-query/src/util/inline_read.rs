@@ -53,8 +53,7 @@ pub trait AsyncInlinableRead: AsyncRead + Unpin + Send {
     ///
     async fn read_inlined_bytes<const N: usize>(&mut self) -> std::io::Result<Vec<u8>> {
         let len = self.read_len_with_width::<N>().await?;
-        let mut buf = Vec::with_capacity(len);
-        buf.resize(len, 0);
+        let mut buf = vec![0; len];
         self.read_exact(&mut buf).await?;
         Ok(buf)
     }

@@ -4,7 +4,7 @@ use taos_query::prelude::RawError;
 
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct tmq_resp_err_t(i32);
+pub(crate) struct tmq_resp_err_t(i32);
 
 impl PartialEq<i32> for tmq_conf_res_t {
     fn eq(&self, other: &i32) -> bool {
@@ -62,7 +62,7 @@ impl tmq_conf_res_t {
     }
 }
 
-pub type tmq_commit_cb =
+pub(crate) type tmq_commit_cb =
     unsafe extern "C" fn(tmq: *mut tmq_t, resp: tmq_resp_err_t, param: *mut c_void);
 
 #[repr(C)]

@@ -12,7 +12,7 @@ use std::{
 
 use taos_query::{
     common::{c_field_t, raw_data_t},
-    prelude::{Code, Field, Precision, RawError, RawMeta},
+    prelude::{Code, Field, Precision, RawError},
     RawBlock,
 };
 

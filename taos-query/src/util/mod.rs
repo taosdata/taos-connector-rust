@@ -208,8 +208,7 @@ pub trait InlinableRead: Read {
     ///
     fn read_inlined_bytes<const N: usize>(&mut self) -> std::io::Result<Vec<u8>> {
         let len = self.read_len_with_width::<N>()?;
-        let mut buf = Vec::with_capacity(len);
-        buf.resize(len, 0);
+        let mut buf = vec![0; len];
         self.read_exact(&mut buf)?;
         Ok(buf)
     }

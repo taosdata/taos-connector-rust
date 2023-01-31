@@ -53,7 +53,7 @@ pub trait AsyncInlinableWrite: AsyncWrite + Send + Unpin {
         Self: Sized,
     {
         // self.write_inlinable(value).await
-        T::write_inlined(&value, self).await
+        T::write_inlined(value, self).await
     }
 }
 

@@ -62,7 +62,7 @@ pub mod sync {
                 self.block = Some(block);
                 self.rows = self.block.as_mut().map(|raw| raw.rows());
                 let row = self.rows.as_mut().unwrap().next();
-                return Ok(row);
+                Ok(row)
             } else {
                 Ok(None)
             }
@@ -72,7 +72,7 @@ pub mod sync {
             if let Some(rows) = self.rows.as_mut() {
                 // check if block over.
                 if let Some(row) = rows.next() {
-                    return Ok(Some(row));
+                    Ok(Some(row))
                 } else {
                     self.fetch()
                 }
@@ -234,7 +234,7 @@ pub mod sync {
             let (name, sql) = (name.as_ref(), sql.as_ref());
             let query = format!("create topic if not exists {name} as {sql}");
 
-            self.query(&query)?;
+            self.query(query)?;
             Ok(())
         }
 
@@ -246,7 +246,7 @@ pub mod sync {
             let name = name.as_ref();
             let query = format!("create topic if not exists {name} as database `{db}`");
 
-            self.exec(&query)?;
+            self.exec(query)?;
             Ok(())
         }
 
@@ -353,7 +353,7 @@ mod r#async {
                         self.block = Some(block);
                         self.rows = self.block.as_mut().map(|raw| raw.rows());
                         let row = self.rows.as_mut().unwrap().next();
-                        return Poll::Ready(Ok(row));
+                        Poll::Ready(Ok(row))
                     }
                     Ok(None) => Poll::Ready(Ok(None)),
                     Err(err) => Poll::Ready(Err(err)),
@@ -369,7 +369,7 @@ mod r#async {
             if let Some(rows) = self.rows.as_mut() {
                 // check if block over.
                 if let Some(row) = rows.next() {
-                    return Poll::Ready(Ok(Some(row)));
+                    Poll::Ready(Ok(Some(row)))
                 } else {
                     self.fetch(cx)
                 }
@@ -424,7 +424,7 @@ mod r#async {
         fn fields(&self) -> &[Field];
 
         fn filed_names(&self) -> Vec<&str> {
-            self.fields().into_iter().map(|f| f.name()).collect_vec()
+            self.fields().iter().map(|f| f.name()).collect_vec()
         }
 
         fn num_of_fields(&self) -> usize {

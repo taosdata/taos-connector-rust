@@ -441,7 +441,7 @@ mod tests {
                     for raw in data {
                         let raw = raw?;
                         dbg!(raw.table_name().unwrap());
-                        let (nrows, ncols) = (raw.nrows(), raw.ncols());
+                        let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
                         for col in raw.columns() {
                             for value in col {
                                 print!("{}\t", value);
@@ -461,7 +461,7 @@ mod tests {
                     for raw in data {
                         let raw = raw?;
                         dbg!(raw.table_name().unwrap());
-                        let (nrows, ncols) = (raw.nrows(), raw.ncols());
+                        let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
                         for col in raw.columns() {
                             for value in col {
                                 print!("{}\t", value);
@@ -558,7 +558,7 @@ mod tests {
                 MessageSet::Data(data) => {
                     for raw in data {
                         let raw = raw?;
-                        let (nrows, ncols) = (raw.nrows(), raw.ncols());
+                        let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
                         for col in raw.columns() {
                             for value in col {
                                 print!("{}\t", value);
@@ -573,7 +573,7 @@ mod tests {
                     taos.write_raw_meta(meta.as_raw_meta()?)?;
                     for raw in data {
                         let raw = raw?;
-                        let (nrows, ncols) = (raw.nrows(), raw.ncols());
+                        let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
                         for col in raw.columns() {
                             for value in col {
                                 print!("{}\t", value);
@@ -713,43 +713,29 @@ mod tests {
                         taos_query::common::JsonMeta::Create(m) => match m {
                             taos_query::common::MetaCreate::Super {
                                 table_name,
-                                columns,
-                                tags,
+                                columns: _,
+                                tags: _,
                             } => {
                                 let desc = taos.describe(table_name.as_str())?;
                                 dbg!(desc);
                             }
                             taos_query::common::MetaCreate::Child {
                                 table_name,
-                                using,
-                                tags,
-                                tag_num,
+                                using: _,
+                                tags: _,
+                                tag_num: _,
                             } => {
                                 let desc = taos.describe(table_name.as_str())?;
                                 dbg!(desc);
                             }
                             taos_query::common::MetaCreate::Normal {
                                 table_name,
-                                columns,
+                                columns: _,
                             } => {
                                 let desc = taos.describe(table_name.as_str())?;
                                 dbg!(desc);
                             }
-                            taos_query::prelude::MetaCreate::Super {
-                                table_name,
-                                columns,
-                                tags,
-                            } => todo!(),
-                            taos_query::prelude::MetaCreate::Child {
-                                table_name,
-                                using,
-                                tags,
-                                tag_num,
-                            } => todo!(),
-                            taos_query::prelude::MetaCreate::Normal {
-                                table_name,
-                                columns,
-                            } => todo!(),
+                            _ => todo!(),
                         },
                         _ => (),
                     }

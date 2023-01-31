@@ -45,7 +45,7 @@ impl Timeout {
         match self {
             Timeout::Never => Duration::from_secs(i64::MAX as u64 / 1000),
             Timeout::None => Duration::from_secs(0),
-            Timeout::Duration(t) => t.clone(),
+            Timeout::Duration(t) => *t,
         }
     }
 }
@@ -149,11 +149,11 @@ where
     type Error = T::Error;
 
     fn as_raw_meta(&self) -> Result<RawMeta, Self::Error> {
-        crate::block_in_place_or_global(T::as_raw_meta(&self))
+        crate::block_in_place_or_global(T::as_raw_meta(self))
     }
 
     fn as_json_meta(&self) -> Result<JsonMeta, Self::Error> {
-        crate::block_in_place_or_global(T::as_json_meta(&self))
+        crate::block_in_place_or_global(T::as_json_meta(self))
     }
 }
 

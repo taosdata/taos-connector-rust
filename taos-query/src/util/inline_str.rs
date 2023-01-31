@@ -65,7 +65,7 @@ macro_rules! _impl_inline_str {
 
             impl InlineStr<$ty> {
 
-                pub unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
+                pub(crate) unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
                     &*std::mem::transmute::<*const u8, *const InlineStr<$ty>>(ptr)
                 }
 
@@ -95,7 +95,12 @@ macro_rules! _impl_inline_str {
                 }
 
                 #[inline]
-                pub unsafe fn set_len(&mut self, len: usize) {
+                pub const fn is_empty(&self) -> bool {
+                    self.len == 0
+                }
+
+                #[inline]
+                pub(crate) unsafe fn set_len(&mut self, len: usize) {
                     self.len = len as _;
                 }
             }

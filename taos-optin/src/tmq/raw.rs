@@ -3,13 +3,13 @@ pub(super) use list::Topics;
 pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
-    use std::{os::raw::c_void, sync::Arc};
+    use std::sync::Arc;
 
     use itertools::Itertools;
 
     use crate::{
         raw::{ApiEntry, TmqApi},
-        types::{tmq_commit_cb, tmq_resp_err_t, tmq_t},
+        types::{tmq_resp_err_t, tmq_t},
         RawError, RawRes,
     };
 
@@ -38,57 +38,57 @@ pub(super) mod tmq {
             }
         }
 
-        pub fn subscription(&self) -> Topics {
-            let tl = Topics::new(self.tmq.list_api);
+        // pub fn subscription(&self) -> Topics {
+        //     let tl = Topics::new(self.tmq.list_api);
 
-            unsafe { (self.tmq.tmq_subscription)(self.as_ptr(), &mut tl.as_ptr()) }
-                .ok_or("get topic list failed")
-                .expect("get topic shoudl always success");
-            tl
-        }
+        //     unsafe { (self.tmq.tmq_subscription)(self.as_ptr(), &mut tl.as_ptr()) }
+        //         .ok_or("get topic list failed")
+        //         .expect("get topic shoudl always success");
+        //     tl
+        // }
 
         pub fn commit_sync(&self, msg: RawRes) -> Result<(), RawError> {
             unsafe { (self.tmq.tmq_commit_sync)(self.as_ptr(), msg.as_ptr() as _) }
                 .ok_or("commit failed")
         }
 
-        pub fn commit_async(&self, msg: RawRes, cb: tmq_commit_cb, param: *mut c_void) {
-            unsafe { (self.tmq.tmq_commit_async)(self.as_ptr(), msg.as_ptr(), cb, param) }
-        }
+        // pub fn commit_async(&self, msg: RawRes, cb: tmq_commit_cb, param: *mut c_void) {
+        //     unsafe { (self.tmq.tmq_commit_async)(self.as_ptr(), msg.as_ptr(), cb, param) }
+        // }
 
-        pub fn commit_non_blocking(
-            &mut self,
-            msg: RawRes,
-            callback: fn(RawTmq, Result<(), RawError>),
-        ) {
-            let c = self.c.clone();
-            let tmq = self.tmq;
-            unsafe extern "C" fn tmq_commit_callback(
-                _tmq: *mut tmq_t,
-                resp: tmq_resp_err_t,
-                param: *mut c_void,
-            ) {
-                log::trace!("commit {resp:?}");
-                let param = Box::from_raw(
-                    param as *mut Box<(Arc<ApiEntry>, TmqApi, fn(RawTmq, Result<(), RawError>))>,
-                );
-                let cons = RawTmq {
-                    c: param.0,
-                    tmq: param.1,
-                    ptr: _tmq,
-                };
-                param.2(cons, resp.ok_or("commit failed"));
-            }
+        // pub fn commit_non_blocking(
+        //     &mut self,
+        //     msg: RawRes,
+        //     callback: fn(RawTmq, Result<(), RawError>),
+        // ) {
+        //     let c = self.c.clone();
+        //     let tmq = self.tmq;
+        //     unsafe extern "C" fn tmq_commit_callback(
+        //         _tmq: *mut tmq_t,
+        //         resp: tmq_resp_err_t,
+        //         param: *mut c_void,
+        //     ) {
+        //         log::trace!("commit {resp:?}");
+        //         let param = Box::from_raw(
+        //             param as *mut Box<(Arc<ApiEntry>, TmqApi, fn(RawTmq, Result<(), RawError>))>,
+        //         );
+        //         let cons = RawTmq {
+        //             c: param.0,
+        //             tmq: param.1,
+        //             ptr: _tmq,
+        //         };
+        //         param.2(cons, resp.ok_or("commit failed"));
+        //     }
 
-            unsafe {
-                (self.tmq.tmq_commit_async)(
-                    self.as_ptr(),
-                    msg.as_ptr() as _,
-                    tmq_commit_callback,
-                    Box::into_raw(Box::new((c, tmq, callback))) as _,
-                )
-            }
-        }
+        //     unsafe {
+        //         (self.tmq.tmq_commit_async)(
+        //             self.as_ptr(),
+        //             msg.as_ptr() as _,
+        //             tmq_commit_callback,
+        //             Box::into_raw(Box::new((c, tmq, callback))) as _,
+        //         )
+        //     }
+        // }
 
         pub async fn commit(&self, msg: RawRes) -> Result<(), RawError> {
             // use tokio::sync::oneshot::{channel, Sender};
@@ -118,11 +118,11 @@ pub(super) mod tmq {
             rx.recv().unwrap()
         }
 
-        /// Wait a message forever
-        pub fn next_or_forever(&self) -> RawRes {
-            self.poll_timeout(-1)
-                .expect("wait forever if there's no message")
-        }
+        // /// Wait a message forever
+        // pub fn next_or_forever(&self) -> RawRes {
+        //     self.poll_timeout(-1)
+        //         .expect("wait forever if there's no message")
+        // }
 
         pub fn poll_timeout(&self, timeout: i64) -> Option<RawRes> {
             log::trace!("poll next message with timeout {}", timeout);
@@ -153,12 +153,12 @@ pub(super) mod tmq {
 pub(super) mod conf {
     use crate::{
         raw::TmqConfApi,
-        types::{tmq_commit_cb, tmq_conf_t, tmq_t},
+        types::{tmq_conf_t, tmq_t},
     };
     // use taos_error::*;
 
     use crate::*;
-    use std::{ffi::c_void, iter::Iterator};
+    use std::iter::Iterator;
     use taos_query::Dsn;
 
     /* tmq conf */
@@ -214,23 +214,23 @@ pub(super) mod conf {
             conf.with(dsn.params.iter().filter(|(k, _)| k.contains('.')))
         }
 
-        pub(crate) fn with_group_id(mut self, id: &str) -> Self {
-            self.set("group.id", id)
-                .expect("set group.id should always be ok");
-            self
-        }
-        pub(crate) fn with_client_id(mut self, id: &str) -> Self {
-            self.set("client.id", id)
-                .expect("set group.id should always be ok");
-            self
-        }
+        // pub(crate) fn with_group_id(mut self, id: &str) -> Self {
+        //     self.set("group.id", id)
+        //         .expect("set group.id should always be ok");
+        //     self
+        // }
+        // pub(crate) fn with_client_id(mut self, id: &str) -> Self {
+        //     self.set("client.id", id)
+        //         .expect("set group.id should always be ok");
+        //     self
+        // }
 
-        pub(crate) fn enable_auto_commit(mut self) -> Self {
-            log::debug!("[tmq-conf] enable auto commit");
-            self.set("enable.auto.commit", "true")
-                .expect("set group.id should always be ok");
-            self
-        }
+        // pub(crate) fn enable_auto_commit(mut self) -> Self {
+        //     log::debug!("[tmq-conf] enable auto commit");
+        //     self.set("enable.auto.commit", "true")
+        //         .expect("set group.id should always be ok");
+        //     self
+        // }
         pub fn disable_auto_commit(mut self) -> Self {
             self.set("enable.auto.commit", "false")
                 .expect("set group.id should always be ok");
@@ -251,11 +251,11 @@ pub(super) mod conf {
             self
         }
 
-        pub fn disable_snapshot(mut self) -> Self {
-            self.set("experimental.snapshot.enable", "false")
-                .expect("enable experimental snapshot");
-            self
-        }
+        // pub fn disable_snapshot(mut self) -> Self {
+        //     self.set("experimental.snapshot.enable", "false")
+        //         .expect("enable experimental snapshot");
+        //     self
+        // }
 
         pub fn with_table_name(mut self) -> Self {
             log::debug!("set msg.with.table.name as true");
@@ -263,11 +263,11 @@ pub(super) mod conf {
                 .expect("set group.id should always be ok");
             self
         }
-        pub fn without_table_name(mut self) -> Self {
-            self.set("msg.with.table.name", "false")
-                .expect("set group.id should always be ok");
-            self
-        }
+        // pub fn without_table_name(mut self) -> Self {
+        //     self.set("msg.with.table.name", "false")
+        //         .expect("set group.id should always be ok");
+        //     self
+        // }
 
         pub(crate) fn with<K: AsRef<str>, V: AsRef<str>>(
             mut self,
@@ -287,11 +287,11 @@ pub(super) mod conf {
             unsafe { self.api.set(self.as_ptr(), key.as_ref(), value.as_ref()) }.map(|_| self)
         }
 
-        pub(crate) fn with_auto_commit_cb(&mut self, cb: tmq_commit_cb, param: *mut c_void) {
-            unsafe {
-                self.api.auto_commit_cb(self.as_ptr(), cb, param);
-            }
-        }
+        // pub(crate) fn with_auto_commit_cb(&mut self, cb: tmq_commit_cb, param: *mut c_void) {
+        //     unsafe {
+        //         self.api.auto_commit_cb(self.as_ptr(), cb, param);
+        //     }
+        // }
 
         pub(crate) fn build(&self) -> Result<*mut tmq_t, RawError> {
             unsafe { self.api.consumer(self.as_ptr()) }
@@ -327,12 +327,12 @@ pub(super) mod list {
         pub(super) fn as_ptr(&self) -> *mut tmq_list_t {
             self.ptr
         }
-        pub(crate) fn new(api: TmqListApi) -> Self {
-            Self {
-                api,
-                ptr: unsafe { api.new() },
-            }
-        }
+        // pub(crate) fn new(api: TmqListApi) -> Self {
+        //     Self {
+        //         api,
+        //         ptr: unsafe { api.new() },
+        //     }
+        // }
 
         // pub(crate) fn append<'a>(&mut self, c_str: impl IntoCStr<'a>) -> Result<()> {
         //     self.api.append(self.as_ptr(), c_str)
