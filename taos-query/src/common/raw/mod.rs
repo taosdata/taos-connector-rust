@@ -81,8 +81,8 @@ impl Header {
 ///
 /// ```text,ignore
 /// +-----+----------+---------------+-----------+-----------------------+-----------------+
-/// | len | group id | col_schema... | length... | (bitmap or offsets    | col data)   ... |
-/// | 4B  | 8B       | (2+4)B * cols | 4B * cols | (row+7)/8 or 4 * rows | length[col] ... |
+/// | header | col_schema... | length... | (bitmap or offsets    | col data)   ... |
+/// | 28 B   | (1+4)B * cols | 4B * cols | (row+7)/8 or 4 * rows | length[col] ... |
 /// +-----+----------+---------------+-----------+-----------------------+-----------------+
 /// ```
 ///
@@ -690,7 +690,7 @@ impl RawBlock {
             self.layout.borrow_mut().set_schema_changed(false);
             unsafe { &*self.data.as_ptr() }
         } else {
-            unsafe { &*self.data.as_ptr() }
+            unsafe { &(*self.data.as_ptr()) }
         }
     }
 

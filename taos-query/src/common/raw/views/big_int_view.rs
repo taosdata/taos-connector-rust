@@ -64,7 +64,6 @@ impl BigIntView {
         }
     }
 
-
     #[inline(always)]
     unsafe fn get_raw_at(&self, index: usize) -> *const Item {
         self.data.as_ptr().offset((index * ITEM_SIZE) as isize) as _
@@ -122,7 +121,9 @@ impl BigIntView {
         }
 
         let nulls = unsafe { self.nulls.slice(range.clone()) };
-        let data = self.data.slice(range.start * ITEM_SIZE..range.end * ITEM_SIZE);
+        let data = self
+            .data
+            .slice(range.start * ITEM_SIZE..range.end * ITEM_SIZE);
         Some(Self { nulls, data })
     }
 
@@ -210,7 +211,6 @@ fn test_slice() {
     let slice = view.slice(1..3);
     dbg!(&slice);
 
-
     let data = [None, Some(0), Some(i64::MAX), None];
     let view = BigIntView::from_iter(data);
     dbg!(&view);
@@ -218,5 +218,5 @@ fn test_slice() {
     let slice = view.slice(range.clone()).unwrap();
     for (v, i) in slice.iter().zip(range) {
         assert_eq!(v, data[i]);
-    }   
+    }
 }

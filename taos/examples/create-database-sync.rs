@@ -1,5 +1,5 @@
-use taos::sync::*;
 use anyhow::Result;
+use taos::sync::*;
 
 fn main() -> Result<()> {
     let taos = TaosBuilder::from_dsn("taos://")?.build()?;

@@ -1,8 +1,8 @@
 use taos_query::prelude::Value;
 use taos_query::stmt::Bindable;
 
-use taos_query::prelude::ColumnView;
 use crate::sys::Stmt as NativeStmt;
+use taos_query::prelude::ColumnView;
 use taos_ws::Stmt as WsStmt;
 enum StmtInner {
     Native(NativeStmt),

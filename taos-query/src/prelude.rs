@@ -218,7 +218,6 @@ pub mod sync {
                 .map_or(Ok(None), |v| v.map(Some).map_err(Into::into))
         }
 
-
         /// Short for `SELECT server_version()` as [String].
         fn server_version(&self) -> Result<Cow<str>, Self::Error> {
             Ok(self
@@ -277,7 +276,6 @@ pub mod sync {
                     .try_collect()?,
             ))
         }
-
 
         /// Check if database exists
         fn database_exists(&self, name: &str) -> Result<bool, Self::Error> {

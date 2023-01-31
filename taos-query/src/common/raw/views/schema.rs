@@ -4,7 +4,7 @@ use bytes::Bytes;
 
 use crate::common::{Field, Ty};
 
-// use packed(2) because [Ty] is int16_t in raw block.
+/// Represent column basics information: type, length.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 #[repr(packed(1))]
@@ -48,6 +48,9 @@ fn col_schema() {
     let bytes: [u8; 5] = [4, 1, 0, 0, 0];
     let col2: ColSchema = unsafe { std::mem::transmute_copy(&bytes) };
     dbg!(col2);
+
+    assert_eq!(std::mem::size_of_val(&col), 5);
+    assert_eq!(std::mem::align_of_val(&col), 1);
 }
 
 #[test]

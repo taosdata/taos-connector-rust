@@ -147,7 +147,8 @@ impl AsyncFetchable for ResultSet {
     ) -> std::task::Poll<Result<Option<RawBlock>, Self::Error>> {
         match &mut self.0 {
             ResultSetInner::Native(rs) => {
-                <crate::sys::ResultSet as AsyncFetchable>::fetch_raw_block(rs, cx).map_err(Into::into)
+                <crate::sys::ResultSet as AsyncFetchable>::fetch_raw_block(rs, cx)
+                    .map_err(Into::into)
             }
             ResultSetInner::Ws(rs) => {
                 <taos_ws::ResultSet as AsyncFetchable>::fetch_raw_block(rs, cx).map_err(Into::into)
@@ -262,10 +263,12 @@ impl taos_query::Queryable for Taos {
 
     fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error> {
         match &self.0 {
-            TaosInner::Native(taos) => <crate::sys::Taos as taos_query::Queryable>::query(taos, sql)
-                .map(ResultSetInner::Native)
-                .map(ResultSet)
-                .map_err(Into::into),
+            TaosInner::Native(taos) => {
+                <crate::sys::Taos as taos_query::Queryable>::query(taos, sql)
+                    .map(ResultSetInner::Native)
+                    .map(ResultSet)
+                    .map_err(Into::into)
+            }
             TaosInner::Ws(taos) => <taos_ws::Taos as taos_query::Queryable>::query(taos, sql)
                 .map(ResultSetInner::Ws)
                 .map(ResultSet)

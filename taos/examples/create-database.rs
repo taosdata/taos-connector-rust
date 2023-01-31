@@ -1,6 +1,6 @@
-use taos::*;
 use anyhow::Result;
 use std::str::FromStr;
+use taos::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {

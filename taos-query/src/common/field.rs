@@ -15,6 +15,12 @@ pub struct c_field_t {
     pub bytes: i32,
 }
 
+#[test]
+fn test_c_field_t() {
+    let bytes = 1960820204i32;
+    println!("{:0b}", bytes);
+}
+
 /// A `Field` represents the name and data type of one column or tag.
 ///
 /// For example, a table as "create table tb1 (ts timestamp, n nchar(100))".
@@ -36,11 +42,11 @@ pub struct Field {
     pub(crate) bytes: u32,
 }
 
-impl From<Field> for c_field_t {
-    fn from(value: Field) -> Self {
-        value.into()
-    }
-}
+// impl From<Field> for c_field_t {
+//     fn from(value: Field) -> Self {
+//         value.into()
+//     }
+// }
 impl From<&Field> for c_field_t {
     fn from(value: &Field) -> Self {
         // let name = value.name().into_c_str().into_owned();

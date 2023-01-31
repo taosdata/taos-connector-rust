@@ -117,7 +117,9 @@ impl UIntView {
         }
 
         let nulls = unsafe { self.nulls.slice(range.clone()) };
-        let data = self.data.slice(range.start * ITEM_SIZE..range.end * ITEM_SIZE);
+        let data = self
+            .data
+            .slice(range.start * ITEM_SIZE..range.end * ITEM_SIZE);
         Some(Self { nulls, data })
     }
 
@@ -203,7 +205,6 @@ fn test_slice() {
     let slice = view.slice(1..3);
     dbg!(&slice);
 
-
     let data = [None, Some(Item::MIN), Some(Item::MAX), None];
     let view = View::from_iter(data);
     dbg!(&view);
@@ -211,5 +212,5 @@ fn test_slice() {
     let slice = view.slice(range.clone()).unwrap();
     for (v, i) in slice.iter().zip(range) {
         assert_eq!(v, data[i]);
-    }   
+    }
 }

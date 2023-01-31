@@ -284,10 +284,7 @@ fn test_slice() {
         let end = start + 1;
         for end in end..data.len() {
             let slice = view.slice(start..end).unwrap();
-            assert_eq!(
-                slice.to_vec().as_slice(),
-                &data[start..end]
-            );
+            assert_eq!(slice.to_vec().as_slice(), &data[start..end]);
         }
     }
 }

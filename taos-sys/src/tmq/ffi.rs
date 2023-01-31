@@ -3,9 +3,7 @@ use std::{borrow::Cow, os::raw::*};
 use taos_macros::c_cfg;
 use taos_query::{common::raw_data_t, prelude::RawError};
 
-use crate::{
-    ffi::{TAOS, TAOS_RES},
-};
+use crate::ffi::{TAOS, TAOS_RES};
 
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]

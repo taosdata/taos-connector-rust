@@ -200,7 +200,6 @@ fn test_bool_slice() {
     let slice = view.slice(1..3);
     dbg!(&slice);
 
-
     let data = [None, Some(false), Some(true), None];
     let view = BoolView::from_iter(data);
     dbg!(&view);
