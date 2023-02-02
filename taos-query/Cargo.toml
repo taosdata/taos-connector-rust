@@ -46,7 +46,7 @@ bitvec_simd = { version = "0.20.5", features = ["use_serde"] }
 
 r2d2 = { version = "0.8.9", optional = true }
 
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "io-util"] }
 
 [dev-dependencies]
 flate2 = "1"
