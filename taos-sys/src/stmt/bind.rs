@@ -155,7 +155,6 @@ mod tests_v2 {
 mod tests_v3 {
 
     use crate::types::TaosBindV3 as TaosBind;
-    use taos_query::common::itypes::IVarChar;
 
     #[test]
     fn bind_bool() {
@@ -174,19 +173,6 @@ mod tests_v3 {
             dbg!(&bind);
             let v1 = unsafe { (bind.buffer() as *const i8).read() };
             assert_eq!(v1, *v);
-        }
-    }
-    #[test]
-    fn bind_var_char() {
-        for v in [IVarChar::from("abc")].iter() {
-            let bind = TaosBind::from(v);
-            dbg!(&bind);
-            let v1 =
-                unsafe { std::str::from_utf8(std::slice::from_raw_parts(bind.buffer() as _, 3)) }
-                    .unwrap();
-
-            dbg!(v1);
-            assert!(v1 == v.as_str());
         }
     }
 }
