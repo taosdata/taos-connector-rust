@@ -16,7 +16,7 @@ use crate::{
 
 use super::RawData;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RawMeta(RawData);
 
 impl<T: Into<RawData>> From<T> for RawMeta {

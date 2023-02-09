@@ -134,7 +134,26 @@ impl RawTaos {
 
     #[inline]
     pub fn write_raw_meta(&self, meta: raw_data_t) -> Result<(), Error> {
-        err_or!(tmq_write_raw(self.as_ptr(), meta))
+        // try 5 times if write_raw_meta fails with 0x2603 error.
+        let mut retries = 5;
+        loop {
+            let code = unsafe { tmq_write_raw(self.as_ptr(), meta) };
+            let code = Code::from(code);
+            if code.success() {
+                return Ok(());
+            }
+            if code != Code::from(0x2603) {
+                let err = unsafe { taos_errstr(std::ptr::null_mut()) };
+                let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                return Err(taos_query::prelude::RawError::new(code, err));
+            }
+            retries -= 1;
+            if retries == 0 {
+                let err = unsafe { taos_errstr(std::ptr::null_mut()) };
+                let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                return Err(taos_query::prelude::RawError::new(code, err));
+            }
+        }
     }
 
     #[inline]

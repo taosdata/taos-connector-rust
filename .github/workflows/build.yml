@@ -52,7 +52,6 @@ jobs:
       - run: |
           cargo build -p taos --no-default-features --features ws-rustls
           cargo build -p taos-ws-sys
-          cargo build -p taos-ws-py
 
   test:
     runs-on: ubuntu-latest
