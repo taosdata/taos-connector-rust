@@ -434,7 +434,7 @@ mod tests {
                 MessageSet::Meta(meta) => {
                     let json = meta.to_json();
                     dbg!(json);
-                    taos.write_raw_meta(meta.as_raw_meta()?)?;
+                    taos.write_raw_meta(&meta.as_raw_meta()?)?;
                     // taos.w
                 }
                 MessageSet::Data(data) => {
@@ -455,7 +455,7 @@ mod tests {
                     // meta
                     let json = meta.to_json();
                     dbg!(json);
-                    taos.write_raw_meta(meta.as_raw_meta()?)?;
+                    taos.write_raw_meta(&meta.as_raw_meta()?)?;
 
                     // data
                     for raw in data {
@@ -552,7 +552,7 @@ mod tests {
                 MessageSet::Meta(meta) => {
                     let json = meta.to_json();
                     dbg!(json);
-                    taos.write_raw_meta(meta.as_raw_meta()?)?;
+                    taos.write_raw_meta(&meta.as_raw_meta()?)?;
                     // taos.w
                 }
                 MessageSet::Data(data) => {
@@ -570,7 +570,7 @@ mod tests {
                 MessageSet::MetaData(meta, data) => {
                     let json = meta.to_json();
                     dbg!(json);
-                    taos.write_raw_meta(meta.as_raw_meta()?)?;
+                    taos.write_raw_meta(&meta.as_raw_meta()?)?;
                     for raw in data {
                         let raw = raw?;
                         let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
@@ -706,7 +706,7 @@ mod tests {
             match message {
                 MessageSet::Meta(meta) => {
                     let raw = meta.as_raw_meta()?;
-                    taos.write_raw_meta(raw)?;
+                    taos.write_raw_meta(&raw)?;
 
                     let json = meta.as_json_meta()?;
                     match &json {
@@ -896,7 +896,7 @@ mod tests {
                 match message {
                     MessageSet::Meta(meta) => {
                         let raw = meta.as_raw_meta().await?;
-                        taos.write_raw_meta(raw).await?;
+                        taos.write_raw_meta(&raw).await?;
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;

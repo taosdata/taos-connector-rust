@@ -107,7 +107,7 @@ fn test_tmq_meta_sync() -> anyhow::Result<()> {
         match message {
             MessageSet::Meta(meta) => {
                 let raw = meta.as_raw_meta()?;
-                taos.write_raw_meta(raw)?;
+                taos.write_raw_meta(&raw)?;
 
                 // meta data can be write to an database seamlessly by raw or json (to sql).
                 let json = meta.as_json_meta()?;
@@ -126,7 +126,7 @@ fn test_tmq_meta_sync() -> anyhow::Result<()> {
             }
             MessageSet::MetaData(meta, data) => {
                 let raw = meta.as_raw_meta()?;
-                taos.write_raw_meta(raw)?;
+                taos.write_raw_meta(&raw)?;
 
                 // meta data can be write to an database seamlessly by raw or json (to sql).
                 let json = meta.as_json_meta()?;

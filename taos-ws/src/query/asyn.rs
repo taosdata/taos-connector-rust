@@ -613,7 +613,7 @@ impl WsTaos {
         })
     }
 
-    pub async fn write_meta(&self, raw: RawMeta) -> Result<()> {
+    pub async fn write_meta(&self, raw: &RawMeta) -> Result<()> {
         let req_id = self.sender.req_id();
         let message_id = req_id;
         let raw_meta_message = 3; // magic number from taosAdapter.
@@ -930,7 +930,7 @@ impl AsyncQueryable for WsTaos {
     ) -> StdResult<Self::AsyncResultSet, Self::Error> {
         self.s_query(sql.as_ref()).await
     }
-    async fn write_raw_meta(&self, raw: RawMeta) -> StdResult<(), Self::Error> {
+    async fn write_raw_meta(&self, raw: &RawMeta) -> StdResult<(), Self::Error> {
         self.write_meta(raw).await
     }
 

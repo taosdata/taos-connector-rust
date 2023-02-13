@@ -190,7 +190,7 @@ pub mod sync {
             self.query(sql).map(|res| res.affected_rows() as _)
         }
 
-        fn write_raw_meta(&self, _: RawMeta) -> Result<(), Self::Error>;
+        fn write_raw_meta(&self, _: &RawMeta) -> Result<(), Self::Error>;
 
         fn write_raw_block(&self, _: &RawBlock) -> Result<(), Self::Error>;
 
@@ -493,7 +493,7 @@ mod r#async {
             self.query(sql).await.map(|res| res.affected_rows() as _)
         }
 
-        async fn write_raw_meta(&self, _: RawMeta) -> Result<(), Self::Error>;
+        async fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error>;
 
         async fn write_raw_block(&self, block: &RawBlock) -> Result<(), Self::Error>;
 

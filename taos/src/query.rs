@@ -241,7 +241,7 @@ impl AsyncQueryable for Taos {
         }
     }
 
-    async fn write_raw_meta(&self, meta: RawMeta) -> Result<(), Self::Error> {
+    async fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
         match &self.0 {
             TaosInner::Native(taos) => taos.write_raw_meta(meta).await.map_err(Into::into),
             TaosInner::Ws(taos) => taos.write_raw_meta(meta).await.map_err(Into::into),
@@ -276,7 +276,7 @@ impl taos_query::Queryable for Taos {
         }
     }
 
-    fn write_raw_meta(&self, meta: RawMeta) -> Result<(), Self::Error> {
+    fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
         match &self.0 {
             TaosInner::Native(taos) => {
                 <crate::sys::Taos as taos_query::Queryable>::write_raw_meta(taos, meta)
