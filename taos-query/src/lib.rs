@@ -359,7 +359,7 @@ mod tests {
             Ok(1)
         }
 
-        fn write_raw_meta(&self, _: RawMeta) -> Result<(), Self::Error> {
+        fn write_raw_meta(&self, _: &RawMeta) -> Result<(), Self::Error> {
             Ok(())
         }
 

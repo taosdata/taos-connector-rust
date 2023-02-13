@@ -458,7 +458,7 @@ mod tests {
                 match message {
                     MessageSet::Meta(meta) => {
                         let raw = meta.as_raw_meta().await?;
-                        taos.write_raw_meta(raw).await?;
+                        taos.write_raw_meta(&raw).await?;
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
@@ -476,7 +476,7 @@ mod tests {
                     }
                     MessageSet::MetaData(meta, data) => {
                         let raw = meta.as_raw_meta().await?;
-                        taos.write_raw_meta(raw).await?;
+                        taos.write_raw_meta(&raw).await?;
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;

@@ -57,7 +57,7 @@ impl taos_query::AsyncQueryable for Taos {
         }
     }
 
-    async fn write_raw_meta(&self, raw: RawMeta) -> Result<(), Self::Error> {
+    async fn write_raw_meta(&self, raw: &RawMeta) -> Result<(), Self::Error> {
         if let Some(ws) = self.async_client.get() {
             ws.write_meta(raw).await
         } else {
@@ -91,7 +91,7 @@ impl taos_query::Queryable for Taos {
         let sql = sql.as_ref();
         block_in_place_or_global(<Self as AsyncQueryable>::query(self, sql))
     }
-    fn write_raw_meta(&self, meta: RawMeta) -> Result<(), Self::Error> {
+    fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
         block_in_place_or_global(<Self as AsyncQueryable>::write_raw_meta(self, meta))
     }
 

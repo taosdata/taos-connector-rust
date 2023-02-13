@@ -826,7 +826,7 @@ mod tests {
             match message {
                 MessageSet::Meta(meta) => {
                     let raw = meta.as_raw_meta()?;
-                    taos.write_raw_meta(raw)?;
+                    taos.write_raw_meta(&raw)?;
 
                     let json = meta.as_json_meta()?;
                     match &json {
@@ -1063,7 +1063,7 @@ mod tests {
                 match message {
                     MessageSet::Meta(meta) => {
                         dbg!(&meta.as_json_meta().await?);
-                        target.write_raw_meta(meta.as_raw_meta().await?).await?;
+                        target.write_raw_meta(&meta.as_raw_meta().await?).await?;
                     }
                     MessageSet::Data(mut data) => {
                         println!("is data");
@@ -1083,7 +1083,7 @@ mod tests {
                         }
                         if !has_blocks {
                             target
-                                .write_raw_meta(unsafe { std::mem::transmute(raw) })
+                                .write_raw_meta(&unsafe { std::mem::transmute(raw) })
                                 .await?;
                         }
                     }
@@ -1219,7 +1219,7 @@ mod tests {
                 match message {
                     MessageSet::Meta(meta) => {
                         let raw = meta.as_raw_meta().await?;
-                        taos.write_raw_meta(raw).await?;
+                        taos.write_raw_meta(&raw).await?;
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
