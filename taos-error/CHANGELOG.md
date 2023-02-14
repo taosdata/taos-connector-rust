@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.2.16] - 2023-02-14
+
+### Bug Fixes
+
+- *(ws)* Fix stmt bind with non-null values coredump
+- *(ws)* Add ws-related error codes, fix version detection- Fix derive error since rustc-1.65.0-nightly
+- Fix column length calculation for v2 block
+
+
+### Features
+
+- *(libtaosws)* Add ws_get_server_info
+- *(ws)* Add ws_take_timing method for taosc cost
+
+### Refactor
+
+- *(query)* Refactor query interface- Fix nchar/json error, refactor error handling
+
+
+### Testing
+- Fix llvm-cov test error and report code coverage
+
+
 ## [0.2.15] - 2023-01-16
 
 ### Bug Fixes
