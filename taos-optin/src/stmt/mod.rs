@@ -13,7 +13,8 @@ use std::{
 use itertools::Itertools;
 // use taos_error::{Code, Error};
 use taos_query::prelude::{
-    sync::{Bindable, Queryable, RawError as Error, Ty},
+    // sync::{Bindable, Queryable, RawError as Error, Ty},
+    sync::{Bindable, Queryable, RawError as Error},
     Code,
 };
 
@@ -88,7 +89,7 @@ impl Bindable<super::Taos> for Stmt {
 pub(crate) struct RawStmt {
     c: Arc<ApiEntry>,
     api: StmtApi,
-    ptr: *mut TAOS_STMT,
+    ptr: *mut TaosStmt,
     tbname: Option<CString>,
 }
 
@@ -116,14 +117,14 @@ impl RawStmt {
     }
 
     #[inline]
-    pub unsafe fn as_ptr(&self) -> *mut TAOS_STMT {
+    pub unsafe fn as_ptr(&self) -> *mut TaosStmt {
         self.ptr
     }
 
-    #[inline]
-    pub fn errstr(&self) -> &CStr {
-        unsafe { CStr::from_ptr((self.api.taos_stmt_errstr)(self.as_ptr())) }
-    }
+    // #[inline]
+    // pub fn errstr(&self) -> &CStr {
+    //     unsafe { CStr::from_ptr((self.api.taos_stmt_errstr)(self.as_ptr())) }
+    // }
 
     #[inline]
     pub fn err_as_str(&self) -> String {
@@ -157,19 +158,19 @@ impl RawStmt {
         })
     }
 
-    pub fn set_tbname_tags_v3<'a>(
-        &mut self,
-        name: impl IntoCStr<'a>,
-        tags: &[TaosBindV3],
-    ) -> Result<(), Error> {
-        self.ok(unsafe {
-            (self.api.taos_stmt_set_tbname_tags)(
-                self.as_ptr(),
-                name.into_c_str().as_ptr(),
-                tags.as_ptr() as _,
-            )
-        })
-    }
+    // pub fn set_tbname_tags_v3<'a>(
+    //     &mut self,
+    //     name: impl IntoCStr<'a>,
+    //     tags: &[TaosBindV3],
+    // ) -> Result<(), Error> {
+    //     self.ok(unsafe {
+    //         (self.api.taos_stmt_set_tbname_tags)(
+    //             self.as_ptr(),
+    //             name.into_c_str().as_ptr(),
+    //             tags.as_ptr() as _,
+    //         )
+    //     })
+    // }
 
     #[inline]
     pub fn set_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> Result<(), Error> {
@@ -183,12 +184,12 @@ impl RawStmt {
         res
     }
 
-    #[inline]
-    pub fn set_sub_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> Result<(), Error> {
-        self.ok(unsafe {
-            (self.api.taos_stmt_set_sub_tbname)(self.as_ptr(), name.into_c_str().as_ptr())
-        })
-    }
+    // #[inline]
+    // pub fn set_sub_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> Result<(), Error> {
+    //     self.ok(unsafe {
+    //         (self.api.taos_stmt_set_sub_tbname)(self.as_ptr(), name.into_c_str().as_ptr())
+    //     })
+    // }
 
     #[inline]
     pub fn set_tags(&mut self, tags: *const c_void) -> Result<(), Error> {
@@ -234,39 +235,39 @@ impl RawStmt {
         err_or!(self, (self.api.taos_stmt_add_batch)(self.as_ptr()))
     }
 
-    #[inline]
-    pub fn is_insert(&self) -> Result<bool, Error> {
-        let mut is_insert = 0;
-        err_or!(
-            self,
-            (self.api.taos_stmt_is_insert)(self.as_ptr(), &mut is_insert as _),
-            is_insert != 0
-        )
-    }
+    // #[inline]
+    // pub fn is_insert(&self) -> Result<bool, Error> {
+    //     let mut is_insert = 0;
+    //     err_or!(
+    //         self,
+    //         (self.api.taos_stmt_is_insert)(self.as_ptr(), &mut is_insert as _),
+    //         is_insert != 0
+    //     )
+    // }
 
-    #[inline]
-    pub fn num_params(&self) -> Result<usize, Error> {
-        let mut num = 0i32;
-        err_or!(
-            self,
-            (self.api.taos_stmt_num_params)(self.as_ptr(), &mut num as _),
-            num as usize
-        )
-    }
+    // #[inline]
+    // pub fn num_params(&self) -> Result<usize, Error> {
+    //     let mut num = 0i32;
+    //     err_or!(
+    //         self,
+    //         (self.api.taos_stmt_num_params)(self.as_ptr(), &mut num as _),
+    //         num as usize
+    //     )
+    // }
 
-    #[inline]
-    pub fn get_param(&mut self, idx: i32) -> Result<(Ty, i32), Error> {
-        let (mut type_, mut bytes) = (0, 0);
-        err_or!(
-            self,
-            (self.api.taos_stmt_get_param)(self.as_ptr(), idx, &mut type_ as _, &mut bytes as _),
-            ((type_ as u8).into(), bytes)
-        )
-    }
-    #[inline]
-    pub fn bind_param(&mut self, bind: *const c_void) -> Result<(), Error> {
-        err_or!(self, (self.api.taos_stmt_bind_param)(self.as_ptr(), bind))
-    }
+    // #[inline]
+    // pub fn get_param(&mut self, idx: i32) -> Result<(Ty, i32), Error> {
+    //     let (mut type_, mut bytes) = (0, 0);
+    //     err_or!(
+    //         self,
+    //         (self.api.taos_stmt_get_param)(self.as_ptr(), idx, &mut type_ as _, &mut bytes as _),
+    //         ((type_ as u8).into(), bytes)
+    //     )
+    // }
+    // #[inline]
+    // pub fn bind_param(&mut self, bind: *const c_void) -> Result<(), Error> {
+    //     err_or!(self, (self.api.taos_stmt_bind_param)(self.as_ptr(), bind))
+    // }
 
     #[inline]
     pub fn bind_param_batch(&mut self, bind: &[TaosMultiBind]) -> Result<(), Error> {
@@ -276,12 +277,12 @@ impl RawStmt {
         )
     }
 
-    #[inline]
-    pub fn bind_single_param_batch(&self, bind: &TaosMultiBind, col: i32) -> Result<(), Error> {
-        self.ok(unsafe {
-            (self.api.taos_stmt_bind_single_param_batch)(self.as_ptr(), bind as *const _ as _, col)
-        })
-    }
+    // #[inline]
+    // pub fn bind_single_param_batch(&self, bind: &TaosMultiBind, col: i32) -> Result<(), Error> {
+    //     self.ok(unsafe {
+    //         (self.api.taos_stmt_bind_single_param_batch)(self.as_ptr(), bind as *const _ as _, col)
+    //     })
+    // }
 }
 
 #[cfg(test)]

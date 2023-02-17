@@ -225,13 +225,13 @@ impl Meta {
 }
 pub struct Data {
     raw: RawRes,
-    precision: Precision,
+    _precision: Precision,
 }
 
 impl Data {
     fn new(raw: RawRes) -> Self {
         Self {
-            precision: raw.precision(),
+            _precision: raw.precision(),
             raw,
         }
     }
@@ -258,18 +258,18 @@ impl IsAsyncData for Data {
 impl From<RawRes> for MessageSet<Meta, Data> {
     fn from(raw: RawRes) -> Self {
         match raw.tmq_message_type() {
-            tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-            tmq_res_t::TMQ_RES_DATA => Self::Data(Data::new(raw)),
-            tmq_res_t::TMQ_RES_TABLE_META => Self::Meta(Meta::new(raw)),
-            tmq_res_t::TMQ_RES_METADATA => Self::MetaData(Meta::new(raw.clone()), Data::new(raw)),
+            tmq_res_t::_TmqResInvalid => unreachable!(),
+            tmq_res_t::_TmqResData => Self::Data(Data::new(raw)),
+            tmq_res_t::_TmqResTableMeta => Self::Meta(Meta::new(raw)),
+            tmq_res_t::_TmqResMetadata => Self::MetaData(Meta::new(raw.clone()), Data::new(raw)),
         }
     }
 }
 
 pub struct MessageSetIter {
-    raw: RawRes,
-    msg_type: tmq_res_t,
-    precision: Precision,
+    _raw: RawRes,
+    _msg_type: tmq_res_t,
+    _precision: Precision,
 }
 
 impl Iterator for Data {
@@ -324,12 +324,12 @@ impl AsConsumer for Consumer {
             (
                 Offset(raw.clone()),
                 match raw.tmq_message_type() {
-                    tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                    tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                    tmq_res_t::TMQ_RES_TABLE_META => {
+                    tmq_res_t::_TmqResInvalid => unreachable!(),
+                    tmq_res_t::_TmqResData => taos_query::tmq::MessageSet::Data(Data::new(raw)),
+                    tmq_res_t::_TmqResTableMeta => {
                         taos_query::tmq::MessageSet::Meta(Meta::new(raw))
                     }
-                    tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(
+                    tmq_res_t::_TmqResMetadata => taos_query::tmq::MessageSet::MetaData(
                         Meta::new(raw.clone()),
                         Data::new(raw),
                     ),
@@ -378,12 +378,12 @@ impl AsAsyncConsumer for Consumer {
             (
                 Offset(raw.clone()),
                 match raw.tmq_message_type() {
-                    tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                    tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                    tmq_res_t::TMQ_RES_TABLE_META => {
+                    tmq_res_t::_TmqResInvalid => unreachable!(),
+                    tmq_res_t::_TmqResData => taos_query::tmq::MessageSet::Data(Data::new(raw)),
+                    tmq_res_t::_TmqResTableMeta => {
                         taos_query::tmq::MessageSet::Meta(Meta::new(raw))
                     }
-                    tmq_res_t::TMQ_RES_METADATA => todo!(),
+                    tmq_res_t::_TmqResMetadata => todo!(),
                 },
             )
         }))
@@ -743,7 +743,7 @@ mod tests {
                                 let desc = taos.describe(table_name.as_str())?;
                                 dbg!(desc);
                             }
-                            _ => todo!(),
+                            // _ => todo!(),
                         },
                         _ => (),
                     }

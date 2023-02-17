@@ -2,9 +2,9 @@ use taos_query::common::{itypes::IsValue, Ty};
 
 use crate::types::{BindFrom, TaosBindV2, TaosBindV3};
 
-fn box_into_raw<T>(v: T) -> *mut T {
-    Box::into_raw(Box::new(v))
-}
+// fn box_into_raw<T>(v: T) -> *mut T {
+//     Box::into_raw(Box::new(v))
+// }
 
 impl<T> From<&T> for TaosBindV2
 where
@@ -143,7 +143,7 @@ mod tests_v2 {
             dbg!(&bind);
 
             let v1 =
-                unsafe { std::str::from_utf8(std::slice::from_raw_parts(bind.buffer() as _, 3)) }
+                unsafe { std::str::from_utf8(std::slice::from_raw_parts(bind.buffer as _, 3)) }
                     .unwrap();
 
             dbg!(v1);
@@ -162,7 +162,7 @@ mod tests_v3 {
         for v in [true, false].iter() {
             let bind = TaosBind::from(v);
             dbg!(&bind);
-            let v1 = unsafe { (bind.buffer() as *const bool).read() };
+            let v1 = unsafe { (bind.buffer as *const bool).read() };
             assert_eq!(v1, *v);
         }
     }
@@ -172,7 +172,7 @@ mod tests_v3 {
         for v in [0i8, 1i8].iter() {
             let bind = TaosBind::from(v);
             dbg!(&bind);
-            let v1 = unsafe { (bind.buffer() as *const i8).read() };
+            let v1 = unsafe { (bind.buffer as *const i8).read() };
             assert_eq!(v1, *v);
         }
     }
@@ -183,7 +183,7 @@ mod tests_v3 {
             let bind = TaosBind::from(v);
             dbg!(&bind);
             let v1 =
-                unsafe { std::str::from_utf8(std::slice::from_raw_parts(bind.buffer() as _, 3)) }
+                unsafe { std::str::from_utf8(std::slice::from_raw_parts(bind.buffer as _, 3)) }
                     .unwrap();
 
             dbg!(v1);

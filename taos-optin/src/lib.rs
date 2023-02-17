@@ -37,37 +37,37 @@ mod version {
     }
 
     impl Version {
-        pub(crate) const fn new(mainline: u8, major: u8, minor: u8, patch: u8) -> Self {
-            Self {
-                mainline,
-                major,
-                minor,
-                patch,
-            }
-        }
-        fn parse(version: &str) -> Result<Self, Box<dyn std::error::Error>> {
-            let version_items: Vec<_> = version.split('.').collect();
-            let items = version_items.len();
-            if items == 0 || items > 4 {
-                Err("parse version error: {version}")?
-            }
+        // pub(crate) const fn new(mainline: u8, major: u8, minor: u8, patch: u8) -> Self {
+        //     Self {
+        //         mainline,
+        //         major,
+        //         minor,
+        //         patch,
+        //     }
+        // }
+        // fn parse(version: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        //     let version_items: Vec<_> = version.split('.').collect();
+        //     let items = version_items.len();
+        //     if items == 0 || items > 4 {
+        //         Err("parse version error: {version}")?
+        //     }
 
-            let mainline = version_items[0].parse()?;
-            let major = version_items
-                .get(1)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or_default();
-            let minor = version_items
-                .get(2)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or_default();
-            let patch = version_items
-                .get(3)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or_default();
+        //     let mainline = version_items[0].parse()?;
+        //     let major = version_items
+        //         .get(1)
+        //         .and_then(|s| s.parse().ok())
+        //         .unwrap_or_default();
+        //     let minor = version_items
+        //         .get(2)
+        //         .and_then(|s| s.parse().ok())
+        //         .unwrap_or_default();
+        //     let patch = version_items
+        //         .get(3)
+        //         .and_then(|s| s.parse().ok())
+        //         .unwrap_or_default();
 
-            Ok(Self::new(mainline, major, minor, patch))
-        }
+        //     Ok(Self::new(mainline, major, minor, patch))
+        // }
     }
 }
 mod into_c_str;
@@ -217,7 +217,7 @@ impl taos_query::AsyncQueryable for Taos {
 /// ```
 #[derive(Debug, Default)]
 pub struct TaosBuilder {
-    dsn: Dsn,
+    _dsn: Dsn,
     auth: Auth,
     lib: Arc<ApiEntry>,
     inner_conn: OnceCell<Taos>,
@@ -336,7 +336,7 @@ impl TBuilder for TaosBuilder {
         lib.options(types::TSDB_OPTION::ShellActivityTimer, "3600");
 
         Ok(Self {
-            dsn,
+            _dsn: dsn,
             auth,
             lib: Arc::new(lib),
             inner_conn: OnceCell::new(),
@@ -440,13 +440,13 @@ impl ResultSet {
         self.fields.get_or_init(|| self.raw.fetch_fields())
     }
 
-    fn ncols(&self) -> usize {
-        self.raw.field_count()
-    }
+    // fn ncols(&self) -> usize {
+    //     self.raw.field_count()
+    // }
 
-    fn names(&self) -> impl Iterator<Item = &str> {
-        self.fields().iter().map(|f| f.name())
-    }
+    // fn names(&self) -> impl Iterator<Item = &str> {
+    //     self.fields().iter().map(|f| f.name())
+    // }
 
     fn update_summary(&mut self, nrows: usize) {
         let summary = self.summary.get_mut();

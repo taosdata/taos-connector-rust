@@ -20,9 +20,9 @@ use crate::{
     err_or,
     into_c_str::IntoCStr,
     types::{
-        from_raw_fields, taos_async_fetch_cb, taos_async_query_cb, tmq_commit_cb, tmq_conf_res_t,
-        tmq_conf_t, tmq_list_t, tmq_res_t, tmq_resp_err_t, tmq_t, TaosMultiBind, TAOS, TAOS_RES,
-        TAOS_ROW, TAOS_STMT, TSDB_OPTION,
+        from_raw_fields, TaosAsyncFetchCb, TaosAsyncQueryCb, TmqCommitCb, tmq_conf_res_t,
+        tmq_conf_t, tmq_list_t, tmq_res_t, TmqRespErrT, tmq_t, TaosMultiBind, TAOS, TaosRes,
+        TaosRow, TaosStmt, TSDB_OPTION,
     },
     Auth,
 };
@@ -37,10 +37,10 @@ lazy_static::lazy_static! {
 
 #[derive(Debug)]
 pub struct ApiEntry {
-    lib: Arc<Library>,
+    _lib: Arc<Library>,
     version: String,
-    taos_cleanup: unsafe extern "C" fn(),
-    taos_get_client_info: unsafe extern "C" fn() -> *const c_char,
+    _taos_cleanup: unsafe extern "C" fn(),
+    _taos_get_client_info: unsafe extern "C" fn() -> *const c_char,
     taos_options: unsafe extern "C" fn(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int,
     taos_connect: unsafe extern "C" fn(
         ip: *const c_char,
@@ -57,19 +57,19 @@ pub struct ApiEntry {
 
     // async query
     taos_fetch_rows_a:
-        unsafe extern "C" fn(res: *mut TAOS_RES, fp: taos_async_fetch_cb, param: *mut c_void),
+        unsafe extern "C" fn(res: *mut TaosRes, fp: TaosAsyncFetchCb, param: *mut c_void),
     taos_query_a: unsafe extern "C" fn(
         taos: *mut TAOS,
         sql: *const c_char,
-        fp: taos_async_query_cb,
+        fp: TaosAsyncQueryCb,
         param: *mut c_void,
     ),
-    taos_result_block: Option<unsafe extern "C" fn(taos: *mut TAOS_RES) -> *mut *mut c_void>,
-    taos_get_raw_block: Option<unsafe extern "C" fn(taos: *mut TAOS_RES) -> *mut c_void>,
+    taos_result_block: Option<unsafe extern "C" fn(taos: *mut TaosRes) -> *mut *mut c_void>,
+    taos_get_raw_block: Option<unsafe extern "C" fn(taos: *mut TaosRes) -> *mut c_void>,
     taos_fetch_raw_block_a: Option<
-        unsafe extern "C" fn(res: *mut TAOS_RES, fp: taos_async_fetch_cb, param: *mut c_void),
+        unsafe extern "C" fn(res: *mut TaosRes, fp: TaosAsyncFetchCb, param: *mut c_void),
     >,
-    // taos_result_block: Option<unsafe extern "C" fn(taos: *mut TAOS_RES) -> *mut c_void>,
+    // taos_result_block: Option<unsafe extern "C" fn(taos: *mut TaosRes) -> *mut c_void>,
     tmq_write_raw: Option<unsafe extern "C" fn(taos: *mut TAOS, meta: raw_data_t) -> i32>,
     taos_write_raw_block: Option<
         unsafe extern "C" fn(
@@ -91,23 +91,23 @@ pub struct ApiEntry {
     >,
 
     // query
-    taos_query: unsafe extern "C" fn(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES,
-    taos_free_result: unsafe extern "C" fn(res: *mut TAOS_RES),
-    taos_result_precision: unsafe extern "C" fn(res: *mut TAOS_RES) -> c_int,
-    taos_field_count: unsafe extern "C" fn(res: *mut TAOS_RES) -> c_int,
-    taos_affected_rows: unsafe extern "C" fn(res: *mut TAOS_RES) -> c_int,
-    taos_fetch_fields: unsafe extern "C" fn(res: *mut TAOS_RES) -> *mut c_void,
-    taos_fetch_lengths: unsafe extern "C" fn(res: *mut TAOS_RES) -> *mut c_int,
-    taos_fetch_block: unsafe extern "C" fn(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int,
+    taos_query: unsafe extern "C" fn(taos: *mut TAOS, sql: *const c_char) -> *mut TaosRes,
+    taos_free_result: unsafe extern "C" fn(res: *mut TaosRes),
+    taos_result_precision: unsafe extern "C" fn(res: *mut TaosRes) -> c_int,
+    taos_field_count: unsafe extern "C" fn(res: *mut TaosRes) -> c_int,
+    taos_affected_rows: unsafe extern "C" fn(res: *mut TaosRes) -> c_int,
+    taos_fetch_fields: unsafe extern "C" fn(res: *mut TaosRes) -> *mut c_void,
+    taos_fetch_lengths: unsafe extern "C" fn(res: *mut TaosRes) -> *mut c_int,
+    taos_fetch_block: unsafe extern "C" fn(res: *mut TaosRes, rows: *mut TaosRow) -> c_int,
     taos_fetch_block_s: Option<
         unsafe extern "C" fn(
-            res: *mut TAOS_RES,
+            res: *mut TaosRes,
             num_of_rows: *mut c_int,
-            rows: *mut TAOS_ROW,
+            rows: *mut TaosRow,
         ) -> c_int,
     >,
     taos_fetch_raw_block: Option<
-        unsafe extern "C" fn(res: *mut TAOS_RES, num: *mut i32, data: *mut *mut c_void) -> c_int,
+        unsafe extern "C" fn(res: *mut TaosRes, num: *mut i32, data: *mut *mut c_void) -> c_int,
     >,
 
     // stmt
@@ -179,8 +179,8 @@ pub(crate) struct TmqConfApi {
         value: *const c_char,
     ) -> tmq_conf_res_t,
 
-    tmq_conf_set_auto_commit_cb:
-        unsafe extern "C" fn(conf: *mut tmq_conf_t, cb: tmq_commit_cb, param: *mut c_void),
+    _tmq_conf_set_auto_commit_cb:
+        unsafe extern "C" fn(conf: *mut tmq_conf_t, cb: TmqCommitCb, param: *mut c_void),
 
     tmq_consumer_new: unsafe extern "C" fn(
         conf: *mut tmq_conf_t,
@@ -207,14 +207,14 @@ impl TmqConfApi {
         (self.tmq_conf_set)(conf, key.as_ptr(), value.as_ptr()).ok(k, v)
     }
 
-    pub(crate) unsafe fn auto_commit_cb(
-        &self,
-        conf: *mut tmq_conf_t,
-        cb: tmq_commit_cb,
-        param: *mut c_void,
-    ) {
-        (self.tmq_conf_set_auto_commit_cb)(conf, cb, param)
-    }
+    // pub(crate) unsafe fn auto_commit_cb(
+    //     &self,
+    //     conf: *mut tmq_conf_t,
+    //     cb: TmqCommitCb,
+    //     param: *mut c_void,
+    // ) {
+    //     (self.tmq_conf_set_auto_commit_cb)(conf, cb, param)
+    // }
 
     pub(crate) unsafe fn consumer(&self, conf: *mut tmq_conf_t) -> Result<*mut tmq_t, RawError> {
         let mut err = [0; 256];
@@ -233,28 +233,28 @@ impl TmqConfApi {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TmqApi {
-    tmq_get_res_type: unsafe extern "C" fn(res: *mut TAOS_RES) -> tmq_res_t,
-    tmq_get_table_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
-    tmq_get_db_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
-    tmq_get_json_meta: unsafe extern "C" fn(res: *mut TAOS_RES) -> *mut c_char,
-    tmq_get_topic_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
-    tmq_get_vgroup_id: unsafe extern "C" fn(res: *mut TAOS_RES) -> i32,
-    tmq_get_raw: unsafe extern "C" fn(res: *mut TAOS_RES, raw: *mut raw_data_t) -> i32,
+    tmq_get_res_type: unsafe extern "C" fn(res: *mut TaosRes) -> tmq_res_t,
+    tmq_get_table_name: unsafe extern "C" fn(res: *mut TaosRes) -> *const c_char,
+    tmq_get_db_name: unsafe extern "C" fn(res: *mut TaosRes) -> *const c_char,
+    tmq_get_json_meta: unsafe extern "C" fn(res: *mut TaosRes) -> *mut c_char,
+    tmq_get_topic_name: unsafe extern "C" fn(res: *mut TaosRes) -> *const c_char,
+    tmq_get_vgroup_id: unsafe extern "C" fn(res: *mut TaosRes) -> i32,
+    tmq_get_raw: unsafe extern "C" fn(res: *mut TaosRes, raw: *mut raw_data_t) -> i32,
 
     pub(crate) tmq_subscribe:
-        unsafe extern "C" fn(tmq: *mut tmq_t, topics: *mut tmq_list_t) -> tmq_resp_err_t,
-    pub(crate) tmq_unsubscribe: unsafe extern "C" fn(tmq: *mut tmq_t) -> tmq_resp_err_t,
-    pub(crate) tmq_subscription:
-        unsafe extern "C" fn(tmq: *mut tmq_t, topic_list: *mut *mut tmq_list_t) -> tmq_resp_err_t,
+        unsafe extern "C" fn(tmq: *mut tmq_t, topics: *mut tmq_list_t) -> TmqRespErrT,
+    pub(crate) tmq_unsubscribe: unsafe extern "C" fn(tmq: *mut tmq_t) -> TmqRespErrT,
+    pub(crate) _tmq_subscription:
+        unsafe extern "C" fn(tmq: *mut tmq_t, topic_list: *mut *mut tmq_list_t) -> TmqRespErrT,
     pub(crate) tmq_consumer_poll:
-        unsafe extern "C" fn(tmq: *mut tmq_t, blocking_time: i64) -> *mut TAOS_RES,
-    pub(crate) tmq_consumer_close: unsafe extern "C" fn(tmq: *mut tmq_t) -> tmq_resp_err_t,
+        unsafe extern "C" fn(tmq: *mut tmq_t, blocking_time: i64) -> *mut TaosRes,
+    pub(crate) tmq_consumer_close: unsafe extern "C" fn(tmq: *mut tmq_t) -> TmqRespErrT,
     pub(crate) tmq_commit_sync:
-        unsafe extern "C" fn(tmq: *mut tmq_t, msg: *const TAOS_RES) -> tmq_resp_err_t,
+        unsafe extern "C" fn(tmq: *mut tmq_t, msg: *const TaosRes) -> TmqRespErrT,
     pub(crate) tmq_commit_async: unsafe extern "C" fn(
         tmq: *mut tmq_t,
-        msg: *const TAOS_RES,
-        cb: tmq_commit_cb,
+        msg: *const TaosRes,
+        cb: TmqCommitCb,
         param: *mut c_void,
     ),
 
@@ -264,59 +264,59 @@ pub(crate) struct TmqApi {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct StmtApi {
-    pub(crate) taos_stmt_init: unsafe extern "C" fn(taos: *mut TAOS) -> *mut TAOS_STMT,
+    pub(crate) taos_stmt_init: unsafe extern "C" fn(taos: *mut TAOS) -> *mut TaosStmt,
 
     pub(crate) taos_stmt_prepare:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, sql: *const c_char, length: c_ulong) -> c_int,
+        unsafe extern "C" fn(stmt: *mut TaosStmt, sql: *const c_char, length: c_ulong) -> c_int,
 
     pub(crate) taos_stmt_set_tbname_tags:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char, tags: *mut c_void) -> c_int,
+        unsafe extern "C" fn(stmt: *mut TaosStmt, name: *const c_char, tags: *mut c_void) -> c_int,
 
     pub(crate) taos_stmt_set_tbname:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int,
+        unsafe extern "C" fn(stmt: *mut TaosStmt, name: *const c_char) -> c_int,
 
     pub(crate) taos_stmt_set_tags:
-        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT, tags: *mut c_void) -> c_int>,
+        Option<unsafe extern "C" fn(stmt: *mut TaosStmt, tags: *mut c_void) -> c_int>,
 
-    pub(crate) taos_stmt_set_sub_tbname:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int,
+    pub(crate) _taos_stmt_set_sub_tbname:
+        unsafe extern "C" fn(stmt: *mut TaosStmt, name: *const c_char) -> c_int,
 
-    pub(crate) taos_stmt_is_insert:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int,
+    pub(crate) _taos_stmt_is_insert:
+        unsafe extern "C" fn(stmt: *mut TaosStmt, insert: *mut c_int) -> c_int,
 
-    pub(crate) taos_stmt_num_params:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_int,
+    pub(crate) _taos_stmt_num_params:
+        unsafe extern "C" fn(stmt: *mut TaosStmt, nums: *mut c_int) -> c_int,
 
-    pub(crate) taos_stmt_get_param: unsafe extern "C" fn(
-        stmt: *mut TAOS_STMT,
+    pub(crate) _taos_stmt_get_param: unsafe extern "C" fn(
+        stmt: *mut TaosStmt,
         idx: c_int,
         type_: *mut c_int,
         bytes: *mut c_int,
     ) -> c_int,
 
-    pub(crate) taos_stmt_bind_param:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, bind: *const c_void) -> c_int,
+    pub(crate) _taos_stmt_bind_param:
+        unsafe extern "C" fn(stmt: *mut TaosStmt, bind: *const c_void) -> c_int,
 
     pub(crate) taos_stmt_bind_param_batch:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, bind: *const TaosMultiBind) -> c_int,
+        unsafe extern "C" fn(stmt: *mut TaosStmt, bind: *const TaosMultiBind) -> c_int,
 
-    pub(crate) taos_stmt_bind_single_param_batch: unsafe extern "C" fn(
-        stmt: *mut TAOS_STMT,
+    pub(crate) _taos_stmt_bind_single_param_batch: unsafe extern "C" fn(
+        stmt: *mut TaosStmt,
         bind: *const TaosMultiBind,
         colIdx: c_int,
     ) -> c_int,
 
-    pub(crate) taos_stmt_add_batch: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
+    pub(crate) taos_stmt_add_batch: unsafe extern "C" fn(stmt: *mut TaosStmt) -> c_int,
 
-    pub(crate) taos_stmt_execute: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
+    pub(crate) taos_stmt_execute: unsafe extern "C" fn(stmt: *mut TaosStmt) -> c_int,
 
-    pub(crate) taos_stmt_affected_rows: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
+    pub(crate) taos_stmt_affected_rows: unsafe extern "C" fn(stmt: *mut TaosStmt) -> c_int,
 
-    pub(crate) taos_stmt_use_result: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> *mut TAOS_RES,
+    pub(crate) taos_stmt_use_result: unsafe extern "C" fn(stmt: *mut TaosStmt) -> *mut TaosRes,
 
-    pub(crate) taos_stmt_close: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
+    pub(crate) taos_stmt_close: unsafe extern "C" fn(stmt: *mut TaosStmt) -> c_int,
 
-    pub(crate) taos_stmt_errstr: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> *const c_char,
+    pub(crate) taos_stmt_errstr: unsafe extern "C" fn(stmt: *mut TaosStmt) -> *const c_char,
 }
 const fn default_lib_name() -> &'static str {
     if cfg!(target_os = "windows") {
@@ -440,13 +440,13 @@ impl ApiEntry {
                 taos_stmt_set_tbname_tags,
                 taos_stmt_set_tbname,
                 taos_stmt_set_tags,
-                taos_stmt_set_sub_tbname,
-                taos_stmt_is_insert,
-                taos_stmt_num_params,
-                taos_stmt_get_param,
-                taos_stmt_bind_param,
+                _taos_stmt_set_sub_tbname: taos_stmt_set_sub_tbname,
+                _taos_stmt_is_insert: taos_stmt_is_insert,
+                _taos_stmt_num_params: taos_stmt_num_params,
+                _taos_stmt_get_param: taos_stmt_get_param,
+                _taos_stmt_bind_param: taos_stmt_bind_param,
                 taos_stmt_bind_param_batch,
-                taos_stmt_bind_single_param_batch,
+                _taos_stmt_bind_single_param_batch: taos_stmt_bind_single_param_batch,
                 taos_stmt_add_batch,
                 taos_stmt_execute,
                 taos_stmt_affected_rows,
@@ -487,7 +487,7 @@ impl ApiEntry {
                     tmq_conf_new,
                     tmq_conf_destroy,
                     tmq_conf_set,
-                    tmq_conf_set_auto_commit_cb,
+                    _tmq_conf_set_auto_commit_cb: tmq_conf_set_auto_commit_cb,
                     tmq_consumer_new,
                 };
 
@@ -508,7 +508,7 @@ impl ApiEntry {
                     tmq_get_raw,
                     tmq_subscribe,
                     tmq_unsubscribe,
-                    tmq_subscription,
+                    _tmq_subscription: tmq_subscription,
                     tmq_consumer_poll,
                     tmq_consumer_close,
                     tmq_commit_sync,
@@ -522,10 +522,10 @@ impl ApiEntry {
             };
 
             Ok(Self {
-                lib,
+                _lib: lib,
                 version: version.to_string(),
-                taos_cleanup,
-                taos_get_client_info,
+                _taos_cleanup: taos_cleanup,
+                _taos_get_client_info: taos_get_client_info,
                 taos_options,
                 taos_connect,
                 taos_close,
@@ -586,7 +586,7 @@ impl ApiEntry {
         }
     }
 
-    pub(super) fn check(&self, ptr: *const TAOS_RES) -> Result<(), RawError> {
+    pub(super) fn check(&self, ptr: *const TaosRes) -> Result<(), RawError> {
         let code: Code = unsafe { (self.taos_errno)(ptr as _) & 0xffff }.into();
         if code.success() {
             Ok(())
@@ -692,7 +692,7 @@ impl RawTaos {
     pub fn query_a<'a, S: IntoCStr<'a>>(
         &self,
         sql: S,
-        fp: taos_async_query_cb,
+        fp: TaosAsyncQueryCb,
         param: *mut c_void,
     ) {
         unsafe { (self.c.taos_query_a)(self.as_ptr(), sql.into_c_str().as_ptr(), fp, param) }
@@ -792,7 +792,7 @@ impl RawTaos {
 #[derive(Debug, Clone)]
 pub struct RawRes {
     c: Arc<ApiEntry>,
-    ptr: *mut TAOS_RES,
+    ptr: *mut TaosRes,
 }
 
 unsafe impl Send for RawRes {}
@@ -800,7 +800,7 @@ unsafe impl Sync for RawRes {}
 
 impl RawRes {
     #[inline]
-    pub fn as_ptr(&self) -> *mut TAOS_RES {
+    pub fn as_ptr(&self) -> *mut TaosRes {
         self.ptr
     }
 
@@ -829,19 +829,19 @@ impl RawRes {
         }
     }
     #[inline]
-    pub fn from_ptr(c: Arc<ApiEntry>, ptr: *mut TAOS_RES) -> Result<Self, RawError> {
+    pub fn from_ptr(c: Arc<ApiEntry>, ptr: *mut TaosRes) -> Result<Self, RawError> {
         let raw = unsafe { Self::from_ptr_unchecked(c, ptr) };
         let code = raw.errno();
         raw.with_code(code)
     }
     #[inline]
-    pub unsafe fn from_ptr_unchecked(c: Arc<ApiEntry>, ptr: *mut TAOS_RES) -> RawRes {
+    pub unsafe fn from_ptr_unchecked(c: Arc<ApiEntry>, ptr: *mut TaosRes) -> RawRes {
         Self { c, ptr }
     }
     #[inline]
     pub fn from_ptr_with_code(
         c: Arc<ApiEntry>,
-        ptr: *mut TAOS_RES,
+        ptr: *mut TaosRes,
         code: Code,
     ) -> Result<RawRes, RawError> {
         unsafe { RawRes::from_ptr_unchecked(c, ptr) }.with_code(code)
@@ -888,7 +888,7 @@ impl RawRes {
     }
 
     #[inline]
-    pub fn fetch_block(&self) -> Result<Option<(TAOS_ROW, i32, *const i32)>, RawError> {
+    pub fn fetch_block(&self) -> Result<Option<(TaosRow, i32, *const i32)>, RawError> {
         let block = Box::into_raw(Box::new(std::ptr::null_mut()));
         // let mut num = 0;
         let num = unsafe { (self.c.taos_fetch_block)(self.as_ptr(), block) };
@@ -959,12 +959,12 @@ impl RawRes {
             (self.c.taos_fetch_raw_block.unwrap())(self.as_ptr(), &mut num as _, &mut block as _),
             if num > 0 {
                 match self.tmq_message_type() {
-                    tmq_res_t::TMQ_RES_INVALID => {
+                    tmq_res_t::_TmqResInvalid => {
                         let mut raw = RawBlock::parse_from_ptr(block as _, self.precision());
                         raw.with_field_names(fields.iter().map(Field::name));
                         Some(raw)
                     }
-                    tmq_res_t::TMQ_RES_DATA | tmq_res_t::TMQ_RES_METADATA => {
+                    tmq_res_t::_TmqResData | tmq_res_t::_TmqResMetadata => {
                         let fields = self.fetch_fields();
 
                         let mut raw = RawBlock::parse_from_ptr(block as _, self.precision());
@@ -981,7 +981,7 @@ impl RawRes {
 
                         Some(raw)
                     }
-                    tmq_res_t::TMQ_RES_TABLE_META => {
+                    tmq_res_t::_TmqResTableMeta => {
                         todo!()
                     }
                 }
@@ -1035,7 +1035,7 @@ impl RawRes {
             let param = Box::new((state.clone(), self.c.clone(), cx.waker().clone()));
             unsafe extern "C" fn async_fetch_callback(
                 param: *mut c_void,
-                res: *mut TAOS_RES,
+                res: *mut TaosRes,
                 num_of_rows: c_int,
             ) {
                 let param = param as *mut (Arc<UnsafeCell<SharedState>>, Arc<ApiEntry>, Waker);
@@ -1118,7 +1118,7 @@ impl RawRes {
             let param = Box::new((state.clone(), self.c.clone(), cx.waker().clone()));
             unsafe extern "C" fn async_fetch_callback(
                 param: *mut c_void,
-                res: *mut TAOS_RES,
+                res: *mut TaosRes,
                 num_of_rows: c_int,
             ) {
                 let param: Box<(Arc<UnsafeCell<SharedState>>, Arc<ApiEntry>, Waker)> =

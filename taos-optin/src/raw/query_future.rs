@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
 use crate::into_c_str::IntoCStr;
-use crate::types::TAOS_RES;
+use crate::types::TaosRes;
 use crate::{RawRes, RawTaos};
 use taos_query::prelude::RawError;
 
@@ -20,7 +20,7 @@ pub struct QueryFuture<'a> {
 
 /// Shared state between the future and the waiting thread
 struct State {
-    result: *mut TAOS_RES,
+    result: *mut TaosRes,
     code: i32,
     done: bool,
 }
@@ -43,7 +43,7 @@ impl<'a> Future for QueryFuture<'a> {
         } else {
             unsafe extern "C" fn async_query_callback(
                 param: *mut c_void,
-                res: *mut TAOS_RES,
+                res: *mut TaosRes,
                 code: c_int,
             ) {
                 let param = param as *mut (&UnsafeCell<State>, Waker);

@@ -4,7 +4,7 @@ use taos_query::prelude::RawError;
 
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct tmq_resp_err_t(i32);
+pub(crate) struct TmqRespErrT(i32);
 
 impl PartialEq<i32> for tmq_conf_res_t {
     fn eq(&self, other: &i32) -> bool {
@@ -12,7 +12,7 @@ impl PartialEq<i32> for tmq_conf_res_t {
     }
 }
 
-impl tmq_resp_err_t {
+impl TmqRespErrT {
     pub fn ok_or(self, s: impl Into<Cow<'static, str>>) -> Result<(), RawError> {
         match self {
             Self(0) => Ok(()),
@@ -45,31 +45,31 @@ pub struct tmq_message_t {
 
 #[repr(C)]
 pub enum tmq_conf_res_t {
-    Unknown = -2,
-    Invalid = -1,
-    Ok = 0,
+    _Unknown = -2,
+    _Invalid = -1,
+    _Ok = 0,
 }
 
 impl tmq_conf_res_t {
     pub fn ok(self, k: &str, v: &str) -> Result<(), RawError> {
         match self {
-            Self::Ok => Ok(()),
-            Self::Invalid => Err(RawError::from_string(format!(
+            Self::_Ok => Ok(()),
+            Self::_Invalid => Err(RawError::from_string(format!(
                 "Invalid key value pair ({k}, {v})"
             ))),
-            Self::Unknown => Err(RawError::from_string(format!("Unknown key {k}"))),
+            Self::_Unknown => Err(RawError::from_string(format!("Unknown key {k}"))),
         }
     }
 }
 
-pub(crate) type tmq_commit_cb =
-    unsafe extern "C" fn(tmq: *mut tmq_t, resp: tmq_resp_err_t, param: *mut c_void);
+pub(crate) type TmqCommitCb =
+    unsafe extern "C" fn(tmq: *mut tmq_t, resp: TmqRespErrT, param: *mut c_void);
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum tmq_res_t {
-    TMQ_RES_INVALID = -1,
-    TMQ_RES_DATA = 1,
-    TMQ_RES_TABLE_META = 2,
-    TMQ_RES_METADATA = 3,
+    _TmqResInvalid = -1,
+    _TmqResData = 1,
+    _TmqResTableMeta = 2,
+    _TmqResMetadata = 3,
 }
