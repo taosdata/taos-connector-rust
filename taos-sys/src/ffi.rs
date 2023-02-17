@@ -4,19 +4,19 @@ use taos_macros::c_cfg;
 use crate::types::*;
 
 pub type TAOS = c_void;
-pub type TAOS_STMT = c_void;
-pub type TAOS_RES = c_void;
-pub type TAOS_STREAM = c_void;
-pub type TAOS_SUB = c_void;
-pub type TAOS_ROW = *mut *mut c_void;
+pub type TaosStmt = c_void;
+pub type TaosRes = c_void;
+pub type TaosStream = c_void;
+pub type TaosSub = c_void;
+pub type TaosRow = *mut *mut c_void;
 
-pub type taos_subscribe_cb =
-    unsafe extern "C" fn(sub: *mut TAOS_SUB, res: *mut TAOS_RES, param: *mut c_void, code: c_int);
+pub type TaosSubscribeCb =
+    unsafe extern "C" fn(sub: *mut TaosSub, res: *mut TaosRes, param: *mut c_void, code: c_int);
 
-pub type taos_stream_cb =
-    unsafe extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, row: TAOS_ROW);
+pub type TaosStreamCb =
+    unsafe extern "C" fn(param: *mut c_void, res: *mut TaosRes, row: TaosRow);
 
-pub type taos_stream_close_cb = unsafe extern "C" fn(param: *mut c_void);
+pub type TaosStreamCloseCb = unsafe extern "C" fn(param: *mut c_void);
 
 extern "C" {
     pub fn taos_cleanup();
@@ -60,19 +60,19 @@ extern "C" {
 
 }
 
-pub type taos_async_fetch_cb =
+pub type TaosAsyncFetchCb =
     unsafe extern "C" fn(param: *mut c_void, res: *mut c_void, rows: c_int);
 
-pub type taos_async_query_cb =
+pub type TaosAsyncQueryCb =
     unsafe extern "C" fn(param: *mut c_void, res: *mut c_void, code: c_int);
 
 extern "C" {
-    pub fn taos_fetch_rows_a(res: *mut TAOS_RES, fp: taos_async_fetch_cb, param: *mut c_void);
+    pub fn taos_fetch_rows_a(res: *mut TaosRes, fp: TaosAsyncFetchCb, param: *mut c_void);
 
     pub fn taos_query_a(
         taos: *mut TAOS,
         sql: *const c_char,
-        fp: taos_async_query_cb,
+        fp: TaosAsyncQueryCb,
         param: *mut c_void,
     );
 }
@@ -80,89 +80,89 @@ extern "C" {
 extern "C" {
     pub fn taos_load_table_info(taos: *mut TAOS, tableNameList: *const c_char) -> c_int;
 
-    pub fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT;
+    pub fn taos_stmt_init(taos: *mut TAOS) -> *mut TaosStmt;
 
-    pub fn taos_stmt_prepare(stmt: *mut TAOS_STMT, sql: *const c_char, length: c_ulong) -> c_int;
+    pub fn taos_stmt_prepare(stmt: *mut TaosStmt, sql: *const c_char, length: c_ulong) -> c_int;
 
     pub fn taos_stmt_set_tbname_tags(
-        stmt: *mut TAOS_STMT,
+        stmt: *mut TaosStmt,
         name: *const c_char,
         tags: *mut TaosBind,
     ) -> c_int;
 
-    pub fn taos_stmt_set_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int;
+    pub fn taos_stmt_set_tbname(stmt: *mut TaosStmt, name: *const c_char) -> c_int;
 
-    pub fn taos_stmt_set_tags(stmt: *mut TAOS_STMT, tags: *mut TaosBind) -> c_int;
+    pub fn taos_stmt_set_tags(stmt: *mut TaosStmt, tags: *mut TaosBind) -> c_int;
 
-    pub fn taos_stmt_set_sub_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int;
+    pub fn taos_stmt_set_sub_tbname(stmt: *mut TaosStmt, name: *const c_char) -> c_int;
 
-    pub fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int;
+    pub fn taos_stmt_is_insert(stmt: *mut TaosStmt, insert: *mut c_int) -> c_int;
 
-    pub fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_int;
+    pub fn taos_stmt_num_params(stmt: *mut TaosStmt, nums: *mut c_int) -> c_int;
 
     pub fn taos_stmt_get_param(
-        stmt: *mut TAOS_STMT,
+        stmt: *mut TaosStmt,
         idx: c_int,
         type_: *mut c_int,
         bytes: *mut c_int,
     ) -> c_int;
 
-    pub fn taos_stmt_bind_param(stmt: *mut TAOS_STMT, bind: *const TaosBind) -> c_int;
+    pub fn taos_stmt_bind_param(stmt: *mut TaosStmt, bind: *const TaosBind) -> c_int;
 
-    pub fn taos_stmt_bind_param_batch(stmt: *mut TAOS_STMT, bind: *const TaosMultiBind) -> c_int;
+    pub fn taos_stmt_bind_param_batch(stmt: *mut TaosStmt, bind: *const TaosMultiBind) -> c_int;
 
     pub fn taos_stmt_bind_single_param_batch(
-        stmt: *mut TAOS_STMT,
+        stmt: *mut TaosStmt,
         bind: *const TaosMultiBind,
         colIdx: c_int,
     ) -> c_int;
 
-    pub fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int;
+    pub fn taos_stmt_add_batch(stmt: *mut TaosStmt) -> c_int;
 
-    pub fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int;
+    pub fn taos_stmt_execute(stmt: *mut TaosStmt) -> c_int;
 
-    pub fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int;
+    pub fn taos_stmt_affected_rows(stmt: *mut TaosStmt) -> c_int;
 
-    pub fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS_RES;
+    pub fn taos_stmt_use_result(stmt: *mut TaosStmt) -> *mut TaosRes;
 
-    pub fn taos_stmt_close(stmt: *mut TAOS_STMT) -> c_int;
+    pub fn taos_stmt_close(stmt: *mut TaosStmt) -> c_int;
 
-    pub fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *const c_char;
+    pub fn taos_stmt_errstr(stmt: *mut TaosStmt) -> *const c_char;
 }
 
 extern "C" {
-    pub fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES;
+    pub fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TaosRes;
 
-    pub fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW;
+    pub fn taos_fetch_row(res: *mut TaosRes) -> TaosRow;
 
-    pub fn taos_result_precision(res: *mut TAOS_RES) -> c_int;
+    pub fn taos_result_precision(res: *mut TaosRes) -> c_int;
 
-    pub fn taos_free_result(res: *mut TAOS_RES);
+    pub fn taos_free_result(res: *mut TaosRes);
 
-    pub fn taos_field_count(res: *mut TAOS_RES) -> c_int;
+    pub fn taos_field_count(res: *mut TaosRes) -> c_int;
 
-    pub fn taos_affected_rows(res: *mut TAOS_RES) -> c_int;
+    pub fn taos_affected_rows(res: *mut TaosRes) -> c_int;
 
-    pub fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIELD;
+    pub fn taos_fetch_fields(res: *mut TaosRes) -> *mut TAOS_FIELD;
 
     pub fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c_int;
 
     pub fn taos_print_row(
         str_: *mut c_char,
-        row: TAOS_ROW,
+        row: TaosRow,
         fields: *mut TAOS_FIELD,
         num_fields: c_int,
     ) -> c_int;
 
-    pub fn taos_stop_query(res: *mut TAOS_RES);
+    pub fn taos_stop_query(res: *mut TaosRes);
 
-    pub fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) -> bool;
+    pub fn taos_is_null(res: *mut TaosRes, row: i32, col: i32) -> bool;
 
-    pub fn taos_is_update_query(res: *mut TAOS_RES) -> bool;
+    pub fn taos_is_update_query(res: *mut TaosRes) -> bool;
 
-    pub fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int;
+    pub fn taos_fetch_block(res: *mut TaosRes, rows: *mut TaosRow) -> c_int;
 
-    pub fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int;
+    pub fn taos_fetch_lengths(res: *mut TaosRes) -> *mut c_int;
 
     pub fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int;
 
@@ -170,44 +170,44 @@ extern "C" {
 
     pub fn taos_get_server_info(taos: *mut TAOS) -> *mut c_char;
 
-    pub fn taos_errstr(tres: *mut TAOS_RES) -> *mut c_char;
+    pub fn taos_errstr(tres: *mut TaosRes) -> *mut c_char;
 
-    pub fn taos_errno(tres: *mut TAOS_RES) -> c_int;
+    pub fn taos_errno(tres: *mut TaosRes) -> c_int;
 
 }
 
 #[c_cfg(taos_v3)]
 extern "C" {
-    pub fn taos_get_column_data_offset(res: *mut TAOS_RES, col: i32) -> *mut i32;
+    pub fn taos_get_column_data_offset(res: *mut TaosRes, col: i32) -> *mut i32;
 
-    pub fn taos_fetch_raw_block(res: *mut TAOS_RES, num: *mut i32, data: *mut *mut c_void)
+    pub fn taos_fetch_raw_block(res: *mut TaosRes, num: *mut i32, data: *mut *mut c_void)
         -> c_int;
 
-    pub fn taos_fetch_raw_block_a(res: *mut TAOS_RES, fp: taos_async_fetch_cb, param: *mut c_void);
+    pub fn taos_fetch_raw_block_a(res: *mut TaosRes, fp: TaosAsyncFetchCb, param: *mut c_void);
 
-    pub fn taos_get_raw_block(taos: *mut TAOS_RES) -> *mut c_void;
+    pub fn taos_get_raw_block(taos: *mut TaosRes) -> *mut c_void;
 }
 
 #[c_cfg(taos_result_block)]
 extern "C" {
-    pub fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW;
+    pub fn taos_result_block(res: *mut TaosRes) -> *mut TaosRow;
 }
 
 #[cfg(taos_fetch_block_s)]
 extern "C" {
     pub fn taos_fetch_block_s(
-        res: *mut TAOS_RES,
+        res: *mut TaosRes,
         num_of_rows: *mut c_int,
-        rows: *mut TAOS_ROW,
+        rows: *mut TaosRow,
     ) -> c_int;
 }
 
 #[cfg(not(taos_fetch_block_s))]
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_block_s(
-    res: *mut TAOS_RES,
+    res: *mut TaosRes,
     num_of_rows: *mut c_int,
-    rows: *mut TAOS_ROW,
+    rows: *mut TaosRow,
 ) -> c_int {
     *num_of_rows = taos_fetch_block(res, rows);
     return 0;
@@ -219,25 +219,25 @@ extern "C" {
         restart: c_int,
         topic: *const c_char,
         sql: *const c_char,
-        fp: Option<taos_subscribe_cb>,
+        fp: Option<TaosSubscribeCb>,
         param: *mut c_void,
         interval: c_int,
-    ) -> *mut TAOS_SUB;
+    ) -> *mut TaosSub;
 
-    pub fn taos_consume(tsub: *mut TAOS_SUB) -> *mut TAOS_RES;
+    pub fn taos_consume(tsub: *mut TaosSub) -> *mut TaosRes;
 
-    pub fn taos_unsubscribe(tsub: *mut TAOS_SUB, keep_progress: c_int);
+    pub fn taos_unsubscribe(tsub: *mut TaosSub, keep_progress: c_int);
 }
 
 extern "C" {
     pub fn taos_open_stream(
         taos: *mut TAOS,
         sql: *const c_char,
-        fp: Option<taos_stream_cb>,
+        fp: Option<TaosStreamCb>,
         stime: i64,
         param: *mut c_void,
-        callback: Option<taos_stream_close_cb>,
-    ) -> *mut TAOS_STREAM;
+        callback: Option<TaosStreamCloseCb>,
+    ) -> *mut TaosStream;
 
-    pub fn taos_close_stream(stream: *mut TAOS_STREAM);
+    pub fn taos_close_stream(stream: *mut TaosStream);
 }

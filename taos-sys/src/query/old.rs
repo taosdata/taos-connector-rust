@@ -13,7 +13,7 @@ use taos_query::common::{Field, Precision, RawData};
 use crate::{
     ffi::{
         taos_errstr, taos_fetch_fields, taos_fetch_raw_block, taos_fetch_raw_block_a,
-        taos_field_count, taos_get_raw_block, taos_result_precision, TAOS_RES,
+        taos_field_count, taos_get_raw_block, taos_result_precision, TaosRes,
     },
     tmq_get_db_name, tmq_get_json_meta, tmq_get_res_type, tmq_get_table_name, tmq_res_t,
 };
@@ -24,7 +24,7 @@ pub struct BlockStream {
     precision: Precision,
     fields: *const Field,
     cols: usize,
-    res: *mut TAOS_RES,
+    res: *mut TaosRes,
     shared_state: UnsafeCell<SharedState>,
 }
 
@@ -149,7 +149,7 @@ impl BlockStream {
             let param = Box::new((&self.shared_state, cx.waker().clone()));
             unsafe extern "C" fn async_fetch_callback(
                 param: *mut c_void,
-                res: *mut TAOS_RES,
+                res: *mut TaosRes,
                 num_of_rows: c_int,
             ) {
                 let param = param as *mut (&UnsafeCell<SharedState>, Waker);
@@ -203,8 +203,8 @@ impl Stream for BlockStream {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.msg_type {
-            tmq_res_t::TMQ_RES_DATA => self.poll_next_tmq_data(cx),
-            tmq_res_t::TMQ_RES_TABLE_META => self.poll_next_tmq_meta(cx),
+            tmq_res_t::TmqResData => self.poll_next_tmq_data(cx),
+            tmq_res_t::TmqResTableMeta => self.poll_next_tmq_meta(cx),
             _ => self.poll_next_query_data(cx),
         }
     }
@@ -214,7 +214,7 @@ impl BlockStream {
     /// Create a new `TimerFuture` which will complete after the provided
     /// timeout.
     #[inline(always)]
-    pub fn new(res: *mut TAOS_RES, fields: &[Field], precision: Precision) -> Self {
+    pub fn new(res: *mut TaosRes, fields: &[Field], precision: Precision) -> Self {
         let shared_state = UnsafeCell::new(SharedState {
             done: false,
             block: std::ptr::null_mut(),
@@ -223,7 +223,7 @@ impl BlockStream {
         });
 
         let msg_type = unsafe { tmq_get_res_type(res) };
-        // let msg_type = tmq_res_t::TMQ_RES_INVALID;
+        // let msg_type = tmq_res_t::TmqResInvalid;
         BlockStream {
             res,
             msg_type,

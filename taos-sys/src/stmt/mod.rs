@@ -71,7 +71,7 @@ impl Bindable<super::Taos> for Stmt {
 }
 
 #[derive(Debug)]
-pub(crate) struct RawStmt(*mut TAOS_STMT);
+pub(crate) struct RawStmt(*mut TaosStmt);
 
 impl Drop for RawStmt {
     fn drop(&mut self) {
@@ -92,7 +92,7 @@ impl RawStmt {
     }
 
     #[inline]
-    pub unsafe fn as_ptr(&self) -> *mut TAOS_STMT {
+    pub unsafe fn as_ptr(&self) -> *mut TaosStmt {
         self.0
     }
 

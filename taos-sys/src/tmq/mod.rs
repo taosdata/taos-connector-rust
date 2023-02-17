@@ -326,10 +326,10 @@ impl IsAsyncData for Data {
 impl From<RawRes> for MessageSet<Meta, Data> {
     fn from(raw: RawRes) -> Self {
         match raw.tmq_message_type() {
-            tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-            tmq_res_t::TMQ_RES_DATA => Self::Data(Data::new(raw)),
-            tmq_res_t::TMQ_RES_TABLE_META => Self::Meta(Meta::new(raw)),
-            tmq_res_t::TMQ_RES_METADATA => Self::MetaData(Meta::new(raw), Data::new(raw)),
+            tmq_res_t::TmqResInvalid => unreachable!(),
+            tmq_res_t::TmqResData => Self::Data(Data::new(raw)),
+            tmq_res_t::TmqResTableMeta => Self::Meta(Meta::new(raw)),
+            tmq_res_t::TmqResMetadata => Self::MetaData(Meta::new(raw), Data::new(raw)),
         }
     }
 }
@@ -390,12 +390,12 @@ impl AsConsumer for Consumer {
             (
                 Offset(raw),
                 match raw.tmq_message_type() {
-                    tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                    tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                    tmq_res_t::TMQ_RES_TABLE_META => {
+                    tmq_res_t::TmqResInvalid => unreachable!(),
+                    tmq_res_t::TmqResData => taos_query::tmq::MessageSet::Data(Data::new(raw)),
+                    tmq_res_t::TmqResTableMeta => {
                         taos_query::tmq::MessageSet::Meta(Meta::new(raw))
                     }
-                    tmq_res_t::TMQ_RES_METADATA => {
+                    tmq_res_t::TmqResMetadata => {
                         taos_query::tmq::MessageSet::MetaData(Meta::new(raw), Data::new(raw))
                     }
                 },
@@ -450,9 +450,9 @@ impl AsAsyncConsumer for Consumer {
                         let message =    (
                             Offset(raw),
                             match raw.tmq_message_type() {
-                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                                tmq_res_t::TMQ_RES_TABLE_META => {
+                                tmq_res_t::TmqResInvalid => unreachable!(),
+                                tmq_res_t::TmqResData => taos_query::tmq::MessageSet::Data(Data::new(raw)),
+                                tmq_res_t::TmqResTableMeta => {
                                     taos_query::tmq::MessageSet::Meta(Meta::new(raw))
                                 }
                                 tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw), Data::new(raw))
@@ -473,9 +473,9 @@ impl AsAsyncConsumer for Consumer {
                         let message =    (
                             Offset(raw),
                             match raw.tmq_message_type() {
-                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                                tmq_res_t::TMQ_RES_TABLE_META => {
+                                tmq_res_t::TmqResInvalid => unreachable!(),
+                                tmq_res_t::TmqResData => taos_query::tmq::MessageSet::Data(Data::new(raw)),
+                                tmq_res_t::TmqResTableMeta => {
                                     taos_query::tmq::MessageSet::Meta(Meta::new(raw))
                                 }
                                 tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw), Data::new(raw))
@@ -490,12 +490,12 @@ impl AsAsyncConsumer for Consumer {
         //     (
         //         Offset(raw),
         //         match raw.tmq_message_type() {
-        //             tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-        //             tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-        //             tmq_res_t::TMQ_RES_TABLE_META => {
+        //             tmq_res_t::TmqResInvalid => unreachable!(),
+        //             tmq_res_t::TmqResData => taos_query::tmq::MessageSet::Data(Data::new(raw)),
+        //             tmq_res_t::TmqResTableMeta => {
         //                 taos_query::tmq::MessageSet::Meta(Meta::new(raw))
         //             }
-        //             tmq_res_t::TMQ_RES_METADATA => todo!(),
+        //             tmq_res_t::TmqResMetadata => todo!(),
         //         },
         //     )
         // }))
