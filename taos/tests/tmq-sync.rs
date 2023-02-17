@@ -2,7 +2,7 @@ use std::{str::FromStr, time::Duration};
 use taos::sync::*;
 
 //#[test]
-fn test_tmq_meta_sync() -> anyhow::Result<()> {
+fn _test_tmq_meta_sync() -> anyhow::Result<()> {
     pretty_env_logger::formatted_timed_builder()
         .filter_level(log::LevelFilter::Trace)
         .init();
