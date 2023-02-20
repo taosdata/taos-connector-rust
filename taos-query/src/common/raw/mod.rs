@@ -8,6 +8,8 @@ use serde::Deserialize;
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
     ffi::c_void,
+    fmt::Display,
+    ops::Deref,
     ptr::NonNull,
     sync::Arc,
 };
@@ -749,6 +751,10 @@ impl RawBlock {
             .collect_vec()
     }
 
+    pub fn pretty_format(&self) -> PrettyBlock {
+        PrettyBlock::new(self)
+    }
+
     // pub fn fields_iter(&self) -> impl Iterator<Item = Field> + '_ {
     //     self.schemas()
     //         .iter()
@@ -761,6 +767,44 @@ impl RawBlock {
             table_name: table_name.to_string(),
             columns: self.fields(),
         })
+    }
+}
+
+pub struct PrettyBlock<'a> {
+    raw: &'a RawBlock,
+}
+
+impl<'a> PrettyBlock<'a> {
+    fn new(raw: &'a RawBlock) -> Self {
+        Self { raw }
+    }
+}
+
+impl<'a> Deref for PrettyBlock<'a> {
+    type Target = RawBlock;
+    fn deref(&self) -> &Self::Target {
+        &self.raw
+    }
+}
+
+impl<'a> Display for PrettyBlock<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use prettytable::{Row, Table};
+        let mut table = Table::new();
+        writeln!(
+            f,
+            "Table view with {} rows, {} columns",
+            self.nrows(),
+            self.ncols()
+        )?;
+        table.set_titles(Row::from_iter(self.field_names()));
+        for row in self.raw.rows() {
+            table.add_row(Row::from_iter(
+                row.map(|s| s.1.to_string().unwrap_or_default()),
+            ));
+        }
+        f.write_fmt(format_args!("{}", table))?;
+        Ok(())
     }
 }
 
@@ -1233,4 +1277,6 @@ fn test_from_v2() {
         Precision::Millisecond,
     );
     dbg!(&raw);
+
+    println!("{}", raw.pretty_format());
 }
