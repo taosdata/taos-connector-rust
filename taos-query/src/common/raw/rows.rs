@@ -126,7 +126,19 @@ impl<'a> Iterator for RowView<'a> {
             }
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let max = self.raw.ncols();
+        if self.col < max {
+            let hint = max - self.col;
+            (hint, Some(hint))
+        } else {
+            (0, Some(0))
+        }
+    }
 }
+
+impl<'a> ExactSizeIterator for RowView<'a> {}
 
 impl<'a> std::fmt::Debug for RowView<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

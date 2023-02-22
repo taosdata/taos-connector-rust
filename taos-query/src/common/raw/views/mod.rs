@@ -60,7 +60,7 @@ pub(crate) use lengths::*;
 
 mod from;
 
-use crate::common::{BorrowedValue, Ty};
+use crate::common::{BorrowedValue, Ty, Value};
 
 use std::{ffi::c_void, fmt::Debug, io::Write, iter::FusedIterator};
 
@@ -222,6 +222,31 @@ impl ColumnView {
         iter: V,
     ) -> Self {
         ColumnView::NChar(NCharView::from_iter(iter))
+    }
+
+    pub fn null(n: usize, ty: Ty) -> Self {
+        match ty {
+            Ty::Null => panic!("type should be known"),
+            Ty::Bool => Self::from_bools(vec![None; n]),
+            Ty::TinyInt => Self::from_tiny_ints(vec![None; n]),
+            Ty::SmallInt => Self::from_small_ints(vec![None; n]),
+            Ty::Int => Self::from_ints(vec![None; n]),
+            Ty::BigInt => Self::from_big_ints(vec![None; n]),
+            Ty::UTinyInt => Self::from_unsigned_tiny_ints(vec![None; n]),
+            Ty::USmallInt => Self::from_unsigned_small_ints(vec![None; n]),
+            Ty::UInt => Self::from_unsigned_ints(vec![None; n]),
+            Ty::UBigInt => Self::from_unsigned_big_ints(vec![None; n]),
+            Ty::Float => Self::from_floats(vec![None; n]),
+            Ty::Double => Self::from_doubles(vec![None; n]),
+            Ty::Timestamp => Self::from_millis_timestamp(vec![None; n]),
+            Ty::VarChar => Self::from_varchar::<&'static str, _, _, _>(vec![None; n]),
+            Ty::NChar => Self::from_nchar::<&'static str, _, _, _>(vec![None; n]),
+            Ty::Json => todo!(),
+            Ty::VarBinary => todo!(),
+            Ty::Decimal => todo!(),
+            Ty::Blob => todo!(),
+            Ty::MediumBlob => todo!(),
+        }
     }
 
     /// It's equal to the cols
@@ -505,4 +530,27 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
         );
     }
     bytes
+}
+
+impl From<Value> for ColumnView {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Null(ty) => ColumnView::null(1, ty),
+            Value::Bool(v) => vec![v].into(),
+            Value::TinyInt(v) => vec![v].into(),
+            Value::SmallInt(v) => vec![v].into(),
+            Value::Int(v) => vec![v].into(),
+            Value::BigInt(v) => vec![v].into(),
+            Value::Float(v) => vec![v].into(),
+            Value::Double(v) => vec![v].into(),
+            Value::VarChar(v) => ColumnView::from_varchar::<String, _, _, _>(vec![v]),
+            Value::Timestamp(v) => ColumnView::Timestamp(TimestampView::from_timestamp(vec![v])),
+            Value::NChar(v) => ColumnView::from_nchar::<String, _, _, _>(vec![v]),
+            Value::UTinyInt(v) => vec![v].into(),
+            Value::USmallInt(v) => vec![v].into(),
+            Value::UInt(v) => vec![v].into(),
+            Value::UBigInt(v) => vec![v].into(),
+            _ => todo!(),
+        }
+    }
 }

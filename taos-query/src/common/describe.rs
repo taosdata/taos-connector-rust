@@ -49,6 +49,11 @@ impl Describe {
         self.fields().iter().map(|f| f.field())
     }
 
+    pub fn split(&self) -> Option<(&[ColumnMeta], &[ColumnMeta])> {
+        let n = self.deref().iter().find_position(|c| c.is_tag());
+        n.map(|(at, _)| self.deref().split_at(at))
+    }
+
     pub fn tag_names(&self) -> impl Iterator<Item = &str> {
         self.fields()
             .iter()

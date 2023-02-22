@@ -76,6 +76,7 @@ impl<'b> BorrowedValue<'b> {
         use BorrowedValue::*;
         match self {
             Null(_) => Ok(String::new()),
+            Bool(v) => Ok(format!("{v}")),
             VarChar(v) => Ok(v.to_string()),
             Json(v) => Ok(unsafe { std::str::from_utf8_unchecked(v) }.to_string()),
             NChar(v) => Ok(v.to_string()),
@@ -413,4 +414,34 @@ impl Value {
     }
 }
 
+macro_rules! _impl_primitive_from {
+    ($f:ident, $t:ident) => {
+        impl From<$f> for Value {
+            fn from(value: $f) -> Self {
+                Value::$t(value)
+            }
+        }
+        impl From<Option<$f>> for Value {
+            fn from(value: Option<$f>) -> Self {
+                match value {
+                    Some(value) => Value::$t(value),
+                    None => Value::Null(Ty::$t),
+                }
+            }
+        }
+    };
+}
+
+_impl_primitive_from!(bool, Bool);
+_impl_primitive_from!(i8, TinyInt);
+_impl_primitive_from!(i16, SmallInt);
+_impl_primitive_from!(i32, Int);
+_impl_primitive_from!(i64, BigInt);
+_impl_primitive_from!(u8, UTinyInt);
+_impl_primitive_from!(u16, USmallInt);
+_impl_primitive_from!(u32, UInt);
+_impl_primitive_from!(u64, UBigInt);
+_impl_primitive_from!(f32, Float);
+_impl_primitive_from!(f64, Double);
+_impl_primitive_from!(Timestamp, Timestamp);
 mod de;

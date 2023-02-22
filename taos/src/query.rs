@@ -17,11 +17,12 @@ pub enum Error {
     #[error(transparent)]
     Any(#[from] anyhow::Error),
 }
-
+#[derive(Debug)]
 enum TaosBuilderInner {
     Native(crate::sys::TaosBuilder),
     Ws(taos_ws::TaosBuilder),
 }
+#[derive(Debug)]
 pub(super) enum TaosInner {
     Native(crate::sys::Taos),
     Ws(taos_ws::Taos),
@@ -31,8 +32,9 @@ enum ResultSetInner {
     Native(crate::sys::ResultSet),
     Ws(taos_ws::ResultSet),
 }
-
+#[derive(Debug)]
 pub struct TaosBuilder(TaosBuilderInner);
+#[derive(Debug)]
 pub struct Taos(pub(super) TaosInner);
 pub struct ResultSet(ResultSetInner);
 
