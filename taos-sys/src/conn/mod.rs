@@ -100,7 +100,7 @@ impl RawTaos {
     pub fn query_a<'a, S: IntoCStr<'a>>(
         &self,
         sql: S,
-        fp: TaosAsyncQueryCb,
+        fp: taos_async_query_cb,
         param: *mut c_void,
     ) {
         unsafe { taos_query_a(self.as_ptr(), sql.into_c_str().as_ptr(), fp, param) }

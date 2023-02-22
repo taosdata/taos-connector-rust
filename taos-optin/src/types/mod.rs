@@ -12,23 +12,28 @@ pub use tmq::*;
 
 #[allow(clippy::upper_case_acronyms)]
 pub type TAOS = c_void;
-pub type TaosStmt = c_void;
-pub type TaosRes = c_void;
+#[allow(non_camel_case_types)]
+pub type TAOS_STMT = c_void;
+#[allow(non_camel_case_types)]
+pub type TAOS_RES = c_void;
 // pub type TaosStream = c_void;
 // pub type TaosSub = c_void;
-pub type TaosRow = *mut *mut c_void;
+#[allow(non_camel_case_types)]
+pub type TAOS_ROW = *mut *mut c_void;
 
-pub type TaosAsyncFetchCb =
+#[allow(non_camel_case_types)]
+pub type taos_async_fetch_cb =
     unsafe extern "C" fn(param: *mut c_void, res: *mut c_void, rows: c_int);
 
-pub type TaosAsyncQueryCb =
+#[allow(non_camel_case_types)]
+pub type taos_async_query_cb =
     unsafe extern "C" fn(param: *mut c_void, res: *mut c_void, code: c_int);
 
 // pub type TaosSubscribeCb =
-    // unsafe extern "C" fn(sub: *mut TaosSub, res: *mut TaosRes, param: *mut c_void, code: c_int);
+    // unsafe extern "C" fn(sub: *mut TaosSub, res: *mut TAOS_RES, param: *mut c_void, code: c_int);
 
 // pub type TaosStreamCb =
-    // unsafe extern "C" fn(param: *mut c_void, res: *mut TaosRes, row: TaosRow);
+    // unsafe extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, row: TAOS_ROW);
 
 // pub type TaosStreamCloseCb = unsafe extern "C" fn(param: *mut c_void);
 

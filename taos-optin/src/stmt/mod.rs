@@ -89,7 +89,7 @@ impl Bindable<super::Taos> for Stmt {
 pub(crate) struct RawStmt {
     c: Arc<ApiEntry>,
     api: StmtApi,
-    ptr: *mut TaosStmt,
+    ptr: *mut TAOS_STMT,
     tbname: Option<CString>,
 }
 
@@ -117,7 +117,7 @@ impl RawStmt {
     }
 
     #[inline]
-    pub unsafe fn as_ptr(&self) -> *mut TaosStmt {
+    pub unsafe fn as_ptr(&self) -> *mut TAOS_STMT {
         self.ptr
     }
 

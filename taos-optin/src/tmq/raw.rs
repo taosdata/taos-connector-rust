@@ -9,7 +9,7 @@ pub(super) mod tmq {
 
     use crate::{
         raw::{ApiEntry, TmqApi},
-        types::{TmqRespErrT, tmq_t},
+        types::{tmq_resp_err_t, tmq_t},
         RawError, RawRes,
     };
 
@@ -52,7 +52,7 @@ pub(super) mod tmq {
                 .ok_or("commit failed")
         }
 
-        // pub fn commit_async(&self, msg: RawRes, cb: TmqCommitCb, param: *mut c_void) {
+        // pub fn commit_async(&self, msg: RawRes, cb: tmq_commit_cb, param: *mut c_void) {
         //     unsafe { (self.tmq.tmq_commit_async)(self.as_ptr(), msg.as_ptr(), cb, param) }
         // }
 
@@ -65,7 +65,7 @@ pub(super) mod tmq {
         //     let tmq = self.tmq;
         //     unsafe extern "C" fn tmq_commit_callback(
         //         _tmq: *mut tmq_t,
-        //         resp: TmqRespErrT,
+        //         resp: tmq_resp_err_t,
         //         param: *mut c_void,
         //     ) {
         //         log::trace!("commit {resp:?}");
@@ -96,7 +96,7 @@ pub(super) mod tmq {
             let (sender, rx) = channel::<Result<(), RawError>>();
             unsafe extern "C" fn tmq_commit_async_cb(
                 _tmq: *mut tmq_t,
-                resp: TmqRespErrT,
+                resp: tmq_resp_err_t,
                 param: *mut std::os::raw::c_void,
             ) {
                 let offsets = resp.ok_or("commit failed").map(|_| ());
@@ -287,7 +287,7 @@ pub(super) mod conf {
             unsafe { self.api.set(self.as_ptr(), key.as_ref(), value.as_ref()) }.map(|_| self)
         }
 
-        // pub(crate) fn with_auto_commit_cb(&mut self, cb: TmqCommitCb, param: *mut c_void) {
+        // pub(crate) fn with_auto_commit_cb(&mut self, cb: tmq_commit_cb, param: *mut c_void) {
         //     unsafe {
         //         self.api.auto_commit_cb(self.as_ptr(), cb, param);
         //     }

@@ -13,7 +13,7 @@ use taos_query::common::{Field, Precision, RawData};
 use crate::{
     ffi::{
         taos_errstr, taos_fetch_fields, taos_fetch_raw_block, taos_fetch_raw_block_a,
-        taos_field_count, taos_get_raw_block, taos_result_precision, TaosRes,
+        taos_field_count, taos_get_raw_block, taos_result_precision, TAOS_RES,
     },
     tmq_get_db_name, tmq_get_json_meta, tmq_get_res_type, tmq_get_table_name, tmq_res_t,
 };
@@ -24,7 +24,7 @@ pub struct BlockStream {
     precision: Precision,
     fields: *const Field,
     cols: usize,
-    res: *mut TaosRes,
+    res: *mut TAOS_RES,
     shared_state: UnsafeCell<SharedState>,
 }
 
@@ -149,7 +149,7 @@ impl BlockStream {
             let param = Box::new((&self.shared_state, cx.waker().clone()));
             unsafe extern "C" fn async_fetch_callback(
                 param: *mut c_void,
-                res: *mut TaosRes,
+                res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
                 let param = param as *mut (&UnsafeCell<SharedState>, Waker);
@@ -214,7 +214,7 @@ impl BlockStream {
     /// Create a new `TimerFuture` which will complete after the provided
     /// timeout.
     #[inline(always)]
-    pub fn new(res: *mut TaosRes, fields: &[Field], precision: Precision) -> Self {
+    pub fn new(res: *mut TAOS_RES, fields: &[Field], precision: Precision) -> Self {
         let shared_state = UnsafeCell::new(SharedState {
             done: false,
             block: std::ptr::null_mut(),

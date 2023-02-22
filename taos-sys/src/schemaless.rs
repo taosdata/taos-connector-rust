@@ -1,4 +1,4 @@
-use crate::ffi::{TAOS, TaosRes};
+use crate::ffi::{TAOS, TAOS_RES};
 use std::os::raw::*;
 
 ///
@@ -53,7 +53,7 @@ extern "C" {
         numLines: c_int,
         protocol: SchemalessProtocol,
         precision: TSDB_SML_TIMESTAMP_TYPE,
-    ) -> *mut TaosRes;
+    ) -> *mut TAOS_RES;
 }
 
 #[test]

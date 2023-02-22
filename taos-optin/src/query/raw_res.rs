@@ -17,14 +17,14 @@ use super::{blocks::Blocks, message::MessageStream};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
-pub struct RawRes(pub *mut TaosRes);
+pub struct RawRes(pub *mut TAOS_RES);
 
 unsafe impl Send for RawRes {}
 unsafe impl Sync for RawRes {}
 
 impl RawRes {
     #[inline]
-    pub fn as_ptr(&self) -> *mut TaosRes {
+    pub fn as_ptr(&self) -> *mut TAOS_RES {
         self.0
     }
 
@@ -44,19 +44,19 @@ impl RawRes {
     }
 
     #[inline]
-    pub fn from_ptr(ptr: *mut TaosRes) -> Result<Self, Error> {
+    pub fn from_ptr(ptr: *mut TAOS_RES) -> Result<Self, Error> {
         let raw = unsafe { Self::from_ptr_unchecked(ptr) };
         let code = raw.errno();
         raw.with_code(code)
     }
 
     #[inline]
-    pub unsafe fn from_ptr_unchecked(ptr: *mut TaosRes) -> RawRes {
+    pub unsafe fn from_ptr_unchecked(ptr: *mut TAOS_RES) -> RawRes {
         Self(ptr)
     }
 
     #[inline]
-    pub fn from_ptr_with_code(ptr: *mut TaosRes, code: Code) -> Result<RawRes, Error> {
+    pub fn from_ptr_with_code(ptr: *mut TAOS_RES, code: Code) -> Result<RawRes, Error> {
         unsafe { RawRes::from_ptr_unchecked(ptr) }.with_code(code)
     }
 
@@ -95,7 +95,7 @@ impl RawRes {
     }
 
     #[inline]
-    pub fn fetch_block(&self) -> Result<Option<(TaosRow, i32, *const i32)>, Error> {
+    pub fn fetch_block(&self) -> Result<Option<(TAOS_ROW, i32, *const i32)>, Error> {
         let block = Box::into_raw(Box::new(std::ptr::null_mut()));
         // let mut num = 0;
         let num = unsafe { taos_fetch_block(self.as_ptr(), block) };
@@ -161,7 +161,7 @@ impl RawRes {
             let param = Box::new((state.clone(), cx.waker().clone()));
             unsafe extern "C" fn async_fetch_callback(
                 param: *mut c_void,
-                res: *mut TaosRes,
+                res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
                 let param = param as *mut (Arc<UnsafeCell<SharedState>>, Waker);
@@ -320,17 +320,17 @@ impl RawRes {
     }
 
     // #[inline]
-    // pub fn fetch_row(&self) -> TaosRow {
+    // pub fn fetch_row(&self) -> TAOS_ROW {
     //     unsafe { taos_fetch_row(self.as_ptr()) }
     // }
 
     #[inline]
-    pub fn fetch_rows_a(&self, fp: TaosAsyncFetchCb, param: *mut c_void) {
+    pub fn fetch_rows_a(&self, fp: taos_async_fetch_cb, param: *mut c_void) {
         unsafe { taos_fetch_rows_a(self.as_ptr(), fp, param) }
     }
 
     #[inline]
-    pub fn fetch_raw_block_a(&self, fp: TaosAsyncFetchCb, param: *mut c_void) {
+    pub fn fetch_raw_block_a(&self, fp: taos_async_fetch_cb, param: *mut c_void) {
         unsafe { taos_fetch_raw_block_a(self.as_ptr(), fp, param) }
     }
 

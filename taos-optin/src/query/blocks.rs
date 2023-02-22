@@ -9,7 +9,7 @@ use futures::Stream;
 use taos_error::Error;
 use taos_query::common::{Field, Precision, RawBlock};
 
-use crate::ffi::{taos_get_raw_block, TaosRes};
+use crate::ffi::{taos_get_raw_block, TAOS_RES};
 
 use super::raw_res::RawRes;
 
@@ -90,7 +90,7 @@ impl Stream for Blocks {
             let param = Box::new((&self.shared_state, cx.waker().clone()));
             unsafe extern "C" fn async_fetch_callback(
                 param: *mut c_void,
-                res: *mut TaosRes,
+                res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
                 let param = param as *mut (&UnsafeCell<SharedState>, Waker);
