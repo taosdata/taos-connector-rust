@@ -31,6 +31,7 @@ pub struct TaosBuilder {
     addr: String,
     auth: WsAuth,
     database: Option<String>,
+    server_version: OnceCell<String>,
     // timeout: Duration,
 }
 
@@ -57,6 +58,14 @@ impl Display for Error {
 
 impl From<DsnError> for Error {
     fn from(err: DsnError) -> Self {
+        Error {
+            code: Code::Failed,
+            source: err.into(),
+        }
+    }
+}
+impl From<query::asyn::Error> for Error {
+    fn from(err: query::asyn::Error) -> Self {
         Error {
             code: Code::Failed,
             source: err.into(),
@@ -99,6 +108,59 @@ impl TBuilder for TaosBuilder {
             async_client: OnceCell::new(),
         })
     }
+
+    fn server_version(&self) -> Result<&str, Self::Error> {
+        if let Some(v) = self.server_version.get() {
+            Ok(v.as_str())
+        } else {
+            let conn = self.build()?;
+            use taos_query::prelude::sync::Queryable;
+            let v: String = Queryable::query_one(&conn, "select server_version()")?.unwrap();
+            Ok(match self.server_version.try_insert(v) {
+                Ok(v) => v.as_str(),
+                Err((v, _)) => v.as_str(),
+            })
+        }
+    }
+    fn is_enterprise_edition(&self) -> bool {
+        if self.addr.matches(".cloud.tdengine.com").next().is_some() {
+            // self.server_version().or_else(|| => );
+            return true;
+        }
+
+        if let Ok(taos) = self.build() {
+            use taos_query::prelude::sync::Queryable;
+            let grant: Option<(String, bool)> = Queryable::query_one(
+                &taos,
+                "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+            )
+            .unwrap_or_default();
+
+            if let Some((edition, expired)) = grant {
+                if expired {
+                    return false;
+                }
+                return match edition.as_str() {
+                    "official" | "trial" => true,
+                    _ => false,
+                };
+            }
+
+            let grant: Option<(String, (), String)> =
+                Queryable::query_one(&taos, "show grants").unwrap_or_default();
+
+            if let Some((edition, _, expired)) = grant {
+                match (edition.trim(), expired.trim()) {
+                    ("official" | "trial", "false") => true,
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
 }
 
 impl TaosBuilder {
@@ -136,6 +198,7 @@ impl TaosBuilder {
                 addr,
                 auth: WsAuth::Token(token),
                 database: dsn.subject,
+                server_version: OnceCell::new(),
                 // timeout,
             })
         } else {
@@ -146,6 +209,7 @@ impl TaosBuilder {
                 addr,
                 auth: WsAuth::Plain(username, password),
                 database: dsn.subject,
+                server_version: OnceCell::new(),
                 // timeout,
             })
         }

@@ -97,6 +97,20 @@ impl TBuilder for TaosBuilder {
             TaosBuilderInner::Ws(b) => Ok(Taos(TaosInner::Ws(b.build()?))),
         }
     }
+
+    fn server_version(&self) -> Result<&str, Self::Error> {
+        match &self.0 {
+            TaosBuilderInner::Native(b) => Ok(b.server_version()?),
+            TaosBuilderInner::Ws(b) => Ok(b.server_version()?),
+        }
+    }
+
+    fn is_enterprise_edition(&self) -> bool {
+        match &self.0 {
+            TaosBuilderInner::Native(b) => b.is_enterprise_edition(),
+            TaosBuilderInner::Ws(b) => b.is_enterprise_edition(),
+        }
+    }
 }
 
 impl AsyncFetchable for ResultSet {
