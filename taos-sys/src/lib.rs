@@ -255,21 +255,6 @@ impl TBuilder for TaosBuilder {
     fn client_version() -> &'static str {
         RawTaos::version()
     }
-
-    fn server_version(&self) -> Result<&str, Self::Error> {
-        if let Some(v) = self.server_version.get() {
-            Ok(v.as_str())
-        } else {
-            let conn = self.inner_connection()?;
-            use taos_query::prelude::sync::Queryable;
-            let v: String = Queryable::query_one(conn, "select server_version()")?.unwrap();
-            Ok(match self.server_version.try_insert(v) {
-                Ok(v) => v.as_str(),
-                Err((v, _)) => v.as_str(),
-            })
-        }
-    }
-
     fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
         conn.raw.query("select 1")?;
         Ok(())
@@ -302,6 +287,21 @@ impl TBuilder for TaosBuilder {
 
         Ok(Taos { raw })
     }
+
+    fn server_version(&self) -> Result<&str, Self::Error> {
+        if let Some(v) = self.server_version.get() {
+            Ok(v.as_str())
+        } else {
+            let conn = self.inner_connection()?;
+            use taos_query::prelude::sync::Queryable;
+            let v: String = Queryable::query_one(conn, "select server_version()")?.unwrap();
+            Ok(match self.server_version.try_insert(v) {
+                Ok(v) => v.as_str(),
+                Err((v, _)) => v.as_str(),
+            })
+        }
+    }
+
 
     fn is_enterprise_edition(&self) -> bool {
         if let Ok(taos) = self.inner_connection() {
