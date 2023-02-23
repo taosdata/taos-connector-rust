@@ -101,7 +101,7 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
 
     /// Check if the server is an enterprise edition.
     #[doc(hidden)]
-    fn is_enterprise_edition(&self) -> bool;
+    fn is_enterprise_edition(&self) -> bool { false }
 
     /// Check a connection is still alive.
     fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error>;

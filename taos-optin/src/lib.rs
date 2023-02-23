@@ -74,6 +74,7 @@ mod into_c_str;
 mod raw;
 mod stmt;
 
+#[allow(non_camel_case_types)]
 pub(crate) mod types;
 
 pub mod tmq;
@@ -219,6 +220,13 @@ pub struct TaosBuilder {
     dsn: Dsn,
     auth: Auth,
     lib: Arc<ApiEntry>,
+    inner_conn: OnceCell<Taos>,
+    server_version: OnceCell<String>,
+}
+impl TaosBuilder {
+    fn inner_connection(&self) -> Result<&Taos, Error> {
+        self.inner_conn.get_or_try_init(|| self.build())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -331,6 +339,8 @@ impl TBuilder for TaosBuilder {
             dsn,
             auth,
             lib: Arc::new(lib),
+            inner_conn: OnceCell::new(),
+            server_version: OnceCell::new(),
         })
     }
 
@@ -352,6 +362,55 @@ impl TBuilder for TaosBuilder {
 
         let raw = RawTaos::new(self.lib.clone(), ptr)?;
         Ok(Taos { raw })
+    }
+
+    fn server_version(&self) -> Result<&str, Self::Error> {
+        if let Some(v) = self.server_version.get() {
+            Ok(v.as_str())
+        } else {
+            let conn = self.inner_connection()?;
+            use taos_query::prelude::sync::Queryable;
+            let v: String = Queryable::query_one(conn, "select server_version()")?.unwrap();
+            Ok(match self.server_version.try_insert(v) {
+                Ok(v) => v.as_str(),
+                Err((v, _)) => v.as_str(),
+            })
+        }
+    }
+    
+    fn is_enterprise_edition(&self) -> bool {
+        if let Ok(taos) = self.inner_connection() {
+            use taos_query::prelude::sync::Queryable;
+            let grant: Option<(String, bool)> = Queryable::query_one(
+                taos,
+                "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+            )
+            .unwrap_or_default();
+
+            if let Some((edition, expired)) = grant {
+                if expired {
+                    return false;
+                }
+                return match edition.as_str() {
+                    "official" | "trial" => true,
+                    _ => false,
+                };
+            }
+
+            let grant: Option<(String, (), String)> =
+                Queryable::query_one(taos, "show grants").unwrap_or_default();
+
+            if let Some((edition, _, expired)) = grant {
+                match (edition.trim(), expired.trim()) {
+                    ("official" | "trial", "false") => true,
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 }
 

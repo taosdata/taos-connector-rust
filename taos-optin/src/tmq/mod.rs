@@ -15,7 +15,7 @@ use taos_query::{
     Dsn, IntoDsn, RawBlock, TBuilder,
 };
 
-use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t};
+use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t, Taos, TaosBuilder};
 
 // use taos_error::Error;
 
@@ -27,6 +27,7 @@ use self::raw::{Conf, Topics};
 
 pub struct TmqBuilder {
     dsn: Dsn,
+    builder: TaosBuilder,
     lib: Arc<ApiEntry>,
     conf: Conf,
     timeout: Timeout,
@@ -60,6 +61,7 @@ impl TBuilder for TmqBuilder {
             Timeout::from_millis(500)
         };
         Ok(Self {
+            builder: TaosBuilder::from_dsn(&dsn).map_err(RawError::from_any)?,
             dsn,
             lib: Arc::new(lib),
             conf,
@@ -90,6 +92,12 @@ impl TBuilder for TmqBuilder {
             tmq,
             timeout: self.timeout,
         })
+    }
+
+    fn server_version(&self) -> Result<&str, Self::Error> {
+        self.builder
+            .server_version()
+            .map_err(|err| RawError::from_any(err))
     }
 }
 
