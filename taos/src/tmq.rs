@@ -93,6 +93,14 @@ impl TBuilder for TmqBuilder {
             TmqBuilderInner::Ws(b) => Ok(Consumer(ConsumerInner::Ws(b.build()?))),
         }
     }
+
+    fn server_version(&self) -> Result<&str, Self::Error> {
+        todo!()
+    }
+
+    fn is_enterprise_edition(&self) -> bool {
+        todo!()
+    }
 }
 
 impl taos_query::tmq::IsOffset for Offset {

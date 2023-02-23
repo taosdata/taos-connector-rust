@@ -158,6 +158,14 @@ impl TBuilder for TmqBuilder {
             timeout: self.timeout,
         })
     }
+
+    fn is_enterprise_edition(&self) -> bool {
+        unimplemented!()
+    }
+
+    fn server_version(&self) -> Result<&str, Self::Error> {
+        unimplemented!()
+    }
 }
 
 /// Consumer offset.
@@ -447,7 +455,7 @@ impl AsAsyncConsumer for Consumer {
                                 tmq_res_t::TMQ_RES_TABLE_META => {
                                     taos_query::tmq::MessageSet::Meta(Meta::new(raw))
                                 }
-                                tmq_res_t::TMQ_RES_METADATA => todo!(),
+                                tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw), Data::new(raw))
                             },
                         );
                         Ok(Some(message))
@@ -470,7 +478,7 @@ impl AsAsyncConsumer for Consumer {
                                 tmq_res_t::TMQ_RES_TABLE_META => {
                                     taos_query::tmq::MessageSet::Meta(Meta::new(raw))
                                 }
-                                tmq_res_t::TMQ_RES_METADATA => todo!(),
+                                tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw), Data::new(raw))
                             },
                         );
                         Ok(Some(message))

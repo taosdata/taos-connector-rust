@@ -95,6 +95,14 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
     /// Get client version.
     fn client_version() -> &'static str;
 
+    /// Get server version.
+    #[doc(hidden)]
+    fn server_version(&self) -> Result<&str, Self::Error>;
+
+    /// Check if the server is an enterprise edition.
+    #[doc(hidden)]
+    fn is_enterprise_edition(&self) -> bool;
+
     /// Check a connection is still alive.
     fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error>;
 
@@ -343,6 +351,14 @@ mod tests {
 
         fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error> {
             Ok(())
+        }
+
+        fn server_version(&self) -> Result<&str, Self::Error> {
+            todo!()
+        }
+
+        fn is_enterprise_edition(&self) -> bool {
+            todo!()
         }
     }
 

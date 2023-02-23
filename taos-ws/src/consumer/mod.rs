@@ -116,6 +116,14 @@ impl TBuilder for TmqBuilder {
     fn build(&self) -> StdResult<Self::Target, Self::Error> {
         block_in_place_or_global(self.build_consumer())
     }
+
+    fn server_version(&self) -> StdResult<&str, Self::Error> {
+        todo!()
+    }
+
+    fn is_enterprise_edition(&self) -> bool {
+        todo!()
+    }
 }
 
 struct WsMessageBase {
