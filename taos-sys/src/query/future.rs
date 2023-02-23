@@ -22,6 +22,7 @@ pub struct QueryFuture<'a> {
 struct State {
     result: *mut TAOS_RES,
     code: i32,
+    done: bool,
 }
 
 unsafe impl Send for State {}
@@ -32,8 +33,9 @@ impl<'a> Unpin for QueryFuture<'a> {}
 impl<'a> Future for QueryFuture<'a> {
     type Output = Result<RawRes, RawError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let ptr = self.state.get();
         let state = unsafe { &*self.state.get() };
-        if !state.result.is_null() || state.code != 0 {
+        if state.done {
             Poll::Ready(RawRes::from_ptr_with_code(state.result, state.code.into()))
         } else {
             unsafe extern "C" fn async_query_callback(
@@ -46,6 +48,7 @@ impl<'a> Future for QueryFuture<'a> {
 
                 s.result = res;
                 s.code = code;
+                s.done = true;
                 state.1.wake();
             }
 
@@ -67,6 +70,7 @@ impl<'a> QueryFuture<'a> {
         let state = UnsafeCell::new(State {
             result: std::ptr::null_mut(),
             code: 0,
+            done: false,
         });
 
         let sql = sql.into_c_str();
