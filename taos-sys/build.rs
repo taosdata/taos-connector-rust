@@ -54,7 +54,7 @@ fn taos_version() -> String {
         "taos.dll"
     } else if cfg!(target_os = "linux") {
         "libtaos.so"
-    } else if cfg!(target_os = "darwin") {
+    } else if cfg!(target_os = "macos") {
         "libtaos.dylib"
     } else {
         unreachable!("the current os is not supported");
