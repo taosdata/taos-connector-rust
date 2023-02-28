@@ -35,7 +35,8 @@ pub struct MessageArgs {
 pub enum MessageType {
     Invalid = 0,
     Data = 1,
-    Meta,
+    Meta = 2,
+    MetaData = 3,
 }
 
 impl Default for MessageType {
