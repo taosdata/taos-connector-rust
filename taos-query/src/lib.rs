@@ -101,7 +101,9 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
 
     /// Check if the server is an enterprise edition.
     #[doc(hidden)]
-    fn is_enterprise_edition(&self) -> bool { false }
+    fn is_enterprise_edition(&self) -> bool {
+        false
+    }
 
     /// Check a connection is still alive.
     fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error>;
@@ -119,15 +121,17 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
     ///
     /// Here we will use some default options with [r2d2::Builder]
     ///
-    /// - max_lifetime: None,
+    /// - max_lifetime: 12h,
     /// - max_size: 5000,
     /// - min_idle: 2.
+    /// - connection_timeout: 5s.
     #[cfg(feature = "r2d2")]
     fn pool(self) -> Result<r2d2::Pool<Manager<Self>>, r2d2::Error> {
         r2d2::Builder::new()
-            .max_lifetime(None)
-            .min_idle(Some(2))
+            .max_lifetime(Some(std::time::Duration::from_secs(12 * 60 * 60)))
+            .min_idle(Some(0))
             .max_size(5000)
+            .connection_timeout(std::time::Duration::from_secs(5))
             .build(Manager::new(self))
     }
 
