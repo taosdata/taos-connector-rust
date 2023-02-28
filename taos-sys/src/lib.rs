@@ -317,7 +317,7 @@ impl TBuilder for TaosBuilder {
                     return false;
                 }
                 return match edition.as_str() {
-                    "official" | "trial" => true,
+                    "cloud" | "official" | "trial" => true,
                     _ => false,
                 };
             }
@@ -327,7 +327,7 @@ impl TBuilder for TaosBuilder {
 
             if let Some((edition, _, expired)) = grant {
                 match (edition.trim(), expired.trim()) {
-                    ("official" | "trial", "false") => true,
+                    ("cloud" | "official" | "trial", "false") => true,
                     _ => false,
                 }
             } else {

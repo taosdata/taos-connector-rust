@@ -132,7 +132,7 @@ impl TBuilder for TaosBuilder {
             use taos_query::prelude::sync::Queryable;
             let grant: Option<(String, bool)> = Queryable::query_one(
                 &taos,
-                "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+                "select version, (expire_time < now) from information_schema.ins_cluster",
             )
             .unwrap_or_default();
 
@@ -140,8 +140,8 @@ impl TBuilder for TaosBuilder {
                 if expired {
                     return false;
                 }
-                return match edition.as_str() {
-                    "official" | "trial" => true,
+                return match edition.trim() {
+                    "cloud" | "official" | "trial" => true,
                     _ => false,
                 };
             }
@@ -151,7 +151,7 @@ impl TBuilder for TaosBuilder {
 
             if let Some((edition, _, expired)) = grant {
                 match (edition.trim(), expired.trim()) {
-                    ("official" | "trial", "false") => true,
+                    ("cloud" | "official" | "trial", "false") => true,
                     _ => false,
                 }
             } else {
