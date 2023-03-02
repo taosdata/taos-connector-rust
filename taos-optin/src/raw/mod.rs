@@ -323,7 +323,7 @@ const fn default_lib_name() -> &'static str {
         "taos.dll"
     } else if cfg!(target_os = "linux") {
         "libtaos.so"
-    } else if cfg!(target_os = "darwin") {
+    } else if cfg!(target_os = "macos") {
         "libtaos.dylib"
     } else {
         panic!("current os is not supported")
