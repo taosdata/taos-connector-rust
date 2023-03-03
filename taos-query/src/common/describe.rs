@@ -39,7 +39,7 @@ impl DerefMut for Describe {
 }
 impl Describe {
     #[inline]
-    fn fields(&self) -> &[ColumnMeta] {
+    pub fn fields(&self) -> &[ColumnMeta] {
         &self.0
     }
     pub fn is_stable(&self) -> bool {
