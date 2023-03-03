@@ -51,11 +51,7 @@ impl Describe {
 
     pub fn split(&self) -> Option<(&[ColumnMeta], &[ColumnMeta])> {
         let n = self.deref().iter().find_position(|c| c.is_tag());
-        if let Some(_) = n {
-            n.map(|(at, _)| self.deref().split_at(at))
-        } else {
-            (self.deref(), Vec::new().deref())
-        }
+        n.map(|(at, _)| self.deref().split_at(at))
     }
 
     pub fn tag_names(&self) -> impl Iterator<Item = &str> {
