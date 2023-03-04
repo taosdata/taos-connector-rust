@@ -89,6 +89,8 @@ pub enum ColumnView {
     UBigInt(UBigIntView),     // 14
     Json(JsonView),           // 15
 }
+unsafe impl Send for ColumnView {}
+unsafe impl Sync for ColumnView {}
 
 impl Debug for ColumnView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
