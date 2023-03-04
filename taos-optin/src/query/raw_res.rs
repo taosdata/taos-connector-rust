@@ -124,7 +124,7 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &UnsafeCell<SharedState>,
+        state: &Arc<UnsafeCell<SharedState>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, Error>> {
         let current = unsafe { &mut *state.get() };
@@ -154,13 +154,17 @@ impl RawRes {
                 Poll::Ready(Ok(None))
             }
         } else {
-            let param = Box::new((state, cx.waker().clone()));
+            if current.in_use {
+                return Poll::Pending;
+            }
+            current.in_use = true;
+            let param = Box::new((state.clone(), cx.waker().clone()));
             unsafe extern "C" fn async_fetch_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
-                let param = param as *mut (&UnsafeCell<SharedState>, Waker);
+                let param = param as *mut (Arc<UnsafeCell<SharedState>>, Waker);
                 let param = Box::from_raw(param);
                 let state = &mut *param.0.get();
                 state.done = true;

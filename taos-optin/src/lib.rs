@@ -377,7 +377,7 @@ impl TBuilder for TaosBuilder {
             })
         }
     }
-    
+
     fn is_enterprise_edition(&self) -> bool {
         if let Ok(taos) = self.inner_connection() {
             use taos_query::prelude::sync::Queryable;
@@ -419,7 +419,7 @@ pub struct ResultSet {
     raw: RawRes,
     fields: OnceCell<Vec<Field>>,
     summary: UnsafeCell<(usize, usize)>,
-    state: UnsafeCell<SharedState>,
+    state: Arc<UnsafeCell<SharedState>>,
 }
 
 impl ResultSet {
@@ -428,7 +428,7 @@ impl ResultSet {
             raw,
             fields: OnceCell::new(),
             summary: UnsafeCell::new((0, 0)),
-            state: UnsafeCell::new(SharedState::default()),
+            state: Arc::new(UnsafeCell::new(SharedState::default())),
         }
     }
 
@@ -564,6 +564,62 @@ mod tests {
                 }
             }
         }
+
+        println!("summary: {:?}", set.summary());
+
+        Ok(())
+    }
+    #[test]
+    fn long_query() -> Result<(), Error> {
+        use taos_query::prelude::sync::*;
+        let builder = TaosBuilder::from_dsn(DSN_V3)?;
+        let taos = builder.build()?;
+        let mut set = taos.query("show databases")?;
+
+        for raw in &mut set.blocks() {
+            let raw = raw?;
+            for (col, view) in raw.columns().into_iter().enumerate() {
+                for (row, value) in view.iter().enumerate().take(10) {
+                    println!("Value at (row: {}, col: {}) is: {}", row, col, value);
+                }
+            }
+
+            for (row, view) in raw.rows().enumerate().take(10) {
+                for (col, value) in view.enumerate() {
+                    println!("Value at (row: {}, col: {}) is: {:?}", row, col, value);
+                }
+            }
+        }
+
+        println!("summary: {:?}", set.summary());
+
+        Ok(())
+    }
+    #[tokio::test(flavor = "multi_thread")]
+    async fn long_query_async() -> Result<(), Error> {
+        use taos_query::prelude::*;
+        let builder = TaosBuilder::from_dsn(DSN_V3)?;
+        let taos = builder.build()?;
+        let mut set = taos.query("select * from test.meters limit 100000").await?;
+
+        set.blocks()
+            .try_for_each_concurrent(10, |block| async move {
+                println!("{}", block.pretty_format());
+                Ok(())
+            })
+            .await?;
+
+        let mut set = taos.query("select * from test.meters limit 100000").await?;
+
+        set.rows()
+            .try_for_each_concurrent(10, |row| async move {
+                println!(
+                    "{}",
+                    row.map(|(_, value)| value.to_string().unwrap()).join(",")
+                );
+                Ok(())
+            })
+            .await?;
 
         println!("summary: {:?}", set.summary());
 
