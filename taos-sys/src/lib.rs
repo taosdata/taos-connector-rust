@@ -6,9 +6,10 @@
 //!
 
 use std::{
-    cell::UnsafeCell,
+    cell::{Cell, UnsafeCell},
     ffi::CString,
     fmt::Display,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -302,7 +303,6 @@ impl TBuilder for TaosBuilder {
         }
     }
 
-
     fn is_enterprise_edition(&self) -> bool {
         if let Ok(taos) = self.inner_connection() {
             use taos_query::prelude::sync::Queryable;
@@ -344,7 +344,7 @@ pub struct ResultSet {
     raw: RawRes,
     fields: OnceCell<Vec<Field>>,
     summary: UnsafeCell<(usize, usize)>,
-    state: UnsafeCell<SharedState>,
+    state: Arc<UnsafeCell<SharedState>>,
 }
 
 impl ResultSet {
@@ -353,7 +353,7 @@ impl ResultSet {
             raw,
             fields: OnceCell::new(),
             summary: UnsafeCell::new((0, 0)),
-            state: UnsafeCell::new(SharedState::default()),
+            state: Arc::new(UnsafeCell::new(SharedState::default())),
         }
     }
 

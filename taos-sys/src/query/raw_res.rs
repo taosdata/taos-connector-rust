@@ -1,6 +1,8 @@
-use std::cell::UnsafeCell;
+use std::cell::{Cell, UnsafeCell};
 use std::ffi::CStr;
+use std::ops::Deref;
 use std::os::raw::*;
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use taos_query::prelude::{Code, RawError as Error};
@@ -125,7 +127,7 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &UnsafeCell<SharedState>,
+        state: &Arc<UnsafeCell<SharedState>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, Error>> {
         #[cfg(not(taos_v3))]
@@ -139,17 +141,19 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &UnsafeCell<SharedState>,
+        state: &Arc<UnsafeCell<SharedState>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, Error>> {
-        let current = unsafe { &mut *state.get() };
-        let ptr = state.get();
+        let cell = state.get();
+        let current = unsafe { &mut *cell };
+        // let current = unsafe { &mut *state.get() };
+        // let ptr = state.get();
 
         if current.done {
             // handle errors
             if current.code != 0 {
                 let err = Error::new(current.code, self.err_as_str());
-
+                current.in_use = false;
                 return Poll::Ready(Err(err));
             }
 
@@ -164,22 +168,29 @@ impl RawRes {
                 } else {
                     current.done = false;
                 }
+                current.in_use = false;
                 Poll::Ready(Ok(Some(raw)))
             } else {
+                current.in_use = false;
                 // no data todo, stop stream.
                 Poll::Ready(Ok(None))
             }
         } else {
-            let param = Box::new((ptr, cx.waker().clone()));
-            unsafe extern "C" fn async_fetch_callback(
+            if current.in_use {
+                return Poll::Pending;
+            }
+            current.in_use = true;
+            let param = Box::new((state.clone(), cx.waker().clone()));
+            // #[no_mangle]
+            unsafe extern "C" fn __async_fetch_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
-                let param = param as *mut Box<(*mut SharedState, Waker)>;
+                let param = param as *mut (Arc<UnsafeCell<SharedState>>, Waker);
                 let param = Box::from_raw(param);
                 // let state = &mut *param.0.get();
-                let state = &mut *param.0;
+                let state = &mut *param.0.get();
                 state.done = true;
                 state.block = taos_get_raw_block(res);
                 if num_of_rows < 0 {
@@ -190,8 +201,8 @@ impl RawRes {
                 param.1.wake()
             }
             self.fetch_raw_block_a(
-                async_fetch_callback as _,
-                Box::into_raw(Box::new(param)) as *mut _ as _,
+                __async_fetch_callback as _,
+                Box::into_raw(param) as *mut _ as _,
             );
             Poll::Pending
         }
@@ -202,7 +213,7 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &UnsafeCell<SharedState>,
+        state: &Arc<UnsafeCell<SharedState>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, Error>> {
         let current = unsafe { &mut *state.get() };
@@ -239,13 +250,17 @@ impl RawRes {
                 Poll::Ready(Ok(None))
             }
         } else {
-            let param = Box::new((state, cx.waker().clone()));
+            if current.in_use {
+                return Poll::Pending;
+            }
+            current.in_use = true;
+            let param = Box::new((state.clone(), cx.waker().clone()));
             unsafe extern "C" fn async_fetch_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
-                let param = param as *mut (&UnsafeCell<SharedState>, Waker);
+                let param = param as *mut (Arc<UnsafeCell<SharedState>>, Waker);
                 let param = Box::from_raw(param);
                 let state = &mut *param.0.get();
                 state.done = true;

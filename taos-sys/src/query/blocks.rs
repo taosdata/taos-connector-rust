@@ -2,6 +2,7 @@ use std::{
     cell::UnsafeCell,
     os::raw::{c_int, c_void},
     pin::Pin,
+    sync::atomic::AtomicBool,
     task::{Context, Poll, Waker},
 };
 
@@ -39,8 +40,10 @@ impl IntoIterator for RawRes {
     }
 }
 
+#[derive(Debug)]
 pub struct SharedState {
     pub block: *mut c_void,
+    pub in_use: bool,
     pub done: bool,
     pub num: usize,
     pub code: i32,
@@ -50,6 +53,7 @@ impl Default for SharedState {
     fn default() -> Self {
         Self {
             block: std::ptr::null_mut(),
+            in_use: Default::default(),
             done: Default::default(),
             num: Default::default(),
             code: Default::default(),
@@ -121,9 +125,7 @@ impl Blocks {
     pub(crate) fn new(res: RawRes) -> Self {
         let shared_state = UnsafeCell::new(SharedState {
             done: false,
-            block: std::ptr::null_mut(),
-            num: 0,
-            code: 0,
+            ..Default::default()
         });
 
         Self {
