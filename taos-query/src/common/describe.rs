@@ -50,8 +50,11 @@ impl Describe {
     }
 
     pub fn split(&self) -> Option<(&[ColumnMeta], &[ColumnMeta])> {
-        let n = self.deref().iter().find_position(|c| c.is_tag());
-        n.map(|(at, _)| self.deref().split_at(at))
+        if let Some((at, _)) = self.deref().iter().find_position(|c| c.is_tag()) {
+            Some(self.deref().split_at(at))
+        } else {
+            Some(self.deref().split_at(self.0.len()))
+        }
     }
 
     pub fn tag_names(&self) -> impl Iterator<Item = &str> {
