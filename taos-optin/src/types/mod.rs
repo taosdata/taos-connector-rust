@@ -530,85 +530,98 @@ impl TaosMultiBind {
 
 impl Drop for TaosMultiBind {
     fn drop(&mut self) {
-        let ty = Ty::from(self.buffer_type as u8);
-        if ty == Ty::VarChar || ty == Ty::NChar {
-            let len = self.buffer_length * self.num as usize;
-            unsafe { Vec::from_raw_parts(self.buffer as *mut u8, len, len as _) };
-            unsafe { Vec::from_raw_parts(self.length as *mut i32, self.num as _, self.num as _) };
-        }
         if !self.is_null.is_null() {
             unsafe { Vec::from_raw_parts(self.is_null as *mut i8, self.num as _, self.num as _) };
         }
     }
 }
 
-impl<'b> From<&'b ColumnView> for TaosMultiBind {
+impl<'b> From<&'b ColumnView> for DropMultiBind {
     fn from(view: &'b ColumnView) -> Self {
         use ColumnView::*;
         match view {
             Bool(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_primitives(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_primitives(nulls, values))
             }
             TinyInt(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_primitives(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_primitives(nulls, values))
             }
             SmallInt(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_primitives(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_primitives(nulls, values))
             }
             Int(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_primitives(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_primitives(nulls, values))
             }
             BigInt(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_primitives(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_primitives(nulls, values))
             }
             Float(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_primitives(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_primitives(nulls, values))
             }
             Double(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_primitives(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_primitives(nulls, values))
             }
-            VarChar(view) => TaosMultiBind::from_binary_vec(&view.to_vec()),
+            VarChar(view) => DropMultiBind::new(TaosMultiBind::from_binary_vec(&view.to_vec())),
             Timestamp(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_raw_timestamps(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_raw_timestamps(nulls, values))
             }
-            NChar(view) => TaosMultiBind::from_string_vec(&view.to_vec()),
+            NChar(view) => DropMultiBind::new(TaosMultiBind::from_string_vec(&view.to_vec())),
             UTinyInt(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_primitives(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_primitives(nulls, values))
             }
             USmallInt(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_primitives(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_primitives(nulls, values))
             }
             UInt(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_primitives(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_primitives(nulls, values))
             }
             UBigInt(view) => {
                 let nulls: Vec<_> = view.is_null_iter().collect();
                 let values = view.as_raw_slice();
-                TaosMultiBind::from_primitives(nulls, values)
+                DropMultiBind::new(TaosMultiBind::from_primitives(nulls, values))
             }
-            Json(view) => TaosMultiBind::from_json(&view.to_vec()),
+            Json(view) => DropMultiBind::new(TaosMultiBind::from_json(&view.to_vec())),
+        }
+    }
+}
+
+pub struct DropMultiBind(TaosMultiBind);
+
+impl DropMultiBind {
+    fn new(taos_multi_bind: TaosMultiBind) -> Self {
+        Self(taos_multi_bind)
+    }
+}
+
+impl Drop for DropMultiBind {
+    fn drop(&mut self) {
+        let ty = Ty::from(self.0.buffer_type as u8);
+        if ty == Ty::VarChar || ty == Ty::NChar {
+            let len = self.0.buffer_length * self.0.num as usize;
+            unsafe { Vec::from_raw_parts(self.0.buffer as *mut u8, len, len as _) };
+            unsafe { Vec::from_raw_parts(self.0.length as *mut i32, self.0.num as _, self.0.num as _) };
         }
     }
 }

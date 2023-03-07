@@ -61,8 +61,8 @@ impl Bindable<super::Taos> for Stmt {
         &mut self,
         params: &[taos_query::common::ColumnView],
     ) -> Result<&mut Self, Self::Error> {
-        let params = params.iter().map(|c| c.into()).collect_vec();
-        self.raw.bind_param_batch(&params)?;
+        let params: Vec<DropMultiBind> = params.iter().map(|c| c.into()).collect_vec();
+        self.raw.bind_param_batch(unsafe { std::mem::transmute(params.as_slice()) })?;
         Ok(self)
     }
 
@@ -292,14 +292,14 @@ mod tests {
     #[test]
     fn test_tbname_tags() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        let builder = TaosBuilder::from_dsn("taos:///")?;
+        let builder = TaosBuilder::from_dsn("taos://192.168.1.92:6030/")?;
         let taos = builder.build()?;
         taos.query("drop database if exists stt1")?;
         taos.query("create database if not exists stt1 keep 36500")?;
         taos.query("use stt1")?;
         taos.query(
             // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
-            "create stable if not exists st1(ts timestamp, v int) tags(jt int, t1 float)",
+            "create stable if not exists st1(ts timestamp, v int) tags(jt int, t1 varchar(32))",
         )?;
 
         let mut stmt = Stmt::init(&taos)?;
@@ -310,7 +310,7 @@ mod tests {
         let tbname = "tb1";
         stmt.set_tbname(tbname)?;
 
-        let tags = vec![Value::Int(0), Value::Float(0.)];
+        let tags = vec![Value::Int(0), Value::VarChar(String::from("taos"))];
         stmt.set_tags(&tags)?;
         let params = vec![
             ColumnView::from_millis_timestamp(vec![0]),
@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(stmt.affected_rows(), 2);
         println!("done");
 
-        taos.query("drop database stt1")?;
+        // taos.query("drop database stt1")?;
         Ok(())
     }
 
