@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(stmt.affected_rows(), 2);
         println!("done");
 
-        // taos.query("drop database stt1")?;
+        taos.query("drop database stt1")?;
         Ok(())
     }
 
