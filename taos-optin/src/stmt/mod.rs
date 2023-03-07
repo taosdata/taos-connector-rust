@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn test_tbname_tags() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        let builder = TaosBuilder::from_dsn("taos://192.168.1.92:6030/")?;
+        let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build()?;
         taos.query("drop database if exists stt1")?;
         taos.query("create database if not exists stt1 keep 36500")?;
