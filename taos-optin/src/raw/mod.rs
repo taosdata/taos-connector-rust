@@ -36,6 +36,7 @@ lazy_static::lazy_static! {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ApiEntry {
     lib: Arc<Library>,
     version: String,
@@ -179,6 +180,7 @@ pub(crate) struct TmqConfApi {
         value: *const c_char,
     ) -> tmq_conf_res_t,
 
+    #[allow(dead_code)]
     tmq_conf_set_auto_commit_cb:
         unsafe extern "C" fn(conf: *mut tmq_conf_t, cb: tmq_commit_cb, param: *mut c_void),
 
@@ -207,14 +209,14 @@ impl TmqConfApi {
         (self.tmq_conf_set)(conf, key.as_ptr(), value.as_ptr()).ok(k, v)
     }
 
-    pub(crate) unsafe fn auto_commit_cb(
-        &self,
-        conf: *mut tmq_conf_t,
-        cb: tmq_commit_cb,
-        param: *mut c_void,
-    ) {
-        (self.tmq_conf_set_auto_commit_cb)(conf, cb, param)
-    }
+    // pub(crate) unsafe fn auto_commit_cb(
+    //     &self,
+    //     conf: *mut tmq_conf_t,
+    //     cb: tmq_commit_cb,
+    //     param: *mut c_void,
+    // ) {
+    //     (self.tmq_conf_set_auto_commit_cb)(conf, cb, param)
+    // }
 
     pub(crate) unsafe fn consumer(&self, conf: *mut tmq_conf_t) -> Result<*mut tmq_t, RawError> {
         let mut err = [0; 256];
@@ -244,6 +246,7 @@ pub(crate) struct TmqApi {
     pub(crate) tmq_subscribe:
         unsafe extern "C" fn(tmq: *mut tmq_t, topics: *mut tmq_list_t) -> tmq_resp_err_t,
     pub(crate) tmq_unsubscribe: unsafe extern "C" fn(tmq: *mut tmq_t) -> tmq_resp_err_t,
+    #[allow(dead_code)]
     pub(crate) tmq_subscription:
         unsafe extern "C" fn(tmq: *mut tmq_t, topic_list: *mut *mut tmq_list_t) -> tmq_resp_err_t,
     pub(crate) tmq_consumer_poll:
@@ -263,6 +266,7 @@ pub(crate) struct TmqApi {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub(crate) struct StmtApi {
     pub(crate) taos_stmt_init: unsafe extern "C" fn(taos: *mut TAOS) -> *mut TAOS_STMT,
 
@@ -916,10 +920,8 @@ impl RawRes {
             let fetch =
                 unsafe { (taos_fetch_block_s)(self.as_ptr(), &mut num as _, &mut block as _) };
             let lengths = self.fetch_lengths();
-            dbg!(lengths, fields);
-            crate::err_or!(
-                self,
-                fetch,
+            // dbg!(lengths, fields);
+            if fetch == 0 {
                 if num > 0 {
                     let raw = RawBlock::parse_from_ptr_v2(
                         block as _,
@@ -928,11 +930,15 @@ impl RawRes {
                         num as usize,
                         self.precision(),
                     );
-                    Some(raw)
+                    Ok(Some(raw))
                 } else {
-                    None
+                    Ok(None)
                 }
-            )
+            } else {
+                let code: Code = fetch.into();
+                let err = self.err_as_str();
+                Err(RawError::new(code, err))
+            }
         } else {
             num = unsafe { (self.c.taos_fetch_block)(self.as_ptr(), &mut block as _) };
             let lengths = self.fetch_lengths();

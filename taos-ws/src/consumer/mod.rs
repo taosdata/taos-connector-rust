@@ -1041,7 +1041,7 @@ mod tests {
             // kind 9: drop normal table
             "drop table `table`",
             // kind 10: drop child table
-            "drop table `tb2` `tb1`",
+            "drop table `tb2`, `tb1`",
             // kind 11: drop super table
             "drop table `stb2`",
             "drop table `stb1`",
@@ -1130,11 +1130,11 @@ mod tests {
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?.build()?;
         taos.exec_many([
-            "drop topic if exists ws_tmq_meta_sync",
-            "drop database if exists ws_tmq_meta_sync",
-            "create database ws_tmq_meta_sync",
-            "create topic ws_tmq_meta_sync with meta as database ws_tmq_meta_sync",
-            "use ws_tmq_meta_sync",
+            "drop topic if exists ws_tmq_meta_sync3",
+            "drop database if exists ws_tmq_meta_sync3",
+            "create database ws_tmq_meta_sync3",
+            "create topic ws_tmq_meta_sync3 with meta as database ws_tmq_meta_sync3",
+            "use ws_tmq_meta_sync3",
             // kind 1: create super table using all types
             "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
             c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
@@ -1190,21 +1190,21 @@ mod tests {
             // kind 9: drop normal table
             "drop table `table`",
             // kind 10: drop child table
-            "drop table `tb2` `tb1`",
+            "drop table `tb2`, `tb1`",
             // kind 11: drop super table
             "drop table `stb2`",
             "drop table `stb1`",
         ])?;
 
         taos.exec_many([
-            "drop database if exists ws_tmq_meta_sync2",
-            "create database if not exists ws_tmq_meta_sync2",
-            "use ws_tmq_meta_sync2",
+            "drop database if exists ws_tmq_meta_sync32",
+            "create database if not exists ws_tmq_meta_sync32",
+            "use ws_tmq_meta_sync32",
         ])?;
 
         let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms")?;
         let mut consumer = builder.build()?;
-        consumer.subscribe(["ws_tmq_meta_sync"])?;
+        consumer.subscribe(["ws_tmq_meta_sync3"])?;
 
         let iter = consumer.iter_with_timeout(Timeout::from_secs(5));
 
@@ -1262,9 +1262,9 @@ mod tests {
         std::thread::sleep(Duration::from_secs(2));
 
         taos.exec_many([
-            "drop database ws_tmq_meta_sync2",
-            "drop topic ws_tmq_meta_sync",
-            "drop database ws_tmq_meta_sync",
+            "drop database ws_tmq_meta_sync32",
+            "drop topic ws_tmq_meta_sync3",
+            "drop database ws_tmq_meta_sync3",
         ])?;
         Ok(())
     }

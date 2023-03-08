@@ -1,6 +1,6 @@
-use std::cell::{Cell, UnsafeCell};
+use std::cell::{UnsafeCell};
 use std::ffi::CStr;
-use std::ops::Deref;
+
 use std::os::raw::*;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};

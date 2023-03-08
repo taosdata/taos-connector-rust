@@ -14,8 +14,6 @@ pub use tmq::*;
 pub type TAOS = c_void;
 pub type TAOS_STMT = c_void;
 pub type TAOS_RES = c_void;
-pub type TAOS_STREAM = c_void;
-pub type TAOS_SUB = c_void;
 pub type TAOS_ROW = *mut *mut c_void;
 
 pub type taos_async_fetch_cb =
@@ -24,16 +22,10 @@ pub type taos_async_fetch_cb =
 pub type taos_async_query_cb =
     unsafe extern "C" fn(param: *mut c_void, res: *mut c_void, code: c_int);
 
-pub type taos_subscribe_cb =
-    unsafe extern "C" fn(sub: *mut TAOS_SUB, res: *mut TAOS_RES, param: *mut c_void, code: c_int);
-
-pub type taos_stream_cb =
-    unsafe extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, row: TAOS_ROW);
-
-pub type taos_stream_close_cb = unsafe extern "C" fn(param: *mut c_void);
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+#[allow(dead_code)]
 pub enum TSDB_OPTION {
     Locale = 0,
     Charset,
@@ -42,12 +34,6 @@ pub enum TSDB_OPTION {
     ShellActivityTimer,
     MaxOptions,
 }
-pub const TSDB_OPTION_LOCALE: TSDB_OPTION = TSDB_OPTION::Locale;
-pub const TSDB_OPTION_CHARSET: TSDB_OPTION = TSDB_OPTION::Charset;
-pub const TSDB_OPTION_TIMEZONE: TSDB_OPTION = TSDB_OPTION::Timezone;
-pub const TSDB_OPTION_CONFIGDIR: TSDB_OPTION = TSDB_OPTION::ConfigDir;
-pub const TSDB_OPTION_SHELL_ACTIVITY_TIMER: TSDB_OPTION = TSDB_OPTION::ShellActivityTimer;
-pub const TSDB_MAX_OPTIONS: TSDB_OPTION = TSDB_OPTION::MaxOptions;
 
 #[repr(C)]
 #[derive(Clone)]
@@ -270,6 +256,7 @@ impl TaosBindV2 {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn buffer(&self) -> *const c_void {
         self.buffer
     }
@@ -431,16 +418,16 @@ pub trait ToMultiBind {
 }
 
 impl TaosMultiBind {
-    pub(crate) fn nulls(n: usize) -> Self {
-        TaosMultiBind {
-            buffer_type: Ty::Null as _,
-            buffer: std::ptr::null_mut(),
-            buffer_length: 0,
-            length: n as _,
-            is_null: std::ptr::null_mut(),
-            num: n as _,
-        }
-    }
+    // pub(crate) fn nulls(n: usize) -> Self {
+    //     TaosMultiBind {
+    //         buffer_type: Ty::Null as _,
+    //         buffer: std::ptr::null_mut(),
+    //         buffer_length: 0,
+    //         length: n as _,
+    //         is_null: std::ptr::null_mut(),
+    //         num: n as _,
+    //     }
+    // }
     pub(crate) fn from_primitives<T: IValue>(nulls: Vec<bool>, values: &[T]) -> Self {
         TaosMultiBind {
             buffer_type: T::TY as _,
@@ -523,6 +510,7 @@ impl TaosMultiBind {
         s
     }
 
+    #[cfg(test)]
     pub(crate) fn buffer(&self) -> *const c_void {
         self.buffer
     }

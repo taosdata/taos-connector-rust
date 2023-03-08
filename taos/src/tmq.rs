@@ -430,7 +430,7 @@ mod tests {
             // kind 9: drop normal table
             "drop table `table`",
             // kind 10: drop child table
-            "drop table `tb2` `tb1`",
+            "drop table `tb2`, `tb1`",
             // kind 11: drop super table
             "drop table `stb2`",
             "drop table `stb1`",

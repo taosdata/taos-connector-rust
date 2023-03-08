@@ -2,7 +2,6 @@ use std::{
     cell::UnsafeCell,
     os::raw::{c_int, c_void},
     pin::Pin,
-    sync::atomic::AtomicBool,
     task::{Context, Poll, Waker},
 };
 
