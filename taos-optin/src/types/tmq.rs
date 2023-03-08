@@ -44,6 +44,7 @@ pub struct tmq_message_t {
 }
 
 #[repr(C)]
+#[allow(dead_code)]
 pub enum tmq_conf_res_t {
     Unknown = -2,
     Invalid = -1,
@@ -67,6 +68,7 @@ pub(crate) type tmq_commit_cb =
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[allow(dead_code)]
 pub enum tmq_res_t {
     TMQ_RES_INVALID = -1,
     TMQ_RES_DATA = 1,

@@ -1,8 +1,8 @@
 use std::{str::FromStr, time::Duration};
 use taos::sync::*;
 
-//#[test]
-fn test_tmq_meta_sync() -> anyhow::Result<()> {
+// #[test]
+fn _test_tmq_meta_sync() -> anyhow::Result<()> {
     pretty_env_logger::formatted_timed_builder()
         .filter_level(log::LevelFilter::Trace)
         .init();
@@ -72,10 +72,10 @@ fn test_tmq_meta_sync() -> anyhow::Result<()> {
         // kind 9: drop normal table
         "drop table `table`",
         // kind 10: drop child table
-        "drop table `tb2` `tb1`",
+        "drop table `tb2`, `tb1`",
         // kind 11: drop super table
-        "drop table `stb2`",
-        "drop table `stb1`",
+        // "drop table `stb2`",
+        // "drop table `stb1`",
     ])?;
 
     taos.exec_many([

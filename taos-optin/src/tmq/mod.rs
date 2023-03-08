@@ -6,16 +6,15 @@ use std::{fmt::Debug, str::FromStr, sync::Arc, time::Duration};
 
 use itertools::Itertools;
 use taos_query::{
-    common::{raw_data_t, Precision, RawMeta},
+    common::{raw_data_t, RawMeta},
     prelude::RawError,
     tmq::{
         AsAsyncConsumer, AsConsumer, AsyncOnSync, IsAsyncData, IsMeta, IsOffset, MessageSet,
         Timeout, VGroupId,
-    },
-    Dsn, IntoDsn, RawBlock, TBuilder,
+    }, IntoDsn, RawBlock, TBuilder,
 };
 
-use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t, Taos, TaosBuilder};
+use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t, TaosBuilder};
 
 // use taos_error::Error;
 
@@ -26,7 +25,7 @@ use raw::RawTmq;
 use self::raw::{Conf, Topics};
 
 pub struct TmqBuilder {
-    dsn: Dsn,
+    // dsn: Dsn,
     builder: TaosBuilder,
     lib: Arc<ApiEntry>,
     conf: Conf,
@@ -62,7 +61,7 @@ impl TBuilder for TmqBuilder {
         };
         Ok(Self {
             builder: TaosBuilder::from_dsn(&dsn).map_err(RawError::from_any)?,
-            dsn,
+            // dsn,
             lib: Arc::new(lib),
             conf,
             timeout,
@@ -225,15 +224,11 @@ impl Meta {
 }
 pub struct Data {
     raw: RawRes,
-    precision: Precision,
 }
 
 impl Data {
     fn new(raw: RawRes) -> Self {
-        Self {
-            precision: raw.precision(),
-            raw,
-        }
+        Self { raw }
     }
 }
 
@@ -264,12 +259,6 @@ impl From<RawRes> for MessageSet<Meta, Data> {
             tmq_res_t::TMQ_RES_METADATA => Self::MetaData(Meta::new(raw.clone()), Data::new(raw)),
         }
     }
-}
-
-pub struct MessageSetIter {
-    raw: RawRes,
-    msg_type: tmq_res_t,
-    precision: Precision,
 }
 
 impl Iterator for Data {
@@ -680,7 +669,7 @@ mod tests {
             // kind 9: drop normal table
             "drop table `table`",
             // kind 10: drop child table
-            "drop table `tb2` `tb1`",
+            "drop table `tb2`, `tb1`",
             // kind 11: drop super table
             "drop table `stb2`",
             "drop table `stb1`",
@@ -743,7 +732,6 @@ mod tests {
                                 let desc = taos.describe(table_name.as_str())?;
                                 dbg!(desc);
                             }
-                            _ => todo!(),
                         },
                         _ => (),
                     }
@@ -819,9 +807,9 @@ mod tests {
             // kind 2: create child table with json tag
             "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
             "create table tb1 using stb1 tags(NULL)",
-            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL)
+            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL, \
+            NULL, NULL, NULL, NULL, NULL, \
+            NULL, NULL, NULL, NULL) \
             tb1 values(now, true, -2, -3, -4, -5, \
             '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
             254, 65534, 1, 1)",
@@ -869,7 +857,7 @@ mod tests {
             // kind 9: drop normal table
             "drop table `table`",
             // kind 10: drop child table
-            "drop table `tb2` `tb1`",
+            "drop table `tb2`,`tb1`",
             // kind 11: drop super table
             // "drop table `stb2`",
             // "drop table `stb1`",

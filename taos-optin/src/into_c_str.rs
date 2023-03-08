@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::ffi::{c_void, CStr, CString};
-use std::os::raw::c_char;
 
 /// Helper trait to auto convert Rust strings to CStr.
 pub trait IntoCStr<'a> {
@@ -61,14 +60,14 @@ _impl_for_str!(&str);
 
 pub struct NullableCStr<'a>(Option<Cow<'a, CStr>>);
 
-impl<'a> NullableCStr<'a> {
-    pub fn as_ptr(&self) -> *const c_char {
-        match self.0.as_ref() {
-            Some(c) => c.as_ptr(),
-            None => std::ptr::null(),
-        }
-    }
-}
+// impl<'a> NullableCStr<'a> {
+//     pub fn as_ptr(&self) -> *const c_char {
+//         match self.0.as_ref() {
+//             Some(c) => c.as_ptr(),
+//             None => std::ptr::null(),
+//         }
+//     }
+// }
 
 pub trait IntoNullableCStr<'a> {
     fn into_nullable_c_str(self) -> NullableCStr<'a>;

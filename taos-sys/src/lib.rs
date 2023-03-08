@@ -6,7 +6,7 @@
 //!
 
 use std::{
-    cell::{Cell, UnsafeCell},
+    cell::{UnsafeCell},
     ffi::CString,
     fmt::Display,
     sync::Arc,

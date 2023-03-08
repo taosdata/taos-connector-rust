@@ -1,11 +1,6 @@
 use taos_query::common::{itypes::IsValue, Ty};
 
 use crate::types::{BindFrom, TaosBindV2, TaosBindV3};
-
-fn box_into_raw<T>(v: T) -> *mut T {
-    Box::into_raw(Box::new(v))
-}
-
 impl<T> From<&T> for TaosBindV2
 where
     T: IsValue + Clone,

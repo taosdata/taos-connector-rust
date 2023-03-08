@@ -1,6 +1,3 @@
-fn box_into_raw<T>(v: T) -> *mut T {
-    Box::into_raw(Box::new(v))
-}
 
 #[cfg(test)]
 mod tests {
