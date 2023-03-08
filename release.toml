@@ -1,1 +1,1 @@
-pre-release-hook = ["./.github/scripits/clog.sh"]
+pre-release-hook = ["./.github/scripts/cliff.sh"]

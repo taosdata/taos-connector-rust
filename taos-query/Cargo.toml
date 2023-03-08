@@ -1,14 +1,15 @@
 [package]
 name = "taos-query"
-version = "0.3.14"
-documentation = "https://docs.rs/taos-query"
-edition = "2021"
-homepage = "https://github.com/taosdata/taos-connector-rust"
-keywords = ["taos", "TDengine", "timeseries"]
-license = "MIT OR Apache-2.0"
-readme = "README.md"
-repository = "https://github.com/taosdata/taos-connector-rust/tree/main/taos-query"
-description = "The high-level abstraction for TDengine funtionalities"
+
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+license.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+documentation.workspace = true
+homepage.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
