@@ -372,7 +372,7 @@ impl AsAsyncConsumer for Consumer {
                     tmq_res_t::TMQ_RES_TABLE_META => {
                         taos_query::tmq::MessageSet::Meta(Meta::new(raw))
                     }
-                    tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw), Data::new(raw)),
+                    tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw)),
                 },
             )
         }))
