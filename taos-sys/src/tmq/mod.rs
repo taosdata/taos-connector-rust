@@ -486,19 +486,6 @@ impl AsAsyncConsumer for Consumer {
                 }
             }
         }
-        // Ok(self.tmq.poll_timeout(timeout.as_raw_timeout()).map(|raw| {
-        //     (
-        //         Offset(raw),
-        //         match raw.tmq_message_type() {
-        //             tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-        //             tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-        //             tmq_res_t::TMQ_RES_TABLE_META => {
-        //                 taos_query::tmq::MessageSet::Meta(Meta::new(raw))
-        //             }
-        //             tmq_res_t::TMQ_RES_METADATA => todo!(),
-        //         },
-        //     )
-        // }))
     }
 
     async fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
