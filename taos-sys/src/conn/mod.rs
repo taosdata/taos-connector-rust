@@ -144,11 +144,12 @@ impl RawTaos {
                 return Ok(());
             }
             if code != Code::from(0x2603) {
-                log::error!("received error code 0x2603, try once");
+                log::debug!("received error code {code} when write raw meta");
                 let err = unsafe { taos_errstr(std::ptr::null_mut()) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
                 return Err(taos_query::prelude::RawError::new(code, err));
             }
+            log::debug!("received error code 0x2603, try once");
             retries -= 1;
             if retries == 0 {
                 let err = unsafe { taos_errstr(std::ptr::null_mut()) };
