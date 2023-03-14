@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::*;
 
 #[derive(Debug, thiserror::Error)]
@@ -258,9 +260,19 @@ impl AsyncQueryable for Taos {
     }
 
     async fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
-        match &self.0 {
-            TaosInner::Native(taos) => taos.write_raw_meta(meta).await.map_err(Into::into),
-            TaosInner::Ws(taos) => taos.write_raw_meta(meta).await.map_err(Into::into),
+        loop {
+            let ok: Result<(), Self::Error> = match &self.0 {
+                TaosInner::Native(taos) => taos.write_raw_meta(meta).await.map_err(Into::into),
+                TaosInner::Ws(taos) => taos.write_raw_meta(meta).await.map_err(Into::into),
+            };
+            if let Err(err) = ok {
+                if err.to_string().contains("0x032C") {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                } else {
+                    break Err(err);
+                }
+            }
+            break Ok(());
         }
     }
 
