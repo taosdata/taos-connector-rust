@@ -437,7 +437,8 @@ impl AsAsyncConsumer for Consumer {
         )>,
         Self::Error,
     > {
-        match timeout {
+        log::debug!("waiting for next message");
+        let res = match timeout {
             Timeout::Never | Timeout::None => {
                 let timeout = Duration::MAX;
                 let sleep = tokio::time::sleep(timeout);
@@ -485,7 +486,10 @@ impl AsAsyncConsumer for Consumer {
                     }
                 }
             }
-        }
+        };
+        log::debug!("waiting for next message");
+        res
+
     }
 
     async fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {

@@ -23,6 +23,7 @@ struct State {
     result: *mut TAOS_RES,
     code: i32,
     done: bool,
+    waiting: bool,
 }
 
 unsafe impl Send for State {}
@@ -33,7 +34,8 @@ impl<'a> Unpin for QueryFuture<'a> {}
 impl<'a> Future for QueryFuture<'a> {
     type Output = Result<RawRes, RawError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let state = unsafe { &*self.state.get() };
+        let state = unsafe { &mut *self.state.get() };
+
         if state.done {
             Poll::Ready(RawRes::from_ptr_with_code(
                 self.raw.c.clone(),
@@ -41,7 +43,14 @@ impl<'a> Future for QueryFuture<'a> {
                 state.code.into(),
             ))
         } else {
-            unsafe extern "C" fn async_query_callback(
+            if state.waiting {
+                log::debug!("waken, still waiting for taos_query_a callback.");
+                return Poll::Pending;
+            } else {
+                state.waiting = true;
+            }
+            #[no_mangle]
+            unsafe extern "C" fn _optin_async_query_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 code: c_int,
@@ -57,12 +66,13 @@ impl<'a> Future for QueryFuture<'a> {
             }
 
             let param = Box::new((&self.state, cx.waker().clone()));
-
+            log::debug!("calling taos_query_a");
             self.raw.query_a(
                 self.sql.as_ref(),
-                async_query_callback as _,
+                _optin_async_query_callback as _,
                 Box::into_raw(param) as *mut _,
             );
+            log::debug!("waiting taos_query_a callback");
             Poll::Pending
         }
     }
@@ -75,6 +85,7 @@ impl<'a> QueryFuture<'a> {
             result: std::ptr::null_mut(),
             code: 0,
             done: false,
+            waiting: false,
         });
         let sql = sql.into_c_str();
         log::debug!("query with: {}", sql.to_str().unwrap_or("<...>"));

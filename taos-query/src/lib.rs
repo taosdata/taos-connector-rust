@@ -13,6 +13,9 @@ use std::{
 pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
 pub use serde::de::value::Error as DeError;
 
+mod error;
+pub use error::*;
+
 pub mod common;
 mod de;
 pub mod helpers;
