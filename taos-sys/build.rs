@@ -123,7 +123,7 @@ impl Version {
     fn parse(version: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let version_items: Vec<_> = version.split('.').collect();
         let items = version_items.len();
-        if items == 0 || items > 4 {
+        if items == 0 {
             Err("parse version error: {version}")?
         }
 
