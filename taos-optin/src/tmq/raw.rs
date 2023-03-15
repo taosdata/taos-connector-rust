@@ -3,7 +3,7 @@ pub(super) use list::Topics;
 pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     use itertools::Itertools;
 
@@ -131,6 +131,36 @@ pub(super) mod tmq {
                 None
             } else {
                 Some(unsafe { RawRes::from_ptr_unchecked(self.c.clone(), res) })
+            }
+        }
+
+        pub async fn poll_async(&self) -> RawRes {
+            let elapsed = std::time::Instant::now();
+            use taos_query::prelude::tokio;
+
+            loop {
+                // poll with 50ms timeout.
+                // let ptr = UnsafeCell::new(self.0);
+                log::debug!("try poll next message with 200ms timeout");
+                let raw = self.clone();
+                let res = tokio::task::spawn_blocking(move || {
+                    let raw = raw;
+                    let res = unsafe { (raw.tmq.tmq_consumer_poll)(raw.as_ptr(), 200) };
+                    if res.is_null() {
+                        None
+                    } else {
+                        Some(unsafe { RawRes::from_ptr_unchecked(raw.c.clone(), res) })
+                    }
+                    // result
+                })
+                .await
+                .unwrap_or_default();
+                if let Some(res) = res {
+                    log::debug!("received tmq message in {:?}", elapsed.elapsed());
+                    break res;
+                } else {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
             }
         }
 

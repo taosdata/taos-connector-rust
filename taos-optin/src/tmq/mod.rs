@@ -11,7 +11,8 @@ use taos_query::{
     tmq::{
         AsAsyncConsumer, AsConsumer, AsyncOnSync, IsAsyncData, IsMeta, IsOffset, MessageSet,
         Timeout, VGroupId,
-    }, IntoDsn, RawBlock, TBuilder,
+    },
+    IntoDsn, RawBlock, TBuilder,
 };
 
 use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t, TaosBuilder};
@@ -363,19 +364,67 @@ impl AsAsyncConsumer for Consumer {
         )>,
         Self::Error,
     > {
-        Ok(self.tmq.poll_timeout(timeout.as_raw_timeout()).map(|raw| {
-            (
-                Offset(raw.clone()),
-                match raw.tmq_message_type() {
-                    tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                    tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                    tmq_res_t::TMQ_RES_TABLE_META => {
-                        taos_query::tmq::MessageSet::Meta(Meta::new(raw))
+        use taos_query::prelude::tokio;
+        log::debug!("Waiting for next message");
+        let res = match timeout {
+            Timeout::Never | Timeout::None => {
+                let timeout = Duration::MAX;
+                let sleep = tokio::time::sleep(timeout);
+                tokio::pin!(sleep);
+                tokio::select! {
+                    _ = &mut sleep, if !sleep.is_elapsed() => {
+                       Ok(None)
                     }
-                    tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw)),
-                },
-            )
-        }))
+                    raw = self.tmq.poll_async() => {
+                        let message =    (
+                            Offset(raw.clone()),
+                            match raw.tmq_message_type() {
+                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
+                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
+                                tmq_res_t::TMQ_RES_TABLE_META => {
+                                    taos_query::tmq::MessageSet::Meta(Meta::new(raw))
+                                }
+                                tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
+                            },
+                        );
+                        Ok(Some(message))
+                    }
+                }
+            }
+            Timeout::Duration(timeout) => {
+                let sleep = tokio::time::sleep(timeout);
+                tokio::pin!(sleep);
+                tokio::select! {
+                    _ = &mut sleep, if !sleep.is_elapsed() => {
+                       Ok(None)
+                    }
+                    raw = self.tmq.poll_async() => {
+                        let message =    (
+                            Offset(raw.clone()),
+                            match raw.tmq_message_type() {
+                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
+                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
+                                tmq_res_t::TMQ_RES_TABLE_META => {
+                                    taos_query::tmq::MessageSet::Meta(Meta::new(raw))
+                                }
+                                tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
+                            },
+                        );
+                        Ok(Some(message))
+                    }
+                }
+            }
+        };
+        match res {
+            Ok(res) => {
+                log::debug!("Got a new message");
+                Ok(res)
+            }
+            Err(err) => {
+                log::warn!("Polling message error: {err:?}");
+                Err(err)
+            }
+        }
     }
 
     async fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
