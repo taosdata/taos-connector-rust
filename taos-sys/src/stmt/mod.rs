@@ -47,8 +47,9 @@ impl Bindable<super::Taos> for Stmt {
         &mut self,
         params: &[taos_query::common::ColumnView],
     ) -> Result<&mut Self, Self::Error> {
-        let params = params.iter().map(|c| c.into()).collect_vec();
-        self.raw.bind_param_batch(&params)?;
+        let params: Vec<DropMultiBind> = params.iter().map(|c| c.into()).collect_vec();
+        self.raw
+            .bind_param_batch(unsafe { std::mem::transmute(params.as_slice()) })?;
         Ok(self)
     }
 
