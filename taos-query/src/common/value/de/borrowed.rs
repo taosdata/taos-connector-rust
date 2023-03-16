@@ -114,7 +114,6 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize_any: {self:?}");
         use BorrowedValue::*;
         // todo!()
         match self {
@@ -165,7 +164,6 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize_str: {self:?}");
         use BorrowedValue::*;
         match self {
             Null(_) => visitor.visit_borrowed_str(""), // todo: empty string or error?
@@ -204,7 +202,6 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize_string");
         self.deserialize_str(visitor)
     }
 
@@ -212,7 +209,6 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize_option");
         if self.is_null() {
             visitor.visit_none()
         } else {
@@ -228,7 +224,6 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     where
         V: Visitor<'de>,
     {
-        log::trace!("deserialize_newtype_struct: {_name}");
         use BorrowedValue::*;
         macro_rules! _v_ {
             ($v:expr) => {
@@ -273,7 +268,6 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize_map");
         self.deserialize_any(visitor)
     }
 
@@ -281,7 +275,6 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize seq by value");
         use BorrowedValue::*;
         match self {
             Null(_) => Vec::<u8>::new()
@@ -315,8 +308,6 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     where
         V: Visitor<'de>,
     {
-        log::trace!("deserialize enum with name: {name}, variants: {variants:?}");
-
         if name == "Timestamp" && variants == TIMESTAMP_VARIANTS {
             return visitor.visit_enum(EnumTimestampDeserializer { value: self });
         }

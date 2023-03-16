@@ -61,7 +61,7 @@ fn foreign_fn_to_item_fn(item: ForeignItemFn) -> ItemFn {
     ItemFn {
         attrs: item.attrs,
         vis: item.vis,
-        sig: sig,
+        sig,
         block: Box::new(block),
     }
 }

@@ -134,7 +134,7 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
             .max_lifetime(Some(std::time::Duration::from_secs(12 * 60 * 60)))
             .min_idle(Some(0))
             .max_size(5000)
-            .connection_timeout(std::time::Duration::from_secs(5))
+            .connection_timeout(std::time::Duration::from_secs(60))
             .build(Manager::new(self))
     }
 

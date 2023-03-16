@@ -57,6 +57,32 @@ impl<'b> BorrowedValue<'b> {
         }
     }
 
+    pub fn to_sql_value(&self) -> String {
+        use BorrowedValue::*;
+        match self {
+            Null(_) => "NULL".to_string(),
+            Bool(v) => format!("{v}"),
+            TinyInt(v) => format!("{v}"),
+            SmallInt(v) => format!("{v}"),
+            Int(v) => format!("{v}"),
+            BigInt(v) => format!("{v}"),
+            Float(v) => format!("{v}"),
+            Double(v) => format!("{v}"),
+            VarChar(v) => format!("\"{}\"", v.escape_debug()),
+            Timestamp(v) => format!("{}", v.as_raw_i64()),
+            NChar(v) => format!("\"{}\"", v.escape_debug()),
+            UTinyInt(v) => format!("{v}"),
+            USmallInt(v) => format!("{v}"),
+            UInt(v) => format!("{v}"),
+            UBigInt(v) => format!("{v}"),
+            Json(v) => format!("\"{}\"", unsafe { std::str::from_utf8_unchecked(v) }),
+            VarBinary(_) => todo!(),
+            Decimal(_) => todo!(),
+            Blob(_) => todo!(),
+            MediumBlob(_) => todo!(),
+        }
+    }
+
     /// Check if the value is null.
     pub const fn is_null(&self) -> bool {
         matches!(self, BorrowedValue::Null(_))
@@ -410,6 +436,64 @@ impl Value {
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+        }
+    }
+}
+
+impl<'b> PartialEq<&Value> for BorrowedValue<'b> {
+    fn eq(&self, other: &&Value) -> bool {
+        match (self, other) {
+            (Self::Null(l0), Value::Null(r0)) => l0 == r0,
+            (Self::Bool(l0), Value::Bool(r0)) => l0 == r0,
+            (Self::TinyInt(l0), Value::TinyInt(r0)) => l0 == r0,
+            (Self::SmallInt(l0), Value::SmallInt(r0)) => l0 == r0,
+            (Self::Int(l0), Value::Int(r0)) => l0 == r0,
+            (Self::BigInt(l0), Value::BigInt(r0)) => l0 == r0,
+            (Self::Float(l0), Value::Float(r0)) => l0 == r0,
+            (Self::Double(l0), Value::Double(r0)) => l0 == r0,
+            (Self::VarChar(l0), Value::VarChar(r0)) => l0 == r0,
+            (Self::Timestamp(l0), Value::Timestamp(r0)) => l0 == r0,
+            (Self::NChar(l0), Value::NChar(r0)) => l0 == r0,
+            (Self::UTinyInt(l0), Value::UTinyInt(r0)) => l0 == r0,
+            (Self::USmallInt(l0), Value::USmallInt(r0)) => l0 == r0,
+            (Self::UInt(l0), Value::UInt(r0)) => l0 == r0,
+            (Self::UBigInt(l0), Value::UBigInt(r0)) => l0 == r0,
+            (Self::Json(l0), Value::Json(r0)) => l0.as_ref() == &serde_json::to_vec(r0).unwrap(),
+            (Self::VarBinary(l0), Value::VarBinary(r0)) => l0 == r0,
+            (Self::Decimal(l0), Value::Decimal(r0)) => l0 == r0,
+            (Self::Blob(l0), Value::Blob(r0)) => l0 == r0,
+            (Self::MediumBlob(l0), Value::MediumBlob(r0)) => l0 == r0,
+            _ => false,
+        }
+    }
+}
+
+impl<'b> PartialEq<BorrowedValue<'b>> for Value {
+    fn eq(&self, other: &BorrowedValue<'b>) -> bool {
+        match (other, self) {
+            (BorrowedValue::Null(l0), Value::Null(r0)) => l0 == r0,
+            (BorrowedValue::Bool(l0), Value::Bool(r0)) => l0 == r0,
+            (BorrowedValue::TinyInt(l0), Value::TinyInt(r0)) => l0 == r0,
+            (BorrowedValue::SmallInt(l0), Value::SmallInt(r0)) => l0 == r0,
+            (BorrowedValue::Int(l0), Value::Int(r0)) => l0 == r0,
+            (BorrowedValue::BigInt(l0), Value::BigInt(r0)) => l0 == r0,
+            (BorrowedValue::Float(l0), Value::Float(r0)) => l0 == r0,
+            (BorrowedValue::Double(l0), Value::Double(r0)) => l0 == r0,
+            (BorrowedValue::VarChar(l0), Value::VarChar(r0)) => l0 == r0,
+            (BorrowedValue::Timestamp(l0), Value::Timestamp(r0)) => l0 == r0,
+            (BorrowedValue::NChar(l0), Value::NChar(r0)) => l0 == r0,
+            (BorrowedValue::UTinyInt(l0), Value::UTinyInt(r0)) => l0 == r0,
+            (BorrowedValue::USmallInt(l0), Value::USmallInt(r0)) => l0 == r0,
+            (BorrowedValue::UInt(l0), Value::UInt(r0)) => l0 == r0,
+            (BorrowedValue::UBigInt(l0), Value::UBigInt(r0)) => l0 == r0,
+            (BorrowedValue::Json(l0), Value::Json(r0)) => {
+                l0.as_ref() == &serde_json::to_vec(r0).unwrap()
+            }
+            (BorrowedValue::VarBinary(l0), Value::VarBinary(r0)) => l0 == r0,
+            (BorrowedValue::Decimal(l0), Value::Decimal(r0)) => l0 == r0,
+            (BorrowedValue::Blob(l0), Value::Blob(r0)) => l0 == r0,
+            (BorrowedValue::MediumBlob(l0), Value::MediumBlob(r0)) => l0 == r0,
+            _ => false,
         }
     }
 }
