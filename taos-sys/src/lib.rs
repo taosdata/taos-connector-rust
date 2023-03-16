@@ -102,6 +102,7 @@ impl taos_query::Queryable for Taos {
     type ResultSet = ResultSet;
 
     fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error> {
+        log::debug!("Query with SQL: {}", sql.as_ref());
         self.raw.query(sql.as_ref())
     }
 
@@ -125,7 +126,7 @@ impl AsyncQueryable for Taos {
         &self,
         sql: T,
     ) -> Result<Self::AsyncResultSet, Self::Error> {
-        log::trace!("Async query with SQL: {}", sql.as_ref());
+        log::debug!("Async query with SQL: {}", sql.as_ref());
         self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
     }
 

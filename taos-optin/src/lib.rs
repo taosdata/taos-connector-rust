@@ -10,7 +10,7 @@ use raw::{ApiEntry, RawRes, RawTaos, SharedState};
 // use taos_error::Error as RawError;
 use taos_query::{
     prelude::{Field, Precision, RawError, RawMeta},
-     DsnError, RawBlock, TBuilder,
+    DsnError, RawBlock, TBuilder,
 };
 
 mod version {
@@ -141,6 +141,7 @@ impl taos_query::Queryable for Taos {
     type ResultSet = ResultSet;
 
     fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error> {
+        log::debug!("Query with SQL: {}", sql.as_ref());
         self.raw.query(sql.as_ref()).map(ResultSet::new)
     }
 
@@ -164,9 +165,8 @@ impl taos_query::AsyncQueryable for Taos {
         &self,
         sql: T,
     ) -> Result<Self::AsyncResultSet, Self::Error> {
-        let sql = sql.as_ref();
-        log::trace!("query with sql: {}", sql);
-        self.raw.query_async(sql).await.map(ResultSet::new)
+        log::debug!("Async query with SQL: {}", sql.as_ref());
+        self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
     }
 
     async fn write_raw_meta(&self, meta: &taos_query::common::RawMeta) -> Result<(), Self::Error> {
