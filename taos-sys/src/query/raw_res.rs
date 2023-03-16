@@ -1,4 +1,4 @@
-use std::cell::{UnsafeCell};
+use std::cell::UnsafeCell;
 use std::ffi::CStr;
 
 use std::os::raw::*;
@@ -181,8 +181,8 @@ impl RawRes {
             }
             current.in_use = true;
             let param = Box::new((state.clone(), cx.waker().clone()));
-            // #[no_mangle]
-            unsafe extern "C" fn __async_fetch_callback(
+            #[no_mangle]
+            unsafe extern "C" fn taos_sys_async_fetch_raw_block_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
@@ -201,7 +201,7 @@ impl RawRes {
                 param.1.wake()
             }
             self.fetch_raw_block_a(
-                __async_fetch_callback as _,
+                taos_sys_async_fetch_raw_block_callback as _,
                 Box::into_raw(param) as *mut _ as _,
             );
             Poll::Pending
@@ -255,7 +255,8 @@ impl RawRes {
             }
             current.in_use = true;
             let param = Box::new((state.clone(), cx.waker().clone()));
-            unsafe extern "C" fn async_fetch_callback(
+            #[no_mangle]
+            unsafe extern "C" fn taos_sys_async_fetch_rows_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
@@ -275,7 +276,7 @@ impl RawRes {
                 param.1.wake()
             }
             self.fetch_rows_a(
-                async_fetch_callback as _,
+                taos_sys_async_fetch_rows_callback as _,
                 Box::into_raw(param) as *mut _ as _,
             );
             Poll::Pending
@@ -417,11 +418,6 @@ impl RawRes {
         unsafe { taos_result_precision(self.as_ptr()) }.into()
     }
 
-    // #[inline]
-    // pub fn fetch_row(&self) -> TAOS_ROW {
-    //     unsafe { taos_fetch_row(self.as_ptr()) }
-    // }
-
     #[inline]
     pub fn fetch_rows_a(&self, fp: taos_async_fetch_cb, param: *mut c_void) {
         unsafe { taos_fetch_rows_a(self.as_ptr(), fp, param) }
@@ -439,6 +435,7 @@ impl RawRes {
 
     pub(crate) fn drop(&mut self) {
         unsafe {
+            log::debug!("call taos_free_result");
             taos_free_result(self.0);
         }
     }

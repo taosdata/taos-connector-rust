@@ -92,7 +92,7 @@ impl RawTaos {
     }
 
     #[inline]
-    pub fn query_async<'a, S: IntoCStr<'a>>(&self, sql: S) -> QueryFuture<'a> {
+    pub fn query_async<'a, S: IntoCStr<'a>>(&'a self, sql: S) -> QueryFuture<'a> {
         QueryFuture::new(*self, sql)
     }
 

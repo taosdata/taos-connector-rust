@@ -91,7 +91,8 @@ impl Stream for Blocks {
             }
         } else {
             let param = Box::new((&self.shared_state, cx.waker().clone()));
-            unsafe extern "C" fn async_fetch_callback(
+            #[no_mangle]
+            unsafe extern "C" fn taos_sys_block_stream_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
@@ -109,7 +110,7 @@ impl Stream for Blocks {
                 param.1.wake()
             }
             self.res.fetch_raw_block_a(
-                async_fetch_callback as _,
+                taos_sys_block_stream_callback as _,
                 Box::into_raw(param) as *mut SharedState as _,
             );
             Poll::Pending

@@ -50,7 +50,7 @@ impl<'a> Future for QueryFuture<'a> {
                 state.waiting = true;
             }
             #[no_mangle]
-            unsafe extern "C" fn _optin_async_query_callback(
+            unsafe extern "C" fn taos_optin_query_future_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 code: c_int,
@@ -69,7 +69,7 @@ impl<'a> Future for QueryFuture<'a> {
             log::debug!("calling taos_query_a");
             self.raw.query_a(
                 self.sql.as_ref(),
-                _optin_async_query_callback as _,
+                taos_optin_query_future_callback as _,
                 Box::into_raw(param) as *mut _,
             );
             log::debug!("waiting taos_query_a callback");

@@ -1040,7 +1040,7 @@ impl RawRes {
             }
         } else {
             let param = Box::new((state.clone(), self.c.clone(), cx.waker().clone()));
-            unsafe extern "C" fn async_fetch_callback(
+            unsafe extern "C" fn taos_optin_fetch_rows_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
@@ -1062,7 +1062,7 @@ impl RawRes {
             unsafe {
                 (self.c.taos_fetch_rows_a)(
                     self.as_ptr(),
-                    async_fetch_callback as _,
+                    taos_optin_fetch_rows_callback as _,
                     Box::into_raw(param) as *mut _ as _,
                 )
             };
@@ -1123,7 +1123,7 @@ impl RawRes {
             }
             current.in_use = true;
             let param = Box::new((state.clone(), self.c.clone(), cx.waker().clone()));
-            unsafe extern "C" fn async_fetch_callback(
+            unsafe extern "C" fn taos_optin_fetch_raw_block_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
@@ -1143,7 +1143,7 @@ impl RawRes {
             unsafe {
                 (self.c.taos_fetch_raw_block_a.unwrap())(
                     self.as_ptr(),
-                    async_fetch_callback as _,
+                    taos_optin_fetch_raw_block_callback as _,
                     Box::into_raw(param) as *mut _ as _,
                 )
             };

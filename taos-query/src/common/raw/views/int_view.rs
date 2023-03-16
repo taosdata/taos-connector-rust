@@ -27,6 +27,11 @@ impl IntView {
         unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const Item, self.len()) }
     }
 
+    /// Raw pointer of the slice.
+    pub fn as_raw_ptr(&self) -> *const Item {
+        self.data.as_ptr() as *const Item
+    }
+
     /// Build a nulls vector.
     pub fn to_nulls_vec(&self) -> Vec<bool> {
         self.is_null_iter().collect()

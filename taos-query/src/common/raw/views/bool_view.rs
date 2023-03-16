@@ -18,9 +18,14 @@ impl BoolView {
         self.data.len()
     }
 
-    /// Raw slice of `bool` type.
-    pub fn as_raw_slice(&self) -> &[bool] {
-        unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const bool, self.len()) }
+    // /// Raw slice of `bool` type.
+    // pub fn as_raw_slice(&self) -> &[bool] {
+    //     unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const bool, self.len()) }
+    // }
+
+    /// Raw pointer of the slice.
+    pub fn as_raw_ptr(&self) -> *const bool {
+        self.data.as_ptr() as *const bool
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
