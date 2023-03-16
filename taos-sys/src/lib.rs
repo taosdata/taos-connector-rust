@@ -125,7 +125,7 @@ impl AsyncQueryable for Taos {
         &self,
         sql: T,
     ) -> Result<Self::AsyncResultSet, Self::Error> {
-        log::debug!("Async query with SQL: {}", sql.as_ref());
+        log::trace!("Async query with SQL: {}", sql.as_ref());
         self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
     }
 

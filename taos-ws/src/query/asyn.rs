@@ -86,7 +86,7 @@ impl WsQuerySender {
 
         match msg {
             WsSend::FetchBlock(args) => {
-                log::debug!("[req id: {req_id}] prepare message {msg:?}");
+                log::trace!("[req id: {req_id}] prepare message {msg:?}");
                 if self.results.contains_key(&args.id) {
                     Err(RawError::from_any(format!(
                         "there's a result with id {}",
@@ -104,12 +104,12 @@ impl WsQuerySender {
                     .await?;
             }
             _ => {
-                log::debug!("[req id: {req_id}] prepare  message: {msg:?}");
+                log::trace!("[req id: {req_id}] prepare  message: {msg:?}");
                 self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
             }
         }
         // handle the error
-        log::debug!("[req id: {req_id}] message sent, wait for receiving");
+        log::trace!("[req id: {req_id}] message sent, wait for receiving");
         Ok(rx.await.unwrap()?)
     }
     async fn send_only(&self, msg: WsSend) -> Result<()> {
@@ -126,7 +126,7 @@ pub struct WsTaos {
 }
 impl Drop for WsTaos {
     fn drop(&mut self) {
-        log::debug!("dropping connection");
+        log::trace!("dropping connection");
         // send close signal to reader/writer spawned tasks.
         let _ = self.close_signal.send(true);
     }
@@ -266,7 +266,7 @@ async fn read_queries(
                 match message {
                     Ok(message) => match message {
                         Message::Text(text) => {
-                            log::debug!("received json response: {text}");
+                            log::trace!("received json response: {text}");
                             let v: WsRecv = serde_json::from_str(&text).unwrap();
                             let (req_id, data, ok) = v.ok();
                             match &data {
@@ -355,7 +355,7 @@ async fn read_queries(
                                 if is_v3 {
                                     // v3
                                     if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                        log::debug!("send data to fetches with id {}", res_id);
+                                        log::trace!("send data to fetches with id {}", res_id);
                                         sender.send(Ok(WsRecvData::Block { timing, raw: block[offset..].to_vec() })).unwrap();
                                     } else {
                                         log::warn!("req_id {res_id} not detected, message might be lost");
@@ -363,7 +363,7 @@ async fn read_queries(
                                 } else {
                                     // v2
                                     if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                        log::debug!("send data to fetches with id {}", res_id);
+                                        log::trace!("send data to fetches with id {}", res_id);
                                         sender.send(Ok(WsRecvData::BlockV2 { timing, raw: block[offset..].to_vec() })).unwrap();
                                     } else {
                                         log::warn!("req_id {res_id} not detected, message might be lost");
@@ -416,7 +416,7 @@ async fn read_queries(
                         Message::Frame(frame) => {
                             // do nothing
                             log::warn!("received (unexpected) frame message, do nothing");
-                            log::debug!("* frame data: {frame:?}");
+                            log::trace!("* frame data: {frame:?}");
                         }
                     },
                     Err(err) => {
@@ -438,7 +438,7 @@ async fn read_queries(
                 }
             }
             _ = close_listener.changed() => {
-                log::debug!("close reader task");
+                log::trace!("close reader task");
                 let mut keys = Vec::new();
                 for e in queries_sender.iter() {
                                     keys.push(*e.key());
@@ -589,7 +589,7 @@ impl WsTaos {
                     }
                     _ = rx.changed() => {
                         let _ = sender.close().await;
-                        log::debug!("close sender task");
+                        log::trace!("close sender task");
                         break 'ws;
                     }
                 }
@@ -625,7 +625,7 @@ impl WsTaos {
         meta.write_all(&raw.as_bytes())?;
         let len = meta.len();
 
-        log::debug!("write meta with req_id: {req_id}, raw data length: {len}",);
+        log::trace!("write meta with req_id: {req_id}, raw data length: {len}",);
 
         match self.sender.send_recv(WsSend::Binary(meta)).await? {
             WsRecvData::WriteMeta => Ok(()),
@@ -651,7 +651,7 @@ impl WsTaos {
             meta.write_all(raw.as_raw_bytes())?;
 
             let len = meta.len();
-            log::debug!("write block with req_id: {req_id}, raw data len: {len}",);
+            log::trace!("write block with req_id: {req_id}, raw data len: {len}",);
 
             match self.sender.send_recv(WsSend::Binary(meta)).await? {
                 WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
@@ -677,7 +677,7 @@ impl WsTaos {
                 unsafe { std::slice::from_raw_parts(fields.as_ptr() as _, fields.len() * 72) };
             meta.write_all(fields)?;
             let len = meta.len();
-            log::debug!("write block with req_id: {req_id}, raw data len: {len}",);
+            log::trace!("write block with req_id: {req_id}, raw data len: {len}",);
 
             match self.sender.send_recv(WsSend::Binary(meta)).await? {
                 WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
@@ -706,7 +706,7 @@ impl WsTaos {
         tokio::task::spawn(async move {
             let t = Instant::now();
             let _ = rx.await;
-            log::debug!("result {result_id} lives {:?}", t.elapsed());
+            log::trace!("result {result_id} lives {:?}", t.elapsed());
         });
 
         if resp.fields_count > 0 {

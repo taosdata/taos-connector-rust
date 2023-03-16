@@ -165,7 +165,7 @@ impl taos_query::AsyncQueryable for Taos {
         sql: T,
     ) -> Result<Self::AsyncResultSet, Self::Error> {
         let sql = sql.as_ref();
-        log::debug!("query with sql: {}", sql);
+        log::trace!("query with sql: {}", sql);
         self.raw.query_async(sql).await.map(ResultSet::new)
     }
 
@@ -303,10 +303,10 @@ impl TBuilder for TaosBuilder {
         let mut dsn = dsn.into_dsn()?;
 
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
-            log::debug!("using library path: {path}");
+            log::trace!("using library path: {path}");
             ApiEntry::dlopen(path).unwrap()
         } else {
-            log::debug!("using default library of taos");
+            log::trace!("using default library of taos");
             ApiEntry::default()
         };
         let mut auth = Auth::default();

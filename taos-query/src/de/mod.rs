@@ -69,7 +69,6 @@ where
     {
         let value = self.value.take().unwrap(); // always be here, so it's safe to unwrap
 
-        log::trace!("target value: {:?}", type_name::<V::Value>());
         seed.deserialize(value)
             .map_err(<Self::Error as serde::de::Error>::custom)
     }
@@ -108,7 +107,6 @@ where
     where
         V: Visitor<'de>,
     {
-        log::trace!("call deserialize any for <{}>", type_name::<V>());
         match self.next_value() {
             Some(v) => v
                 .deserialize_any(visitor)
@@ -130,7 +128,6 @@ where
     where
         V: Visitor<'de>,
     {
-        log::trace!("call deserialize_str for <{}>", type_name::<V>());
         match self.next_value() {
             Some(v) => v
                 .deserialize_str(visitor)
@@ -152,7 +149,6 @@ where
     where
         V: Visitor<'de>,
     {
-        log::trace!("call deserialize_option for <{}>", type_name::<V>());
         match self.next_value() {
             Some(v) => {
                 if v.is_null() {
@@ -205,7 +201,6 @@ where
     where
         V: Visitor<'de>,
     {
-        log::debug!("deserialize_newtype_struct: {}", _name);
         visitor.visit_newtype_struct(self)
     }
 
@@ -250,7 +245,6 @@ where
     {
         // let value = visitor.visit_map(self);
         // unimplemented!();
-        log::trace!("visit map for {}", type_name::<V::Value>());
         visitor.visit_map(self)
     }
 
@@ -269,7 +263,6 @@ where
     where
         V: Visitor<'de>,
     {
-        log::trace!("name: {_name}, fields: {_fields:?}");
         self.deserialize_map(visitor)
     }
 }

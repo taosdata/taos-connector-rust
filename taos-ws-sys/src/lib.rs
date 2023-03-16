@@ -62,7 +62,7 @@ pub struct WsMaybeError<T> {
 impl<T> Drop for WsMaybeError<T> {
     fn drop(&mut self) {
         if !self.data.is_null() {
-            log::debug!("dropping obj {}", self.type_id);
+            log::trace!("dropping obj {}", self.type_id);
             let _ = unsafe { self.data.read() };
         }
     }
@@ -376,7 +376,7 @@ impl WsResultSet {
     }
 
     unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
-        log::debug!("fetch block with ptr {ptr:p}");
+        log::trace!("fetch block with ptr {ptr:p}");
         self.block = self.rs.fetch_raw_block()?;
         if let Some(block) = self.block.as_ref() {
             *ptr = block.as_raw_bytes().as_ptr() as _;
@@ -384,20 +384,20 @@ impl WsResultSet {
         } else {
             *rows = 0;
         }
-        log::debug!("fetch block with ptr {ptr:p} with rows {}", *rows);
+        log::trace!("fetch block with ptr {ptr:p} with rows {}", *rows);
         Ok(())
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
-        log::debug!("try to get raw value at ({row}, {col})");
+        log::trace!("try to get raw value at ({row}, {col})");
         match self.block.as_ref() {
             Some(block) => {
                 if row < block.nrows() && col < block.ncols() {
                     let res = block.get_raw_value_unchecked(row, col);
-                    log::debug!("got raw value at ({row}, {col}): {:?}", res);
+                    log::trace!("got raw value at ({row}, {col}): {:?}", res);
                     res
                 } else {
-                    log::debug!("out of range at ({row}, {col}), return null");
+                    log::trace!("out of range at ({row}, {col}), return null");
                     (Ty::Null, 0, std::ptr::null())
                 }
             }
@@ -452,7 +452,7 @@ pub unsafe extern "C" fn ws_enable_log() {
         }
         builder.init();
     });
-    log::debug!("enable logger to stdout");
+    log::trace!("enable logger to stdout");
 }
 
 /// Connect via dsn string, returns NULL if failed.
@@ -508,7 +508,7 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
 /// Same to taos_close. This should always be called after everything done with the connection.
 pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) {
     if !taos.is_null() {
-        log::debug!("close connection {taos:p}");
+        log::trace!("close connection {taos:p}");
         let client = Box::from_raw(taos as *mut Taos);
         // client.close();
         drop(client);
@@ -545,9 +545,9 @@ unsafe fn query_with_sql_timeout(
 ///
 /// Please always use `ws_errno` to check it work and `ws_free_result` to free memory.
 pub unsafe extern "C" fn ws_query(taos: *mut WS_TAOS, sql: *const c_char) -> *mut WS_RES {
-    log::debug!("query {:?}", CStr::from_ptr(sql));
+    log::trace!("query {:?}", CStr::from_ptr(sql));
     let res: WsMaybeError<WsResultSet> = query_with_sql(taos, sql).into();
-    log::debug!("query done: {:?}", res);
+    log::trace!("query done: {:?}", res);
     Box::into_raw(Box::new(res)) as _
 }
 

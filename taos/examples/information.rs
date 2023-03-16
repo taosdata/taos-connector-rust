@@ -6,10 +6,10 @@ async fn main() -> anyhow::Result<()> {
     let dsn = "taos+ws://root:taosdata@";
 
     let pool = TaosBuilder::from_dsn(dsn)?.pool()?;
-    log::info!("start");
+    log::trace!("start");
 
     let taos = pool.get()?;
-    log::info!("got connection");
+    log::trace!("got connection");
 
     let mut result = taos
         .query("select * from information_schema.ins_databases")

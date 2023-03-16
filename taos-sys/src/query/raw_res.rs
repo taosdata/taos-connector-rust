@@ -435,7 +435,7 @@ impl RawRes {
 
     pub(crate) fn drop(&mut self) {
         unsafe {
-            log::debug!("call taos_free_result");
+            log::trace!("call taos_free_result");
             taos_free_result(self.0);
         }
     }

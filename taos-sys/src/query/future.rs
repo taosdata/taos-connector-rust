@@ -78,7 +78,7 @@ impl<'a> QueryFuture<'a> {
         }));
 
         let sql = sql.into_c_str();
-        // log::debug!("async query with sql: {:?}", sql);
+        // log::trace!("async query with sql: {:?}", sql);
 
         QueryFuture {
             raw: taos,

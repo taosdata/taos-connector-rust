@@ -35,7 +35,7 @@ impl RawTaos {
         port: u16,
     ) -> Result<Self, Error> {
         let ptr = unsafe { taos_connect(host, user, pass, db, port) };
-        log::info!("call taos_connect: {ptr:?}");
+        log::trace!("call taos_connect: {ptr:?}");
         let null = std::ptr::null_mut();
         let code = unsafe { taos_errno(null) };
         if code != 0 {
@@ -87,7 +87,7 @@ impl RawTaos {
     #[inline]
     pub fn query<'a, S: IntoCStr<'a>>(&self, sql: S) -> Result<ResultSet, Error> {
         let sql = sql.into_c_str();
-        log::debug!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
+        log::trace!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
         RawRes::from_ptr(unsafe { taos_query(self.as_ptr(), sql.as_ptr()) }).map(ResultSet::new)
     }
 
@@ -144,12 +144,12 @@ impl RawTaos {
                 return Ok(());
             }
             if code != Code::from(0x2603) {
-                log::debug!("received error code {code} when write raw meta");
+                log::trace!("received error code {code} when write raw meta");
                 let err = unsafe { taos_errstr(std::ptr::null_mut()) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
                 return Err(taos_query::prelude::RawError::new(code, err));
             }
-            log::debug!("received error code 0x2603, try once");
+            log::trace!("received error code 0x2603, try once");
             retries -= 1;
             if retries == 0 {
                 let err = unsafe { taos_errstr(std::ptr::null_mut()) };

@@ -44,7 +44,7 @@ impl<'a> Future for QueryFuture<'a> {
             ))
         } else {
             if state.waiting {
-                log::debug!("waken, still waiting for taos_query_a callback.");
+                log::trace!("waken, still waiting for taos_query_a callback.");
                 return Poll::Pending;
             } else {
                 state.waiting = true;
@@ -66,13 +66,13 @@ impl<'a> Future for QueryFuture<'a> {
             }
 
             let param = Box::new((&self.state, cx.waker().clone()));
-            log::debug!("calling taos_query_a");
+            log::trace!("calling taos_query_a");
             self.raw.query_a(
                 self.sql.as_ref(),
                 taos_optin_query_future_callback as _,
                 Box::into_raw(param) as *mut _,
             );
-            log::debug!("waiting taos_query_a callback");
+            log::trace!("waiting taos_query_a callback");
             Poll::Pending
         }
     }
@@ -88,7 +88,7 @@ impl<'a> QueryFuture<'a> {
             waiting: false,
         });
         let sql = sql.into_c_str();
-        log::debug!("query with: {}", sql.to_str().unwrap_or("<...>"));
+        log::trace!("query with: {}", sql.to_str().unwrap_or("<...>"));
 
         QueryFuture {
             raw: taos,

@@ -90,7 +90,7 @@ pub(super) mod tmq {
             loop {
                 // poll with 50ms timeout.
                 // let ptr = UnsafeCell::new(self.0);
-                log::debug!("try poll next message with 200ms timeout");
+                log::trace!("try poll next message with 200ms timeout");
                 let raw = self.clone();
                 let res = tokio::task::spawn_blocking(move || {
                     let raw = raw;
@@ -105,7 +105,7 @@ pub(super) mod tmq {
                 .await
                 .unwrap_or_default();
                 if let Some(res) = res {
-                    log::debug!("received tmq message in {:?}", elapsed.elapsed());
+                    log::trace!("received tmq message in {:?}", elapsed.elapsed());
                     break res;
                 } else {
                     tokio::time::sleep(Duration::from_millis(1)).await;
@@ -205,7 +205,7 @@ pub(super) mod conf {
         // }
 
         // pub(crate) fn enable_auto_commit(mut self) -> Self {
-        //     log::debug!("[tmq-conf] enable auto commit");
+        //     log::trace!("[tmq-conf] enable auto commit");
         //     self.set("enable.auto.commit", "true")
         //         .expect("set group.id should always be ok");
         //     self
@@ -217,14 +217,14 @@ pub(super) mod conf {
         }
 
         pub(crate) fn enable_heartbeat_background(mut self) -> Self {
-            log::debug!("[tmq-conf] enable heartbeat in the background");
+            log::trace!("[tmq-conf] enable heartbeat in the background");
             self.set("enable.heartbeat.background", "true")
                 .expect("set heartbeat at background");
             self
         }
 
         pub(crate) fn enable_snapshot(mut self) -> Self {
-            log::debug!("[tmq-conf] enable snapshot");
+            log::trace!("[tmq-conf] enable snapshot");
             self.set("experimental.snapshot.enable", "true")
                 .expect("enable experimental snapshot");
             self
@@ -237,7 +237,7 @@ pub(super) mod conf {
         // }
 
         pub fn with_table_name(mut self) -> Self {
-            log::debug!("set msg.with.table.name as true");
+            log::trace!("set msg.with.table.name as true");
             self.set("msg.with.table.name", "true")
                 .expect("set group.id should always be ok");
             self

@@ -233,7 +233,6 @@ impl<'de, 'a: 'de> MapAccess<'de> for RowView<'a> {
         //         "expect a value but no value remains",
         //     ))?; // always be here, so it's safe to unwrap
 
-        log::trace!("target value: {:?}", std::any::type_name::<V::Value>());
         seed.deserialize(&mut *self)
             .map_err(<Self::Error as serde::de::Error>::custom)
     }
@@ -249,7 +248,6 @@ impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
     where
         V: Visitor<'de>,
     {
-        log::trace!("call deserialize any for <{}>", std::any::type_name::<V>());
         match self.walk_next() {
             Some(v) => v
                 .deserialize_any(visitor)
@@ -271,7 +269,6 @@ impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
     where
         V: Visitor<'de>,
     {
-        log::trace!("call deserialize_str for <{}>", std::any::type_name::<V>());
         match self.walk_next() {
             Some(v) => v
                 .deserialize_str(visitor)
@@ -293,10 +290,6 @@ impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
     where
         V: Visitor<'de>,
     {
-        log::trace!(
-            "call deserialize_option for <{}>",
-            std::any::type_name::<V>()
-        );
         match self.walk_next() {
             Some(v) => {
                 if v.is_null() {
@@ -349,7 +342,6 @@ impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
     where
         V: Visitor<'de>,
     {
-        log::debug!("deserialize_newtype_struct: {}", _name);
         visitor.visit_newtype_struct(self)
     }
 
@@ -392,10 +384,6 @@ impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
     where
         V: Visitor<'de>,
     {
-        // let value = visitor.visit_map(self);
-        // unimplemented!();
-        log::trace!("visit map for {}", std::any::type_name::<V::Value>());
-
         // No field names, just access as sequence.
         if self.raw.fields.is_empty() {
             return visitor.visit_seq(self);
@@ -418,7 +406,6 @@ impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
     where
         V: Visitor<'de>,
     {
-        log::trace!("name: {_name}, fields: {_fields:?}");
         self.deserialize_map(visitor)
     }
 }

@@ -365,7 +365,7 @@ impl AsAsyncConsumer for Consumer {
         Self::Error,
     > {
         use taos_query::prelude::tokio;
-        log::debug!("Waiting for next message");
+        log::trace!("Waiting for next message");
         let res = match timeout {
             Timeout::Never | Timeout::None => {
                 let timeout = Duration::MAX;
@@ -417,7 +417,7 @@ impl AsAsyncConsumer for Consumer {
         };
         match res {
             Ok(res) => {
-                log::debug!("Got a new message");
+                log::trace!("Got a new message");
                 Ok(res)
             }
             Err(err) => {
@@ -588,7 +588,7 @@ mod tests {
 
         consumer.subscribe([db])?;
 
-        log::info!("polling start");
+        log::trace!("polling start");
 
         for message in consumer.iter_with_timeout(Timeout::from_secs(1)) {
             let (offset, msg) = message?;
@@ -789,18 +789,18 @@ mod tests {
                     let sql = dbg!(json.to_string());
                     if let Err(err) = taos.exec(sql) {
                         match err.errno() {
-                            Code::TAG_ALREADY_EXIST => log::debug!("tag already exists"),
-                            Code::TAG_NOT_EXIST => log::debug!("tag not exist"),
-                            Code::COLUMN_EXISTS => log::debug!("column already exists"),
-                            Code::COLUMN_NOT_EXIST => log::debug!("column not exists"),
-                            Code::INVALID_COLUMN_NAME => log::debug!("invalid column name"),
-                            Code::MODIFIED_ALREADY => log::debug!("modified already done"),
-                            Code::TABLE_NOT_EXIST => log::debug!("table does not exists"),
-                            Code::STABLE_NOT_EXIST => log::debug!("stable does not exists"),
-                            Code::INVALID_ROW_BYTES => log::debug!("invalid row bytes"),
-                            Code::DUPLICATED_COLUMN_NAMES => log::debug!("duplicated column names"),
+                            Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
+                            Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
+                            Code::COLUMN_EXISTS => log::trace!("column already exists"),
+                            Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
+                            Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
+                            Code::MODIFIED_ALREADY => log::trace!("modified already done"),
+                            Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
+                            Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
+                            Code::INVALID_ROW_BYTES => log::trace!("invalid row bytes"),
+                            Code::DUPLICATED_COLUMN_NAMES => log::trace!("duplicated column names"),
                             Code::NO_COLUMN_CAN_BE_DROPPED => {
-                                log::debug!("no column can be dropped")
+                                log::trace!("no column can be dropped")
                             }
                             _ => {
                                 log::error!("{:?}", err);
@@ -949,20 +949,20 @@ mod tests {
                         let sql = dbg!(json.to_string());
                         if let Err(err) = taos.exec(sql).await {
                             match err.errno() {
-                                Code::TAG_ALREADY_EXIST => log::debug!("tag already exists"),
-                                Code::TAG_NOT_EXIST => log::debug!("tag not exist"),
-                                Code::COLUMN_EXISTS => log::debug!("column already exists"),
-                                Code::COLUMN_NOT_EXIST => log::debug!("column not exists"),
-                                Code::INVALID_COLUMN_NAME => log::debug!("invalid column name"),
-                                Code::MODIFIED_ALREADY => log::debug!("modified already done"),
-                                Code::TABLE_NOT_EXIST => log::debug!("table does not exists"),
-                                Code::STABLE_NOT_EXIST => log::debug!("stable does not exists"),
-                                Code::INVALID_ROW_BYTES => log::debug!("invalid row bytes"),
+                                Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
+                                Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
+                                Code::COLUMN_EXISTS => log::trace!("column already exists"),
+                                Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
+                                Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
+                                Code::MODIFIED_ALREADY => log::trace!("modified already done"),
+                                Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
+                                Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
+                                Code::INVALID_ROW_BYTES => log::trace!("invalid row bytes"),
                                 Code::DUPLICATED_COLUMN_NAMES => {
-                                    log::debug!("duplicated column names")
+                                    log::trace!("duplicated column names")
                                 }
                                 Code::NO_COLUMN_CAN_BE_DROPPED => {
-                                    log::debug!("no column can be dropped")
+                                    log::trace!("no column can be dropped")
                                 }
                                 _ => {
                                     log::error!("{:?}", err);

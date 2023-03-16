@@ -188,7 +188,7 @@ impl AsyncTmqBuilder {
                         sender.send(msg).await.unwrap();
                     }
                     _ = rx.changed() => {
-                        log::debug!("close sender task");
+                        log::trace!("close sender task");
                         break;
                     }
                 }
@@ -236,7 +236,7 @@ impl AsyncTmqBuilder {
                                     let res_id = slice.read_u64().unwrap();
 
                                     if let Some(_) = messages_sender.read(&res_id, |_, v| {
-                                        log::debug!("send data to fetches with id {}", res_id);
+                                        log::trace!("send data to fetches with id {}", res_id);
                                         let raw = slice.read_inlinable::<RawBlock>().unwrap();
                                         v.send(Ok(TmqMsgData::Block(dbg!(raw)).clone())).unwrap();
                                     }) {}
@@ -255,7 +255,7 @@ impl AsyncTmqBuilder {
                                 Message::Frame(frame) => {
                                     // do nothing
                                     log::warn!("received (unexpected) frame message, do nothing");
-                                    log::debug!("* frame data: {frame:?}");
+                                    log::trace!("* frame data: {frame:?}");
                                 }
                             },
                             Err(err) => {
@@ -264,7 +264,7 @@ impl AsyncTmqBuilder {
                         }
                     }
                     _ = close_listener.changed() => {
-                        log::debug!("close reader task");
+                        log::trace!("close reader task");
                         break
                     }
                 }

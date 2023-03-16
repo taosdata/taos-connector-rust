@@ -119,7 +119,7 @@ pub(super) mod tmq {
             loop {
                 // poll with 50ms timeout.
                 // let ptr = UnsafeCell::new(self.0);
-                log::debug!("try poll next message with 200ms timeout");
+                log::trace!("try poll next message with 200ms timeout");
                 let raw = *self;
                 let res = tokio::task::spawn_blocking(move || {
                     let raw = raw;
@@ -134,7 +134,7 @@ pub(super) mod tmq {
                 .await
                 .unwrap_or_default();
                 if let Some(res) = res {
-                    log::debug!("received tmq message in {:?}", elapsed.elapsed());
+                    log::trace!("received tmq message in {:?}", elapsed.elapsed());
                     break res;
                 } else {
                     tokio::time::sleep(Duration::from_millis(1)).await;
@@ -253,7 +253,7 @@ pub(super) mod conf {
         }
 
         pub fn with_table_name(mut self) -> Self {
-            log::debug!("set msg.with.table.name as true");
+            log::trace!("set msg.with.table.name as true");
             self.set("msg.with.table.name", "true")
                 .expect("set group.id should always be ok");
             self

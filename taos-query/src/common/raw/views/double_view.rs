@@ -145,7 +145,6 @@ impl DoubleView {
     /// Write column data as raw bytes.
     pub(crate) fn write_raw_into<W: std::io::Write>(&self, mut wtr: W) -> std::io::Result<usize> {
         let nulls = self.nulls.0.as_ref();
-        log::debug!("nulls: {:?}", nulls);
         debug_assert_eq!(nulls.len(), (self.len() + 7) / 8);
         wtr.write_all(nulls)?;
         wtr.write_all(&self.data)?;

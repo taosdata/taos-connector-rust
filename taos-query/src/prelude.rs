@@ -211,7 +211,6 @@ pub mod sync {
             &self,
             sql: T,
         ) -> Result<Option<O>, Self::Error> {
-            log::debug!("query one: {}", sql.as_ref());
             self.query(sql)?
                 .deserialize::<O>()
                 .next()
@@ -489,7 +488,7 @@ mod r#async {
 
         async fn exec<T: AsRef<str> + Send + Sync>(&self, sql: T) -> Result<usize, Self::Error> {
             let sql = sql.as_ref();
-            // log::debug!("exec sql: {sql}");
+            // log::trace!("exec sql: {sql}");
             self.query(sql).await.map(|res| res.affected_rows() as _)
         }
 
@@ -530,7 +529,7 @@ mod r#async {
             sql: T,
         ) -> Result<Option<O>, Self::Error> {
             use futures::StreamExt;
-            // log::debug!("query one with sql: {}", sql.as_ref());
+            // log::trace!("query one with sql: {}", sql.as_ref());
             self.query(sql)
                 .await?
                 .deserialize::<O>()
@@ -627,7 +626,7 @@ mod r#async {
         /// This is a 3.x-only API.
         async fn topics(&self) -> Result<Vec<Topic>, Self::Error> {
             let sql = "SELECT * FROM information_schema.ins_topics";
-            log::debug!("query one with sql: {sql}");
+            log::trace!("query one with sql: {sql}");
             Ok(self.query(sql).await?.deserialize().try_collect().await?)
         }
 

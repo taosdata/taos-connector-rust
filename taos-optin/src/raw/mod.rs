@@ -680,7 +680,7 @@ impl RawTaos {
     #[inline]
     pub fn query<'a, S: IntoCStr<'a>>(&self, sql: S) -> Result<RawRes, RawError> {
         let sql = sql.into_c_str();
-        log::debug!("query with sql: {:?}", sql);
+        log::trace!("query with sql: {:?}", sql);
         Ok(RawRes {
             c: self.c.clone(),
             ptr: unsafe { (self.c.taos_query)(self.as_ptr(), sql.as_ptr()) },
@@ -749,7 +749,7 @@ impl RawTaos {
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
                 return Err(taos_query::prelude::RawError::new(code, err));
             }
-            log::debug!("received error code 0x2603, try once");
+            log::trace!("received error code 0x2603, try once");
             retries -= 1;
             if retries == 0 {
                 let err = unsafe { taos_errstr(std::ptr::null_mut()) };

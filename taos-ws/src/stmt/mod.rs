@@ -269,7 +269,7 @@ impl Stmt {
                         sender.send(msg).await.unwrap();
                     }
                     _ = rx.changed() => {
-                        log::debug!("close sender task");
+                        log::trace!("close sender task");
                         break;
                     }
                 }
@@ -284,14 +284,14 @@ impl Stmt {
                         match message {
                             Ok(message) => match message {
                                 Message::Text(text) => {
-                                    log::debug!("json response: {}", text);
+                                    log::trace!("json response: {}", text);
                                     let v: StmtRecv = serde_json::from_str(&text).unwrap();
                                     match v.ok() {
                                         StmtOk::Conn(_) => {
                                             log::warn!("[{req_id}] received connected response in message loop");
                                         },
                                         StmtOk::Init(req_id, stmt_id) => {
-                                            log::debug!("stmt init done: {{ req_id: {}, stmt_id: {:?}}}", req_id, stmt_id);
+                                            log::trace!("stmt init done: {{ req_id: {}, stmt_id: {:?}}}", req_id, stmt_id);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 sender.send(stmt_id).unwrap();
@@ -301,7 +301,7 @@ impl Stmt {
                                         }
                                         StmtOk::Stmt(stmt_id, res) => {
                                             if let Some(sender) = fetches_sender.get(&stmt_id) {
-                                                log::debug!("send data to fetches with id {}", stmt_id);
+                                                log::trace!("send data to fetches with id {}", stmt_id);
                                                 // let res = res.clone();
                                                 sender.send(res).unwrap();
                                             // }) {
@@ -329,7 +329,7 @@ impl Stmt {
                                 Message::Frame(frame) => {
                                     // do nothing
                                     log::warn!("received (unexpected) frame message, do nothing");
-                                    log::debug!("* frame data: {frame:?}");
+                                    log::trace!("* frame data: {frame:?}");
                                 }
                             },
                             Err(err) => {
@@ -339,7 +339,7 @@ impl Stmt {
                         }
                     }
                     _ = close_listener.changed() => {
-                        log::debug!("close reader task");
+                        log::trace!("close reader task");
                         break
                     }
                 }
@@ -418,7 +418,7 @@ impl Stmt {
         Ok(())
     }
     pub async fn stmt_add_batch(&mut self) -> Result<()> {
-        log::debug!("add batch");
+        log::trace!("add batch");
         let message = StmtSend::AddBatch(self.args.unwrap());
         self.ws.send(message.to_msg()).await?;
         let _ = self
@@ -434,11 +434,11 @@ impl Stmt {
             columns: columns,
         };
         {
-            log::debug!("bind with: {message:?}");
-            log::debug!("bind string: {}", message.to_msg());
+            log::trace!("bind with: {message:?}");
+            log::trace!("bind string: {}", message.to_msg());
             self.ws.send(message.to_msg()).await?;
         }
-        log::debug!("begin receive");
+        log::trace!("begin receive");
         let _ = self
             .receiver
             .as_ref()
@@ -462,9 +462,9 @@ impl Stmt {
         let block = views_to_raw_block(columns);
 
         bytes.extend(&block);
-        log::debug!("block: {:?}", block);
+        log::trace!("block: {:?}", block);
         // dbg!(bytes::Bytes::copy_from_slice(&block));
-        log::debug!(
+        log::trace!(
             "{:#?}",
             RawBlock::parse_from_raw_block(block, taos_query::prelude::Precision::Millisecond)
         );
@@ -510,7 +510,7 @@ impl Stmt {
     }
 
     pub async fn stmt_exec(&mut self) -> Result<usize> {
-        log::debug!("exec");
+        log::trace!("exec");
         let message = StmtSend::Exec(self.args.unwrap());
         self.ws.send_timeout(message.to_msg(), self.timeout).await?;
         if let Some(affected) = self

@@ -71,7 +71,7 @@ impl WsTmqSender {
         tokio::pin!(sleep);
         let data = tokio::select! {
             _ = &mut sleep, if !sleep.is_elapsed() => {
-               log::debug!("poll timed out");
+               log::trace!("poll timed out");
                Err(Error::QueryTimeout("poll".to_string()))?
             }
             message = rx => {
@@ -160,7 +160,7 @@ impl WsMessageBase {
 
             // for row in 0..raw.nrows() {
             //     for col in 0..raw.ncols() {
-            //         log::debug!("at ({}, {})", row, col);
+            //         log::trace!("at ({}, {})", row, col);
             //         let v = unsafe { raw.get_ref_unchecked(row, col) };
             //         println!("({}, {}): {:?}", row, col, v);
             //     }
@@ -328,7 +328,7 @@ impl Consumer {
                             sender: self.sender.clone(),
                             message_id,
                         };
-                        log::debug!("Got message in {}ms", dur.as_millis());
+                        log::trace!("Got message in {}ms", dur.as_millis());
                         break match message_type {
                             MessageType::Meta => Ok((offset, MessageSet::Meta(Meta(message)))),
                             MessageType::Data => Ok((offset, MessageSet::Data(Data(message)))),
@@ -553,7 +553,7 @@ impl TmqBuilder {
                     _ = rx.changed() => {
                         let _= sender.send(Message::Close(None)).await;
                         let _ = sender.close().await;
-                        log::debug!("close tmq sender");
+                        log::trace!("close tmq sender");
                         break;
                     }
                 }
@@ -568,12 +568,12 @@ impl TmqBuilder {
                         match message {
                             Ok(message) => match message {
                                 Message::Text(text) => {
-                                    log::debug!("json response: {}", text);
+                                    log::trace!("json response: {}", text);
                                     let v: TmqRecv = serde_json::from_str(&text).expect(&text);
                                     let (req_id, recv, ok) = v.ok();
                                     match &recv {
                                         TmqRecvData::Subscribe => {
-                                            log::debug!("subscribe with: {:?}", req_id);
+                                            log::trace!("subscribe with: {:?}", req_id);
 
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
@@ -591,7 +591,7 @@ impl TmqBuilder {
                                             }
                                         },
                                         TmqRecvData::FetchJsonMeta { data }=> {
-                                            log::debug!("fetch json meta data: {:?}", data);
+                                            log::trace!("fetch json meta data: {:?}", data);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
@@ -608,7 +608,7 @@ impl TmqBuilder {
                                             }
                                         }
                                         TmqRecvData::Commit=> {
-                                            log::debug!("commit done: {:?}", recv);
+                                            log::trace!("commit done: {:?}", recv);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
@@ -617,7 +617,7 @@ impl TmqBuilder {
                                             }
                                         }
                                         TmqRecvData::Fetch(fetch)=> {
-                                            log::debug!("fetch done: {:?}", fetch);
+                                            log::trace!("fetch done: {:?}", fetch);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
@@ -643,7 +643,7 @@ impl TmqBuilder {
                                     let message_id = bytes.get_u64_le();
 
 
-                                    log::debug!("[{:.2}ms] receive binary message with req_id {} message_id {}",
+                                    log::trace!("[{:.2}ms] receive binary message with req_id {} message_id {}",
                                         Duration::from_nanos(timing).as_secs_f64() / 1000.,
                                         req_id, message_id);
 
@@ -677,7 +677,7 @@ impl TmqBuilder {
                                 }
                                 Message::Pong(bytes) => {
                                     if bytes == PING {
-                                        log::debug!("ping/pong handshake success");
+                                        log::trace!("ping/pong handshake success");
                                     } else {
                                         // do nothing
                                         log::warn!("received (unexpected) pong message, do nothing");
@@ -686,7 +686,7 @@ impl TmqBuilder {
                                 Message::Frame(frame) => {
                                     // do no`thing
                                     log::warn!("received (unexpected) frame message, do nothing");
-                                    log::debug!("* frame data: {frame:?}");
+                                    log::trace!("* frame data: {frame:?}");
                                 }
                             },
                             Err(err) => {
@@ -709,12 +709,12 @@ impl TmqBuilder {
                         }
                     }
                     _ = close_listener.changed() => {
-                        log::debug!("close reader task");
+                        log::trace!("close reader task");
                         break 'ws;
                     }
                 }
             }
-            log::debug!("Consuming done in {:?}", instant.elapsed());
+            log::trace!("Consuming done in {:?}", instant.elapsed());
         });
         let consumer = Consumer {
             conn: self.info.to_conn_request(),
@@ -932,14 +932,14 @@ mod tests {
                         let sql = dbg!(json.to_string());
                         if let Err(err) = taos.exec(sql).await {
                             match err.errno() {
-                                Code::TAG_ALREADY_EXIST => log::debug!("tag already exists"),
-                                Code::TAG_NOT_EXIST => log::debug!("tag not exist"),
-                                Code::COLUMN_EXISTS => log::debug!("column already exists"),
-                                Code::COLUMN_NOT_EXIST => log::debug!("column not exists"),
-                                Code::INVALID_COLUMN_NAME => log::debug!("invalid column name"),
-                                Code::MODIFIED_ALREADY => log::debug!("modified already done"),
-                                Code::TABLE_NOT_EXIST => log::debug!("table does not exists"),
-                                Code::STABLE_NOT_EXIST => log::debug!("stable does not exists"),
+                                Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
+                                Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
+                                Code::COLUMN_EXISTS => log::trace!("column already exists"),
+                                Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
+                                Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
+                                Code::MODIFIED_ALREADY => log::trace!("modified already done"),
+                                Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
+                                Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                                 _ => {
                                     log::error!("{:?}", err);
                                     panic!("{}", err);
@@ -1081,14 +1081,14 @@ mod tests {
                     let sql = dbg!(json.to_string());
                     if let Err(err) = taos.exec(sql) {
                         match err.errno() {
-                            Code::TAG_ALREADY_EXIST => log::debug!("tag already exists"),
-                            Code::TAG_NOT_EXIST => log::debug!("tag not exist"),
-                            Code::COLUMN_EXISTS => log::debug!("column already exists"),
-                            Code::COLUMN_NOT_EXIST => log::debug!("column not exists"),
-                            Code::INVALID_COLUMN_NAME => log::debug!("invalid column name"),
-                            Code::MODIFIED_ALREADY => log::debug!("modified already done"),
-                            Code::TABLE_NOT_EXIST => log::debug!("table does not exists"),
-                            Code::STABLE_NOT_EXIST => log::debug!("stable does not exists"),
+                            Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
+                            Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
+                            Code::COLUMN_EXISTS => log::trace!("column already exists"),
+                            Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
+                            Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
+                            Code::MODIFIED_ALREADY => log::trace!("modified already done"),
+                            Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
+                            Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                             _ => {
                                 log::error!("{:?}", err);
                                 panic!("{}", err);
@@ -1230,14 +1230,14 @@ mod tests {
                     let sql = dbg!(json.to_string());
                     if let Err(err) = taos.exec(sql) {
                         match err.errno() {
-                            Code::TAG_ALREADY_EXIST => log::debug!("tag already exists"),
-                            Code::TAG_NOT_EXIST => log::debug!("tag not exist"),
-                            Code::COLUMN_EXISTS => log::debug!("column already exists"),
-                            Code::COLUMN_NOT_EXIST => log::debug!("column not exists"),
-                            Code::INVALID_COLUMN_NAME => log::debug!("invalid column name"),
-                            Code::MODIFIED_ALREADY => log::debug!("modified already done"),
-                            Code::TABLE_NOT_EXIST => log::debug!("table does not exists"),
-                            Code::STABLE_NOT_EXIST => log::debug!("stable does not exists"),
+                            Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
+                            Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
+                            Code::COLUMN_EXISTS => log::trace!("column already exists"),
+                            Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
+                            Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
+                            Code::MODIFIED_ALREADY => log::trace!("modified already done"),
+                            Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
+                            Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                             _ => {
                                 log::error!("{:?}", err);
                                 panic!("{}", err);

@@ -468,7 +468,6 @@ impl RawBlock {
             // go for each column
             let length = unsafe { lengths.get_unchecked(col) } as usize;
             let schema = unsafe { schemas.get_unchecked(col) };
-            log::trace!("col: {}, length: {}, schema: {:?}", col, length, schema);
 
             macro_rules! _primitive_value {
                 ($ty:ident, $prim:ty) => {{
@@ -549,7 +548,6 @@ impl RawBlock {
                     unreachable!("unsupported type: {ty}")
                 }
             };
-            // log::debug!("column: {:?}", column);
             columns.push(column);
             debug_assert!(data_offset <= len);
         }
@@ -917,7 +915,6 @@ impl crate::prelude::sync::Inlinable for RawBlock {
     fn read_optional_inlined<R: std::io::Read>(reader: &mut R) -> std::io::Result<Option<Self>> {
         use crate::prelude::sync::InlinableRead;
         let layout = reader.read_u32()?;
-        log::debug!("parse layout 0x{:X}", layout);
         if layout == 0xFFFFFFFF {
             return Ok(None);
         }
@@ -937,7 +934,7 @@ impl crate::prelude::sync::Inlinable for RawBlock {
                 .try_collect()?;
             raw.with_field_names(names);
         }
-        log::debug!(
+        log::trace!(
             "table name: {}, cols: {}, rows: {}",
             &raw.table_name().unwrap_or("(?)"),
             raw.ncols(),
@@ -978,7 +975,6 @@ impl crate::prelude::AsyncInlinable for RawBlock {
         use crate::util::AsyncInlinableRead;
         use tokio::io::*;
         let layout = reader.read_u32_le().await?;
-        log::trace!("layout: 0x{:X}", layout);
         if layout == 0xFFFFFFFF {
             return Ok(None);
         }

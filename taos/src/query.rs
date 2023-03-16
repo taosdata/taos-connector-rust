@@ -243,7 +243,7 @@ impl AsyncQueryable for Taos {
         &self,
         sql: T,
     ) -> Result<Self::AsyncResultSet, Self::Error> {
-        log::debug!("Query with SQL: {}", sql.as_ref());
+        log::trace!("Query with SQL: {}", sql.as_ref());
         match &self.0 {
             TaosInner::Native(taos) => taos
                 .query(sql)

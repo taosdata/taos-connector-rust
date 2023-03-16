@@ -154,7 +154,6 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize_any: {self:?}");
         use Value::*;
         // todo!()
         match self {
@@ -197,7 +196,6 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize_str");
         use Value::*;
         match self {
             Null(_) => visitor.visit_borrowed_str(""), // todo: empty string or error?
@@ -229,7 +227,6 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize_string");
         self.deserialize_str(visitor)
     }
 
@@ -237,7 +234,6 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize_option");
         if self.is_null() {
             visitor.visit_none()
         } else {
@@ -253,7 +249,6 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
     where
         V: Visitor<'de>,
     {
-        log::trace!("deserialize_newtype_struct: {_name}");
         use Value::*;
         macro_rules! _v_ {
             ($v:expr) => {
@@ -291,7 +286,6 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize_map");
         self.deserialize_any(visitor)
     }
 
@@ -299,7 +293,6 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
     where
         V: serde::de::Visitor<'de>,
     {
-        log::trace!("call deserialize seq by value");
         use Value::*;
         match self {
             Null(_) => Vec::<u8>::new()
@@ -331,8 +324,6 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
     where
         V: Visitor<'de>,
     {
-        log::trace!("name: {name}, variants: {variants:?}");
-
         if name == "Timestamp" && variants == TIMESTAMP_VARIANTS {
             return visitor.visit_enum(EnumTimestampDeserializer { value: self });
         }
@@ -599,7 +590,7 @@ mod tests {
 
         macro_rules! _de_prim {
             ($v:ident, $ty:ty, $inner:literal) => {
-                log::debug!(
+                log::trace!(
                     "ty: {}, prim: {}",
                     stringify!($v),
                     std::any::type_name::<$ty>()
