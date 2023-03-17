@@ -442,6 +442,12 @@ impl Value {
 
 impl<'b> PartialEq<&Value> for BorrowedValue<'b> {
     fn eq(&self, other: &&Value) -> bool {
+        self == *other
+    }
+}
+
+impl<'b> PartialEq<Value> for BorrowedValue<'b> {
+    fn eq(&self, other: &Value) -> bool {
         match (self, other) {
             (Self::Null(l0), Value::Null(r0)) => l0 == r0,
             (Self::Bool(l0), Value::Bool(r0)) => l0 == r0,
