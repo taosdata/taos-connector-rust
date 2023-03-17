@@ -1008,6 +1008,7 @@ impl RawRes {
         let current = unsafe { &mut *state.get() };
 
         if current.done {
+            current.in_use = false;
             // handle errors
             if current.code != 0 {
                 let err = RawError::new(current.code, self.err_as_str());
@@ -1039,7 +1040,12 @@ impl RawRes {
                 Poll::Ready(Ok(None))
             }
         } else {
+            if current.in_use {
+                return Poll::Pending;
+            }
+            current.in_use = true;
             let param = Box::new((state.clone(), self.c.clone(), cx.waker().clone()));
+            #[no_mangle]
             unsafe extern "C" fn taos_optin_fetch_rows_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
