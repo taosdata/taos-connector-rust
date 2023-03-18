@@ -8,6 +8,7 @@ services:
       - 16030-16041:16030-16041/udp
     environment:
       - TAOS_ADAPTER_PORT=16041
+      - TAOS_FQDN=localhost
     volumes:
       - data-v2:/tmp/data/v2
       - log-v2:/tmp/logs/v2
@@ -19,6 +20,7 @@ services:
       - 26030-26041:26030-26041/udp
     environment:
       - TAOS_ADAPTER_PORT=26041
+      - TAOS_FQDN=localhost
     volumes:
       - ./tests/cfg/v3/taos.cfg:/etc/taos/taos.cfg
 

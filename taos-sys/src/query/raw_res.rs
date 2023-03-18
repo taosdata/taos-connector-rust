@@ -150,10 +150,11 @@ impl RawRes {
         // let ptr = state.get();
 
         if current.done {
+            current.in_use = false;
+            current.done = false;
             // handle errors
             if current.code != 0 {
                 let err = Error::new(current.code, self.err_as_str());
-                current.in_use = false;
                 return Poll::Ready(Err(err));
             }
 

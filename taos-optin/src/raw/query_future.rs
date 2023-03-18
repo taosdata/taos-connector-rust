@@ -6,6 +6,7 @@ use std::future::Future;
 use std::os::raw::{c_int, c_void};
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
+use std::time::Instant;
 
 use crate::into_c_str::IntoCStr;
 use crate::types::TAOS_RES;
@@ -24,6 +25,7 @@ struct State {
     code: i32,
     done: bool,
     waiting: bool,
+    time: Instant,
 }
 
 unsafe impl Send for State {}
@@ -58,6 +60,7 @@ impl<'a> Future for QueryFuture<'a> {
                 let param = param as *mut (&UnsafeCell<State>, Waker);
                 let state = param.read();
                 let mut s = { &mut *state.0.get() };
+                log::debug!("Receive query callback in {:?}", s.time.elapsed());
 
                 s.result = res;
                 s.code = code;
@@ -86,6 +89,7 @@ impl<'a> QueryFuture<'a> {
             code: 0,
             done: false,
             waiting: false,
+            time: Instant::now(),
         });
         let sql = sql.into_c_str();
         log::trace!("query with: {}", sql.to_str().unwrap_or("<...>"));

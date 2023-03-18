@@ -104,6 +104,24 @@ impl Code {
     }
 }
 
+impl PartialEq<usize> for Code {
+    fn eq(&self, other: &usize) -> bool {
+        self.0 == *other as i32
+    }
+}
+
+impl PartialEq<isize> for Code {
+    fn eq(&self, other: &isize) -> bool {
+        self.0 == *other as i32
+    }
+}
+
+impl PartialEq<i32> for Code {
+    fn eq(&self, other: &i32) -> bool {
+        self.0 == *other
+    }
+}
+
 #[allow(non_upper_case_globals, non_snake_case)]
 #[cfg_attr(feature = "no_coverage", no_coverage)]
 mod code {

@@ -790,6 +790,7 @@ impl RawTaos {
 
     #[inline]
     pub fn close(&mut self) {
+        log::trace!("call taos_close");
         unsafe { (self.c.as_ref().taos_close)(self.as_ptr()) }
     }
 }
@@ -1006,17 +1007,21 @@ impl RawRes {
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
+        if current.in_use {
+            log::debug!("call back in use");
+            return Poll::Pending;
+        }
 
         if current.done {
-            current.in_use = false;
+            current.done = false;
             // handle errors
             if current.code != 0 {
                 let err = RawError::new(current.code, self.err_as_str());
-
                 return Poll::Ready(Err(err));
             }
 
             if current.num > 0 {
+                log::trace!("current block has {}", current.num);
                 // has next block.
                 let mut raw = RawBlock::parse_from_ptr_v2(
                     current.block as _,
@@ -1025,25 +1030,25 @@ impl RawRes {
                     current.num as usize,
                     precision,
                 );
-                // let mut raw = unsafe { RawBlock::parse_from_ptr(current.block as _, precision) };
+                // // let mut raw = unsafe { RawBlock::parse_from_ptr(current.block as _, precision) };
                 raw.with_field_names(fields.iter().map(|f| f.name()));
-                if current.num == 0 {
-                    // finish fetch loop.
-                    current.done = true;
-                    current.num = 0;
-                } else {
-                    current.done = false;
-                }
+
+                current.num = 0;
+                // if current.num == 0 {
+                //     // finish fetch loop.
+                //     current.done = true;
+                //     current.num = 0;
+                // } else {
+                //     current.done = false;
+                // }
                 Poll::Ready(Ok(Some(raw)))
             } else {
                 // no data todo, stop stream.
                 Poll::Ready(Ok(None))
             }
         } else {
-            if current.in_use {
-                return Poll::Pending;
-            }
             current.in_use = true;
+            current.num = 0;
             let param = Box::new((state.clone(), self.c.clone(), cx.waker().clone()));
             #[no_mangle]
             unsafe extern "C" fn taos_optin_fetch_rows_callback(
@@ -1055,6 +1060,7 @@ impl RawRes {
                 let param = Box::from_raw(param);
                 let state = &mut *param.0.get();
                 state.done = true;
+                state.in_use = false;
                 if num_of_rows < 0 {
                     state.code = num_of_rows;
                 } else {
@@ -1097,9 +1103,12 @@ impl RawRes {
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
-
+        if current.in_use {
+            return Poll::Pending;
+        }
         if current.done {
             current.in_use = false;
+            current.done = false;
             // handle errors
             if current.code != 0 {
                 let err = RawError::new(current.code, self.err_as_str());
@@ -1111,22 +1120,19 @@ impl RawRes {
                 // has next block.
                 let mut raw = unsafe { RawBlock::parse_from_ptr(current.block as _, precision) };
                 raw.with_field_names(fields.iter().map(|f| f.name()));
-                if current.num == 0 {
-                    // finish fetch loop.
-                    current.done = true;
-                    current.num = 0;
-                } else {
-                    current.done = false;
-                }
+                // if current.num == 0 {
+                //     // finish fetch loop.
+                //     current.done = true;
+                //     current.num = 0;
+                // } else {
+                //     current.done = false;
+                // }
                 Poll::Ready(Ok(Some(raw)))
             } else {
                 // no data todo, stop stream.
                 Poll::Ready(Ok(None))
             }
         } else {
-            if current.in_use {
-                return Poll::Pending;
-            }
             current.in_use = true;
             let param = Box::new((state.clone(), self.c.clone(), cx.waker().clone()));
             unsafe extern "C" fn taos_optin_fetch_raw_block_callback(
@@ -1138,6 +1144,7 @@ impl RawRes {
                     Box::from_raw(param as _);
                 let state = &mut *param.0.get();
                 state.done = true;
+                state.in_use = false;
                 state.block = (param.1.taos_get_raw_block.unwrap())(res);
                 if num_of_rows < 0 {
                     state.code = num_of_rows;

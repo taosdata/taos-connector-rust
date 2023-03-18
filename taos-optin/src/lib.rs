@@ -166,7 +166,13 @@ impl taos_query::AsyncQueryable for Taos {
         sql: T,
     ) -> Result<Self::AsyncResultSet, Self::Error> {
         log::debug!("Async query with SQL: {}", sql.as_ref());
-        self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
+        loop {
+            match self.raw.query_async(sql.as_ref()).await {
+                Err(err) if err.code() == 0x2603 => continue,
+                Err(err) => break Err(err),
+                Ok(raw) => break Ok(ResultSet::new(raw)),
+            }
+        }
     }
 
     async fn write_raw_meta(&self, meta: &taos_query::common::RawMeta) -> Result<(), Self::Error> {

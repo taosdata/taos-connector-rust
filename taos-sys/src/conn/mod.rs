@@ -177,7 +177,7 @@ impl RawTaos {
                     .map(|field| field.into())
                     .collect_vec();
 
-                err_or!(taos_write_raw_block_with_fields(
+                err_or!(self, taos_write_raw_block_with_fields(
                     self.as_ptr(),
                     nrows as _,
                     ptr as _,
@@ -186,7 +186,7 @@ impl RawTaos {
                     fields.len() as _,
                 ))
             } else {
-                err_or!(taos_write_raw_block(
+                err_or!(self, taos_write_raw_block(
                     self.as_ptr(),
                     nrows as _,
                     ptr as _,
@@ -196,6 +196,14 @@ impl RawTaos {
         }
     }
 
+    #[inline]
+    pub fn err_as_str(&self) -> &'static str {
+        unsafe {
+            std::str::from_utf8_unchecked(
+                CStr::from_ptr(taos_errstr(std::ptr::null_mut())).to_bytes(),
+            )
+        }
+    }
     #[inline]
     pub fn close(&mut self) {
         unsafe { taos_close(self.as_ptr()) }
