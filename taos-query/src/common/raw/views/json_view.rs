@@ -1,6 +1,6 @@
 use std::{ffi::c_void, fmt::Debug};
 
-use super::Offsets;
+use super::{Offsets, IsColumnView};
 use crate::{
     common::{BorrowedValue, Ty},
     prelude::InlinableWrite,
@@ -14,6 +14,18 @@ pub struct JsonView {
     // version: Version,
     pub offsets: Offsets,
     pub data: Bytes,
+}
+
+type View = JsonView;
+
+impl IsColumnView for View {
+    fn ty(&self) -> Ty {
+        Ty::Json
+    }
+    fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
+        // Self::from_iter(iter.map(|v| v.to_str()))
+        todo!()
+    }
 }
 
 impl JsonView {

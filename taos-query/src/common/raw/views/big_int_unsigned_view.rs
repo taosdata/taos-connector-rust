@@ -2,17 +2,58 @@ use std::ffi::c_void;
 
 use crate::common::{BorrowedValue, Ty};
 
-use super::{NullBits, NullsIter};
+use super::{IsColumnView, NullBits, NullsIter};
 
 use bytes::Bytes;
-
-type Item = u64;
-const ITEM_SIZE: usize = std::mem::size_of::<Item>();
 
 #[derive(Debug, Clone)]
 pub struct UBigIntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
+}
+
+type Item = u64;
+type View = UBigIntView;
+const ITEM_SIZE: usize = std::mem::size_of::<Item>();
+
+impl IsColumnView for View {
+    fn ty(&self) -> Ty {
+        Ty::UBigInt
+    }
+    fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
+        Self::from_iter(iter.map(|v| v.to_u64()))
+    }
+}
+
+impl std::ops::Add for View {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::from_iter(self.iter().chain(rhs.iter()))
+    }
+}
+impl std::ops::Add for &View {
+    type Output = View;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        View::from_iter(self.iter().chain(rhs.iter()))
+    }
+}
+
+impl std::ops::Add<View> for &View {
+    type Output = View;
+
+    fn add(self, rhs: View) -> Self::Output {
+        View::from_iter(self.iter().chain(rhs.iter()))
+    }
+}
+
+impl std::ops::Add<&View> for View {
+    type Output = View;
+
+    fn add(self, rhs: &View) -> Self::Output {
+        View::from_iter(self.iter().chain(rhs.iter()))
+    }
 }
 
 impl UBigIntView {

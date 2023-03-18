@@ -2,7 +2,7 @@ use std::ffi::c_void;
 
 use crate::common::{BorrowedValue, Ty};
 
-use super::{NullBits, NullsIter};
+use super::{NullBits, NullsIter, IsColumnView};
 
 use bytes::Bytes;
 
@@ -13,6 +13,14 @@ const ITEM_SIZE: usize = std::mem::size_of::<Item>();
 pub struct SmallIntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
+}
+impl IsColumnView for View {
+    fn ty(&self) -> Ty {
+        Ty::USmallInt
+    }
+    fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
+        Self::from_iter(iter.map(|v| v.to_i16()))
+    }
 }
 
 impl SmallIntView {

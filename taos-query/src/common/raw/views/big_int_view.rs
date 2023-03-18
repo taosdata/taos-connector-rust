@@ -2,7 +2,7 @@ use std::ffi::c_void;
 
 use crate::common::{BorrowedValue, Ty};
 
-use super::{NullBits, NullsIter};
+use super::{NullBits, NullsIter, IsColumnView};
 
 use bytes::Bytes;
 
@@ -14,6 +14,46 @@ const ITEM_SIZE: usize = std::mem::size_of::<Item>();
 pub struct BigIntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
+}
+
+impl IsColumnView for View {
+    fn ty(&self) -> Ty {
+        Ty::BigInt
+    }
+    fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
+        Self::from_iter(iter.map(|v| v.to_i64()))
+    }
+}
+
+impl std::ops::Add for View {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::from_iter(self.iter().chain(rhs.iter()))
+    }
+}
+impl std::ops::Add for &View {
+    type Output = View;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        View::from_iter(self.iter().chain(rhs.iter()))
+    }
+}
+
+impl std::ops::Add<View> for &View {
+    type Output = View;
+
+    fn add(self, rhs: View) -> Self::Output {
+        View::from_iter(self.iter().chain(rhs.iter()))
+    }
+}
+
+impl std::ops::Add<&View> for View {
+    type Output = View;
+
+    fn add(self, rhs: &View) -> Self::Output {
+        View::from_iter(self.iter().chain(rhs.iter()))
+    }
 }
 
 impl BigIntView {

@@ -1,11 +1,13 @@
 use std::{
+    borrow::Cow,
     cell::{RefCell, UnsafeCell},
     ffi::c_void,
     fmt::Debug,
+    ops::Deref,
     sync::Arc,
 };
 
-use super::{Offsets, Version};
+use super::{IsColumnView, Offsets, Version};
 
 use crate::{
     common::{layout::Layout, BorrowedValue, Ty},
@@ -26,6 +28,19 @@ pub struct NCharView {
     pub(crate) version: Version,
     /// Layout should set as NCHAR_DECODED when raw data decoded.
     pub(crate) layout: Arc<RefCell<Layout>>,
+}
+
+impl IsColumnView for NCharView {
+    fn ty(&self) -> Ty {
+        Ty::NChar
+    }
+    fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
+        Self::from_iter::<String, _, _, _>(
+            iter.map(|v| v.to_str().map(|v| v.into_owned()))
+                .collect_vec()
+                .into_iter(),
+        )
+    }
 }
 
 impl NCharView {

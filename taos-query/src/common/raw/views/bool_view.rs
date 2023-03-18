@@ -2,7 +2,7 @@ use std::{ffi::c_void, io::Write, ops::Range};
 
 use crate::common::{BorrowedValue, Ty};
 
-use super::{NullBits, NullsIter};
+use super::{IsColumnView, NullBits, NullsIter};
 
 use bytes::Bytes;
 
@@ -10,6 +10,46 @@ use bytes::Bytes;
 pub struct BoolView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
+}
+
+impl IsColumnView for BoolView {
+    fn ty(&self) -> Ty {
+        Ty::Bool
+    }
+    fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
+        Self::from_iter(iter.map(|v| v.to_bool()))
+    }
+}
+
+impl std::ops::Add for BoolView {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::from_iter(self.iter().chain(rhs.iter()))
+    }
+}
+impl std::ops::Add for &BoolView {
+    type Output = BoolView;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        BoolView::from_iter(self.iter().chain(rhs.iter()))
+    }
+}
+
+impl std::ops::Add<BoolView> for &BoolView {
+    type Output = BoolView;
+
+    fn add(self, rhs: BoolView) -> Self::Output {
+        BoolView::from_iter(self.iter().chain(rhs.iter()))
+    }
+}
+
+impl std::ops::Add<&BoolView> for BoolView {
+    type Output = BoolView;
+
+    fn add(self, rhs: &BoolView) -> Self::Output {
+        BoolView::from_iter(self.iter().chain(rhs.iter()))
+    }
 }
 
 impl BoolView {
@@ -209,4 +249,14 @@ fn test_bool_slice() {
     dbg!(&view);
     let slice = view.slice(1..4);
     dbg!(&slice);
+
+    let chain = &view + slice.as_ref().unwrap();
+    dbg!(&chain);
+    assert!(chain.len() == 7);
+    assert!(chain
+        .slice(0..4)
+        .unwrap()
+        .iter()
+        .zip(view.iter())
+        .all(|(l, r)| dbg!(l) == r));
 }

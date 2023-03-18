@@ -2,7 +2,7 @@ use std::ffi::c_void;
 
 use crate::common::{BorrowedValue, Precision, Timestamp, Ty};
 
-use super::{NullBits, NullsIter};
+use super::{IsColumnView, NullBits, NullsIter};
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -18,6 +18,14 @@ pub struct TimestampView {
     pub(crate) precision: Precision,
 }
 
+impl IsColumnView for View {
+    fn ty(&self) -> Ty {
+        Ty::USmallInt
+    }
+    fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
+        Self::from_nullable_timestamp(iter.map(|v| v.to_timestamp()).collect_vec())
+    }
+}
 impl TimestampView {
     pub fn from_millis(values: Vec<impl Into<Option<i64>>>) -> Self {
         TimestampMillisecondView::from_iter(values).into_inner()
@@ -38,6 +46,25 @@ impl TimestampView {
             Precision::Millisecond => Self::from_millis(values),
             Precision::Microsecond => Self::from_micros(values),
             Precision::Nanosecond => Self::from_nanos(values),
+        }
+    }
+    pub fn from_nullable_timestamp(values: Vec<Option<Timestamp>>) -> Self {
+        let precision = values
+            .iter()
+            .find(|ts| ts.is_some())
+            .map(|v| v.as_ref().unwrap().precision());
+        if let Some(precision) = precision {
+            let values = values
+                .into_iter()
+                .map(|ts| ts.map(|v| v.as_raw_i64()))
+                .collect_vec();
+            match precision {
+                Precision::Millisecond => Self::from_millis(values),
+                Precision::Microsecond => Self::from_micros(values),
+                Precision::Nanosecond => Self::from_nanos(values),
+            }
+        } else {
+            Self::from_millis(vec![None; values.len()])
         }
     }
 

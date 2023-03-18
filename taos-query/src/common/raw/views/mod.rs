@@ -64,6 +64,17 @@ use crate::common::{BorrowedValue, Ty, Value};
 
 use std::{ffi::c_void, fmt::Debug, io::Write, iter::FusedIterator};
 
+pub(crate) trait IsColumnView: Sized {
+    /// View item data type.
+    fn ty(&self) -> Ty;
+
+    fn from_value_iter<'a>(iter: impl Iterator<Item = &'a Value>) -> Self {
+        Self::from_borrowed_value_iter::<'a>(iter.map(|v| v.to_borrowed_value()))
+    }
+
+    fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self;
+}
+
 /// Compatible version for var char.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Version {
@@ -111,6 +122,14 @@ impl Debug for ColumnView {
             Self::UBigInt(view) => f.debug_tuple("UBigInt").field(&view.to_vec()).finish(),
             Self::Json(view) => f.debug_tuple("Json").field(&view.to_vec()).finish(),
         }
+    }
+}
+
+impl std::ops::Add for ColumnView {
+    type Output = ColumnView;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        self.concat(&rhs)
     }
 }
 
@@ -226,6 +245,79 @@ impl ColumnView {
         ColumnView::NChar(NCharView::from_iter(iter))
     }
 
+    #[inline]
+    pub fn concat_iter<'b, 'a: 'b>(
+        &'a self,
+        rhs: impl Iterator<Item = BorrowedValue<'b>>,
+        ty: Ty,
+    ) -> ColumnView {
+        match ty {
+            Ty::Null => unreachable!(),
+            Ty::Bool => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::TinyInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::SmallInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::Int => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::BigInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::UTinyInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::USmallInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::UInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::UBigInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::Float => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::Double => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::Timestamp => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::VarChar => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::NChar => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::Json => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
+            Ty::VarBinary => todo!(),
+            Ty::Decimal => todo!(),
+            Ty::Blob => todo!(),
+            Ty::MediumBlob => todo!(),
+        }
+    }
+
+    /// Concatenate another column view, output a new column view with exact type of self.
+    #[inline]
+    pub fn concat(&self, rhs: &ColumnView) -> ColumnView {
+        self.concat_as(rhs, self.as_ty())
+    }
+
+    /// Concatenate another column view, output a new column view with specified type `ty`.
+    #[inline]
+    pub fn concat_as(&self, rhs: &ColumnView, ty: Ty) -> ColumnView {
+        self.concat_iter(rhs.iter(), ty)
+    }
+
+    /// Generate single element view for specified type `ty`.
     pub fn null(n: usize, ty: Ty) -> Self {
         match ty {
             Ty::Null => panic!("type should be known"),
@@ -475,6 +567,12 @@ impl ColumnView {
             ColumnView::Timestamp(view) => view,
             _ => unreachable!(),
         }
+    }
+
+    pub(crate) fn to_nulls_vec(&self) -> Vec<bool> {
+        (0..self.len())
+            .map(|i| unsafe { self.is_null_unchecked(i) })
+            .collect()
     }
 }
 

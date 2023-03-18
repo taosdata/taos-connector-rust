@@ -29,6 +29,60 @@ pub enum BorrowedValue<'b> {
     MediumBlob(&'b [u8]),
 }
 
+macro_rules! borrowed_value_to_native {
+    ($v:expr) => {
+        match $v {
+            BorrowedValue::Null(_) => None,
+            BorrowedValue::Bool(v) => Some(if *v { 1 } else { 0 }),
+            BorrowedValue::TinyInt(v) => Some(*v as _),
+            BorrowedValue::SmallInt(v) => Some(*v as _),
+            BorrowedValue::Int(v) => Some(*v as _),
+            BorrowedValue::BigInt(v) => Some(*v as _),
+            BorrowedValue::Float(v) => Some(*v as _),
+            BorrowedValue::Double(v) => Some(*v as _),
+            BorrowedValue::VarChar(s) => s.parse().map(Some).unwrap_or(None),
+            BorrowedValue::Timestamp(v) => Some(v.as_raw_i64() as _),
+            BorrowedValue::NChar(s) => s.parse().map(Some).unwrap_or(None),
+            BorrowedValue::UTinyInt(v) => Some(*v as _),
+            BorrowedValue::USmallInt(v) => Some(*v as _),
+            BorrowedValue::UInt(v) => Some(*v as _),
+            BorrowedValue::UBigInt(v) => Some(*v as _),
+            BorrowedValue::Json(v) => serde_json::from_slice(&v).ok(),
+            BorrowedValue::VarBinary(_) => todo!(),
+            BorrowedValue::Decimal(_) => todo!(),
+            BorrowedValue::Blob(_) => todo!(),
+            BorrowedValue::MediumBlob(_) => todo!(),
+        }
+    };
+}
+
+macro_rules! borrowed_value_to_float {
+    ($v:expr) => {
+        match $v {
+            BorrowedValue::Null(_) => None,
+            BorrowedValue::Bool(v) => Some(if *v { 1. } else { 0. }),
+            BorrowedValue::TinyInt(v) => Some(*v as _),
+            BorrowedValue::SmallInt(v) => Some(*v as _),
+            BorrowedValue::Int(v) => Some(*v as _),
+            BorrowedValue::BigInt(v) => Some(*v as _),
+            BorrowedValue::Float(v) => Some(*v as _),
+            BorrowedValue::Double(v) => Some(*v as _),
+            BorrowedValue::VarChar(s) => s.parse().map(Some).unwrap_or(None),
+            BorrowedValue::Timestamp(v) => Some(v.as_raw_i64() as _),
+            BorrowedValue::NChar(s) => s.parse().map(Some).unwrap_or(None),
+            BorrowedValue::UTinyInt(v) => Some(*v as _),
+            BorrowedValue::USmallInt(v) => Some(*v as _),
+            BorrowedValue::UInt(v) => Some(*v as _),
+            BorrowedValue::UBigInt(v) => Some(*v as _),
+            BorrowedValue::Json(v) => serde_json::from_slice(&v).ok(),
+            BorrowedValue::VarBinary(_) => todo!(),
+            BorrowedValue::Decimal(_) => todo!(),
+            BorrowedValue::Blob(_) => todo!(),
+            BorrowedValue::MediumBlob(_) => todo!(),
+        }
+    };
+}
+
 impl<'b> BorrowedValue<'b> {
     /// The data type of this value.
     pub const fn ty(&self) -> Ty {
@@ -205,6 +259,107 @@ impl<'b> BorrowedValue<'b> {
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+        }
+    }
+
+    pub(crate) fn to_bool(&self) -> Option<bool> {
+        match self {
+            BorrowedValue::Null(_) => None,
+            BorrowedValue::Bool(v) => Some(*v),
+            BorrowedValue::TinyInt(v) => Some(*v > 0),
+            BorrowedValue::SmallInt(v) => Some(*v > 0),
+            BorrowedValue::Int(v) => Some(*v > 0),
+            BorrowedValue::BigInt(v) => Some(*v > 0),
+            BorrowedValue::Float(v) => Some(*v > 0.),
+            BorrowedValue::Double(v) => Some(*v > 0.),
+            BorrowedValue::VarChar(s) => match *s {
+                "" => None,
+                "false" | "f" | "F" | "FALSE" | "False" => Some(false),
+                "true" | "t" | "T" | "TRUE" | "True" => Some(true),
+                _ => Some(true),
+            },
+            BorrowedValue::Timestamp(_) => Some(true),
+            BorrowedValue::NChar(s) => match s.as_ref() {
+                "" => None,
+                "false" | "f" | "F" | "FALSE" | "False" => Some(false),
+                "true" | "t" | "T" | "TRUE" | "True" => Some(true),
+                _ => Some(true),
+            },
+            BorrowedValue::UTinyInt(v) => Some(*v != 0),
+            BorrowedValue::USmallInt(v) => Some(*v != 0),
+            BorrowedValue::UInt(v) => Some(*v != 0),
+            BorrowedValue::UBigInt(v) => Some(*v != 0),
+            BorrowedValue::Json(v) => Some(true),
+            BorrowedValue::VarBinary(_) => todo!(),
+            BorrowedValue::Decimal(_) => todo!(),
+            BorrowedValue::Blob(_) => todo!(),
+            BorrowedValue::MediumBlob(_) => todo!(),
+        }
+    }
+
+    pub(crate) fn to_i8(&self) -> Option<i8> {
+        borrowed_value_to_native!(self)
+    }
+    pub(crate) fn to_i16(&self) -> Option<i16> {
+        borrowed_value_to_native!(self)
+    }
+    pub(crate) fn to_i32(&self) -> Option<i32> {
+        borrowed_value_to_native!(self)
+    }
+
+    pub(crate) fn to_i64(&self) -> Option<i64> {
+        borrowed_value_to_native!(self)
+    }
+    pub(crate) fn to_u8(&self) -> Option<u8> {
+        borrowed_value_to_native!(self)
+    }
+    pub(crate) fn to_u16(&self) -> Option<u16> {
+        borrowed_value_to_native!(self)
+    }
+
+    pub(crate) fn to_u32(&self) -> Option<u32> {
+        borrowed_value_to_native!(self)
+    }
+
+    pub(crate) fn to_u64(&self) -> Option<u64> {
+        borrowed_value_to_native!(self)
+    }
+
+    pub(crate) fn to_f32(&self) -> Option<f32> {
+        borrowed_value_to_float!(self)
+    }
+    pub(crate) fn to_f64(&self) -> Option<f64> {
+        borrowed_value_to_float!(self)
+    }
+    pub(crate) fn to_str(&self) -> Option<Cow<str>> {
+        match self {
+            BorrowedValue::Null(_) => None,
+            BorrowedValue::Bool(v) => Some(v.to_string().into()),
+            BorrowedValue::TinyInt(v) => Some(v.to_string().into()),
+            BorrowedValue::SmallInt(v) => Some(v.to_string().into()),
+            BorrowedValue::Int(v) => Some(v.to_string().into()),
+            BorrowedValue::BigInt(v) => Some(v.to_string().into()),
+            BorrowedValue::Float(v) => Some(v.to_string().into()),
+            BorrowedValue::Double(v) => Some(v.to_string().into()),
+            BorrowedValue::VarChar(s) => Some((*s).into()),
+            BorrowedValue::Timestamp(v) => Some(v.to_datetime_with_tz().to_string().into()),
+            BorrowedValue::NChar(s) => Some(s.as_ref().into()),
+            BorrowedValue::UTinyInt(v) => Some(v.to_string().into()),
+            BorrowedValue::USmallInt(v) => Some(v.to_string().into()),
+            BorrowedValue::UInt(v) => Some(v.to_string().into()),
+            BorrowedValue::UBigInt(v) => Some(v.to_string().into()),
+            BorrowedValue::Json(v) => Some(unsafe { std::str::from_utf8_unchecked(&v) }.into()),
+            BorrowedValue::VarBinary(_) => todo!(),
+            BorrowedValue::Decimal(_) => todo!(),
+            BorrowedValue::Blob(_) => todo!(),
+            BorrowedValue::MediumBlob(_) => todo!(),
+        }
+    }
+    pub(crate) fn to_timestamp(&self) -> Option<Timestamp> {
+        match self {
+            BorrowedValue::Null(_) => None,
+            BorrowedValue::Timestamp(v) => Some(*v),
+            _ => panic!("Unsupported conversion from {} to timestamp", self.ty()),
         }
     }
 }
