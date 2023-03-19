@@ -256,46 +256,46 @@ impl ColumnView {
             Ty::Bool => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::TinyInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::TinyInt => ColumnView::TinyInt(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::SmallInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::SmallInt => ColumnView::SmallInt(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::Int => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::Int => ColumnView::Int(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::BigInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::BigInt => ColumnView::BigInt(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::UTinyInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::UTinyInt => ColumnView::UTinyInt(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::USmallInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::USmallInt => ColumnView::USmallInt(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::UInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::UInt => ColumnView::UInt(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::UBigInt => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::UBigInt => ColumnView::UBigInt(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::Float => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::Float => ColumnView::Float(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::Double => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::Double => ColumnView::Double(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::Timestamp => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::Timestamp => ColumnView::Timestamp(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::VarChar => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::VarChar => ColumnView::VarChar(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::NChar => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::NChar => ColumnView::NChar(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::Json => ColumnView::Bool(IsColumnView::from_borrowed_value_iter(
+            Ty::Json => ColumnView::Json(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
             Ty::VarBinary => todo!(),
