@@ -57,6 +57,22 @@ impl taos_query::AsyncQueryable for Taos {
         }
     }
 
+    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
+        &self,
+        sql: T,
+        req_id: u64,
+    ) -> Result<Self::AsyncResultSet, Self::Error> {
+        if let Some(ws) = self.async_client.get() {
+            ws.s_query_with_req_id(sql.as_ref(), req_id).await
+        } else {
+            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
+            self.async_client
+                .get_or_init(|| async_client)
+                .s_query_with_req_id(sql.as_ref(), req_id)
+                .await
+        }
+    }
+
     async fn write_raw_meta(&self, raw: &RawMeta) -> Result<(), Self::Error> {
         if let Some(ws) = self.async_client.get() {
             ws.write_meta(raw).await
@@ -91,6 +107,12 @@ impl taos_query::Queryable for Taos {
         let sql = sql.as_ref();
         block_in_place_or_global(<Self as AsyncQueryable>::query(self, sql))
     }
+
+    fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> Result<Self::ResultSet, Self::Error> {
+        let sql = sql.as_ref();
+        block_in_place_or_global(<Self as AsyncQueryable>::query_with_req_id(self, sql, req_id))
+    }
+
     fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
         block_in_place_or_global(<Self as AsyncQueryable>::write_raw_meta(self, meta))
     }

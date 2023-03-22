@@ -753,6 +753,72 @@ impl WsTaos {
         }
     }
 
+    pub async fn s_query_with_req_id(&self, sql: &str, req_id: u64) -> Result<ResultSet> {
+        let action = WsSend::Query {
+            req_id,
+            sql: sql.to_string(),
+        };
+
+        let req = self.sender.send_recv(action).await?;
+
+        let resp = match req {
+            WsRecvData::Query(resp) => resp,
+            _ => unreachable!(),
+        };
+
+        let result_id = resp.id;
+        //  for drop task.
+        let (closer, rx) = oneshot::channel();
+        tokio::task::spawn(async move {
+            let t = Instant::now();
+            let _ = rx.await;
+            log::trace!("result {result_id} lives {:?}", t.elapsed());
+        });
+
+        if resp.fields_count > 0 {
+            let names = resp.fields_names.unwrap();
+            let types = resp.fields_types.unwrap();
+            let bytes = resp.fields_lengths.unwrap();
+            let fields: Vec<_> = names
+                .into_iter()
+                .zip(types)
+                .zip(bytes)
+                .map(|((name, ty), bytes)| Field::new(name, ty, bytes))
+                .collect();
+            Ok(ResultSet {
+                fields: Some(fields),
+                fields_count: resp.fields_count,
+                precision: resp.precision,
+                affected_rows: resp.affected_rows,
+                args: WsResArgs {
+                    req_id,
+                    id: resp.id,
+                },
+                summary: (0, 0),
+                sender: self.sender.clone(),
+                timing: resp.timing,
+                block_future: None,
+                closer: Some(closer),
+            })
+        } else {
+            Ok(ResultSet {
+                affected_rows: resp.affected_rows,
+                args: WsResArgs {
+                    req_id,
+                    id: resp.id,
+                },
+                fields: None,
+                fields_count: 0,
+                precision: resp.precision,
+                summary: (0, 0),
+                sender: self.sender.clone(),
+                timing: resp.timing,
+                block_future: None,
+                closer: Some(closer),
+            })
+        }
+    }
+
     pub async fn s_exec(&self, sql: &str) -> Result<usize> {
         let req_id = self.sender.req_id();
         let action = WsSend::Query {
@@ -930,6 +996,11 @@ impl AsyncQueryable for WsTaos {
     ) -> StdResult<Self::AsyncResultSet, Self::Error> {
         self.s_query(sql.as_ref()).await
     }
+
+    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(&self, sql: T, req_id: u64) -> StdResult<Self::AsyncResultSet, Self::Error> {
+        self.s_query_with_req_id(sql.as_ref(), req_id).await
+    }
+
     async fn write_raw_meta(&self, raw: &RawMeta) -> StdResult<(), Self::Error> {
         self.write_meta(raw).await
     }

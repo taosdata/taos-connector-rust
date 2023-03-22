@@ -186,6 +186,8 @@ pub mod sync {
 
         fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error>;
 
+        fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> Result<Self::ResultSet, Self::Error>;
+
         fn exec<T: AsRef<str>>(&self, sql: T) -> Result<usize, Self::Error> {
             self.query(sql).map(|res| res.affected_rows() as _)
         }
@@ -484,6 +486,12 @@ mod r#async {
         async fn query<T: AsRef<str> + Send + Sync>(
             &self,
             sql: T,
+        ) -> Result<Self::AsyncResultSet, Self::Error>;
+
+        async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
+            &self,
+            sql: T,
+            req_id: u64,
         ) -> Result<Self::AsyncResultSet, Self::Error>;
 
         async fn exec<T: AsRef<str> + Send + Sync>(&self, sql: T) -> Result<usize, Self::Error> {
