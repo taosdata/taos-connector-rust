@@ -378,6 +378,10 @@ mod tests {
             Ok(MyResultSet)
         }
 
+        fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> Result<Self::ResultSet, Self::Error> {
+            todo!()
+        }
+
         fn exec<T: AsRef<str>>(&self, _sql: T) -> Result<usize, Self::Error> {
             Ok(1)
         }
