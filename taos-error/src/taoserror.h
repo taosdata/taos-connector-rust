@@ -139,6 +139,8 @@ int32_t* taosGetErrno();
 #define TSDB_CODE_MND_FAILED_TO_CREATE_DIR      TAOS_DEF_ERROR_CODE(0, 0x0313)  //"failed to create mnode dir"
 #define TSDB_CODE_MND_FAILED_TO_INIT_STEP       TAOS_DEF_ERROR_CODE(0, 0x0314)  //"failed to init components"
 
+#define TSDB_CODE_SDB_OBJ_CREATING              TAOS_DEF_ERROR_CODE(0, 0x032C)  //"Object is creating"
+
 #define TSDB_CODE_MND_SDB_OBJ_ALREADY_THERE     TAOS_DEF_ERROR_CODE(0, 0x0320)  //"Object already there"
 #define TSDB_CODE_MND_SDB_ERROR                 TAOS_DEF_ERROR_CODE(0, 0x0321)  //"Unexpected generic error in sdb"
 #define TSDB_CODE_MND_SDB_INVALID_TABLE_TYPE    TAOS_DEF_ERROR_CODE(0, 0x0322)  //"Invalid table type"

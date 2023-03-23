@@ -130,12 +130,18 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
     /// - connection_timeout: 60s.
     #[cfg(feature = "r2d2")]
     fn pool(self) -> Result<r2d2::Pool<Manager<Self>>, r2d2::Error> {
+        self.pool_builder().build(Manager::new(self))
+    }
+
+    /// [r2d2::Builder] generation from config.
+    #[cfg(feature = "r2d2")]
+    #[inline]
+    fn pool_builder(&self) -> r2d2::Builder<Manager<Self>> {
         r2d2::Builder::new()
             .max_lifetime(Some(std::time::Duration::from_secs(12 * 60 * 60)))
             .min_idle(Some(0))
-            .max_size(500)
+            .max_size(200)
             .connection_timeout(std::time::Duration::from_secs(60))
-            .build(Manager::new(self))
     }
 
     /// Build connection pool with [r2d2::Builder]

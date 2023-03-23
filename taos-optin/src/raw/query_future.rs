@@ -1,17 +1,20 @@
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
 
-use std::ffi::CStr;
+use std::ffi::{c_char, CStr};
 use std::future::Future;
 use std::os::raw::{c_int, c_void};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::into_c_str::IntoCStr;
 use crate::types::TAOS_RES;
 use crate::{RawRes, RawTaos};
-use taos_query::prelude::RawError;
+use taos_query::prelude::{Code, RawError};
+
+use super::ApiEntry;
 
 pub struct QueryFuture<'a> {
     raw: RawTaos,
@@ -21,11 +24,25 @@ pub struct QueryFuture<'a> {
 
 /// Shared state between the future and the waiting thread
 struct State {
-    result: *mut TAOS_RES,
-    code: i32,
+    api: Arc<ApiEntry>,
+    result: Option<Result<RawRes, RawError>>,
     done: bool,
     waiting: bool,
     time: Instant,
+    callback_cost: Option<Duration>,
+}
+
+impl State {
+    pub fn new(api: Arc<ApiEntry>) -> Self {
+        State {
+            api: api.clone(),
+            result: None,
+            done: false,
+            waiting: false,
+            time: Instant::now(),
+            callback_cost: None,
+        }
+    }
 }
 
 unsafe impl Send for State {}
@@ -39,14 +56,15 @@ impl<'a> Future for QueryFuture<'a> {
         let state = unsafe { &mut *self.state.get() };
 
         if state.done {
-            Poll::Ready(RawRes::from_ptr_with_code(
-                self.raw.c.clone(),
-                state.result,
-                state.code.into(),
-            ))
+            let d = state.time.elapsed();
+            log::debug!(
+                "Waken {:?} after callback received",
+                d - state.callback_cost.unwrap()
+            );
+            Poll::Ready(state.result.take().unwrap())
         } else {
             if state.waiting {
-                log::trace!("waken, still waiting for taos_query_a callback.");
+                log::trace!("It's waked but still waiting for taos_query_a callback.");
                 return Poll::Pending;
             } else {
                 state.waiting = true;
@@ -60,11 +78,32 @@ impl<'a> Future for QueryFuture<'a> {
                 let param = param as *mut (&UnsafeCell<State>, Waker);
                 let state = param.read();
                 let mut s = { &mut *state.0.get() };
-                log::debug!("Receive query callback in {:?}", s.time.elapsed());
+                let cost = s.time.elapsed();
+                log::debug!("Received query callback in {:?}", cost);
+                s.callback_cost.replace(cost);
+                if res.is_null() && code == 0 {
+                    unreachable!("query callback should be ok or error");
+                }
+                if (code & 0xffff) == 0x032C {
+                    log::warn!("Received 0x032C (Object is creating) error, retry");
+                    s.waiting = false;
+                    (s.api.taos_free_result)(res);
+                    state.1.wake();
+                    return;
+                }
 
-                s.result = res;
-                s.code = code;
+                let result = if code < 0 {
+                    let ptr = (s.api.taos_errstr)(res);
+                    (s.api.taos_free_result)(res);
+                    let err = RawError::new(code, CStr::from_ptr(ptr).to_string_lossy());
+                    Err(err)
+                } else {
+                    Ok(RawRes::from_ptr_unchecked(s.api.clone(), res))
+                };
+
+                s.result.replace(result);
                 s.done = true;
+                s.waiting = false;
                 state.1.wake();
             }
 
@@ -84,13 +123,7 @@ impl<'a> QueryFuture<'a> {
     /// Create a new `TimerFuture` which will complete after the provided
     /// timeout.
     pub fn new(taos: RawTaos, sql: impl IntoCStr<'a>) -> Self {
-        let state = UnsafeCell::new(State {
-            result: std::ptr::null_mut(),
-            code: 0,
-            done: false,
-            waiting: false,
-            time: Instant::now(),
-        });
+        let state = UnsafeCell::new(State::new(taos.c.clone()));
         let sql = sql.into_c_str();
         log::trace!("query with: {}", sql.to_str().unwrap_or("<...>"));
 
