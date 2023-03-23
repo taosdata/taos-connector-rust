@@ -260,6 +260,19 @@ impl AsyncQueryable for Taos {
         }
     }
 
+    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(&self, sql: T, req_id: u64) -> Result<Self::AsyncResultSet, Self::Error> {
+        log::trace!("Query with SQL: {}", sql.as_ref());
+        match &self.0 {
+            TaosInner::Native(taos) => todo!(),
+            TaosInner::Ws(taos) => taos
+                .query_with_req_id(sql, req_id)
+                .await
+                .map(ResultSetInner::Ws)
+                .map(ResultSet)
+                .map_err(Into::into),
+        }
+    }
+
     async fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
         loop {
             let ok: Result<(), Self::Error> = match &self.0 {
@@ -299,6 +312,18 @@ impl taos_query::Queryable for Taos {
                     .map_err(Into::into)
             }
             TaosInner::Ws(taos) => <taos_ws::Taos as taos_query::Queryable>::query(taos, sql)
+                .map(ResultSetInner::Ws)
+                .map(ResultSet)
+                .map_err(Into::into),
+        }
+    }
+
+    fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> Result<Self::ResultSet, Self::Error> {
+        match &self.0 {
+            TaosInner::Native(taos) => {
+                todo!()
+            }
+            TaosInner::Ws(taos) => <taos_ws::Taos as taos_query::Queryable>::query_with_req_id(taos, sql, req_id)
                 .map(ResultSetInner::Ws)
                 .map(ResultSet)
                 .map_err(Into::into),

@@ -145,6 +145,10 @@ impl taos_query::Queryable for Taos {
         self.raw.query(sql.as_ref()).map(ResultSet::new)
     }
 
+    fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> Result<Self::ResultSet, Self::Error> {
+        todo!()
+    }
+
     fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
         let raw = meta.as_raw_data_t();
         self.raw.write_raw_meta(raw)
@@ -173,6 +177,10 @@ impl taos_query::AsyncQueryable for Taos {
                 Ok(raw) => break Ok(ResultSet::new(raw)),
             }
         }
+    }
+
+    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(&self, sql: T, req_id: u64) -> Result<Self::AsyncResultSet, Self::Error> {
+        todo!()
     }
 
     async fn write_raw_meta(&self, meta: &taos_query::common::RawMeta) -> Result<(), Self::Error> {
