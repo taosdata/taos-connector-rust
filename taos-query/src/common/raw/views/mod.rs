@@ -569,7 +569,7 @@ impl ColumnView {
         }
     }
 
-    pub(crate) fn to_nulls_vec(&self) -> Vec<bool> {
+    pub(crate) fn _to_nulls_vec(&self) -> Vec<bool> {
         (0..self.len())
             .map(|i| unsafe { self.is_null_unchecked(i) })
             .collect()

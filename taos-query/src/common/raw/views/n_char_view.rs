@@ -1,9 +1,7 @@
 use std::{
-    borrow::Cow,
     cell::{RefCell, UnsafeCell},
     ffi::c_void,
     fmt::Debug,
-    ops::Deref,
     sync::Arc,
 };
 

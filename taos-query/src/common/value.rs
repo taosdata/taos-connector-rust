@@ -289,7 +289,7 @@ impl<'b> BorrowedValue<'b> {
             BorrowedValue::USmallInt(v) => Some(*v != 0),
             BorrowedValue::UInt(v) => Some(*v != 0),
             BorrowedValue::UBigInt(v) => Some(*v != 0),
-            BorrowedValue::Json(v) => Some(true),
+            BorrowedValue::Json(_) => Some(true),
             BorrowedValue::VarBinary(_) => todo!(),
             BorrowedValue::Decimal(_) => todo!(),
             BorrowedValue::Blob(_) => todo!(),

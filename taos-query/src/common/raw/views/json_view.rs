@@ -22,8 +22,7 @@ impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::Json
     }
-    fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        // Self::from_iter(iter.map(|v| v.to_str()))
+    fn from_borrowed_value_iter<'b>(_: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         todo!()
     }
 }

@@ -3,7 +3,6 @@ use crate::common::{BorrowedValue, Field, Precision, Ty, Value};
 use bytes::Bytes;
 use itertools::Itertools;
 
-use prettytable::format::LineSeparator;
 use serde::Deserialize;
 
 use std::{

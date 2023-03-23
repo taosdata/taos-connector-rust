@@ -145,7 +145,7 @@ impl taos_query::Queryable for Taos {
         self.raw.query(sql.as_ref()).map(ResultSet::new)
     }
 
-    fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> Result<Self::ResultSet, Self::Error> {
+    fn query_with_req_id<T: AsRef<str>>(&self, _sql: T, _req_id: u64) -> Result<Self::ResultSet, Self::Error> {
         todo!()
     }
 
@@ -179,7 +179,7 @@ impl taos_query::AsyncQueryable for Taos {
         }
     }
 
-    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(&self, sql: T, req_id: u64) -> Result<Self::AsyncResultSet, Self::Error> {
+    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(&self, _sql: T, _req_id: u64) -> Result<Self::AsyncResultSet, Self::Error> {
         todo!()
     }
 
