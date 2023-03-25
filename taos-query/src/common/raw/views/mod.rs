@@ -244,6 +244,16 @@ impl ColumnView {
     ) -> Self {
         ColumnView::NChar(NCharView::from_iter(iter))
     }
+    pub fn from_json<
+        S: AsRef<str>,
+        T: Into<Option<S>>,
+        I: ExactSizeIterator<Item = T>,
+        V: IntoIterator<Item = T, IntoIter = I>,
+    >(
+        iter: V,
+    ) -> Self {
+        ColumnView::Json(JsonView::from_iter(iter))
+    }
 
     #[inline]
     pub fn concat_iter<'b, 'a: 'b>(
