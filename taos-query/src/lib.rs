@@ -10,6 +10,7 @@ use std::{
     rc::Rc,
 };
 
+use async_trait::async_trait;
 pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
 pub use serde::de::value::Error as DeError;
 
@@ -174,6 +175,91 @@ impl<T: TBuilder> r2d2::ManageConnection for Manager<T> {
     }
 }
 
+/// A struct is `Connectable` when it can be build from a `Dsn`.
+#[async_trait]
+pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
+    type Target: Send + Sync + 'static;
+    type Error: std::error::Error + From<DsnError>;
+
+    /// Connect with dsn without connection checking.
+    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error>;
+
+    /// Get client version.
+    fn client_version() -> &'static str;
+
+    /// Get server version.
+    #[doc(hidden)]
+    async fn server_version(&self) -> Result<&str, Self::Error>;
+
+    /// Check if the server is an enterprise edition.
+    #[doc(hidden)]
+    async fn is_enterprise_edition(&self) -> bool {
+        false
+    }
+
+    /// Check a connection is still alive.
+    async fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error>;
+
+    /// Check if it's ready to connect.
+    ///
+    /// In most cases, just return true. `r2d2` will use this method to check if it's valid to create a connection.
+    /// Just check the address is ready to connect.
+    async fn ready(&self) -> bool;
+
+    /// Create a new connection from this struct.
+    async fn build(&self) -> Result<Self::Target, Self::Error>;
+
+    /// Build connection pool with [r2d2::Pool]
+    ///
+    /// Here we will use some default options with [r2d2::Builder]
+    ///
+    /// - max_lifetime: 12h,
+    /// - max_size: 500,
+    /// - min_idle: 2.
+    /// - connection_timeout: 60s.
+    #[cfg(feature = "deadpool")]
+    fn pool(
+        self,
+    ) -> Result<deadpool::managed::Pool<Manager<Self>>, deadpool::managed::BuildError<Self::Error>>
+    {
+        let config = self.default_pool_config();
+        self.pool_builder()
+            .config(config)
+            .runtime(deadpool::Runtime::Tokio1)
+            .build()
+    }
+
+    /// [deadpool::managed::PoolBuilder] generation from config.
+    #[cfg(feature = "deadpool")]
+    #[inline]
+    fn pool_builder(self) -> deadpool::managed::PoolBuilder<Manager<Self>> {
+        deadpool::managed::Pool::builder(Manager { manager: self })
+    }
+
+    #[cfg(feature = "deadpool")]
+    #[inline]
+    fn default_pool_config(&self) -> deadpool::managed::PoolConfig {
+        deadpool::managed::PoolConfig {
+            max_size: 500,
+            timeouts: deadpool::managed::Timeouts::default(),
+        }
+    }
+
+    /// Build connection pool with [r2d2::Builder]
+    #[cfg(feature = "deadpool")]
+    #[inline]
+    fn with_pool_config(
+        self,
+        config: deadpool::managed::PoolConfig,
+    ) -> Result<deadpool::managed::Pool<Manager<Self>>, deadpool::managed::BuildError<Self::Error>>
+    {
+        deadpool::managed::Pool::builder(Manager { manager: self })
+            .config(config)
+            .runtime(deadpool::Runtime::Tokio1)
+            .build()
+    }
+}
+
 /// This is how we manage connections.
 pub struct Manager<T> {
     manager: T,
@@ -236,11 +322,31 @@ impl<T: TBuilder> Manager<T> {
     }
 }
 
+#[cfg(all(feature = "r2d2", feature = "deadpool"))]
+compile_error!("Use only ONE of r2d2 or deadpool");
+
 #[cfg(feature = "r2d2")]
 pub type Pool<T> = r2d2::Pool<Manager<T>>;
 
+#[cfg(all(feature = "deadpool", not(feature = "r2d2")))]
+pub type Pool<T> = deadpool::managed::Pool<Manager<T>>;
+
 #[cfg(feature = "r2d2")]
 pub type PoolBuilder<T> = r2d2::Builder<Manager<T>>;
+
+#[async_trait]
+impl<T: AsyncTBuilder> deadpool::managed::Manager for Manager<T> {
+    type Type = <T as AsyncTBuilder>::Target;
+    type Error = <T as AsyncTBuilder>::Error;
+
+    async fn create(&self) -> Result<Self::Type, Self::Error> {
+        self.manager.build().await
+    }
+
+    async fn recycle(&self, _: &mut Self::Type) -> deadpool::managed::RecycleResult<Self::Error> {
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -384,7 +490,11 @@ mod tests {
             Ok(MyResultSet)
         }
 
-        fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> Result<Self::ResultSet, Self::Error> {
+        fn query_with_req_id<T: AsRef<str>>(
+            &self,
+            sql: T,
+            req_id: u64,
+        ) -> Result<Self::ResultSet, Self::Error> {
             todo!()
         }
 

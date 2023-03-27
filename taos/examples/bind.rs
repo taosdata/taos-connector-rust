@@ -4,7 +4,7 @@ use taos::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let taos = TaosBuilder::from_dsn("taos://")?.build()?;
+    let taos = TaosBuilder::from_dsn("taos://")?.build().await?;
     taos.exec_many([
         "drop database if exists test_bindable",
         "create database test_bindable keep 36500",

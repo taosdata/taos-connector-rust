@@ -108,9 +108,15 @@ impl taos_query::Queryable for Taos {
         block_in_place_or_global(<Self as AsyncQueryable>::query(self, sql))
     }
 
-    fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> Result<Self::ResultSet, Self::Error> {
+    fn query_with_req_id<T: AsRef<str>>(
+        &self,
+        sql: T,
+        req_id: u64,
+    ) -> Result<Self::ResultSet, Self::Error> {
         let sql = sql.as_ref();
-        block_in_place_or_global(<Self as AsyncQueryable>::query_with_req_id(self, sql, req_id))
+        block_in_place_or_global(<Self as AsyncQueryable>::query_with_req_id(
+            self, sql, req_id,
+        ))
     }
 
     fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
@@ -125,16 +131,14 @@ impl taos_query::Queryable for Taos {
 #[cfg(test)]
 mod tests {
 
-    use futures::TryStreamExt;
-    use taos_query::TBuilder;
-
     use crate::TaosBuilder;
+    use futures::TryStreamExt;
 
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
-        use taos_query::{Fetchable, Queryable};
+        use taos_query::prelude::sync::*;
         let client = TaosBuilder::from_dsn("taosws://localhost:6041/")?.build()?;
         let db = "ws_sync_json";
         assert_eq!(client.exec(format!("drop database if exists {db}"))?, 0);
@@ -244,7 +248,7 @@ mod tests {
 
     #[test]
     fn ws_sync() -> anyhow::Result<()> {
-        use taos_query::{Fetchable, Queryable};
+        use taos_query::prelude::sync::*;
         let client = TaosBuilder::from_dsn("ws://localhost:6041/")?.build()?;
         assert_eq!(client.exec("drop database if exists ws_sync")?, 0);
         assert_eq!(client.exec("create database ws_sync keep 36500")?, 0);
@@ -338,7 +342,7 @@ mod tests {
 
     #[test]
     fn ws_show_databases() -> anyhow::Result<()> {
-        use taos_query::{Fetchable, Queryable, TBuilder};
+        use taos_query::prelude::sync::*;
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos:///".to_string());
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
@@ -349,13 +353,13 @@ mod tests {
         Ok(())
     }
 
-    // #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test(flavor = "multi_thread")]
     async fn _ws_select_from_meters() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "info");
-        pretty_env_logger::init_timed();
-        use taos_query::{AsyncFetchable, AsyncQueryable};
+        // pretty_env_logger::init_timed();
+        use taos_query::prelude::*;
         let dsn = "taos+ws:///test";
-        let client = TaosBuilder::from_dsn(dsn)?.build()?;
+        let client = TaosBuilder::from_dsn(dsn)?.build().await?;
 
         let mut rs = client.query("select * from meters").await?;
 

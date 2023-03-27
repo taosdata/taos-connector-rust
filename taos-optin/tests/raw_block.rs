@@ -29,7 +29,7 @@ fn raw_block() -> anyhow::Result<()> {
 async fn raw_block_async() -> anyhow::Result<()> {
     use taos_optin::TaosBuilder;
     use taos_query::prelude::*;
-    let taos = TaosBuilder::from_dsn("taos:///")?.build()?;
+    let taos = TaosBuilder::from_dsn("taos:///")?.build().await?;
     let mut rs = taos.query("show databases").await?;
     if let Some(inner) = rs.blocks().try_next().await? {
         // let inner = unsafe { Raw::from_ptr(ptr, rows as _, field_count as _, precision) };

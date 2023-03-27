@@ -166,7 +166,7 @@ impl Drop for ResultSet {
             self.sender.queries.remove(&req_id);
         }
 
-        self.closer.take().unwrap().send(()).unwrap();
+        let _ = self.closer.take().unwrap().send(());
         // let _ = self
         //     .sender
         //     .blocking_send_only(WsSend::FreeResult(self.args));
@@ -699,6 +699,7 @@ impl WsTaos {
             WsRecvData::Query(resp) => resp,
             _ => unreachable!(),
         };
+        log::info!("resp: {resp:?}");
 
         let result_id = resp.id;
         //  for drop task.
@@ -719,6 +720,7 @@ impl WsTaos {
                 .zip(bytes)
                 .map(|((name, ty), bytes)| Field::new(name, ty, bytes))
                 .collect();
+            // log::info!("resp: {resp:?}");
             Ok(ResultSet {
                 fields: Some(fields),
                 fields_count: resp.fields_count,
@@ -997,7 +999,11 @@ impl AsyncQueryable for WsTaos {
         self.s_query(sql.as_ref()).await
     }
 
-    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(&self, sql: T, req_id: u64) -> StdResult<Self::AsyncResultSet, Self::Error> {
+    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
+        &self,
+        sql: T,
+        req_id: u64,
+    ) -> StdResult<Self::AsyncResultSet, Self::Error> {
         self.s_query_with_req_id(sql.as_ref(), req_id).await
     }
 
@@ -1068,7 +1074,7 @@ async fn test_client_cloud() -> anyhow::Result<()> {
     let client = WsTaos::from_dsn(dsn).await?;
     let mut rs = client.query("select * from test.meters limit 10").await?;
 
-    let values = rs.to_records()?;
+    let values = rs.to_records().await?;
     for row in values {
         use itertools::Itertools;
         println!(

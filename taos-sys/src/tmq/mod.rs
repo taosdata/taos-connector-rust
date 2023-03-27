@@ -16,7 +16,7 @@ use taos_query::{
         AsAsyncConsumer, AsConsumer, AsyncOnSync, IsAsyncData, IsMeta, IsOffset, MessageSet,
         Timeout, VGroupId,
     },
-    Dsn, IntoDsn, RawBlock, TBuilder,
+    Dsn, IntoDsn, RawBlock,
 };
 
 use crate::{conn::RawTaos, query::RawRes};
@@ -118,7 +118,7 @@ pub struct TmqBuilder {
 unsafe impl Send for TmqBuilder {}
 unsafe impl Sync for TmqBuilder {}
 
-impl TBuilder for TmqBuilder {
+impl taos_query::TBuilder for TmqBuilder {
     type Target = Consumer;
 
     type Error = RawError;
@@ -164,6 +164,53 @@ impl TBuilder for TmqBuilder {
     }
 
     fn server_version(&self) -> Result<&str, Self::Error> {
+        unimplemented!()
+    }
+}
+
+#[async_trait::async_trait]
+impl taos_query::AsyncTBuilder for TmqBuilder {
+    type Target = Consumer;
+
+    type Error = RawError;
+
+    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+        let mut dsn = dsn
+            .into_dsn()
+            .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
+        let conf = Conf::from_dsn(&dsn)?;
+        let timeout = if let Some(timeout) = dsn.params.remove("timeout") {
+            Timeout::from_str(&timeout).map_err(RawError::from_any)?
+        } else {
+            Timeout::from_millis(500)
+        };
+        Ok(Self { dsn, conf, timeout })
+    }
+
+    fn client_version() -> &'static str {
+        RawTaos::version()
+    }
+
+    async fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error> {
+        self.build().await.map(|_| ())
+    }
+
+    async fn ready(&self) -> bool {
+        true
+    }
+
+    async fn build(&self) -> Result<Self::Target, Self::Error> {
+        self.conf.build().map(|tmq| Consumer {
+            tmq,
+            timeout: self.timeout,
+        })
+    }
+
+    async fn is_enterprise_edition(&self) -> bool {
+        unimplemented!()
+    }
+
+    async fn server_version(&self) -> Result<&str, Self::Error> {
         unimplemented!()
     }
 }
@@ -489,7 +536,6 @@ impl AsAsyncConsumer for Consumer {
         };
         log::trace!("waiting for next message");
         res
-
     }
 
     async fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
@@ -913,7 +959,7 @@ mod tests {
     async fn test_ts2035() -> anyhow::Result<()> {
         use taos_query::prelude::*;
 
-        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
+        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
 
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -937,7 +983,7 @@ mod tests {
         .await?;
 
         // target
-        let target = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
+        let target = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
         target
             .exec_many([
                 "drop database if exists sys_ts2035_target",
@@ -950,7 +996,7 @@ mod tests {
         let builder = TmqBuilder::from_dsn(
             "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false",
         )?;
-        let mut consumer = builder.build()?;
+        let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_ts2035"]).await?;
 
         consumer
@@ -1010,7 +1056,7 @@ mod tests {
         use taos_query::prelude::*;
         // pretty_env_logger::init_timed();
 
-        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
+        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
 
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1034,7 +1080,7 @@ mod tests {
         .await?;
 
         // target
-        let target = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
+        let target = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
         target
             .exec_many([
                 "drop database if exists sys_delete_meta_target",
@@ -1047,7 +1093,7 @@ mod tests {
         let builder = TmqBuilder::from_dsn(
             "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false",
         )?;
-        let mut consumer = builder.build()?;
+        let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_delete_meta"]).await?;
 
         consumer
@@ -1119,7 +1165,7 @@ mod tests {
             .filter_level(log::LevelFilter::Debug)
             .init();
 
-        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
+        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
         taos.exec_many([
             "drop topic if exists sys_tmq_meta",
             "drop database if exists sys_tmq_meta",
@@ -1199,7 +1245,7 @@ mod tests {
         .await?;
 
         let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms")?;
-        let mut consumer = builder.build()?;
+        let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_tmq_meta"]).await?;
 
         consumer

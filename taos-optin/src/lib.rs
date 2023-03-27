@@ -10,7 +10,7 @@ use raw::{ApiEntry, RawRes, RawTaos, SharedState};
 // use taos_error::Error as RawError;
 use taos_query::{
     prelude::{Field, Precision, RawError, RawMeta},
-    DsnError, RawBlock, TBuilder,
+    DsnError, RawBlock,
 };
 
 mod version {
@@ -145,7 +145,11 @@ impl taos_query::Queryable for Taos {
         self.raw.query(sql.as_ref()).map(ResultSet::new)
     }
 
-    fn query_with_req_id<T: AsRef<str>>(&self, _sql: T, _req_id: u64) -> Result<Self::ResultSet, Self::Error> {
+    fn query_with_req_id<T: AsRef<str>>(
+        &self,
+        _sql: T,
+        _req_id: u64,
+    ) -> Result<Self::ResultSet, Self::Error> {
         todo!()
     }
 
@@ -179,7 +183,11 @@ impl taos_query::AsyncQueryable for Taos {
         }
     }
 
-    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(&self, _sql: T, _req_id: u64) -> Result<Self::AsyncResultSet, Self::Error> {
+    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
+        &self,
+        _sql: T,
+        _req_id: u64,
+    ) -> Result<Self::AsyncResultSet, Self::Error> {
         todo!()
     }
 
@@ -239,7 +247,15 @@ pub struct TaosBuilder {
 }
 impl TaosBuilder {
     fn inner_connection(&self) -> Result<&Taos, Error> {
-        self.inner_conn.get_or_try_init(|| self.build())
+        if let Some(taos) = self.inner_conn.get() {
+            Ok(taos)
+        } else {
+            let ptr = self.lib.connect(&self.auth);
+
+            let raw = RawTaos::new(self.lib.clone(), ptr)?;
+            let taos = Ok(Taos { raw });
+            self.inner_conn.get_or_try_init(|| taos)
+        }
     }
 }
 
@@ -303,7 +319,7 @@ impl Display for Error {
     }
 }
 
-impl TBuilder for TaosBuilder {
+impl taos_query::TBuilder for TaosBuilder {
     type Target = Taos;
 
     type Error = Error;
@@ -413,6 +429,132 @@ impl TBuilder for TaosBuilder {
 
             let grant: Option<(String, (), String)> =
                 Queryable::query_one(taos, "show grants").unwrap_or_default();
+
+            if let Some((edition, _, expired)) = grant {
+                match (edition.trim(), expired.trim()) {
+                    ("cloud" | "official" | "trial", "false") => true,
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl taos_query::AsyncTBuilder for TaosBuilder {
+    type Target = Taos;
+
+    type Error = Error;
+
+    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+        let mut dsn = dsn.into_dsn()?;
+
+        let lib = if let Some(path) = dsn.params.remove("libraryPath") {
+            log::trace!("using library path: {path}");
+            ApiEntry::dlopen(path).unwrap()
+        } else {
+            log::trace!("using default library of taos");
+            ApiEntry::default()
+        };
+        let mut auth = Auth::default();
+        // let mut builder = TaosBuilder::default();
+        if let Some(addr) = dsn.addresses.first() {
+            if let Some(host) = &addr.host {
+                auth.host.replace(CString::new(host.as_str()).unwrap());
+            }
+            if let Some(port) = addr.port {
+                auth.port = port;
+            }
+        }
+        if let Some(db) = dsn.subject.as_deref() {
+            auth.db.replace(CString::new(db).unwrap());
+        }
+        if let Some(user) = dsn.username.as_deref() {
+            auth.user.replace(CString::new(user).unwrap());
+        }
+        if let Some(pass) = dsn.password.as_deref() {
+            auth.pass.replace(CString::new(pass).unwrap());
+        }
+        let params = &dsn.params;
+        if let Some(dir) = params.get("configDir") {
+            lib.options(types::TSDB_OPTION::ConfigDir, dir);
+        }
+
+        lib.options(types::TSDB_OPTION::ShellActivityTimer, "3600");
+
+        Ok(Self {
+            // dsn,
+            auth,
+            lib: Arc::new(lib),
+            inner_conn: OnceCell::new(),
+            server_version: OnceCell::new(),
+        })
+    }
+
+    fn client_version() -> &'static str {
+        "dynamic"
+    }
+
+    async fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
+        conn.raw.query("select 1")?;
+        Ok(())
+    }
+
+    async fn ready(&self) -> bool {
+        true
+    }
+
+    async fn build(&self) -> Result<Self::Target, Self::Error> {
+        let ptr = self.lib.connect(&self.auth);
+
+        let raw = RawTaos::new(self.lib.clone(), ptr)?;
+        Ok(Taos { raw })
+    }
+
+    async fn server_version(&self) -> Result<&str, Self::Error> {
+        if let Some(v) = self.server_version.get() {
+            Ok(v.as_str())
+        } else {
+            let conn = self.inner_connection()?;
+            use taos_query::prelude::AsyncQueryable;
+            let v: String = AsyncQueryable::query_one(conn, "select server_version()")
+                .await?
+                .unwrap();
+            Ok(match self.server_version.try_insert(v) {
+                Ok(v) => v.as_str(),
+                Err((v, _)) => v.as_str(),
+            })
+        }
+    }
+
+    async fn is_enterprise_edition(&self) -> bool {
+        if let Ok(taos) = self.inner_connection() {
+            use taos_query::prelude::AsyncQueryable;
+            let grant: Option<(String, bool)> = AsyncQueryable::query_one(
+                taos,
+                "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+            )
+            .await
+            .unwrap_or_default();
+
+            if let Some((edition, expired)) = grant {
+                if expired {
+                    return false;
+                }
+                return match edition.as_str() {
+                    "cloud" | "official" | "trial" => true,
+                    _ => false,
+                };
+            }
+
+            let grant: Option<(String, (), String)> =
+                AsyncQueryable::query_one(taos, "show grants")
+                    .await
+                    .unwrap_or_default();
 
             if let Some((edition, _, expired)) = grant {
                 match (edition.trim(), expired.trim()) {
@@ -605,7 +747,7 @@ mod tests {
     async fn long_query_async() -> Result<(), Error> {
         use taos_query::prelude::*;
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
-        let taos = builder.build()?;
+        let taos = builder.build().await?;
         let mut set = taos.query("select * from test.meters limit 100000").await?;
 
         set.blocks()
@@ -635,7 +777,7 @@ mod tests {
     async fn show_databases_async() -> Result<(), Error> {
         use taos_query::prelude::*;
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
-        let taos = builder.build()?;
+        let taos = builder.build().await?;
         let mut set = taos.query("show databases").await?;
 
         let mut rows = set.rows();
@@ -683,7 +825,7 @@ mod tests {
     async fn show_databases_async_v2() -> Result<(), Error> {
         use taos_query::prelude::*;
         let builder = TaosBuilder::from_dsn(DSN_V2)?;
-        let taos = builder.build()?;
+        let taos = builder.build().await?;
         let mut set = taos.query("show databases").await?;
 
         let mut rows = set.rows();

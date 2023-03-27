@@ -4,7 +4,7 @@ use std::fmt::{Debug, Display};
 use once_cell::sync::OnceCell;
 
 use taos_query::prelude::Code;
-use taos_query::{DsnError, IntoDsn, TBuilder};
+use taos_query::{DsnError, IntoDsn};
 
 mod stmt;
 pub use stmt::Stmt;
@@ -73,7 +73,7 @@ impl From<query::asyn::Error> for Error {
     }
 }
 
-impl TBuilder for TaosBuilder {
+impl taos_query::TBuilder for TaosBuilder {
     type Target = Taos;
 
     type Error = Error;
@@ -148,6 +148,99 @@ impl TBuilder for TaosBuilder {
 
             let grant: Option<(String, (), String)> =
                 Queryable::query_one(&taos, "show grants").unwrap_or_default();
+
+            if let Some((edition, _, expired)) = grant {
+                match (edition.trim(), expired.trim()) {
+                    ("cloud" | "official" | "trial", "false") => true,
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl taos_query::AsyncTBuilder for TaosBuilder {
+    type Target = Taos;
+
+    type Error = Error;
+
+    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+        Ok(Self::from_dsn(dsn.into_dsn()?)?)
+    }
+
+    fn client_version() -> &'static str {
+        "0"
+    }
+    async fn ping(&self, taos: &mut Self::Target) -> Result<(), Self::Error> {
+        taos_query::AsyncQueryable::exec(taos, "SELECT 1")
+            .await
+            .map_err(|e| Error {
+                code: e.errno(),
+                source: e.into(),
+            })
+            .map(|_| ())
+    }
+
+    async fn ready(&self) -> bool {
+        true
+    }
+
+    async fn build(&self) -> Result<Self::Target, Self::Error> {
+        Ok(Taos {
+            dsn: self.clone(),
+            async_client: OnceCell::new(),
+        })
+    }
+
+    async fn server_version(&self) -> Result<&str, Self::Error> {
+        if let Some(v) = self.server_version.get() {
+            Ok(v.as_str())
+        } else {
+            let conn = <Self as taos_query::AsyncTBuilder>::build(&self).await?;
+            use taos_query::prelude::AsyncQueryable;
+            let v: String = AsyncQueryable::query_one(&conn, "select server_version()")
+                .await?
+                .unwrap();
+            Ok(match self.server_version.try_insert(v) {
+                Ok(v) => v.as_str(),
+                Err((v, _)) => v.as_str(),
+            })
+        }
+    }
+    async fn is_enterprise_edition(&self) -> bool {
+        if self.addr.matches(".cloud.tdengine.com").next().is_some() {
+            // self.server_version().or_else(|| => );
+            return true;
+        }
+
+        if let Ok(taos) = self.build().await {
+            use taos_query::prelude::AsyncQueryable;
+            let grant: Option<(String, bool)> = AsyncQueryable::query_one(
+                &taos,
+                "select version, (expire_time < now) from information_schema.ins_cluster",
+            )
+            .await
+            .unwrap_or_default();
+
+            if let Some((edition, expired)) = grant {
+                if expired {
+                    return false;
+                }
+                return match edition.trim() {
+                    "cloud" | "official" | "trial" => true,
+                    _ => false,
+                };
+            }
+
+            let grant: Option<(String, (), String)> =
+                AsyncQueryable::query_one(&taos, "show grants")
+                    .await
+                    .unwrap_or_default();
 
             if let Some((edition, _, expired)) = grant {
                 match (edition.trim(), expired.trim()) {

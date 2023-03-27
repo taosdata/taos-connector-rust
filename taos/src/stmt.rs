@@ -189,7 +189,7 @@ mod tests {
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://".to_string());
         let dsn = Dsn::from_str(&dsn)?;
-        let taos = TaosBuilder::from_dsn(dsn)?.build()?;
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
         taos.exec_many([
             "drop database if exists test_bindable2",
             "create database test_bindable2 keep 36500",

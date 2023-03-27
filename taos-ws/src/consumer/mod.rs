@@ -126,6 +126,41 @@ impl TBuilder for TmqBuilder {
     }
 }
 
+#[async_trait::async_trait]
+impl taos_query::AsyncTBuilder for TmqBuilder {
+    type Target = Consumer;
+
+    type Error = Error;
+
+    fn from_dsn<D: IntoDsn>(dsn: D) -> StdResult<Self, Self::Error> {
+        Self::new(dsn)
+    }
+
+    fn client_version() -> &'static str {
+        "0"
+    }
+
+    async fn ping(&self, _: &mut Self::Target) -> StdResult<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn ready(&self) -> bool {
+        true
+    }
+
+    async fn build(&self) -> StdResult<Self::Target, Self::Error> {
+        self.build_consumer().await
+    }
+
+    async fn server_version(&self) -> StdResult<&str, Self::Error> {
+        todo!()
+    }
+
+    async fn is_enterprise_edition(&self) -> bool {
+        todo!()
+    }
+}
+
 struct WsMessageBase {
     sender: WsTmqSender,
     message_id: MessageId,
@@ -827,7 +862,7 @@ mod tests {
         //     .filter_level(log::LevelFilter::Debug)
         //     .init();
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
+        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build().await?;
         taos.exec_many([
             "drop topic if exists ws_tmq_meta",
             "drop database if exists ws_tmq_meta",

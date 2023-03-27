@@ -12,7 +12,7 @@ use taos_query::{
         AsAsyncConsumer, AsConsumer, AsyncOnSync, IsAsyncData, IsMeta, IsOffset, MessageSet,
         Timeout, VGroupId,
     },
-    IntoDsn, RawBlock, TBuilder,
+    IntoDsn, RawBlock,
 };
 
 use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t, TaosBuilder};
@@ -36,7 +36,7 @@ pub struct TmqBuilder {
 unsafe impl Send for TmqBuilder {}
 unsafe impl Sync for TmqBuilder {}
 
-impl TBuilder for TmqBuilder {
+impl taos_query::TBuilder for TmqBuilder {
     type Target = Consumer;
 
     type Error = RawError;
@@ -97,6 +97,69 @@ impl TBuilder for TmqBuilder {
     fn server_version(&self) -> Result<&str, Self::Error> {
         self.builder
             .server_version()
+            .map_err(|err| RawError::from_any(err))
+    }
+}
+
+#[async_trait::async_trait]
+impl taos_query::AsyncTBuilder for TmqBuilder {
+    type Target = Consumer;
+
+    type Error = RawError;
+
+    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+        let mut dsn = dsn
+            .into_dsn()
+            .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
+        let lib = if let Some(path) = dsn.params.remove("libraryPath") {
+            ApiEntry::dlopen(path).unwrap()
+        } else {
+            ApiEntry::default()
+        };
+        let conf = Conf::from_dsn(&dsn, lib.tmq.unwrap().conf_api)?;
+        let timeout = if let Some(timeout) = dsn.params.remove("timeout") {
+            Timeout::from_str(&timeout).map_err(RawError::from_any)?
+        } else {
+            Timeout::from_millis(500)
+        };
+        Ok(Self {
+            builder: TaosBuilder::from_dsn(&dsn).map_err(RawError::from_any)?,
+            // dsn,
+            lib: Arc::new(lib),
+            conf,
+            timeout,
+        })
+    }
+
+    fn client_version() -> &'static str {
+        ""
+    }
+
+    async fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error> {
+        self.build().await.map(|_| ())
+    }
+
+    async fn ready(&self) -> bool {
+        true
+    }
+
+    async fn build(&self) -> Result<Self::Target, Self::Error> {
+        let ptr = self.conf.build()?;
+        let tmq = RawTmq {
+            c: self.lib.clone(),
+            tmq: self.lib.tmq.unwrap(),
+            ptr,
+        };
+        Ok(Consumer {
+            tmq,
+            timeout: self.timeout,
+        })
+    }
+
+    async fn server_version(&self) -> Result<&str, Self::Error> {
+        self.builder
+            .server_version()
+            .await
             .map_err(|err| RawError::from_any(err))
     }
 }
@@ -842,7 +905,7 @@ mod tests {
         //     .filter_level(log::LevelFilter::Debug)
         //     .init();
 
-        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
+        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
         taos.exec_many([
             "drop topic if exists sys_tmq_meta",
             "drop database if exists sys_tmq_meta",
@@ -922,7 +985,7 @@ mod tests {
         .await?;
 
         let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms")?;
-        let mut consumer = builder.build()?;
+        let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_tmq_meta"]).await?;
 
         consumer

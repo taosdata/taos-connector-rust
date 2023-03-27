@@ -4,11 +4,6 @@ mod _priv {
         Precision, RawBlock, RawMeta, TagWithValue, Ty, Value,
     };
     pub use crate::util::{Inlinable, InlinableRead, InlinableWrite};
-    pub use crate::TBuilder;
-    #[cfg(feature = "r2d2")]
-    pub use crate::{Pool, PoolBuilder};
-    #[cfg(feature = "r2d2")]
-    pub use r2d2::ManageConnection;
 
     pub use itertools::Itertools;
     pub use mdsn::{Dsn, DsnError, IntoDsn};
@@ -18,12 +13,20 @@ mod _priv {
 }
 
 pub use crate::tmq::{AsAsyncConsumer, IsAsyncData, IsAsyncMeta};
+pub use crate::AsyncTBuilder;
+#[cfg(feature = "deadpool")]
+pub use crate::Pool;
 pub use _priv::*;
 pub use futures::stream::{Stream, StreamExt, TryStreamExt};
 pub use r#async::*;
 pub use tokio;
 
 pub mod sync {
+    pub use crate::TBuilder;
+    #[cfg(feature = "r2d2")]
+    pub use crate::{Pool, PoolBuilder};
+    #[cfg(feature = "r2d2")]
+    pub use r2d2::ManageConnection;
     use std::borrow::Cow;
 
     pub use super::_priv::*;
@@ -186,7 +189,11 @@ pub mod sync {
 
         fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error>;
 
-        fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> Result<Self::ResultSet, Self::Error>;
+        fn query_with_req_id<T: AsRef<str>>(
+            &self,
+            sql: T,
+            req_id: u64,
+        ) -> Result<Self::ResultSet, Self::Error>;
 
         fn exec<T: AsRef<str>>(&self, sql: T) -> Result<usize, Self::Error> {
             self.query(sql).map(|res| res.affected_rows() as _)
@@ -415,6 +422,7 @@ mod r#async {
     }
 
     #[cfg(feature = "async")]
+    #[async_trait]
     pub trait AsyncFetchable: Sized + Send + Sync {
         type Error: From<taos_error::Error> + Send + Sync;
 
@@ -458,10 +466,9 @@ mod r#async {
         }
 
         /// Records is a row-based 2-dimension matrix of values.
-        fn to_records(&mut self) -> Result<Vec<Vec<Value>>, Self::Error> {
-            futures::executor::block_on_stream(Box::pin(self.rows()))
-                .map_ok(|block| block.into_values())
-                .try_collect()
+        async fn to_records(&mut self) -> Result<Vec<Vec<Value>>, Self::Error> {
+            let future = self.rows().map_ok(RowView::into_values).try_collect();
+            future.await
         }
 
         fn deserialize<R>(&mut self) -> AsyncDeserialized<'_, Self, R>

@@ -40,7 +40,7 @@ pub struct TaosBuilder(TaosBuilderInner);
 pub struct Taos(pub(super) TaosInner);
 pub struct ResultSet(ResultSetInner);
 
-impl TBuilder for TaosBuilder {
+impl taos_query::TBuilder for TaosBuilder {
     type Target = Taos;
 
     type Error = Error;
@@ -55,12 +55,13 @@ impl TBuilder for TaosBuilder {
             dsn.protocol = Some("ws".to_string());
         }
         // dbg!(&dsn);
+        use taos_query::TBuilder;
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(
                 TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
             )),
             ("taos" | "tmq", None) => Ok(Self(TaosBuilderInner::Native(
-                crate::sys::TaosBuilder::from_dsn(dsn)?,
+                <crate::sys::TaosBuilder as TBuilder>::from_dsn(dsn)?,
             ))),
             ("taos" | "tmq", Some("ws" | "wss" | "http" | "https")) => Ok(Self(
                 TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
@@ -76,11 +77,15 @@ impl TBuilder for TaosBuilder {
     fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
         match &self.0 {
             TaosBuilderInner::Native(b) => match &mut conn.0 {
-                TaosInner::Native(taos) => Ok(b.ping(taos)?),
+                TaosInner::Native(taos) => Ok(
+                    <sys::TaosBuilder as taos_query::TBuilder>::ping(b, taos)?,
+                ),
                 _ => unreachable!(),
             },
             TaosBuilderInner::Ws(b) => match &mut conn.0 {
-                TaosInner::Ws(taos) => Ok(b.ping(taos)?),
+                TaosInner::Ws(taos) => Ok(<taos_ws::TaosBuilder as taos_query::TBuilder>::ping(
+                    b, taos,
+                )?),
                 _ => unreachable!(),
             },
         }
@@ -88,29 +93,124 @@ impl TBuilder for TaosBuilder {
 
     fn ready(&self) -> bool {
         match &self.0 {
-            TaosBuilderInner::Native(b) => b.ready(),
-            TaosBuilderInner::Ws(b) => b.ready(),
+            TaosBuilderInner::Native(b) => {
+                <sys::TaosBuilder as taos_query::TBuilder>::ready(b)
+            }
+            TaosBuilderInner::Ws(b) => <taos_ws::TaosBuilder as taos_query::TBuilder>::ready(b),
         }
     }
 
     fn build(&self) -> Result<Self::Target, Self::Error> {
         match &self.0 {
-            TaosBuilderInner::Native(b) => Ok(Taos(TaosInner::Native(b.build()?))),
-            TaosBuilderInner::Ws(b) => Ok(Taos(TaosInner::Ws(b.build()?))),
+            TaosBuilderInner::Native(b) => Ok(Taos(TaosInner::Native(
+                <sys::TaosBuilder as taos_query::TBuilder>::build(b)?,
+            ))),
+            TaosBuilderInner::Ws(b) => Ok(Taos(TaosInner::Ws(
+                <taos_ws::TaosBuilder as taos_query::TBuilder>::build(b)?,
+            ))),
         }
     }
 
     fn server_version(&self) -> Result<&str, Self::Error> {
         match &self.0 {
-            TaosBuilderInner::Native(b) => Ok(b.server_version()?),
-            TaosBuilderInner::Ws(b) => Ok(b.server_version()?),
+            TaosBuilderInner::Native(b) => {
+                Ok(<sys::TaosBuilder as taos_query::TBuilder>::server_version(b)?)
+            }
+            TaosBuilderInner::Ws(b) => {
+                Ok(<taos_ws::TaosBuilder as taos_query::TBuilder>::server_version(b)?)
+            }
         }
     }
 
     fn is_enterprise_edition(&self) -> bool {
         match &self.0 {
-            TaosBuilderInner::Native(b) => b.is_enterprise_edition(),
-            TaosBuilderInner::Ws(b) => b.is_enterprise_edition(),
+            TaosBuilderInner::Native(b) => {
+                <sys::TaosBuilder as taos_query::TBuilder>::is_enterprise_edition(b)
+            }
+            TaosBuilderInner::Ws(b) => {
+                <taos_ws::TaosBuilder as taos_query::TBuilder>::is_enterprise_edition(b)
+            }
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl taos_query::AsyncTBuilder for TaosBuilder {
+    type Target = Taos;
+
+    type Error = Error;
+
+    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+        let mut dsn = dsn.into_dsn()?;
+        if dsn.params.contains_key("token") {
+            dsn.protocol = Some("ws".to_string());
+        }
+        // dbg!(&dsn);
+        use taos_query::TBuilder;
+        match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
+            ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(
+                TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
+            )),
+            ("taos" | "tmq", None) => Ok(Self(TaosBuilderInner::Native(
+                <crate::sys::TaosBuilder as TBuilder>::from_dsn(dsn)?,
+            ))),
+            ("taos" | "tmq", Some("ws" | "wss" | "http" | "https")) => Ok(Self(
+                TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
+            )),
+            (driver, _) => Err(DsnError::InvalidDriver(driver.to_string()).into()),
+        }
+    }
+
+    fn client_version() -> &'static str {
+        ""
+    }
+
+    async fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
+        match &self.0 {
+            TaosBuilderInner::Native(b) => match &mut conn.0 {
+                TaosInner::Native(taos) => Ok(b.ping(taos).await?),
+                _ => unreachable!(),
+            },
+            TaosBuilderInner::Ws(b) => match &mut conn.0 {
+                TaosInner::Ws(taos) => Ok(b.ping(taos).await?),
+                _ => unreachable!(),
+            },
+        }
+    }
+
+    async fn ready(&self) -> bool {
+        match &self.0 {
+            TaosBuilderInner::Native(b) => {
+                <sys::TaosBuilder as taos_query::AsyncTBuilder>::ready(b).await
+            }
+            TaosBuilderInner::Ws(b) => b.ready().await,
+        }
+    }
+
+    async fn build(&self) -> Result<Self::Target, Self::Error> {
+        match &self.0 {
+            TaosBuilderInner::Native(b) => Ok(Taos(TaosInner::Native(b.build().await?))),
+            TaosBuilderInner::Ws(b) => Ok(Taos(TaosInner::Ws(b.build().await?))),
+        }
+    }
+
+    async fn server_version(&self) -> Result<&str, Self::Error> {
+        match &self.0 {
+            TaosBuilderInner::Native(b) => {
+                Ok(<sys::TaosBuilder as taos_query::AsyncTBuilder>::server_version(b).await?)
+            }
+            TaosBuilderInner::Ws(b) => {
+                Ok(<taos_ws::TaosBuilder as taos_query::AsyncTBuilder>::server_version(b).await?)
+            }
+        }
+    }
+
+    async fn is_enterprise_edition(&self) -> bool {
+        match &self.0 {
+            TaosBuilderInner::Native(b) => {
+                <sys::TaosBuilder as taos_query::AsyncTBuilder>::is_enterprise_edition(b).await
+            }
+            TaosBuilderInner::Ws(b) => b.is_enterprise_edition().await,
         }
     }
 }
@@ -260,7 +360,11 @@ impl AsyncQueryable for Taos {
         }
     }
 
-    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(&self, sql: T, req_id: u64) -> Result<Self::AsyncResultSet, Self::Error> {
+    async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
+        &self,
+        sql: T,
+        req_id: u64,
+    ) -> Result<Self::AsyncResultSet, Self::Error> {
         log::trace!("Query with SQL: {}", sql.as_ref());
         match &self.0 {
             TaosInner::Native(_) => todo!(),
@@ -318,15 +422,21 @@ impl taos_query::Queryable for Taos {
         }
     }
 
-    fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> Result<Self::ResultSet, Self::Error> {
+    fn query_with_req_id<T: AsRef<str>>(
+        &self,
+        sql: T,
+        req_id: u64,
+    ) -> Result<Self::ResultSet, Self::Error> {
         match &self.0 {
             TaosInner::Native(_) => {
                 todo!()
             }
-            TaosInner::Ws(taos) => <taos_ws::Taos as taos_query::Queryable>::query_with_req_id(taos, sql, req_id)
-                .map(ResultSetInner::Ws)
-                .map(ResultSet)
-                .map_err(Into::into),
+            TaosInner::Ws(taos) => {
+                <taos_ws::Taos as taos_query::Queryable>::query_with_req_id(taos, sql, req_id)
+                    .map(ResultSetInner::Ws)
+                    .map(ResultSet)
+                    .map_err(Into::into)
+            }
         }
     }
 

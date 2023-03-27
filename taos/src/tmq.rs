@@ -1,6 +1,6 @@
 use taos_query::{
     block_in_place_or_global,
-    prelude::{AsAsyncConsumer, RawMeta, TBuilder, Timeout},
+    prelude::{AsAsyncConsumer, RawMeta, Timeout},
     RawBlock,
 };
 
@@ -37,7 +37,7 @@ pub type MessageSet<Meta, Data> = taos_query::tmq::MessageSet<Meta, Data>;
 pub struct TmqBuilder(TmqBuilderInner);
 pub struct Consumer(ConsumerInner);
 
-impl TBuilder for TmqBuilder {
+impl taos_query::TBuilder for TmqBuilder {
     type Target = Consumer;
 
     type Error = super::Error;
@@ -100,6 +100,74 @@ impl TBuilder for TmqBuilder {
 
     fn is_enterprise_edition(&self) -> bool {
         todo!()
+    }
+}
+
+#[async_trait::async_trait]
+impl taos_query::AsyncTBuilder for TmqBuilder {
+    type Target = Consumer;
+
+    type Error = super::Error;
+    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+        let dsn = dsn.into_dsn()?;
+        // dbg!(&dsn);
+        match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
+            ("ws" | "wss" | "http" | "https" | "taosws", _) => Ok(Self(TmqBuilderInner::Ws(
+                taos_ws::consumer::TmqBuilder::from_dsn(dsn)?,
+            ))),
+            ("taos" | "tmq", None) => Ok(Self(TmqBuilderInner::Native(
+                crate::sys::TmqBuilder::from_dsn(dsn)?,
+            ))),
+            ("taos" | "tmq", Some("ws" | "wss" | "http" | "https")) => Ok(Self(
+                TmqBuilderInner::Ws(taos_ws::consumer::TmqBuilder::from_dsn(dsn)?),
+            )),
+            (driver, _) => Err(taos_query::DsnError::InvalidDriver(driver.to_string()).into()),
+        }
+    }
+
+    fn client_version() -> &'static str {
+        ""
+    }
+
+    async fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
+        match &self.0 {
+            TmqBuilderInner::Native(b) => match &mut conn.0 {
+                ConsumerInner::Native(taos) => Ok(b.ping(taos).await?),
+                _ => unreachable!(),
+            },
+            TmqBuilderInner::Ws(b) => match &mut conn.0 {
+                ConsumerInner::Ws(taos) => Ok(b.ping(taos).await?),
+                _ => unreachable!(),
+            },
+        }
+    }
+
+    async fn ready(&self) -> bool {
+        match &self.0 {
+            TmqBuilderInner::Native(b) => b.ready().await,
+            TmqBuilderInner::Ws(b) => b.ready().await,
+        }
+    }
+
+    async fn build(&self) -> Result<Self::Target, Self::Error> {
+        match &self.0 {
+            TmqBuilderInner::Native(b) => Ok(Consumer(ConsumerInner::Native(b.build().await?))),
+            TmqBuilderInner::Ws(b) => Ok(Consumer(ConsumerInner::Ws(b.build().await?))),
+        }
+    }
+
+    async fn server_version(&self) -> Result<&str, Self::Error> {
+        match &self.0 {
+            TmqBuilderInner::Native(b) => Ok(b.server_version().await?),
+            TmqBuilderInner::Ws(b) => Ok(b.server_version().await?),
+        }
+    }
+
+    async fn is_enterprise_edition(&self) -> bool {
+        match &self.0 {
+            TmqBuilderInner::Native(b) => b.is_enterprise_edition().await,
+            TmqBuilderInner::Ws(b) => b.is_enterprise_edition().await,
+        }
     }
 }
 
@@ -355,7 +423,7 @@ mod tests {
         dsn.set("client.id", "test");
         dsn.set("auto.offset.reset", "earliest");
 
-        let _tmq = TmqBuilder::from_dsn(dsn)?.build()?;
+        let _tmq = TmqBuilder::from_dsn(dsn)?;
         Ok(())
     }
 
@@ -368,7 +436,7 @@ mod tests {
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let mut dsn = Dsn::from_str(&dsn)?;
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec_many([
             "drop topic if exists ws_abc1",
             "drop database if exists ws_abc1",
@@ -446,7 +514,7 @@ mod tests {
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
         let builder = TmqBuilder::from_dsn(&dsn)?;
-        let mut consumer = builder.build()?;
+        let mut consumer = builder.build().await?;
         consumer.subscribe(["ws_abc1"]).await?;
 
         {
