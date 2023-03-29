@@ -699,7 +699,7 @@ impl WsTaos {
             WsRecvData::Query(resp) => resp,
             _ => unreachable!(),
         };
-        log::info!("resp: {resp:?}");
+        log::trace!("resp: {resp:?}");
 
         let result_id = resp.id;
         //  for drop task.
