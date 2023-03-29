@@ -20,7 +20,7 @@ chrono = { version = "0.4", features = ["serde"] }
 derive_more = "0.99"
 itertools = "0.10.3"
 log = "0.4"
-mdsn = { path = "../mdsn", version = "0.2" }
+mdsn = { path = "../mdsn", version = "0.2.10" }
 num_enum = "0.5.7"
 once_cell = "1.12.0"
 parse_duration = "2.1"

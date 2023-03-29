@@ -14,7 +14,7 @@ repository.workspace = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
-mdsn = { path = "../mdsn", version = "0.2"}
+mdsn = { path = "../mdsn", version = "0.2.10"}
 thiserror = "1.0"
 
 [build-dependencies]
