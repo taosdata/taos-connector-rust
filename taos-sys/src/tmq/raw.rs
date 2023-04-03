@@ -235,8 +235,7 @@ pub(super) mod conf {
         }
 
         pub(crate) fn enable_heartbeat_background(mut self) -> Self {
-            self.set("enable.heartbeat.background", "true")
-                .expect("set heartbeat at background");
+            let _ = self.set("enable.heartbeat.background", "true");
             self
         }
 

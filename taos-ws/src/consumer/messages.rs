@@ -51,6 +51,10 @@ pub struct TmqInit {
     pub group_id: String,
     pub client_id: Option<String>,
     pub offset_reset: Option<String>,
+    pub snapshot_enable: String,
+    pub with_table_name: String,
+    pub auto_commit: String,
+    pub auto_commit_interval_ms: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
