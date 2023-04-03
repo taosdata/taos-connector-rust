@@ -132,8 +132,6 @@ impl taos_query::Queryable for Taos {
 mod tests {
 
     use crate::TaosBuilder;
-    use futures::TryStreamExt;
-
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");

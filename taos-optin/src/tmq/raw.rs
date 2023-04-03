@@ -71,7 +71,6 @@ pub(super) mod tmq {
             rx.recv().unwrap()
         }
 
-
         pub fn poll_timeout(&self, timeout: i64) -> Option<RawRes> {
             log::trace!("poll next message with timeout {}", timeout);
             let res = unsafe { (self.tmq.tmq_consumer_poll)(self.as_ptr(), timeout) };

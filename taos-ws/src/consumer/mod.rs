@@ -503,6 +503,46 @@ impl TmqBuilder {
             .ok_or_else(|| DsnError::RequireParam("group.id".to_string()))?;
         let client_id = dsn.params.get("client.id").map(ToString::to_string);
         let offset_reset = dsn.params.get("auto.offset.reset").map(ToString::to_string);
+        let auto_commit = dsn
+            .params
+            .get("enable.auto.commit")
+            .map(|s| {
+                if s.is_empty() {
+                    "false".to_string()
+                } else {
+                    s.to_string()
+                }
+            })
+            .unwrap_or("false".to_string());
+        let auto_commit_interval_ms = dsn.params.get("auto.commit.interval.ms").and_then(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        });
+        let snapshot_enable = dsn
+            .params
+            .get("experimental.snapshot.enable")
+            .and_then(|s| {
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
+            })
+            .unwrap_or("true".to_string());
+        let with_table_name = dsn
+            .params
+            .get("with.table.name")
+            .and_then(|s| {
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
+            })
+            .unwrap_or("true".to_string());
         let timeout = if let Some(timeout) = dsn.get("timeout") {
             Timeout::from_str(&timeout).map_err(RawError::from_any)?
         } else {
@@ -512,6 +552,10 @@ impl TmqBuilder {
             group_id,
             client_id,
             offset_reset,
+            auto_commit,
+            auto_commit_interval_ms,
+            snapshot_enable,
+            with_table_name,
         };
 
         Ok(Self {
@@ -862,7 +906,9 @@ mod tests {
         //     .filter_level(log::LevelFilter::Debug)
         //     .init();
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build().await?;
+        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
+            .build()
+            .await?;
         taos.exec_many([
             "drop topic if exists ws_tmq_meta",
             "drop database if exists ws_tmq_meta",
@@ -1154,7 +1200,6 @@ mod tests {
         ])?;
         Ok(())
     }
-
 
     #[test]
     fn test_ws_tmq_metadata() -> anyhow::Result<()> {

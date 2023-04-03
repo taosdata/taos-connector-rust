@@ -1,6 +1,6 @@
 use std::{ffi::c_void, fmt::Debug};
 
-use super::{Offsets, IsColumnView};
+use super::{IsColumnView, Offsets};
 use crate::{
     common::{BorrowedValue, Ty},
     prelude::InlinableWrite,
