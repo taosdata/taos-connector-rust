@@ -22,7 +22,6 @@ pub type taos_async_fetch_cb =
 pub type taos_async_query_cb =
     unsafe extern "C" fn(param: *mut c_void, res: *mut c_void, code: c_int);
 
-
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 #[allow(dead_code)]
@@ -576,7 +575,6 @@ impl<'b> From<&'b ColumnView> for DropMultiBind {
     }
 }
 
-
 pub struct DropMultiBind(TaosMultiBind);
 
 impl DropMultiBind {
@@ -591,7 +589,9 @@ impl Drop for DropMultiBind {
         if ty == Ty::VarChar || ty == Ty::NChar {
             let len = self.0.buffer_length * self.0.num as usize;
             unsafe { Vec::from_raw_parts(self.0.buffer as *mut u8, len, len as _) };
-            unsafe { Vec::from_raw_parts(self.0.length as *mut i32, self.0.num as _, self.0.num as _) };
+            unsafe {
+                Vec::from_raw_parts(self.0.length as *mut i32, self.0.num as _, self.0.num as _)
+            };
         }
     }
 }

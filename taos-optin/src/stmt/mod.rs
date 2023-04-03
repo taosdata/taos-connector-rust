@@ -13,7 +13,7 @@ use std::{
 use itertools::Itertools;
 // use taos_error::{Code, Error};
 use taos_query::prelude::{
-    sync::{Bindable, Queryable, RawError as Error },
+    sync::{Bindable, Queryable, RawError as Error},
     Code,
 };
 
@@ -62,7 +62,8 @@ impl Bindable<super::Taos> for Stmt {
         params: &[taos_query::common::ColumnView],
     ) -> Result<&mut Self, Self::Error> {
         let params: Vec<DropMultiBind> = params.iter().map(|c| c.into()).collect_vec();
-        self.raw.bind_param_batch(unsafe { std::mem::transmute(params.as_slice()) })?;
+        self.raw
+            .bind_param_batch(unsafe { std::mem::transmute(params.as_slice()) })?;
         Ok(self)
     }
 

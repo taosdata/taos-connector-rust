@@ -2,7 +2,7 @@ use std::ffi::c_void;
 
 use crate::common::{BorrowedValue, Ty};
 
-use super::{NullBits, NullsIter, IsColumnView};
+use super::{IsColumnView, NullBits, NullsIter};
 
 use bytes::Bytes;
 

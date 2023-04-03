@@ -77,9 +77,9 @@ impl taos_query::TBuilder for TaosBuilder {
     fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
         match &self.0 {
             TaosBuilderInner::Native(b) => match &mut conn.0 {
-                TaosInner::Native(taos) => Ok(
-                    <sys::TaosBuilder as taos_query::TBuilder>::ping(b, taos)?,
-                ),
+                TaosInner::Native(taos) => {
+                    Ok(<sys::TaosBuilder as taos_query::TBuilder>::ping(b, taos)?)
+                }
                 _ => unreachable!(),
             },
             TaosBuilderInner::Ws(b) => match &mut conn.0 {
@@ -93,9 +93,7 @@ impl taos_query::TBuilder for TaosBuilder {
 
     fn ready(&self) -> bool {
         match &self.0 {
-            TaosBuilderInner::Native(b) => {
-                <sys::TaosBuilder as taos_query::TBuilder>::ready(b)
-            }
+            TaosBuilderInner::Native(b) => <sys::TaosBuilder as taos_query::TBuilder>::ready(b),
             TaosBuilderInner::Ws(b) => <taos_ws::TaosBuilder as taos_query::TBuilder>::ready(b),
         }
     }
@@ -113,9 +111,9 @@ impl taos_query::TBuilder for TaosBuilder {
 
     fn server_version(&self) -> Result<&str, Self::Error> {
         match &self.0 {
-            TaosBuilderInner::Native(b) => {
-                Ok(<sys::TaosBuilder as taos_query::TBuilder>::server_version(b)?)
-            }
+            TaosBuilderInner::Native(b) => Ok(
+                <sys::TaosBuilder as taos_query::TBuilder>::server_version(b)?,
+            ),
             TaosBuilderInner::Ws(b) => {
                 Ok(<taos_ws::TaosBuilder as taos_query::TBuilder>::server_version(b)?)
             }
