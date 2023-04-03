@@ -492,8 +492,8 @@ mod tests {
 
         fn query_with_req_id<T: AsRef<str>>(
             &self,
-            sql: T,
-            req_id: u64,
+            _sql: T,
+            _req_id: u64,
         ) -> Result<Self::ResultSet, Self::Error> {
             todo!()
         }

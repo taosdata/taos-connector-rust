@@ -88,7 +88,7 @@ impl UIntView {
         if self.nulls.is_null_unchecked(row) {
             None
         } else {
-            Some(*self.get_raw_at(row))
+            Some(self.get_raw_at(row).read_unaligned())
         }
     }
 

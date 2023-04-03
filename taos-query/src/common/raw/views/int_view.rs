@@ -88,7 +88,7 @@ impl IntView {
         if self.nulls.is_null_unchecked(row) {
             None
         } else {
-            Some(*self.get_unchecked_inner(row))
+            Some(self.get_unchecked_inner(row).read_unaligned())
         }
     }
 

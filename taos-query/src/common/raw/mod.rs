@@ -8,12 +8,12 @@ use serde::Deserialize;
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
     ffi::c_void,
+    fmt::Debug,
     fmt::Display,
     ops::Deref,
     ptr::NonNull,
     sync::Arc,
 };
-use std::{fmt::Debug, mem::transmute};
 
 pub mod layout;
 pub mod meta;
@@ -183,38 +183,49 @@ impl RawBlock {
         use bytes::BufMut;
         debug_assert_eq!(fields.len(), lengths.len());
 
-        const fn bool_is_null(v: *const bool) -> bool {
-            unsafe { *(v as *const u8) == 0x02 }
+        #[inline(always)]
+        fn bool_is_null(v: *const bool) -> bool {
+            unsafe { (v as *const u8).read_unaligned() == 0x02 }
         }
-        const fn tiny_int_is_null(v: *const i8) -> bool {
-            unsafe { *(v as *const u8) == 0x80 }
+        #[inline(always)]
+        fn tiny_int_is_null(v: *const i8) -> bool {
+            unsafe { (v as *const u8).read_unaligned() == 0x80 }
         }
-        const fn small_int_is_null(v: *const i16) -> bool {
-            unsafe { *(v as *const u16) == 0x8000 }
+        #[inline(always)]
+        fn small_int_is_null(v: *const i16) -> bool {
+            unsafe { (v as *const u16).read_unaligned() == 0x8000 }
         }
-        const fn int_is_null(v: *const i32) -> bool {
-            unsafe { *(v as *const u32) == 0x80000000 }
+        #[inline(always)]
+        fn int_is_null(v: *const i32) -> bool {
+            unsafe { (v as *const u32).read_unaligned() == 0x80000000 }
         }
-        const fn big_int_is_null(v: *const i64) -> bool {
-            unsafe { *(v as *const u64) == 0x8000000000000000 }
+        #[inline(always)]
+        fn big_int_is_null(v: *const i64) -> bool {
+            unsafe { (v as *const u64).read_unaligned() == 0x8000000000000000 }
         }
-        const fn u_tiny_int_is_null(v: *const u8) -> bool {
-            unsafe { *(v as *const u8) == 0xFF }
+        #[inline(always)]
+        fn u_tiny_int_is_null(v: *const u8) -> bool {
+            unsafe { (v as *const u8).read_unaligned() == 0xFF }
         }
-        const fn u_small_int_is_null(v: *const u16) -> bool {
-            unsafe { *(v as *const u16) == 0xFFFF }
+        #[inline(always)]
+        fn u_small_int_is_null(v: *const u16) -> bool {
+            unsafe { (v as *const u16).read_unaligned() == 0xFFFF }
         }
-        const fn u_int_is_null(v: *const u32) -> bool {
-            unsafe { *(v as *const u32) == 0xFFFFFFFF }
+        #[inline(always)]
+        fn u_int_is_null(v: *const u32) -> bool {
+            unsafe { (v as *const u32).read_unaligned() == 0xFFFFFFFF }
         }
-        const fn u_big_int_is_null(v: *const u64) -> bool {
-            unsafe { *(v as *const u64) == 0xFFFFFFFFFFFFFFFF }
+        #[inline(always)]
+        fn u_big_int_is_null(v: *const u64) -> bool {
+            unsafe { (v as *const u64).read_unaligned() == 0xFFFFFFFFFFFFFFFF }
         }
-        const fn float_is_null(v: *const f32) -> bool {
-            unsafe { *(v as *const u32) == 0x7FF00000 }
+        #[inline(always)]
+        fn float_is_null(v: *const f32) -> bool {
+            unsafe { (v as *const u32).read_unaligned() == 0x7FF00000 }
         }
-        const fn double_is_null(v: *const f64) -> bool {
-            unsafe { *(v as *const u64) == 0x7FFFFF0000000000 }
+        #[inline(always)]
+        fn double_is_null(v: *const f64) -> bool {
+            unsafe { (v as *const u64).read_unaligned() == 0x7FFFFF0000000000 }
         }
 
         // const BOOL_NULL: u8 = 0x2;
@@ -317,7 +328,7 @@ impl RawBlock {
                     let offsets = Offsets::from_offsets((0..rows).into_iter().map(|row| unsafe {
                         let offset = row as i32 * *length as i32;
                         let ptr = data_ptr.offset(offset as isize);
-                        let len = *transmute::<*const u8, *const u16>(ptr);
+                        let len = (ptr as *const u16).read_unaligned();
                         if len == 1 && *ptr.offset(2) == 0xFF {
                             -1
                         } else {
@@ -336,13 +347,6 @@ impl RawBlock {
                     offset += rows * std::mem::size_of::<i64>() as usize;
                     // byte slice from start to end: `[start, end)`.
                     let data = bytes.slice(start..offset);
-                    // value as target type
-                    // let value_slice = unsafe {
-                    //     std::slice::from_raw_parts(
-                    //         transmute::<*const u8, *const i64>(data.as_ptr()),
-                    //         rows,
-                    //     )
-                    // };
                     let nulls = NullBits::from_iter((0..rows).map(|row| unsafe {
                         big_int_is_null(
                             &(data
@@ -355,10 +359,6 @@ impl RawBlock {
                     // Set data lengths for v3-compatible block.
                     data_lengths[i] = data.len() as u32;
 
-                    // generate nulls bitmap.
-                    // let nulls =
-                    //     NullsMut::from_bools(value_slice.iter().map(|b| big_int_is_null(b as _)))
-                    //         .into_nulls();
                     // build column view
                     let column = ColumnView::Timestamp(TimestampView {
                         nulls,
@@ -376,8 +376,9 @@ impl RawBlock {
                     let offsets = Offsets::from_offsets((0..rows).into_iter().map(|row| unsafe {
                         let offset = row as i32 * *length as i32;
                         let ptr = data_ptr.offset(offset as isize);
-                        let len = *transmute::<*const u8, *const u16>(ptr);
-                        if len == 4 && *(ptr.offset(2) as *const u32) == 0xFFFFFFFF {
+                        let len = (ptr as *const u16).read_unaligned();
+                        if len == 4 && (ptr.offset(2) as *const u32).read_unaligned() == 0xFFFFFFFF
+                        {
                             -1
                         } else {
                             offset
@@ -403,8 +404,9 @@ impl RawBlock {
                     let offsets = Offsets::from_offsets((0..rows).into_iter().map(|row| unsafe {
                         let offset = row as i32 * *length as i32;
                         let ptr = data_ptr.offset(offset as isize);
-                        let len = *transmute::<*const u8, *const u16>(ptr);
-                        if len == 4 && *(ptr.offset(2) as *const u32) == 0xFFFFFFFF {
+                        let len = (ptr as *const u16).read_unaligned();
+                        if len == 4 && (ptr.offset(2) as *const u32).read_unaligned() == 0xFFFFFFFF
+                        {
                             -1
                         } else {
                             offset
