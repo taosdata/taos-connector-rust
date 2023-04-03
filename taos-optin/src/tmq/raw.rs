@@ -192,23 +192,6 @@ pub(super) mod conf {
             conf.with(dsn.params.iter().filter(|(k, _)| k.contains('.')))
         }
 
-        // pub(crate) fn with_group_id(mut self, id: &str) -> Self {
-        //     self.set("group.id", id)
-        //         .expect("set group.id should always be ok");
-        //     self
-        // }
-        // pub(crate) fn with_client_id(mut self, id: &str) -> Self {
-        //     self.set("client.id", id)
-        //         .expect("set group.id should always be ok");
-        //     self
-        // }
-
-        // pub(crate) fn enable_auto_commit(mut self) -> Self {
-        //     log::trace!("[tmq-conf] enable auto commit");
-        //     self.set("enable.auto.commit", "true")
-        //         .expect("set group.id should always be ok");
-        //     self
-        // }
         pub fn disable_auto_commit(mut self) -> Self {
             self.set("enable.auto.commit", "false")
                 .expect("set group.id should always be ok");
@@ -217,8 +200,7 @@ pub(super) mod conf {
 
         pub(crate) fn enable_heartbeat_background(mut self) -> Self {
             log::trace!("[tmq-conf] enable heartbeat in the background");
-            self.set("enable.heartbeat.background", "true")
-                .expect("set heartbeat at background");
+            let _ = self.set("enable.heartbeat.background", "true");
             self
         }
 
