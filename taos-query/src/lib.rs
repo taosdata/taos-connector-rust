@@ -209,14 +209,10 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
     /// Create a new connection from this struct.
     async fn build(&self) -> Result<Self::Target, Self::Error>;
 
-    /// Build connection pool with [r2d2::Pool]
+    /// Build connection pool with [deadpool::managed::Pool].
     ///
-    /// Here we will use some default options with [r2d2::Builder]
-    ///
-    /// - max_lifetime: 12h,
-    /// - max_size: 500,
-    /// - min_idle: 2.
-    /// - connection_timeout: 60s.
+    /// Default:
+    /// - max_size: 500
     #[cfg(feature = "deadpool")]
     fn pool(
         self,
@@ -245,7 +241,7 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
         }
     }
 
-    /// Build connection pool with [r2d2::Builder]
+    /// Build connection pool with [deadpool::managed::PoolBuilder]
     #[cfg(feature = "deadpool")]
     #[inline]
     fn with_pool_config(

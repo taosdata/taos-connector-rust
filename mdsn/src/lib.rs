@@ -278,7 +278,7 @@ impl Dsn {
 #[grammar = "dsn.pest"]
 struct DsnParser;
 
-/// Error caused by [pest] DSN parser.
+/// Error caused by [pest](https://docs.rs/pest) DSN parser.
 #[derive(Debug, Error)]
 pub enum DsnError {
     #[cfg(feature = "pest")]

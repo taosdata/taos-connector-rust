@@ -33,7 +33,7 @@ use serde::de::Visitor;
 #[repr(u8)]
 #[non_exhaustive]
 pub enum Ty {
-    /// Null is only a value, not a *real* type, a nullable data type could be represented as [Option<T>] in Rust.
+    /// Null is only a value, not a *real* type, a nullable data type could be represented as [`Option<T>`] in Rust.
     ///
     /// A data type should never be Null.
     #[doc(hidden)]
@@ -64,14 +64,14 @@ pub enum Ty {
     /// But can be deserialized to [chrono::naive::NaiveDateTime] or [String].
     Timestamp = 9, // 9
     /// 8: VarChar, `binary` type in sql for TDengine 2.x, `varchar` for TDengine 3.x,
-    ///  will be represented in Rust as [&str] or [String]. This type of data be deserialized to [Vec<u8>].
+    ///  will be represented in Rust as [&str] or [String]. This type of data be deserialized to [`Vec<u8>`].
     VarChar = 8,
     /// 10: NChar, `nchar` type in sql, the recommended way in TDengine to store utf-8 [String].
     NChar = 10, // 10
     /// 15: Json, `json` tag in sql, will be represented as [serde_json::value::Value] in Rust.
     Json = 15, // 15
 
-    /// 16, VarBinary, `varbinary` in sql, [Vec<u8>] in Rust, which is supported since TDengine 3.0.
+    /// 16, VarBinary, `varbinary` in sql, [`Vec<u8>`] in Rust, which will be supported since TDengine 3.1.
     #[doc(hidden)]
     VarBinary, // 16
     /// 17, Not supported now.
