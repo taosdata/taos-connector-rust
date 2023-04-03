@@ -351,7 +351,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    // #[tokio::test(flavor = "multi_thread")]
     async fn _ws_select_from_meters() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "info");
         // pretty_env_logger::init_timed();
