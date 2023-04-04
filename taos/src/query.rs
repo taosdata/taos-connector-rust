@@ -526,6 +526,34 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn query_with_req_id_ws() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taosws://localhost:6041".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        taos.exec_many(["drop database if exists db", "create database db", "use db"])?;
+
+        taos.exec(
+            "create table st(ts timestamp, c1 TINYINT UNSIGNED) tags(utntag TINYINT UNSIGNED)",
+        )?;
+        taos.exec("create table t1 using st tags(0)")?;
+        taos.exec("insert into t1 values(1640000000000, 0)")?;
+        taos.exec("create table t2 using st tags(254)")?;
+        taos.exec("insert into t2 values(1640000000000, 254)")?;
+        taos.exec("create table t3 using st tags(NULL)")?;
+        taos.exec("insert into t3 values(1640000000000, NULL)")?;
+
+        let mut rs = taos.query_with_req_id("select * from st where utntag is null", 123)?;
+        for row in rs.rows() {
+            let row = row?;
+            let values = row.into_values();
+            assert_eq!(values[1], Value::Null(Ty::UTinyInt));
+            assert_eq!(values[2], Value::Null(Ty::UTinyInt));
+        }
+        Ok(())
+    }
+
     fn sync_json_test(dsn: &str, db: &str) -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
 
