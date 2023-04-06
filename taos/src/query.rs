@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn query_with_req_id_ws() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        let dsn = std::env::var("TEST_DSN").unwrap_or("taosws://localhost:6041".to_string());
+        let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
         taos.exec_many(["drop database if exists db", "create database db", "use db"])?;
