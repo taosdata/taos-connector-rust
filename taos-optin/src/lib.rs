@@ -150,7 +150,8 @@ impl taos_query::Queryable for Taos {
         _sql: T,
         _req_id: u64,
     ) -> Result<Self::ResultSet, Self::Error> {
-        todo!()
+        log::debug!("Query with SQL: {}", sql.as_ref());
+        self.raw.query_with_req_id(sql.as_ref(), req_id).map(ResultSet::new)
     }
 
     fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
