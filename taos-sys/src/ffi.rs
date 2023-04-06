@@ -186,6 +186,9 @@ extern "C" {
     pub fn taos_fetch_raw_block_a(res: *mut TAOS_RES, fp: taos_async_fetch_cb, param: *mut c_void);
 
     pub fn taos_get_raw_block(taos: *mut TAOS_RES) -> *mut c_void;
+
+    pub fn taos_query_with_reqid(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> *mut TAOS_RES;
+
 }
 
 #[c_cfg(taos_result_block)]
