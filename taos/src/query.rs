@@ -486,15 +486,84 @@ mod tests {
     }
 
     #[test]
+    fn test_server_version() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        println!("server version: {:?}", builder.server_version()?);
+        assert!(builder.server_version().is_ok());
+
+        Ok(())
+    }
+
+
+    #[test]
+    fn test_server_is_enterprise_edition() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        println!("is enterprise edition: {:?}", builder.is_enterprise_edition());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_server_version_ws() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        println!("server version: {:?}", builder.server_version()?);
+        assert!(builder.server_version().is_ok());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_server_is_enterprise_edition_ws() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        println!("is enterprise edition: {:?}", builder.is_enterprise_edition());
+
+        Ok(())
+    }
+
+    #[test]
     fn sync_json_test_native() -> anyhow::Result<()> {
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://".to_string());
         sync_json_test(&dsn, "taos")
     }
+
     #[cfg(feature = "ws")]
     #[test]
     fn sync_json_test_ws() -> anyhow::Result<()> {
         sync_json_test("ws://", "ws")
     }
+
     #[cfg(feature = "ws")]
     #[test]
     fn sync_json_test_taosws() -> anyhow::Result<()> {
