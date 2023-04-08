@@ -491,7 +491,7 @@ mod tests {
             _sql: T,
             _req_id: u64,
         ) -> Result<Self::ResultSet, Self::Error> {
-            todo!()
+            Ok(MyResultSet)
         }
 
         fn exec<T: AsRef<str>>(&self, _sql: T) -> Result<usize, Self::Error> {
