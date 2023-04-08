@@ -144,7 +144,8 @@ impl AsyncQueryable for Taos {
         sql: T,
         req_id: u64,
     ) -> Result<Self::AsyncResultSet, Self::Error> {
-        todo!()
+        log::debug!("Async query with SQL: {}", sql.as_ref());
+        self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
     }
 
     async fn write_raw_meta(&self, meta: &taos_query::common::RawMeta) -> Result<(), Self::Error> {
@@ -164,8 +165,11 @@ impl AsyncQueryable for Taos {
 ///
 /// ```rust
 /// use taos_sys::sync::*;
+/// use std::str::FromStr;
 /// fn main() -> anyhow::Result<()> {
-///     let builder = TaosBuilder::from_dsn("taos://localhost:6030")?;
+///     let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+///     let dsn = Dsn::from_str(&dsn)?;
+///     let builder = TaosBuilder::from_dsn(&dsn)?;
 ///     let taos = builder.build()?;
 ///     let mut query = taos.query("show databases")?;
 ///     for row in query.rows() {
