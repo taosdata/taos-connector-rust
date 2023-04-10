@@ -95,12 +95,23 @@ impl RawTaos {
     pub fn query_with_req_id<'a, S: IntoCStr<'a>>(&self, sql: S, req_id: u64) -> Result<ResultSet, Error> {
         let sql = sql.into_c_str();
         log::trace!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
-        RawRes::from_ptr(
+        #[cfg(taos_v3)]
+        return RawRes::from_ptr(
             unsafe {
                 taos_query_with_reqid(
                     self.as_ptr(),
                     sql.as_ptr(),
                     req_id
+                )
+            }
+        )
+            .map(ResultSet::new);
+        #[cfg(not(taos_v3))]
+        RawRes::from_ptr(
+            unsafe {
+                taos_query(
+                    self.as_ptr(),
+                    sql.as_ptr()
                 )
             }
         )
