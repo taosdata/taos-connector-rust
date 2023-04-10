@@ -60,6 +60,12 @@ impl<'a> Future for QueryFuture<'a> {
             );
             Poll::Ready(state.result.take().unwrap())
         } else {
+            if state.waiting {
+                log::trace!("It's waked but still waiting for taos_query_a callback.");
+                return Poll::Pending;
+            } else {
+                state.waiting = true;
+            }
             #[no_mangle]
             unsafe extern "C" fn taos_sys_async_query_callback(
                 param: *mut c_void,
@@ -78,6 +84,7 @@ impl<'a> Future for QueryFuture<'a> {
                 if (code & 0xffff) == 0x032C {
                     log::warn!("Received 0x032C (Object is creating) error, retry");
                     s.waiting = false;
+                    s.done = false;
                     taos_free_result(res);
                     state.1.wake();
                     return;
