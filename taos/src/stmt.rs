@@ -4,11 +4,14 @@ use taos_query::stmt::Bindable;
 use crate::sys::Stmt as NativeStmt;
 use taos_query::prelude::ColumnView;
 use taos_ws::Stmt as WsStmt;
+
+#[derive(Debug)]
 enum StmtInner {
     Native(NativeStmt),
     Ws(WsStmt),
 }
 
+#[derive(Debug)]
 pub struct Stmt(StmtInner);
 
 impl Bindable<super::Taos> for Stmt {
