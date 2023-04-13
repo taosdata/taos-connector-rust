@@ -669,14 +669,26 @@ mod async_tests {
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build().await?;
-        
 
-        // let client = WsTaos::from_dsn(dsn).await?;
+        let db = "test_schemaless_ws";
+
+        client.exec(format!("drop database if exists {db}")).await?;
+        
+        client.exec(format!("create database if not exists {db}")).await?;
 
         let data = "measurement,host=host1 field1=2i,field2=2.0 1577837300000\nmeasurement,host=host1 field1=2i,field2=2.0 1577837400000\nmeasurement,host=host1 field1=2i,field2=2.0 1577837500000\nmeasurement,host=host1 field1=2i,field2=2.0 1577837600000".to_string();
 
-        let sml_data = SmlData { data };
+        let sml_data = SmlData::new(
+            db.to_string(),
+            1,
+            "ms".to_string(),
+            data,
+            1000,
+            199,
+        );
         assert_eq!(client.put(&sml_data).await?, ());
+
+        client.exec(format!("drop database if exists {db}")).await?;
 
         Ok(())
     }

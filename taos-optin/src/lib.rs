@@ -199,7 +199,7 @@ impl taos_query::AsyncQueryable for Taos {
         self.raw.write_raw_block(block)
     }
 
-    async fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
+    async fn put(&self, _data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
         todo!()
     }
 }

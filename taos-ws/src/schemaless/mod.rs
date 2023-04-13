@@ -410,14 +410,14 @@ impl WsTaos {
         })
     }
 
-    pub async fn s_put(&self, schemaless_data: &SmlData) -> Result<()> {
+    pub async fn s_put(&self, sml: &SmlData) -> Result<()> {
         let action = WsSend::Insert {
-            db: "test_schemaless_ws".to_string(),
-            protocol: 1,
-            precision: "ms".to_string(),
-            data: schemaless_data.data().to_string(),
-            ttl: 1000,
-            req_id: 10,
+            db: sml.db().to_string(),
+            protocol: sml.protocol(),
+            precision: sml.precision().to_string(),
+            data: sml.data().to_string(),
+            ttl: sml.ttl(),
+            req_id: sml.req_id(),
         };
         log::debug!("put send: {:?}", action);
         let req = self.sender.send_recv(action).await?;

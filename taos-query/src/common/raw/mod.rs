@@ -970,18 +970,63 @@ impl crate::prelude::sync::Inlinable for RawBlock {
 }
 
 pub struct SmlData {
-    pub data: String,
+    db: String,
+    protocol: u8,
+    precision: String,
+    data: String,
+    ttl: u64,
+    req_id: u64,
 }
 
 impl SmlData {
-    pub fn new(data: String) -> Self {
-        Self { data }
+    pub fn new(
+        db: String,
+        protocol: u8,
+        precision: String,
+        data: String,
+        ttl: u64,
+        req_id: u64,
+    ) -> Self {
+        Self {
+            db,
+            protocol,
+            precision,
+            data,
+            ttl,
+            req_id,
+        }
+    }
+
+    #[inline]
+    pub fn db(&self) -> &str {
+        self.db.as_ref()
+    }
+
+    #[inline]
+    pub fn protocol(&self) -> u8 {
+        self.protocol
+    }
+
+    #[inline]
+    pub fn precision(&self) -> &str {
+        self.precision.as_ref()
     }
 
     #[inline]
     pub fn data(&self) -> &str {
         self.data.as_ref()
     }
+
+    #[inline]
+    pub fn ttl(&self) -> u64 {
+        self.ttl
+    }
+
+    #[inline]
+    pub fn req_id(&self) -> u64 {
+        self.req_id
+    }
+    
 }
 
 #[async_trait::async_trait]
