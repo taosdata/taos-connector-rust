@@ -1239,7 +1239,7 @@ impl RawRes {
     pub(crate) fn tmq_get_json_meta(&self) -> CString {
         unsafe {
             let meta = (self.c.tmq.as_ref().unwrap().tmq_get_json_meta)(self.as_ptr());
-            CString::from_raw(meta)
+            CStr::from_ptr(meta).to_owned()
         }
     }
 
