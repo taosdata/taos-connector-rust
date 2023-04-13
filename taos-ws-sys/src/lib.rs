@@ -593,6 +593,9 @@ pub unsafe extern "C" fn ws_take_timing(rs: *mut WS_RES) -> i64 {
 #[no_mangle]
 /// Always use this to ensure that the query is executed correctly.
 pub unsafe extern "C" fn ws_errno(rs: *mut WS_RES) -> i32 {
+    if rs.is_null() {
+        return C_ERRNO.into()
+    }
     match (rs as *mut WsMaybeError<()>)
         .as_ref()
         .and_then(|s| s.errno())
@@ -605,6 +608,13 @@ pub unsafe extern "C" fn ws_errno(rs: *mut WS_RES) -> i32 {
 #[no_mangle]
 /// Use this method to get a formatted error string when query errno is not 0.
 pub unsafe extern "C" fn ws_errstr(rs: *mut WS_RES) -> *const c_char {
+    if rs.is_null() {
+        if C_ERRNO.success() {
+            return EMPTY.as_ptr();
+        } else {
+            return C_ERROR_CONTAINER.as_ptr() as _;
+        }
+    }
     match (rs as *mut WsMaybeError<()>)
         .as_ref()
         .and_then(|s| s.errstr())
