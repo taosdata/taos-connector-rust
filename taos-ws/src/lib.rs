@@ -19,6 +19,9 @@ pub use query::Taos;
 
 use query::WsConnReq;
 
+pub mod schemaless;
+
+
 #[derive(Debug, Clone)]
 pub enum WsAuth {
     Token(String),
@@ -106,6 +109,7 @@ impl taos_query::TBuilder for TaosBuilder {
         Ok(Taos {
             dsn: self.clone(),
             async_client: OnceCell::new(),
+            async_sml: OnceCell::new(),
         })
     }
 
@@ -194,6 +198,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         Ok(Taos {
             dsn: self.clone(),
             async_client: OnceCell::new(),
+            async_sml: OnceCell::new(),
         })
     }
 
@@ -334,6 +339,15 @@ impl TaosBuilder {
         }
     }
 
+    pub(crate) fn to_schemaless_url(&self) -> String {
+        match &self.auth {
+            WsAuth::Token(token) => {
+                format!("{}://{}/rest/schemaless?token={}", self.scheme, self.addr, token)
+            }
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/schemaless", self.scheme, self.addr),
+        }
+    }
+
     pub(crate) fn to_conn_request(&self) -> WsConnReq {
         match &self.auth {
             WsAuth::Token(_token) => WsConnReq {
@@ -348,4 +362,5 @@ impl TaosBuilder {
             },
         }
     }
+
 }

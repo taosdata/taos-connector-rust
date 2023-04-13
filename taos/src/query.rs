@@ -398,6 +398,16 @@ impl AsyncQueryable for Taos {
             TaosInner::Ws(taos) => taos.write_raw_block(block).await.map_err(Into::into),
         }
     }
+
+    async fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
+        match &self.0 {
+            TaosInner::Native(_) => todo!(),
+            TaosInner::Ws(taos) => taos
+                .put(data)
+                .await
+                .map_err(Into::into),
+        }
+    }
 }
 
 impl taos_query::Queryable for Taos {
@@ -638,6 +648,36 @@ mod tests {
         );
 
         assert_eq!(client.exec(format!("drop database {db}"))?, 0);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod async_tests {
+    use taos_query::common::SmlData;
+
+    use crate::TaosBuilder;
+    use crate::AsyncQueryable;
+    use crate::AsyncTBuilder;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    async fn test_put() -> anyhow::Result<()> {
+        // std::env::set_var("RUST_LOG", "taos=trace");
+        std::env::set_var("RUST_LOG", "taos=debug");
+        pretty_env_logger::init();
+        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        log::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?.build().await?;
+        
+
+        // let client = WsTaos::from_dsn(dsn).await?;
+
+        let data = "measurement,host=host1 field1=2i,field2=2.0 1577837300000\nmeasurement,host=host1 field1=2i,field2=2.0 1577837400000\nmeasurement,host=host1 field1=2i,field2=2.0 1577837500000\nmeasurement,host=host1 field1=2i,field2=2.0 1577837600000".to_string();
+
+        let sml_data = SmlData { data };
+        assert_eq!(client.put(&sml_data).await?, ());
+
         Ok(())
     }
 }

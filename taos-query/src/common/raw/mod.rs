@@ -969,6 +969,21 @@ impl crate::prelude::sync::Inlinable for RawBlock {
     }
 }
 
+pub struct SmlData {
+    pub data: String,
+}
+
+impl SmlData {
+    pub fn new(data: String) -> Self {
+        Self { data }
+    }
+
+    #[inline]
+    pub fn data(&self) -> &str {
+        self.data.as_ref()
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::prelude::AsyncInlinable for RawBlock {
     async fn read_optional_inlined<R: tokio::io::AsyncRead + Send + Unpin>(

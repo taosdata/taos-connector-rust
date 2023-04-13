@@ -5,7 +5,7 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use dashmap::DashMap as HashMap;
 use itertools::Itertools;
 use std::future::Future;
-use taos_query::common::{Field, Precision, RawBlock, RawMeta};
+use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError};
 use taos_query::util::InlinableWrite;
 use taos_query::{
@@ -1013,6 +1013,10 @@ impl AsyncQueryable for WsTaos {
 
     async fn write_raw_block(&self, block: &RawBlock) -> StdResult<(), Self::Error> {
         self.s_write_raw_block(block).await
+    }
+
+    async fn put(&self, _data: &SmlData) -> Result<()> {
+        todo!()
     }
 }
 

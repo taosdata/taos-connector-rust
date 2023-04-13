@@ -198,6 +198,10 @@ impl taos_query::AsyncQueryable for Taos {
     async fn write_raw_block(&self, block: &RawBlock) -> Result<(), Self::Error> {
         self.raw.write_raw_block(block)
     }
+
+    async fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
+        todo!()
+    }
 }
 
 /// Connection builder.
