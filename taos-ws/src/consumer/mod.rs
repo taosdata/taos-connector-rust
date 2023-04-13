@@ -595,7 +595,7 @@ impl TmqBuilder {
                     _ = interval.tick() => {
                         log::trace!("Check websocket message sender alive");
                         if let Err(err) = sender.send(Message::Ping(PING.to_vec())).await {
-                            log::error!("sending ping message to {sending_url} error: {err:?}");
+                            log::trace!("sending ping message to {sending_url} error: {err:?}");
                             // let mut keys = Vec::new();
                             let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
 
@@ -618,7 +618,7 @@ impl TmqBuilder {
                         }
                         log::trace!("send message {msg:?}");
                         if let Err(err) = sender.send(msg).await {
-                            log::error!("sending message to {sending_url} error: {err:?}");
+                            log::trace!("sending message to {sending_url} error: {err:?}");
                             let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
@@ -769,12 +769,7 @@ impl TmqBuilder {
                                 }
                             },
                             Err(err) => {
-                                log::error!("reading message from {url} error: {err:?}");
-                                // let mut keys = Vec::new();
                                 let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                // queries_sender.for_each_async(|k, _| {
-                                //     keys.push(*k);
-                                // }).await;
                                 for k in keys {
                                     if let Some((_, sender)) = queries_sender.remove(&k) {
                                         let _ = sender.send(Err(RawError::new(
@@ -1022,7 +1017,6 @@ mod tests {
                                 Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
                                 Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                                 _ => {
-                                    log::error!("{:?}", err);
                                     panic!("{}", err);
                                 }
                             }
@@ -1171,7 +1165,6 @@ mod tests {
                             Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
                             Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                             _ => {
-                                log::error!("{:?}", err);
                                 panic!("{}", err);
                             }
                         }
@@ -1319,7 +1312,6 @@ mod tests {
                             Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
                             Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                             _ => {
-                                log::error!("{:?}", err);
                                 panic!("{}", err);
                             }
                         }

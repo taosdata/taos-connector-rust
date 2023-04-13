@@ -296,7 +296,7 @@ impl Stmt {
                                             {
                                                 sender.send(stmt_id).unwrap();
                                             }  else {
-                                                log::error!("Stmt init failed because req id {req_id} not exist");
+                                                log::trace!("Stmt init failed because req id {req_id} not exist");
                                             }
                                         }
                                         StmtOk::Stmt(stmt_id, res) => {
@@ -307,7 +307,7 @@ impl Stmt {
                                             // }) {
 
                                             } else {
-                                                log::error!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
                                     }
@@ -333,7 +333,7 @@ impl Stmt {
                                 }
                             },
                             Err(err) => {
-                                log::error!("receiving cause error: {err:?}");
+                                log::trace!("receiving cause error: {err:?}");
                                 break;
                             }
                         }

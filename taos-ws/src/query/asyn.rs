@@ -420,7 +420,6 @@ async fn read_queries(
                         }
                     },
                     Err(err) => {
-                        log::error!("reading websocket error: {}", err);
                         let mut keys = Vec::new();
                         for e in queries_sender.iter() {
                                     keys.push(*e.key());
@@ -573,7 +572,6 @@ impl WsTaos {
                     Some(msg) = msg_recv.recv() => {
                         // dbg!(&msg);
                         if let Err(err) = sender.send(msg).await {
-                                log::error!("send websocket message packet error: {}", err);
                                 let mut keys = Vec::new();
                                 queries3.iter().for_each(|r| keys.push(*r.key()));
                                 // queries3.for_each_async(|k, _| {

@@ -866,7 +866,6 @@ mod tests {
                                 log::trace!("no column can be dropped")
                             }
                             _ => {
-                                log::error!("{:?}", err);
                                 panic!("{}", err);
                             }
                         }
@@ -1028,7 +1027,6 @@ mod tests {
                                     log::trace!("no column can be dropped")
                                 }
                                 _ => {
-                                    log::error!("{:?}", err);
                                     panic!("{}", err);
                                 }
                             }
