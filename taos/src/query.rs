@@ -654,7 +654,10 @@ mod tests {
 
 #[cfg(test)]
 mod async_tests {
-    use taos_query::common::SmlData;
+    use taos_query::common::SmlDataBuilder;
+    use taos_query::common::SchemalessProtocol;
+    use taos_query::common::SchemalessPrecision;
+
 
     use crate::TaosBuilder;
     use crate::AsyncQueryable;
@@ -676,20 +679,43 @@ mod async_tests {
         
         client.exec(format!("create database if not exists {db}")).await?;
 
-        let data = "measurement,host=host1 field1=2i,field2=2.0 1577837300000\nmeasurement,host=host1 field1=2i,field2=2.0 1577837400000\nmeasurement,host=host1 field1=2i,field2=2.0 1577837500000\nmeasurement,host=host1 field1=2i,field2=2.0 1577837600000".to_string();
+        let data = [
+            "measurement,host=host1 field1=2i,field2=2.0 1577837300000",
+            "measurement,host=host1 field1=2i,field2=2.0 1577837400000",
+            "measurement,host=host1 field1=2i,field2=2.0 1577837500000",
+            "measurement,host=host1 field1=2i,field2=2.0 1577837600000",
+        ].map(String::from).to_vec();
 
-        let sml_data = SmlData::new(
-            db.to_string(),
-            1,
-            "ms".to_string(),
-            data,
-            1000,
-            199,
-        );
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(199u64)
+            .build()?;
+        assert_eq!(client.put(&sml_data).await?, ());
+
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .req_id(199u64)
+            .build()?;
+        assert_eq!(client.put(&sml_data).await?, ());
+
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data)
+            .build()?;
         assert_eq!(client.put(&sml_data).await?, ());
 
         client.exec(format!("drop database if exists {db}")).await?;
 
         Ok(())
     }
+    
 }

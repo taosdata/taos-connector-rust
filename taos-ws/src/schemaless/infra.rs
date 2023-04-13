@@ -56,8 +56,8 @@ pub enum WsSend {
         protocol: u8,
         precision: String,
         data: String,
-        ttl: u64,
-        req_id: ReqId,
+        ttl: Option<i32>,
+        req_id: Option<ReqId>,
     },
 }
 
@@ -65,7 +65,7 @@ impl WsSend {
     pub(crate) fn req_id(&self) -> ReqId {
         match self {
             WsSend::Conn { req_id, req: _ } => *req_id,
-            WsSend::Insert { req_id, .. } => *req_id,
+            WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
             _ => unreachable!(),
         }
     }

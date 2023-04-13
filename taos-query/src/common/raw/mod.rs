@@ -34,6 +34,8 @@ mod de;
 mod rows;
 pub use rows::*;
 
+use derive_builder::Builder;
+
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(1))]
 struct Header {
@@ -969,33 +971,47 @@ impl crate::prelude::sync::Inlinable for RawBlock {
     }
 }
 
+#[derive(Default, Debug, Copy, Clone)]
+pub enum SchemalessProtocol {
+    Unknown = 0,
+    #[default]
+    Line,
+    Telnet,
+    Json,
+}
+
+#[derive(Default, Debug, Copy, Clone)]
+pub enum SchemalessPrecision {
+    #[default]
+    Millisecond,
+    Microsecond,
+    Nanosecond,
+}
+
+impl From<SchemalessPrecision> for String {
+    fn from(precision: SchemalessPrecision) -> Self {
+        match precision {
+            SchemalessPrecision::Millisecond => "ms".to_string(),
+            SchemalessPrecision::Microsecond => "us".to_string(),
+            SchemalessPrecision::Nanosecond => "ns".to_string(),
+        }
+    }
+}
+
+#[derive(Default, Builder, Debug)]
+#[builder(setter(into))]
 pub struct SmlData {
     db: String,
-    protocol: u8,
-    precision: String,
-    data: String,
-    ttl: u64,
-    req_id: u64,
+    protocol: SchemalessProtocol,
+    precision: SchemalessPrecision,
+    data: Vec<String>,
+    #[builder(setter(into, strip_option), default)]
+    ttl: Option<i32>,
+    #[builder(setter(into, strip_option), default)]
+    req_id: Option<u64>,
 }
 
 impl SmlData {
-    pub fn new(
-        db: String,
-        protocol: u8,
-        precision: String,
-        data: String,
-        ttl: u64,
-        req_id: u64,
-    ) -> Self {
-        Self {
-            db,
-            protocol,
-            precision,
-            data,
-            ttl,
-            req_id,
-        }
-    }
 
     #[inline]
     pub fn db(&self) -> &str {
@@ -1003,30 +1019,30 @@ impl SmlData {
     }
 
     #[inline]
-    pub fn protocol(&self) -> u8 {
+    pub fn protocol(&self) -> SchemalessProtocol {
         self.protocol
     }
 
     #[inline]
-    pub fn precision(&self) -> &str {
-        self.precision.as_ref()
+    pub fn precision(&self) -> SchemalessPrecision {
+        self.precision
     }
 
     #[inline]
-    pub fn data(&self) -> &str {
-        self.data.as_ref()
+    pub fn data(&self) -> &Vec<String> {
+        &self.data
     }
 
     #[inline]
-    pub fn ttl(&self) -> u64 {
+    pub fn ttl(&self) -> Option<i32> {
         self.ttl
     }
 
     #[inline]
-    pub fn req_id(&self) -> u64 {
+    pub fn req_id(&self) -> Option<u64> {
         self.req_id
     }
-    
+
 }
 
 #[async_trait::async_trait]
