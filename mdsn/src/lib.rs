@@ -80,6 +80,7 @@ use pest::Parser;
 use pest_derive::Parser;
 use regex::Regex;
 use thiserror::Error;
+use urlencoding::encode;
 
 impl Dsn {
     pub fn from_regex(input: &str) -> Result<Self, DsnError> {
@@ -88,7 +89,7 @@ impl Dsn {
                 (?P<driver>[\w.-]+)(\+(?P<protocol>[^@/?\#]+))?: # abc
                 (
                     # url-like dsn
-                    //((?P<username>[\w.-]+)?(:(?P<password>[^@/?\#]+))?@)? # for authorization
+                    //((?P<username>[\w\-_%.]+)?(:(?P<password>[^@/?\#]+))?@)? # for authorization
                         (((?P<protocol2>[\w.-]+)\()?
                             (?P<addr>[\w\-_%.:]*(:\d{0,5})?(,[\w\-:_.]*(:\d{0,5})?)*)?  # for addresses
                         \)?)?
@@ -112,7 +113,15 @@ impl Dsn {
             (Some(p), None) | (None, Some(p)) => Some(p),
             _ => None,
         };
-        let username = cap.name("username").map(|m| m.as_str().to_string());
+        let username = cap
+            .name("username")
+            .map(|m| {
+                let s = m.as_str();
+                urlencoding::decode(s)
+                    .map(|s| s.to_string())
+                    .map_err(|err| DsnError::InvalidPassword(s.to_string(), err))
+            })
+            .transpose()?;
         let password = cap
             .name("password")
             .map(|m| {
@@ -511,10 +520,10 @@ impl Display for Dsn {
 
         match (&self.username, &self.password) {
             (Some(username), Some(password)) => {
-                write!(f, "{username}:{}@", urlencoding::encode(password))?
+                write!(f, "{}:{}@", encode(username), encode(password))?
             }
-            (Some(username), None) => write!(f, "{username}@")?,
-            (None, Some(password)) => write!(f, ":{}@", urlencoding::encode(password))?,
+            (Some(username), None) => write!(f, "{}@", encode(username))?,
+            (None, Some(password)) => write!(f, ":{}@", encode(password))?,
             (None, None) => {}
         }
 
@@ -1095,6 +1104,21 @@ mod tests {
         assert_eq!(
             dsn.to_string(),
             format!("taos://root:{e}@localhost:6030?code1={e}")
+        );
+    }
+    #[test]
+    fn param_special_chars_all() {
+        let p = "!@#$%^&*()";
+        let e = urlencoding::encode(p);
+        dbg!(&e);
+
+        let dsn = Dsn::from_str(&format!("taos://{e}:{e}@localhost:6030?{e}={e}")).unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.password.as_deref().unwrap(), p);
+        assert_eq!(dsn.get(&p).as_deref().unwrap(), p);
+        assert_eq!(
+            dsn.to_string(),
+            format!("taos://{e}:{e}@localhost:6030?{e}={e}")
         );
     }
 }
