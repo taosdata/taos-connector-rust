@@ -14,7 +14,7 @@ fn _test_tmq_meta_sync() -> anyhow::Result<()> {
     taos.exec_many([
         "drop topic if exists t_tmq_meta_sync",
         "drop database if exists t_tmq_meta_sync",
-        "create database t_tmq_meta_sync",
+        "create database t_tmq_meta_sync wal_retention_period 3600",
         "create topic t_tmq_meta_sync with meta as database t_tmq_meta_sync",
         "use t_tmq_meta_sync",
         // kind 1: create super table using all types
@@ -80,7 +80,7 @@ fn _test_tmq_meta_sync() -> anyhow::Result<()> {
 
     taos.exec_many([
         "drop database if exists t_tmq_meta_sync2",
-        "create database if not exists t_tmq_meta_sync2",
+        "create database if not exists t_tmq_meta_sync2 wal_retention_period 3600",
         "use t_tmq_meta_sync2",
     ])?;
 
