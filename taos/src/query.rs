@@ -663,10 +663,19 @@ mod async_tests {
     use crate::TaosBuilder;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-    async fn test_put_line() -> anyhow::Result<()> {
+    async fn test_put() -> anyhow::Result<()> {
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
+        put_line().await?;
+        put_telnet().await?;
+        put_json().await
+    }
+
+    async fn put_line() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         std::env::set_var("RUST_LOG", "taos=debug");
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
+
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         log::debug!("dsn: {:?}", &dsn);
@@ -730,12 +739,10 @@ mod async_tests {
         Ok(())
     }
 
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-    async fn test_put_telnet() -> anyhow::Result<()> {
+    async fn put_telnet() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         std::env::set_var("RUST_LOG", "taos=debug");
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         log::debug!("dsn: {:?}", &dsn);
@@ -804,11 +811,10 @@ mod async_tests {
     }
 
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-    async fn test_put_json() -> anyhow::Result<()> {
+    async fn put_json() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         std::env::set_var("RUST_LOG", "taos=debug");
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         log::debug!("dsn: {:?}", &dsn);
