@@ -1003,6 +1003,7 @@ impl From<SchemalessPrecision> for String {
 pub struct SmlData {
     db: String,
     protocol: SchemalessProtocol,
+    #[builder(setter(into, strip_option), default)]
     precision: SchemalessPrecision,
     data: Vec<String>,
     #[builder(setter(into, strip_option), default)]
