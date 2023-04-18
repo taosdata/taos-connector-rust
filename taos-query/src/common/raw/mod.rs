@@ -34,6 +34,8 @@ mod de;
 mod rows;
 pub use rows::*;
 
+use derive_builder::Builder;
+
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(1))]
 struct Header {
@@ -967,6 +969,81 @@ impl crate::prelude::sync::Inlinable for RawBlock {
         }
         Ok(l)
     }
+}
+
+#[derive(Default, Debug, Copy, Clone)]
+pub enum SchemalessProtocol {
+    Unknown = 0,
+    #[default]
+    Line,
+    Telnet,
+    Json,
+}
+
+#[derive(Default, Debug, Copy, Clone)]
+pub enum SchemalessPrecision {
+    #[default]
+    Millisecond,
+    Microsecond,
+    Nanosecond,
+}
+
+impl From<SchemalessPrecision> for String {
+    fn from(precision: SchemalessPrecision) -> Self {
+        match precision {
+            SchemalessPrecision::Millisecond => "ms".to_string(),
+            SchemalessPrecision::Microsecond => "us".to_string(),
+            SchemalessPrecision::Nanosecond => "ns".to_string(),
+        }
+    }
+}
+
+#[derive(Default, Builder, Debug)]
+#[builder(setter(into))]
+pub struct SmlData {
+    db: String,
+    protocol: SchemalessProtocol,
+    #[builder(setter(into, strip_option), default)]
+    precision: SchemalessPrecision,
+    data: Vec<String>,
+    #[builder(setter(into, strip_option), default)]
+    ttl: Option<i32>,
+    #[builder(setter(into, strip_option), default)]
+    req_id: Option<u64>,
+}
+
+impl SmlData {
+
+    #[inline]
+    pub fn db(&self) -> &str {
+        self.db.as_ref()
+    }
+
+    #[inline]
+    pub fn protocol(&self) -> SchemalessProtocol {
+        self.protocol
+    }
+
+    #[inline]
+    pub fn precision(&self) -> SchemalessPrecision {
+        self.precision
+    }
+
+    #[inline]
+    pub fn data(&self) -> &Vec<String> {
+        &self.data
+    }
+
+    #[inline]
+    pub fn ttl(&self) -> Option<i32> {
+        self.ttl
+    }
+
+    #[inline]
+    pub fn req_id(&self) -> Option<u64> {
+        self.req_id
+    }
+
 }
 
 #[async_trait::async_trait]

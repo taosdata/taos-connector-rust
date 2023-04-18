@@ -440,7 +440,7 @@ mod tests {
         taos.exec_many([
             "drop topic if exists ws_abc1",
             "drop database if exists ws_abc1",
-            "create database ws_abc1",
+            "create database ws_abc1 wal_retention_period 3600",
             "create topic ws_abc1 with meta as database ws_abc1",
             "use ws_abc1",
             // kind 1: create super table using all types
@@ -507,7 +507,7 @@ mod tests {
 
         taos.exec_many([
             "drop database if exists db2",
-            "create database if not exists db2",
+            "create database if not exists db2 wal_retention_period 3600",
             "use db2",
         ])
         .await?;

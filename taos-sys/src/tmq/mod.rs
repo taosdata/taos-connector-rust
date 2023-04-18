@@ -566,7 +566,7 @@ mod tests {
         let db = "tmq_metadata";
         taos.query(format!("drop topic if exists {db}"))?;
         taos.query(format!("drop database if exists {db}"))?;
-        taos.query(format!("create database {db} keep 36500 vgroups 1"))?;
+        taos.query(format!("create database {db} keep 36500 vgroups 1 wal_retention_period 3600"))?;
         taos.query(format!("use {db}"))?;
         taos.query(
             // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
@@ -580,7 +580,7 @@ mod tests {
         taos.query(format!("create topic {db} with meta as database {db}"))?;
 
         taos.query(format!("drop database if exists {db}2"))?;
-        taos.query(format!("create database {db}2"))?;
+        taos.query(format!("create database {db}2 wal_retention_period 3600"))?;
         taos.query(format!("use {db}2"))?;
 
         let builder = TmqBuilder::from_dsn(
@@ -672,7 +672,7 @@ mod tests {
         let db = "tmq_meta";
         taos.query(format!("drop topic if exists {db}"))?;
         taos.query(format!("drop database if exists {db}"))?;
-        taos.query(format!("create database {db} keep 36500"))?;
+        taos.query(format!("create database {db} keep 36500 wal_retention_period 3600"))?;
         taos.query(format!("use {db}"))?;
         taos.query(
             // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
@@ -701,7 +701,7 @@ mod tests {
         taos.query(format!("create topic {db} with meta as database {db}"))?;
 
         taos.query(format!("drop database if exists {db}2"))?;
-        taos.query(format!("create database {db}2"))?;
+        taos.query(format!("create database {db}2 wal_retention_period 3600"))?;
         taos.query(format!("use {db}2"))?;
 
         let builder = TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5")?;
@@ -777,7 +777,7 @@ mod tests {
         taos.exec_many([
             "drop topic if exists sys_tmq_meta_sync",
             "drop database if exists sys_tmq_meta_sync",
-            "create database sys_tmq_meta_sync vgroups 1",
+            "create database sys_tmq_meta_sync vgroups 1 wal_retention_period 3600",
             "use sys_tmq_meta_sync",
             "show databases",
             "select database()",
@@ -846,7 +846,7 @@ mod tests {
 
         taos.exec_many([
             "drop database if exists sys_tmq_meta_sync2",
-            "create database if not exists sys_tmq_meta_sync2",
+            "create database if not exists sys_tmq_meta_sync2 wal_retention_period 3600",
             "use sys_tmq_meta_sync2",
         ])?;
 
@@ -969,7 +969,7 @@ mod tests {
         taos.exec_many([
             "drop topic if exists sys_ts2035",
             "drop database if exists sys_ts2035",
-            "create database sys_ts2035",
+            "create database sys_ts2035 wal_retention_period 3600",
             "create topic sys_ts2035 as database sys_ts2035",
             "use sys_ts2035",
             "create table tb1 (ts timestamp, c1 int, c2 int)",
@@ -987,7 +987,7 @@ mod tests {
         target
             .exec_many([
                 "drop database if exists sys_ts2035_target",
-                "create database sys_ts2035_target",
+                "create database sys_ts2035_target wal_retention_period 3600",
                 "use sys_ts2035_target",
                 "create table tb1 (ts timestamp, c1 int, c2 int)",
             ])
@@ -1066,7 +1066,7 @@ mod tests {
         taos.exec_many([
             "drop topic if exists sys_delete_meta",
             "drop database if exists sys_delete_meta",
-            "create database sys_delete_meta",
+            "create database sys_delete_meta wal_retention_period 3600",
             "create topic sys_delete_meta with meta as database sys_delete_meta",
             "use sys_delete_meta",
             "create table tb1 (ts timestamp, c1 int, c2 int)",
@@ -1084,7 +1084,7 @@ mod tests {
         target
             .exec_many([
                 "drop database if exists sys_delete_meta_target",
-                "create database sys_delete_meta_target",
+                "create database sys_delete_meta_target wal_retention_period 3600",
                 "use sys_delete_meta_target",
                 // "create table tb1 (ts timestamp, c1 int, c2 int)",
             ])
@@ -1169,7 +1169,7 @@ mod tests {
         taos.exec_many([
             "drop topic if exists sys_tmq_meta",
             "drop database if exists sys_tmq_meta",
-            "create database sys_tmq_meta",
+            "create database sys_tmq_meta wal_retention_period 3600",
             "use sys_tmq_meta",
             // kind 1: create super table using all types
             "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
@@ -1239,7 +1239,7 @@ mod tests {
 
         taos.exec_many([
             "drop database if exists sys_tmq_meta2",
-            "create database if not exists sys_tmq_meta2",
+            "create database if not exists sys_tmq_meta2 wal_retention_period 3600",
             "use sys_tmq_meta2",
         ])
         .await?;

@@ -1,4 +1,5 @@
 use once_cell::sync::OnceCell;
+use taos_query::common::SmlData;
 use taos_query::{block_in_place_or_global, common::RawMeta, AsyncQueryable};
 
 pub mod asyn;
@@ -16,6 +17,7 @@ use crate::TaosBuilder;
 pub struct Taos {
     pub(crate) dsn: TaosBuilder,
     pub(crate) async_client: OnceCell<WsTaos>,
+    pub(crate) async_sml: OnceCell<crate::schemaless::WsTaos>,
 }
 
 impl Taos {
@@ -93,6 +95,18 @@ impl taos_query::AsyncQueryable for Taos {
             self.async_client
                 .get_or_init(|| async_client)
                 .write_raw_block(block)
+                .await
+        }
+    }
+
+    async fn put(&self, data: &SmlData) -> Result<(), Self::Error> {
+        if let Some(ws) = self.async_sml.get() {
+            ws.s_put(data).await
+        } else {
+            let async_sml = crate::schemaless::WsTaos::from_wsinfo(&self.dsn).await?;
+            self.async_sml
+                .get_or_init(|| async_sml)
+                .s_put(data)
                 .await
         }
     }

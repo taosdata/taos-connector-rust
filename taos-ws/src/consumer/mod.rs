@@ -907,7 +907,7 @@ mod tests {
         taos.exec_many([
             "drop topic if exists ws_tmq_meta",
             "drop database if exists ws_tmq_meta",
-            "create database ws_tmq_meta",
+            "create database ws_tmq_meta wal_retention_period 3600",
             "create topic ws_tmq_meta with meta as database ws_tmq_meta",
             "use ws_tmq_meta",
             // kind 1: create super table using all types
@@ -974,7 +974,7 @@ mod tests {
 
         taos.exec_many([
             "drop database if exists ws_tmq_meta2",
-            "create database if not exists ws_tmq_meta2",
+            "create database if not exists ws_tmq_meta2 wal_retention_period 3600",
             "use ws_tmq_meta2",
         ])
         .await?;
@@ -1058,7 +1058,7 @@ mod tests {
         taos.exec_many([
             "drop topic if exists ws_tmq_meta_sync",
             "drop database if exists ws_tmq_meta_sync",
-            "create database ws_tmq_meta_sync",
+            "create database ws_tmq_meta_sync wal_retention_period 3600",
             "create topic ws_tmq_meta_sync with meta as database ws_tmq_meta_sync",
             "use ws_tmq_meta_sync",
             // kind 1: create super table using all types
@@ -1124,7 +1124,7 @@ mod tests {
 
         taos.exec_many([
             "drop database if exists ws_tmq_meta_sync2",
-            "create database if not exists ws_tmq_meta_sync2",
+            "create database if not exists ws_tmq_meta_sync2 wal_retention_period 3600",
             "use ws_tmq_meta_sync2",
         ])?;
 
@@ -1205,7 +1205,7 @@ mod tests {
         taos.exec_many([
             "drop topic if exists ws_tmq_meta_sync3",
             "drop database if exists ws_tmq_meta_sync3",
-            "create database ws_tmq_meta_sync3",
+            "create database ws_tmq_meta_sync3 wal_retention_period 3600",
             "create topic ws_tmq_meta_sync3 with meta as database ws_tmq_meta_sync3",
             "use ws_tmq_meta_sync3",
             // kind 1: create super table using all types
@@ -1271,7 +1271,7 @@ mod tests {
 
         taos.exec_many([
             "drop database if exists ws_tmq_meta_sync32",
-            "create database if not exists ws_tmq_meta_sync32",
+            "create database if not exists ws_tmq_meta_sync32 wal_retention_period 3600",
             "use ws_tmq_meta_sync32",
         ])?;
 

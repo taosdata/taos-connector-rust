@@ -495,6 +495,12 @@ mod r#async {
             sql: T,
         ) -> Result<Self::AsyncResultSet, Self::Error>;
 
+        async fn put(&self, schemaless_data: &SmlData) -> Result<(), Self::Error> ;
+
+        // async fn put_line_protocol;
+        // async fn put_opentsdb_lines;
+        // async fn put_json()
+
         async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
             &self,
             sql: T,
