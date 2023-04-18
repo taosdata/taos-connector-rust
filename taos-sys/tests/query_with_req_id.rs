@@ -1,8 +1,8 @@
 use std::str::FromStr;
-use taos_optin::TaosBuilder;
+use taos_sys::TaosBuilder;
 
 #[test]
-fn ws_sync_json() -> anyhow::Result<()> {
+fn sync_json_with_req_id() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     pretty_env_logger::init();
     use taos_query::prelude::sync::*;
@@ -13,24 +13,25 @@ fn ws_sync_json() -> anyhow::Result<()> {
     assert_eq!(client.exec(format!("drop database if exists {db}"))?, 0);
     assert_eq!(client.exec(format!("create database {db} keep 36500"))?, 0);
     assert_eq!(
-        client.exec(
-            format!("create table {db}.stb1(ts timestamp,\
-                b1 bool, c8i1 tinyint, c16i1 smallint, c32i1 int, c64i1 bigint,\
-                c8u1 tinyint unsigned, c16u1 smallint unsigned, c32u1 int unsigned, c64u1 bigint unsigned,\
-                cb1 binary(100), cn1 nchar(10),\
-                b2 bool, c8i2 tinyint, c16i2 smallint, c32i2 int, c64i2 bigint,\
-                c8u2 tinyint unsigned, c16u2 smallint unsigned, c32u2 int unsigned, c64u2 bigint unsigned,\
-                cb2 binary(10), cn2 nchar(16)) tags (jt json)")
-        )?,
-        0
-    );
+            client.exec(
+                format!("create table {db}.stb1(ts timestamp,\
+                    b1 bool, c8i1 tinyint, c16i1 smallint, c32i1 int, c64i1 bigint,\
+                    c8u1 tinyint unsigned, c16u1 smallint unsigned, c32u1 int unsigned, c64u1 bigint unsigned,\
+                    cb1 binary(100), cn1 nchar(10),
+
+                    b2 bool, c8i2 tinyint, c16i2 smallint, c32i2 int, c64i2 bigint,\
+                    c8u2 tinyint unsigned, c16u2 smallint unsigned, c32u2 int unsigned, c64u2 bigint unsigned,\
+                    cb2 binary(10), cn2 nchar(16)) tags (jt json)")
+            )?,
+            0
+        );
     assert_eq!(
         client.exec(format!(
-            "insert into {db}.tb1 using {db}.stb1 tags('{{\"key\":\"数据\"}}') \
-             values(0,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思', \
-                          false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据') \
-                   (65535,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL, \
-                          NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"
+            r#"insert into {db}.tb1 using {db}.stb1 tags('{{"key":"数据"}}')
+                   values(0,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
+                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
+                         (65535,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
+                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
         ))?,
         2
     );
@@ -46,7 +47,7 @@ fn ws_sync_json() -> anyhow::Result<()> {
     );
 
     // let mut rs = client.s_query("select * from wsabc.tb1").unwrap().unwrap();
-    let mut rs = client.query(format!("select * from {db}.tb1 order by ts limit 1"))?;
+    let mut rs = client.query_with_req_id(format!("select * from {db}.tb1 order by ts limit 1"), 123)?;
 
     #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
     #[allow(dead_code)]

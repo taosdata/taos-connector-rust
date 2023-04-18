@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use taos_sys::TaosBuilder;
 
 #[test]
@@ -5,7 +6,9 @@ fn ws_sync_json() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     pretty_env_logger::init();
     use taos_query::prelude::sync::*;
-    let client = TaosBuilder::from_dsn("taos://localhost:6030/")?.build()?;
+    let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+    let dsn = Dsn::from_str(&dsn)?;
+    let client = TaosBuilder::from_dsn(&dsn)?.build()?;
     let db = "ws_sync_json";
     assert_eq!(client.exec(format!("drop database if exists {db}"))?, 0);
     assert_eq!(client.exec(format!("create database {db} keep 36500"))?, 0);

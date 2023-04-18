@@ -2,7 +2,7 @@ use std::str::FromStr;
 use taos_optin::TaosBuilder;
 
 #[test]
-fn ws_sync_json() -> anyhow::Result<()> {
+fn sync_json_with_req_id() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     pretty_env_logger::init();
     use taos_query::prelude::sync::*;
@@ -46,7 +46,7 @@ fn ws_sync_json() -> anyhow::Result<()> {
     );
 
     // let mut rs = client.s_query("select * from wsabc.tb1").unwrap().unwrap();
-    let mut rs = client.query(format!("select * from {db}.tb1 order by ts limit 1"))?;
+    let mut rs = client.query_with_req_id(format!("select * from {db}.tb1 order by ts limit 1"), 123)?;
 
     #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
     #[allow(dead_code)]

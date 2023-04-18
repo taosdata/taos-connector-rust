@@ -93,6 +93,13 @@ pub struct ApiEntry {
 
     // query
     taos_query: unsafe extern "C" fn(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES,
+    taos_query_with_reqid: Option<
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            sql: *const c_char,
+            req_id: u64
+        ) -> *mut TAOS_RES,
+    >,
     taos_free_result: unsafe extern "C" fn(res: *mut TAOS_RES),
     taos_result_precision: unsafe extern "C" fn(res: *mut TAOS_RES) -> c_int,
     taos_field_count: unsafe extern "C" fn(res: *mut TAOS_RES) -> c_int,
@@ -397,6 +404,7 @@ impl ApiEntry {
                 taos_fetch_rows_a,
                 taos_query_a,
                 taos_query,
+                taos_query_with_reqid,
                 taos_free_result,
                 taos_result_precision,
                 taos_field_count,
@@ -540,6 +548,7 @@ impl ApiEntry {
                 taos_fetch_rows_a,
                 taos_query_a,
                 taos_query,
+                taos_query_with_reqid,
                 tmq_write_raw,
                 taos_write_raw_block,
                 taos_write_raw_block_with_fields,
@@ -685,6 +694,26 @@ impl RawTaos {
             c: self.c.clone(),
             ptr: unsafe { (self.c.taos_query)(self.as_ptr(), sql.as_ptr()) },
         })
+    }
+
+    #[inline]
+    pub fn query_with_req_id<'a, S: IntoCStr<'a>>(&self, sql: S, req_id: u64) -> Result<RawRes, RawError> {
+        let sql = sql.into_c_str();
+        log::trace!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
+        if let Some(taos_query_with_req_id) = self.c.taos_query_with_reqid {
+            Ok(RawRes {
+                c: self.c.clone(),
+                ptr: unsafe {
+                    (taos_query_with_req_id)(
+                        self.as_ptr(),
+                        sql.as_ptr(),
+                        req_id
+                    )
+                },
+            })
+        } else {
+            unimplemented!("2.x does not support req_id")
+        }
     }
 
     #[inline]

@@ -426,8 +426,11 @@ impl taos_query::Queryable for Taos {
         req_id: u64,
     ) -> Result<Self::ResultSet, Self::Error> {
         match &self.0 {
-            TaosInner::Native(_) => {
-                todo!()
+            TaosInner::Native(taos) => {
+                <crate::sys::Taos as taos_query::Queryable>::query_with_req_id(taos, sql, req_id)
+                    .map(ResultSetInner::Native)
+                    .map(ResultSet)
+                    .map_err(Into::into)
             }
             TaosInner::Ws(taos) => {
                 <taos_ws::Taos as taos_query::Queryable>::query_with_req_id(taos, sql, req_id)
@@ -483,15 +486,84 @@ mod tests {
     }
 
     #[test]
+    fn test_server_version() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        println!("server version: {:?}", builder.server_version()?);
+        assert!(builder.server_version().is_ok());
+
+        Ok(())
+    }
+
+
+    #[test]
+    fn test_server_is_enterprise_edition() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        println!("is enterprise edition: {:?}", builder.is_enterprise_edition());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_server_version_ws() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        println!("server version: {:?}", builder.server_version()?);
+        assert!(builder.server_version().is_ok());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_server_is_enterprise_edition_ws() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        println!("is enterprise edition: {:?}", builder.is_enterprise_edition());
+
+        Ok(())
+    }
+
+    #[test]
     fn sync_json_test_native() -> anyhow::Result<()> {
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://".to_string());
         sync_json_test(&dsn, "taos")
     }
+
     #[cfg(feature = "ws")]
     #[test]
     fn sync_json_test_ws() -> anyhow::Result<()> {
         sync_json_test("ws://", "ws")
     }
+
     #[cfg(feature = "ws")]
     #[test]
     fn sync_json_test_taosws() -> anyhow::Result<()> {
@@ -517,6 +589,62 @@ mod tests {
         taos.exec("insert into t3 values(1640000000000, NULL)")?;
 
         let mut rs = taos.query("select * from st where utntag is null")?;
+        for row in rs.rows() {
+            let row = row?;
+            let values = row.into_values();
+            assert_eq!(values[1], Value::Null(Ty::UTinyInt));
+            assert_eq!(values[2], Value::Null(Ty::UTinyInt));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn query_with_req_id_ws() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        taos.exec_many(["drop database if exists db", "create database db", "use db"])?;
+
+        taos.exec(
+            "create table st(ts timestamp, c1 TINYINT UNSIGNED) tags(utntag TINYINT UNSIGNED)",
+        )?;
+        taos.exec("create table t1 using st tags(0)")?;
+        taos.exec("insert into t1 values(1640000000000, 0)")?;
+        taos.exec("create table t2 using st tags(254)")?;
+        taos.exec("insert into t2 values(1640000000000, 254)")?;
+        taos.exec("create table t3 using st tags(NULL)")?;
+        taos.exec("insert into t3 values(1640000000000, NULL)")?;
+
+        let mut rs = taos.query_with_req_id("select * from st where utntag is null", 123)?;
+        for row in rs.rows() {
+            let row = row?;
+            let values = row.into_values();
+            assert_eq!(values[1], Value::Null(Ty::UTinyInt));
+            assert_eq!(values[2], Value::Null(Ty::UTinyInt));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn query_with_req_id_native() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        taos.exec_many(["drop database if exists db", "create database db", "use db"])?;
+
+        taos.exec(
+            "create table st(ts timestamp, c1 TINYINT UNSIGNED) tags(utntag TINYINT UNSIGNED)",
+        )?;
+        taos.exec("create table t1 using st tags(0)")?;
+        taos.exec("insert into t1 values(1640000000000, 0)")?;
+        taos.exec("create table t2 using st tags(254)")?;
+        taos.exec("insert into t2 values(1640000000000, 199)")?;
+        taos.exec("create table t3 using st tags(NULL)")?;
+        taos.exec("insert into t3 values(1640000000000, NULL)")?;
+
+        let mut rs = taos.query_with_req_id("select * from st where utntag is null", 123)?;
         for row in rs.rows() {
             let row = row?;
             let values = row.into_values();
