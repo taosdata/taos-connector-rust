@@ -614,7 +614,8 @@ mod tests {
         let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
-        taos.exec_many(["drop database if exists db", "create database db", "use db"])?;
+        let db = "test_reqid_ws";
+        taos.exec_many([format!("drop database if exists {db}"), format!("create database {db}"), format!("use {db}")])?;
 
         taos.exec(
             "create table st(ts timestamp, c1 TINYINT UNSIGNED) tags(utntag TINYINT UNSIGNED)",
@@ -633,6 +634,7 @@ mod tests {
             assert_eq!(values[1], Value::Null(Ty::UTinyInt));
             assert_eq!(values[2], Value::Null(Ty::UTinyInt));
         }
+        taos.exec(format!("drop database {db}"))?;
         Ok(())
     }
 
@@ -642,7 +644,8 @@ mod tests {
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
-        taos.exec_many(["drop database if exists db", "create database db", "use db"])?;
+        let db = "test_reqid_native";
+        taos.exec_many([format!("drop database if exists {db}"), format!("create database {db}"), format!("use {db}")])?;
 
         taos.exec(
             "create table st(ts timestamp, c1 TINYINT UNSIGNED) tags(utntag TINYINT UNSIGNED)",
@@ -661,6 +664,7 @@ mod tests {
             assert_eq!(values[1], Value::Null(Ty::UTinyInt));
             assert_eq!(values[2], Value::Null(Ty::UTinyInt));
         }
+        taos.exec(format!("drop database {db}"))?;
         Ok(())
     }
 
