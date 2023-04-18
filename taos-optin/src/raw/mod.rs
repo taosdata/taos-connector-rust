@@ -404,7 +404,6 @@ impl ApiEntry {
                 taos_fetch_rows_a,
                 taos_query_a,
                 taos_query,
-                taos_query_with_reqid,
                 taos_free_result,
                 taos_result_precision,
                 taos_field_count,
@@ -419,6 +418,7 @@ impl ApiEntry {
                 taos_fetch_raw_block_a,
                 tmq_write_raw,
                 taos_write_raw_block,
+                taos_query_with_reqid,
                 taos_write_raw_block_with_fields,
                 taos_get_raw_block,
                 taos_result_block
