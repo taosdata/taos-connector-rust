@@ -123,6 +123,10 @@ impl taos_query::Queryable for Taos {
     fn write_raw_block(&self, block: &RawBlock) -> Result<(), Self::Error> {
         self.raw.write_raw_block(block)
     }
+
+    fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
+        todo!()
+    }
 }
 
 #[async_trait::async_trait]

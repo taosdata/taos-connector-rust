@@ -505,6 +505,11 @@ mod tests {
         fn write_raw_block(&self, _: &RawBlock) -> Result<(), Self::Error> {
             Ok(())
         }
+
+        fn put(&self, _data: &SmlData) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        
     }
     #[test]
     fn query_deserialize() {

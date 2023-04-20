@@ -289,6 +289,8 @@ pub mod sync {
         fn database_exists(&self, name: &str) -> Result<bool, Self::Error> {
             Ok(self.exec(format!("show `{name}`.stables")).is_ok())
         }
+
+        fn put(&self, schemaless_data: &SmlData) -> Result<(), Self::Error> ;
     }
 }
 

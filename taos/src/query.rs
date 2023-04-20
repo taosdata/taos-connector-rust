@@ -476,6 +476,20 @@ impl taos_query::Queryable for Taos {
             }
         }
     }
+
+    fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
+        match &self.0 {
+            TaosInner::Native(taos) => {
+                <crate::sys::Taos as taos_query::Queryable>::put(taos, data)
+                    .map_err(Into::into)
+            }
+            TaosInner::Ws(taos) => {
+                <taos_ws::Taos as taos_query::Queryable>::put(taos, data)
+                    .map_err(Into::into)
+            }
+        }
+    }
+
 }
 #[cfg(test)]
 mod tests {
@@ -483,6 +497,9 @@ mod tests {
     use std::str::FromStr;
 
     use taos_query::{common::Timestamp, TBuilder};
+    use taos_query::common::SchemalessPrecision;
+    use taos_query::common::SchemalessProtocol;
+    use taos_query::common::SmlDataBuilder;
 
     use super::TaosBuilder;
 
@@ -780,6 +797,76 @@ mod tests {
         );
 
         assert_eq!(client.exec(format!("drop database {db}"))?, 0);
+        Ok(())
+    }
+
+    // #[test]
+    fn test_put_line() -> anyhow::Result<()> {
+        std::env::set_var("RUST_LOG", "taos=trace");
+        // std::env::set_var("RUST_LOG", "taos=debug");
+        pretty_env_logger::init();
+        use taos_query::prelude::sync::*;
+
+        let dsn =
+            std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        log::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?.build()?;
+
+        let db = "test_schemaless";
+
+        client.exec(format!("drop database if exists {db}"))?;
+
+        client
+            .exec(format!("create database if not exists {db}"))
+            ?;
+
+        let data = [
+            "measurement,host=host1 field1=2i,field2=2.0 1577837300000",
+            "measurement,host=host1 field1=2i,field2=2.0 1577837400000",
+            "measurement,host=host1 field1=2i,field2=2.0 1577837500000",
+            "measurement,host=host1 field1=2i,field2=2.0 1577837600000",
+        ]
+        .map(String::from)
+        .to_vec();
+
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(100u64)
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
+
+        // let sml_data = SmlDataBuilder::default()
+        //     .db(db.to_string())
+        //     .protocol(SchemalessProtocol::Line)
+        //     .precision(SchemalessPrecision::Millisecond)
+        //     .data(data.clone())
+        //     .req_id(101u64)
+        //     .build()?;
+        // assert_eq!(client.put(&sml_data).await?, ());
+
+        // let sml_data = SmlDataBuilder::default()
+        //     .db(db.to_string())
+        //     .protocol(SchemalessProtocol::Line)
+        //     .precision(SchemalessPrecision::Millisecond)
+        //     .data(data.clone())
+        //     .build()?;
+        // assert_eq!(client.put(&sml_data).await?, ());
+
+        // let sml_data = SmlDataBuilder::default()
+        //     .db(db.to_string())
+        //     .protocol(SchemalessProtocol::Line)
+        //     .data(data)
+        //     .req_id(103u64)
+        //     .build()?;
+        // assert_eq!(client.put(&sml_data).await?, ());
+
+        client.exec(format!("drop database if exists {db}"))?;
+
         Ok(())
     }
 }

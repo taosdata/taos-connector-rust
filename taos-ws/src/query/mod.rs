@@ -140,6 +140,10 @@ impl taos_query::Queryable for Taos {
     fn write_raw_block(&self, block: &taos_query::RawBlock) -> Result<(), Self::Error> {
         block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))
     }
+
+    fn put(&self, _data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
+        todo!()
+    }
 }
 
 #[cfg(test)]
