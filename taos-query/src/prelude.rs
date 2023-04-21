@@ -290,7 +290,8 @@ pub mod sync {
             Ok(self.exec(format!("show `{name}`.stables")).is_ok())
         }
 
-        fn put(&self, schemaless_data: &SmlData) -> Result<(), Self::Error> ;
+        fn put(&self, data: &SmlData) -> Result<(), Self::Error> ;
+        
     }
 }
 

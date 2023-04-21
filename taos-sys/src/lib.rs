@@ -125,7 +125,7 @@ impl taos_query::Queryable for Taos {
     }
 
     fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
-        todo!()
+        self.raw.put(data)
     }
 }
 

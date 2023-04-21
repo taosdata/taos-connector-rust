@@ -54,6 +54,46 @@ extern "C" {
         protocol: SchemalessProtocol,
         precision: TSDB_SML_TIMESTAMP_TYPE,
     ) -> *mut TAOS_RES;
+
+    pub fn taos_schemaless_insert_raw(
+        taos: *mut TAOS,
+        lines: *const c_char,
+        len: c_int,
+        totalRows: *mut i32,
+        protocol: SchemalessProtocol,
+        precision: TSDB_SML_TIMESTAMP_TYPE,
+    ) -> *mut TAOS_RES;
+
+    pub fn taos_schemaless_insert_raw_with_reqid(
+        taos: *mut TAOS,
+        lines: *const c_char,
+        len: c_int,
+        totalRows: *mut i32,
+        protocol: SchemalessProtocol,
+        precision: TSDB_SML_TIMESTAMP_TYPE,
+        reqid: u64,
+    ) -> *mut TAOS_RES;
+
+    pub fn taos_schemaless_insert_raw_ttl(
+        taos: *mut TAOS,
+        lines: *const c_char,
+        len: c_int,
+        totalRows: *mut i32,
+        protocol: SchemalessProtocol,
+        precision: TSDB_SML_TIMESTAMP_TYPE,
+        ttl: i32,
+    ) -> *mut TAOS_RES;
+
+    pub fn taos_schemaless_insert_raw_ttl_with_reqid(
+        taos: *mut TAOS,
+        lines: *const c_char,
+        len: c_int,
+        totalRows: *mut i32,
+        protocol: SchemalessProtocol,
+        precision: TSDB_SML_TIMESTAMP_TYPE,
+        ttl: i32,
+        reqid: u64,
+    ) -> *mut TAOS_RES;
 }
 
 #[test]

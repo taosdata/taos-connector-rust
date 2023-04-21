@@ -480,7 +480,15 @@ impl taos_query::Queryable for Taos {
     fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
         match &self.0 {
             TaosInner::Native(taos) => {
-                <crate::sys::Taos as taos_query::Queryable>::put(taos, data)
+                <crate::sys::Taos as taos_query::Queryable>::exec(
+                    taos, 
+                    format!("use {}", data.db()),
+                )?;
+
+                <crate::sys::Taos as taos_query::Queryable>::put(
+                    taos, 
+                    data,
+                )
                     .map_err(Into::into)
             }
             TaosInner::Ws(taos) => {
@@ -800,11 +808,11 @@ mod tests {
         Ok(())
     }
 
-    // #[test]
+    #[test]
     fn test_put_line() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "taos=trace");
-        // std::env::set_var("RUST_LOG", "taos=debug");
-        pretty_env_logger::init();
+        // std::env::set_var("RUST_LOG", "taos=trace");
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
         let dsn =
@@ -820,6 +828,8 @@ mod tests {
         client
             .exec(format!("create database if not exists {db}"))
             ?;
+
+        // client.exec(format!("use {db}"))?;
 
         let data = [
             "measurement,host=host1 field1=2i,field2=2.0 1577837300000",
@@ -840,30 +850,175 @@ mod tests {
             .build()?;
         assert_eq!(client.put(&sml_data)?, ());
 
-        // let sml_data = SmlDataBuilder::default()
-        //     .db(db.to_string())
-        //     .protocol(SchemalessProtocol::Line)
-        //     .precision(SchemalessPrecision::Millisecond)
-        //     .data(data.clone())
-        //     .req_id(101u64)
-        //     .build()?;
-        // assert_eq!(client.put(&sml_data).await?, ());
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .req_id(101u64)
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
 
-        // let sml_data = SmlDataBuilder::default()
-        //     .db(db.to_string())
-        //     .protocol(SchemalessProtocol::Line)
-        //     .precision(SchemalessPrecision::Millisecond)
-        //     .data(data.clone())
-        //     .build()?;
-        // assert_eq!(client.put(&sml_data).await?, ());
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
 
-        // let sml_data = SmlDataBuilder::default()
-        //     .db(db.to_string())
-        //     .protocol(SchemalessProtocol::Line)
-        //     .data(data)
-        //     .req_id(103u64)
-        //     .build()?;
-        // assert_eq!(client.put(&sml_data).await?, ());
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Line)
+            .data(data)
+            .req_id(103u64)
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
+
+        client.exec(format!("drop database if exists {db}"))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_put_telnet() -> anyhow::Result<()> {
+        // std::env::set_var("RUST_LOG", "taos=trace");
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
+        use taos_query::prelude::sync::*;
+
+        let dsn =
+            std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        log::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?.build()?;
+
+        let db = "test_schemaless";
+
+        client.exec(format!("drop database if exists {db}"))?;
+
+        client
+            .exec(format!("create database if not exists {db}"))
+            ?;
+
+        // client.exec(format!("use {db}"))?;
+
+        let data = [
+            "meters.current 1648432611249 10.3 location=California.SanFrancisco group=2",
+            "meters.current 1648432611250 12.6 location=California.SanFrancisco group=2",
+            "meters.current 1648432611249 10.8 location=California.LosAngeles group=3",
+            "meters.current 1648432611250 11.3 location=California.LosAngeles group=3",
+            "meters.voltage 1648432611249 219 location=California.SanFrancisco group=2",
+            "meters.voltage 1648432611250 218 location=California.SanFrancisco group=2",
+            "meters.voltage 1648432611249 221 location=California.LosAngeles group=3",
+            "meters.voltage 1648432611250 217 location=California.LosAngeles group=3",
+        ]
+        .map(String::from)
+        .to_vec();
+
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Telnet)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(100u64)
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
+
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Telnet)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .req_id(101u64)
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
+
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Telnet)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
+
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Telnet)
+            .data(data)
+            .req_id(103u64)
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
+
+        client.exec(format!("drop database if exists {db}"))?;
+
+        Ok(())
+    }
+    
+    #[test]
+    fn test_put_json() -> anyhow::Result<()> {
+        // std::env::set_var("RUST_LOG", "taos=trace");
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
+        use taos_query::prelude::sync::*;
+
+        let dsn =
+            std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        log::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?.build()?;
+
+        let db = "test_schemaless";
+
+        client.exec(format!("drop database if exists {db}"))?;
+
+        client
+            .exec(format!("create database if not exists {db}"))
+            ?;
+
+        // client.exec(format!("use {db}"))?;
+
+        // SchemalessProtocol::Json
+        let data = [
+            r#"[{"metric": "meters.current", "timestamp": 1681345954000, "value": 10.3, "tags": {"location": "California.SanFrancisco", "groupid": 2}}, {"metric": "meters.voltage", "timestamp": 1648432611249, "value": 219, "tags": {"location": "California.LosAngeles", "groupid": 1}}, {"metric": "meters.current", "timestamp": 1648432611250, "value": 12.6, "tags": {"location": "California.SanFrancisco", "groupid": 2}}, {"metric": "meters.voltage", "timestamp": 1648432611250, "value": 221, "tags": {"location": "California.LosAngeles", "groupid": 1}}]"#
+        ]
+        .map(String::from)
+        .to_vec();
+
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Json)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(300u64)
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
+
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Json)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(301u64)
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
+
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Json)
+            .data(data.clone())
+            .req_id(302u64)
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
+
+        let sml_data = SmlDataBuilder::default()
+            .db(db.to_string())
+            .protocol(SchemalessProtocol::Json)
+            .data(data.clone())
+            .build()?;
+        assert_eq!(client.put(&sml_data)?, ());
 
         client.exec(format!("drop database if exists {db}"))?;
 
