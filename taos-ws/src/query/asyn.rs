@@ -208,6 +208,8 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("Websocket has been closed: {0}")]
     WsClosed(String),
+    #[error("Common error: {0}")]
+    CommonError(String),
 }
 
 #[derive(Debug, Clone, Copy)]

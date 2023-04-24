@@ -100,15 +100,30 @@ impl taos_query::AsyncQueryable for Taos {
     }
 
     async fn put(&self, data: &SmlData) -> Result<(), Self::Error> {
-        if let Some(ws) = self.async_sml.get() {
-            ws.s_put(data).await
+        let client = self.async_client.get().unwrap();
+
+        let db: Option<String> = client.query_one("select database()").await?;
+        
+        log::debug!("current db: {:?}", db);
+
+        if let Some(db) = db {
+            if db != "".to_string() {
+                if let Some(ws) = self.async_sml.get() {
+                    ws.s_put(data, db).await
+                } else {
+                    let async_sml = crate::schemaless::WsTaos::from_wsinfo(&self.dsn).await?;
+                    self.async_sml
+                        .get_or_init(|| async_sml)
+                        .s_put(data, db)
+                        .await
+                }
+            } else {
+                Err(asyn::Error::CommonError("Database should be specified".into()))
+            }
         } else {
-            let async_sml = crate::schemaless::WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_sml
-                .get_or_init(|| async_sml)
-                .s_put(data)
-                .await
+            Err(asyn::Error::CommonError("Database should be specified".into()))
         }
+        
     }
 }
 
@@ -139,6 +154,10 @@ impl taos_query::Queryable for Taos {
 
     fn write_raw_block(&self, block: &taos_query::RawBlock) -> Result<(), Self::Error> {
         block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))
+    }
+
+    fn put(&self, _data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
+        todo!()
     }
 }
 

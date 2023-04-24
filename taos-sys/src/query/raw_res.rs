@@ -67,8 +67,16 @@ impl RawRes {
         if code.success() {
             Ok(self)
         } else {
+            let err: Result<RawRes, Error> = Err(
+                Error::new(
+                    code, 
+                    self.err_as_str().to_string()
+                )
+            );
+
             self.free_result();
-            Err(Error::new(code, self.err_as_str()))
+
+            err
         }
     }
 

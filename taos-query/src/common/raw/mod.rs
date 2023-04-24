@@ -971,6 +971,7 @@ impl crate::prelude::sync::Inlinable for RawBlock {
     }
 }
 
+#[repr(C)]
 #[derive(Default, Debug, Copy, Clone)]
 pub enum SchemalessProtocol {
     Unknown = 0,
@@ -980,8 +981,13 @@ pub enum SchemalessProtocol {
     Json,
 }
 
+#[repr(C)]
 #[derive(Default, Debug, Copy, Clone)]
 pub enum SchemalessPrecision {
+    NonConfigured = 0,
+    Hours,
+    Minutes,
+    Seconds,
     #[default]
     Millisecond,
     Microsecond,
@@ -994,6 +1000,7 @@ impl From<SchemalessPrecision> for String {
             SchemalessPrecision::Millisecond => "ms".to_string(),
             SchemalessPrecision::Microsecond => "us".to_string(),
             SchemalessPrecision::Nanosecond => "ns".to_string(),
+            _ => todo!(),
         }
     }
 }
@@ -1001,7 +1008,6 @@ impl From<SchemalessPrecision> for String {
 #[derive(Default, Builder, Debug)]
 #[builder(setter(into))]
 pub struct SmlData {
-    db: String,
     protocol: SchemalessProtocol,
     #[builder(setter(into, strip_option), default)]
     precision: SchemalessPrecision,
@@ -1013,11 +1019,6 @@ pub struct SmlData {
 }
 
 impl SmlData {
-
-    #[inline]
-    pub fn db(&self) -> &str {
-        self.db.as_ref()
-    }
 
     #[inline]
     pub fn protocol(&self) -> SchemalessProtocol {

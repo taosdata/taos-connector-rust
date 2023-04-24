@@ -1,10 +1,11 @@
 use std::{ffi::CStr, os::raw::*};
 
 use cfg_if::cfg_if;
-use taos_query::common::raw_data_t;
+use taos_query::common::{raw_data_t, SmlData};
 use taos_query::prelude::{Code, RawError as Error};
 use taos_query::RawBlock;
 
+use crate::schemaless::*;
 use crate::tmq::*;
 use crate::{err_or, into_c_str::IntoCStr, query::QueryFuture};
 use crate::{ffi::*, tmq::ffi::tmq_write_raw, RawRes, ResultSet};
@@ -231,6 +232,84 @@ impl RawTaos {
             )
         }
     }
+
+    #[inline]
+    pub fn put(&self, sml: &SmlData) -> Result<(), Error> {
+
+        let data = sml.data().join("\n").to_string();
+        log::trace!("sml insert with data: {}", data.clone());
+        let length = data.clone().len() as i32;
+        let mut total_rows: i32 = 0;
+        let res;
+        
+        if sml.req_id().is_some() && sml.ttl().is_some() {
+            log::debug!("sml insert with req_id: {} and ttl {}", sml.req_id().unwrap(), sml.ttl().unwrap());
+            res = RawRes::from_ptr(unsafe { 
+                taos_schemaless_insert_raw_ttl_with_reqid(
+                    self.as_ptr(), 
+                    data.into_c_str().as_ptr(),
+                    length,
+                    &mut total_rows,
+                    std::mem::transmute(sml.protocol()),
+                    std::mem::transmute(sml.precision()),
+                    sml.ttl().unwrap(),
+                    sml.req_id().unwrap(),
+                )
+            });
+        } else if sml.req_id().is_some() {
+            log::debug!("sml insert with req_id: {}", sml.req_id().unwrap());
+            res = RawRes::from_ptr(unsafe { 
+                taos_schemaless_insert_raw_with_reqid(
+                    self.as_ptr(), 
+                    data.into_c_str().as_ptr(),
+                    length,
+                    &mut total_rows,
+                    std::mem::transmute(sml.protocol()),
+                    std::mem::transmute(sml.precision()),
+                    sml.req_id().unwrap(),
+                )
+            });
+        } else if sml.ttl().is_some() {
+            log::debug!("sml insert with ttl: {}", sml.ttl().unwrap());
+            res = RawRes::from_ptr(unsafe { 
+                taos_schemaless_insert_raw_ttl(
+                    self.as_ptr(), 
+                    data.into_c_str().as_ptr(),
+                    length,
+                    &mut total_rows,
+                    std::mem::transmute(sml.protocol()),
+                    std::mem::transmute(sml.precision()),
+                    sml.ttl().unwrap(),
+                )
+            });
+        } else {
+            log::debug!("sml insert without req_id and ttl");
+            res = RawRes::from_ptr(unsafe { 
+                taos_schemaless_insert_raw(
+                    self.as_ptr(), 
+                    data.into_c_str().as_ptr(),
+                    length,
+                    &mut total_rows,
+                    std::mem::transmute(sml.protocol()),
+                    std::mem::transmute(sml.precision()),
+                )
+            });
+        }
+        
+        
+        log::trace!("sml total rows: {}", total_rows);
+        match res {
+            Ok(_) => {
+                log::trace!("sml insert success");
+                Ok(())
+            }
+            Err(e) => {
+                log::trace!("sml insert failed: {:?}", e);
+                return Err(e);
+            }
+        }
+    }
+
     #[inline]
     pub fn close(&mut self) {
         unsafe { taos_close(self.as_ptr()) }
