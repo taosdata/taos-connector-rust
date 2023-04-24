@@ -824,7 +824,8 @@ mod tests {
             .exec(format!("create database if not exists {db}"))
             ?;
 
-        // client.exec(format!("use {db}"))?;
+        // should specify database before insert
+        client.exec(format!("use {db}"))?;
 
         let data = [
             "measurement,host=host1 field1=2i,field2=2.0 1577837300000",
@@ -892,7 +893,8 @@ mod tests {
             .exec(format!("create database if not exists {db}"))
             ?;
 
-        // client.exec(format!("use {db}"))?;
+        // should specify database before insert
+        client.exec(format!("use {db}"))?;
 
         let data = [
             "meters.current 1648432611249 10.3 location=California.SanFrancisco group=2",
@@ -964,7 +966,8 @@ mod tests {
             .exec(format!("create database if not exists {db}"))
             ?;
 
-        // client.exec(format!("use {db}"))?;
+        // should specify database before insert
+        client.exec(format!("use {db}"))?;
 
         // SchemalessProtocol::Json
         let data = [
