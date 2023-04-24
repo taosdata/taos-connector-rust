@@ -19,8 +19,10 @@ use super::ApiEntry;
 pub struct QueryFuture<'a> {
     raw: RawTaos,
     sql: Cow<'a, CStr>,
-    state: UnsafeCell<State>,
+    state: Arc<UnsafeCell<State>>,
 }
+
+unsafe impl<'a> Send for QueryFuture<'a> {}
 
 /// Shared state between the future and the waiting thread
 struct State {
@@ -75,9 +77,9 @@ impl<'a> Future for QueryFuture<'a> {
                 res: *mut TAOS_RES,
                 code: c_int,
             ) {
-                let param = param as *mut (&UnsafeCell<State>, Waker);
-                let state = param.read();
-                let mut s = { &mut *state.0.get() };
+                let param = Box::from_raw(param as *mut (Arc<UnsafeCell<State>>, Waker));
+                // let state = param.read();
+                let mut s = { &mut *param.0.get() };
                 let cost = s.time.elapsed();
                 log::debug!("Received query callback in {:?}", cost);
                 s.callback_cost.replace(cost);
@@ -88,7 +90,7 @@ impl<'a> Future for QueryFuture<'a> {
                     log::warn!("Received 0x032C (Object is creating) error, retry");
                     s.waiting = false;
                     (s.api.taos_free_result)(res);
-                    state.1.wake();
+                    param.1.wake();
                     return;
                 }
 
@@ -104,10 +106,10 @@ impl<'a> Future for QueryFuture<'a> {
                 s.result.replace(result);
                 s.done = true;
                 s.waiting = false;
-                state.1.wake();
+                param.1.wake();
             }
 
-            let param = Box::new((&self.state, cx.waker().clone()));
+            let param = Box::new((self.state.clone(), cx.waker().clone()));
             log::trace!("calling taos_query_a");
             self.raw.query_a(
                 self.sql.as_ref(),
@@ -123,7 +125,7 @@ impl<'a> QueryFuture<'a> {
     /// Create a new `TimerFuture` which will complete after the provided
     /// timeout.
     pub fn new(taos: RawTaos, sql: impl IntoCStr<'a>) -> Self {
-        let state = UnsafeCell::new(State::new(taos.c.clone()));
+        let state = Arc::new(UnsafeCell::new(State::new(taos.c.clone())));
         let sql = sql.into_c_str();
         log::trace!("query with: {}", sql.to_str().unwrap_or("<...>"));
 

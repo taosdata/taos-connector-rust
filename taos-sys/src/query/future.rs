@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
-use crate::ffi::{TAOS_RES, taos_free_result, taos_errstr};
+use crate::ffi::{taos_errstr, taos_free_result, TAOS_RES};
 use crate::into_c_str::IntoCStr;
 use crate::{RawRes, RawTaos};
 use taos_query::prelude::RawError;
@@ -72,9 +72,8 @@ impl<'a> Future for QueryFuture<'a> {
                 res: *mut TAOS_RES,
                 code: c_int,
             ) {
-                let param = param as *mut (Arc<UnsafeCell<State>>, Waker);
-                let state = param.read();
-                let mut s = { &mut *state.0.get() };
+                let param = Box::from_raw(param as *mut (Arc<UnsafeCell<State>>, Waker));
+                let mut s = { &mut *param.0.get() };
                 let cost = s.time.elapsed();
                 log::debug!("Received query callback in {:?}", cost);
                 s.callback_cost.replace(cost);
@@ -86,7 +85,7 @@ impl<'a> Future for QueryFuture<'a> {
                     s.waiting = false;
                     s.done = false;
                     taos_free_result(res);
-                    state.1.wake();
+                    param.1.wake();
                     return;
                 }
 
@@ -102,7 +101,7 @@ impl<'a> Future for QueryFuture<'a> {
                 s.result.replace(result);
                 s.done = true;
                 s.waiting = false;
-                state.1.wake();
+                param.1.wake();
             }
 
             let param = Box::new((self.state.clone(), cx.waker().clone()));
