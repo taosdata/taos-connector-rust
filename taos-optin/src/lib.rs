@@ -877,6 +877,7 @@ mod tests {
             .exec(format!("create database if not exists {db}"))
             ?;
 
+        // should specify database before insert
         client.exec(format!("use {db}"))?;
 
         let data = [
@@ -889,7 +890,6 @@ mod tests {
         .to_vec();
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -899,7 +899,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -908,7 +907,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -916,7 +914,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .data(data)
             .req_id(103u64)
@@ -949,6 +946,7 @@ mod tests {
             .exec(format!("create database if not exists {db}"))
             ?;
 
+        // should specify database before insert
         client.exec(format!("use {db}"))?;
 
         let data = [
@@ -965,7 +963,6 @@ mod tests {
         .to_vec();
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -975,7 +972,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -984,7 +980,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -992,7 +987,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .data(data)
             .req_id(103u64)
@@ -1025,6 +1019,7 @@ mod tests {
             .exec(format!("create database if not exists {db}"))
             ?;
 
+        // should specify database before insert
         client.exec(format!("use {db}"))?;
 
         // SchemalessProtocol::Json
@@ -1035,7 +1030,6 @@ mod tests {
         .to_vec();
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -1045,7 +1039,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .data(data.clone())
             .ttl(1000)
@@ -1054,7 +1047,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .data(data.clone())
             .req_id(302u64)
@@ -1062,7 +1054,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .data(data.clone())
             .build()?;

@@ -480,11 +480,6 @@ impl taos_query::Queryable for Taos {
     fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
         match &self.0 {
             TaosInner::Native(taos) => {
-                <crate::sys::Taos as taos_query::Queryable>::exec(
-                    taos, 
-                    format!("use {}", data.db()),
-                )?;
-
                 <crate::sys::Taos as taos_query::Queryable>::put(
                     taos, 
                     data,
@@ -841,7 +836,6 @@ mod tests {
         .to_vec();
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -851,7 +845,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -860,7 +853,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -868,7 +860,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .data(data)
             .req_id(103u64)
@@ -917,7 +908,6 @@ mod tests {
         .to_vec();
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -927,7 +917,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -936,7 +925,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -944,7 +932,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .data(data)
             .req_id(103u64)
@@ -987,7 +974,6 @@ mod tests {
         .to_vec();
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -997,7 +983,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .data(data.clone())
             .ttl(1000)
@@ -1006,7 +991,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .data(data.clone())
             .req_id(302u64)
@@ -1014,7 +998,6 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .data(data.clone())
             .build()?;
@@ -1064,6 +1047,9 @@ mod async_tests {
             .exec(format!("create database if not exists {db}"))
             .await?;
 
+        // should specify database before insert
+        client.exec(format!("use {db}")).await?;
+
         let data = [
             "measurement,host=host1 field1=2i,field2=2.0 1577837300000",
             "measurement,host=host1 field1=2i,field2=2.0 1577837400000",
@@ -1074,7 +1060,6 @@ mod async_tests {
         .to_vec();
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -1084,7 +1069,6 @@ mod async_tests {
         assert_eq!(client.put(&sml_data).await?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -1093,7 +1077,6 @@ mod async_tests {
         assert_eq!(client.put(&sml_data).await?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -1101,7 +1084,6 @@ mod async_tests {
         assert_eq!(client.put(&sml_data).await?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Line)
             .data(data)
             .req_id(103u64)
@@ -1131,6 +1113,8 @@ mod async_tests {
             .exec(format!("create database if not exists {db}"))
             .await?;
 
+        // should specify database before insert
+        client.exec(format!("use {db}")).await?;
 
         let data = [
             "meters.current 1648432611249 10.3 location=California.SanFrancisco group=2",
@@ -1146,7 +1130,6 @@ mod async_tests {
         .to_vec();
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -1156,7 +1139,6 @@ mod async_tests {
         assert_eq!(client.put(&sml_data).await?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .data(data.clone())
             .ttl(1000)
@@ -1165,7 +1147,6 @@ mod async_tests {
         assert_eq!(client.put(&sml_data).await?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .data(data.clone())
             .req_id(202u64)
@@ -1173,7 +1154,6 @@ mod async_tests {
         assert_eq!(client.put(&sml_data).await?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Telnet)
             .data(data.clone())
             .build()?;
@@ -1203,6 +1183,9 @@ mod async_tests {
             .exec(format!("create database if not exists {db}"))
             .await?;
 
+        // should specify database before insert
+        client.exec(format!("use {db}")).await?;
+
         // SchemalessProtocol::Json
         let data = [
             r#"[{"metric": "meters.current", "timestamp": 1681345954000, "value": 10.3, "tags": {"location": "California.SanFrancisco", "groupid": 2}}, {"metric": "meters.voltage", "timestamp": 1648432611249, "value": 219, "tags": {"location": "California.LosAngeles", "groupid": 1}}, {"metric": "meters.current", "timestamp": 1648432611250, "value": 12.6, "tags": {"location": "California.SanFrancisco", "groupid": 2}}, {"metric": "meters.voltage", "timestamp": 1648432611250, "value": 221, "tags": {"location": "California.LosAngeles", "groupid": 1}}]"#
@@ -1211,7 +1194,6 @@ mod async_tests {
         .to_vec();
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .precision(SchemalessPrecision::Millisecond)
             .data(data.clone())
@@ -1221,7 +1203,6 @@ mod async_tests {
         assert_eq!(client.put(&sml_data).await?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .data(data.clone())
             .ttl(1000)
@@ -1230,7 +1211,6 @@ mod async_tests {
         assert_eq!(client.put(&sml_data).await?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .data(data.clone())
             .req_id(302u64)
@@ -1238,7 +1218,6 @@ mod async_tests {
         assert_eq!(client.put(&sml_data).await?, ());
 
         let sml_data = SmlDataBuilder::default()
-            .db(db.to_string())
             .protocol(SchemalessProtocol::Json)
             .data(data.clone())
             .build()?;

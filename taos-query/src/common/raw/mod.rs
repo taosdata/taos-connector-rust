@@ -1008,7 +1008,6 @@ impl From<SchemalessPrecision> for String {
 #[derive(Default, Builder, Debug)]
 #[builder(setter(into))]
 pub struct SmlData {
-    db: String,
     protocol: SchemalessProtocol,
     #[builder(setter(into, strip_option), default)]
     precision: SchemalessPrecision,
@@ -1020,11 +1019,6 @@ pub struct SmlData {
 }
 
 impl SmlData {
-
-    #[inline]
-    pub fn db(&self) -> &str {
-        self.db.as_ref()
-    }
 
     #[inline]
     pub fn protocol(&self) -> SchemalessProtocol {
