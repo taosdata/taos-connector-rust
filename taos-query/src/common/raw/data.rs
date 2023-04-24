@@ -42,6 +42,16 @@ impl raw_data_t {
         }
         Bytes::from(data)
     }
+
+    pub fn free(&mut self) {
+        unsafe {
+            Vec::from_raw_parts(
+                self.raw as *mut u8,
+                self.raw_len as usize,
+                self.raw_len as usize,
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +86,14 @@ impl RawDataInner {
         match self {
             Self::Raw(raw) => Cow::Owned(raw.to_bytes()),
             Self::Data(bytes) => Cow::Borrowed(bytes),
+        }
+    }
+}
+
+impl Drop for RawDataInner {
+    fn drop(&mut self) {
+        if let RawDataInner::Raw(raw) = self {
+            raw.free()
         }
     }
 }
