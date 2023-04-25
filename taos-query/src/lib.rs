@@ -105,8 +105,8 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
 
     /// Check if the server is an enterprise edition.
     #[doc(hidden)]
-    fn is_enterprise_edition(&self) -> bool {
-        false
+    fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+        Ok(false)
     }
 
     /// Check a connection is still alive.
@@ -193,8 +193,8 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
 
     /// Check if the server is an enterprise edition.
     #[doc(hidden)]
-    async fn is_enterprise_edition(&self) -> bool {
-        false
+    async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+        Ok(false)
     }
 
     /// Check a connection is still alive.
@@ -472,7 +472,7 @@ mod tests {
             todo!()
         }
 
-        fn is_enterprise_edition(&self) -> bool {
+        fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
             todo!()
         }
     }

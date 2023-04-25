@@ -126,44 +126,42 @@ impl taos_query::TBuilder for TaosBuilder {
             })
         }
     }
-    fn is_enterprise_edition(&self) -> bool {
+    fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
         if self.addr.matches(".cloud.tdengine.com").next().is_some() {
             // self.server_version().or_else(|| => );
-            return true;
+            return Ok(true);
         }
 
-        if let Ok(taos) = self.build() {
-            use taos_query::prelude::sync::Queryable;
-            let grant: Option<(String, bool)> = Queryable::query_one(
-                &taos,
-                "select version, (expire_time < now) from information_schema.ins_cluster",
-            )
-            .unwrap_or_default();
+        let taos = self.build()?;
 
-            if let Some((edition, expired)) = grant {
-                if expired {
-                    return false;
-                }
-                return match edition.trim() {
-                    "cloud" | "official" | "trial" => true,
-                    _ => false,
-                };
+        use taos_query::prelude::sync::Queryable;
+        let grant: Option<(String, bool)> = Queryable::query_one(
+            &taos,
+            "select version, (expire_time < now) from information_schema.ins_cluster",
+        )?;
+
+        if let Some((edition, expired)) = grant {
+            if expired {
+                return Ok(false);
             }
+            return match edition.trim() {
+                "cloud" | "official" | "trial" => Ok(true),
+                _ => Ok(false),
+            };
+        }
 
-            let grant: Option<(String, (), String)> =
-                Queryable::query_one(&taos, "show grants").unwrap_or_default();
+        let grant: Option<(String, (), String)> =
+            Queryable::query_one(&taos, "show grants").unwrap_or_default();
 
-            if let Some((edition, _, expired)) = grant {
-                match (edition.trim(), expired.trim()) {
-                    ("cloud" | "official" | "trial", "false") => true,
-                    _ => false,
-                }
-            } else {
-                false
+        if let Some((edition, _, expired)) = grant {
+            match (edition.trim(), expired.trim()) {
+                ("cloud" | "official" | "trial", "false") => Ok(true),
+                _ => Ok(false),
             }
         } else {
-            false
+            Ok(false)
         }
+        
     }
 }
 
@@ -217,47 +215,45 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             })
         }
     }
-    async fn is_enterprise_edition(&self) -> bool {
+    async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
         if self.addr.matches(".cloud.tdengine.com").next().is_some() {
             // self.server_version().or_else(|| => );
-            return true;
+            return Ok(true);
         }
 
-        if let Ok(taos) = self.build().await {
-            use taos_query::prelude::AsyncQueryable;
-            let grant: Option<(String, bool)> = AsyncQueryable::query_one(
-                &taos,
-                "select version, (expire_time < now) from information_schema.ins_cluster",
-            )
-            .await
-            .unwrap_or_default();
+        let taos = self.build().await?;
+        use taos_query::prelude::AsyncQueryable;
+        let grant: Option<(String, bool)> = AsyncQueryable::query_one(
+            &taos,
+            "select version, (expire_time < now) from information_schema.ins_cluster",
+        )
+        .await
+        .unwrap_or_default();
 
-            if let Some((edition, expired)) = grant {
-                if expired {
-                    return false;
-                }
-                return match edition.trim() {
-                    "cloud" | "official" | "trial" => true,
-                    _ => false,
-                };
+        if let Some((edition, expired)) = grant {
+            if expired {
+                return Ok(false);
             }
+            return match edition.trim() {
+                "cloud" | "official" | "trial" => Ok(true),
+                _ => Ok(false),
+            };
+        }
 
-            let grant: Option<(String, (), String)> =
-                AsyncQueryable::query_one(&taos, "show grants")
-                    .await
-                    .unwrap_or_default();
+        let grant: Option<(String, (), String)> =
+            AsyncQueryable::query_one(&taos, "show grants")
+                .await
+                .unwrap_or_default();
 
-            if let Some((edition, _, expired)) = grant {
-                match (edition.trim(), expired.trim()) {
-                    ("cloud" | "official" | "trial", "false") => true,
-                    _ => false,
-                }
-            } else {
-                false
+        if let Some((edition, _, expired)) = grant {
+            match (edition.trim(), expired.trim()) {
+                ("cloud" | "official" | "trial", "false") => Ok(true),
+                _ => Ok(false),
             }
         } else {
-            false
+            Ok(false)
         }
+    
     }
 }
 

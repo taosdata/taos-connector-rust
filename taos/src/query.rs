@@ -120,13 +120,13 @@ impl taos_query::TBuilder for TaosBuilder {
         }
     }
 
-    fn is_enterprise_edition(&self) -> bool {
+    fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
         match &self.0 {
             TaosBuilderInner::Native(b) => {
-                <sys::TaosBuilder as taos_query::TBuilder>::is_enterprise_edition(b)
+                Ok(<sys::TaosBuilder as taos_query::TBuilder>::is_enterprise_edition(b)?)
             }
             TaosBuilderInner::Ws(b) => {
-                <taos_ws::TaosBuilder as taos_query::TBuilder>::is_enterprise_edition(b)
+                Ok(<taos_ws::TaosBuilder as taos_query::TBuilder>::is_enterprise_edition(b)?)
             }
         }
     }
@@ -203,12 +203,14 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         }
     }
 
-    async fn is_enterprise_edition(&self) -> bool {
+    async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
         match &self.0 {
             TaosBuilderInner::Native(b) => {
-                <sys::TaosBuilder as taos_query::AsyncTBuilder>::is_enterprise_edition(b).await
+                Ok(<sys::TaosBuilder as taos_query::AsyncTBuilder>::is_enterprise_edition(b).await?)
             }
-            TaosBuilderInner::Ws(b) => b.is_enterprise_edition().await,
+            TaosBuilderInner::Ws(b) => {
+                Ok(b.is_enterprise_edition().await?)
+            }
         }
     }
 }
