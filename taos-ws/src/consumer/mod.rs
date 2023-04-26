@@ -285,7 +285,7 @@ impl IsAsyncData for Data {
     type Error = Error;
 
     async fn as_raw_data(&self) -> StdResult<taos_query::common::RawData, Self::Error> {
-        todo!()
+        self.0.fetch_raw_meta().await.map(|raw| unsafe { std::mem::transmute(raw) })
     }
 
     async fn fetch_raw_block(&self) -> StdResult<Option<RawBlock>, Self::Error> {
