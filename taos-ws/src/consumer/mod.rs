@@ -121,7 +121,7 @@ impl TBuilder for TmqBuilder {
         todo!()
     }
 
-    fn is_enterprise_edition(&self) -> bool {
+    fn is_enterprise_edition(&self) -> StdResult<bool, Self::Error> {
         todo!()
     }
 }
@@ -156,7 +156,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         todo!()
     }
 
-    async fn is_enterprise_edition(&self) -> bool {
+    async fn is_enterprise_edition(&self) -> StdResult<bool, Self::Error> {
         todo!()
     }
 }

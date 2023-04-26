@@ -159,7 +159,7 @@ impl taos_query::TBuilder for TmqBuilder {
         })
     }
 
-    fn is_enterprise_edition(&self) -> bool {
+    fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
         unimplemented!()
     }
 
@@ -206,7 +206,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         })
     }
 
-    async fn is_enterprise_edition(&self) -> bool {
+    async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
         unimplemented!()
     }
 

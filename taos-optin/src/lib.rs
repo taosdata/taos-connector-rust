@@ -418,39 +418,37 @@ impl taos_query::TBuilder for TaosBuilder {
         }
     }
 
-    fn is_enterprise_edition(&self) -> bool {
-        if let Ok(taos) = self.inner_connection() {
-            use taos_query::prelude::sync::Queryable;
-            let grant: Option<(String, bool)> = Queryable::query_one(
-                taos,
-                "select version, (expire_time < now) as valid from information_schema.ins_cluster",
-            )
-            .unwrap_or_default();
+    fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+        let taos = self.inner_connection()?;
+        use taos_query::prelude::sync::Queryable;
+        let grant: Option<(String, bool)> = Queryable::query_one(
+            taos,
+            "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+        )
+        .unwrap_or_default();
 
-            if let Some((edition, expired)) = grant {
-                if expired {
-                    return false;
-                }
-                return match edition.as_str() {
-                    "cloud" | "official" | "trial" => true,
-                    _ => false,
-                };
+        if let Some((edition, expired)) = grant {
+            if expired {
+                return Ok(false);
             }
+            return match edition.as_str() {
+                "cloud" | "official" | "trial" => Ok(true),
+                _ => Ok(false),
+            };
+        }
 
-            let grant: Option<(String, (), String)> =
-                Queryable::query_one(taos, "show grants").unwrap_or_default();
+        let grant: Option<(String, (), String)> =
+            Queryable::query_one(taos, "show grants").unwrap_or_default();
 
-            if let Some((edition, _, expired)) = grant {
-                match (edition.trim(), expired.trim()) {
-                    ("cloud" | "official" | "trial", "false") => true,
-                    _ => false,
-                }
-            } else {
-                false
+        if let Some((edition, _, expired)) = grant {
+            match (edition.trim(), expired.trim()) {
+                ("cloud" | "official" | "trial", "false") => Ok(true),
+                _ => Ok(false),
             }
         } else {
-            false
+            Ok(false)
         }
+        
     }
 }
 
@@ -541,42 +539,40 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         }
     }
 
-    async fn is_enterprise_edition(&self) -> bool {
-        if let Ok(taos) = self.inner_connection() {
-            use taos_query::prelude::AsyncQueryable;
-            let grant: Option<(String, bool)> = AsyncQueryable::query_one(
-                taos,
-                "select version, (expire_time < now) as valid from information_schema.ins_cluster",
-            )
-            .await
-            .unwrap_or_default();
+    async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+        let taos = self.inner_connection()?;
+        use taos_query::prelude::AsyncQueryable;
+        let grant: Option<(String, bool)> = AsyncQueryable::query_one(
+            taos,
+            "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+        )
+        .await
+        .unwrap_or_default();
 
-            if let Some((edition, expired)) = grant {
-                if expired {
-                    return false;
-                }
-                return match edition.as_str() {
-                    "cloud" | "official" | "trial" => true,
-                    _ => false,
-                };
+        if let Some((edition, expired)) = grant {
+            if expired {
+                return Ok(false);
             }
+            return match edition.as_str() {
+                "cloud" | "official" | "trial" => Ok(true),
+                _ => Ok(false),
+            };
+        }
 
-            let grant: Option<(String, (), String)> =
-                AsyncQueryable::query_one(taos, "show grants")
-                    .await
-                    .unwrap_or_default();
+        let grant: Option<(String, (), String)> =
+            AsyncQueryable::query_one(taos, "show grants")
+                .await
+                .unwrap_or_default();
 
-            if let Some((edition, _, expired)) = grant {
-                match (edition.trim(), expired.trim()) {
-                    ("cloud" | "official" | "trial", "false") => true,
-                    _ => false,
-                }
-            } else {
-                false
+        if let Some((edition, _, expired)) = grant {
+            match (edition.trim(), expired.trim()) {
+                ("cloud" | "official" | "trial", "false") => Ok(true),
+                _ => Ok(false),
             }
         } else {
-            false
+            Ok(false)
         }
+    
     }
 }
 
