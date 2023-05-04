@@ -1251,7 +1251,7 @@ mod async_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_is_enterprise_edition_ws() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
 
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
