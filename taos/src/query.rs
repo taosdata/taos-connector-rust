@@ -1236,7 +1236,7 @@ mod async_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_is_enterprise_edition() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
 
         let dsn =
             std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
