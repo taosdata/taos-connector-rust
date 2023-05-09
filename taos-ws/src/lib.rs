@@ -227,8 +227,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             &taos,
             "select version, (expire_time < now) from information_schema.ins_cluster",
         )
-        .await
-        .unwrap_or_default();
+        .await?;
 
         if let Some((edition, expired)) = grant {
             if expired {
