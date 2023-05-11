@@ -221,7 +221,7 @@ pub(super) mod tmq {
             log::info!("tmq_resp: {:?}, topic_name: {}, vgroup_id: {}, offset: {}", tmq_resp, topic_name, vgroup_id, offset);
 
             let err_str = err_as_str(tmq_resp);
-            log::info!("tmq_resp str: {}", err_str);
+            log::info!("tmq_resp as str: {}", err_str);
 
             tmq_resp.ok_or(
                 format!("offset seek failed: {err_str}")
