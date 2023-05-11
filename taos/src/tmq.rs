@@ -786,7 +786,13 @@ mod tests {
                 let begin = assignment.begin();
                 let end = assignment.end();
                 log::info!("topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}", topic, vgroup_id, current, begin, end);
-                consumer.offset_seek(topic, vgroup_id, begin).await?;
+                let res = consumer.offset_seek(topic, vgroup_id, end).await;
+                if res.is_err() {
+                    log::error!("seek offset error: {:?}", res);
+                    let a = consumer.assignments().await.unwrap();
+                    log::error!("assignments: {:?}", a);
+                    panic!()
+                }
             }
         }
 
