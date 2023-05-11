@@ -12,6 +12,8 @@ use taos_query::prelude::{Code, RawError};
 use taos_query::tmq::{
     AsAsyncConsumer, AsConsumer, IsAsyncData, IsAsyncMeta, IsOffset, MessageSet, SyncOnAsync,
     Timeout,
+    VGroupId,
+    Assignment,
 };
 use taos_query::util::InlinableRead;
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
@@ -457,6 +459,14 @@ impl AsAsyncConsumer for Consumer {
 
         let _ = self.sender.send_recv(action).await?;
         Ok(())
+    }
+
+    async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
+        todo!("ws assignments")
+    }
+
+    async fn offset_seek(&mut self, _topic: &str, _dvgroup_id: VGroupId, _offset: i64) -> StdResult<(), Self::Error> {
+        todo!("ws offset_seek")
     }
 
     fn default_timeout(&self) -> Timeout {

@@ -2,6 +2,7 @@ use std::{borrow::Cow, os::raw::*};
 
 use taos_macros::c_cfg;
 use taos_query::{common::raw_data_t, prelude::RawError};
+use taos_query::tmq::Assignment;
 
 use crate::ffi::{TAOS, TAOS_RES};
 
@@ -118,6 +119,20 @@ extern "C" {
         cb: tmq_commit_cb,
         param: *mut c_void,
     );
+
+    pub fn tmq_get_topic_assignment(
+        tmq: *mut tmq_t,
+        pTopicName: *const c_char,
+        tmq_topic_assignment: *mut *mut Assignment,
+        numOfAssignment: *mut i32,
+    ) -> tmq_resp_err_t;
+
+    pub fn tmq_offset_seek(
+        tmq: *mut tmq_t,
+        pTopicName: *const c_char,
+        vgId: i32,
+        offset: i64,
+    ) -> tmq_resp_err_t;
 
     pub fn tmq_get_raw(res: *mut TAOS_RES, meta: *mut raw_data_t) -> i32;
     pub fn tmq_free_raw(raw: raw_data_t);

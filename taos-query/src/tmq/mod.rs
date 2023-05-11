@@ -227,6 +227,42 @@ pub trait IsOffset {
     fn vgroup_id(&self) -> VGroupId;
 }
 
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct Assignment {
+    vgroup_id: VGroupId,
+    current_offset: i64,
+    begin: i64,
+    end: i64,
+}
+
+impl Assignment {
+    pub fn new(vgroup_id: VGroupId, current_offset: i64, begin: i64, end: i64) -> Self {
+        Self {
+            vgroup_id,
+            current_offset,
+            begin,
+            end,
+        }
+    }
+
+    pub fn vgroup_id(&self) -> VGroupId {
+        self.vgroup_id
+    }
+
+    pub fn current_offset(&self) -> i64 {
+        self.current_offset
+    }
+
+    pub fn begin(&self) -> i64 {
+        self.begin
+    }
+
+    pub fn end(&self) -> i64 {
+        self.end
+    }
+}
+
 pub trait AsConsumer: Sized {
     type Error;
     type Offset: IsOffset;
@@ -356,6 +392,17 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     async fn unsubscribe(self) {
         drop(self)
     }
+
+    async fn assignments(&self) -> 
+    Option<Vec<(String, Vec<Assignment>)>>;
+
+    async fn offset_seek(
+        &mut self, 
+        topic: &str, 
+        vgroup_id: VGroupId, 
+        offset: i64
+    ) -> Result<(), Self::Error>;
+
 }
 
 /// Marker trait to impl sync on async impl.

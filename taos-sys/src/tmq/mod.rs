@@ -15,6 +15,7 @@ use taos_query::{
     tmq::{
         AsAsyncConsumer, AsConsumer, AsyncOnSync, IsAsyncData, IsMeta, IsOffset, MessageSet,
         Timeout, VGroupId,
+        Assignment,
     },
     Dsn, IntoDsn, RawBlock,
 };
@@ -544,6 +545,34 @@ impl AsAsyncConsumer for Consumer {
 
     fn default_timeout(&self) -> Timeout {
         self.timeout
+    }
+
+    async fn assignments(&self) -> 
+    Option<Vec<(String, Vec<Assignment>)>> {
+        let topics = self.tmq.subscription();
+        let topics = topics.into_strings();
+        log::info!("topics: {:?}", topics);
+        let ret: Vec<(String, Vec<Assignment>)> = topics
+        .into_iter()
+        .map(|topic| {
+            let assignments = self.tmq.get_topic_assignment(&topic);
+            (topic, assignments)
+        })
+        .collect();
+        Some(ret)
+    }
+
+    async fn offset_seek(
+        &mut self, 
+        topic: &str, 
+        vgroup_id: VGroupId, 
+        offset: i64
+    ) -> Result<(), Self::Error> {
+        self.tmq.offset_seek(
+            topic, 
+            vgroup_id, 
+            offset
+        )
     }
 }
 #[cfg(test)]
