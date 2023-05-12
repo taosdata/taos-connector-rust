@@ -3,14 +3,15 @@ pub(super) use list::Topics;
 pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
-    use std::{sync::Arc, time::Duration};
+    use std::{sync::Arc, time::Duration, ffi::CStr};
 
     use itertools::Itertools;
+    use taos_query::tmq::{Assignment, VGroupId};
 
     use crate::{
         raw::{ApiEntry, TmqApi},
         types::{tmq_resp_err_t, tmq_t},
-        RawError, RawRes,
+        RawError, RawRes, into_c_str::IntoCStr,
     };
 
     use super::Topics;
@@ -36,6 +37,26 @@ pub(super) mod tmq {
                     topics.iter().join(",")
                 ))
             }
+        }
+
+        pub fn err_as_str(
+            &self,
+            tmq_resp: tmq_resp_err_t
+        ) -> String {
+            unsafe {
+                CStr::from_ptr((self.tmq.tmq_err2str)(tmq_resp))
+                .to_string_lossy()
+                .to_string()
+            }
+        }
+
+        pub fn subscription(&self) -> Topics {
+            let tl = Topics::new(self.tmq.list_api);
+
+            unsafe { (self.tmq.tmq_subscription)(self.as_ptr(), &mut tl.as_ptr()) }
+                .ok_or("get topic list failed")
+                .expect("get topic shoudl always success");
+            tl
         }
 
         pub fn commit_sync(&self, msg: RawRes) -> Result<(), RawError> {
@@ -118,6 +139,74 @@ pub(super) mod tmq {
                 (self.tmq.tmq_unsubscribe)(self.as_ptr());
                 log::trace!("consumer closed safely");
             }
+        }
+
+        pub fn get_topic_assignment(
+            &self, 
+            topic_name: &str
+        ) -> Vec<Assignment> {
+
+            let assignments_ptr: *mut *mut Assignment = Box::into_raw(
+                Box::new(
+                    std::ptr::null_mut()
+                )
+            );
+            let mut assignment_num: i32 = 0;
+
+            log::debug!("get_topic_assignment: {}", topic_name);
+
+            let tmq_resp = unsafe {
+                (self.tmq.tmq_get_topic_assignment)(
+                    self.as_ptr(), 
+                    topic_name.into_c_str().as_ptr(), 
+                    assignments_ptr, 
+                    &mut assignment_num
+                )
+            };
+            log::debug!("get_topic_assignment tmq_resp: {:?} topic_name: {} num: {}", tmq_resp, topic_name, assignment_num);
+
+            let err_str = self.err_as_str(tmq_resp);
+            if tmq_resp.is_err() {
+                log::error!("get_topic_assignment tmq_resp as str: {}", err_str);
+                return vec![];
+            } else {
+                log::debug!("get_topic_assignment tmq_resp as str: {}", err_str);
+            }
+
+            let assignments = unsafe {
+                  std::slice::from_raw_parts(
+                    *assignments_ptr, 
+                    assignment_num as usize
+                )
+            };
+
+            let assignments = assignments.to_vec();
+
+            assignments
+        }
+
+        pub fn offset_seek(
+            &mut self, 
+            topic_name: &str, 
+            vgroup_id: VGroupId, 
+            offset: i64
+        ) -> Result<(), RawError> {
+            let tmq_resp = unsafe {
+                (self.tmq.tmq_offset_seek)(
+                    self.as_ptr(), 
+                    topic_name.into_c_str().as_ptr(), 
+                    vgroup_id, 
+                    offset
+                )
+            };
+            log::debug!("offset_seek tmq_resp: {:?}, topic_name: {}, vgroup_id: {}, offset: {}", tmq_resp, topic_name, vgroup_id, offset);
+
+            let err_str = self.err_as_str(tmq_resp);
+            log::debug!("offset_seek tmq_resp as str: {}", err_str);
+
+            tmq_resp.ok_or(
+                format!("offset seek failed: {err_str}")
+            )
         }
 
         pub fn close(&mut self) {
@@ -287,12 +376,13 @@ pub(super) mod list {
         pub(super) fn as_ptr(&self) -> *mut tmq_list_t {
             self.ptr
         }
-        // pub(crate) fn new(api: TmqListApi) -> Self {
-        //     Self {
-        //         api,
-        //         ptr: unsafe { api.new() },
-        //     }
-        // }
+
+        pub(crate) fn new(api: TmqListApi) -> Self {
+            Self {
+                api,
+                ptr: unsafe { api.new() },
+            }
+        }
 
         // pub(crate) fn append<'a>(&mut self, c_str: impl IntoCStr<'a>) -> Result<()> {
         //     self.api.append(self.as_ptr(), c_str)
@@ -316,9 +406,9 @@ pub(super) mod list {
             }
         }
 
-        // pub fn to_strings(&self) -> Vec<String> {
-        //     self.iter().map(|s| s.to_string()).collect()
-        // }
+        pub fn to_strings(&self) -> Vec<String> {
+            self.iter().map(|s| s.to_string()).collect()
+        }
     }
 
     impl<'a> IntoIterator for &'a Topics {
