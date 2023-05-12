@@ -190,7 +190,12 @@ pub(super) mod tmq {
             log::debug!("get_topic_assignment tmq_resp: {:?} topic_name: {} num: {}", tmq_resp, topic_name, assignment_num);
 
             let err_str = err_as_str(tmq_resp);
-            log::debug!("get_topic_assignment tmq_resp as str: {}", err_str);
+            if tmq_resp.is_err() {
+                log::error!("get_topic_assignment tmq_resp as str: {}", err_str);
+                return vec![];
+            } else {
+                log::debug!("get_topic_assignment tmq_resp as str: {}", err_str);
+            }
 
             let assignments = unsafe {
                   std::slice::from_raw_parts(
