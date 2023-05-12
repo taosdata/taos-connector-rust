@@ -57,6 +57,7 @@ jobs:
         with:
           path: |
             TDengine/release/
+            TDengine/debug/
             TDengine/contrib/cJson
             TDengine/contrib/cpp-stub
             TDengine/contrib/googletest
@@ -70,8 +71,8 @@ jobs:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
           cd TDengine
-          [ -d release ] || mkdir release
-          cd release
+          [ -d debug ] || mkdir debug
+          cd debug
           cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=false
           make -j8
           sudo make install
