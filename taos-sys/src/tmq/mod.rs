@@ -551,7 +551,7 @@ impl AsAsyncConsumer for Consumer {
     Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.into_strings();
-        log::info!("topics: {:?}", topics);
+        log::debug!("topics: {:?}", topics);
         let ret: Vec<(String, Vec<Assignment>)> = topics
         .into_iter()
         .map(|topic| {

@@ -177,7 +177,7 @@ pub(super) mod tmq {
             );
             let mut assignment_num: i32 = 0;
 
-            log::info!("get_topic_assignment: {}", topic_name);
+            log::debug!("get_topic_assignment: {}", topic_name);
 
             let tmq_resp = unsafe {
                 tmq_get_topic_assignment(
@@ -187,10 +187,10 @@ pub(super) mod tmq {
                     &mut assignment_num
                 )
             };
-            log::info!("tmq_resp: {:?} topic_name: {} num: {}", tmq_resp, topic_name, assignment_num);
+            log::debug!("get_topic_assignment tmq_resp: {:?} topic_name: {} num: {}", tmq_resp, topic_name, assignment_num);
 
             let err_str = err_as_str(tmq_resp);
-            log::info!("tmq_resp str: {}", err_str);
+            log::debug!("get_topic_assignment tmq_resp as str: {}", err_str);
 
             let assignments = unsafe {
                   std::slice::from_raw_parts(
@@ -218,10 +218,10 @@ pub(super) mod tmq {
                     offset
                 )
             };
-            log::info!("tmq_resp: {:?}, topic_name: {}, vgroup_id: {}, offset: {}", tmq_resp, topic_name, vgroup_id, offset);
+            log::debug!("offset_seek tmq_resp: {:?}, topic_name: {}, vgroup_id: {}, offset: {}", tmq_resp, topic_name, vgroup_id, offset);
 
             let err_str = err_as_str(tmq_resp);
-            log::info!("tmq_resp as str: {}", err_str);
+            log::debug!("offset_seek tmq_resp as str: {}", err_str);
 
             tmq_resp.ok_or(
                 format!("offset seek failed: {err_str}")
