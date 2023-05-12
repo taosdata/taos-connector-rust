@@ -624,9 +624,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_tmq() -> anyhow::Result<()> {
-        pretty_env_logger::formatted_timed_builder()
-            .filter_level(log::LevelFilter::Info)
-            .init();
+        // pretty_env_logger::formatted_timed_builder()
+        //     .filter_level(log::LevelFilter::Info)
+        //     .init();
 
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
