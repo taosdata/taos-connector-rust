@@ -514,6 +514,13 @@ impl AsAsyncConsumer for Consumer {
         Some(ret)
     }
 
+    async fn topic_assignment(
+        &self, 
+        topic:&str
+    ) -> Vec<Assignment> {
+        self.tmq.get_topic_assignment(topic)
+    }
+
     async fn offset_seek(
         &mut self, 
         topic: &str, 
@@ -1091,9 +1098,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_tmq() -> anyhow::Result<()> {
-        pretty_env_logger::formatted_timed_builder()
-            .filter_level(log::LevelFilter::Info)
-            .init();
+        // pretty_env_logger::formatted_timed_builder()
+        //     .filter_level(log::LevelFilter::Info)
+        //     .init();
 
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
@@ -1261,11 +1268,14 @@ mod tests {
                     // panic!()
                 }
             }
+
+            let topic_assignment = consumer.topic_assignment(topic).await;
+            log::debug!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset
         let assignments = consumer.assignments().await.unwrap();
-        log::info!("after seek offset assignments: {:?}", assignments);
+        log::debug!("after seek offset assignments: {:?}", assignments);
 
         consumer.unsubscribe().await;
 

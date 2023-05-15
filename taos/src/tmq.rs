@@ -413,6 +413,22 @@ impl AsAsyncConsumer for Consumer {
         }
     }
 
+    async fn topic_assignment(
+        &self, 
+        topic: &str
+    ) -> Vec<Assignment> {
+        match &self.0 {
+            ConsumerInner::Native(c) => {
+                <crate::sys::Consumer as AsAsyncConsumer>::topic_assignment(c, topic)
+                    .await
+            }
+            ConsumerInner::Ws(c) => {
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::topic_assignment(c, topic)
+                    .await
+            }
+        }
+    }
+
     async fn offset_seek(
         &mut self, 
         topic: &str, 
@@ -794,6 +810,9 @@ mod tests {
                     // panic!()
                 }
             }
+
+            let topic_assignment = consumer.topic_assignment(topic).await;
+            log::debug!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset

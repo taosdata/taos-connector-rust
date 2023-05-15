@@ -465,6 +465,10 @@ impl AsAsyncConsumer for Consumer {
         todo!("ws assignments")
     }
 
+    async fn topic_assignment(&self, _topic: &str) -> Vec<Assignment> {
+        todo!("ws assignment")
+    }
+
     async fn offset_seek(&mut self, _topic: &str, _dvgroup_id: VGroupId, _offset: i64) -> StdResult<(), Self::Error> {
         todo!("ws offset_seek")
     }

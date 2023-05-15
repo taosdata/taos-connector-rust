@@ -562,6 +562,13 @@ impl AsAsyncConsumer for Consumer {
         Some(ret)
     }
 
+    async fn topic_assignment(
+        &self, 
+        topic:&str
+    ) -> Vec<Assignment> {
+        self.tmq.get_topic_assignment(topic)
+    }
+
     async fn offset_seek(
         &mut self, 
         topic: &str, 
@@ -1522,6 +1529,9 @@ mod tests {
                     // panic!()
                 }
             }
+
+            let topic_assignment = consumer.topic_assignment(topic).await;
+            log::debug!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset

@@ -396,6 +396,11 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     async fn assignments(&self) -> 
     Option<Vec<(String, Vec<Assignment>)>>;
 
+    async fn topic_assignment(
+        &self, 
+        topic:&str
+    ) -> Vec<Assignment>;
+
     async fn offset_seek(
         &mut self, 
         topic: &str, 
