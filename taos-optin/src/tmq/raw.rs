@@ -55,7 +55,7 @@ pub(super) mod tmq {
 
             unsafe { (self.tmq.tmq_subscription)(self.as_ptr(), &mut tl.as_ptr()) }
                 .ok_or("get topic list failed")
-                .expect("get topic shoudl always success");
+                .expect("get topic should always success");
             tl
         }
 
