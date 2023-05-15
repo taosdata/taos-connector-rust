@@ -13,7 +13,7 @@ use std::{
 use taos_query::{
     common::{c_field_t, raw_data_t, SmlData},
     prelude::{Code, Field, Precision, RawError},
-    RawBlock,
+    RawBlock, tmq::Assignment,
 };
 
 use crate::{
@@ -176,7 +176,7 @@ pub struct ApiEntry {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TmqListApi {
-    tmq_list_new: unsafe extern "C" fn() -> *mut tmq_list_t,
+    pub tmq_list_new: unsafe extern "C" fn() -> *mut tmq_list_t,
     tmq_list_append: unsafe extern "C" fn(arg1: *mut tmq_list_t, arg2: *const c_char) -> i32,
     tmq_list_destroy: unsafe extern "C" fn(list: *mut tmq_list_t),
     tmq_list_get_size: unsafe extern "C" fn(list: *const tmq_list_t) -> i32,
@@ -317,6 +317,24 @@ pub(crate) struct TmqApi {
         cb: tmq_commit_cb,
         param: *mut c_void,
     ),
+    
+    pub(crate) tmq_get_topic_assignment: unsafe extern "C" fn(
+        tmq: *mut tmq_t,
+        topic_name: *const c_char,
+        tmq_topic_assignment: *mut *mut Assignment,
+        num_of_assignment: *mut i32,
+    ) -> tmq_resp_err_t,
+
+    pub(crate) tmq_offset_seek: unsafe extern "C" fn(
+        tmq: *mut tmq_t,
+        topic_name: *const c_char,
+        vgroup_id: i32,
+        offset: i64,
+    ) -> tmq_resp_err_t,
+
+    pub(crate) tmq_err2str: unsafe extern "C" fn(
+        err: tmq_resp_err_t
+    ) -> *const c_char,
 
     pub(crate) conf_api: TmqConfApi,
     pub(crate) list_api: TmqListApi,
@@ -548,6 +566,9 @@ impl ApiEntry {
                     tmq_consumer_close,
                     tmq_commit_sync,
                     tmq_commit_async,
+                    tmq_get_topic_assignment,
+                    tmq_offset_seek,
+                    tmq_err2str,
                     tmq_consumer_new
                 );
 
@@ -581,6 +602,9 @@ impl ApiEntry {
                     tmq_consumer_close,
                     tmq_commit_sync,
                     tmq_commit_async,
+                    tmq_get_topic_assignment,
+                    tmq_offset_seek,
+                    tmq_err2str,
 
                     conf_api,
                     list_api,

@@ -22,6 +22,9 @@ fn version2features<V: Into<Version>>(version: V) -> Vec<&'static str> {
         if version >= Version::new(3, 0, 2, 0) {
             feats.push("req_id");
         }
+        if version >= Version::new(3, 0, 5, 0) {
+            feats.push("tmq_offset_seek");
+        }
         feats.push("v3");
         feats.push("tmq");
         feats.push("fetch_raw_block");

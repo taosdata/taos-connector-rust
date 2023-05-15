@@ -2,6 +2,7 @@ use std::{borrow::Cow, os::raw::*};
 
 use taos_macros::c_cfg;
 use taos_query::{common::raw_data_t, prelude::RawError};
+use taos_query::tmq::Assignment;
 
 use crate::ffi::{TAOS, TAOS_RES};
 
@@ -16,6 +17,17 @@ impl PartialEq<i32> for tmq_conf_res_t {
 }
 
 impl tmq_resp_err_t {
+
+    pub const OK: i32 = 0;
+
+    pub fn is_ok(self) -> bool {
+        self.0 == Self::OK
+    }
+
+    pub fn is_err(self) -> bool {
+        !self.is_ok()
+    }
+
     pub fn ok_or(self, s: impl Into<Cow<'static, str>>) -> Result<(), RawError> {
         match self {
             Self(0) => Ok(()),
@@ -135,6 +147,43 @@ extern "C" {
     pub fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char;
     pub fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char;
     pub fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32;
+}
+
+#[cfg(taos_tmq_offset_seek)]
+extern "C" {
+    pub fn tmq_get_topic_assignment(
+        tmq: *mut tmq_t,
+        topic_name: *const c_char,
+        tmq_topic_assignment: *mut *mut Assignment,
+        num_of_assignment: *mut i32,
+    ) -> tmq_resp_err_t;
+
+    pub fn tmq_offset_seek(
+        tmq: *mut tmq_t,
+        topic_name: *const c_char,
+        vgroup_id: i32,
+        offset: i64,
+    ) -> tmq_resp_err_t;
+}
+
+#[cfg(not(taos_tmq_offset_seek))]
+pub unsafe fn tmq_get_topic_assignment(
+    tmq: *mut tmq_t,
+    topic_name: *const c_char,
+    tmq_topic_assignment: *mut *mut Assignment,
+    num_of_assignment: *mut i32,
+) -> tmq_resp_err_t {
+    unimplemented!()
+}
+
+#[cfg(not(taos_tmq_offset_seek))]
+pub unsafe fn tmq_offset_seek(
+    tmq: *mut tmq_t,
+    topic_name: *const c_char,
+    vgroup_id: i32,
+    offset: i64,
+) -> tmq_resp_err_t {
+    unimplemented!()
 }
 
 #[cfg(taos_tmq)]

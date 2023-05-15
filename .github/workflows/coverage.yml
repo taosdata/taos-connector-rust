@@ -42,7 +42,7 @@ jobs:
 
       - name: Prepare development tools
         run: |
-          sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config -y
+          sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config libgflags2.2 libgflags-dev -y
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
 
@@ -51,12 +51,13 @@ jobs:
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "main"
+          ref: "test/adamji/3.0"
 
       - uses: actions/cache@v3
         with:
           path: |
             TDengine/release/
+            TDengine/debug/
             TDengine/contrib/cJson
             TDengine/contrib/cpp-stub
             TDengine/contrib/googletest
@@ -70,8 +71,8 @@ jobs:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
           cd TDengine
-          [ -d release ] || mkdir release
-          cd release
+          [ -d debug ] || mkdir debug
+          cd debug
           cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=false
           make -j8
           sudo make install
