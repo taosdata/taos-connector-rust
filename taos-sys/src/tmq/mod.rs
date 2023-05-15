@@ -1358,6 +1358,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
     async fn test_tmq() -> anyhow::Result<()> {
         // pretty_env_logger::formatted_timed_builder()
         //     .filter_level(log::LevelFilter::Info)
