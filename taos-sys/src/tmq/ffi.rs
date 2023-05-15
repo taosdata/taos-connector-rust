@@ -153,15 +153,15 @@ extern "C" {
 extern "C" {
     pub fn tmq_get_topic_assignment(
         tmq: *mut tmq_t,
-        pTopicName: *const c_char,
+        topic_name: *const c_char,
         tmq_topic_assignment: *mut *mut Assignment,
-        numOfAssignment: *mut i32,
+        num_of_assignment: *mut i32,
     ) -> tmq_resp_err_t;
 
     pub fn tmq_offset_seek(
         tmq: *mut tmq_t,
-        pTopicName: *const c_char,
-        vgId: i32,
+        topic_name: *const c_char,
+        vgroup_id: i32,
         offset: i64,
     ) -> tmq_resp_err_t;
 }
@@ -169,7 +169,7 @@ extern "C" {
 #[cfg(not(taos_tmq_offset_seek))]
 pub unsafe fn tmq_get_topic_assignment(
     tmq: *mut tmq_t,
-    p_topic_name: *const c_char,
+    topic_name: *const c_char,
     tmq_topic_assignment: *mut *mut Assignment,
     num_of_assignment: *mut i32,
 ) -> tmq_resp_err_t {
@@ -179,8 +179,8 @@ pub unsafe fn tmq_get_topic_assignment(
 #[cfg(not(taos_tmq_offset_seek))]
 pub unsafe fn tmq_offset_seek(
     tmq: *mut tmq_t,
-    p_topic_name: *const c_char,
-    vg_id: i32,
+    topic_name: *const c_char,
+    vgroup_id: i32,
     offset: i64,
 ) -> tmq_resp_err_t {
     unimplemented!()

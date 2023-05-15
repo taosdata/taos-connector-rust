@@ -320,15 +320,15 @@ pub(crate) struct TmqApi {
     
     pub(crate) tmq_get_topic_assignment: unsafe extern "C" fn(
         tmq: *mut tmq_t,
-        pTopicName: *const c_char,
+        topic_name: *const c_char,
         tmq_topic_assignment: *mut *mut Assignment,
-        numOfAssignment: *mut i32,
+        num_of_assignment: *mut i32,
     ) -> tmq_resp_err_t,
 
     pub(crate) tmq_offset_seek: unsafe extern "C" fn(
         tmq: *mut tmq_t,
-        pTopicName: *const c_char,
-        vgId: i32,
+        topic_name: *const c_char,
+        vgroup_id: i32,
         offset: i64,
     ) -> tmq_resp_err_t,
 
