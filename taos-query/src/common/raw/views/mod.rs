@@ -374,6 +374,26 @@ impl ColumnView {
         }
     }
 
+    pub fn max_variable_length(&self) -> usize {
+        match self {
+            ColumnView::Bool(_) => 1,
+            ColumnView::TinyInt(_) => 1,
+            ColumnView::SmallInt(_) => 2,
+            ColumnView::Int(_) => 4,
+            ColumnView::BigInt(_) => 8,
+            ColumnView::Float(_) => 4,
+            ColumnView::Double(_) => 8,
+            ColumnView::VarChar(view) => view.max_length(),
+            ColumnView::Timestamp(_) => 8,
+            ColumnView::NChar(view) => view.max_length(),
+            ColumnView::UTinyInt(_) => 1,
+            ColumnView::USmallInt(_) => 2,
+            ColumnView::UInt(_) => 4,
+            ColumnView::UBigInt(_) => 8,
+            ColumnView::Json(view) => view.max_length(),
+        }
+    }
+
     /// Check if a value at `row` is null
     #[inline]
     pub(super) unsafe fn is_null_unchecked(&self, row: usize) -> bool {
@@ -552,7 +572,7 @@ impl ColumnView {
         }
     }
 
-    fn as_ty(&self) -> Ty {
+    pub fn as_ty(&self) -> Ty {
         match self {
             ColumnView::Bool(_) => Ty::Bool,
             ColumnView::TinyInt(_) => Ty::TinyInt,
@@ -641,6 +661,64 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
     }
     bytes
 }
+
+// pub fn views_to_raw_block_(views: &[ColumnView]) -> RawBlock {
+//     let mut header = super::Header::default();
+
+//     header.nrows = views.first().map(|v| v.len()).unwrap_or(0) as _;
+//     header.ncols = views.len() as _;
+
+//     let ncols = views.len();
+
+//     let mut bytes = Vec::new();
+//     bytes.extend(header.as_bytes());
+
+//     let schemas = views
+//         .iter()
+//         .map(|view| {
+//             let ty = view.as_ty();
+//             ColSchema {
+//                 ty,
+//                 len: ty.fixed_length() as _,
+//             }
+//         })
+//         .collect_vec();
+
+//     let schema_bytes = unsafe {
+//         std::slice::from_raw_parts(
+//             schemas.as_ptr() as *const u8,
+//             ncols * std::mem::size_of::<ColSchema>(),
+//         )
+//     };
+//     let schemas = Schemas(Bytes::copy_from_slice(schema_bytes));
+//     // bytes.write_all(schema_bytes).unwrap();
+
+//     let length_offset = bytes.len();
+//     bytes.resize(bytes.len() + ncols * std::mem::size_of::<u32>(), 0);
+
+//     let mut lengths = Vec::with_capacity(ncols);
+//     lengths.resize(ncols, 0);
+//     for (i, view) in views.iter().enumerate() {
+//         let cur = bytes.len();
+//         let n = view.write_raw_into(&mut bytes).unwrap();
+//         let len = bytes.len();
+//         debug_assert!(cur + n == len);
+//         if !view.as_ty().is_primitive() {
+//             lengths[i] = (n - header.nrows() * 4) as _;
+//         } else {
+//             lengths[i] = (header.nrows() * view.as_ty().fixed_length()) as _;
+//         }
+//     }
+//     unsafe {
+//         (*(bytes.as_mut_ptr() as *mut super::Header)).length = bytes.len() as _;
+//         std::ptr::copy(
+//             lengths.as_ptr(),
+//             bytes.as_mut_ptr().offset(length_offset as isize) as *mut u32,
+//             lengths.len(),
+//         );
+//     }
+//     bytes
+// }
 
 impl From<Value> for ColumnView {
     fn from(value: Value) -> Self {

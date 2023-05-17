@@ -406,7 +406,6 @@ impl taos_query::TBuilder for TaosBuilder {
         } else {
             Ok(false)
         }
-    
     }
 }
 
@@ -519,10 +518,9 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             };
         }
 
-        let grant: Option<(String, (), String)> =
-            AsyncQueryable::query_one(taos, "show grants")
-                .await
-                .unwrap_or_default();
+        let grant: Option<(String, (), String)> = AsyncQueryable::query_one(taos, "show grants")
+            .await
+            .unwrap_or_default();
 
         if let Some((edition, _, expired)) = grant {
             match (edition.trim(), expired.trim()) {
@@ -532,7 +530,6 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         } else {
             Ok(false)
         }
-    
     }
 }
 

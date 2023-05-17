@@ -594,7 +594,7 @@ pub unsafe extern "C" fn ws_take_timing(rs: *mut WS_RES) -> i64 {
 /// Always use this to ensure that the query is executed correctly.
 pub unsafe extern "C" fn ws_errno(rs: *mut WS_RES) -> i32 {
     if rs.is_null() {
-        return C_ERRNO.into()
+        return C_ERRNO.into();
     }
     match (rs as *mut WsMaybeError<()>)
         .as_ref()

@@ -147,6 +147,9 @@ impl Debug for RawBlock {
 }
 
 impl RawBlock {
+    pub fn from_views(views: &[ColumnView], precision: Precision) -> Self {
+        Self::parse_from_raw_block(views_to_raw_block(views), precision)
+    }
     pub unsafe fn parse_from_ptr(ptr: *mut c_void, precision: Precision) -> Self {
         let header = &*(ptr as *const Header);
         let len = header.length as usize;
@@ -165,7 +168,7 @@ impl RawBlock {
         let mut bytes = Vec::new();
         for i in 0..fields.len() {
             unsafe {
-                let slice = ptr.offset(i as _).read();
+                let slice = ptr.add(i).read();
                 bytes.extend_from_slice(std::slice::from_raw_parts(
                     slice as *const u8,
                     lengths[i] as usize * rows,
@@ -586,11 +589,11 @@ impl RawBlock {
     }
 
     /// Set field names of the block
-    pub fn with_field_names<S: Into<String>, I: IntoIterator<Item = S>>(
+    pub fn with_field_names<S: Display, I: IntoIterator<Item = S>>(
         &mut self,
         names: I,
     ) -> &mut Self {
-        self.fields = names.into_iter().map(|name| name.into()).collect();
+        self.fields = names.into_iter().map(|name| name.to_string()).collect();
         self.layout.borrow_mut().with_field_names();
         self
     }
@@ -1019,7 +1022,6 @@ pub struct SmlData {
 }
 
 impl SmlData {
-
     #[inline]
     pub fn protocol(&self) -> SchemalessProtocol {
         self.protocol
@@ -1044,7 +1046,6 @@ impl SmlData {
     pub fn req_id(&self) -> Option<u64> {
         self.req_id
     }
-
 }
 
 #[async_trait::async_trait]

@@ -151,7 +151,9 @@ impl taos_query::Queryable for Taos {
         _req_id: u64,
     ) -> Result<Self::ResultSet, Self::Error> {
         log::debug!("Query with SQL: {}", _sql.as_ref());
-        self.raw.query_with_req_id(_sql.as_ref(), _req_id).map(ResultSet::new)
+        self.raw
+            .query_with_req_id(_sql.as_ref(), _req_id)
+            .map(ResultSet::new)
     }
 
     fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
@@ -448,7 +450,6 @@ impl taos_query::TBuilder for TaosBuilder {
         } else {
             Ok(false)
         }
-        
     }
 }
 
@@ -559,10 +560,9 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             };
         }
 
-        let grant: Option<(String, (), String)> =
-            AsyncQueryable::query_one(taos, "show grants")
-                .await
-                .unwrap_or_default();
+        let grant: Option<(String, (), String)> = AsyncQueryable::query_one(taos, "show grants")
+            .await
+            .unwrap_or_default();
 
         if let Some((edition, _, expired)) = grant {
             match (edition.trim(), expired.trim()) {
@@ -572,7 +572,6 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         } else {
             Ok(false)
         }
-    
     }
 }
 
@@ -700,7 +699,6 @@ mod tests {
     use taos_query::common::SchemalessPrecision;
     use taos_query::common::SchemalessProtocol;
     use taos_query::common::SmlDataBuilder;
-
 
     #[test]
     fn show_databases() -> Result<(), Error> {
@@ -859,8 +857,7 @@ mod tests {
         // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
-        let dsn =
-            std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
@@ -869,9 +866,7 @@ mod tests {
 
         client.exec(format!("drop database if exists {db}"))?;
 
-        client
-            .exec(format!("create database if not exists {db}"))
-            ?;
+        client.exec(format!("create database if not exists {db}"))?;
 
         // should specify database before insert
         client.exec(format!("use {db}"))?;
@@ -928,8 +923,7 @@ mod tests {
         // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
-        let dsn =
-            std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
@@ -938,9 +932,7 @@ mod tests {
 
         client.exec(format!("drop database if exists {db}"))?;
 
-        client
-            .exec(format!("create database if not exists {db}"))
-            ?;
+        client.exec(format!("create database if not exists {db}"))?;
 
         // should specify database before insert
         client.exec(format!("use {db}"))?;
@@ -993,7 +985,7 @@ mod tests {
 
         Ok(())
     }
-    
+
     #[test]
     fn test_put_json() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
@@ -1001,8 +993,7 @@ mod tests {
         // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
-        let dsn =
-            std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
@@ -1011,9 +1002,7 @@ mod tests {
 
         client.exec(format!("drop database if exists {db}"))?;
 
-        client
-            .exec(format!("create database if not exists {db}"))
-            ?;
+        client.exec(format!("create database if not exists {db}"))?;
 
         // should specify database before insert
         client.exec(format!("use {db}"))?;
@@ -1059,5 +1048,4 @@ mod tests {
 
         Ok(())
     }
-
 }

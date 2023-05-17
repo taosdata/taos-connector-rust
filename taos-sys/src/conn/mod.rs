@@ -93,30 +93,20 @@ impl RawTaos {
     }
 
     #[inline]
-    pub fn query_with_req_id<'a, S: IntoCStr<'a>>(&self, sql: S, req_id: u64) -> Result<ResultSet, Error> {
+    pub fn query_with_req_id<'a, S: IntoCStr<'a>>(
+        &self,
+        sql: S,
+        req_id: u64,
+    ) -> Result<ResultSet, Error> {
         let sql = sql.into_c_str();
         log::trace!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
         #[cfg(taos_req_id)]
-        return RawRes::from_ptr(
-            unsafe {
-                taos_query_with_reqid(
-                    self.as_ptr(),
-                    sql.as_ptr(),
-                    req_id
-                )
-            }
-        )
-            .map(ResultSet::new);
+        return RawRes::from_ptr(unsafe {
+            taos_query_with_reqid(self.as_ptr(), sql.as_ptr(), req_id)
+        })
+        .map(ResultSet::new);
         #[cfg(not(taos_req_id))]
-        RawRes::from_ptr(
-            unsafe {
-                taos_query(
-                    self.as_ptr(),
-                    sql.as_ptr()
-                )
-            }
-        )
-            .map(ResultSet::new)
+        RawRes::from_ptr(unsafe { taos_query(self.as_ptr(), sql.as_ptr()) }).map(ResultSet::new)
     }
 
     #[inline]
@@ -235,18 +225,21 @@ impl RawTaos {
 
     #[inline]
     pub fn put(&self, sml: &SmlData) -> Result<(), Error> {
-
         let data = sml.data().join("\n").to_string();
         log::trace!("sml insert with data: {}", data.clone());
         let length = data.clone().len() as i32;
         let mut total_rows: i32 = 0;
         let res;
-        
+
         if sml.req_id().is_some() && sml.ttl().is_some() {
-            log::debug!("sml insert with req_id: {} and ttl {}", sml.req_id().unwrap(), sml.ttl().unwrap());
-            res = RawRes::from_ptr(unsafe { 
+            log::debug!(
+                "sml insert with req_id: {} and ttl {}",
+                sml.req_id().unwrap(),
+                sml.ttl().unwrap()
+            );
+            res = RawRes::from_ptr(unsafe {
                 taos_schemaless_insert_raw_ttl_with_reqid(
-                    self.as_ptr(), 
+                    self.as_ptr(),
                     data.into_c_str().as_ptr(),
                     length,
                     &mut total_rows,
@@ -258,9 +251,9 @@ impl RawTaos {
             });
         } else if sml.req_id().is_some() {
             log::debug!("sml insert with req_id: {}", sml.req_id().unwrap());
-            res = RawRes::from_ptr(unsafe { 
+            res = RawRes::from_ptr(unsafe {
                 taos_schemaless_insert_raw_with_reqid(
-                    self.as_ptr(), 
+                    self.as_ptr(),
                     data.into_c_str().as_ptr(),
                     length,
                     &mut total_rows,
@@ -271,9 +264,9 @@ impl RawTaos {
             });
         } else if sml.ttl().is_some() {
             log::debug!("sml insert with ttl: {}", sml.ttl().unwrap());
-            res = RawRes::from_ptr(unsafe { 
+            res = RawRes::from_ptr(unsafe {
                 taos_schemaless_insert_raw_ttl(
-                    self.as_ptr(), 
+                    self.as_ptr(),
                     data.into_c_str().as_ptr(),
                     length,
                     &mut total_rows,
@@ -284,9 +277,9 @@ impl RawTaos {
             });
         } else {
             log::debug!("sml insert without req_id and ttl");
-            res = RawRes::from_ptr(unsafe { 
+            res = RawRes::from_ptr(unsafe {
                 taos_schemaless_insert_raw(
-                    self.as_ptr(), 
+                    self.as_ptr(),
                     data.into_c_str().as_ptr(),
                     length,
                     &mut total_rows,
@@ -295,8 +288,7 @@ impl RawTaos {
                 )
             });
         }
-        
-        
+
         log::trace!("sml total rows: {}", total_rows);
         match res {
             Ok(_) => {

@@ -3,15 +3,16 @@ pub(super) use list::Topics;
 pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
-    use std::{sync::Arc, time::Duration, ffi::CStr};
+    use std::{ffi::CStr, sync::Arc, time::Duration};
 
     use itertools::Itertools;
     use taos_query::tmq::{Assignment, VGroupId};
 
     use crate::{
+        into_c_str::IntoCStr,
         raw::{ApiEntry, TmqApi},
         types::{tmq_resp_err_t, tmq_t},
-        RawError, RawRes, into_c_str::IntoCStr,
+        RawError, RawRes,
     };
 
     use super::Topics;
@@ -39,14 +40,11 @@ pub(super) mod tmq {
             }
         }
 
-        pub fn err_as_str(
-            &self,
-            tmq_resp: tmq_resp_err_t
-        ) -> String {
+        pub fn err_as_str(&self, tmq_resp: tmq_resp_err_t) -> String {
             unsafe {
                 CStr::from_ptr((self.tmq.tmq_err2str)(tmq_resp))
-                .to_string_lossy()
-                .to_string()
+                    .to_string_lossy()
+                    .to_string()
             }
         }
 
@@ -141,16 +139,9 @@ pub(super) mod tmq {
             }
         }
 
-        pub fn get_topic_assignment(
-            &self, 
-            topic_name: &str
-        ) -> Vec<Assignment> {
-
-            let assignments_ptr: *mut *mut Assignment = Box::into_raw(
-                Box::new(
-                    std::ptr::null_mut()
-                )
-            );
+        pub fn get_topic_assignment(&self, topic_name: &str) -> Vec<Assignment> {
+            let assignments_ptr: *mut *mut Assignment =
+                Box::into_raw(Box::new(std::ptr::null_mut()));
             let mut assignment_num: i32 = 0;
 
             log::debug!("get_topic_assignment: {}", topic_name);
@@ -159,16 +150,21 @@ pub(super) mod tmq {
             if let Some(tmq_get_topic_assignment) = self.tmq.tmq_get_topic_assignment {
                 tmq_resp = unsafe {
                     tmq_get_topic_assignment(
-                        self.as_ptr(), 
-                        topic_name.into_c_str().as_ptr(), 
-                        assignments_ptr, 
-                        &mut assignment_num
+                        self.as_ptr(),
+                        topic_name.into_c_str().as_ptr(),
+                        assignments_ptr,
+                        &mut assignment_num,
                     )
                 };
             } else {
                 unimplemented!("does not support tmq_get_topic_assignment")
             }
-            log::debug!("get_topic_assignment tmq_resp: {:?} topic_name: {} num: {}", tmq_resp, topic_name, assignment_num);
+            log::debug!(
+                "get_topic_assignment tmq_resp: {:?} topic_name: {} num: {}",
+                tmq_resp,
+                topic_name,
+                assignment_num
+            );
 
             let err_str = self.err_as_str(tmq_resp);
             if tmq_resp.is_err() {
@@ -178,12 +174,8 @@ pub(super) mod tmq {
                 log::debug!("get_topic_assignment tmq_resp as str: {}", err_str);
             }
 
-            let assignments = unsafe {
-                  std::slice::from_raw_parts(
-                    *assignments_ptr, 
-                    assignment_num as usize
-                )
-            };
+            let assignments =
+                unsafe { std::slice::from_raw_parts(*assignments_ptr, assignment_num as usize) };
 
             let assignments = assignments.to_vec();
 
@@ -191,32 +183,36 @@ pub(super) mod tmq {
         }
 
         pub fn offset_seek(
-            &mut self, 
-            topic_name: &str, 
-            vgroup_id: VGroupId, 
-            offset: i64
+            &mut self,
+            topic_name: &str,
+            vgroup_id: VGroupId,
+            offset: i64,
         ) -> Result<(), RawError> {
             let tmq_resp;
             if let Some(tmq_offset_seek) = self.tmq.tmq_offset_seek {
-                tmq_resp  = unsafe {
+                tmq_resp = unsafe {
                     tmq_offset_seek(
-                        self.as_ptr(), 
-                        topic_name.into_c_str().as_ptr(), 
-                        vgroup_id, 
-                        offset
+                        self.as_ptr(),
+                        topic_name.into_c_str().as_ptr(),
+                        vgroup_id,
+                        offset,
                     )
                 };
             } else {
                 unimplemented!("does not support tmq_offset_seek")
             }
-            log::debug!("offset_seek tmq_resp: {:?}, topic_name: {}, vgroup_id: {}, offset: {}", tmq_resp, topic_name, vgroup_id, offset);
+            log::debug!(
+                "offset_seek tmq_resp: {:?}, topic_name: {}, vgroup_id: {}, offset: {}",
+                tmq_resp,
+                topic_name,
+                vgroup_id,
+                offset
+            );
 
             let err_str = self.err_as_str(tmq_resp);
             log::debug!("offset_seek tmq_resp as str: {}", err_str);
 
-            tmq_resp.ok_or(
-                format!("offset seek failed: {err_str}")
-            )
+            tmq_resp.ok_or(format!("offset seek failed: {err_str}"))
         }
 
         pub fn close(&mut self) {

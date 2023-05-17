@@ -13,7 +13,8 @@ use std::{
 use taos_query::{
     common::{c_field_t, raw_data_t, SmlData},
     prelude::{Code, Field, Precision, RawError},
-    RawBlock, tmq::Assignment,
+    tmq::Assignment,
+    RawBlock,
 };
 
 use crate::{
@@ -94,11 +95,7 @@ pub struct ApiEntry {
     // query
     taos_query: unsafe extern "C" fn(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES,
     taos_query_with_reqid: Option<
-        unsafe extern "C" fn(
-            taos: *mut TAOS,
-            sql: *const c_char,
-            req_id: u64
-        ) -> *mut TAOS_RES,
+        unsafe extern "C" fn(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> *mut TAOS_RES,
     >,
     taos_free_result: unsafe extern "C" fn(res: *mut TAOS_RES),
     taos_result_precision: unsafe extern "C" fn(res: *mut TAOS_RES) -> c_int,
@@ -143,7 +140,7 @@ pub struct ApiEntry {
             totalRows: *mut i32,
             protocol: c_int,
             precision: c_int,
-            req_id: u64
+            req_id: u64,
         ) -> *mut TAOS_RES,
     >,
 
@@ -168,10 +165,9 @@ pub struct ApiEntry {
             protocol: c_int,
             precision: c_int,
             ttl: i32,
-            req_id: u64
+            req_id: u64,
         ) -> *mut TAOS_RES,
     >,
-
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -317,14 +313,14 @@ pub(crate) struct TmqApi {
         cb: tmq_commit_cb,
         param: *mut c_void,
     ),
-    
+
     pub(crate) tmq_get_topic_assignment: Option<
         unsafe extern "C" fn(
             tmq: *mut tmq_t,
             topic_name: *const c_char,
             tmq_topic_assignment: *mut *mut Assignment,
             num_of_assignment: *mut i32,
-        ) -> tmq_resp_err_t
+        ) -> tmq_resp_err_t,
     >,
 
     pub(crate) tmq_offset_seek: Option<
@@ -333,12 +329,10 @@ pub(crate) struct TmqApi {
             topic_name: *const c_char,
             vgroup_id: i32,
             offset: i64,
-        ) -> tmq_resp_err_t
+        ) -> tmq_resp_err_t,
     >,
 
-    pub(crate) tmq_err2str: unsafe extern "C" fn(
-        err: tmq_resp_err_t
-    ) -> *const c_char,
+    pub(crate) tmq_err2str: unsafe extern "C" fn(err: tmq_resp_err_t) -> *const c_char,
 
     pub(crate) conf_api: TmqConfApi,
     pub(crate) list_api: TmqListApi,
@@ -491,15 +485,13 @@ impl ApiEntry {
                 tmq_write_raw,
                 taos_write_raw_block,
                 taos_query_with_reqid,
-
                 taos_schemaless_insert_raw,
                 taos_schemaless_insert_raw_with_reqid,
                 taos_schemaless_insert_raw_ttl,
                 taos_schemaless_insert_raw_ttl_with_reqid,
-
                 taos_write_raw_block_with_fields,
                 taos_get_raw_block,
-                taos_result_block                
+                taos_result_block
             );
 
             // stmt
@@ -573,10 +565,7 @@ impl ApiEntry {
                     tmq_err2str,
                     tmq_consumer_new
                 );
-                optional_symbol!(
-                    tmq_get_topic_assignment,
-                    tmq_offset_seek
-                );
+                optional_symbol!(tmq_get_topic_assignment, tmq_offset_seek);
 
                 let conf_api = TmqConfApi {
                     tmq_conf_new,
@@ -788,19 +777,17 @@ impl RawTaos {
     }
 
     #[inline]
-    pub fn query_with_req_id<'a, S: IntoCStr<'a>>(&self, sql: S, req_id: u64) -> Result<RawRes, RawError> {
+    pub fn query_with_req_id<'a, S: IntoCStr<'a>>(
+        &self,
+        sql: S,
+        req_id: u64,
+    ) -> Result<RawRes, RawError> {
         let sql = sql.into_c_str();
         log::trace!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
         if let Some(taos_query_with_req_id) = self.c.taos_query_with_reqid {
             Ok(RawRes {
                 c: self.c.clone(),
-                ptr: unsafe {
-                    (taos_query_with_req_id)(
-                        self.as_ptr(),
-                        sql.as_ptr(),
-                        req_id
-                    )
-                },
+                ptr: unsafe { (taos_query_with_req_id)(self.as_ptr(), sql.as_ptr(), req_id) },
             })
         } else {
             unimplemented!("2.x does not support req_id")
@@ -910,21 +897,24 @@ impl RawTaos {
 
     #[inline]
     pub fn put(&self, sml: &SmlData) -> Result<(), RawError> {
-
         let data = sml.data().join("\n").to_string();
         log::trace!("sml insert with data: {}", data.clone());
         let length = data.clone().len() as i32;
         let mut total_rows: i32 = 0;
         let res;
-        
+
         if sml.req_id().is_some() && sml.ttl().is_some() {
-            log::debug!("sml insert with req_id: {} and ttl {}", sml.req_id().unwrap(), sml.ttl().unwrap());
-            if let Some(taos_schemaless_insert_raw_ttl_with_reqid) = self.c.taos_schemaless_insert_raw_ttl_with_reqid {
-                res = RawRes::from_ptr(
-                    self.c.clone(),
-                    unsafe { 
+            log::debug!(
+                "sml insert with req_id: {} and ttl {}",
+                sml.req_id().unwrap(),
+                sml.ttl().unwrap()
+            );
+            if let Some(taos_schemaless_insert_raw_ttl_with_reqid) =
+                self.c.taos_schemaless_insert_raw_ttl_with_reqid
+            {
+                res = RawRes::from_ptr(self.c.clone(), unsafe {
                     taos_schemaless_insert_raw_ttl_with_reqid(
-                        self.as_ptr(), 
+                        self.as_ptr(),
                         data.into_c_str().as_ptr(),
                         length,
                         &mut total_rows,
@@ -939,12 +929,12 @@ impl RawTaos {
             }
         } else if sml.req_id().is_some() {
             log::debug!("sml insert with req_id: {}", sml.req_id().unwrap());
-            if let Some(taos_schemaless_insert_raw_with_reqid) = self.c.taos_schemaless_insert_raw_with_reqid {
-                res = RawRes::from_ptr(
-                    self.c.clone(),
-                    unsafe { 
+            if let Some(taos_schemaless_insert_raw_with_reqid) =
+                self.c.taos_schemaless_insert_raw_with_reqid
+            {
+                res = RawRes::from_ptr(self.c.clone(), unsafe {
                     taos_schemaless_insert_raw_with_reqid(
-                        self.as_ptr(), 
+                        self.as_ptr(),
                         data.into_c_str().as_ptr(),
                         length,
                         &mut total_rows,
@@ -956,15 +946,12 @@ impl RawTaos {
             } else {
                 unimplemented!("does not support schemaless")
             }
-            
         } else if sml.ttl().is_some() {
             log::debug!("sml insert with ttl: {}", sml.ttl().unwrap());
             if let Some(taos_schemaless_insert_raw_ttl) = self.c.taos_schemaless_insert_raw_ttl {
-                res = RawRes::from_ptr(
-                    self.c.clone(),
-                    unsafe { 
+                res = RawRes::from_ptr(self.c.clone(), unsafe {
                     taos_schemaless_insert_raw_ttl(
-                        self.as_ptr(), 
+                        self.as_ptr(),
                         data.into_c_str().as_ptr(),
                         length,
                         &mut total_rows,
@@ -976,15 +963,12 @@ impl RawTaos {
             } else {
                 unimplemented!("does not support schemaless")
             }
-            
         } else {
             log::debug!("sml insert without req_id and ttl");
             if let Some(taos_schemaless_insert_raw) = self.c.taos_schemaless_insert_raw {
-                res = RawRes::from_ptr(
-                    self.c.clone(),
-                    unsafe { 
+                res = RawRes::from_ptr(self.c.clone(), unsafe {
                     taos_schemaless_insert_raw(
-                        self.as_ptr(), 
+                        self.as_ptr(),
                         data.into_c_str().as_ptr(),
                         length,
                         &mut total_rows,
@@ -995,10 +979,8 @@ impl RawTaos {
             } else {
                 unimplemented!("does not support schemaless")
             }
-            
         }
-        
-        
+
         log::debug!("sml total rows: {}", total_rows);
         match res {
             Ok(_) => {

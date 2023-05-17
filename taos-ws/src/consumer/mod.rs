@@ -10,10 +10,8 @@ use taos_query::block_in_place_or_global;
 use taos_query::common::{JsonMeta, RawMeta};
 use taos_query::prelude::{Code, RawError};
 use taos_query::tmq::{
-    AsAsyncConsumer, AsConsumer, IsAsyncData, IsAsyncMeta, IsOffset, MessageSet, SyncOnAsync,
-    Timeout,
-    VGroupId,
-    Assignment,
+    AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsOffset, MessageSet,
+    SyncOnAsync, Timeout, VGroupId,
 };
 use taos_query::util::InlinableRead;
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
@@ -287,7 +285,10 @@ impl IsAsyncData for Data {
     type Error = Error;
 
     async fn as_raw_data(&self) -> StdResult<taos_query::common::RawData, Self::Error> {
-        self.0.fetch_raw_meta().await.map(|raw| unsafe { std::mem::transmute(raw) })
+        self.0
+            .fetch_raw_meta()
+            .await
+            .map(|raw| unsafe { std::mem::transmute(raw) })
     }
 
     async fn fetch_raw_block(&self) -> StdResult<Option<RawBlock>, Self::Error> {
@@ -469,7 +470,12 @@ impl AsAsyncConsumer for Consumer {
         todo!("ws assignment")
     }
 
-    async fn offset_seek(&mut self, _topic: &str, _dvgroup_id: VGroupId, _offset: i64) -> StdResult<(), Self::Error> {
+    async fn offset_seek(
+        &mut self,
+        _topic: &str,
+        _dvgroup_id: VGroupId,
+        _offset: i64,
+    ) -> StdResult<(), Self::Error> {
         todo!("ws offset_seek")
     }
 

@@ -93,7 +93,6 @@ fn test_serde_send() {
     assert_eq!(v, j);
 }
 
-
 #[serde_as]
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(default)]
@@ -156,7 +155,6 @@ impl WsRecv {
     }
 }
 
-
 pub(crate) trait ToMessage: Serialize {
     // #[cfg(feature = "async")]
     fn to_msg(&self) -> tokio_tungstenite::tungstenite::Message {
@@ -165,4 +163,3 @@ pub(crate) trait ToMessage: Serialize {
 }
 
 impl ToMessage for WsSend {}
-

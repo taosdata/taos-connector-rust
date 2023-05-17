@@ -196,22 +196,18 @@ extern "C" {
 
 #[cfg(taos_req_id)]
 extern "C" {
-    pub fn taos_query_with_reqid(
-        taos: *mut TAOS,
-        sql: *const c_char,
-        req_id: u64
-    ) -> *mut TAOS_RES;
+    pub fn taos_query_with_reqid(taos: *mut TAOS, sql: *const c_char, req_id: u64)
+        -> *mut TAOS_RES;
 }
 #[cfg(not(taos_req_id))]
 #[no_mangle]
 pub unsafe extern "C" fn taos_query_with_reqid(
     taos: *mut TAOS,
     sql: *const c_char,
-    req_id: u64
+    req_id: u64,
 ) -> *mut TAOS_RES {
     return taos_query(taos, sql);
 }
-
 
 #[cfg(taos_fetch_block_s)]
 extern "C" {

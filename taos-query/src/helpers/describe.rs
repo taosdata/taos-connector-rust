@@ -26,10 +26,22 @@ impl Described {
     pub fn sql_repr(&self) -> String {
         let ty = self.ty;
         if ty.is_var_type() {
-            format!("{} {}({})", self.field, ty, self.length)
+            format!("`{}` {}({})", self.field, ty, self.length)
         } else {
-            format!("{} {}", self.field, self.ty)
+            format!("`{}` {}", self.field, self.ty)
         }
+    }
+    pub fn new(field: impl Into<String>, ty: Ty, length: impl Into<Option<usize>>) -> Self {
+        let field = field.into();
+        let length = length.into();
+        let length = length.unwrap_or_else(|| {
+            if ty.is_var_type() {
+                32
+            } else {
+                ty.fixed_length()
+            }
+        });
+        Self { field, ty, length }
     }
 }
 #[derive(Debug, Serialize, PartialEq, Eq, Clone)]

@@ -509,7 +509,6 @@ mod tests {
         fn put(&self, _data: &SmlData) -> Result<(), Self::Error> {
             Ok(())
         }
-        
     }
     #[test]
     fn query_deserialize() {
