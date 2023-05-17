@@ -1,8 +1,8 @@
 use std::{borrow::Cow, os::raw::*};
 
 use taos_macros::c_cfg;
-use taos_query::{common::raw_data_t, prelude::RawError};
 use taos_query::tmq::Assignment;
+use taos_query::{common::raw_data_t, prelude::RawError};
 
 use crate::ffi::{TAOS, TAOS_RES};
 
@@ -17,7 +17,6 @@ impl PartialEq<i32> for tmq_conf_res_t {
 }
 
 impl tmq_resp_err_t {
-
     pub const OK: i32 = 0;
 
     pub fn is_ok(self) -> bool {

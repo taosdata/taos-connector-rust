@@ -393,21 +393,16 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
         drop(self)
     }
 
-    async fn assignments(&self) -> 
-    Option<Vec<(String, Vec<Assignment>)>>;
+    async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>>;
 
-    async fn topic_assignment(
-        &self, 
-        topic:&str
-    ) -> Vec<Assignment>;
+    async fn topic_assignment(&self, topic: &str) -> Vec<Assignment>;
 
     async fn offset_seek(
-        &mut self, 
-        topic: &str, 
-        vgroup_id: VGroupId, 
-        offset: i64
+        &mut self,
+        topic: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
     ) -> Result<(), Self::Error>;
-
 }
 
 /// Marker trait to impl sync on async impl.

@@ -13,9 +13,8 @@ use taos_query::{
     common::{raw_data_t, Precision, RawMeta},
     prelude::tokio,
     tmq::{
-        AsAsyncConsumer, AsConsumer, AsyncOnSync, IsAsyncData, IsMeta, IsOffset, MessageSet,
-        Timeout, VGroupId,
-        Assignment,
+        AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsMeta, IsOffset,
+        MessageSet, Timeout, VGroupId,
     },
     Dsn, IntoDsn, RawBlock,
 };
@@ -547,39 +546,31 @@ impl AsAsyncConsumer for Consumer {
         self.timeout
     }
 
-    async fn assignments(&self) -> 
-    Option<Vec<(String, Vec<Assignment>)>> {
+    async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.into_strings();
         log::debug!("topics: {:?}", topics);
         let ret: Vec<(String, Vec<Assignment>)> = topics
-        .into_iter()
-        .map(|topic| {
-            let assignments = self.tmq.get_topic_assignment(&topic);
-            (topic, assignments)
-        })
-        .collect();
+            .into_iter()
+            .map(|topic| {
+                let assignments = self.tmq.get_topic_assignment(&topic);
+                (topic, assignments)
+            })
+            .collect();
         Some(ret)
     }
 
-    async fn topic_assignment(
-        &self, 
-        topic:&str
-    ) -> Vec<Assignment> {
+    async fn topic_assignment(&self, topic: &str) -> Vec<Assignment> {
         self.tmq.get_topic_assignment(topic)
     }
 
     async fn offset_seek(
-        &mut self, 
-        topic: &str, 
-        vgroup_id: VGroupId, 
-        offset: i64
+        &mut self,
+        topic: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
     ) -> Result<(), Self::Error> {
-        self.tmq.offset_seek(
-            topic, 
-            vgroup_id, 
-            offset
-        )
+        self.tmq.offset_seek(topic, vgroup_id, offset)
     }
 }
 #[cfg(test)]
@@ -604,7 +595,9 @@ mod tests {
         let db = "tmq_metadata";
         taos.query(format!("drop topic if exists {db}"))?;
         taos.query(format!("drop database if exists {db}"))?;
-        taos.query(format!("create database {db} keep 36500 vgroups 1 wal_retention_period 3600"))?;
+        taos.query(format!(
+            "create database {db} keep 36500 vgroups 1 wal_retention_period 3600"
+        ))?;
         taos.query(format!("use {db}"))?;
         taos.query(
             // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
@@ -710,7 +703,9 @@ mod tests {
         let db = "tmq_meta";
         taos.query(format!("drop topic if exists {db}"))?;
         taos.query(format!("drop database if exists {db}"))?;
-        taos.query(format!("create database {db} keep 36500 wal_retention_period 3600"))?;
+        taos.query(format!(
+            "create database {db} keep 36500 wal_retention_period 3600"
+        ))?;
         taos.query(format!("use {db}"))?;
         taos.query(
             // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
@@ -1460,7 +1455,12 @@ mod tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!("topic: {}, database: {}, vgroup_id: {}", topic, database, vgroup_id);
+                log::debug!(
+                    "topic: {}, database: {}, vgroup_id: {}",
+                    topic,
+                    database,
+                    vgroup_id
+                );
 
                 // Different to kafka message, TDengine consumer would consume two kind of messages.
                 //
@@ -1511,7 +1511,7 @@ mod tests {
 
         let assignments = consumer.assignments().await.unwrap();
         log::debug!("assignments: {:?}", assignments);
-        
+
         // seek offset
         for topic_vec_assignment in assignments {
             let topic = &topic_vec_assignment.0;
@@ -1521,7 +1521,14 @@ mod tests {
                 let current = assignment.current_offset();
                 let begin = assignment.begin();
                 let end = assignment.end();
-                log::debug!("topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}", topic, vgroup_id, current, begin, end);
+                log::debug!(
+                    "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
+                    topic,
+                    vgroup_id,
+                    current,
+                    begin,
+                    end
+                );
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
                 if res.is_err() {
                     log::error!("seek offset error: {:?}", res);

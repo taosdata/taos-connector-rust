@@ -34,7 +34,13 @@ impl Described {
     pub fn new(field: impl Into<String>, ty: Ty, length: impl Into<Option<usize>>) -> Self {
         let field = field.into();
         let length = length.into();
-        let length = length.unwrap_or_else(|| if ty.is_var_type() { 32 } else { ty.fixed_length() });
+        let length = length.unwrap_or_else(|| {
+            if ty.is_var_type() {
+                32
+            } else {
+                ty.fixed_length()
+            }
+        });
         Self { field, ty, length }
     }
 }

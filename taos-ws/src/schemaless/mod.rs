@@ -283,7 +283,6 @@ impl WsTaos {
     /// ```
     ///
 
-
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> Result<Self> {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = Some(1024 * 1024 * 16);
@@ -433,4 +432,3 @@ impl WsTaos {
         }
     }
 }
-

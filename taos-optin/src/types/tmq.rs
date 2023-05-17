@@ -13,7 +13,6 @@ impl PartialEq<i32> for tmq_conf_res_t {
 }
 
 impl tmq_resp_err_t {
-
     pub const OK: i32 = 0;
 
     pub fn is_ok(self) -> bool {
@@ -23,7 +22,7 @@ impl tmq_resp_err_t {
     pub fn is_err(self) -> bool {
         !self.is_ok()
     }
-    
+
     pub fn ok_or(self, s: impl Into<Cow<'static, str>>) -> Result<(), RawError> {
         match self {
             Self(0) => Ok(()),

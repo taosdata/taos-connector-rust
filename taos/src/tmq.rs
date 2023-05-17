@@ -1,11 +1,8 @@
 use taos_query::{
     block_in_place_or_global,
     prelude::{AsAsyncConsumer, RawMeta, Timeout},
+    tmq::{Assignment, VGroupId},
     RawBlock,
-    tmq::{
-        VGroupId,
-        Assignment,
-    }
 };
 
 enum TmqBuilderInner {
@@ -398,42 +395,33 @@ impl AsAsyncConsumer for Consumer {
         }
     }
 
-    async fn assignments(
-        &self
-    ) -> Option<Vec<(String, Vec<Assignment>)>> {
+    async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         match &self.0 {
             ConsumerInner::Native(c) => {
-                <crate::sys::Consumer as AsAsyncConsumer>::assignments(c)
-                    .await
+                <crate::sys::Consumer as AsAsyncConsumer>::assignments(c).await
             }
             ConsumerInner::Ws(c) => {
-                <taos_ws::consumer::Consumer as AsAsyncConsumer>::assignments(c)
-                    .await
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::assignments(c).await
             }
         }
     }
 
-    async fn topic_assignment(
-        &self, 
-        topic: &str
-    ) -> Vec<Assignment> {
+    async fn topic_assignment(&self, topic: &str) -> Vec<Assignment> {
         match &self.0 {
             ConsumerInner::Native(c) => {
-                <crate::sys::Consumer as AsAsyncConsumer>::topic_assignment(c, topic)
-                    .await
+                <crate::sys::Consumer as AsAsyncConsumer>::topic_assignment(c, topic).await
             }
             ConsumerInner::Ws(c) => {
-                <taos_ws::consumer::Consumer as AsAsyncConsumer>::topic_assignment(c, topic)
-                    .await
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::topic_assignment(c, topic).await
             }
         }
     }
 
     async fn offset_seek(
-        &mut self, 
-        topic: &str, 
-        vgroup_id:VGroupId, 
-        offset: i64
+        &mut self,
+        topic: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
     ) -> Result<(), Self::Error> {
         match &mut self.0 {
             ConsumerInner::Native(c) => {
@@ -441,11 +429,11 @@ impl AsAsyncConsumer for Consumer {
                     .await
                     .map_err(Into::into)
             }
-            ConsumerInner::Ws(c) => {
-                <taos_ws::consumer::Consumer as AsAsyncConsumer>::offset_seek(c, topic, vgroup_id, offset)
-                    .await
-                    .map_err(Into::into)
-            }
+            ConsumerInner::Ws(c) => <taos_ws::consumer::Consumer as AsAsyncConsumer>::offset_seek(
+                c, topic, vgroup_id, offset,
+            )
+            .await
+            .map_err(Into::into),
         }
     }
 }
@@ -741,7 +729,12 @@ mod tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!("topic: {}, database: {}, vgroup_id: {}", topic, database, vgroup_id);
+                log::debug!(
+                    "topic: {}, database: {}, vgroup_id: {}",
+                    topic,
+                    database,
+                    vgroup_id
+                );
 
                 // Different to kafka message, TDengine consumer would consume two kind of messages.
                 //
@@ -792,7 +785,7 @@ mod tests {
 
         let assignments = consumer.assignments().await.unwrap();
         log::debug!("assignments: {:?}", assignments);
-        
+
         // seek offset
         for topic_vec_assignment in assignments {
             let topic = &topic_vec_assignment.0;
@@ -802,7 +795,14 @@ mod tests {
                 let current = assignment.current_offset();
                 let begin = assignment.begin();
                 let end = assignment.end();
-                log::debug!("topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}", topic, vgroup_id, current, begin, end);
+                log::debug!(
+                    "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
+                    topic,
+                    vgroup_id,
+                    current,
+                    begin,
+                    end
+                );
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
                 if res.is_err() {
                     log::error!("seek offset error: {:?}", res);

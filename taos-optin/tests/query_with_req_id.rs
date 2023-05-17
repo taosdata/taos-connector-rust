@@ -46,7 +46,8 @@ fn sync_json_with_req_id() -> anyhow::Result<()> {
     );
 
     // let mut rs = client.s_query("select * from wsabc.tb1").unwrap().unwrap();
-    let mut rs = client.query_with_req_id(format!("select * from {db}.tb1 order by ts limit 1"), 123)?;
+    let mut rs =
+        client.query_with_req_id(format!("select * from {db}.tb1 order by ts limit 1"), 123)?;
 
     #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
     #[allow(dead_code)]

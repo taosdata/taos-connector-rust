@@ -205,12 +205,10 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 
     async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
         match &self.0 {
-            TaosBuilderInner::Native(b) => {
-                Ok(<sys::TaosBuilder as taos_query::AsyncTBuilder>::is_enterprise_edition(b).await?)
-            }
-            TaosBuilderInner::Ws(b) => {
-                Ok(b.is_enterprise_edition().await?)
-            }
+            TaosBuilderInner::Native(b) => Ok(
+                <sys::TaosBuilder as taos_query::AsyncTBuilder>::is_enterprise_edition(b).await?,
+            ),
+            TaosBuilderInner::Ws(b) => Ok(b.is_enterprise_edition().await?),
         }
     }
 }
@@ -404,10 +402,7 @@ impl AsyncQueryable for Taos {
     async fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
         match &self.0 {
             TaosInner::Native(_) => todo!(),
-            TaosInner::Ws(taos) => taos
-                .put(data)
-                .await
-                .map_err(Into::into),
+            TaosInner::Ws(taos) => taos.put(data).await.map_err(Into::into),
         }
     }
 }
@@ -482,29 +477,23 @@ impl taos_query::Queryable for Taos {
     fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
         match &self.0 {
             TaosInner::Native(taos) => {
-                <crate::sys::Taos as taos_query::Queryable>::put(
-                    taos, 
-                    data,
-                )
-                    .map_err(Into::into)
+                <crate::sys::Taos as taos_query::Queryable>::put(taos, data).map_err(Into::into)
             }
             TaosInner::Ws(taos) => {
-                <taos_ws::Taos as taos_query::Queryable>::put(taos, data)
-                    .map_err(Into::into)
+                <taos_ws::Taos as taos_query::Queryable>::put(taos, data).map_err(Into::into)
             }
         }
     }
-
 }
 #[cfg(test)]
 mod tests {
 
     use std::str::FromStr;
 
-    use taos_query::{common::Timestamp, TBuilder};
     use taos_query::common::SchemalessPrecision;
     use taos_query::common::SchemalessProtocol;
     use taos_query::common::SmlDataBuilder;
+    use taos_query::{common::Timestamp, TBuilder};
 
     use super::TaosBuilder;
 
@@ -534,7 +523,6 @@ mod tests {
         Ok(())
     }
 
-
     #[test]
     fn test_server_is_enterprise_edition() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
@@ -546,7 +534,10 @@ mod tests {
         let mut conn = builder.build().unwrap();
         assert!(builder.ping(&mut conn).is_ok());
 
-        println!("is enterprise edition: {:?}", builder.is_enterprise_edition());
+        println!(
+            "is enterprise edition: {:?}",
+            builder.is_enterprise_edition()
+        );
 
         Ok(())
     }
@@ -579,7 +570,10 @@ mod tests {
         let mut conn = builder.build().unwrap();
         assert!(builder.ping(&mut conn).is_ok());
 
-        println!("is enterprise edition: {:?}", builder.is_enterprise_edition());
+        println!(
+            "is enterprise edition: {:?}",
+            builder.is_enterprise_edition()
+        );
 
         Ok(())
     }
@@ -637,7 +631,11 @@ mod tests {
         let dsn = Dsn::from_str(&dsn)?;
         let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
         let db = "test_reqid_ws";
-        taos.exec_many([format!("drop database if exists {db}"), format!("create database {db}"), format!("use {db}")])?;
+        taos.exec_many([
+            format!("drop database if exists {db}"),
+            format!("create database {db}"),
+            format!("use {db}"),
+        ])?;
 
         taos.exec(
             "create table st(ts timestamp, c1 TINYINT UNSIGNED) tags(utntag TINYINT UNSIGNED)",
@@ -667,7 +665,11 @@ mod tests {
         let dsn = Dsn::from_str(&dsn)?;
         let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
         let db = "test_reqid_native";
-        taos.exec_many([format!("drop database if exists {db}"), format!("create database {db}"), format!("use {db}")])?;
+        taos.exec_many([
+            format!("drop database if exists {db}"),
+            format!("create database {db}"),
+            format!("use {db}"),
+        ])?;
 
         taos.exec(
             "create table st(ts timestamp, c1 TINYINT UNSIGNED) tags(utntag TINYINT UNSIGNED)",
@@ -812,8 +814,7 @@ mod tests {
         // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
-        let dsn =
-            std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
@@ -822,9 +823,7 @@ mod tests {
 
         client.exec(format!("drop database if exists {db}"))?;
 
-        client
-            .exec(format!("create database if not exists {db}"))
-            ?;
+        client.exec(format!("create database if not exists {db}"))?;
 
         // should specify database before insert
         client.exec(format!("use {db}"))?;
@@ -881,8 +880,7 @@ mod tests {
         // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
-        let dsn =
-            std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
@@ -891,9 +889,7 @@ mod tests {
 
         client.exec(format!("drop database if exists {db}"))?;
 
-        client
-            .exec(format!("create database if not exists {db}"))
-            ?;
+        client.exec(format!("create database if not exists {db}"))?;
 
         // should specify database before insert
         client.exec(format!("use {db}"))?;
@@ -946,7 +942,7 @@ mod tests {
 
         Ok(())
     }
-    
+
     #[test]
     fn test_put_json() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
@@ -954,8 +950,7 @@ mod tests {
         // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
-        let dsn =
-            std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
@@ -964,9 +959,7 @@ mod tests {
 
         client.exec(format!("drop database if exists {db}"))?;
 
-        client
-            .exec(format!("create database if not exists {db}"))
-            ?;
+        client.exec(format!("create database if not exists {db}"))?;
 
         // should specify database before insert
         client.exec(format!("use {db}"))?;
@@ -1169,7 +1162,6 @@ mod async_tests {
         Ok(())
     }
 
-
     async fn put_json() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         std::env::set_var("RUST_LOG", "taos=debug");
@@ -1238,8 +1230,7 @@ mod async_tests {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
 
-        let dsn =
-            std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
@@ -1262,6 +1253,4 @@ mod async_tests {
         log::debug!("is_enterprise: {:?}", client.is_enterprise_edition().await?);
         Ok(())
     }
-
-
 }

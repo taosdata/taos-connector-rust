@@ -103,7 +103,7 @@ impl taos_query::AsyncQueryable for Taos {
         let client = self.async_client.get().unwrap();
 
         let db: Option<String> = client.query_one("select database()").await?;
-        
+
         log::debug!("current db: {:?}", db);
 
         if let Some(db) = db {
@@ -118,12 +118,15 @@ impl taos_query::AsyncQueryable for Taos {
                         .await
                 }
             } else {
-                Err(asyn::Error::CommonError("Database should be specified".into()))
+                Err(asyn::Error::CommonError(
+                    "Database should be specified".into(),
+                ))
             }
         } else {
-            Err(asyn::Error::CommonError("Database should be specified".into()))
+            Err(asyn::Error::CommonError(
+                "Database should be specified".into(),
+            ))
         }
-        
     }
 }
 
