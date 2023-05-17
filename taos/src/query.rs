@@ -1044,7 +1044,7 @@ mod async_tests {
 
         let client = TaosBuilder::from_dsn(dsn)?.build().await?;
 
-        let db = "test_schemaless_ws";
+        let db = "test_schemaless_ws_line";
 
         client.exec(format!("drop database if exists {db}")).await?;
 
@@ -1110,7 +1110,7 @@ mod async_tests {
 
         let client = TaosBuilder::from_dsn(dsn)?.build().await?;
 
-        let db = "test_schemaless_ws";
+        let db = "test_schemaless_ws_telnet";
 
         client.exec(format!("drop database if exists {db}")).await?;
 
