@@ -112,6 +112,32 @@ impl NCharView {
         }
     }
 
+    #[inline]
+    pub unsafe fn get_length_unchecked(&self, row: usize) -> Option<usize> {
+        let offset = self.offsets.get_unchecked(row);
+        if offset >= 0 {
+            self.nchar_to_utf8();
+            Some(InlineStr::<u16>::from_ptr(self.data.as_ptr().offset(offset as isize)).len())
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn lengths(&self) -> Vec<Option<usize>> {
+        (0..self.len())
+            .map(|i| unsafe { self.get_length_unchecked(i) })
+            .collect_vec()
+    }
+
+    #[inline]
+    pub fn max_length(&self) -> usize {
+        (0..self.len())
+            .filter_map(|i| unsafe { self.get_length_unchecked(i) })
+            .min()
+            .unwrap_or(0)
+    }
+
     /// Get UTF-8 string at `row`.
     #[inline]
     pub unsafe fn get_unchecked(&self, row: usize) -> Option<&str> {
