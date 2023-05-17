@@ -155,14 +155,19 @@ pub(super) mod tmq {
 
             log::debug!("get_topic_assignment: {}", topic_name);
 
-            let tmq_resp = unsafe {
-                (self.tmq.tmq_get_topic_assignment)(
-                    self.as_ptr(), 
-                    topic_name.into_c_str().as_ptr(), 
-                    assignments_ptr, 
-                    &mut assignment_num
-                )
-            };
+            let tmq_resp;
+            if let Some(tmq_get_topic_assignment) = self.tmq.tmq_get_topic_assignment {
+                tmq_resp = unsafe {
+                    tmq_get_topic_assignment(
+                        self.as_ptr(), 
+                        topic_name.into_c_str().as_ptr(), 
+                        assignments_ptr, 
+                        &mut assignment_num
+                    )
+                };
+            } else {
+                unimplemented!("does not support tmq_get_topic_assignment")
+            }
             log::debug!("get_topic_assignment tmq_resp: {:?} topic_name: {} num: {}", tmq_resp, topic_name, assignment_num);
 
             let err_str = self.err_as_str(tmq_resp);
@@ -191,14 +196,19 @@ pub(super) mod tmq {
             vgroup_id: VGroupId, 
             offset: i64
         ) -> Result<(), RawError> {
-            let tmq_resp = unsafe {
-                (self.tmq.tmq_offset_seek)(
-                    self.as_ptr(), 
-                    topic_name.into_c_str().as_ptr(), 
-                    vgroup_id, 
-                    offset
-                )
-            };
+            let tmq_resp;
+            if let Some(tmq_offset_seek) = self.tmq.tmq_offset_seek {
+                tmq_resp  = unsafe {
+                    tmq_offset_seek(
+                        self.as_ptr(), 
+                        topic_name.into_c_str().as_ptr(), 
+                        vgroup_id, 
+                        offset
+                    )
+                };
+            } else {
+                unimplemented!("does not support tmq_offset_seek")
+            }
             log::debug!("offset_seek tmq_resp: {:?}, topic_name: {}, vgroup_id: {}, offset: {}", tmq_resp, topic_name, vgroup_id, offset);
 
             let err_str = self.err_as_str(tmq_resp);
