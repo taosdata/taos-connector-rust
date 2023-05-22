@@ -936,9 +936,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
-        pretty_env_logger::formatted_builder()
-            .filter_level(log::LevelFilter::Info)
-            .init();
+        // pretty_env_logger::formatted_builder()
+        //     .filter_level(log::LevelFilter::Info)
+        //     .init();
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
             .build()
