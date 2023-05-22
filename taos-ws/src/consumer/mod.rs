@@ -437,7 +437,11 @@ impl AsAsyncConsumer for Consumer {
 
     async fn unsubscribe(self) {
         let req_id = self.sender.req_id();
-        log::info!("Unsubscribe {}", req_id);
+        log::trace!("unsubscribe {} start", req_id);
+        let action = TmqSend::Unsubscribe {
+            req_id,
+        };
+        self.sender.send_recv(action).await.unwrap();
         drop(self)
     }
 
@@ -685,6 +689,15 @@ impl TmqBuilder {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
                                                 log::warn!("subscribe message received but no receiver alive");
+                                            }
+                                        },
+                                        TmqRecvData::Unsubscribe => {
+                                            log::trace!("unsubscribe with: {:?} successed", req_id);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("unsubscribe message received but no receiver alive");
                                             }
                                         },
                                         TmqRecvData::Poll(_) => {
