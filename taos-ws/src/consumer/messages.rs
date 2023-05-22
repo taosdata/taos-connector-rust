@@ -76,6 +76,9 @@ pub enum TmqSend {
         req: TmqInit,
         topics: Vec<String>,
     },
+    Unsubscribe {
+        req_id: ReqId,
+    },
     Poll {
         req_id: ReqId,
         blocking_time: i64,
@@ -98,6 +101,9 @@ impl TmqSend {
                 conn: _,
                 req: _,
                 topics: _,
+            } => *req_id,
+            TmqSend::Unsubscribe { 
+                req_id 
             } => *req_id,
             TmqSend::Poll {
                 req_id,
@@ -160,6 +166,7 @@ impl TmqFetch {
 #[serde(rename_all = "snake_case")]
 pub enum TmqRecvData {
     Subscribe,
+    Unsubscribe,
     Poll(TmqPoll),
     Fetch(TmqFetch),
     FetchJsonMeta {

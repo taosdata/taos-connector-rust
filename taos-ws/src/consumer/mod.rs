@@ -435,6 +435,16 @@ impl AsAsyncConsumer for Consumer {
         Ok(())
     }
 
+    async fn unsubscribe(self) {
+        let req_id = self.sender.req_id();
+        log::trace!("unsubscribe {} start", req_id);
+        let action = TmqSend::Unsubscribe {
+            req_id,
+        };
+        self.sender.send_recv(action).await.unwrap();
+        drop(self)
+    }
+
     async fn recv_timeout(
         &self,
         timeout: taos_query::tmq::Timeout,
@@ -681,6 +691,15 @@ impl TmqBuilder {
                                                 log::warn!("subscribe message received but no receiver alive");
                                             }
                                         },
+                                        TmqRecvData::Unsubscribe => {
+                                            log::trace!("unsubscribe with: {:?} successed", req_id);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("unsubscribe message received but no receiver alive");
+                                            }
+                                        },
                                         TmqRecvData::Poll(_) => {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
@@ -918,7 +937,7 @@ mod tests {
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(log::LevelFilter::Debug)
+        //     .filter_level(log::LevelFilter::Info)
         //     .init();
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
