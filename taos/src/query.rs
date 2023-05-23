@@ -1028,7 +1028,7 @@ mod async_tests {
 
     async fn put_line() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
-        std::env::set_var("RUST_LOG", "taos=debug");
+        // std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
 
         let dsn =
