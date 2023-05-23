@@ -423,11 +423,12 @@ impl AsAsyncConsumer for Consumer {
         &mut self,
         topics: I,
     ) -> Result<()> {
+        self.topics = topics.into_iter().map(Into::into).collect_vec();
         let req_id = self.sender.req_id();
         let action = TmqSend::Subscribe {
             req_id,
             req: self.tmq_conf.clone(),
-            topics: topics.into_iter().map(Into::into).collect_vec(),
+            topics: self.topics.clone(),
             conn: self.conn.clone(),
         };
         self.sender.send_recv(action).await?;
@@ -473,20 +474,57 @@ impl AsAsyncConsumer for Consumer {
     }
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
-        todo!("ws assignments")
+        let topics = self.topics.clone();
+        log::trace!("topics: {:?}", topics);
+
+        let mut ret = Vec::new();
+        for topic in topics {
+            let assignments = self.topic_assignment(&topic).await;
+            ret.push((topic, assignments));
+        }
+
+        Some(ret)
     }
 
-    async fn topic_assignment(&self, _topic: &str) -> Vec<Assignment> {
-        todo!("ws assignment")
+    async fn topic_assignment(&self, topic: &str) -> Vec<Assignment> {
+        let req_id = self.sender.req_id();
+        let action = TmqSend::Assignment(TopicAssignmentArgs {
+            req_id,
+            topic: topic.to_string(),
+        });
+
+        let recv = self.sender.send_recv(action).await.unwrap();
+        match recv {
+            TmqRecvData::Assignment(TopicAssignment {
+                assignment,
+                timing,
+            }) => {
+                // assert_eq!(topic, topic);
+                log::trace!("timing: {:?}", timing);
+                log::trace!("assignment: {:?}", assignment);
+                assignment
+            }
+            _ => unreachable!(),
+        }
+        
     }
 
     async fn offset_seek(
         &mut self,
-        _topic: &str,
-        _dvgroup_id: VGroupId,
-        _offset: i64,
+        topic: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
     ) -> StdResult<(), Self::Error> {
-        todo!("ws offset_seek")
+        let req_id = self.sender.req_id();
+        let action = TmqSend::Seek(OffsetSeekArgs {
+            req_id,
+            topic: topic.to_string(),
+            vgroup_id,
+            offset,
+        });
+
+        let _ = self.sender.send_recv(action).await?;
+        Ok(())
     }
 
     fn default_timeout(&self) -> Timeout {
@@ -743,6 +781,24 @@ impl TmqBuilder {
                                                 log::warn!("poll message received but no receiver alive");
                                             }
                                         }
+                                        TmqRecvData::Assignment(assignment)=> {
+                                            log::trace!("assignment done: {:?}", assignment);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("assignment message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::Seek { timing }=> {
+                                            log::trace!("seek done: req_id {:?} timing {:?}", &req_id, timing);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("seek message received but no receiver alive");
+                                            }
+                                        }
                                         _ => unreachable!("unknown tmq response"),
                                     }
                                 }
@@ -841,6 +897,7 @@ impl TmqBuilder {
             // fetches,
             close_signal: tx,
             timeout: self.timeout,
+            topics: vec![],
         };
 
         Ok(consumer)
@@ -853,6 +910,7 @@ pub struct Consumer {
     sender: WsTmqSender,
     close_signal: watch::Sender<bool>,
     timeout: Timeout,
+    topics: Vec<String>,
 }
 
 impl Drop for Consumer {
