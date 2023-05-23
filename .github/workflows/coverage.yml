@@ -74,7 +74,7 @@ jobs:
           [ -d debug ] || mkdir debug
           cd debug
           cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=false
-          make -j8
+          make -j4
           sudo make install
           nohup sudo sh -c 'TAOS_SUPPORT_VNODES=256 taosd' > /dev/null 2>&1 &
           sleep 5
