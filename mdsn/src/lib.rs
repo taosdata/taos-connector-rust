@@ -1081,6 +1081,14 @@ mod tests {
     }
 
     #[test]
+    fn tmq_offset() {
+        let dsn = Dsn::from_str("tmq+ws:///abc1?offset=10:20,11:40").unwrap();
+        let offset = dsn.get("offset").unwrap();
+        dbg!(&dsn);
+        dbg!(&offset);
+    }
+
+    #[test]
     fn password_special_chars() {
         let p = "!@#$%^&*()";
         let e = urlencoding::encode(p);

@@ -9,6 +9,7 @@ use std::{
 
 pub(crate) use ffi::*;
 
+use itertools::Itertools;
 use taos_query::{
     common::{raw_data_t, Precision, RawMeta},
     prelude::tokio,
@@ -156,6 +157,7 @@ impl taos_query::TBuilder for TmqBuilder {
         self.conf.build().map(|tmq| Consumer {
             tmq,
             timeout: self.timeout,
+            dsn: self.dsn.clone(),
         })
     }
 
@@ -203,6 +205,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         self.conf.build().map(|tmq| Consumer {
             tmq,
             timeout: self.timeout,
+            dsn: self.dsn.clone(),
         })
     }
 
@@ -262,6 +265,7 @@ impl Drop for Offset {
 pub struct Consumer {
     tmq: RawTmq,
     timeout: Timeout,
+    dsn: Dsn,
 }
 
 unsafe impl Send for Consumer {}
@@ -471,7 +475,34 @@ impl AsAsyncConsumer for Consumer {
         topics: I,
     ) -> Result<(), Self::Error> {
         let topics = Topics::from_topics(topics.into_iter().map(|s| s.into()))?;
-        self.tmq.subscribe(&topics)
+
+        let r = self.tmq.subscribe(&topics);
+        
+        if let Some(offset) = self.dsn.get("offset") {
+            // dbg!(offset);
+            let offsets = offset
+            .split(",")
+            .map(|s| 
+                s
+                .split(":")
+                .map(
+                    |i| 
+                    i.parse::<i64>().unwrap()
+                )
+                .collect_vec()
+            )
+            .collect_vec();
+            let topic_name = &self.tmq.subscription().into_strings()[0];
+            // let topic_name = topic_name.into_strings();
+            for offset in offsets {
+                let vgroup_id = offset[0];
+                let offset = offset[1];
+                log::debug!("topic {} seeking to offset {} for vgroup {}",  &topic_name, offset, vgroup_id);
+                let _ = self.tmq.offset_seek(&topic_name, vgroup_id as i32, offset);
+            }
+        }
+
+        r
     }
 
     async fn recv_timeout(

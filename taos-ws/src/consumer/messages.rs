@@ -70,6 +70,7 @@ pub struct TmqInit {
     pub with_table_name: String,
     pub auto_commit: String,
     pub auto_commit_interval_ms: Option<String>,
+    pub offset_seek: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]

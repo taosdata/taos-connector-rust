@@ -433,6 +433,40 @@ impl AsAsyncConsumer for Consumer {
         };
         self.sender.send_recv(action).await?;
 
+        // dbg!(&self.tmq_conf);
+
+        if let Some(offset) = self.tmq_conf.offset_seek.clone() {
+            // dbg!(offset);
+            let offsets = offset
+            .split(",")
+            .map(|s| 
+                s
+                .split(":")
+                .map(
+                    |i| 
+                    i.parse::<i64>().unwrap()
+                )
+                .collect_vec()
+            )
+            .collect_vec();
+            let topic_name = &self.topics[0];
+            for offset in offsets {
+                let vgroup_id = offset[0] as i32;
+                let offset = offset[1];
+                log::debug!("topic {} seeking to offset {} for vgroup {}",  &topic_name, offset, vgroup_id);
+
+                let req_id = self.sender.req_id();
+                let action = TmqSend::Seek(OffsetSeekArgs {
+                    req_id,
+                    topic: topic_name.to_string(),
+                    vgroup_id,
+                    offset,
+                });
+
+                let _ = self.sender.send_recv(action).await.unwrap_or(crate::consumer::messages::TmqRecvData::Seek{timing:0});
+            }
+        }
+
         Ok(())
     }
 
@@ -616,6 +650,16 @@ impl TmqBuilder {
         } else {
             Timeout::Duration(Duration::from_secs(5))
         };
+        let offset_seek = dsn
+            .params
+            .get("offset")
+            .and_then(|s| {
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
+            });
         let conf = TmqInit {
             group_id,
             client_id,
@@ -624,6 +668,7 @@ impl TmqBuilder {
             auto_commit_interval_ms,
             snapshot_enable,
             with_table_name,
+            offset_seek,
         };
 
         Ok(Self {
