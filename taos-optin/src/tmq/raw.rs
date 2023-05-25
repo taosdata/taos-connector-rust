@@ -157,7 +157,8 @@ pub(super) mod tmq {
                     )
                 };
             } else {
-                unimplemented!("does not support tmq_get_topic_assignment")
+                // unimplemented!("does not support tmq_get_topic_assignment")
+                return vec![];
             }
             log::debug!(
                 "get_topic_assignment tmq_resp: {:?} topic_name: {} num: {}",
@@ -199,7 +200,8 @@ pub(super) mod tmq {
                     )
                 };
             } else {
-                unimplemented!("does not support tmq_offset_seek")
+                // unimplemented!("does not support tmq_offset_seek")
+                return Ok(());
             }
             log::debug!(
                 "offset_seek tmq_resp: {:?}, topic_name: {}, vgroup_id: {}, offset: {}",
