@@ -473,11 +473,11 @@ impl AsAsyncConsumer for Consumer {
     }
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
-        todo!("ws assignments")
+        Some(vec![])
     }
 
     async fn topic_assignment(&self, _topic: &str) -> Vec<Assignment> {
-        todo!("ws assignment")
+        vec![]
     }
 
     async fn offset_seek(
@@ -486,7 +486,7 @@ impl AsAsyncConsumer for Consumer {
         _dvgroup_id: VGroupId,
         _offset: i64,
     ) -> StdResult<(), Self::Error> {
-        todo!("ws offset_seek")
+        Err(RawError::from_any("offset_seek via websocket is not supported currently").into())
     }
 
     fn default_timeout(&self) -> Timeout {
