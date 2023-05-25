@@ -42,7 +42,7 @@ jobs:
 
       - name: Prepare development tools
         run: |
-          sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config libgflags2.2 libgflags-dev -y
+          sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config libgflags2.2 libgflags-dev libgeos-dev -y
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
 
