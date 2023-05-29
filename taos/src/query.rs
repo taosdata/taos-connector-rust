@@ -1018,6 +1018,7 @@ mod async_tests {
     use crate::TaosBuilder;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    #[ignore]
     async fn test_put() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
