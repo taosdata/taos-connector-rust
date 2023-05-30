@@ -46,12 +46,23 @@ jobs:
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
 
+      - name: Determine TDengine branch
+        uses: haya14busa/action-cond@v1
+        id: determine-branch
+        with:
+          cond: ${{ github.base_ref == 'main' }}
+          if_true: 'main'  
+          if_false: '3.0' 
+
+      - name: Echo conditional value
+        run: echo "${{ steps.determine-branch.outputs.value }}"
+
       - name: Checkout tdengine
         uses: actions/checkout@v2
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "3.0"
+          ref: ${{ steps.determine-branch.outputs.value }}
 
       - uses: actions/cache@v3
         with:
