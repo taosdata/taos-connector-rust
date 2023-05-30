@@ -1,6 +1,7 @@
 use std::{fmt::Debug, pin::Pin, str::FromStr, time::Duration};
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     common::{JsonMeta, RawData, RawMeta},
@@ -228,19 +229,19 @@ pub trait IsOffset {
 }
 
 #[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone, Deserialize, Serialize)]
 pub struct Assignment {
     vgroup_id: VGroupId,
-    current_offset: i64,
+    offset: i64,
     begin: i64,
     end: i64,
 }
 
 impl Assignment {
-    pub fn new(vgroup_id: VGroupId, current_offset: i64, begin: i64, end: i64) -> Self {
+    pub fn new(vgroup_id: VGroupId, offset: i64, begin: i64, end: i64) -> Self {
         Self {
             vgroup_id,
-            current_offset,
+            offset,
             begin,
             end,
         }
@@ -251,7 +252,7 @@ impl Assignment {
     }
 
     pub fn current_offset(&self) -> i64 {
-        self.current_offset
+        self.offset
     }
 
     pub fn begin(&self) -> i64 {

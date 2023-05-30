@@ -1018,6 +1018,7 @@ mod async_tests {
     use crate::TaosBuilder;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    #[ignore]
     async fn test_put() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
@@ -1028,14 +1029,14 @@ mod async_tests {
 
     async fn put_line() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
-        std::env::set_var("RUST_LOG", "taos=debug");
+        // std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
 
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
-        let client = TaosBuilder::from_dsn(dsn)?.build().await?;
+        let client = TaosBuilder::from_dsn(&dsn)?.build().await?;
 
         let db = "test_schemaless_ws_line";
 
@@ -1046,7 +1047,12 @@ mod async_tests {
             .await?;
 
         // should specify database before insert
-        client.exec(format!("use {db}")).await?;
+        // client.exec(format!("use {db}")).await?;
+
+        let dsn_with_db = format!("{dsn}/{db}");
+
+        let client = TaosBuilder::from_dsn(dsn_with_db)?.build().await?;
+        log::debug!("client: {:?}", &client);
 
         let data = [
             "measurement,host=host1 field1=2i,field2=2.0 1577837300000",
@@ -1095,13 +1101,13 @@ mod async_tests {
 
     async fn put_telnet() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
-        std::env::set_var("RUST_LOG", "taos=debug");
+        // std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
-        let client = TaosBuilder::from_dsn(dsn)?.build().await?;
+        let client = TaosBuilder::from_dsn(&dsn)?.build().await?;
 
         let db = "test_schemaless_ws_telnet";
 
@@ -1112,7 +1118,12 @@ mod async_tests {
             .await?;
 
         // should specify database before insert
-        client.exec(format!("use {db}")).await?;
+        // client.exec(format!("use {db}")).await?;
+
+        let dsn_with_db = format!("{dsn}/{db}");
+
+        let client = TaosBuilder::from_dsn(dsn_with_db)?.build().await?;
+        log::debug!("client: {:?}", &client);
 
         let data = [
             "meters.current 1648432611249 10.3 location=California.SanFrancisco group=2",
@@ -1164,13 +1175,13 @@ mod async_tests {
 
     async fn put_json() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
-        std::env::set_var("RUST_LOG", "taos=debug");
+        // std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
-        let client = TaosBuilder::from_dsn(dsn)?.build().await?;
+        let client = TaosBuilder::from_dsn(&dsn)?.build().await?;
 
         let db = "test_schemaless_ws";
 
@@ -1181,7 +1192,12 @@ mod async_tests {
             .await?;
 
         // should specify database before insert
-        client.exec(format!("use {db}")).await?;
+        // client.exec(format!("use {db}")).await?;
+
+        let dsn_with_db = format!("{dsn}/{db}");
+
+        let client = TaosBuilder::from_dsn(dsn_with_db)?.build().await?;
+        log::debug!("client: {:?}", &client);
 
         // SchemalessProtocol::Json
         let data = [

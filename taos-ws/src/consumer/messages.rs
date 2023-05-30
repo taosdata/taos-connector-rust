@@ -10,6 +10,7 @@ use taos_query::common::Field;
 use taos_query::common::Precision;
 use taos_query::common::Ty;
 use taos_query::prelude::RawError;
+use taos_query::tmq::Assignment;
 use taos_query::tmq::VGroupId;
 
 use crate::query::infra::ToMessage;
@@ -28,6 +29,20 @@ pub type MessageId = u64;
 pub struct MessageArgs {
     pub(crate) req_id: ReqId,
     pub(crate) message_id: MessageId,
+}
+
+#[derive(Debug, Serialize, Default, Clone)]
+pub struct TopicAssignmentArgs {
+    pub(crate) req_id: ReqId,
+    pub(crate) topic: String,
+}
+
+#[derive(Debug, Serialize, Default, Clone)]
+pub struct OffsetSeekArgs {
+    pub(crate) req_id: ReqId,
+    pub(crate) topic: String,
+    pub(crate) vgroup_id: i32,
+    pub(crate) offset: i64,
 }
 
 #[derive(Debug, Deserialize_repr, Serialize_repr, Clone, Copy)]
@@ -55,6 +70,7 @@ pub struct TmqInit {
     pub with_table_name: String,
     pub auto_commit: String,
     pub auto_commit_interval_ms: Option<String>,
+    pub offset_seek: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
@@ -88,6 +104,8 @@ pub enum TmqSend {
     Fetch(MessageArgs),
     FetchBlock(MessageArgs),
     Commit(MessageArgs),
+    Assignment(TopicAssignmentArgs),
+    Seek(OffsetSeekArgs),
 }
 
 unsafe impl Send for TmqSend {}
@@ -114,6 +132,8 @@ impl TmqSend {
             TmqSend::Fetch(args) => args.req_id,
             TmqSend::FetchBlock(args) => args.req_id,
             TmqSend::Commit(args) => args.req_id,
+            TmqSend::Assignment(args) => args.req_id,
+            TmqSend::Seek(args) => args.req_id,
         }
     }
 }
@@ -145,6 +165,12 @@ pub struct TmqFetch {
     pub fields_lengths: Option<Vec<u32>>,
     pub precision: Precision,
     pub rows: usize,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct TopicAssignment {
+    pub timing: i64,
+    pub assignment: Vec<Assignment>,
 }
 
 impl TmqFetch {
@@ -185,6 +211,10 @@ pub enum TmqRecvData {
     Block(Vec<u32>),
     Commit,
     Close,
+    Assignment(TopicAssignment),
+    Seek {
+        timing: i64,
+    },
 }
 
 #[serde_as]

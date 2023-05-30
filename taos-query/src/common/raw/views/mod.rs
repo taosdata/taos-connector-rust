@@ -191,6 +191,12 @@ impl ColumnView {
     pub fn from_millis_timestamp(values: Vec<impl Into<Option<i64>>>) -> Self {
         ColumnView::Timestamp(TimestampView::from_millis(values))
     }
+    pub fn from_micros_timestamp(values: Vec<impl Into<Option<i64>>>) -> Self {
+        ColumnView::Timestamp(TimestampView::from_micros(values))
+    }
+    pub fn from_nanos_timestamp(values: Vec<impl Into<Option<i64>>>) -> Self {
+        ColumnView::Timestamp(TimestampView::from_nanos(values))
+    }
     pub fn from_bools(values: Vec<impl Into<Option<bool>>>) -> Self {
         ColumnView::Bool(BoolView::from_iter(values))
     }

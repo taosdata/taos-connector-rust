@@ -21,11 +21,15 @@ pub struct WsConnReq {
 
 impl WsConnReq {
     #[cfg(test)]
-    pub fn new(user: impl Into<String>, password: impl Into<String>) -> Self {
+    pub fn new(
+        user: impl Into<String>, 
+        password: impl Into<String>,
+        db: impl Into<String>,
+    ) -> Self {
         Self {
             user: Some(user.into()),
             password: Some(password.into()),
-            db: None,
+            db: Some(db.into()),
         }
     }
     // pub fn with_database(mut self, db: impl Into<String>) -> Self {
@@ -52,7 +56,6 @@ pub enum WsSend {
         req: WsConnReq,
     },
     Insert {
-        db: String,
         protocol: u8,
         precision: String,
         data: String,
@@ -64,7 +67,7 @@ pub enum WsSend {
 impl WsSend {
     pub(crate) fn req_id(&self) -> ReqId {
         match self {
-            WsSend::Conn { req_id, req: _ } => *req_id,
+            WsSend::Conn { req_id, .. } => *req_id,
             WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
             _ => unreachable!(),
         }
@@ -78,7 +81,11 @@ unsafe impl Sync for WsSend {}
 fn test_serde_send() {
     let s = WsSend::Conn {
         req_id: 1,
-        req: WsConnReq::new("root", "taosdata"),
+        req: WsConnReq::new(
+            "root", 
+            "taosdata",
+            "db"
+        ),
     };
     let v = serde_json::to_value(&s).unwrap();
     let j = serde_json::json!({
@@ -87,7 +94,7 @@ fn test_serde_send() {
             "req_id": 1,
             "user": "root",
             "password": "taosdata",
-            "db": ""
+            "db": "db"
         }
     });
     assert_eq!(v, j);
