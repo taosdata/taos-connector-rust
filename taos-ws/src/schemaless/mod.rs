@@ -409,9 +409,8 @@ impl WsTaos {
         })
     }
 
-    pub async fn s_put(&self, sml: &SmlData, db: String) -> Result<()> {
+    pub async fn s_put(&self, sml: &SmlData) -> Result<()> {
         let action = WsSend::Insert {
-            db,
             protocol: sml.protocol() as u8,
             precision: sml.precision().into(),
             data: sml.data().join("\n").to_string(),
