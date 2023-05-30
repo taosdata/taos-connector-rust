@@ -54,9 +54,6 @@ jobs:
           if_true: 'main'  
           if_false: '3.0' 
 
-      - name: Echo conditional value
-        run: echo "${{ steps.determine-branch.outputs.value }}"
-
       - name: Checkout tdengine
         uses: actions/checkout@v2
         with:
