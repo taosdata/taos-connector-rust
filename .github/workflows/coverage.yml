@@ -52,7 +52,7 @@ jobs:
         with:
           cond: ${{ github.base_ref == 'main' }}
           if_true: 'main'  
-          if_false: 'main' 
+          if_false: '3.0' 
 
       - name: Checkout tdengine
         uses: actions/checkout@v2
