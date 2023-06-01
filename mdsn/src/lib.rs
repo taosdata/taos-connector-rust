@@ -98,7 +98,7 @@ impl Dsn {
                     # path-like dsn
                     (?P<path>([\\/.~]$|/\w+[\w %$@:.\\\-/]*|[\.~\w]?[\w %$@:.\\\-/]+))
                 ) # abc
-                (\?(?P<params>.*))?").unwrap();
+                (\?(?P<params>(?s:.)*))?").unwrap();
         }
 
         let cap = RE
