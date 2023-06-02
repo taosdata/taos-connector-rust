@@ -20,10 +20,10 @@ no-default-features = true
 anyhow = "1"
 async-trait = "0.1"
 log = "0.4.17"
-taos-optin = { path = "../taos-optin", version = "0.8.4", optional = true }
-taos-query = { path = "../taos-query", version = "0.8.4", default-features = false }
-taos-sys = { path = "../taos-sys", version = "0.8.4", optional = true }
-taos-ws = { path = "../taos-ws", version = "0.8.4", optional = true }
+taos-optin = { path = "../taos-optin", version = "0.8.8", optional = true }
+taos-query = { path = "../taos-query", version = "0.8.8", default-features = false }
+taos-sys = { path = "../taos-sys", version = "0.8.8", optional = true }
+taos-ws = { path = "../taos-ws", version = "0.8.8", optional = true }
 thiserror = "1"
 
 [dev-dependencies]
