@@ -75,6 +75,7 @@ impl FromStr for Timeout {
         }
     }
 }
+
 pub enum MessageSet<M, D> {
     Meta(M),
     Data(D),
@@ -82,9 +83,9 @@ pub enum MessageSet<M, D> {
 }
 
 impl<M, D> Debug for MessageSet<M, D>
-where
-    M: Debug,
-    D: Debug,
+    where
+        M: Debug,
+        D: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -144,8 +145,8 @@ pub trait IsAsyncMeta {
 }
 
 impl<T> IsMeta for T
-where
-    T: IsAsyncMeta + SyncOnAsync,
+    where
+        T: IsAsyncMeta + SyncOnAsync,
 {
     type Error = T::Error;
 
@@ -160,8 +161,8 @@ where
 
 #[async_trait::async_trait]
 impl<T> IsAsyncMeta for T
-where
-    T: IsMeta + AsyncOnSync + Send + Sync,
+    where
+        T: IsMeta + AsyncOnSync + Send + Sync,
 {
     type Error = T::Error;
 
@@ -268,14 +269,14 @@ pub trait AsConsumer: Sized {
     type Error;
     type Offset: IsOffset;
     type Meta: IsMeta;
-    type Data: IntoIterator<Item = Result<RawBlock, Self::Error>>;
+    type Data: IntoIterator<Item=Result<RawBlock, Self::Error>>;
 
     /// Default timeout getter for message stream.
     fn default_timeout(&self) -> Timeout {
         Timeout::Never
     }
 
-    fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
+    fn subscribe<T: Into<String>, I: IntoIterator<Item=T> + Send>(
         &mut self,
         topics: I,
     ) -> Result<(), Self::Error>;
@@ -295,7 +296,7 @@ pub trait AsConsumer: Sized {
     fn iter_data_only(
         &self,
         timeout: Timeout,
-    ) -> Box<dyn '_ + Iterator<Item = Result<(Self::Offset, Self::Data), Self::Error>>> {
+    ) -> Box<dyn '_ + Iterator<Item=Result<(Self::Offset, Self::Data), Self::Error>>> {
         Box::new(
             self.iter_with_timeout(timeout)
                 .filter_map_ok(|m| m.1.into_data().map(|data| (m.0, data))),
@@ -318,6 +319,10 @@ pub trait AsConsumer: Sized {
     fn unsubscribe(self) {
         drop(self)
     }
+
+    fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>>;
+
+    fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> Result<(), Self::Error>;
 }
 
 pub struct MessageSetsIter<'a, C> {
@@ -326,8 +331,8 @@ pub struct MessageSetsIter<'a, C> {
 }
 
 impl<'a, C> Iterator for MessageSetsIter<'a, C>
-where
-    C: AsConsumer,
+    where
+        C: AsConsumer,
 {
     type Item = Result<(C::Offset, MessageSet<C::Meta, C::Data>), C::Error>;
 
@@ -345,7 +350,7 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
 
     fn default_timeout(&self) -> Timeout;
 
-    async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
+    async fn subscribe<T: Into<String>, I: IntoIterator<Item=T> + Send>(
         &mut self,
         topics: I,
     ) -> Result<(), Self::Error>;
@@ -362,10 +367,10 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     ) -> Pin<
         Box<
             dyn '_
-                + Send
-                + futures::Stream<
-                    Item = Result<(Self::Offset, MessageSet<Self::Meta, Self::Data>), Self::Error>,
-                >,
+            + Send
+            + futures::Stream<
+                Item=Result<(Self::Offset, MessageSet<Self::Meta, Self::Data>), Self::Error>,
+            >,
         >,
     > {
         Box::pin(futures::stream::unfold((), move |_| async move {
@@ -379,10 +384,10 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     ) -> Pin<
         Box<
             dyn '_
-                + Send
-                + futures::Stream<
-                    Item = Result<(Self::Offset, MessageSet<Self::Meta, Self::Data>), Self::Error>,
-                >,
+            + Send
+            + futures::Stream<
+                Item=Result<(Self::Offset, MessageSet<Self::Meta, Self::Data>), Self::Error>,
+            >,
         >,
     > {
         self.stream_with_timeout(self.default_timeout())
@@ -408,13 +413,14 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
 
 /// Marker trait to impl sync on async impl.
 pub trait SyncOnAsync {}
+
 pub trait AsyncOnSync {}
 
 impl<C> AsConsumer for C
-where
-    C: AsAsyncConsumer + SyncOnAsync,
-    C::Meta: IsMeta,
-    C::Data: IntoIterator<Item = Result<RawBlock, C::Error>>,
+    where
+        C: AsAsyncConsumer + SyncOnAsync,
+        C::Meta: IsMeta,
+        C::Data: IntoIterator<Item=Result<RawBlock, C::Error>>,
 {
     type Error = C::Error;
 
@@ -424,7 +430,7 @@ where
 
     type Data = C::Data;
 
-    fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
+    fn subscribe<T: Into<String>, I: IntoIterator<Item=T> + Send>(
         &mut self,
         topics: I,
     ) -> Result<(), Self::Error> {
@@ -440,6 +446,15 @@ where
 
     fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit(self, offset))
+    }
+
+    fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::assignments(self))
+    }
+
+    fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> Result<(), Self::Error> {
+        crate::block_in_place_or_global(
+            <C as AsAsyncConsumer>::offset_seek(self, topic, vg_id, offset))
     }
 }
 

@@ -6,6 +6,7 @@ use std::{
     str::FromStr,
     time::Duration,
 };
+use std::thread::sleep;
 
 pub(crate) use ffi::*;
 
@@ -117,6 +118,7 @@ pub struct TmqBuilder {
 }
 
 unsafe impl Send for TmqBuilder {}
+
 unsafe impl Sync for TmqBuilder {}
 
 impl taos_query::TBuilder for TmqBuilder {
@@ -224,6 +226,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 pub struct Offset(RawRes);
 
 unsafe impl Send for Offset {}
+
 unsafe impl Sync for Offset {}
 
 impl Debug for Offset {
@@ -269,6 +272,7 @@ pub struct Consumer {
 }
 
 unsafe impl Send for Consumer {}
+
 unsafe impl Sync for Consumer {}
 
 impl Drop for Consumer {
@@ -324,6 +328,7 @@ impl IsMeta for Meta {
         Ok(meta)
     }
 }
+
 impl Meta {
     fn new(raw: RawRes) -> Self {
         Self { raw }
@@ -342,6 +347,7 @@ impl Meta {
         todo!()
     }
 }
+
 pub struct Data {
     raw: RawRes,
     precision: Precision,
@@ -419,7 +425,7 @@ impl AsConsumer for Consumer {
 
     type Data = Data;
 
-    fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
+    fn subscribe<T: Into<String>, I: IntoIterator<Item=T> + Send>(
         &mut self,
         topics: I,
     ) -> Result<(), Self::Error> {
@@ -457,6 +463,23 @@ impl AsConsumer for Consumer {
     fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
         self.tmq.commit_sync(offset.0).map(|_| ())
     }
+
+    fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
+        let topics = self.tmq.subscription();
+        let topics = topics.into_strings();
+        let ret = topics
+            .into_iter()
+            .map(|topic| {
+                let assignments = self.tmq.get_topic_assignment(&topic);
+                (topic, assignments)
+            })
+            .collect();
+        Some(ret)
+    }
+
+    fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> Result<(), Self::Error> {
+        self.tmq.offset_seek(topic, vg_id, offset)
+    }
 }
 
 // impl AsyncOnSync for Consumer {}
@@ -470,28 +493,28 @@ impl AsAsyncConsumer for Consumer {
 
     type Data = Data;
 
-    async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
+    async fn subscribe<T: Into<String>, I: IntoIterator<Item=T> + Send>(
         &mut self,
         topics: I,
     ) -> Result<(), Self::Error> {
         let topics = Topics::from_topics(topics.into_iter().map(|s| s.into()))?;
 
         let r = self.tmq.subscribe(&topics);
-        
+
         if let Some(offset) = self.dsn.get("offset") {
             // dbg!(offset);
             let offsets = offset
-            .split(",")
-            .map(|s| 
-                s
-                .split(":")
-                .map(
-                    |i| 
-                    i.parse::<i64>().unwrap()
+                .split(",")
+                .map(|s|
+                    s
+                        .split(":")
+                        .map(
+                            |i|
+                                i.parse::<i64>().unwrap()
+                        )
+                        .collect_vec()
                 )
-                .collect_vec()
-            )
-            .collect_vec();
+                .collect_vec();
             let topic_name = &self.tmq.subscription().into_strings()[0];
             // let topic_name = topic_name.into_strings();
             for offset in offsets {
@@ -604,6 +627,7 @@ impl AsAsyncConsumer for Consumer {
         self.tmq.offset_seek(topic, vgroup_id, offset)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use std::{str::FromStr, time::Duration};
@@ -720,6 +744,7 @@ mod tests {
         taos.query(format!("drop database {db}"))?;
         Ok(())
     }
+
     #[test]
     fn meta() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
@@ -1038,13 +1063,13 @@ mod tests {
             "use sys_ts2035",
             "create table tb1 (ts timestamp, c1 int, c2 int)",
         ])
-        .await?;
+            .await?;
 
         taos.exec_many([
             format!("insert into tb1 (ts, c1) values({ts}, 0)"),
             format!("insert into tb1 (ts, c2) values({ts}, 1)"),
         ])
-        .await?;
+            .await?;
 
         // target
         let target = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
@@ -1109,7 +1134,7 @@ mod tests {
             "drop topic sys_ts2035", // drop topic before dropping database
             "drop database sys_ts2035",
         ])
-        .await?;
+            .await?;
         target.exec("drop database sys_ts2035_target").await?;
         Ok(())
     }
@@ -1135,13 +1160,13 @@ mod tests {
             "use sys_delete_meta",
             "create table tb1 (ts timestamp, c1 int, c2 int)",
         ])
-        .await?;
+            .await?;
 
         taos.exec_many([
             format!("insert into tb1 (ts, c1) values({ts}, 0)"),
             format!("delete from tb1 where ts = {ts}"),
         ])
-        .await?;
+            .await?;
 
         // target
         let target = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
@@ -1216,10 +1241,11 @@ mod tests {
             "drop topic sys_delete_meta", // drop topic before dropping database
             "drop database sys_delete_meta",
         ])
-        .await?;
+            .await?;
         target.exec("drop database sys_delete_meta_target").await?;
         Ok(())
     }
+
     #[tokio::test]
     async fn test_tmq_meta() -> anyhow::Result<()> {
         use futures::TryStreamExt;
@@ -1299,14 +1325,14 @@ mod tests {
             // "drop table `stb1`",
             "create topic if not exists sys_tmq_meta with meta as database sys_tmq_meta",
         ])
-        .await?;
+            .await?;
 
         taos.exec_many([
             "drop database if exists sys_tmq_meta2",
             "create database if not exists sys_tmq_meta2 wal_retention_period 3600",
             "use sys_tmq_meta2",
         ])
-        .await?;
+            .await?;
 
         let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms")?;
         let mut consumer = builder.build().await?;
@@ -1379,7 +1405,7 @@ mod tests {
             "drop topic sys_tmq_meta",
             "drop database sys_tmq_meta",
         ])
-        .await?;
+            .await?;
         Ok(())
     }
 
@@ -1463,14 +1489,14 @@ mod tests {
             // "drop table `stb2`",
             // "drop table `stb1`",
         ])
-        .await?;
+            .await?;
 
         taos.exec_many([
             "drop database if exists db2",
             "create database if not exists db2 wal_retention_period 3600",
             "use db2",
         ])
-        .await?;
+            .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
         let builder = TmqBuilder::from_dsn(&dsn)?;
@@ -1586,7 +1612,7 @@ mod tests {
             "drop topic ws_abc1",
             "drop database ws_abc1",
         ])
-        .await?;
+            .await?;
         Ok(())
     }
 }

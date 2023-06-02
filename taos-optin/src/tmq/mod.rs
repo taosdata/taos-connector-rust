@@ -397,6 +397,23 @@ impl AsConsumer for Consumer {
     fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
         self.tmq.commit_sync(offset.0.clone()).map(|_| ())
     }
+
+    fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
+        let topics = self.tmq.subscription();
+        let topics = topics.to_strings();
+        let ret = topics
+            .into_iter()
+            .map(|topic| {
+                let assignments = self.tmq.get_topic_assignment(&topic);
+                (topic, assignments)
+            })
+            .collect();
+        Some(ret)
+    }
+
+    fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> Result<(), Self::Error> {
+        self.tmq.offset_seek(topic, vg_id, offset)
+    }
 }
 
 // impl AsyncOnSync for Consumer {}

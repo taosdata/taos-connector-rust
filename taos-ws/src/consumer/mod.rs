@@ -347,13 +347,13 @@ impl Consumer {
 
             match data {
                 TmqRecvData::Poll(TmqPoll {
-                    message_id,
-                    database,
-                    have_message,
-                    topic,
-                    vgroup_id,
-                    message_type,
-                }) => {
+                                      message_id,
+                                      database,
+                                      have_message,
+                                      topic,
+                                      vgroup_id,
+                                      message_type,
+                                  }) => {
                     if have_message {
                         let dur = elapsed.elapsed();
                         let offset = Offset {
@@ -419,7 +419,7 @@ impl AsAsyncConsumer for Consumer {
 
     type Data = Data;
 
-    async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
+    async fn subscribe<T: Into<String>, I: IntoIterator<Item=T> + Send>(
         &mut self,
         topics: I,
     ) -> Result<()> {
@@ -438,17 +438,17 @@ impl AsAsyncConsumer for Consumer {
         if let Some(offset) = self.tmq_conf.offset_seek.clone() {
             // dbg!(offset);
             let offsets = offset
-            .split(",")
-            .map(|s| 
-                s
-                .split(":")
-                .map(
-                    |i| 
-                    i.parse::<i64>().unwrap()
+                .split(",")
+                .map(|s|
+                    s
+                        .split(":")
+                        .map(
+                            |i|
+                                i.parse::<i64>().unwrap()
+                        )
+                        .collect_vec()
                 )
-                .collect_vec()
-            )
-            .collect_vec();
+                .collect_vec();
             let topic_name = &self.topics[0];
             for offset in offsets {
                 let vgroup_id = offset[0] as i32;
@@ -463,7 +463,7 @@ impl AsAsyncConsumer for Consumer {
                     offset,
                 });
 
-                let _ = self.sender.send_recv(action).await.unwrap_or(crate::consumer::messages::TmqRecvData::Seek{timing:0});
+                let _ = self.sender.send_recv(action).await.unwrap_or(crate::consumer::messages::TmqRecvData::Seek { timing: 0 });
             }
         }
 
@@ -530,9 +530,9 @@ impl AsAsyncConsumer for Consumer {
         let recv = self.sender.send_recv(action).await.unwrap();
         match recv {
             TmqRecvData::Assignment(TopicAssignment {
-                assignment,
-                timing,
-            }) => {
+                                        assignment,
+                                        timing,
+                                    }) => {
                 // assert_eq!(topic, topic);
                 log::trace!("timing: {:?}", timing);
                 log::trace!("assignment: {:?}", assignment);
@@ -540,7 +540,6 @@ impl AsAsyncConsumer for Consumer {
             }
             _ => unreachable!(),
         }
-        
     }
 
     async fn offset_seek(
@@ -575,7 +574,7 @@ impl AsConsumer for Consumer {
 
     type Data = Data;
 
-    fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
+    fn subscribe<T: Into<String>, I: IntoIterator<Item=T> + Send>(
         &mut self,
         topics: I,
     ) -> StdResult<(), Self::Error> {
@@ -591,6 +590,15 @@ impl AsConsumer for Consumer {
 
     fn commit(&self, offset: Self::Offset) -> StdResult<(), Self::Error> {
         block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(self, offset))
+    }
+
+    fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
+        block_in_place_or_global(<Consumer as AsAsyncConsumer>::assignments(self))
+    }
+
+    fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> StdResult<(), Self::Error> {
+        block_in_place_or_global(
+            <Consumer as AsAsyncConsumer>::offset_seek(self, topic, vg_id, offset))
     }
 }
 
@@ -1010,6 +1018,7 @@ pub enum Error {
 }
 
 unsafe impl Send for Error {}
+
 unsafe impl Sync for Error {}
 
 impl Error {
@@ -1112,14 +1121,14 @@ mod tests {
             // "drop table `stb2`",
             // "drop table `stb1`",
         ])
-        .await?;
+            .await?;
 
         taos.exec_many([
             "drop database if exists ws_tmq_meta2",
             "create database if not exists ws_tmq_meta2 wal_retention_period 3600",
             "use ws_tmq_meta2",
         ])
-        .await?;
+            .await?;
 
         let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=5s")?;
         let mut consumer = builder.build_consumer().await?;
@@ -1185,7 +1194,7 @@ mod tests {
             "drop topic ws_tmq_meta",
             "drop database ws_tmq_meta",
         ])
-        .await?;
+            .await?;
         Ok(())
     }
 
