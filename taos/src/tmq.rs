@@ -315,20 +315,14 @@ impl AsAsyncConsumer for Consumer {
             }
         }
     }
-    
-    async fn unsubscribe(
-        self,
-    ) {
+
+    async fn unsubscribe(self) {
         match self.0 {
             ConsumerInner::Native(c) => {
-                <crate::sys::Consumer as AsAsyncConsumer>::unsubscribe(c)
-                    .await
-                    
+                <crate::sys::Consumer as AsAsyncConsumer>::unsubscribe(c).await
             }
             ConsumerInner::Ws(c) => {
-                <taos_ws::consumer::Consumer as AsAsyncConsumer>::unsubscribe(c)
-                    .await
-                    
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::unsubscribe(c).await
             }
         }
     }
@@ -945,7 +939,6 @@ mod tests {
         // dbg!(&builder);
         let mut consumer = builder.build().await?;
 
-
         consumer.subscribe(["ws_abc1"]).await?;
 
         {
@@ -1220,7 +1213,6 @@ mod tests {
         let assignments = consumer.assignments().await.unwrap();
         log::debug!("assignments: {:?}", assignments);
 
-
         // seek offset
         for topic_vec_assignment in assignments {
             let topic = &topic_vec_assignment.0;
@@ -1426,7 +1418,6 @@ mod tests {
 
         let assignments = consumer.assignments().await.unwrap();
         log::debug!("assignments: {:?}", assignments);
-
 
         // seek offset
         for topic_vec_assignment in assignments {

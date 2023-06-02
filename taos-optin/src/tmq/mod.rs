@@ -12,7 +12,7 @@ use taos_query::{
         AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsMeta, IsOffset,
         MessageSet, Timeout, VGroupId,
     },
-    IntoDsn, RawBlock, Dsn,
+    Dsn, IntoDsn, RawBlock,
 };
 
 use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t, TaosBuilder};
@@ -397,6 +397,28 @@ impl AsConsumer for Consumer {
     fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
         self.tmq.commit_sync(offset.0.clone()).map(|_| ())
     }
+
+    fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
+        let topics = self.tmq.subscription();
+        let topics = topics.to_strings();
+        let ret = topics
+            .into_iter()
+            .map(|topic| {
+                let assignments = self.tmq.get_topic_assignment(&topic);
+                (topic, assignments)
+            })
+            .collect();
+        Some(ret)
+    }
+
+    fn offset_seek(
+        &mut self,
+        topic: &str,
+        vg_id: VGroupId,
+        offset: i64,
+    ) -> Result<(), Self::Error> {
+        self.tmq.offset_seek(topic, vg_id, offset)
+    }
 }
 
 // impl AsyncOnSync for Consumer {}
@@ -422,22 +444,23 @@ impl AsAsyncConsumer for Consumer {
         if let Some(offset) = self.dsn.get("offset") {
             // dbg!(offset);
             let offsets = offset
-            .split(",")
-            .map(|s| 
-                s
-                .split(":")
-                .map(
-                    |i| 
-                    i.parse::<i64>().unwrap()
-                )
-                .collect_vec()
-            )
-            .collect_vec();
+                .split(",")
+                .map(|s| {
+                    s.split(":")
+                        .map(|i| i.parse::<i64>().unwrap())
+                        .collect_vec()
+                })
+                .collect_vec();
             let topic_name = &self.tmq.subscription().to_strings()[0];
             for offset in offsets {
                 let vgroup_id = offset[0];
                 let offset = offset[1];
-                log::debug!("topic {} seeking to offset {} for vgroup {}",  &topic_name, offset, vgroup_id);
+                log::debug!(
+                    "topic {} seeking to offset {} for vgroup {}",
+                    &topic_name,
+                    offset,
+                    vgroup_id
+                );
                 let _ = self.tmq.offset_seek(&topic_name, vgroup_id as i32, offset);
             }
         }
