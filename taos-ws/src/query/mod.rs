@@ -104,13 +104,9 @@ impl taos_query::AsyncQueryable for Taos {
             ws.s_put(data).await
         } else {
             let async_sml = crate::schemaless::WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_sml
-                .get_or_init(|| async_sml)
-                .s_put(data)
-                .await
+            self.async_sml.get_or_init(|| async_sml).s_put(data).await
         }
     }
-     
 }
 
 impl taos_query::Queryable for Taos {

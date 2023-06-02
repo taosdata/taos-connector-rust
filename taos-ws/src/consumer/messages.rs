@@ -120,9 +120,7 @@ impl TmqSend {
                 req: _,
                 topics: _,
             } => *req_id,
-            TmqSend::Unsubscribe { 
-                req_id 
-            } => *req_id,
+            TmqSend::Unsubscribe { req_id } => *req_id,
             TmqSend::Poll {
                 req_id,
                 blocking_time: _,
