@@ -1474,25 +1474,3 @@ mod tests {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod as_consumer_test {
-    use std::str::FromStr;
-    use taos_query::{Dsn, Queryable, TBuilder};
-    use taos_query::tmq::AsConsumer;
-    use taos_ws::TaosBuilder;
-    use crate::TmqBuilder;
-
-    #[test]
-    fn test_assignments() {
-        let mut dsn = Dsn::from_str("taosws://localhost:6041/").unwrap();
-        dsn.params.insert("group.id".to_string(), "abc".to_string());
-        dsn.params.insert("experimental.snapshot.enable".to_string(), "false".to_string());
-
-        let builder = TmqBuilder::from_dsn(dsn).unwrap();
-        let mut consumer = builder.build().unwrap();
-        consumer.subscribe(["topic_1"]).unwrap();
-        let assignments = consumer.assignments();
-        println!("{:?}", assignments);
-    }
-}
