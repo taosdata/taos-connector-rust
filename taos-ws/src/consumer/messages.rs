@@ -109,6 +109,7 @@ pub enum TmqSend {
 }
 
 unsafe impl Send for TmqSend {}
+
 unsafe impl Sync for TmqSend {}
 
 impl TmqSend {
@@ -168,7 +169,7 @@ pub struct TmqFetch {
 #[derive(Debug, Deserialize, Clone)]
 pub struct TopicAssignment {
     pub timing: i64,
-    pub assignment: Vec<Assignment>,
+    pub assignment: Option<Vec<Assignment>>,
 }
 
 impl TmqFetch {
@@ -249,6 +250,33 @@ fn test_serde_recv_data() {
         "message": "",
         "action": "poll",
         "req_id": 1
+    }"#;
+    let d: TmqRecv = serde_json::from_str(&json).unwrap();
+    let _ = dbg!(d.ok());
+}
+
+#[test]
+fn test_serde_assignment_data() {
+    let json = r#"{
+        "code": 280,
+        "message": "Invalid parameters",
+        "action": "assignment",
+        "req_id": 2,
+        "assignment": [],
+        "timing": 1712000
+    }"#;
+    let d: TmqRecv = serde_json::from_str(&json).unwrap();
+    let _ = dbg!(d.ok());
+}
+
+#[test]
+fn test_serde_without_assignment_data() {
+    let json = r#"{
+        "code": 280,
+        "message": "Invalid parameters",
+        "action": "assignment",
+        "req_id": 2,
+        "timing": 1712000
     }"#;
     let d: TmqRecv = serde_json::from_str(&json).unwrap();
     let _ = dbg!(d.ok());

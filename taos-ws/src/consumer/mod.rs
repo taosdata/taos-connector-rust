@@ -347,13 +347,13 @@ impl Consumer {
 
             match data {
                 TmqRecvData::Poll(TmqPoll {
-                    message_id,
-                    database,
-                    have_message,
-                    topic,
-                    vgroup_id,
-                    message_type,
-                }) => {
+                                      message_id,
+                                      database,
+                                      have_message,
+                                      topic,
+                                      vgroup_id,
+                                      message_type,
+                                  }) => {
                     if have_message {
                         let dur = elapsed.elapsed();
                         let offset = Offset {
@@ -419,7 +419,7 @@ impl AsAsyncConsumer for Consumer {
 
     type Data = Data;
 
-    async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
+    async fn subscribe<T: Into<String>, I: IntoIterator<Item=T> + Send>(
         &mut self,
         topics: I,
     ) -> Result<()> {
@@ -530,15 +530,19 @@ impl AsAsyncConsumer for Consumer {
             topic: topic.to_string(),
         });
 
-        let recv = self.sender.send_recv(action).await.unwrap();
-        match recv {
-            TmqRecvData::Assignment(TopicAssignment { assignment, timing }) => {
-                // assert_eq!(topic, topic);
-                log::trace!("timing: {:?}", timing);
-                log::trace!("assignment: {:?}", assignment);
-                assignment
+        let recv = self.sender.send_recv(action).await;
+        if let Err(err) = recv {
+            panic!("{}", err)
+        } else {
+            match recv.unwrap() {
+                TmqRecvData::Assignment(TopicAssignment { assignment, timing }) => {
+                    // assert_eq!(topic, topic);
+                    log::trace!("timing: {:?}", timing);
+                    log::trace!("assignment: {:?}", assignment);
+                    assignment.unwrap_or_default()
+                }
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
         }
     }
 
@@ -574,7 +578,7 @@ impl AsConsumer for Consumer {
 
     type Data = Data;
 
-    fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
+    fn subscribe<T: Into<String>, I: IntoIterator<Item=T> + Send>(
         &mut self,
         topics: I,
     ) -> StdResult<(), Self::Error> {
@@ -1124,14 +1128,14 @@ mod tests {
             // "drop table `stb2`",
             // "drop table `stb1`",
         ])
-        .await?;
+            .await?;
 
         taos.exec_many([
             "drop database if exists ws_tmq_meta2",
             "create database if not exists ws_tmq_meta2 wal_retention_period 3600",
             "use ws_tmq_meta2",
         ])
-        .await?;
+            .await?;
 
         let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=5s")?;
         let mut consumer = builder.build_consumer().await?;
@@ -1197,7 +1201,7 @@ mod tests {
             "drop topic ws_tmq_meta",
             "drop database ws_tmq_meta",
         ])
-        .await?;
+            .await?;
         Ok(())
     }
 

@@ -19,6 +19,7 @@ enum OffsetInner {
     Native(crate::sys::tmq::Offset),
     Ws(taos_ws::consumer::Offset),
 }
+
 enum MetaInner {
     Native(crate::sys::tmq::Meta),
     Ws(taos_ws::consumer::Meta),
@@ -30,12 +31,15 @@ enum DataInner {
 }
 
 pub struct Offset(OffsetInner);
+
 pub struct Meta(MetaInner);
+
 pub struct Data(DataInner);
 
 pub type MessageSet<Meta, Data> = taos_query::tmq::MessageSet<Meta, Data>;
 
 pub struct TmqBuilder(TmqBuilderInner);
+
 pub struct Consumer(ConsumerInner);
 
 impl taos_query::TBuilder for TmqBuilder {
@@ -298,7 +302,7 @@ impl AsAsyncConsumer for Consumer {
         }
     }
 
-    async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
+    async fn subscribe<T: Into<String>, I: IntoIterator<Item=T> + Send>(
         &mut self,
         topics: I,
     ) -> Result<(), Self::Error> {
@@ -443,14 +447,16 @@ impl AsAsyncConsumer for Consumer {
             ConsumerInner::Ws(c) => <taos_ws::consumer::Consumer as AsAsyncConsumer>::offset_seek(
                 c, topic, vgroup_id, offset,
             )
-            .await
-            .map_err(Into::into),
+                .await
+                .map_err(Into::into),
         }
     }
 }
 
 impl taos_query::tmq::SyncOnAsync for Consumer {}
+
 impl taos_query::tmq::SyncOnAsync for Data {}
+
 impl taos_query::tmq::SyncOnAsync for Meta {}
 
 impl Iterator for Data {
@@ -461,6 +467,7 @@ impl Iterator for Data {
         block_in_place_or_global(self.fetch_raw_block()).transpose()
     }
 }
+
 // impl taos_query::tmq::AsConsumer for Consumer {}
 #[cfg(test)]
 mod tests {
@@ -557,14 +564,14 @@ mod tests {
             "drop table `stb2`",
             "drop table `stb1`",
         ])
-        .await?;
+            .await?;
 
         taos.exec_many([
             "drop database if exists db2",
             "create database if not exists db2 wal_retention_period 3600",
             "use db2",
         ])
-        .await?;
+            .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
         let builder = TmqBuilder::from_dsn(&dsn)?;
@@ -633,7 +640,7 @@ mod tests {
             "drop topic ws_abc1",
             "drop database ws_abc1",
         ])
-        .await?;
+            .await?;
         Ok(())
     }
 
@@ -717,14 +724,14 @@ mod tests {
             // "drop table `stb2`",
             // "drop table `stb1`",
         ])
-        .await?;
+            .await?;
 
         taos.exec_many([
             "drop database if exists db2",
             "create database if not exists db2 wal_retention_period 3600",
             "use db2",
         ])
-        .await?;
+            .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
         let builder = TmqBuilder::from_dsn(&dsn)?;
@@ -840,7 +847,7 @@ mod tests {
             "drop topic ws_abc1",
             "drop database ws_abc1",
         ])
-        .await?;
+            .await?;
         Ok(())
     }
 
@@ -925,14 +932,14 @@ mod tests {
             // "drop table `stb2`",
             // "drop table `stb1`",
         ])
-        .await?;
+            .await?;
 
         taos.exec_many([
             "drop database if exists db2",
             "create database if not exists db2 wal_retention_period 3600",
             "use db2",
         ])
-        .await?;
+            .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
         let builder = TmqBuilder::from_dsn(&dsn)?;
@@ -1050,7 +1057,7 @@ mod tests {
             "drop topic ws_abc1",
             "drop database ws_abc1",
         ])
-        .await?;
+            .await?;
         Ok(())
     }
 
@@ -1133,14 +1140,14 @@ mod tests {
             // "drop table `stb2`",
             // "drop table `stb1`",
         ])
-        .await?;
+            .await?;
 
         taos.exec_many([
             "drop database if exists db2",
             "create database if not exists db2 wal_retention_period 3600",
             "use db2",
         ])
-        .await?;
+            .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
         let builder = TmqBuilder::from_dsn(&dsn)?;
@@ -1256,9 +1263,10 @@ mod tests {
             "drop topic ws_abc1",
             "drop database ws_abc1",
         ])
-        .await?;
+            .await?;
         Ok(())
     }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ws_tmq_offset() -> anyhow::Result<()> {
         // pretty_env_logger::formatted_timed_builder()
@@ -1338,14 +1346,14 @@ mod tests {
             // "drop table `stb2`",
             // "drop table `stb1`",
         ])
-        .await?;
+            .await?;
 
         taos.exec_many([
             "drop database if exists db2",
             "create database if not exists db2 wal_retention_period 3600",
             "use db2",
         ])
-        .await?;
+            .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
         let builder = TmqBuilder::from_dsn(&dsn)?;
@@ -1462,7 +1470,29 @@ mod tests {
             "drop topic ws_abc1",
             "drop database ws_abc1",
         ])
-        .await?;
+            .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod as_consumer_test {
+    use std::str::FromStr;
+    use taos_query::{Dsn, Queryable, TBuilder};
+    use taos_query::tmq::AsConsumer;
+    use taos_ws::TaosBuilder;
+    use crate::TmqBuilder;
+
+    #[test]
+    fn test_assignments() {
+        let mut dsn = Dsn::from_str("taosws://localhost:6041/").unwrap();
+        dsn.params.insert("group.id".to_string(), "abc".to_string());
+        dsn.params.insert("experimental.snapshot.enable".to_string(), "false".to_string());
+
+        let builder = TmqBuilder::from_dsn(dsn).unwrap();
+        let mut consumer = builder.build().unwrap();
+        consumer.subscribe(["topic_1"]).unwrap();
+        let assignments = consumer.assignments();
+        println!("{:?}", assignments);
     }
 }
