@@ -22,7 +22,7 @@ pub struct WsConnReq {
 impl WsConnReq {
     #[cfg(test)]
     pub fn new(
-        user: impl Into<String>, 
+        user: impl Into<String>,
         password: impl Into<String>,
         db: impl Into<String>,
     ) -> Self {
@@ -81,11 +81,7 @@ unsafe impl Sync for WsSend {}
 fn test_serde_send() {
     let s = WsSend::Conn {
         req_id: 1,
-        req: WsConnReq::new(
-            "root", 
-            "taosdata",
-            "db"
-        ),
+        req: WsConnReq::new("root", "taosdata", "db"),
     };
     let v = serde_json::to_value(&s).unwrap();
     let j = serde_json::json!({

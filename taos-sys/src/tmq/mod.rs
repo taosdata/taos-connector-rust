@@ -117,6 +117,7 @@ pub struct TmqBuilder {
 }
 
 unsafe impl Send for TmqBuilder {}
+
 unsafe impl Sync for TmqBuilder {}
 
 impl taos_query::TBuilder for TmqBuilder {
@@ -224,6 +225,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 pub struct Offset(RawRes);
 
 unsafe impl Send for Offset {}
+
 unsafe impl Sync for Offset {}
 
 impl Debug for Offset {
@@ -269,6 +271,7 @@ pub struct Consumer {
 }
 
 unsafe impl Send for Consumer {}
+
 unsafe impl Sync for Consumer {}
 
 impl Drop for Consumer {
@@ -324,6 +327,7 @@ impl IsMeta for Meta {
         Ok(meta)
     }
 }
+
 impl Meta {
     fn new(raw: RawRes) -> Self {
         Self { raw }
@@ -342,6 +346,7 @@ impl Meta {
         todo!()
     }
 }
+
 pub struct Data {
     raw: RawRes,
     precision: Precision,
@@ -457,6 +462,28 @@ impl AsConsumer for Consumer {
     fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
         self.tmq.commit_sync(offset.0).map(|_| ())
     }
+
+    fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
+        let topics = self.tmq.subscription();
+        let topics = topics.into_strings();
+        let ret = topics
+            .into_iter()
+            .map(|topic| {
+                let assignments = self.tmq.get_topic_assignment(&topic);
+                (topic, assignments)
+            })
+            .collect();
+        Some(ret)
+    }
+
+    fn offset_seek(
+        &mut self,
+        topic: &str,
+        vg_id: VGroupId,
+        offset: i64,
+    ) -> Result<(), Self::Error> {
+        self.tmq.offset_seek(topic, vg_id, offset)
+    }
 }
 
 // impl AsyncOnSync for Consumer {}
@@ -477,27 +504,28 @@ impl AsAsyncConsumer for Consumer {
         let topics = Topics::from_topics(topics.into_iter().map(|s| s.into()))?;
 
         let r = self.tmq.subscribe(&topics);
-        
+
         if let Some(offset) = self.dsn.get("offset") {
             // dbg!(offset);
             let offsets = offset
-            .split(",")
-            .map(|s| 
-                s
-                .split(":")
-                .map(
-                    |i| 
-                    i.parse::<i64>().unwrap()
-                )
-                .collect_vec()
-            )
-            .collect_vec();
+                .split(",")
+                .map(|s| {
+                    s.split(":")
+                        .map(|i| i.parse::<i64>().unwrap())
+                        .collect_vec()
+                })
+                .collect_vec();
             let topic_name = &self.tmq.subscription().into_strings()[0];
             // let topic_name = topic_name.into_strings();
             for offset in offsets {
                 let vgroup_id = offset[0];
                 let offset = offset[1];
-                log::debug!("topic {} seeking to offset {} for vgroup {}",  &topic_name, offset, vgroup_id);
+                log::debug!(
+                    "topic {} seeking to offset {} for vgroup {}",
+                    &topic_name,
+                    offset,
+                    vgroup_id
+                );
                 let _ = self.tmq.offset_seek(&topic_name, vgroup_id as i32, offset);
             }
         }
@@ -604,6 +632,7 @@ impl AsAsyncConsumer for Consumer {
         self.tmq.offset_seek(topic, vgroup_id, offset)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use std::{str::FromStr, time::Duration};
@@ -720,6 +749,7 @@ mod tests {
         taos.query(format!("drop database {db}"))?;
         Ok(())
     }
+
     #[test]
     fn meta() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
@@ -1220,6 +1250,7 @@ mod tests {
         target.exec("drop database sys_delete_meta_target").await?;
         Ok(())
     }
+
     #[tokio::test]
     async fn test_tmq_meta() -> anyhow::Result<()> {
         use futures::TryStreamExt;

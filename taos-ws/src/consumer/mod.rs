@@ -438,22 +438,23 @@ impl AsAsyncConsumer for Consumer {
         if let Some(offset) = self.tmq_conf.offset_seek.clone() {
             // dbg!(offset);
             let offsets = offset
-            .split(",")
-            .map(|s| 
-                s
-                .split(":")
-                .map(
-                    |i| 
-                    i.parse::<i64>().unwrap()
-                )
-                .collect_vec()
-            )
-            .collect_vec();
+                .split(",")
+                .map(|s| {
+                    s.split(":")
+                        .map(|i| i.parse::<i64>().unwrap())
+                        .collect_vec()
+                })
+                .collect_vec();
             let topic_name = &self.topics[0];
             for offset in offsets {
                 let vgroup_id = offset[0] as i32;
                 let offset = offset[1];
-                log::debug!("topic {} seeking to offset {} for vgroup {}",  &topic_name, offset, vgroup_id);
+                log::debug!(
+                    "topic {} seeking to offset {} for vgroup {}",
+                    &topic_name,
+                    offset,
+                    vgroup_id
+                );
 
                 let req_id = self.sender.req_id();
                 let action = TmqSend::Seek(OffsetSeekArgs {
@@ -463,7 +464,11 @@ impl AsAsyncConsumer for Consumer {
                     offset,
                 });
 
-                let _ = self.sender.send_recv(action).await.unwrap_or(crate::consumer::messages::TmqRecvData::Seek{timing:0});
+                let _ = self
+                    .sender
+                    .send_recv(action)
+                    .await
+                    .unwrap_or(crate::consumer::messages::TmqRecvData::Seek { timing: 0 });
             }
         }
 
@@ -473,9 +478,7 @@ impl AsAsyncConsumer for Consumer {
     async fn unsubscribe(self) {
         let req_id = self.sender.req_id();
         log::trace!("unsubscribe {} start", req_id);
-        let action = TmqSend::Unsubscribe {
-            req_id,
-        };
+        let action = TmqSend::Unsubscribe { req_id };
         self.sender.send_recv(action).await.unwrap();
         drop(self)
     }
@@ -540,7 +543,6 @@ impl AsAsyncConsumer for Consumer {
             }
             _ => { vec![] },
         }
-        
     }
 
     async fn offset_seek(
@@ -591,6 +593,21 @@ impl AsConsumer for Consumer {
 
     fn commit(&self, offset: Self::Offset) -> StdResult<(), Self::Error> {
         block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(self, offset))
+    }
+
+    fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
+        block_in_place_or_global(<Consumer as AsAsyncConsumer>::assignments(self))
+    }
+
+    fn offset_seek(
+        &mut self,
+        topic: &str,
+        vg_id: VGroupId,
+        offset: i64,
+    ) -> StdResult<(), Self::Error> {
+        block_in_place_or_global(<Consumer as AsAsyncConsumer>::offset_seek(
+            self, topic, vg_id, offset,
+        ))
     }
 }
 
@@ -650,16 +667,13 @@ impl TmqBuilder {
         } else {
             Timeout::Duration(Duration::from_secs(5))
         };
-        let offset_seek = dsn
-            .params
-            .get("offset")
-            .and_then(|s| {
-                if s.is_empty() {
-                    None
-                } else {
-                    Some(s.to_string())
-                }
-            });
+        let offset_seek = dsn.params.get("offset").and_then(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        });
         let conf = TmqInit {
             group_id,
             client_id,
@@ -1010,6 +1024,7 @@ pub enum Error {
 }
 
 unsafe impl Send for Error {}
+
 unsafe impl Sync for Error {}
 
 impl Error {
