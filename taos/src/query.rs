@@ -823,7 +823,11 @@ mod tests {
 
         client.exec(format!("drop database if exists {db}"))?;
 
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
         client.exec(format!("create database if not exists {db}"))?;
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
 
         // should specify database before insert
         client.exec(format!("use {db}"))?;
@@ -889,7 +893,11 @@ mod tests {
 
         client.exec(format!("drop database if exists {db}"))?;
 
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
         client.exec(format!("create database if not exists {db}"))?;
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
 
         // should specify database before insert
         client.exec(format!("use {db}"))?;

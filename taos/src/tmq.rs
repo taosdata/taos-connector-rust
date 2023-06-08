@@ -497,10 +497,19 @@ mod tests {
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+
+        let db = "ws_abc1";
+
+        taos.exec(format!("drop topic if exists {db}")).await?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
+        taos.exec(format!("create database if not exists {db} wal_retention_period 3600")).await?;
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
         taos.exec_many([
-            "drop topic if exists ws_abc1",
-            "drop database if exists ws_abc1",
-            "create database ws_abc1 wal_retention_period 3600",
             "create topic ws_abc1 with meta as database ws_abc1",
             "use ws_abc1",
             // kind 1: create super table using all types
@@ -1497,10 +1506,19 @@ mod tests {
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+
+        let db = "ws_abc1";
+
+        taos.exec(format!("drop topic if exists {db}")).await?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
+        taos.exec(format!("create database if not exists {db} wal_retention_period 3600")).await?;
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
         taos.exec_many([
-            "drop topic if exists ws_abc1",
-            "drop database if exists ws_abc1",
-            "create database ws_abc1 wal_retention_period 3600",
             "create topic ws_abc1 with meta as database ws_abc1",
             "use ws_abc1",
             // kind 1: create super table using all types
