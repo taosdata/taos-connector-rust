@@ -889,7 +889,7 @@ mod tests {
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
-        let db = "test_schemaless";
+        let db = "test_schemaless_put_telnet";
 
         client.exec(format!("drop database if exists {db}"))?;
 
@@ -963,7 +963,7 @@ mod tests {
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
-        let db = "test_schemaless";
+        let db = "test_schemaless_put_json";
 
         client.exec(format!("drop database if exists {db}"))?;
 
