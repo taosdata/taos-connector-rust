@@ -144,8 +144,6 @@ pub(super) mod tmq {
                 Box::into_raw(Box::new(std::ptr::null_mut()));
             let mut assignment_num: i32 = 0;
 
-            log::debug!("get_topic_assignment: {}", topic_name);
-
             let tmq_resp;
             if let Some(tmq_get_topic_assignment) = self.tmq.tmq_get_topic_assignment {
                 tmq_resp = unsafe {
@@ -160,20 +158,11 @@ pub(super) mod tmq {
                 // unimplemented!("does not support tmq_get_topic_assignment")
                 return vec![];
             }
-            log::debug!(
-                "get_topic_assignment tmq_resp: {:?} topic_name: {} num: {}",
-                tmq_resp,
-                topic_name,
-                assignment_num
-            );
 
             let err_str = self.err_as_str(tmq_resp);
             if tmq_resp.is_err() {
-                log::debug!("get_topic_assignment tmq_resp as str: {}", err_str);
                 return vec![];
-            } else {
-                log::debug!("get_topic_assignment tmq_resp as str: {}", err_str);
-            }
+            } 
 
             let assignments =
                 unsafe { std::slice::from_raw_parts(*assignments_ptr, assignment_num as usize) };

@@ -165,8 +165,6 @@ pub(super) mod tmq {
                 Box::into_raw(Box::new(std::ptr::null_mut()));
             let mut assignment_num: i32 = 0;
 
-            log::debug!("get_topic_assignment: {}", topic_name);
-
             let tmq_resp = unsafe {
                 tmq_get_topic_assignment(
                     self.0,
@@ -175,19 +173,10 @@ pub(super) mod tmq {
                     &mut assignment_num,
                 )
             };
-            log::debug!(
-                "get_topic_assignment tmq_resp: {:?} topic_name: {} num: {}",
-                tmq_resp,
-                topic_name,
-                assignment_num
-            );
 
             let err_str = err_as_str(tmq_resp);
             if tmq_resp.is_err() {
-                log::debug!("get_topic_assignment tmq_resp as str: {}", err_str);
                 return vec![];
-            } else {
-                log::debug!("get_topic_assignment tmq_resp as str: {}", err_str);
             }
 
             let assignments =
