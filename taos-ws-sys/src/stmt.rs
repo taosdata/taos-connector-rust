@@ -675,9 +675,9 @@ mod tests {
                 };
             }
 
-            query!(b"drop database if exists ws_stmt_i\0");
-            query!(b"create database ws_stmt_i keep 36500\0");
-            query!(b"use ws_stmt_i\0");
+            query!(b"drop database if exists ws_stmt_i_child\0");
+            query!(b"create database ws_stmt_i_child keep 36500\0");
+            query!(b"use ws_stmt_i_child\0");
             query!(b"CREATE STABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) TAGS (`groupid` INT, `location` VARCHAR(16))\0");
             query!(b"CREATE TABLE `d0` USING `meters` (`groupid`, `location`) TAGS (7, \"San Francisco\")\0");
 
@@ -690,7 +690,7 @@ mod tests {
                 panic!()
             }
 
-            let code = ws_stmt_set_tbname(stmt, b"ws_stmt_i.`d0`\0".as_ptr() as _);
+            let code = ws_stmt_set_tbname(stmt, b"ws_stmt_i_child.`d0`\0".as_ptr() as _);
 
             if code != 0 {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
@@ -744,9 +744,9 @@ mod tests {
                 };
             }
 
-            query!(b"drop database if exists ws_stmt_i\0");
-            query!(b"create database ws_stmt_i keep 36500\0");
-            query!(b"use ws_stmt_i\0");
+            query!(b"drop database if exists ws_stmt_i_null\0");
+            query!(b"create database ws_stmt_i_null keep 36500\0");
+            query!(b"use ws_stmt_i_null\0");
             query!(b"create table st(ts timestamp, c1 TINYINT UNSIGNED) tags(utntag TINYINT UNSIGNED)\0");
             query!(b"create table t1 using st tags(0)\0");
             query!(b"create table t2 using st tags(255)\0");
@@ -762,7 +762,7 @@ mod tests {
             }
 
             for tbname in ["t1", "t2", "t3"] {
-                let name = format!("ws_stmt_i.`{}`\0", tbname);
+                let name = format!("ws_stmt_i_null.`{}`\0", tbname);
                 let code = ws_stmt_set_tbname(stmt, name.as_ptr() as _);
 
                 if code != 0 {
@@ -822,7 +822,7 @@ mod tests {
             }
 
             ws_stmt_close(stmt);
-            // query!(b"drop database ws_stmt_i\0");
+            // query!(b"drop database ws_stmt_i_null\0");
         }
     }
 
