@@ -823,7 +823,11 @@ mod tests {
 
         client.exec(format!("drop database if exists {db}"))?;
 
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
         client.exec(format!("create database if not exists {db}"))?;
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
 
         // should specify database before insert
         client.exec(format!("use {db}"))?;
@@ -885,11 +889,15 @@ mod tests {
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
-        let db = "test_schemaless";
+        let db = "test_schemaless_put_telnet";
 
         client.exec(format!("drop database if exists {db}"))?;
 
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
         client.exec(format!("create database if not exists {db}"))?;
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
 
         // should specify database before insert
         client.exec(format!("use {db}"))?;
@@ -955,7 +963,7 @@ mod tests {
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
-        let db = "test_schemaless";
+        let db = "test_schemaless_put_json";
 
         client.exec(format!("drop database if exists {db}"))?;
 

@@ -168,7 +168,9 @@ pub struct TmqFetch {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TopicAssignment {
+    #[serde(default)]
     pub timing: i64,
+    #[serde(default)]
     pub assignment: Option<Vec<Assignment>>,
 }
 

@@ -535,13 +535,17 @@ impl AsAsyncConsumer for Consumer {
             panic!("{}", err)
         } else {
             match recv.unwrap() {
-                TmqRecvData::Assignment(TopicAssignment { assignment, timing }) => {
+                TmqRecvData::Assignment(
+                    TopicAssignment {
+                        assignment,
+                        timing
+                    }) => {
                     // assert_eq!(topic, topic);
                     log::trace!("timing: {:?}", timing);
                     log::trace!("assignment: {:?}", assignment);
                     assignment.unwrap_or_default()
                 }
-                _ => unreachable!(),
+                _ => { vec![] }
             }
         }
     }
