@@ -1083,12 +1083,16 @@ mod tests {
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+
+        let db = "ws_tmq_1";
+        let db2 = "ws_tmq_1_dest";
+
         taos.exec_many([
-            "drop topic if exists ws_abc1",
-            "drop database if exists ws_abc1",
-            "create database ws_abc1 wal_retention_period 1 wal_retention_size 1",
-            "create topic ws_abc1 with meta as database ws_abc1",
-            "use ws_abc1",
+            format!("drop topic if exists {db}").as_str(),
+            format!("drop database if exists {db}").as_str(),
+            format!("create database {db} wal_retention_period 1").as_str(),
+            format!("create topic {db} with meta as database {db}").as_str(),
+            format!("use {db}").as_str(),
             // kind 1: create super table using all types
             "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
             c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
@@ -1152,13 +1156,13 @@ mod tests {
             '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
             254, 65534, 1, 1)").await?;
         }
-        taos.exec("flush database ws_abc1").await?;
+        taos.exec(format!("flush database {db}")).await?;
         // tokio::time::sleep(Duration::from_secs(16)).await;
 
         taos.exec_many([
-            "drop database if exists db2",
-            "create database if not exists db2 wal_retention_period 1",
-            "use db2",
+            format!("drop database if exists {db2}"),
+            format!("create database if not exists {db2} wal_retention_period 1"),
+            format!("use {db2}"),
         ])
         .await?;
 
@@ -1166,7 +1170,7 @@ mod tests {
         dsn.set("experimental.snapshot.enable", "true");
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;
-        consumer.subscribe(["ws_abc1"]).await?;
+        consumer.subscribe([db]).await?;
 
         {
             let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
@@ -1274,12 +1278,12 @@ mod tests {
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        // taos.exec_many([
-        //     "drop database db2",
-        //     "drop topic ws_abc1",
-        //     "drop database ws_abc1",
-        // ])
-        // .await?;
+        taos.exec_many([
+            format!("drop database {db2}"),
+            format!("drop topic {db}"),
+            format!("drop database {db}"),
+        ])
+        .await?;
         Ok(())
     }
 
