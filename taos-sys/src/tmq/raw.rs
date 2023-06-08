@@ -184,7 +184,7 @@ pub(super) mod tmq {
 
             let err_str = err_as_str(tmq_resp);
             if tmq_resp.is_err() {
-                log::error!("get_topic_assignment tmq_resp as str: {}", err_str);
+                log::debug!("get_topic_assignment tmq_resp as str: {}", err_str);
                 return vec![];
             } else {
                 log::debug!("get_topic_assignment tmq_resp as str: {}", err_str);
