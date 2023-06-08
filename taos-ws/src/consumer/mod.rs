@@ -530,15 +530,18 @@ impl AsAsyncConsumer for Consumer {
             topic: topic.to_string(),
         });
 
-        let recv = self.sender.send_recv(action).await.unwrap();
+        let recv = self.sender.send_recv(action).await.ok();
         match recv {
-            TmqRecvData::Assignment(TopicAssignment { assignment, timing }) => {
+            Some(TmqRecvData::Assignment(TopicAssignment {
+                assignment,
+                timing,
+            })) => {
                 // assert_eq!(topic, topic);
                 log::trace!("timing: {:?}", timing);
                 log::trace!("assignment: {:?}", assignment);
                 assignment
             }
-            _ => unreachable!(),
+            _ => { vec![] },
         }
     }
 
