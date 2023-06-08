@@ -75,6 +75,7 @@ impl FromStr for Timeout {
         }
     }
 }
+
 pub enum MessageSet<M, D> {
     Meta(M),
     Data(D),
@@ -318,6 +319,11 @@ pub trait AsConsumer: Sized {
     fn unsubscribe(self) {
         drop(self)
     }
+
+    fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>>;
+
+    fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64)
+        -> Result<(), Self::Error>;
 }
 
 pub struct MessageSetsIter<'a, C> {
@@ -408,6 +414,7 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
 
 /// Marker trait to impl sync on async impl.
 pub trait SyncOnAsync {}
+
 pub trait AsyncOnSync {}
 
 impl<C> AsConsumer for C
@@ -440,6 +447,21 @@ where
 
     fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit(self, offset))
+    }
+
+    fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::assignments(self))
+    }
+
+    fn offset_seek(
+        &mut self,
+        topic: &str,
+        vg_id: VGroupId,
+        offset: i64,
+    ) -> Result<(), Self::Error> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::offset_seek(
+            self, topic, vg_id, offset,
+        ))
     }
 }
 
