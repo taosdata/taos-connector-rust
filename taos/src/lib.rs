@@ -32,6 +32,8 @@ pub use taos_ws::*;
 
 #[cfg(all(any(feature = "native", feature = "optin"), not(feature = "ws")))]
 pub use crate::sys::*;
+#[cfg(all(any(feature = "native", feature = "optin"), not(feature = "ws")))]
+pub use sys::tmq::Offset;
 
 #[cfg(all(not(feature = "ws"), not(feature = "native"), not(feature = "optin")))]
 compile_error!("Either feature \"ws\" or \"native\"|"optin" or both must be enabled for this crate.");

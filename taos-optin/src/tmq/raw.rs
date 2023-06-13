@@ -159,7 +159,6 @@ pub(super) mod tmq {
                 return vec![];
             }
 
-            let err_str = self.err_as_str(tmq_resp);
             if tmq_resp.is_err() {
                 return vec![];
             } 
