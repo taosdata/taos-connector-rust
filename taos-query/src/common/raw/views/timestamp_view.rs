@@ -238,6 +238,15 @@ impl<'a> Iterator for TimestampViewIter<'a> {
         }
     }
 
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.row < self.view.len() {
+            let len = self.view.len() - self.row;
+            (len, Some(len))
+        } else {
+            (0, Some(0))
+        }
+    }
+
     fn last(self) -> Option<Self::Item>
     where
         Self: Sized,
@@ -245,6 +254,8 @@ impl<'a> Iterator for TimestampViewIter<'a> {
         self.view.get(self.view.len() - 1)
     }
 }
+
+impl<'a> ExactSizeIterator for TimestampViewIter<'a> {}
 
 pub struct TimestampMillisecondView(View);
 
