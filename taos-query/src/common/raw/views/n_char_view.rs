@@ -27,7 +27,20 @@ pub struct NCharView {
     /// Layout should set as NCHAR_DECODED when raw data decoded.
     pub(crate) layout: Arc<RefCell<Layout>>,
 }
-
+impl Clone for NCharView {
+    fn clone(&self) -> Self {
+        unsafe {
+            self.nchar_to_utf8();
+        }
+        Self {
+            offsets: self.offsets.clone(),
+            data: self.data.clone(),
+            is_chars: UnsafeCell::new(false),
+            version: self.version.clone(),
+            layout: self.layout.clone(),
+        }
+    }
+}
 impl IsColumnView for NCharView {
     fn ty(&self) -> Ty {
         Ty::NChar

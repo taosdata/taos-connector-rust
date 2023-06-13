@@ -62,7 +62,12 @@ mod from;
 
 use crate::common::{BorrowedValue, Ty, Value};
 
-use std::{ffi::c_void, fmt::Debug, io::Write, iter::FusedIterator};
+use std::{
+    ffi::c_void,
+    fmt::{Debug, Display},
+    io::Write,
+    iter::FusedIterator,
+};
 
 pub(crate) trait IsColumnView: Sized {
     /// View item data type.
@@ -82,7 +87,7 @@ pub(crate) enum Version {
     V3,
 }
 
-// #[derive(Debug)]
+#[derive(Clone)]
 pub enum ColumnView {
     Bool(BoolView),           // 1
     TinyInt(TinyIntView),     // 2
@@ -132,6 +137,24 @@ impl std::ops::Add for ColumnView {
         self.concat(&rhs)
     }
 }
+
+#[derive(Debug)]
+pub struct CastError {
+    from: Ty,
+    to: Ty,
+    message: &'static str,
+}
+
+impl Display for CastError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "Cast from {} to {} error: {}",
+            self.from, self.to, self.message
+        ))
+    }
+}
+
+impl std::error::Error for CastError {}
 
 pub struct ColumnViewIter<'c> {
     view: &'c ColumnView,
@@ -595,6 +618,552 @@ impl ColumnView {
             ColumnView::UInt(_) => Ty::UInt,
             ColumnView::UBigInt(_) => Ty::UBigInt,
             ColumnView::Json(_) => Ty::Json,
+        }
+    }
+
+    /// Cast behaviors:
+    ///
+    /// - BOOL to VARCHAR/NCHAR: true => "true", false => "false"
+    /// - numeric(integers/float/double) to string(varchar/nchar): like print or to_string.
+    /// - string to primitive: can be parsed => primitive, others => null.
+    /// - timestamp to string: RFC3339 with localized timezone.
+    ///
+    /// Not supported:
+    /// - any to timestamp
+    pub fn cast(&self, ty: Ty) -> Result<ColumnView, CastError> {
+        let l_ty = self.as_ty();
+        if l_ty == ty {
+            return Ok(self.clone());
+        }
+        use Ty::*;
+        match self {
+            // (Bool, UBigInt) => ColumnView::from_big_ints(self.)
+            ColumnView::Bool(booleans) => {
+                macro_rules! _cast_bool_to {
+                    ($ty:ty) => {
+                        booleans
+                            .iter()
+                            .map(|v| v.map(|b| if b { 1 as $ty } else { 0 as $ty }))
+                            .collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    TinyInt => Self::from_tiny_ints(_cast_bool_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_bool_to!(i16)),
+                    Int => Self::from_ints(_cast_bool_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_bool_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_bool_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_bool_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_bool_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_bool_to!(u64)),
+                    Float => Self::from_floats(_cast_bool_to!(f32)),
+                    Double => Self::from_doubles(_cast_bool_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+            ColumnView::TinyInt(booleans) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        booleans.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => {
+                        Self::from_bools(booleans.iter().map(|v| v.map(|b| b > 0)).collect_vec())
+                    }
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+            ColumnView::SmallInt(booleans) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        booleans.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => {
+                        Self::from_bools(booleans.iter().map(|v| v.map(|b| b > 0)).collect_vec())
+                    }
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+            ColumnView::Int(booleans) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        booleans.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => {
+                        Self::from_bools(booleans.iter().map(|v| v.map(|b| b > 0)).collect_vec())
+                    }
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+            ColumnView::BigInt(booleans) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        booleans.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => {
+                        Self::from_bools(booleans.iter().map(|v| v.map(|b| b > 0)).collect_vec())
+                    }
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+
+            ColumnView::UTinyInt(booleans) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        booleans.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => {
+                        Self::from_bools(booleans.iter().map(|v| v.map(|b| b > 0)).collect_vec())
+                    }
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+
+            ColumnView::USmallInt(booleans) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        booleans.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => {
+                        Self::from_bools(booleans.iter().map(|v| v.map(|b| b > 0)).collect_vec())
+                    }
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+
+            ColumnView::UInt(booleans) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        booleans.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => {
+                        Self::from_bools(booleans.iter().map(|v| v.map(|b| b > 0)).collect_vec())
+                    }
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+            ColumnView::UBigInt(booleans) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        booleans.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => {
+                        Self::from_bools(booleans.iter().map(|v| v.map(|b| b > 0)).collect_vec())
+                    }
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+
+            ColumnView::Float(view) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        view.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => Self::from_bools(view.iter().map(|v| v.map(|b| b > 0.0)).collect_vec()),
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        view.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        view.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+            ColumnView::Double(view) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        view.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => Self::from_bools(view.iter().map(|v| v.map(|b| b > 0.0)).collect_vec()),
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        view.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        view.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+            ColumnView::VarChar(view) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        view.iter()
+                            .map(|v| v.and_then(|b| b.as_str().parse::<$ty>().ok()))
+                            .collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => Self::from_bools(_cast_to!(bool)),
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        view.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        view.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "booleans can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+            ColumnView::NChar(view) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        view.iter()
+                            .map(|v| v.and_then(|b| b.parse::<$ty>().ok()))
+                            .collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => Self::from_bools(_cast_to!(bool)),
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        view.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        view.iter().map(|v| v.map(|b| b.to_string())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "can be casted to primitive types only",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+            ColumnView::Timestamp(view) => {
+                macro_rules! _cast_to {
+                    ($ty:ty) => {
+                        view.iter()
+                            .map(|v| v.map(|b| b.as_raw_i64() as $ty))
+                            .collect_vec()
+                    };
+                }
+
+                let view = match ty {
+                    Bool => Self::from_bools(
+                        view.iter()
+                            .map(|v| v.map(|b| b.as_raw_i64() > 0))
+                            .collect_vec(),
+                    ),
+                    TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
+                    SmallInt => Self::from_small_ints(_cast_to!(i16)),
+                    Int => Self::from_ints(_cast_to!(i32)),
+                    BigInt => Self::from_big_ints(_cast_to!(i64)),
+                    UTinyInt => Self::from_unsigned_tiny_ints(_cast_to!(u8)),
+                    USmallInt => Self::from_unsigned_small_ints(_cast_to!(u16)),
+                    UInt => Self::from_unsigned_ints(_cast_to!(u32)),
+                    UBigInt => Self::from_unsigned_big_ints(_cast_to!(u64)),
+                    Float => Self::from_floats(_cast_to!(f32)),
+                    Double => Self::from_doubles(_cast_to!(f64)),
+                    VarChar => Self::from_varchar::<String, _, _, _>(
+                        view.iter()
+                            .map(|v| v.map(|b| b.to_datetime_with_tz().to_rfc3339())),
+                    ),
+                    NChar => Self::from_nchar::<String, _, _, _>(
+                        view.iter()
+                            .map(|v| v.map(|b| b.to_datetime_with_tz().to_rfc3339())),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+
+                            message: "",
+                        })
+                    }
+                };
+                Ok(view)
+            }
+            _ => todo!(),
         }
     }
 
