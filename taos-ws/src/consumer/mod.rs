@@ -1345,7 +1345,7 @@ mod tests {
 
         taos.exec_many([
             "drop database ws_tmq_meta_sync2",
-            "drop topic ws_tmq_meta_sync",
+            // "drop topic ws_tmq_meta_sync",
             "drop database ws_tmq_meta_sync",
         ])?;
         Ok(())
@@ -1492,7 +1492,7 @@ mod tests {
 
         taos.exec_many([
             "drop database ws_tmq_meta_sync32",
-            "drop topic ws_tmq_meta_sync3",
+            // "drop topic ws_tmq_meta_sync3",
             "drop database ws_tmq_meta_sync3",
         ])?;
         Ok(())
