@@ -173,7 +173,11 @@ impl Drop for ResultSet {
         }
 
         if !self.completed {
-            self.free_result();
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    self.free_result();
+                });
+            });
         }
 
         let _ = self.closer.take().unwrap().send(());
