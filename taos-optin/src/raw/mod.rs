@@ -679,6 +679,33 @@ impl ApiEntry {
         }
     }
 
+    pub(super) fn connect_with_retries(
+        &self,
+        auth: &Auth,
+        mut retries: u8,
+    ) -> Result<*mut TAOS, RawError> {
+        if retries == 0 {
+            retries = 5;
+        }
+        loop {
+            let ptr = self.connect(auth);
+            if ptr.is_null() {
+                retries -= 1;
+                let err = self.check(ptr).unwrap_err();
+                if retries == 0 {
+                    break Err(err);
+                }
+                if err.code() == 0x000B {
+                    continue
+                } else {
+                    break Err(err)
+                }
+            } else {
+                break Ok(ptr);
+            }
+        }
+    }
+
     pub(super) fn check(&self, ptr: *const TAOS_RES) -> Result<(), RawError> {
         let code: Code = unsafe { (self.taos_errno)(ptr as _) & 0xffff }.into();
         if code.success() {

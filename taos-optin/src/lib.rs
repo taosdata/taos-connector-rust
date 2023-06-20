@@ -13,6 +13,8 @@ use taos_query::{
     DsnError, RawBlock,
 };
 
+const MAX_CONNECT_RETRIES: u8 = 16;
+
 mod version {
     use std::fmt::Display;
 
@@ -262,7 +264,9 @@ impl TaosBuilder {
         if let Some(taos) = self.inner_conn.get() {
             Ok(taos)
         } else {
-            let ptr = self.lib.connect(&self.auth);
+            let ptr = self
+                .lib
+                .connect_with_retries(&self.auth, MAX_CONNECT_RETRIES)?;
 
             let raw = RawTaos::new(self.lib.clone(), ptr)?;
             let taos = Ok(Taos { raw });
@@ -400,7 +404,9 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn build(&self) -> Result<Self::Target, Self::Error> {
-        let ptr = self.lib.connect(&self.auth);
+        let ptr = self
+            .lib
+            .connect_with_retries(&self.auth, MAX_CONNECT_RETRIES)?;
 
         let raw = RawTaos::new(self.lib.clone(), ptr)?;
         Ok(Taos { raw })
@@ -518,7 +524,9 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     }
 
     async fn build(&self) -> Result<Self::Target, Self::Error> {
-        let ptr = self.lib.connect(&self.auth);
+        let ptr = self
+            .lib
+            .connect_with_retries(&self.auth, MAX_CONNECT_RETRIES)?;
 
         let raw = RawTaos::new(self.lib.clone(), ptr)?;
         Ok(Taos { raw })
