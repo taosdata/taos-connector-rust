@@ -117,6 +117,11 @@ impl WsQuerySender {
         self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
         Ok(())
     }
+
+    fn send_blocking(&self, msg: WsSend) -> Result<()> {
+        let _ = self.sender.blocking_send(msg.to_msg());
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -143,6 +148,7 @@ pub struct ResultSet {
     timing: Duration,
     block_future: Option<Pin<Box<dyn Future<Output = Result<Option<RawBlock>>> + Send>>>,
     closer: Option<oneshot::Sender<()>>,
+    completed: bool,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -164,6 +170,14 @@ impl Drop for ResultSet {
     fn drop(&mut self) {
         if let Some((_, req_id)) = self.sender.results.remove(&self.args.id) {
             self.sender.queries.remove(&req_id);
+        }
+
+        if !self.completed {
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    self.free_result();
+                });
+            });
         }
 
         let _ = self.closer.take().unwrap().send(());
@@ -735,6 +749,7 @@ impl WsTaos {
                 timing: resp.timing,
                 block_future: None,
                 closer: Some(closer),
+                completed: false,
             })
         } else {
             Ok(ResultSet {
@@ -751,6 +766,7 @@ impl WsTaos {
                 timing: resp.timing,
                 block_future: None,
                 closer: Some(closer),
+                completed: false,
             })
         }
     }
@@ -801,6 +817,7 @@ impl WsTaos {
                 timing: resp.timing,
                 block_future: None,
                 closer: Some(closer),
+                completed: false,
             })
         } else {
             Ok(ResultSet {
@@ -817,6 +834,7 @@ impl WsTaos {
                 timing: resp.timing,
                 block_future: None,
                 closer: Some(closer),
+                completed: false,
             })
         }
     }
@@ -854,6 +872,7 @@ impl ResultSet {
 
         if fetch_resp.completed {
             self.timing = fetch_resp.timing;
+            self.completed = true;
             return Ok(None);
         }
 
@@ -898,6 +917,10 @@ impl ResultSet {
         }
 
         let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
+    }
+
+    fn free_result(&self) {
+        let _ = self.sender.send_blocking(WsSend::FreeResult(self.args));
     }
 }
 
