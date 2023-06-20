@@ -1343,11 +1343,11 @@ mod tests {
 
         std::thread::sleep(Duration::from_secs(2));
 
-        // taos.exec_many([
-        //     "drop database ws_tmq_meta_sync2",
-        //     "drop topic ws_tmq_meta_sync",
-        //     "drop database ws_tmq_meta_sync",
-        // ])?;
+        taos.exec_many([
+            "drop database ws_tmq_meta_sync2",
+            "drop topic ws_tmq_meta_sync",
+            "drop database ws_tmq_meta_sync",
+        ])?;
         Ok(())
     }
 
@@ -1490,11 +1490,11 @@ mod tests {
 
         std::thread::sleep(Duration::from_secs(2));
 
-        // taos.exec_many([
-        //     "drop database ws_tmq_meta_sync32",
-        //     "drop topic ws_tmq_meta_sync3",
-        //     "drop database ws_tmq_meta_sync3",
-        // ])?;
+        taos.exec_many([
+            "drop database ws_tmq_meta_sync32",
+            "drop topic ws_tmq_meta_sync3",
+            "drop database ws_tmq_meta_sync3",
+        ])?;
         Ok(())
     }
 }
