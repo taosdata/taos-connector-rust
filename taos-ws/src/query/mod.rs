@@ -36,6 +36,7 @@ impl Taos {
 }
 
 unsafe impl Send for Taos {}
+
 unsafe impl Sync for Taos {}
 
 #[async_trait::async_trait]
@@ -138,15 +139,15 @@ impl taos_query::Queryable for Taos {
         block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))
     }
 
-    fn put(&self, _data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
-        todo!()
+    fn put(&self, sml_data: &SmlData) -> Result<(), Self::Error> {
+        block_in_place_or_global(<Self as AsyncQueryable>::put(self, sml_data))
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use crate::TaosBuilder;
+
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
@@ -387,6 +388,7 @@ mod tests {
         dbg!(summary, (nb, nr));
         Ok(())
     }
+
     #[cfg(feature = "async")]
     // !Websocket tests should always use `multi_thread`
     #[tokio::test(flavor = "multi_thread")]
