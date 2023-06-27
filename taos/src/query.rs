@@ -140,8 +140,8 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 
     fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
         let mut dsn = dsn.into_dsn()?;
-        if dsn.params.contains_key("token") {
-            dsn.protocol = Some("ws".to_string());
+        if dsn.params.contains_key("token") && dsn.protocol.is_none() {
+            dsn.protocol.replace("wss".to_string());
         }
         // dbg!(&dsn);
         use taos_query::TBuilder;
