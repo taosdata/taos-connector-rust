@@ -59,7 +59,7 @@ impl<'a> Future for QueryFuture<'a> {
 
         if state.done {
             let d = state.time.elapsed();
-            log::debug!(
+            log::trace!(
                 "Waken {:?} after callback received",
                 d - state.callback_cost.unwrap()
             );
@@ -81,18 +81,28 @@ impl<'a> Future for QueryFuture<'a> {
                 // let state = param.read();
                 let s = { &mut *param.0.get() };
                 let cost = s.time.elapsed();
-                log::debug!("Received query callback in {:?}", cost);
+                log::trace!("Received query callback in {:?}", cost);
                 s.callback_cost.replace(cost);
                 if res.is_null() && code == 0 {
                     unreachable!("query callback should be ok or error");
                 }
                 if (code & 0xffff) == 0x032C {
-                    log::warn!("Received 0x032C (Object is creating) error, retry");
+                    log::trace!("Received 0x032C (Object is creating) error, retry");
                     s.waiting = false;
                     (s.api.taos_free_result)(res);
                     param.1.wake();
                     return;
                 }
+
+                if (code & 0xffff) == 0x000B {
+                    log::trace!("Received 0x000B (Unable to establish connection) error, retry");
+                    s.waiting = false;
+                    s.done = false;
+                    (s.api.taos_free_result)(res);
+                    param.1.wake();
+                    return;
+                }
+                log::trace!("Received error code: {:0x}", code & 0xffff);
 
                 let result = if code < 0 {
                     let ptr = (s.api.taos_errstr)(res);
@@ -110,7 +120,7 @@ impl<'a> Future for QueryFuture<'a> {
             }
 
             let param = Box::new((self.state.clone(), cx.waker().clone()));
-            log::trace!("calling taos_query_a");
+            log::trace!("calling taos_query_a with: {:?}", self.sql.as_ref());
             self.raw.query_a(
                 self.sql.as_ref(),
                 taos_optin_query_future_callback as _,
