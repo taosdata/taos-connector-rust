@@ -161,7 +161,7 @@ pub(super) mod tmq {
 
             if tmq_resp.is_err() {
                 return vec![];
-            } 
+            }
 
             let assignments =
                 unsafe { std::slice::from_raw_parts(*assignments_ptr, assignment_num as usize) };

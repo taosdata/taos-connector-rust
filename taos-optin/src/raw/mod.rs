@@ -696,9 +696,9 @@ impl ApiEntry {
                     break Err(err);
                 }
                 if err.code() == 0x000B {
-                    continue
+                    continue;
                 } else {
-                    break Err(err)
+                    break Err(err);
                 }
             } else {
                 break Ok(ptr);
