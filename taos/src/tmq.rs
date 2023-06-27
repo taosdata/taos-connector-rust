@@ -499,7 +499,10 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_secs(3));
 
-        taos.exec(format!("create database if not exists {db} wal_retention_period 3600")).await?;
+        taos.exec(format!(
+            "create database if not exists {db} wal_retention_period 3600"
+        ))
+        .await?;
 
         std::thread::sleep(std::time::Duration::from_secs(3));
 
@@ -1142,12 +1145,15 @@ mod tests {
         .await?;
 
         for _ in 0..10000 {
-            taos.exec("insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            taos.exec(
+                "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL)
             tb1 values(now, true, -2, -3, -4, -5, \
             '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
-            254, 65534, 1, 1)").await?;
+            254, 65534, 1, 1)",
+            )
+            .await?;
         }
         taos.exec(format!("flush database {db}")).await?;
         // tokio::time::sleep(Duration::from_secs(16)).await;
@@ -1358,12 +1364,15 @@ mod tests {
         .await?;
 
         for _ in 0..100 {
-            taos.exec("insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            taos.exec(
+                "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL)
             tb1 values(now, true, -2, -3, -4, -5, \
             '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
-            254, 65534, 1, 1)").await?;
+            254, 65534, 1, 1)",
+            )
+            .await?;
         }
 
         taos.exec_many([
@@ -1515,7 +1524,10 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_secs(3));
 
-        taos.exec(format!("create database if not exists {db} wal_retention_period 3600")).await?;
+        taos.exec(format!(
+            "create database if not exists {db} wal_retention_period 3600"
+        ))
+        .await?;
 
         std::thread::sleep(std::time::Duration::from_secs(3));
 
