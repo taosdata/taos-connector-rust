@@ -129,7 +129,6 @@ impl taos_query::TBuilder for TaosBuilder {
         if self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
         {
-            // self.server_version().or_else(|| => );
             return Ok(true);
         }
 
@@ -216,8 +215,9 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         }
     }
     async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
-        if self.addr.matches(".cloud.tdengine.com").next().is_some() {
-            // self.server_version().or_else(|| => );
+        if self.addr.matches(".cloud.tdengine.com").next().is_some()
+            || self.addr.matches(".cloud.taosdata.com").next().is_some()
+        {
             return Ok(true);
         }
 
