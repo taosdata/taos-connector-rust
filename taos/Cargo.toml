@@ -38,7 +38,7 @@ async-trait = "0.1.68"
 criterion = "0.3"
 
 [[bench]]
-name = "my_benchmark"
+name = "benchmark"
 harness = false
 
 [features]
