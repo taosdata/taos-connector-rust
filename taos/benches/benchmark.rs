@@ -12,11 +12,18 @@ fn criterion_benchmark(c: &mut Criterion) {
         format!("CREATE STABLE meters (ts timestamp, current float, voltage int, phase float) TAGS (location binary(64), groupId int)"),
     ];
 
-    let values = " (NOW, 10.2, 219, 0.32)".repeat(100);
+    let mut t: i64 = 1688456534091;
     let mut sql = format!("INSERT INTO");
-    for i in 0..10 {
+    for i in 0..333 {
         let table = format!(" d100{}", i);
-        let sub_sql = format!("{table} USING meters TAGS ('California.SanFrancisco', 2) VALUES {values}");
+        t = t + 1; 
+        let sub_sql = format!("{table}_1 USING meters TAGS ('California.SanFrancisco', 2) (ts, current) VALUES ({t}, 10.2)");
+        sql += &sub_sql;
+        t = t + 1; 
+        let sub_sql = format!("{table}_2 USING meters TAGS ('California.SanFrancisco', 2) (ts, voltage) VALUES ({t}, 219)");
+        sql += &sub_sql;
+        t = t + 1; 
+        let sub_sql = format!("{table}_3 USING meters TAGS ('California.SanFrancisco', 2) (ts, phase) VALUES ({t}, 0.32)");
         sql += &sub_sql;
     }
     println!("{}", sql);
