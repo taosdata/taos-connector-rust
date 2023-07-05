@@ -417,12 +417,12 @@ impl WsTaos {
             ttl: sml.ttl(),
             req_id: sml.req_id(),
         };
-        log::debug!("put send: {:?}", action);
+        log::trace!("put send: {:?}", action);
         let req = self.sender.send_recv(action).await?;
 
         match req {
             WsRecvData::Insert(res) => {
-                log::debug!("put resp : {:?}", res);
+                log::trace!("put resp : {:?}", res);
                 Ok(())
             }
             _ => {

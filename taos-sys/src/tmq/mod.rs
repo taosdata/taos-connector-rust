@@ -520,7 +520,7 @@ impl AsAsyncConsumer for Consumer {
             for offset in offsets {
                 let vgroup_id = offset[0];
                 let offset = offset[1];
-                log::debug!(
+                log::trace!(
                     "topic {} seeking to offset {} for vgroup {}",
                     &topic_name,
                     offset,
@@ -608,7 +608,7 @@ impl AsAsyncConsumer for Consumer {
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.into_strings();
-        log::debug!("topics: {:?}", topics);
+        log::trace!("topics: {:?}", topics);
         let ret: Vec<(String, Vec<Assignment>)> = topics
             .into_iter()
             .map(|topic| {

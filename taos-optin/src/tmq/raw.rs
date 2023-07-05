@@ -191,7 +191,7 @@ pub(super) mod tmq {
                 // unimplemented!("does not support tmq_offset_seek")
                 return Ok(());
             }
-            log::debug!(
+            log::trace!(
                 "offset_seek tmq_resp: {:?}, topic_name: {}, vgroup_id: {}, offset: {}",
                 tmq_resp,
                 topic_name,
@@ -200,7 +200,7 @@ pub(super) mod tmq {
             );
 
             let err_str = self.err_as_str(tmq_resp);
-            log::debug!("offset_seek tmq_resp as str: {}", err_str);
+            log::trace!("offset_seek tmq_resp as str: {}", err_str);
 
             tmq_resp.ok_or(format!("offset seek failed: {err_str}"))
         }

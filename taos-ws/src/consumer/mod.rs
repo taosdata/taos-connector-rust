@@ -449,7 +449,7 @@ impl AsAsyncConsumer for Consumer {
             for offset in offsets {
                 let vgroup_id = offset[0] as i32;
                 let offset = offset[1];
-                log::debug!(
+                log::trace!(
                     "topic {} seeking to offset {} for vgroup {}",
                     &topic_name,
                     offset,

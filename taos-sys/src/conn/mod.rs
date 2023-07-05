@@ -232,7 +232,7 @@ impl RawTaos {
         let res;
 
         if sml.req_id().is_some() && sml.ttl().is_some() {
-            log::debug!(
+            log::trace!(
                 "sml insert with req_id: {} and ttl {}",
                 sml.req_id().unwrap(),
                 sml.ttl().unwrap()
@@ -250,7 +250,7 @@ impl RawTaos {
                 )
             });
         } else if sml.req_id().is_some() {
-            log::debug!("sml insert with req_id: {}", sml.req_id().unwrap());
+            log::trace!("sml insert with req_id: {}", sml.req_id().unwrap());
             res = RawRes::from_ptr(unsafe {
                 taos_schemaless_insert_raw_with_reqid(
                     self.as_ptr(),
@@ -263,7 +263,7 @@ impl RawTaos {
                 )
             });
         } else if sml.ttl().is_some() {
-            log::debug!("sml insert with ttl: {}", sml.ttl().unwrap());
+            log::trace!("sml insert with ttl: {}", sml.ttl().unwrap());
             res = RawRes::from_ptr(unsafe {
                 taos_schemaless_insert_raw_ttl(
                     self.as_ptr(),
@@ -276,7 +276,7 @@ impl RawTaos {
                 )
             });
         } else {
-            log::debug!("sml insert without req_id and ttl");
+            log::trace!("sml insert without req_id and ttl");
             res = RawRes::from_ptr(unsafe {
                 taos_schemaless_insert_raw(
                     self.as_ptr(),
