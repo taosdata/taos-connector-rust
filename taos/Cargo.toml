@@ -35,7 +35,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1.68"
-criterion = "0.3"
+criterion = { version = "0.4", features = ["html_reports"] }
 
 [[bench]]
 name = "benchmark"
