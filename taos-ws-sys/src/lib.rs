@@ -487,7 +487,7 @@ pub unsafe extern "C" fn ws_connect_with_dsn(dsn: *const c_char) -> *mut WS_TAOS
 }
 
 #[no_mangle]
-/// Same to taos_close. This should always be called after everything done with the connection.
+/// Same to taos_get_server_info, returns server version info.
 pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char {
     static mut VERSION_INFO: [u8; 128] = [0; 128];
     if taos.is_null() {
