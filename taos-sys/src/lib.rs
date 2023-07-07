@@ -102,7 +102,7 @@ impl taos_query::Queryable for Taos {
     type ResultSet = ResultSet;
 
     fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error> {
-        log::debug!("Query with SQL: {}", sql.as_ref());
+        log::trace!("Query with SQL: {}", sql.as_ref());
         self.raw.query(sql.as_ref())
     }
 
@@ -111,7 +111,7 @@ impl taos_query::Queryable for Taos {
         sql: T,
         req_id: u64,
     ) -> Result<Self::ResultSet, Self::Error> {
-        log::debug!("Query with SQL: {}", sql.as_ref());
+        log::trace!("Query with SQL: {}", sql.as_ref());
         self.raw.query_with_req_id(sql.as_ref(), req_id)
     }
 
@@ -139,7 +139,7 @@ impl AsyncQueryable for Taos {
         &self,
         sql: T,
     ) -> Result<Self::AsyncResultSet, Self::Error> {
-        log::debug!("Async query with SQL: {}", sql.as_ref());
+        log::trace!("Async query with SQL: {}", sql.as_ref());
         self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
     }
 
@@ -148,7 +148,7 @@ impl AsyncQueryable for Taos {
         sql: T,
         req_id: u64,
     ) -> Result<Self::AsyncResultSet, Self::Error> {
-        log::debug!("Async query with SQL: {}", sql.as_ref());
+        log::trace!("Async query with SQL: {}", sql.as_ref());
         self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
     }
 

@@ -931,7 +931,7 @@ impl RawTaos {
         let res;
 
         if sml.req_id().is_some() && sml.ttl().is_some() {
-            log::debug!(
+            log::trace!(
                 "sml insert with req_id: {} and ttl {}",
                 sml.req_id().unwrap(),
                 sml.ttl().unwrap()
@@ -955,7 +955,7 @@ impl RawTaos {
                 unimplemented!("does not support schemaless")
             }
         } else if sml.req_id().is_some() {
-            log::debug!("sml insert with req_id: {}", sml.req_id().unwrap());
+            log::trace!("sml insert with req_id: {}", sml.req_id().unwrap());
             if let Some(taos_schemaless_insert_raw_with_reqid) =
                 self.c.taos_schemaless_insert_raw_with_reqid
             {
@@ -974,7 +974,7 @@ impl RawTaos {
                 unimplemented!("does not support schemaless")
             }
         } else if sml.ttl().is_some() {
-            log::debug!("sml insert with ttl: {}", sml.ttl().unwrap());
+            log::trace!("sml insert with ttl: {}", sml.ttl().unwrap());
             if let Some(taos_schemaless_insert_raw_ttl) = self.c.taos_schemaless_insert_raw_ttl {
                 res = RawRes::from_ptr(self.c.clone(), unsafe {
                     taos_schemaless_insert_raw_ttl(
@@ -991,7 +991,7 @@ impl RawTaos {
                 unimplemented!("does not support schemaless")
             }
         } else {
-            log::debug!("sml insert without req_id and ttl");
+            log::trace!("sml insert without req_id and ttl");
             if let Some(taos_schemaless_insert_raw) = self.c.taos_schemaless_insert_raw {
                 res = RawRes::from_ptr(self.c.clone(), unsafe {
                     taos_schemaless_insert_raw(
@@ -1008,14 +1008,14 @@ impl RawTaos {
             }
         }
 
-        log::debug!("sml total rows: {}", total_rows);
+        log::trace!("sml total rows: {}", total_rows);
         match res {
             Ok(_) => {
                 log::trace!("sml insert success");
                 Ok(())
             }
             Err(e) => {
-                log::debug!("sml insert failed: {}", e);
+                log::trace!("sml insert failed: {:?}", e);
                 return Err(e);
             }
         }
@@ -1241,7 +1241,7 @@ impl RawRes {
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
         if current.in_use {
-            log::debug!("call back in use");
+            log::trace!("call back in use");
             return Poll::Pending;
         }
 
