@@ -1,162 +1,189 @@
-#![cfg_attr(nightly, feature(backtrace))]
+#![cfg_attr(nightly, feature(provide_any, error_generic_member_access))]
 #![cfg_attr(nightly, feature(no_coverage))]
-
 use std::{
     borrow::Cow,
     fmt::{self, Debug, Display},
-    ops::{Deref, DerefMut},
     str::FromStr,
 };
 
-#[cfg(nightly)]
-use std::backtrace::Backtrace;
-
 use mdsn::DsnError;
+use source::Inner;
+use thiserror::Error;
 
-macro_rules! _impl_fmt {
-    ($fmt:ident) => {
-        impl fmt::$fmt for Code {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                fmt::$fmt::fmt(&self.0, f)
-            }
-        }
-    };
-}
+mod code;
+mod source;
 
-_impl_fmt!(LowerHex);
-_impl_fmt!(UpperHex);
+pub use code::Code;
 
-/// TDengine error code.
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[repr(transparent)]
-pub struct Code(i32);
-
-impl Code {
-    pub const COLUMN_EXISTS: Code = Code(0x036B);
-    pub const COLUMN_NOT_EXIST: Code = Code(0x036C);
-    pub const TAG_ALREADY_EXIST: Code = Code(0x0369);
-    pub const TAG_NOT_EXIST: Code = Code(0x036A);
-    pub const MODIFIED_ALREADY: Code = Code(0x264B);
-    pub const INVALID_COLUMN_NAME: Code = Code(0x2602);
-    pub const TABLE_NOT_EXIST: Code = Code(0x2603);
-    pub const STABLE_NOT_EXIST: Code = Code(0x0362);
-    pub const INVALID_ROW_BYTES: Code = Code(0x036F);
-    pub const DUPLICATED_COLUMN_NAMES: Code = Code(0x263C);
-    pub const NO_COLUMN_CAN_BE_DROPPED: Code = Code(0x2651);
-}
-
-impl Display for Code {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:#06X}", *self))
-    }
-}
-
-impl Debug for Code {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!(
-            "Code([{:#06X}] {})",
-            self.0,
-            self.as_error_str()
-        ))
-    }
-}
-
-macro_rules! _impl_from {
-    ($($from:ty) *) => {
-        $(
-            impl From<$from> for Code {
-                #[inline]
-                fn from(c: $from) -> Self {
-                    Self(c as i32 & 0xFFFF)
-                }
-            }
-            impl From<Code> for $from {
-                #[inline]
-                fn from(c: Code) -> Self {
-                    c.0 as _
-                }
-            }
-        )*
-    };
-}
-
-_impl_from!(i8 u8 i16 i32 u16 u32 i64 u64);
-
-impl Deref for Code {
-    type Target = i32;
-
-    fn deref(&self) -> &i32 {
-        &self.0
-    }
-}
-
-impl DerefMut for Code {
-    fn deref_mut(&mut self) -> &mut i32 {
-        &mut self.0
-    }
-}
-
-impl Code {
-    /// Code from raw primitive type.
-    pub const fn new(code: i32) -> Self {
-        Code(code)
-    }
-}
-
-impl PartialEq<usize> for Code {
-    fn eq(&self, other: &usize) -> bool {
-        self.0 == *other as i32
-    }
-}
-
-impl PartialEq<isize> for Code {
-    fn eq(&self, other: &isize) -> bool {
-        self.0 == *other as i32
-    }
-}
-
-impl PartialEq<i32> for Code {
-    fn eq(&self, other: &i32) -> bool {
-        self.0 == *other
-    }
-}
-
-#[allow(non_upper_case_globals, non_snake_case)]
-#[cfg_attr(feature = "no_coverage", no_coverage)]
-mod code {
-    include!(concat!(env!("OUT_DIR"), "/code.rs"));
-}
-
-#[derive(Debug, thiserror::Error)]
+/// The `Error` type, a wrapper around raw libtaos.so client errors or
+/// dynamic error types that could be integrated into [anyhow::Error].
+///
+/// # Constructions
+///
+/// We prefer to use [format_err] to construct errors, but you can always use
+/// constructor API in your codes.
+///
+/// ## Constructor API
+///
+/// Use error code from native client. You can use it directly with error code
+///
+/// ```rust
+/// # use taos_error::Error;
+/// let error = Error::from_code(0x2603);
+/// ```
+///
+/// Or with error message from C API.
+///
+/// ```rust
+/// # use taos_error::Error;
+/// let error = Error::new(0x0216, r#"syntax error near "123);""#); // Syntax error in SQL
+/// ```
+///
+/// # Display representations
+#[derive(Error)]
+#[must_use]
 pub struct Error {
+    /// Error code, will be displayed when code is not 0xFFFF.
     code: Code,
-    err: Cow<'static, str>,
-    #[cfg(nightly)]
-    backtrace: Backtrace,
+    /// Error context, use this along with `.msg` or `.source`.
+    context: Option<String>,
+    /// Error source, from raw or other error type.
+    #[cfg_attr(nightly, backtrace)]
+    source: Inner,
+}
+
+unsafe impl Send for Error {}
+unsafe impl Sync for Error {}
+
+impl Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            f.debug_struct("Error")
+                .field("code", &self.code)
+                .field("context", &self.context)
+                .field("source", &self.source)
+                .finish()
+        } else {
+            if let Some(context) = &self.context {
+                f.write_fmt(format_args!("{}", context))?;
+                f.write_str("\n\nCaused by:\n")?;
+
+                let chain = self.source.chain();
+                for (idx, source) in chain.enumerate() {
+                    write!(f, "{:4}: {}\n", idx, source)?;
+                }
+            } else {
+                let mut chain = self.source.chain();
+                if let Some(context) = chain.next() {
+                    f.write_fmt(format_args!("{}", context))?;
+                }
+
+                if self.source.deep() {
+                    f.write_str("\n\nCaused by:\n")?;
+                    for (idx, source) in chain.enumerate() {
+                        write!(f, "{:4}: {}\n", idx, source)?;
+                    }
+                }
+            }
+            #[cfg(nightly)]
+            f.write_fmt(format_args!("\nBacktrace:\n{}", self.source.backtrace()))?;
+
+            Ok(())
+        }
+    }
+}
+
+impl Display for Error {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Error code prefix
+        if self.code != Code::FAILED {
+            write!(f, "[{:#06X}] ", self.code)?;
+        }
+        // Error context
+        if let Some(context) = self.context.as_deref() {
+            write!(f, "{}", context)?;
+
+            if self.source.is_empty() {
+                return Ok(());
+            }
+            // pretty print error source.
+            f.write_str(": ")?;
+        } else if self.source.is_empty() {
+            return f.write_str("Unknown error");
+        }
+
+        if f.alternate() {
+            write!(f, "{:#}", self.source)?;
+        } else {
+            write!(f, "{}", self.source)?;
+        }
+        Ok(())
+    }
 }
 
 impl From<DsnError> for Error {
     fn from(dsn: DsnError) -> Self {
-        Self::new(Code::Failed, dsn.to_string())
+        Self::new(Code::FAILED, dsn.to_string())
+    }
+}
+
+impl From<anyhow::Error> for Error {
+    fn from(error: anyhow::Error) -> Self {
+        Self {
+            code: Code::FAILED,
+            context: None,
+            source: Inner::any(error),
+        }
+    }
+}
+
+impl<C: Into<Code>> From<C> for Error {
+    fn from(value: C) -> Self {
+        Self::from_code(value.into())
+    }
+}
+
+impl<'a> From<&'a str> for Error {
+    fn from(value: &'a str) -> Self {
+        Self::from_string(value.to_string())
     }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
-    #[inline]
-    pub fn new(code: impl Into<Code>, err: impl Into<Cow<'static, str>>) -> Self {
+    pub fn new_with_context(
+        code: impl Into<Code>,
+        err: impl Display,
+        context: impl Display,
+    ) -> Self {
         Self {
             code: code.into(),
-            err: err.into(),
-            #[cfg(nightly)]
-            #[cfg_attr(nightly, no_coverage)]
-            backtrace: Backtrace::capture(),
+            context: Some(context.to_string()),
+            source: err.to_string().into(),
+        }
+    }
+    #[inline]
+    pub fn new(code: impl Into<Code>, err: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            context: None,
+            source: err.into().into(),
         }
     }
 
     #[inline]
+    pub fn context(mut self, context: impl Display) -> Self {
+        self.context = Some(match self.context {
+            Some(pre) => format!("{}: {}", context, pre),
+            None => format!("{}", context),
+        });
+        self
+    }
+
+    #[inline]
+    #[deprecated = "Use self.code() instead"]
     pub fn errno(&self) -> Code {
         self.code
     }
@@ -166,24 +193,201 @@ impl Error {
         self.code
     }
     #[inline]
-    pub fn message(&self) -> &str {
-        &self.err
+    pub fn message(&self) -> String {
+        self.source.to_string()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn from_code(code: impl Into<Code>) -> Self {
-        Self::new(code, "")
+        let code = code.into();
+        if let Some(str) = code._priv_err_str() {
+            Self::new(code, str)
+        } else {
+            Self {
+                code: code.into(),
+                context: None,
+                source: Inner::empty(),
+            }
+        }
     }
 
     #[inline]
     pub fn from_string(err: impl Into<Cow<'static, str>>) -> Self {
-        Self::new(Code::Failed, err)
+        anyhow::format_err!("{}", err.into()).into()
     }
 
     #[inline]
-    pub fn from_any(err: impl Display) -> Self {
-        Self::new(Code::Failed, err.to_string())
+    pub fn from_any(err: impl Into<anyhow::Error>) -> Self {
+        err.into().into()
     }
+
+    #[inline]
+    pub fn any(err: impl Into<anyhow::Error>) -> Self {
+        err.into().into()
+    }
+
+    #[inline]
+    pub fn success(&self) -> bool {
+        self.code == 0
+    }
+}
+
+/// Format error with `code`, `raw`, and `context` messages.
+///
+/// - `code` is come from native C API for from websocket API.
+/// - `raw` is the error message which is treated as internal error.
+/// - `context` is some context message which is helpful to users.
+///
+/// We suggest to use all the three fields to construct a more human-readable and
+/// meaningful error. Suck as:
+///
+/// ```rust
+/// # use taos_error::*;
+/// let _ = format_err!(
+///     code = 0x0618,
+///     raw = "Message error from native API",
+///     context = "Query with sql: `select 1`"
+/// );
+/// ```
+///
+/// It will give the error:
+/// ```text
+/// [0x0618] Query with sql: `select 1`: Internal error: `Message error from native API`
+/// ```
+///
+/// For more complex error expressions, use a `format!` like API as this:
+///
+/// ```rust
+/// # use taos_error::*;
+/// # let sql = "select * from test.meters";
+/// # let context = "some context";
+/// let _ = format_err!(
+///     code = 0x0618,
+///     raw = ("Message error from native API while calling {}", "some_c_api"),
+///     context = ("Query with sql {:?} in {}", sql, context),
+/// );
+/// ```
+///
+/// In this kind of usage, `code = ` is optional, so you can use a shorter line:
+///
+/// ```rust
+/// # use taos_error::*;
+/// let _ = format_err!(0x0618, raw = "Some error", context = "Query error");
+/// ```
+///
+/// The `raw` or `context` is optional too:
+///
+/// ```rust
+/// # use taos_error::*;
+/// let _ = format_err!(0x0618, raw = "Some error");
+/// let _ = format_err!(0x0618, context = "Some error");
+/// ```
+///
+/// For non-internal errors, eg. if you prefer construct an [anyhow]-like error manually,
+/// you can use the same arguments like [anyhow::format_err] with this pattern:
+///
+/// ```rust
+/// # use taos_error::*;
+/// # let message = "message";
+/// let err = format_err!(any = "Error here: {}", message);
+/// # assert_eq!(err.to_string(), "Error here: message");
+/// let err = format_err!("Error here: {}", message);
+/// # assert_eq!(err.to_string(), "Error here: message");
+/// ```
+///
+/// It's equivalent to:
+///
+/// ```rust
+/// # use taos_error::*;
+/// # use anyhow;
+/// let err = Error::from(anyhow::format_err!("Error here: {}", message));
+/// ```
+///
+#[macro_export]
+macro_rules! format_err {
+    (code = $c:expr, raw = $arg:expr, context = $arg2:expr) => {
+        $crate::Error::new_with_context($c, $arg, $arg2)
+    };
+    (code = $c:expr, raw = $arg:expr) => {
+        $crate::Error::new($c, $arg)
+    };
+    (code = $c:expr, raw = ($($arg:tt)*), context = ($($arg2:tt)*) $(,)?) => {
+        $crate::Error::new_with_context($c, __priv_format!($($arg)*), __priv_format!($($arg2)*))
+    };
+    (code = $c:expr, context = $($arg2:tt)*) => {
+        $crate::Error::from($c).context(format!($($arg2)*))
+    };
+    // // (code = $c:expr, raw = $arg:literal, context = $arg2:literal) => {
+    // //     $crate::Error::new_with_context($c, format!($arg), format!($arg2))
+    // // };
+    // // (code = $c:expr, raw = $arg:literal, context = $arg2:expr) => {
+    // //     $crate::Error::new_with_context($c, format!($arg), $arg2)
+    // // };
+    (code = $c:expr, raw = $arg:literal, context = $($arg2:tt)*) => {
+        $crate::Error::new_with_context($c, format!($arg), __priv_format!($($arg2)*))
+    };
+    (code = $c:expr, raw = $arg:ident, context = $($arg2:tt)*) => {
+        $crate::Error::new_with_context($c, $arg, __priv_format!($($arg2)*))
+    };
+    (code = $c:expr) => {
+        $crate::Error::from_code($c)
+    };
+    (code = $c:expr, raw = $($arg:tt)*) => {
+        $crate::Error::new($c, format!($($arg)*))
+    };
+    (code = $c:expr, $($arg:tt)*) => {
+        $crate::Error::new($c, format!($($arg)*))
+    };
+    (any = $($arg:tt)*) => {
+        $crate::Error::from_string(format!($($arg)*))
+    };
+    (raw = $($arg:tt)*) => {
+        compile_error!("`raw` error message must be used along with an error code!")
+    };
+
+    ($c:expr, raw = $arg:expr) => {
+        $crate::Error::new($c, $arg)
+    };
+    ($c:expr, raw = $arg:expr, context = $arg2:expr) => {
+        $crate::Error::new_with_context($c, $arg, $arg2)
+    };
+    ($c:expr, raw = ($($arg:tt)*), context = ($($arg2:tt)*) $(,)?) => {
+        $crate::Error::new_with_context($c, format!($($arg)*), format!($($arg2)*))
+    };
+    ($c:expr, context = $arg:expr) => {
+        $crate::Error::from($c).context($arg)
+    };
+    ($c:expr, context = $($arg2:tt)*) => {
+        $crate::Error::from($c).context(format!($($arg2)*))
+    };
+    ($c:expr, raw = $($arg:tt)*) => {
+        $crate::Error::new($c, format!($($arg)*))
+    };
+    ($c:expr) => {
+        $crate::Error::from($c)
+    };
+    ($($arg:tt)*) => {
+        $crate::Error::from_string(format!($($arg)*))
+    };
+}
+
+macro_rules! __priv_format {
+    ($msg:literal $(,)?) => {
+        literal.to_string()
+    };
+    ($err:expr $(,)?) => {
+        $err
+    };
+    ($fmt:expr, $($arg:tt)*) => {
+        format!($fmt, $($arg)*)
+    };
+}
+
+#[macro_export]
+macro_rules! bail {
+    ($($arg:tt)*) => {
+        return std::result::Result::Err($crate::format_err!($($arg)*))
+    };
 }
 
 impl FromStr for Error {
@@ -192,17 +396,6 @@ impl FromStr for Error {
     #[inline]
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(Self::from_string(s.to_string()))
-    }
-}
-
-impl Display for Error {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.code == Code::Failed {
-            write!(f, "{}", self.err)
-        } else {
-            write!(f, "[{:#06X}] {}", self.code, self.err)
-        }
     }
 }
 
@@ -215,39 +408,92 @@ impl serde::de::Error for Error {
 }
 
 #[test]
-fn test_code() {
-    let c: i32 = Code::new(0).into();
-    assert_eq!(c, 0);
-    let c = Code::from(0).to_string();
-    assert_eq!(c, "0x0000");
-    dbg!(Code::from(0x200));
+fn test_format_err() {
+    let code = 0xF000;
+    let raw = "Nothing";
+    let context = "Error";
+    let err = dbg!(format_err!(code, raw = raw, context = context));
+    assert_eq!(err.to_string(), "[0xF000] Error: Internal error: `Nothing`");
+    let err = dbg!(format_err!(code, raw = raw));
+    assert_eq!(err.to_string(), "[0xF000] Internal error: `Nothing`");
+    let err = dbg!(format_err!(code, context = context));
+    assert_eq!(err.to_string(), "[0xF000] Error");
 
-    let c: i8 = Code::new(0).into();
-    let mut c: Code = c.into();
+    let err = dbg!(format_err!(code = 0xF000, context = "Error here"));
+    assert_eq!(err.to_string(), "[0xF000] Error here");
+    let err = dbg!(format_err!(0x6789, context = "Error here: {}", 1));
+    assert_eq!(err.to_string(), "[0x6789] Error here: 1");
+    let err = dbg!(format_err!(code = 0x6789, context = "Error here: {}", 1));
+    assert_eq!(err.to_string(), "[0x6789] Error here: 1");
 
-    let _: &i32 = c.deref();
-    let _: &mut i32 = c.deref_mut();
+    let err = dbg!(format_err!(code = 0x6789, raw = "Error here: {}", 1));
+    assert_eq!(err.to_string(), "[0x6789] Internal error: `Error here: 1`");
+
+    let err = dbg!(format_err!(0x6789, raw = "Error here: {}", 1));
+    assert_eq!(err.to_string(), "[0x6789] Internal error: `Error here: 1`");
+
+    let err = dbg!(format_err!(
+        code = 0x6789,
+        raw = ("Error here: {}", 1),
+        context = ("Query error with {:?}", "sql"),
+    ));
+    assert_eq!(
+        err.to_string(),
+        "[0x6789] Query error with \"sql\": Internal error: `Error here: 1`"
+    );
+
+    let err = dbg!(format_err!("Error here"));
+    assert_eq!(err.to_string(), "Error here");
+
+    let err = dbg!(format_err!(0x2603));
+    assert_eq!(
+        err.to_string(),
+        "[0x2603] Internal error: `Table does not exist`"
+    );
+
+    let err = dbg!(format_err!(0x6789));
+    assert_eq!(err.to_string(), "[0x6789] Unknown error");
+
+    let err = dbg!(format_err!(0x6789, context = "Error here"));
+    assert_eq!(err.to_string(), "[0x6789] Error here");
+}
+
+#[test]
+fn test_bail() {
+    fn use_bail() -> Result<()> {
+        bail!(code = 0x2603, context = "Failed to insert into table `abc`");
+    }
+    let err = use_bail();
+    dbg!(&err);
+    assert!(err.is_err());
+    dbg!(err.unwrap_err().to_string());
 }
 
 #[test]
 fn test_display() {
-    let err = Error::new(Code::Success, "Success");
-    assert_eq!(format!("{err}"), "[0x0000] Success");
-    let err = Error::new(Code::Failed, "failed");
-    assert_eq!(format!("{err}"), "failed");
+    let err = Error::new(Code::SUCCESS, "Success").context("nothing");
+    assert!(dbg!(format!("{}", err)).contains("[0x0000] nothing"));
+    let result = std::panic::catch_unwind(|| {
+        let err = Error::new(Code::SUCCESS, "Success").context("nothing");
+        Err::<(), _>(err).unwrap();
+    });
+    assert!(result.is_err());
 }
 
 #[test]
 fn test_error() {
-    let err = Error::new(Code::Success, "success");
-    assert_eq!(err.code(), err.errno());
-    assert_eq!(err.message(), "success");
+    let err = Error::new(Code::SUCCESS, "success");
+    assert_eq!(err.code(), Code::SUCCESS);
+    assert_eq!(err.message(), "Internal error: `success`");
 
     let _ = Error::from_code(1);
-    assert_eq!(Error::from_any("any").to_string(), "any");
+    assert_eq!(Error::from_string("any").to_string(), "any");
     assert_eq!(Error::from_string("any").to_string(), "any");
 
-    let _ = Error::from(DsnError::InvalidDriver("".to_string()));
+    fn raise_error() -> Result<()> {
+        Err(Error::from_any(DsnError::InvalidDriver("mq".to_string())))
+    }
+    assert_eq!(raise_error().unwrap_err().to_string(), "invalid driver mq");
 }
 
 #[cfg(feature = "serde")]

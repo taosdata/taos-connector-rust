@@ -88,7 +88,7 @@ impl WsQuerySender {
             WsSend::FetchBlock(args) => {
                 log::trace!("[req id: {req_id}] prepare message {msg:?}");
                 if self.results.contains_key(&args.id) {
-                    Err(RawError::from_any(format!(
+                    Err(RawError::from_string(format!(
                         "there's a result with id {}",
                         args.id
                     )))?;
@@ -255,7 +255,7 @@ impl Error {
             Error::WsError(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
             Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
-            _ => Code::Failed,
+            _ => Code::FAILED,
         }
     }
     pub fn errstr(&self) -> String {
@@ -485,7 +485,7 @@ async fn read_queries(
     //     .await;
     for k in keys {
         if let Some((_, sender)) = queries_sender.remove(&k) {
-            let _ = sender.send(Err(RawError::from_any("websocket connection is closed")));
+            let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
         }
     }
 }

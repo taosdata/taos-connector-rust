@@ -17,7 +17,7 @@ pub type WS_STMT = c_void;
 unsafe fn stmt_init(taos: *const WS_TAOS) -> WsResult<Stmt> {
     let client = (taos as *mut Taos)
         .as_mut()
-        .ok_or(WsError::new(Code::Failed, "client pointer it null"))?;
+        .ok_or(WsError::new(Code::FAILED, "client pointer it null"))?;
     Ok(taos_ws::Stmt::init(client)?)
     // Ok(client.stmt_init()?)
 }
