@@ -607,7 +607,7 @@ impl Iterator for ResultSet {
             .transpose()
             .map(|block| {
                 block.map(|raw| {
-                    let mut summary = unsafe { &mut *self.summary.get() };
+                    let summary = unsafe { &mut *self.summary.get() };
                     summary.0 += 1;
                     summary.1 += raw.nrows();
                     raw

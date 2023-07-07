@@ -270,7 +270,7 @@ async fn read_queries(
     //     .await;
     for k in keys {
         if let Some((_, sender)) = queries_sender.remove(&k) {
-            let _ = sender.send(Err(RawError::from_any("websocket connection is closed")));
+            let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
         }
     }
 }

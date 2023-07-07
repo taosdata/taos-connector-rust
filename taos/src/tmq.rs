@@ -15,22 +15,31 @@ enum ConsumerInner {
     Ws(taos_ws::consumer::Consumer),
 }
 
+#[derive(Debug)]
 enum OffsetInner {
     Native(crate::sys::tmq::Offset),
     Ws(taos_ws::consumer::Offset),
 }
+
+#[derive(Debug)]
 enum MetaInner {
     Native(crate::sys::tmq::Meta),
     Ws(taos_ws::consumer::Meta),
 }
 
+#[derive(Debug)]
 enum DataInner {
     Native(crate::sys::tmq::Data),
     Ws(taos_ws::consumer::Data),
 }
 
+#[derive(Debug)]
 pub struct Offset(OffsetInner);
+
+#[derive(Debug)]
 pub struct Meta(MetaInner);
+
+#[derive(Debug)]
 pub struct Data(DataInner);
 
 pub type MessageSet<Meta, Data> = taos_query::tmq::MessageSet<Meta, Data>;

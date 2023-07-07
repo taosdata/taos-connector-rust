@@ -141,7 +141,7 @@ impl RawTaos {
         let nrows = block.nrows();
         let name = block
             .table_name()
-            .ok_or_else(|| Error::new(Code::Failed, "raw block should have table name"))?;
+            .ok_or_else(|| Error::new(Code::FAILED, "raw block should have table name"))?;
         let ptr = block.as_raw_bytes().as_ptr();
         err_or!(taos_write_raw_block(
             self.as_ptr(),

@@ -73,7 +73,7 @@ impl<'a> Future for QueryFuture<'a> {
                 code: c_int,
             ) {
                 let param = Box::from_raw(param as *mut (Arc<UnsafeCell<State>>, Waker));
-                let mut s = { &mut *param.0.get() };
+                let s = { &mut *param.0.get() };
                 let cost = s.time.elapsed();
                 log::debug!("Received query callback in {:?}", cost);
                 s.callback_cost.replace(cost);

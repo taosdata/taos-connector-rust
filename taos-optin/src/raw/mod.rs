@@ -207,7 +207,7 @@ impl TmqListApi {
         if code == 0 {
             Ok(())
         } else {
-            Err(RawError::new(Code::Failed, "append tmq list error"))
+            Err(RawError::new(Code::FAILED, "append tmq list error"))
         }
     }
 
@@ -898,7 +898,7 @@ impl RawTaos {
         let nrows = block.nrows();
         let name = block
             .table_name()
-            .ok_or_else(|| RawError::new(Code::Failed, "raw block should have table name"))?;
+            .ok_or_else(|| RawError::new(Code::FAILED, "raw block should have table name"))?;
         let ptr = block.as_raw_bytes().as_ptr();
         if let Some(f) = self.c.taos_write_raw_block_with_fields {
             let fields: Vec<_> = block.fields().into_iter().map(|f| f.to_c_field()).collect();
@@ -1015,7 +1015,7 @@ impl RawTaos {
                 Ok(())
             }
             Err(e) => {
-                log::debug!("sml insert failed: {:?}", e);
+                log::debug!("sml insert failed: {}", e);
                 return Err(e);
             }
         }

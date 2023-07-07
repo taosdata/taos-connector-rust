@@ -26,7 +26,7 @@ pub mod stmt;
 
 const EMPTY: &'static CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") };
 static mut C_ERROR_CONTAINER: [u8; 4096] = [0; 4096];
-static mut C_ERRNO: Code = Code::Success;
+static mut C_ERRNO: Code = Code::SUCCESS;
 
 /// Opaque type definition for websocket connection.
 #[allow(non_camel_case_types)]
@@ -46,7 +46,7 @@ pub struct WsError {
 impl WsError {
     pub fn from_err(err: Box<dyn std::error::Error + 'static>) -> Self {
         Self {
-            code: Code::Failed,
+            code: Code::FAILED,
             message: CString::new(err.to_string()).unwrap(),
             source: Some(err),
         }
@@ -185,7 +185,7 @@ impl std::error::Error for WsError {
 impl From<Utf8Error> for WsError {
     fn from(e: Utf8Error) -> Self {
         Self {
-            code: Code::Failed,
+            code: Code::FAILED,
             message: CString::new(format!("{}", e)).unwrap(),
             source: Some(Box::new(e)),
         }
@@ -473,7 +473,7 @@ pub unsafe extern "C" fn ws_enable_log() {
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn ws_connect_with_dsn(dsn: *const c_char) -> *mut WS_TAOS {
-    C_ERRNO = Code::Success;
+    C_ERRNO = Code::SUCCESS;
     match connect_with_dsn(dsn) {
         Ok(client) => Box::into_raw(Box::new(client)) as _,
         Err(err) => {
@@ -518,7 +518,7 @@ pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) {
 unsafe fn query_with_sql(taos: *mut WS_TAOS, sql: *const c_char) -> WsResult<WsResultSet> {
     let client = (taos as *mut Taos)
         .as_mut()
-        .ok_or(WsError::new(Code::Failed, "client pointer it null"))?;
+        .ok_or(WsError::new(Code::FAILED, "client pointer it null"))?;
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
     let rs = client.query(sql)?;
@@ -533,7 +533,7 @@ unsafe fn query_with_sql_timeout(
     let _ = timeout;
     let client = (taos as *mut Taos)
         .as_mut()
-        .ok_or(WsError::new(Code::Failed, "client pointer it null"))?;
+        .ok_or(WsError::new(Code::FAILED, "client pointer it null"))?;
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
     let rs = client.query(sql)?;
@@ -581,11 +581,11 @@ pub unsafe extern "C" fn ws_take_timing(rs: *mut WS_RES) -> i64 {
     match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
         Some(rs) => rs.take_timing().as_nanos() as _,
         _ => {
-            C_ERRNO = Code::Failed;
+            C_ERRNO = Code::FAILED;
             let dst = C_ERROR_CONTAINER.as_mut_ptr();
             const NULL_PTR_RES: &'static str = "WS_RES is null";
             std::ptr::copy_nonoverlapping(NULL_PTR_RES.as_ptr(), dst, NULL_PTR_RES.len());
-            Code::Failed.into()
+            Code::FAILED.into()
         }
     }
 }
@@ -693,11 +693,11 @@ pub unsafe extern "C" fn ws_fetch_block(
         _ => {
             *rows = 0;
 
-            C_ERRNO = Code::Failed;
+            C_ERRNO = Code::FAILED;
             let dst = C_ERROR_CONTAINER.as_mut_ptr();
             const NULL_PTR_RES: &'static str = "WS_RES is null";
             std::ptr::copy_nonoverlapping(NULL_PTR_RES.as_ptr(), dst, NULL_PTR_RES.len());
-            Code::Failed.into()
+            Code::FAILED.into()
         }
     }
 }
