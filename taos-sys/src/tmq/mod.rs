@@ -296,6 +296,7 @@ impl Iterator for Messages {
     }
 }
 
+#[derive(Debug)]
 pub struct Meta {
     raw: RawRes,
 }
@@ -347,6 +348,7 @@ impl Meta {
     }
 }
 
+#[derive(Debug)]
 pub struct Data {
     raw: RawRes,
     precision: Precision,

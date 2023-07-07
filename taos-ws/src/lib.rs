@@ -61,7 +61,7 @@ impl Display for Error {
 impl From<DsnError> for Error {
     fn from(err: DsnError) -> Self {
         Error {
-            code: Code::Failed,
+            code: Code::FAILED,
             source: err.into(),
         }
     }
@@ -69,7 +69,7 @@ impl From<DsnError> for Error {
 impl From<query::asyn::Error> for Error {
     fn from(err: query::asyn::Error) -> Self {
         Error {
-            code: Code::Failed,
+            code: Code::FAILED,
             source: err.into(),
         }
     }
@@ -215,10 +215,11 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         }
     }
     async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
-        if self.addr.matches(".cloud.tdengine.com").next().is_some()
+        match self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
         {
-            return Ok(true);
+            true => return Ok(true),
+            false => (),
         }
 
         let taos = self.build().await?;

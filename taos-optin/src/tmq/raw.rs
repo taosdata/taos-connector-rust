@@ -133,42 +133,31 @@ pub(super) mod tmq {
 
         pub fn unsubscribe(&mut self) {
             unsafe {
-                log::trace!("unsubscribe {:p}", self.as_ptr());
                 (self.tmq.tmq_unsubscribe)(self.as_ptr());
-                log::trace!("consumer closed safely");
             }
         }
 
         pub fn get_topic_assignment(&self, topic_name: &str) -> Vec<Assignment> {
-            let assignments_ptr: *mut *mut Assignment =
-                Box::into_raw(Box::new(std::ptr::null_mut()));
-            let mut assignment_num: i32 = 0;
-
-            let tmq_resp;
+            let pt: *mut *mut Assignment = Box::into_raw(Box::new(std::ptr::null_mut()));
             if let Some(tmq_get_topic_assignment) = self.tmq.tmq_get_topic_assignment {
-                tmq_resp = unsafe {
+                let mut num: i32 = 0;
+
+                let tmq_resp = unsafe {
                     tmq_get_topic_assignment(
                         self.as_ptr(),
                         topic_name.into_c_str().as_ptr(),
-                        assignments_ptr,
-                        &mut assignment_num,
+                        pt,
+                        &mut num,
                     )
                 };
+
+                if tmq_resp.is_err() || num == 0 {
+                    return vec![];
+                }
+                unsafe { std::slice::from_raw_parts(*pt, num as usize).to_vec() }
             } else {
-                // unimplemented!("does not support tmq_get_topic_assignment")
-                return vec![];
+                vec![]
             }
-
-            if tmq_resp.is_err() {
-                return vec![];
-            }
-
-            let assignments =
-                unsafe { std::slice::from_raw_parts(*assignments_ptr, assignment_num as usize) };
-
-            let assignments = assignments.to_vec();
-
-            assignments
         }
 
         pub fn offset_seek(

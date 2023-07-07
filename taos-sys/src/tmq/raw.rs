@@ -415,7 +415,7 @@ pub(super) mod list {
             if ret == 0 {
                 Ok(())
             } else {
-                Err(RawError::new(Code::Failed, "append tmq list error"))
+                Err(RawError::new(Code::FAILED, "append tmq list error"))
             }
         }
 

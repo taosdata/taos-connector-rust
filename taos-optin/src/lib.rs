@@ -862,7 +862,7 @@ mod tests {
     fn test_put_line() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         std::env::set_var("RUST_LOG", "taos=debug");
-        // pretty_env_logger::init();
+        let _ = pretty_env_logger::try_init();
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());

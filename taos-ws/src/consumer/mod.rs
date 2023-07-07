@@ -160,7 +160,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         todo!()
     }
 }
-
+#[derive(Debug)]
 struct WsMessageBase {
     sender: WsTmqSender,
     message_id: MessageId,
@@ -238,6 +238,7 @@ impl WsMessageBase {
     }
 }
 
+#[derive(Debug)]
 pub struct Meta(WsMessageBase);
 
 // impl WsMetaMessage {
@@ -264,6 +265,7 @@ impl IsAsyncMeta for Meta {
 
 impl SyncOnAsync for Meta {}
 
+#[derive(Debug)]
 pub struct Data(WsMessageBase);
 
 impl Data {
@@ -976,7 +978,7 @@ impl Drop for Consumer {
         let _ = self.close_signal.send(true);
     }
 }
-
+#[derive(Debug)]
 pub struct Offset {
     message_id: MessageId,
     database: String,
@@ -1030,7 +1032,7 @@ impl Error {
     pub const fn errno(&self) -> Code {
         match self {
             Error::TaosError(error) => error.code(),
-            _ => Code::Failed,
+            _ => Code::FAILED,
         }
     }
     pub fn errstr(&self) -> String {

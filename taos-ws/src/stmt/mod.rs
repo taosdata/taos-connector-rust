@@ -205,7 +205,7 @@ impl Debug for Stmt {
 //     pub const fn errno(&self) -> taos_error::Code {
 //         match self {
 //             Error::TaosError(error) => error.code(),
-//             _ => taos_error::Code::Failed,
+//             _ => taos_error::Code::FAILED,
 //         }
 //     }
 //     pub fn errstr(&self) -> String {

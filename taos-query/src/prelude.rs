@@ -42,10 +42,6 @@ pub mod sync {
     use crate::common::*;
     use crate::helpers::*;
 
-    use crate::common::RawBlock;
-
-    // pub use crate::{Fetchable, Queryable};
-
     pub struct IRowsIter<'a, T>
     where
         T: Fetchable,
