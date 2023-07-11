@@ -763,7 +763,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn long_query_async() -> Result<(), Error> {
         use taos_query::prelude::*;
-        let builder = TaosBuilder::from_dsn(DSN_V2)?;
+        let builder = TaosBuilder::from_dsn(DSN_V3)?;
         let taos = builder.build().await?;
         let mut set = taos.query("select * from test.meters limit 100000").await?;
 
