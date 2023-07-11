@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
 
-use std::ffi::CStr;
+use std::ffi::{c_char, CStr};
 use std::future::Future;
 use std::os::raw::{c_int, c_void};
 use std::pin::Pin;
@@ -77,7 +77,8 @@ impl<'a> Future for QueryFuture<'a> {
                 res: *mut TAOS_RES,
                 code: c_int,
             ) {
-                let param = Box::from_raw(param as *mut (Arc<UnsafeCell<State>>, Waker));
+                let param =
+                    Box::from_raw(param as *mut (Arc<UnsafeCell<State>>, *mut c_char, Waker));
                 // let state = param.read();
                 let s = { &mut *param.0.get() };
                 let cost = s.time.elapsed();
@@ -90,14 +91,21 @@ impl<'a> Future for QueryFuture<'a> {
                     log::warn!("Received 0x032C (Object is creating) error, retry");
                     s.waiting = false;
                     (s.api.taos_free_result)(res);
-                    param.1.wake();
+                    param.2.wake();
                     return;
                 }
 
                 let result = if code < 0 {
                     let ptr = (s.api.taos_errstr)(res);
                     (s.api.taos_free_result)(res);
-                    let err = RawError::new(code, CStr::from_ptr(ptr).to_string_lossy());
+                    let err = RawError::new_with_context(
+                        code,
+                        CStr::from_ptr(ptr).to_string_lossy(),
+                        format!(
+                            "Error while querying with sql {:?}",
+                            CStr::from_ptr(param.1)
+                        ),
+                    );
                     Err(err)
                 } else {
                     Ok(RawRes::from_ptr_unchecked(s.api.clone(), res))
@@ -106,17 +114,19 @@ impl<'a> Future for QueryFuture<'a> {
                 s.result.replace(result);
                 s.done = true;
                 s.waiting = false;
-                param.1.wake();
+                param.2.wake();
             }
 
-            let param = Box::new((self.state.clone(), cx.waker().clone()));
-            log::trace!("calling taos_query_a");
+            let param = Box::new((
+                Arc::downgrade(&self.state),
+                self.sql.as_ptr(),
+                cx.waker().clone(),
+            ));
             self.raw.query_a(
                 self.sql.as_ref(),
                 taos_optin_query_future_callback as _,
                 Box::into_raw(param) as *mut _,
             );
-            log::trace!("waiting taos_query_a callback");
             Poll::Pending
         }
     }

@@ -6,7 +6,7 @@ use std::{
 };
 
 use once_cell::sync::OnceCell;
-use raw::{ApiEntry, RawRes, RawTaos, SharedState};
+use raw::{ApiEntry, BlockState, RawRes, RawTaos};
 // use taos_error::Error as RawError;
 use taos_query::{
     prelude::{Field, Precision, RawError, RawMeta},
@@ -588,7 +588,7 @@ pub struct ResultSet {
     raw: RawRes,
     fields: OnceCell<Vec<Field>>,
     summary: UnsafeCell<(usize, usize)>,
-    state: Arc<UnsafeCell<SharedState>>,
+    state: Arc<UnsafeCell<BlockState>>,
 }
 
 impl ResultSet {
@@ -597,7 +597,7 @@ impl ResultSet {
             raw,
             fields: OnceCell::new(),
             summary: UnsafeCell::new((0, 0)),
-            state: Arc::new(UnsafeCell::new(SharedState::default())),
+            state: Arc::new(UnsafeCell::new(BlockState::default())),
         }
     }
 
@@ -763,7 +763,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn long_query_async() -> Result<(), Error> {
         use taos_query::prelude::*;
-        let builder = TaosBuilder::from_dsn(DSN_V3)?;
+        let builder = TaosBuilder::from_dsn(DSN_V2)?;
         let taos = builder.build().await?;
         let mut set = taos.query("select * from test.meters limit 100000").await?;
 
@@ -773,6 +773,7 @@ mod tests {
                 Ok(())
             })
             .await?;
+        println!("summary: {:?}", set.summary());
 
         let mut set = taos.query("select * from test.meters limit 100000").await?;
 
@@ -793,6 +794,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn show_databases_async() -> Result<(), Error> {
         use taos_query::prelude::*;
+
+        std::env::set_var("RUST_LOG", "trace");
+        let _ = pretty_env_logger::try_init();
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
         let taos = builder.build().await?;
         let mut set = taos.query("show databases").await?;
@@ -843,7 +847,7 @@ mod tests {
         use taos_query::prelude::*;
         let builder = TaosBuilder::from_dsn(DSN_V2)?;
         let taos = builder.build().await?;
-        let mut set = taos.query("show databases").await?;
+        let mut set = taos.query("show databases abc").await?;
 
         let mut rows = set.rows();
         let mut nrows = 0;
