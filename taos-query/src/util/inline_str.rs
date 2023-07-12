@@ -65,6 +65,9 @@ macro_rules! _impl_inline_str {
 
             impl InlineStr<$ty> {
 
+                /// # Safety
+                ///
+                /// Do not use it directly.
                 pub unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
                     &*std::mem::transmute::<*const u8, *const InlineStr<$ty>>(ptr)
                 }

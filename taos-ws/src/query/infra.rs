@@ -85,7 +85,7 @@ fn test_serde_send() {
         req_id: 1,
         req: WsConnReq::new("root", "taosdata"),
     };
-    let v = serde_json::to_value(&s).unwrap();
+    let v = serde_json::to_value(s).unwrap();
     let j = serde_json::json!({
         "action": "conn",
         "args": {
@@ -197,7 +197,7 @@ fn test_serde_recv_data() {
         "action": "conn",
         "req_id": 1
     }"#;
-    let d: WsRecv = serde_json::from_str(&json).unwrap();
+    let d: WsRecv = serde_json::from_str(json).unwrap();
     dbg!(d);
 }
 
@@ -219,6 +219,6 @@ mod tests {
 
     #[test]
     fn dsn_error() {
-        TaosBuilder::from_dsn("").unwrap_err();
+        let _ = TaosBuilder::from_dsn("").unwrap_err();
     }
 }

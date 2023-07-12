@@ -3,6 +3,7 @@ use taos_query::stmt::Bindable;
 
 use crate::sys::Stmt as NativeStmt;
 use taos_query::prelude::ColumnView;
+use taos_query::RawResult;
 use taos_ws::Stmt as WsStmt;
 
 #[derive(Debug)]
@@ -15,9 +16,7 @@ enum StmtInner {
 pub struct Stmt(StmtInner);
 
 impl Bindable<super::Taos> for Stmt {
-    type Error = super::Error;
-
-    fn init(taos: &super::Taos) -> Result<Self, Self::Error> {
+    fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
             crate::TaosInner::Native(taos) => NativeStmt::init(taos)
                 .map(StmtInner::Native)
@@ -30,7 +29,7 @@ impl Bindable<super::Taos> for Stmt {
         }
     }
 
-    fn prepare<S: AsRef<str>>(&mut self, sql: S) -> Result<&mut Self, Self::Error> {
+    fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
         match &mut self.0 {
             StmtInner::Native(stmt) => {
                 stmt.prepare(sql)?;
@@ -42,7 +41,7 @@ impl Bindable<super::Taos> for Stmt {
         Ok(self)
     }
 
-    fn set_tbname<S: AsRef<str>>(&mut self, name: S) -> Result<&mut Self, Self::Error> {
+    fn set_tbname<S: AsRef<str>>(&mut self, name: S) -> RawResult<&mut Self> {
         match &mut self.0 {
             StmtInner::Native(stmt) => {
                 stmt.set_tbname(name)?;
@@ -54,7 +53,7 @@ impl Bindable<super::Taos> for Stmt {
         Ok(self)
     }
 
-    fn set_tags(&mut self, tags: &[Value]) -> Result<&mut Self, Self::Error> {
+    fn set_tags(&mut self, tags: &[Value]) -> RawResult<&mut Self> {
         match &mut self.0 {
             StmtInner::Native(stmt) => {
                 stmt.set_tags(tags)?;
@@ -66,7 +65,7 @@ impl Bindable<super::Taos> for Stmt {
         Ok(self)
     }
 
-    fn bind(&mut self, params: &[ColumnView]) -> Result<&mut Self, Self::Error> {
+    fn bind(&mut self, params: &[ColumnView]) -> RawResult<&mut Self> {
         match &mut self.0 {
             StmtInner::Native(stmt) => {
                 stmt.bind(params)?;
@@ -78,7 +77,7 @@ impl Bindable<super::Taos> for Stmt {
         Ok(self)
     }
 
-    fn add_batch(&mut self) -> Result<&mut Self, Self::Error> {
+    fn add_batch(&mut self) -> RawResult<&mut Self> {
         match &mut self.0 {
             StmtInner::Native(stmt) => {
                 stmt.add_batch()?;
@@ -90,7 +89,7 @@ impl Bindable<super::Taos> for Stmt {
         Ok(self)
     }
 
-    fn execute(&mut self) -> Result<usize, Self::Error> {
+    fn execute(&mut self) -> RawResult<usize> {
         match &mut self.0 {
             StmtInner::Native(stmt) => Ok(stmt.execute()?),
             StmtInner::Ws(stmt) => Ok(stmt.execute()?),
@@ -109,16 +108,17 @@ impl Bindable<super::Taos> for Stmt {
 mod tests {
     use serde::Deserialize;
     use std::str::FromStr;
+    use taos_query::RawResult;
 
     #[test]
-    fn test_bindable_sync() -> anyhow::Result<()> {
+    fn test_bindable_sync() -> RawResult<()> {
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
 
         use crate::sync::*;
-        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        let taos = TaosBuilder::from_dsn(dsn)?.build()?;
         taos.exec_many([
             "drop database if exists taos_test_bindable",
             "create database taos_test_bindable keep 36500",
@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_bindable() -> anyhow::Result<()> {
+    async fn test_bindable() -> RawResult<()> {
         use crate::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://".to_string());

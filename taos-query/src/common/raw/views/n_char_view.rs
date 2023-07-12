@@ -2,7 +2,7 @@ use std::{
     cell::{RefCell, UnsafeCell},
     ffi::c_void,
     fmt::Debug,
-    sync::Arc,
+    rc::Rc,
 };
 
 use super::{IsColumnView, Offsets, Version};
@@ -25,7 +25,7 @@ pub struct NCharView {
     pub is_chars: UnsafeCell<bool>,
     pub(crate) version: Version,
     /// Layout should set as NCHAR_DECODED when raw data decoded.
-    pub(crate) layout: Arc<RefCell<Layout>>,
+    pub(crate) layout: Rc<RefCell<Layout>>,
 }
 impl Clone for NCharView {
     fn clone(&self) -> Self {
@@ -36,7 +36,7 @@ impl Clone for NCharView {
             offsets: self.offsets.clone(),
             data: self.data.clone(),
             is_chars: UnsafeCell::new(false),
-            version: self.version.clone(),
+            version: self.version,
             layout: self.layout.clone(),
         }
     }
@@ -48,8 +48,7 @@ impl IsColumnView for NCharView {
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         Self::from_iter::<String, _, _, _>(
             iter.map(|v| v.to_str().map(|v| v.into_owned()))
-                .collect_vec()
-                .into_iter(),
+                .collect_vec(),
         )
     }
 }
@@ -177,7 +176,7 @@ impl NCharView {
         if range.end > self.len() {
             range.end = self.len();
         }
-        if range.len() == 0 {
+        if range.is_empty() {
             return None;
         }
         let (offsets, range) = unsafe { self.offsets.slice_unchecked(range.clone()) };
@@ -191,7 +190,7 @@ impl NCharView {
             offsets,
             data,
             is_chars: UnsafeCell::new(false),
-            version: self.version.clone(),
+            version: self.version,
             layout: self.layout.clone(),
         })
     }
@@ -237,7 +236,7 @@ impl NCharView {
             );
             wtr.write_all(offsets_bytes)?;
             wtr.write_all(&bytes)?;
-            return Ok(offsets_bytes.len() + bytes.len());
+            Ok(offsets_bytes.len() + bytes.len())
         }
         // }
         // let offsets = self.offsets.as_bytes();
@@ -261,7 +260,7 @@ impl NCharView {
             if let Some(s) = i {
                 let s: &str = s.as_ref();
                 offsets.push(data.len() as i32);
-                data.write_inlined_str::<2>(&s).unwrap();
+                data.write_inlined_str::<2>(s).unwrap();
             } else {
                 offsets.push(-1);
             }
@@ -279,7 +278,7 @@ impl NCharView {
             data: data.into(),
             is_chars: UnsafeCell::new(false),
             version: Version::V2,
-            layout: Arc::new(RefCell::new({
+            layout: Rc::new(RefCell::new({
                 let mut layout = Layout::default();
                 layout.with_nchar_decoded();
                 layout

@@ -232,13 +232,15 @@ impl RawRes {
 
             if current.num > 0 {
                 // has next block.
-                let mut raw = RawBlock::parse_from_ptr_v2(
-                    current.block as _,
-                    fields,
-                    self.fetch_lengths(),
-                    current.num as usize,
-                    precision,
-                );
+                let mut raw = unsafe {
+                    RawBlock::parse_from_ptr_v2(
+                        current.block as _,
+                        fields,
+                        self.fetch_lengths(),
+                        current.num,
+                        precision,
+                    )
+                };
                 // let mut raw = unsafe { RawBlock::parse_from_ptr(current.block as _, precision) };
                 raw.with_field_names(fields.iter().map(|f| f.name()));
                 if current.num == 0 {

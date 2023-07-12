@@ -55,7 +55,7 @@ where
         match self.inner.next() {
             Some((field, value)) => {
                 self.value = Some(value);
-                let field = &*field;
+                let field = field;
                 seed.deserialize(field.name().into_deserializer()).map(Some)
             }
             _ => Ok(None),

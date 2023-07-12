@@ -182,9 +182,7 @@ pub(super) mod tmq {
             let assignments =
                 unsafe { std::slice::from_raw_parts(*assignments_ptr, assignment_num as usize) };
 
-            let assignments = assignments.to_vec();
-
-            assignments
+            assignments.to_vec()
         }
 
         pub fn offset_seek(

@@ -31,12 +31,12 @@ pub fn cfg(attr: impl Into<TokenStream>, item: impl Into<TokenStream>) -> TokenS
             });
         }
     }
-    return quote! {
+    quote! {
         #[cfg(#cfg)]
         #item
 
         #backport
-    };
+    }
 }
 
 /// Convert a extern "C" foreign function to a no_mangle Rust fn.

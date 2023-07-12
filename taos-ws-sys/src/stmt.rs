@@ -51,7 +51,7 @@ pub unsafe extern "C" fn ws_stmt_prepare(
             }
 
             if let Err(e) = stmt.prepare(sql) {
-                let errno = e.errno();
+                let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
             } else {
@@ -70,7 +70,7 @@ pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_c
             let name = CStr::from_ptr(name).to_str().unwrap();
 
             if let Err(e) = stmt.set_tbname(name) {
-                let errno = e.errno();
+                let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
             } else {
@@ -98,7 +98,7 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
                 .collect_vec();
 
             if let Err(e) = stmt.set_tbname_tags(name, &tags) {
-                let errno = e.errno();
+                let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
             } else {
@@ -261,7 +261,7 @@ impl TaosMultiBind {
                             .map(|i| {
                                 let ptr = (self.buffer as *const u8)
                                     .offset(self.buffer_length as isize * i as isize);
-                                let len = *self.length.offset(i as isize) as usize;
+                                let len = *self.length.add(i) as usize;
                                 let bytes = std::slice::from_raw_parts(ptr, len);
                                 std::str::from_utf8_unchecked(bytes)
                             })
@@ -277,7 +277,7 @@ impl TaosMultiBind {
                             } else {
                                 let ptr = (self.buffer as *const u8)
                                     .offset(self.buffer_length as isize * i as isize);
-                                let len = *self.length.offset(i as isize) as usize;
+                                let len = *self.length.add(i) as usize;
                                 let bytes = std::slice::from_raw_parts(ptr, len);
                                 Some(std::str::from_utf8_unchecked(bytes))
                                 // Some(bytes.escape_ascii().to_string())
@@ -294,7 +294,7 @@ impl TaosMultiBind {
                             .map(|i| {
                                 let ptr = (self.buffer as *const u8)
                                     .offset(self.buffer_length as isize * i as isize);
-                                let len = *self.length.offset(i as isize) as usize;
+                                let len = *self.length.add(i) as usize;
                                 let bytes = std::slice::from_raw_parts(ptr, len);
                                 std::str::from_utf8_unchecked(bytes)
                             })
@@ -310,7 +310,7 @@ impl TaosMultiBind {
                             } else {
                                 let ptr = (self.buffer as *const u8)
                                     .offset(self.buffer_length as isize * i as isize);
-                                let len = *self.length.offset(i as isize) as usize;
+                                let len = *self.length.add(i) as usize;
                                 let bytes = std::slice::from_raw_parts(ptr, len);
                                 Some(std::str::from_utf8_unchecked(bytes))
                             }
@@ -329,7 +329,7 @@ impl TaosMultiBind {
                             .map(|i| {
                                 let ptr = (self.buffer as *const u8)
                                     .offset(self.buffer_length as isize * i as isize);
-                                let len = *self.length.offset(i as isize) as usize;
+                                let len = *self.length.add(i) as usize;
                                 let bytes = std::slice::from_raw_parts(ptr, len);
                                 std::str::from_utf8_unchecked(bytes)
                                 // serde_json::from_slice::<serde_json::Value>(bytes)
@@ -347,7 +347,7 @@ impl TaosMultiBind {
                             } else {
                                 let ptr = (self.buffer as *const u8)
                                     .offset(self.buffer_length as isize * i as isize);
-                                let len = *self.length.offset(i as isize) as usize;
+                                let len = *self.length.add(i) as usize;
                                 let bytes = std::slice::from_raw_parts(ptr, len);
                                 Some(serde_json::from_slice::<serde_json::Value>(bytes).unwrap())
                             }
@@ -490,7 +490,7 @@ pub unsafe extern "C" fn ws_stmt_set_tags(
                 .collect_vec();
 
             if let Err(e) = stmt.set_tags(&columns) {
-                let errno = e.errno();
+                let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
             } else {
@@ -515,7 +515,7 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
                 .collect();
 
             if let Err(e) = block_in_place_or_global(stmt.stmt_bind(columns)) {
-                let errno = e.errno();
+                let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
             } else {
@@ -531,7 +531,7 @@ pub unsafe extern "C" fn ws_stmt_add_batch(stmt: *mut WS_STMT) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => {
             if let Err(e) = stmt.add_batch() {
-                let errno = e.errno();
+                let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
             } else {
@@ -552,7 +552,7 @@ pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut
                 0
             }
             Err(e) => {
-                let errno = e.errno();
+                let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
             }
@@ -632,7 +632,7 @@ mod tests {
             let params = vec![
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
                 TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
-                TaosMultiBind::from_binary_vec(&vec![None, Some("涛思数据")]),
+                TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
             ];
             let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
             if code != 0 {
@@ -816,7 +816,7 @@ mod tests {
                                 }
                             }
                         }
-                        println!("");
+                        println!();
                     }
                 }
             }
@@ -864,7 +864,7 @@ mod tests {
             }
             ws_stmt_set_tbname(stmt, b"ws_stmt_t.t1\0".as_ptr() as _);
 
-            let tags = vec![TaosMultiBind::from_string_vec(&vec![Some(
+            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
             )])];
 
@@ -873,7 +873,7 @@ mod tests {
             let params = vec![
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
                 TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
-                TaosMultiBind::from_binary_vec(&vec![None, Some("涛思数据")]),
+                TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
             ];
             let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
             if code != 0 {

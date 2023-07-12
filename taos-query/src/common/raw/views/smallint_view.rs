@@ -78,7 +78,7 @@ impl SmallIntView {
 
     #[inline(always)]
     unsafe fn get_raw_at(&self, index: usize) -> *const Item {
-        self.data.as_ptr().offset((index * ITEM_SIZE) as isize) as _
+        self.data.as_ptr().add(index * ITEM_SIZE) as _
     }
 
     /// Get nullable value at `row` index.
@@ -100,7 +100,7 @@ impl SmallIntView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|v| BorrowedValue::SmallInt(v))
+            .map(BorrowedValue::SmallInt)
             .unwrap_or(BorrowedValue::Null(Ty::SmallInt))
     }
 
@@ -128,7 +128,7 @@ impl SmallIntView {
         if range.end > self.len() {
             range.end = self.len();
         }
-        if range.len() == 0 {
+        if range.is_empty() {
             return None;
         }
 

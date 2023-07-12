@@ -28,6 +28,23 @@ pub(super) enum Inner {
     Any(#[from] anyhow::Error),
 }
 
+impl Clone for Inner {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Empty { .. } => Self::Empty {
+                #[cfg(nightly)]
+                backtrace: Backtrace::force_capture(),
+            },
+            Self::Raw { raw, .. } => Self::Raw {
+                raw: raw.clone(),
+                #[cfg(nightly)]
+                backtrace: Backtrace::force_capture(),
+            },
+            Self::Any(any) => Self::Any(anyhow::format_err!("{:#}", any)),
+        }
+    }
+}
+
 impl Debug for Inner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

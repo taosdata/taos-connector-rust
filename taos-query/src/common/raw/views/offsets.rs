@@ -40,11 +40,7 @@ impl Offsets {
 
     pub unsafe fn get_unchecked(&self, index: usize) -> i32 {
         unsafe {
-            std::ptr::read_unaligned(
-                self.0
-                    .as_ptr()
-                    .offset((index * std::mem::size_of::<i32>()) as isize) as _,
-            )
+            std::ptr::read_unaligned(self.0.as_ptr().add(index * std::mem::size_of::<i32>()) as _)
         }
     }
 
@@ -103,7 +99,7 @@ impl<'a> IntoIterator for &'a Offsets {
     type IntoIter = std::slice::Iter<'a, i32>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.deref().into_iter()
+        self.deref().iter()
     }
 }
 
@@ -186,15 +182,15 @@ impl DerefMut for OffsetsMut {
     }
 }
 
-impl IntoIterator for OffsetsMut {
-    type Item = i32;
+// impl IntoIterator for OffsetsMut {
+//     type Item = i32;
 
-    type IntoIter = std::vec::IntoIter<i32>;
+//     type IntoIter = std::vec::IntoIter<i32>;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.as_slice().to_vec().into_iter()
-    }
-}
+//     fn into_iter(self) -> Self::IntoIter {
+//         self.as_slice().to_vec().into_iter()
+//     }
+// }
 
 impl<'a> IntoIterator for &'a OffsetsMut {
     type Item = &'a i32;
@@ -202,7 +198,7 @@ impl<'a> IntoIterator for &'a OffsetsMut {
     type IntoIter = std::slice::Iter<'a, i32>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.deref().into_iter()
+        self.deref().iter()
     }
 }
 
@@ -212,7 +208,7 @@ impl<'a> IntoIterator for &'a mut OffsetsMut {
     type IntoIter = std::slice::IterMut<'a, i32>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.deref_mut().into_iter()
+        self.deref_mut().iter_mut()
     }
 }
 

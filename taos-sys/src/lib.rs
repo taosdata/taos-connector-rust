@@ -97,48 +97,37 @@ impl Drop for Taos {
 }
 
 impl taos_query::Queryable for Taos {
-    type Error = RawError;
-
     type ResultSet = ResultSet;
 
-    fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error> {
+    fn query<T: AsRef<str>>(&self, sql: T) -> RawResult<Self::ResultSet> {
         log::trace!("Query with SQL: {}", sql.as_ref());
         self.raw.query(sql.as_ref())
     }
 
-    fn query_with_req_id<T: AsRef<str>>(
-        &self,
-        sql: T,
-        req_id: u64,
-    ) -> Result<Self::ResultSet, Self::Error> {
+    fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> RawResult<Self::ResultSet> {
         log::trace!("Query with SQL: {}", sql.as_ref());
         self.raw.query_with_req_id(sql.as_ref(), req_id)
     }
 
-    fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
+    fn write_raw_meta(&self, meta: &RawMeta) -> RawResult<()> {
         let raw = meta.as_raw_data_t();
         self.raw.write_raw_meta(raw)
     }
 
-    fn write_raw_block(&self, block: &RawBlock) -> Result<(), Self::Error> {
+    fn write_raw_block(&self, block: &RawBlock) -> RawResult<()> {
         self.raw.write_raw_block(block)
     }
 
-    fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
+    fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
         self.raw.put(data)
     }
 }
 
 #[async_trait::async_trait]
 impl AsyncQueryable for Taos {
-    type Error = RawError;
-
     type AsyncResultSet = ResultSet;
 
-    async fn query<T: AsRef<str> + Send + Sync>(
-        &self,
-        sql: T,
-    ) -> Result<Self::AsyncResultSet, Self::Error> {
+    async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
         log::trace!("Async query with SQL: {}", sql.as_ref());
         self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
     }
@@ -147,20 +136,20 @@ impl AsyncQueryable for Taos {
         &self,
         sql: T,
         req_id: u64,
-    ) -> Result<Self::AsyncResultSet, Self::Error> {
+    ) -> RawResult<Self::AsyncResultSet> {
         log::trace!("Async query with SQL: {}", sql.as_ref());
         self.raw.query_async(sql.as_ref()).await.map(ResultSet::new)
     }
 
-    async fn write_raw_meta(&self, meta: &taos_query::common::RawMeta) -> Result<(), Self::Error> {
+    async fn write_raw_meta(&self, meta: &taos_query::common::RawMeta) -> RawResult<()> {
         self.raw.write_raw_meta(meta.as_raw_data_t())
     }
 
-    async fn write_raw_block(&self, block: &RawBlock) -> Result<(), Self::Error> {
+    async fn write_raw_block(&self, block: &RawBlock) -> RawResult<()> {
         self.raw.write_raw_block(block)
     }
 
-    async fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
+    async fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
         todo!()
     }
 }
@@ -195,7 +184,7 @@ impl AsyncQueryable for Taos {
 /// #[tokio::main]
 /// async fn main() -> anyhow::Result<()> {
 ///     let builder = TaosBuilder::from_dsn("taos://localhost:6030")?;
-///     let taos = builder.build()?;
+///     let taos = builder.build().await?;
 ///     let mut query = taos.query("show databases").await?;
 ///
 ///     while let Some(row) = query.rows().try_next().await? {
@@ -217,7 +206,7 @@ pub struct TaosBuilder {
 }
 
 impl TaosBuilder {
-    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> Result<Self, Error> {
+    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
         let mut builder = TaosBuilder::default();
         if let Some(addr) = dsn.addresses.into_iter().next() {
@@ -247,16 +236,16 @@ impl TaosBuilder {
         // let raw = RawTaos::connect(host, user, pass, db, port)
         Ok(builder)
     }
-    fn inner_connection(&self) -> Result<&Taos, Error> {
+    fn inner_connection(&self) -> RawResult<&Taos> {
         use taos_query::prelude::sync::TBuilder;
         self.inner_conn
-            .get_or_try_init(|| <Self as TBuilder>::build(&self))
+            .get_or_try_init(|| <Self as TBuilder>::build(self))
     }
 
-    async fn async_inner_connection(&self) -> Result<&Taos, Error> {
+    async fn async_inner_connection(&self) -> RawResult<&Taos> {
         match self.inner_conn.get() {
             None => {
-                let inner = <Self as AsyncTBuilder>::build(&self).await;
+                let inner = <Self as AsyncTBuilder>::build(self).await;
                 self.inner_conn.get_or_try_init(|| inner)
             }
             Some(v) => Ok(v),
@@ -288,14 +277,12 @@ impl Display for Error {
 impl taos_query::TBuilder for TaosBuilder {
     type Target = Taos;
 
-    type Error = Error;
-
     fn available_params() -> &'static [&'static str] {
         const PARAMS: &[&str] = &["configDir"];
         PARAMS
     }
 
-    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
         let mut builder = TaosBuilder::default();
         if let Some(addr) = dsn.addresses.into_iter().next() {
@@ -329,7 +316,7 @@ impl taos_query::TBuilder for TaosBuilder {
     fn client_version() -> &'static str {
         RawTaos::version()
     }
-    fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
+    fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
         conn.raw.query("select 1")?;
         Ok(())
     }
@@ -338,7 +325,7 @@ impl taos_query::TBuilder for TaosBuilder {
         true
     }
 
-    fn build(&self) -> Result<Self::Target, Self::Error> {
+    fn build(&self) -> RawResult<Self::Target> {
         let raw = RawTaos::connect(
             self.host
                 .as_ref()
@@ -362,7 +349,7 @@ impl taos_query::TBuilder for TaosBuilder {
         Ok(Taos { raw })
     }
 
-    fn server_version(&self) -> Result<&str, Self::Error> {
+    fn server_version(&self) -> RawResult<&str> {
         if let Some(v) = self.server_version.get() {
             Ok(v.as_str())
         } else {
@@ -376,7 +363,7 @@ impl taos_query::TBuilder for TaosBuilder {
         }
     }
 
-    fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    fn is_enterprise_edition(&self) -> RawResult<bool> {
         let taos = self.inner_connection()?;
         use taos_query::prelude::sync::Queryable;
         let grant: Option<(String, bool)> = Queryable::query_one(
@@ -413,9 +400,7 @@ impl taos_query::TBuilder for TaosBuilder {
 impl taos_query::AsyncTBuilder for TaosBuilder {
     type Target = Taos;
 
-    type Error = Error;
-
-    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
         let mut builder = TaosBuilder::default();
         if let Some(addr) = dsn.addresses.into_iter().next() {
@@ -449,7 +434,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     fn client_version() -> &'static str {
         RawTaos::version()
     }
-    async fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
+    async fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
         conn.raw.query("select 1")?;
         Ok(())
     }
@@ -458,7 +443,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         true
     }
 
-    async fn build(&self) -> Result<Self::Target, Self::Error> {
+    async fn build(&self) -> RawResult<Self::Target> {
         let raw = RawTaos::connect(
             self.host
                 .as_ref()
@@ -482,7 +467,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         Ok(Taos { raw })
     }
 
-    async fn server_version(&self) -> Result<&str, Self::Error> {
+    async fn server_version(&self) -> RawResult<&str> {
         if let Some(v) = self.server_version.get() {
             Ok(v.as_str())
         } else {
@@ -498,7 +483,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         }
     }
 
-    async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    async fn is_enterprise_edition(&self) -> RawResult<bool> {
         let taos = self.async_inner_connection().await?;
         use taos_query::prelude::AsyncQueryable;
         let grant: Option<(String, bool)> = AsyncQueryable::query_one(
@@ -585,21 +570,21 @@ impl ResultSet {
         self.raw.affected_rows() as _
     }
 
-    pub(crate) fn fetch_raw_block(&self) -> Result<Option<RawBlock>, RawError> {
+    pub(crate) fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
         self.raw.fetch_raw_block(self.fields())
     }
 
     pub(crate) fn fetch_raw_block_async(
         &self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<RawBlock>, RawError>> {
+    ) -> Poll<RawResult<Option<RawBlock>>> {
         self.raw
             .fetch_raw_block_async(self.fields(), self.precision(), &self.state, cx)
     }
 }
 
 impl Iterator for ResultSet {
-    type Item = Result<RawBlock, RawError>;
+    type Item = RawResult<RawBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.raw
@@ -617,7 +602,6 @@ impl Iterator for ResultSet {
 }
 
 impl taos_query::Fetchable for ResultSet {
-    type Error = RawError;
     fn affected_rows(&self) -> i32 {
         self.affected_rows()
     }
@@ -638,14 +622,12 @@ impl taos_query::Fetchable for ResultSet {
         self.update_summary(nrows)
     }
 
-    fn fetch_raw_block(&mut self) -> Result<Option<RawBlock>, Self::Error> {
+    fn fetch_raw_block(&mut self) -> RawResult<Option<RawBlock>> {
         self.raw.fetch_raw_block(self.fields())
     }
 }
 
 impl AsyncFetchable for ResultSet {
-    type Error = RawError;
-
     fn affected_rows(&self) -> i32 {
         self.affected_rows()
     }
@@ -665,7 +647,7 @@ impl AsyncFetchable for ResultSet {
     fn fetch_raw_block(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<Option<RawBlock>, Self::Error>> {
+    ) -> std::task::Poll<RawResult<Option<RawBlock>>> {
         self.fetch_raw_block_async(cx)
     }
 
@@ -688,14 +670,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn show_databases() -> Result<(), Error> {
+    fn show_databases() -> RawResult<()> {
         let null = std::ptr::null();
         let taos = RawTaos::connect(null, null, null, null, 0)?;
         let mut set = taos.query("show databases")?;
 
         for raw in &mut set {
             let raw = raw?;
-            for (col, view) in raw.columns().into_iter().enumerate() {
+            for (col, view) in raw.columns().enumerate() {
                 for (row, value) in view.iter().enumerate() {
                     println!("Value at (row: {}, col: {}) is: {}", row, col, value);
                 }

@@ -2,23 +2,6 @@ use std::time::Duration;
 
 use super::*;
 
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error(transparent)]
-    Dsn(#[from] DsnError),
-    #[error(transparent)]
-    Raw(#[from] RawError),
-    #[error(transparent)]
-    Native(#[from] crate::sys::Error),
-    #[error(transparent)]
-    Ws(#[from] taos_ws::Error),
-    #[error(transparent)]
-    WsQueryError(#[from] taos_ws::query::asyn::Error),
-    #[error(transparent)]
-    WsTmqError(#[from] taos_ws::consumer::Error),
-    #[error(transparent)]
-    Any(#[from] anyhow::Error),
-}
 #[derive(Debug)]
 enum TaosBuilderInner {
     Native(crate::sys::TaosBuilder),
@@ -43,13 +26,11 @@ pub struct ResultSet(ResultSetInner);
 impl taos_query::TBuilder for TaosBuilder {
     type Target = Taos;
 
-    type Error = Error;
-
     fn available_params() -> &'static [&'static str] {
         &[]
     }
 
-    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+    fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
         if dsn.params.contains_key("token") {
             dsn.protocol = Some("ws".to_string());
@@ -74,7 +55,7 @@ impl taos_query::TBuilder for TaosBuilder {
         ""
     }
 
-    fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
+    fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
         match &self.0 {
             TaosBuilderInner::Native(b) => match &mut conn.0 {
                 TaosInner::Native(taos) => {
@@ -98,7 +79,7 @@ impl taos_query::TBuilder for TaosBuilder {
         }
     }
 
-    fn build(&self) -> Result<Self::Target, Self::Error> {
+    fn build(&self) -> RawResult<Self::Target> {
         match &self.0 {
             TaosBuilderInner::Native(b) => Ok(Taos(TaosInner::Native(
                 <sys::TaosBuilder as taos_query::TBuilder>::build(b)?,
@@ -109,7 +90,7 @@ impl taos_query::TBuilder for TaosBuilder {
         }
     }
 
-    fn server_version(&self) -> Result<&str, Self::Error> {
+    fn server_version(&self) -> RawResult<&str> {
         match &self.0 {
             TaosBuilderInner::Native(b) => Ok(
                 <sys::TaosBuilder as taos_query::TBuilder>::server_version(b)?,
@@ -120,7 +101,7 @@ impl taos_query::TBuilder for TaosBuilder {
         }
     }
 
-    fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    fn is_enterprise_edition(&self) -> RawResult<bool> {
         match &self.0 {
             TaosBuilderInner::Native(b) => {
                 Ok(<sys::TaosBuilder as taos_query::TBuilder>::is_enterprise_edition(b)?)
@@ -136,9 +117,7 @@ impl taos_query::TBuilder for TaosBuilder {
 impl taos_query::AsyncTBuilder for TaosBuilder {
     type Target = Taos;
 
-    type Error = Error;
-
-    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+    fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
         if dsn.params.contains_key("token") && dsn.protocol.is_none() {
             dsn.protocol.replace("wss".to_string());
@@ -163,7 +142,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         ""
     }
 
-    async fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
+    async fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
         match &self.0 {
             TaosBuilderInner::Native(b) => match &mut conn.0 {
                 TaosInner::Native(taos) => Ok(b.ping(taos).await?),
@@ -185,14 +164,14 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         }
     }
 
-    async fn build(&self) -> Result<Self::Target, Self::Error> {
+    async fn build(&self) -> RawResult<Self::Target> {
         match &self.0 {
             TaosBuilderInner::Native(b) => Ok(Taos(TaosInner::Native(b.build().await?))),
             TaosBuilderInner::Ws(b) => Ok(Taos(TaosInner::Ws(b.build().await?))),
         }
     }
 
-    async fn server_version(&self) -> Result<&str, Self::Error> {
+    async fn server_version(&self) -> RawResult<&str> {
         match &self.0 {
             TaosBuilderInner::Native(b) => {
                 Ok(<sys::TaosBuilder as taos_query::AsyncTBuilder>::server_version(b).await?)
@@ -203,7 +182,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         }
     }
 
-    async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    async fn is_enterprise_edition(&self) -> RawResult<bool> {
         match &self.0 {
             TaosBuilderInner::Native(b) => Ok(
                 <sys::TaosBuilder as taos_query::AsyncTBuilder>::is_enterprise_edition(b).await?,
@@ -214,8 +193,6 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 }
 
 impl AsyncFetchable for ResultSet {
-    type Error = Error;
-
     fn affected_rows(&self) -> i32 {
         match &self.0 {
             ResultSetInner::Native(rs) => {
@@ -260,7 +237,7 @@ impl AsyncFetchable for ResultSet {
     fn fetch_raw_block(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<Option<RawBlock>, Self::Error>> {
+    ) -> std::task::Poll<RawResult<Option<RawBlock>>> {
         match &mut self.0 {
             ResultSetInner::Native(rs) => {
                 <crate::sys::ResultSet as AsyncFetchable>::fetch_raw_block(rs, cx)
@@ -274,8 +251,6 @@ impl AsyncFetchable for ResultSet {
 }
 
 impl taos_query::Fetchable for ResultSet {
-    type Error = Error;
-
     fn affected_rows(&self) -> i32 {
         match &self.0 {
             ResultSetInner::Native(rs) => {
@@ -317,7 +292,7 @@ impl taos_query::Fetchable for ResultSet {
         }
     }
 
-    fn fetch_raw_block(&mut self) -> Result<Option<RawBlock>, Self::Error> {
+    fn fetch_raw_block(&mut self) -> RawResult<Option<RawBlock>> {
         match &mut self.0 {
             ResultSetInner::Native(rs) => {
                 <crate::sys::ResultSet as taos_query::Fetchable>::fetch_raw_block(rs)
@@ -333,14 +308,9 @@ impl taos_query::Fetchable for ResultSet {
 
 #[async_trait::async_trait]
 impl AsyncQueryable for Taos {
-    type Error = Error;
-
     type AsyncResultSet = ResultSet;
 
-    async fn query<T: AsRef<str> + Send + Sync>(
-        &self,
-        sql: T,
-    ) -> Result<Self::AsyncResultSet, Self::Error> {
+    async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
         log::trace!("Query with SQL: {}", sql.as_ref());
         match &self.0 {
             TaosInner::Native(taos) => taos
@@ -362,7 +332,7 @@ impl AsyncQueryable for Taos {
         &self,
         sql: T,
         req_id: u64,
-    ) -> Result<Self::AsyncResultSet, Self::Error> {
+    ) -> RawResult<Self::AsyncResultSet> {
         log::trace!("Query with SQL: {}", sql.as_ref());
         match &self.0 {
             TaosInner::Native(_) => todo!(),
@@ -375,9 +345,9 @@ impl AsyncQueryable for Taos {
         }
     }
 
-    async fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
+    async fn write_raw_meta(&self, meta: &RawMeta) -> RawResult<()> {
         loop {
-            let ok: Result<(), Self::Error> = match &self.0 {
+            let ok: RawResult<()> = match &self.0 {
                 TaosInner::Native(taos) => taos.write_raw_meta(meta).await.map_err(Into::into),
                 TaosInner::Ws(taos) => taos.write_raw_meta(meta).await.map_err(Into::into),
             };
@@ -392,14 +362,14 @@ impl AsyncQueryable for Taos {
         }
     }
 
-    async fn write_raw_block(&self, block: &RawBlock) -> Result<(), Self::Error> {
+    async fn write_raw_block(&self, block: &RawBlock) -> RawResult<()> {
         match &self.0 {
             TaosInner::Native(taos) => taos.write_raw_block(block).await.map_err(Into::into),
             TaosInner::Ws(taos) => taos.write_raw_block(block).await.map_err(Into::into),
         }
     }
 
-    async fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
+    async fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
         match &self.0 {
             TaosInner::Native(_) => todo!(),
             TaosInner::Ws(taos) => taos.put(data).await.map_err(Into::into),
@@ -408,11 +378,9 @@ impl AsyncQueryable for Taos {
 }
 
 impl taos_query::Queryable for Taos {
-    type Error = Error;
-
     type ResultSet = ResultSet;
 
-    fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error> {
+    fn query<T: AsRef<str>>(&self, sql: T) -> RawResult<Self::ResultSet> {
         match &self.0 {
             TaosInner::Native(taos) => {
                 <crate::sys::Taos as taos_query::Queryable>::query(taos, sql)
@@ -427,11 +395,7 @@ impl taos_query::Queryable for Taos {
         }
     }
 
-    fn query_with_req_id<T: AsRef<str>>(
-        &self,
-        sql: T,
-        req_id: u64,
-    ) -> Result<Self::ResultSet, Self::Error> {
+    fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> RawResult<Self::ResultSet> {
         match &self.0 {
             TaosInner::Native(taos) => {
                 <crate::sys::Taos as taos_query::Queryable>::query_with_req_id(taos, sql, req_id)
@@ -448,7 +412,7 @@ impl taos_query::Queryable for Taos {
         }
     }
 
-    fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
+    fn write_raw_meta(&self, meta: &RawMeta) -> RawResult<()> {
         match &self.0 {
             TaosInner::Native(taos) => {
                 <crate::sys::Taos as taos_query::Queryable>::write_raw_meta(taos, meta)
@@ -461,7 +425,7 @@ impl taos_query::Queryable for Taos {
         }
     }
 
-    fn write_raw_block(&self, block: &RawBlock) -> Result<(), Self::Error> {
+    fn write_raw_block(&self, block: &RawBlock) -> RawResult<()> {
         match &self.0 {
             TaosInner::Native(taos) => {
                 <crate::sys::Taos as taos_query::Queryable>::write_raw_block(taos, block)
@@ -474,7 +438,7 @@ impl taos_query::Queryable for Taos {
         }
     }
 
-    fn put(&self, data: &taos_query::common::SmlData) -> Result<(), Self::Error> {
+    fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
         match &self.0 {
             TaosInner::Native(taos) => {
                 <crate::sys::Taos as taos_query::Queryable>::put(taos, data).map_err(Into::into)
@@ -493,7 +457,7 @@ mod tests {
     use taos_query::common::SchemalessPrecision;
     use taos_query::common::SchemalessProtocol;
     use taos_query::common::SmlDataBuilder;
-    use taos_query::{common::Timestamp, TBuilder};
+    use taos_query::{common::Timestamp, RawResult, TBuilder};
 
     use super::TaosBuilder;
 
@@ -507,11 +471,11 @@ mod tests {
     }
 
     #[test]
-    fn test_server_version() -> anyhow::Result<()> {
+    fn test_server_version() -> RawResult<()> {
         use taos_query::prelude::sync::*;
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
-        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
         assert!(builder.ready());
 
         let mut conn = builder.build().unwrap();
@@ -524,11 +488,11 @@ mod tests {
     }
 
     #[test]
-    fn test_server_is_enterprise_edition() -> anyhow::Result<()> {
+    fn test_server_is_enterprise_edition() -> RawResult<()> {
         use taos_query::prelude::sync::*;
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
-        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
         assert!(builder.ready());
 
         let mut conn = builder.build().unwrap();
@@ -543,11 +507,11 @@ mod tests {
     }
 
     #[test]
-    fn test_server_version_ws() -> anyhow::Result<()> {
+    fn test_server_version_ws() -> RawResult<()> {
         use taos_query::prelude::sync::*;
         let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;
-        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
         assert!(builder.ready());
 
         let mut conn = builder.build().unwrap();
@@ -560,11 +524,11 @@ mod tests {
     }
 
     #[test]
-    fn test_server_is_enterprise_edition_ws() -> anyhow::Result<()> {
+    fn test_server_is_enterprise_edition_ws() -> RawResult<()> {
         use taos_query::prelude::sync::*;
         let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;
-        let builder = TaosBuilder::from_dsn(&dsn).unwrap();
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
         assert!(builder.ready());
 
         let mut conn = builder.build().unwrap();
@@ -579,25 +543,25 @@ mod tests {
     }
 
     #[test]
-    fn sync_json_test_native() -> anyhow::Result<()> {
+    fn sync_json_test_native() -> RawResult<()> {
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://".to_string());
         sync_json_test(&dsn, "taos")
     }
 
     #[cfg(feature = "ws")]
     #[test]
-    fn sync_json_test_ws() -> anyhow::Result<()> {
+    fn sync_json_test_ws() -> RawResult<()> {
         sync_json_test("ws://", "ws")
     }
 
     #[cfg(feature = "ws")]
     #[test]
-    fn sync_json_test_taosws() -> anyhow::Result<()> {
+    fn sync_json_test_taosws() -> RawResult<()> {
         sync_json_test("taosws://", "taosws")
     }
 
     #[test]
-    fn null_test() -> anyhow::Result<()> {
+    fn null_test() -> RawResult<()> {
         use taos_query::prelude::sync::*;
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
@@ -625,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    fn query_with_req_id_ws() -> anyhow::Result<()> {
+    fn query_with_req_id_ws() -> RawResult<()> {
         use taos_query::prelude::sync::*;
         let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;
@@ -659,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn query_with_req_id_native() -> anyhow::Result<()> {
+    fn query_with_req_id_native() -> RawResult<()> {
         use taos_query::prelude::sync::*;
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
@@ -692,7 +656,7 @@ mod tests {
         Ok(())
     }
 
-    fn sync_json_test(dsn: &str, db: &str) -> anyhow::Result<()> {
+    fn sync_json_test(dsn: &str, db: &str) -> RawResult<()> {
         use taos_query::prelude::sync::*;
 
         std::env::set_var("RUST_LOG", "debug");
@@ -766,7 +730,6 @@ mod tests {
             cn2: String,
         }
 
-        use itertools::Itertools;
         let values: Vec<A> = rs.deserialize::<A>().try_collect()?;
 
         dbg!(&values);
@@ -807,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn test_put_line() -> anyhow::Result<()> {
+    fn test_put_line() -> RawResult<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
@@ -877,7 +840,7 @@ mod tests {
     }
 
     #[test]
-    fn test_put_telnet() -> anyhow::Result<()> {
+    fn test_put_telnet() -> RawResult<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
@@ -951,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn test_put_json() -> anyhow::Result<()> {
+    fn test_put_json() -> RawResult<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
@@ -1019,6 +982,7 @@ mod async_tests {
     use taos_query::common::SchemalessPrecision;
     use taos_query::common::SchemalessProtocol;
     use taos_query::common::SmlDataBuilder;
+    use taos_query::RawResult;
 
     use crate::AsyncQueryable;
     use crate::AsyncTBuilder;
@@ -1026,7 +990,7 @@ mod async_tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     #[ignore]
-    async fn test_put() -> anyhow::Result<()> {
+    async fn test_put() -> RawResult<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
         put_line().await?;
@@ -1034,7 +998,7 @@ mod async_tests {
         put_json().await
     }
 
-    async fn put_line() -> anyhow::Result<()> {
+    async fn put_line() -> RawResult<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         // std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
@@ -1106,7 +1070,7 @@ mod async_tests {
         Ok(())
     }
 
-    async fn put_telnet() -> anyhow::Result<()> {
+    async fn put_telnet() -> RawResult<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         // std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
@@ -1180,7 +1144,7 @@ mod async_tests {
         Ok(())
     }
 
-    async fn put_json() -> anyhow::Result<()> {
+    async fn put_json() -> RawResult<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         // std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
@@ -1249,7 +1213,7 @@ mod async_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-    async fn test_is_enterprise_edition() -> anyhow::Result<()> {
+    async fn test_is_enterprise_edition() -> RawResult<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
 
@@ -1263,7 +1227,7 @@ mod async_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-    async fn test_is_enterprise_edition_ws() -> anyhow::Result<()> {
+    async fn test_is_enterprise_edition_ws() -> RawResult<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
 

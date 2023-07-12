@@ -6,7 +6,7 @@ use bitvec::prelude::*;
 unsafe fn is_null_bit_slice(ptr: *const u8, row: usize) -> bool {
     let len = 1;
     let slice = std::slice::from_raw_parts(ptr, len);
-    let is_nulls: &BitSlice<u8, Msb0> = &BitSlice::from_slice_unchecked(slice);
+    let is_nulls: &BitSlice<u8, Msb0> = BitSlice::from_slice_unchecked(slice);
     is_nulls[row]
 }
 

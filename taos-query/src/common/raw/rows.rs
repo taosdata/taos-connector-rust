@@ -30,7 +30,7 @@ impl<'a> Iterator for IntoRowsIter<'a> {
             self.row += 1;
             Some(RowView {
                 raw: unsafe { &*(&self.raw as *const RawBlock) },
-                row: row,
+                row,
                 col: 0,
             })
         }
@@ -57,7 +57,7 @@ impl<'a> Iterator for RowsIter<'a> {
             self.row += 1;
             Some(RowView {
                 raw: unsafe { self.raw.as_mut() },
-                row: row,
+                row,
                 col: 0,
             })
         }
