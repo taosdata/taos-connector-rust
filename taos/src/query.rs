@@ -697,7 +697,6 @@ mod tests {
 
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
-        use taos_query::{Fetchable, Queryable};
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
         assert_eq!(client.exec(format!("drop database if exists {db}"))?, 0);
         assert_eq!(client.exec(format!("create database {db} keep 36500"))?, 0);

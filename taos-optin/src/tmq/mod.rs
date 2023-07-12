@@ -934,7 +934,7 @@ mod tests {
                     // meta data can be write to an database seamlessly by raw or json (to sql).
                     let sql = dbg!(json.to_string());
                     if let Err(err) = taos.exec(sql) {
-                        match err.errno() {
+                        match err.code() {
                             Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
                             Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
                             Code::COLUMN_EXISTS => log::trace!("column already exists"),
@@ -1093,7 +1093,7 @@ mod tests {
                         // dbg!(json);
                         let sql = dbg!(json.to_string());
                         if let Err(err) = taos.exec(sql).await {
-                            match err.errno() {
+                            match err.code() {
                                 Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
                                 Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
                                 Code::COLUMN_EXISTS => log::trace!("column already exists"),

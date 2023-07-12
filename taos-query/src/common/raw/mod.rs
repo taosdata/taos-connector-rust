@@ -803,11 +803,37 @@ impl<'a> Display for PrettyBlock<'a> {
             self.ncols()
         )?;
         table.set_titles(Row::from_iter(self.field_names()));
-        for row in self.raw.rows() {
-            table.add_row(Row::from_iter(
-                row.map(|s| s.1.to_string().unwrap_or_default()),
-            ));
+        let nrows = self.nrows();
+        const MAX_DISPLAY_ROWS: usize = 10;
+        let mut rows_iter = self.raw.rows();
+        if f.alternate() {
+            for row in rows_iter {
+                table.add_row(Row::from_iter(
+                    row.map(|s| s.1.to_string().unwrap_or_default()),
+                ));
+            }
+        } else {
+            if nrows > 2 * MAX_DISPLAY_ROWS {
+                for row in (&mut rows_iter).take(MAX_DISPLAY_ROWS) {
+                    table.add_row(Row::from_iter(
+                        row.map(|s| s.1.to_string().unwrap_or_default()),
+                    ));
+                }
+                table.add_row(Row::from_iter(std::iter::repeat("...").take(self.ncols())));
+                for row in rows_iter.skip(nrows - 2 * MAX_DISPLAY_ROWS) {
+                    table.add_row(Row::from_iter(
+                        row.map(|s| s.1.to_string().unwrap_or_default()),
+                    ));
+                }
+            } else {
+                for row in rows_iter {
+                    table.add_row(Row::from_iter(
+                        row.map(|s| s.1.to_string().unwrap_or_default()),
+                    ));
+                }
+            }
         }
+
         f.write_fmt(format_args!("{}", table))?;
         Ok(())
     }

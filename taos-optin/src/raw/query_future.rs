@@ -1,11 +1,11 @@
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
 
-use std::ffi::CStr;
+use std::ffi::{c_char, CStr};
 use std::future::Future;
 use std::os::raw::{c_int, c_void};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
@@ -28,7 +28,6 @@ unsafe impl<'a> Send for QueryFuture<'a> {}
 struct State {
     api: Arc<ApiEntry>,
     result: Option<Result<RawRes, RawError>>,
-    done: bool,
     waiting: bool,
     time: Instant,
     callback_cost: Option<Duration>,
@@ -39,7 +38,6 @@ impl State {
         State {
             api: api.clone(),
             result: None,
-            done: false,
             waiting: false,
             time: Instant::now(),
             callback_cost: None,
@@ -50,6 +48,12 @@ impl State {
 unsafe impl Send for State {}
 unsafe impl Sync for State {}
 
+struct AsyncQueryParam {
+    state: Weak<UnsafeCell<State>>,
+    sql: *mut c_char,
+    waker: Waker,
+}
+
 impl Unpin for State {}
 impl<'a> Unpin for QueryFuture<'a> {}
 impl<'a> Future for QueryFuture<'a> {
@@ -57,13 +61,13 @@ impl<'a> Future for QueryFuture<'a> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let state = unsafe { &mut *self.state.get() };
 
-        if state.done {
+        if let Some(result) = state.result.take() {
             let d = state.time.elapsed();
             log::trace!(
                 "Waken {:?} after callback received",
                 d - state.callback_cost.unwrap()
             );
-            Poll::Ready(state.result.take().unwrap())
+            Poll::Ready(result)
         } else {
             if state.waiting {
                 log::trace!("It's waked but still waiting for taos_query_a callback.");
@@ -77,46 +81,58 @@ impl<'a> Future for QueryFuture<'a> {
                 res: *mut TAOS_RES,
                 code: c_int,
             ) {
-                let param = Box::from_raw(param as *mut (Arc<UnsafeCell<State>>, Waker));
-                // let state = param.read();
-                let s = { &mut *param.0.get() };
-                let cost = s.time.elapsed();
-                log::trace!("Received query callback in {:?}", cost);
-                s.callback_cost.replace(cost);
-                if res.is_null() && code == 0 {
-                    unreachable!("query callback should be ok or error");
-                }
-                if (code & 0xffff) == 0x032C {
-                    log::warn!("Received 0x032C (Object is creating) error, retry");
+                let param = Box::from_raw(param as *mut AsyncQueryParam);
+                if let Some(state) = param.state.upgrade() {
+                    // let state = param.read();
+                    let s = { &mut *state.get() };
+                    let cost = s.time.elapsed();
+                    log::trace!("Received query callback in {:?}", cost);
+                    s.callback_cost.replace(cost);
+                    if res.is_null() && code == 0 {
+                        unreachable!("query callback should be ok or error");
+                    }
+                    if (code & 0xffff) == 0x032C {
+                        log::warn!("Received 0x032C (Object is creating) error, retry");
+                        s.waiting = false;
+                        (s.api.taos_free_result)(res);
+                        param.waker.wake();
+                        return;
+                    }
+
+                    let result = if code < 0 {
+                        let ptr = (s.api.taos_errstr)(res);
+                        (s.api.taos_free_result)(res);
+                        let err = RawError::new_with_context(
+                            code,
+                            CStr::from_ptr(ptr).to_string_lossy(),
+                            format!(
+                                "Error while querying with sql {:?}",
+                                CStr::from_ptr(param.sql)
+                            ),
+                        );
+                        Err(err)
+                    } else {
+                        Ok(RawRes::from_ptr_unchecked(s.api.clone(), res))
+                    };
+
+                    s.result.replace(result);
                     s.waiting = false;
-                    (s.api.taos_free_result)(res);
-                    param.1.wake();
-                    return;
-                }
-
-                let result = if code < 0 {
-                    let ptr = (s.api.taos_errstr)(res);
-                    (s.api.taos_free_result)(res);
-                    let err = RawError::new(code, CStr::from_ptr(ptr).to_string_lossy());
-                    Err(err)
+                    param.waker.wake();
                 } else {
-                    Ok(RawRes::from_ptr_unchecked(s.api.clone(), res))
-                };
-
-                s.result.replace(result);
-                s.done = true;
-                s.waiting = false;
-                param.1.wake();
+                    log::trace!("Query callback received but no listener");
+                }
             }
 
-            let param = Box::new((self.state.clone(), cx.waker().clone()));
-            log::trace!("calling taos_query_a");
+            let param = Box::new(AsyncQueryParam {
+                state: Arc::downgrade(&self.state),
+                sql: self.sql.as_ptr() as _,
+                waker: cx.waker().clone(),
+            });
             self.raw.query_a(
                 self.sql.as_ref(),
                 taos_optin_query_future_callback as _,
                 Box::into_raw(param) as *mut _,
             );
-            log::trace!("waiting taos_query_a callback");
             Poll::Pending
         }
     }

@@ -64,6 +64,10 @@ impl Debug for Error {
                 .field("source", &self.source)
                 .finish()
         } else {
+            // Error code prefix
+            if self.code != Code::FAILED {
+                write!(f, "[{:#06X}] ", self.code)?;
+            }
             if let Some(context) = &self.context {
                 f.write_fmt(format_args!("{}", context))?;
                 f.write_str("\n\nCaused by:\n")?;
@@ -153,6 +157,7 @@ impl<'a> From<&'a str> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
+    #[inline(always)]
     pub fn new_with_context(
         code: impl Into<Code>,
         err: impl Display,
@@ -466,7 +471,7 @@ fn test_bail() {
     let err = use_bail();
     dbg!(&err);
     assert!(err.is_err());
-    dbg!(err.unwrap_err().to_string());
+    println!("{:?}", err.unwrap_err());
 }
 
 #[test]

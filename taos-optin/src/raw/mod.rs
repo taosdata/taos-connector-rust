@@ -717,6 +717,12 @@ impl ApiEntry {
             Err(RawError::new(code, message))
         }
     }
+
+    pub(crate) fn err_str(&self, res: *mut c_void) -> &str {
+        unsafe { CStr::from_ptr((self.taos_errstr)(res)) }
+            .to_str()
+            .unwrap()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1236,7 +1242,7 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &Arc<UnsafeCell<SharedState>>,
+        state: &Arc<UnsafeCell<BlockState>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
@@ -1245,43 +1251,26 @@ impl RawRes {
             return Poll::Pending;
         }
 
-        if current.done {
-            current.done = false;
-            // handle errors
-            if current.code != 0 {
-                let err = RawError::new(current.code, self.err_as_str());
-                return Poll::Ready(Err(err));
-            }
-
-            if current.num > 0 {
-                log::trace!("current block has {}", current.num);
-                // has next block.
-                let mut raw = RawBlock::parse_from_ptr_v2(
-                    current.block as _,
-                    fields,
-                    self.fetch_lengths(),
-                    current.num as usize,
-                    precision,
-                );
-                // // let mut raw = unsafe { RawBlock::parse_from_ptr(current.block as _, precision) };
-                raw.with_field_names(fields.iter().map(|f| f.name()));
-
-                current.num = 0;
-                // if current.num == 0 {
-                //     // finish fetch loop.
-                //     current.done = true;
-                //     current.num = 0;
-                // } else {
-                //     current.done = false;
-                // }
-                Poll::Ready(Ok(Some(raw)))
-            } else {
-                // no data todo, stop stream.
-                Poll::Ready(Ok(None))
-            }
+        if let Some(res) = current.result.take() {
+            let item = res.map(|block| {
+                block.map(|(ptr, rows)| {
+                    assert!(rows > 0);
+                    log::trace!("{:p} current block has {} rows", self.as_ptr(), rows);
+                    // has next block.
+                    let mut raw = RawBlock::parse_from_ptr_v2(
+                        ptr as _,
+                        fields,
+                        self.fetch_lengths(),
+                        rows as usize,
+                        precision,
+                    );
+                    raw.with_field_names(fields.iter().map(|f| f.name()));
+                    raw
+                })
+            });
+            return Poll::Ready(item);
         } else {
             current.in_use = true;
-            current.num = 0;
             let param = Box::new((state.clone(), self.c.clone(), cx.waker().clone()));
             #[no_mangle]
             unsafe extern "C" fn taos_optin_fetch_rows_callback(
@@ -1289,17 +1278,30 @@ impl RawRes {
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
-                let param = param as *mut (Arc<UnsafeCell<SharedState>>, Arc<ApiEntry>, Waker);
+                let param = param as *mut (Arc<UnsafeCell<BlockState>>, Arc<ApiEntry>, Waker);
                 let param = Box::from_raw(param);
                 let state = &mut *param.0.get();
-                state.done = true;
+                let api = &*param.1;
+                // state.done = true;
                 state.in_use = false;
                 if num_of_rows < 0 {
-                    state.code = num_of_rows;
+                    // error
+                    state.result.replace(Err(RawError::new_with_context(
+                        num_of_rows,
+                        api.err_str(res),
+                        "fetch_rows_a",
+                    )));
                 } else {
-                    state.num = num_of_rows as _;
+                    // success
                     if num_of_rows > 0 {
-                        state.block = (param.1.taos_result_block.unwrap())(res).read() as _;
+                        // has a block
+                        let block = (param.1.taos_result_block.unwrap())(res).read() as _;
+                        state
+                            .result
+                            .replace(Ok(Some((block, num_of_rows as usize))));
+                    } else {
+                        // retrieving completed
+                        state.result.replace(Ok(None));
                     }
                 }
                 param.2.wake()
@@ -1319,7 +1321,7 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &Arc<UnsafeCell<SharedState>>,
+        state: &Arc<UnsafeCell<BlockState>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         if self.c.is_v3() {
@@ -1332,39 +1334,26 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &Arc<UnsafeCell<SharedState>>,
+        state: &Arc<UnsafeCell<BlockState>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
+        // Do not do anything until callback received.
         if current.in_use {
             return Poll::Pending;
         }
-        if current.done {
-            current.in_use = false;
-            current.done = false;
-            // handle errors
-            if current.code != 0 {
-                let err = RawError::new(current.code, self.err_as_str());
 
-                return Poll::Ready(Err(err));
-            }
-
-            if current.num > 0 {
-                // has next block.
-                let mut raw = unsafe { RawBlock::parse_from_ptr(current.block as _, precision) };
-                raw.with_field_names(fields.iter().map(|f| f.name()));
-                // if current.num == 0 {
-                //     // finish fetch loop.
-                //     current.done = true;
-                //     current.num = 0;
-                // } else {
-                //     current.done = false;
-                // }
-                Poll::Ready(Ok(Some(raw)))
-            } else {
-                // no data todo, stop stream.
-                Poll::Ready(Ok(None))
-            }
+        if let Some(res) = current.result.take() {
+            let item = res.map(|block| {
+                block.map(|(ptr, rows)| {
+                    debug_assert!(rows > 0);
+                    // has next block.
+                    let mut raw = unsafe { RawBlock::parse_from_ptr(ptr as _, precision) };
+                    raw.with_field_names(fields.iter().map(|f| f.name()));
+                    raw
+                })
+            });
+            return Poll::Ready(item);
         } else {
             current.in_use = true;
             let param = Box::new((state.clone(), self.c.clone(), cx.waker().clone()));
@@ -1373,16 +1362,30 @@ impl RawRes {
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
-                let param: Box<(Arc<UnsafeCell<SharedState>>, Arc<ApiEntry>, Waker)> =
+                let param: Box<(Arc<UnsafeCell<BlockState>>, Arc<ApiEntry>, Waker)> =
                     Box::from_raw(param as _);
                 let state = &mut *param.0.get();
-                state.done = true;
+                let api = &*param.1;
+                // state.done = true;
                 state.in_use = false;
-                state.block = (param.1.taos_get_raw_block.unwrap())(res);
                 if num_of_rows < 0 {
-                    state.code = num_of_rows;
+                    // state.code = num_of_rows;
+                    // state.num = 0;
+                    state.result.replace(Err(RawError::new_with_context(
+                        num_of_rows,
+                        api.err_str(res),
+                        "taos_fetch_raw_block_a",
+                    )));
                 } else {
-                    state.num = num_of_rows as _;
+                    // state.num = num_of_rows as _;
+                    if num_of_rows > 0 {
+                        let block = (param.1.taos_get_raw_block.unwrap())(res) as _;
+                        state
+                            .result
+                            .replace(Ok(Some((block, num_of_rows as usize))));
+                    } else {
+                        state.result.replace(Ok(None));
+                    }
                 }
                 param.2.wake()
             }
@@ -1490,24 +1493,17 @@ impl RawRes {
     }
 }
 
-// type ResultSet = RawRes;
-
-pub struct SharedState {
-    pub block: *mut c_void,
+/// Shared block state in a ResultSet.
+pub struct BlockState {
+    pub result: Option<Result<Option<(*mut c_void, usize)>, RawError>>,
     pub in_use: bool,
-    pub done: bool,
-    pub num: usize,
-    pub code: i32,
 }
 
-impl Default for SharedState {
+impl Default for BlockState {
     fn default() -> Self {
         Self {
-            block: std::ptr::null_mut(),
-            in_use: Default::default(),
-            done: Default::default(),
-            num: Default::default(),
-            code: Default::default(),
+            result: None,
+            in_use: false,
         }
     }
 }
