@@ -41,6 +41,8 @@ pub trait BlockExt: Debug + Sized {
     /// **DO NOT** call it directly.
     unsafe fn cell_unchecked(&self, row: usize, col: usize) -> (&Field, BorrowedValue);
 
+    /// # Safety
+    /// **DO NOT** call it directly.
     unsafe fn get_col_unchecked(&self, col: usize) -> &ColumnView;
 
     /// Query by rows.

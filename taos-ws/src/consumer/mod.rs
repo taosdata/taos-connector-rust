@@ -6,7 +6,6 @@ use itertools::Itertools;
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
 
-use taos_query::block_in_place_or_global;
 use taos_query::common::{JsonMeta, RawMeta};
 use taos_query::prelude::{Code, RawError};
 use taos_query::tmq::{
@@ -14,6 +13,7 @@ use taos_query::tmq::{
     SyncOnAsync, Timeout, VGroupId,
 };
 use taos_query::util::InlinableRead;
+use taos_query::{block_in_place_or_global, RawResult};
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
 
@@ -30,7 +30,6 @@ use crate::TaosBuilder;
 use messages::*;
 
 use std::fmt::Debug;
-use std::result::Result as StdResult;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -39,7 +38,7 @@ use std::time::{Duration, Instant};
 mod messages;
 
 type WsSender = tokio::sync::mpsc::Sender<Message>;
-type WsTmqAgent = Arc<HashMap<ReqId, oneshot::Sender<StdResult<TmqRecvData, RawError>>>>;
+type WsTmqAgent = Arc<HashMap<ReqId, oneshot::Sender<RawResult<TmqRecvData>>>>;
 
 #[derive(Debug, Clone)]
 struct WsTmqSender {
@@ -55,27 +54,30 @@ impl WsTmqSender {
         self.req_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
-    async fn send_recv(&self, msg: TmqSend) -> Result<TmqRecvData> {
+    async fn send_recv(&self, msg: TmqSend) -> RawResult<TmqRecvData> {
         self.send_recv_timeout(msg, Duration::MAX).await
     }
-    async fn send_recv_timeout(&self, msg: TmqSend, timeout: Duration) -> Result<TmqRecvData> {
+    async fn send_recv_timeout(&self, msg: TmqSend, timeout: Duration) -> RawResult<TmqRecvData> {
         let send_timeout = Duration::from_millis(5000);
         let req_id = msg.req_id();
         let (tx, rx) = oneshot::channel();
 
         self.queries.insert(req_id, tx);
 
-        self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
+        self.sender
+            .send_timeout(msg.to_msg(), send_timeout)
+            .await
+            .map_err(WsTmqError::from)?;
 
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
         let data = tokio::select! {
             _ = &mut sleep, if !sleep.is_elapsed() => {
                log::trace!("poll timed out");
-               Err(Error::QueryTimeout("poll".to_string()))?
+               Err(WsTmqError::QueryTimeout("poll".to_string()))?
             }
             message = rx => {
-                message??
+                message.map_err(WsTmqError::from)??
             }
         };
         Ok(data)
@@ -91,13 +93,11 @@ pub struct TmqBuilder {
 impl TBuilder for TmqBuilder {
     type Target = Consumer;
 
-    type Error = Error;
-
     fn available_params() -> &'static [&'static str] {
         &["token", "timeout", "group.id", "client.id"]
     }
 
-    fn from_dsn<D: IntoDsn>(dsn: D) -> StdResult<Self, Self::Error> {
+    fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         Self::new(dsn)
     }
 
@@ -105,7 +105,7 @@ impl TBuilder for TmqBuilder {
         "0"
     }
 
-    fn ping(&self, _: &mut Self::Target) -> StdResult<(), Self::Error> {
+    fn ping(&self, _: &mut Self::Target) -> RawResult<()> {
         Ok(())
     }
 
@@ -113,15 +113,15 @@ impl TBuilder for TmqBuilder {
         true
     }
 
-    fn build(&self) -> StdResult<Self::Target, Self::Error> {
+    fn build(&self) -> RawResult<Self::Target> {
         block_in_place_or_global(self.build_consumer())
     }
 
-    fn server_version(&self) -> StdResult<&str, Self::Error> {
+    fn server_version(&self) -> RawResult<&str> {
         todo!()
     }
 
-    fn is_enterprise_edition(&self) -> StdResult<bool, Self::Error> {
+    fn is_enterprise_edition(&self) -> RawResult<bool> {
         todo!()
     }
 }
@@ -130,9 +130,7 @@ impl TBuilder for TmqBuilder {
 impl taos_query::AsyncTBuilder for TmqBuilder {
     type Target = Consumer;
 
-    type Error = Error;
-
-    fn from_dsn<D: IntoDsn>(dsn: D) -> StdResult<Self, Self::Error> {
+    fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         Self::new(dsn)
     }
 
@@ -140,7 +138,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         "0"
     }
 
-    async fn ping(&self, _: &mut Self::Target) -> StdResult<(), Self::Error> {
+    async fn ping(&self, _: &mut Self::Target) -> RawResult<()> {
         Ok(())
     }
 
@@ -148,26 +146,26 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         true
     }
 
-    async fn build(&self) -> StdResult<Self::Target, Self::Error> {
+    async fn build(&self) -> RawResult<Self::Target> {
         self.build_consumer().await
     }
 
-    async fn server_version(&self) -> StdResult<&str, Self::Error> {
+    async fn server_version(&self) -> RawResult<&str> {
         todo!()
     }
 
-    async fn is_enterprise_edition(&self) -> StdResult<bool, Self::Error> {
+    async fn is_enterprise_edition(&self) -> RawResult<bool> {
         todo!()
     }
 }
-
+#[derive(Debug)]
 struct WsMessageBase {
     sender: WsTmqSender,
     message_id: MessageId,
 }
 
 impl WsMessageBase {
-    async fn fetch_raw_block(&self) -> Result<Option<RawBlock>> {
+    async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
         let req_id = self.sender.req_id();
 
         let msg = TmqSend::Fetch(MessageArgs {
@@ -208,7 +206,7 @@ impl WsMessageBase {
         }
         todo!()
     }
-    async fn fetch_json_meta(&self) -> Result<JsonMeta> {
+    async fn fetch_json_meta(&self) -> RawResult<JsonMeta> {
         let req_id = self.sender.req_id();
         let msg = TmqSend::FetchJsonMeta(MessageArgs {
             req_id,
@@ -216,12 +214,12 @@ impl WsMessageBase {
         });
         let data = self.sender.send_recv(msg).await?;
         if let TmqRecvData::FetchJsonMeta { data } = data {
-            let json: JsonMeta = serde_json::from_value(data)?;
+            let json: JsonMeta = serde_json::from_value(data).map_err(WsTmqError::from)?;
             return Ok(json);
         }
         unreachable!()
     }
-    async fn fetch_raw_meta(&self) -> Result<RawMeta> {
+    async fn fetch_raw_meta(&self) -> RawResult<RawMeta> {
         let req_id = self.sender.req_id();
         let msg = TmqSend::FetchRaw(MessageArgs {
             req_id,
@@ -238,6 +236,7 @@ impl WsMessageBase {
     }
 }
 
+#[derive(Debug)]
 pub struct Meta(WsMessageBase);
 
 // impl WsMetaMessage {
@@ -251,29 +250,28 @@ pub struct Meta(WsMessageBase);
 
 #[async_trait::async_trait]
 impl IsAsyncMeta for Meta {
-    type Error = Error;
-
-    async fn as_raw_meta(&self) -> StdResult<RawMeta, Self::Error> {
+    async fn as_raw_meta(&self) -> RawResult<RawMeta> {
         self.0.fetch_raw_meta().await
     }
 
-    async fn as_json_meta(&self) -> StdResult<JsonMeta, Self::Error> {
+    async fn as_json_meta(&self) -> RawResult<JsonMeta> {
         self.0.fetch_json_meta().await
     }
 }
 
 impl SyncOnAsync for Meta {}
 
+#[derive(Debug)]
 pub struct Data(WsMessageBase);
 
 impl Data {
-    pub async fn fetch_block(&self) -> Result<Option<RawBlock>> {
+    pub async fn fetch_block(&self) -> RawResult<Option<RawBlock>> {
         self.0.fetch_raw_block().await
     }
 }
 
 impl Iterator for Data {
-    type Item = Result<RawBlock>;
+    type Item = RawResult<RawBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
         block_in_place_or_global(self.fetch_block()).transpose()
@@ -282,16 +280,14 @@ impl Iterator for Data {
 
 #[async_trait::async_trait]
 impl IsAsyncData for Data {
-    type Error = Error;
-
-    async fn as_raw_data(&self) -> StdResult<taos_query::common::RawData, Self::Error> {
+    async fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
         self.0
             .fetch_raw_meta()
             .await
             .map(|raw| unsafe { std::mem::transmute(raw) })
     }
 
-    async fn fetch_raw_block(&self) -> StdResult<Option<RawBlock>, Self::Error> {
+    async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
         self.fetch_block().await
     }
 }
@@ -334,7 +330,7 @@ impl Consumer {
     //     }
     //     Ok(())
     // }
-    async fn poll_wait(&self) -> Result<(Offset, MessageSet<Meta, Data>)> {
+    async fn poll_wait(&self) -> RawResult<(Offset, MessageSet<Meta, Data>)> {
         let elapsed = tokio::time::Instant::now();
         loop {
             let req_id = self.sender.req_id();
@@ -395,24 +391,22 @@ impl Consumer {
     pub(crate) async fn poll_timeout(
         &self,
         timeout: Duration,
-    ) -> Result<Option<(Offset, MessageSet<Meta, Data>)>> {
+    ) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
-        return tokio::select! {
+        tokio::select! {
             _ = &mut sleep, if !sleep.is_elapsed() => {
                Ok(None)
             }
             message = self.poll_wait() => {
                 Ok(Some(message?))
             }
-        };
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
-    type Error = Error;
-
     type Offset = Offset;
 
     type Meta = Meta;
@@ -422,7 +416,7 @@ impl AsAsyncConsumer for Consumer {
     async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
         &mut self,
         topics: I,
-    ) -> Result<()> {
+    ) -> RawResult<()> {
         self.topics = topics.into_iter().map(Into::into).collect_vec();
         let req_id = self.sender.req_id();
         let action = TmqSend::Subscribe {
@@ -438,9 +432,9 @@ impl AsAsyncConsumer for Consumer {
         if let Some(offset) = self.tmq_conf.offset_seek.clone() {
             // dbg!(offset);
             let offsets = offset
-                .split(",")
+                .split(',')
                 .map(|s| {
-                    s.split(":")
+                    s.split(':')
                         .map(|i| i.parse::<i64>().unwrap())
                         .collect_vec()
                 })
@@ -449,7 +443,7 @@ impl AsAsyncConsumer for Consumer {
             for offset in offsets {
                 let vgroup_id = offset[0] as i32;
                 let offset = offset[1];
-                log::debug!(
+                log::trace!(
                     "topic {} seeking to offset {} for vgroup {}",
                     &topic_name,
                     offset,
@@ -486,12 +480,11 @@ impl AsAsyncConsumer for Consumer {
     async fn recv_timeout(
         &self,
         timeout: taos_query::tmq::Timeout,
-    ) -> StdResult<
+    ) -> RawResult<
         Option<(
             Self::Offset,
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
-        Self::Error,
     > {
         match timeout {
             Timeout::Never | Timeout::None => self.poll_timeout(Duration::MAX).await,
@@ -499,7 +492,7 @@ impl AsAsyncConsumer for Consumer {
         }
     }
 
-    async fn commit(&self, offset: Self::Offset) -> StdResult<(), Self::Error> {
+    async fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         let req_id = self.sender.req_id();
         let action = TmqSend::Commit(MessageArgs {
             req_id,
@@ -532,16 +525,15 @@ impl AsAsyncConsumer for Consumer {
 
         let recv = self.sender.send_recv(action).await.ok();
         match recv {
-            Some(TmqRecvData::Assignment(TopicAssignment {
-                assignment,
-                timing,
-            })) => {
+            Some(TmqRecvData::Assignment(TopicAssignment { assignment, timing })) => {
                 // assert_eq!(topic, topic);
                 log::trace!("timing: {:?}", timing);
                 log::trace!("assignment: {:?}", assignment);
                 assignment
             }
-            _ => { vec![] },
+            _ => {
+                vec![]
+            }
         }
     }
 
@@ -550,7 +542,7 @@ impl AsAsyncConsumer for Consumer {
         topic: &str,
         vgroup_id: VGroupId,
         offset: i64,
-    ) -> StdResult<(), Self::Error> {
+    ) -> RawResult<()> {
         let req_id = self.sender.req_id();
         let action = TmqSend::Seek(OffsetSeekArgs {
             req_id,
@@ -569,8 +561,6 @@ impl AsAsyncConsumer for Consumer {
 }
 
 impl AsConsumer for Consumer {
-    type Error = Error;
-
     type Offset = Offset;
 
     type Meta = Meta;
@@ -580,18 +570,18 @@ impl AsConsumer for Consumer {
     fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
         &mut self,
         topics: I,
-    ) -> StdResult<(), Self::Error> {
+    ) -> RawResult<()> {
         block_in_place_or_global(<Consumer as AsAsyncConsumer>::subscribe(self, topics))
     }
 
     fn recv_timeout(
         &self,
         timeout: Timeout,
-    ) -> StdResult<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>, Self::Error> {
+    ) -> RawResult<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>> {
         block_in_place_or_global(<Consumer as AsAsyncConsumer>::recv_timeout(self, timeout))
     }
 
-    fn commit(&self, offset: Self::Offset) -> StdResult<(), Self::Error> {
+    fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(self, offset))
     }
 
@@ -599,12 +589,7 @@ impl AsConsumer for Consumer {
         block_in_place_or_global(<Consumer as AsAsyncConsumer>::assignments(self))
     }
 
-    fn offset_seek(
-        &mut self,
-        topic: &str,
-        vg_id: VGroupId,
-        offset: i64,
-    ) -> StdResult<(), Self::Error> {
+    fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
         block_in_place_or_global(<Consumer as AsAsyncConsumer>::offset_seek(
             self, topic, vg_id, offset,
         ))
@@ -612,7 +597,7 @@ impl AsConsumer for Consumer {
 }
 
 impl TmqBuilder {
-    pub fn new<D: IntoDsn>(dsn: D) -> Result<Self> {
+    pub fn new<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
         let info = TaosBuilder::from_dsn(&dsn)?;
         let group_id = dsn
@@ -663,7 +648,7 @@ impl TmqBuilder {
             })
             .unwrap_or("true".to_string());
         let timeout = if let Some(timeout) = dsn.get("timeout") {
-            Timeout::from_str(&timeout).map_err(RawError::from_any)?
+            Timeout::from_str(timeout).map_err(RawError::from_any)?
         } else {
             Timeout::Duration(Duration::from_secs(5))
         };
@@ -692,10 +677,10 @@ impl TmqBuilder {
         })
     }
 
-    async fn build_consumer(&self) -> Result<Consumer> {
+    async fn build_consumer(&self) -> RawResult<Consumer> {
         let url = self.info.to_tmq_url();
         // let (ws, _) = futures::executor::block_on(connect_async(url))?;
-        let (ws, _) = connect_async(&url).await?;
+        let (ws, _) = connect_async(&url).await.map_err(WsTmqError::from)?;
         let (mut sender, mut reader) = ws.split();
 
         let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new());
@@ -712,7 +697,7 @@ impl TmqBuilder {
 
         let sending_url = url.clone();
         static PING_INTERVAL: u64 = 30;
-        const PING: &'static [u8] = b"TAOSX";
+        const PING: &[u8] = b"TAOSX";
 
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_secs(PING_INTERVAL));
@@ -977,7 +962,7 @@ impl Drop for Consumer {
         let _ = self.close_signal.send(true);
     }
 }
-
+#[derive(Debug)]
 pub struct Offset {
     message_id: MessageId,
     database: String,
@@ -1000,7 +985,7 @@ impl IsOffset for Offset {
 }
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum WsTmqError {
     #[error("{0}")]
     Dsn(#[from] DsnError),
     #[error("{0}")]
@@ -1023,26 +1008,40 @@ pub enum Error {
     QueryTimeout(String),
 }
 
-unsafe impl Send for Error {}
+unsafe impl Send for WsTmqError {}
 
-unsafe impl Sync for Error {}
+unsafe impl Sync for WsTmqError {}
 
-impl Error {
+impl WsTmqError {
     pub const fn errno(&self) -> Code {
         match self {
-            Error::TaosError(error) => error.code(),
-            _ => Code::Failed,
+            WsTmqError::TaosError(error) => error.code(),
+            _ => Code::FAILED,
         }
     }
     pub fn errstr(&self) -> String {
         match self {
-            Error::TaosError(error) => error.message().to_string(),
+            WsTmqError::TaosError(error) => error.message().to_string(),
             _ => format!("{}", self),
         }
     }
 }
 
-type Result<T> = std::result::Result<T, Error>;
+impl From<WsTmqError> for RawError {
+    fn from(value: WsTmqError) -> Self {
+        match value {
+            WsTmqError::TaosError(error) => error,
+            error => {
+                let code = error.errno();
+                if code == Code::FAILED {
+                    RawError::from_any(error)
+                } else {
+                    RawError::new(code, error.to_string())
+                }
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1164,7 +1163,7 @@ mod tests {
                         let json = meta.as_json_meta().await?;
                         let sql = dbg!(json.to_string());
                         if let Err(err) = taos.exec(sql).await {
-                            match err.errno() {
+                            match err.code() {
                                 Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
                                 Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
                                 Code::COLUMN_EXISTS => log::trace!("column already exists"),
@@ -1312,7 +1311,7 @@ mod tests {
                     let json = meta.as_json_meta()?;
                     let sql = dbg!(json.to_string());
                     if let Err(err) = taos.exec(sql) {
-                        match err.errno() {
+                        match err.code() {
                             Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
                             Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
                             Code::COLUMN_EXISTS => log::trace!("column already exists"),
@@ -1341,7 +1340,7 @@ mod tests {
         }
         consumer.unsubscribe();
 
-        std::thread::sleep(Duration::from_secs(2));
+        std::thread::sleep(Duration::from_secs(10));
 
         taos.exec_many([
             "drop database ws_tmq_meta_sync2",
@@ -1459,7 +1458,7 @@ mod tests {
                     let json = meta.as_json_meta()?;
                     let sql = dbg!(json.to_string());
                     if let Err(err) = taos.exec(sql) {
-                        match err.errno() {
+                        match err.code() {
                             Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
                             Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
                             Code::COLUMN_EXISTS => log::trace!("column already exists"),
@@ -1488,7 +1487,7 @@ mod tests {
         }
         consumer.unsubscribe();
 
-        std::thread::sleep(Duration::from_secs(2));
+        std::thread::sleep(Duration::from_secs(10));
 
         taos.exec_many([
             "drop database ws_tmq_meta_sync32",

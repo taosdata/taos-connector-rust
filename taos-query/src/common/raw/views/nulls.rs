@@ -30,8 +30,7 @@ impl FromIterator<bool> for NullBits {
     fn from_iter<T: IntoIterator<Item = bool>>(iter: T) -> Self {
         let booleans = iter.into_iter().collect::<Vec<_>>();
         let len = null_bits_len(booleans.len());
-        let mut inner = Vec::with_capacity(len);
-        inner.resize(len, 0);
+        let inner = vec![0; len];
         let nulls = NullBits(inner.into());
         booleans.into_iter().enumerate().for_each(|(i, is_null)| {
             if is_null {
@@ -59,7 +58,7 @@ impl NullBits {
     pub unsafe fn set_null_unchecked(&self, index: usize) {
         const BIT_LOC_SHIFT: usize = 3;
         const BIT_POS_SHIFT: usize = 7;
-        let loc = self.0.as_ptr().offset((index >> BIT_LOC_SHIFT) as isize) as *mut u8;
+        let loc = self.0.as_ptr().add(index >> BIT_LOC_SHIFT) as *mut u8;
         *loc |= 1 << (BIT_POS_SHIFT - (index & BIT_POS_SHIFT));
         debug_assert!(self.is_null_unchecked(index));
     }

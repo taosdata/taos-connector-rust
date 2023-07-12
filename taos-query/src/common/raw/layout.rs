@@ -25,6 +25,7 @@ pub enum InlineFormat {
 bitflags! {
     /// Inline memory layout for raw block.
     #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
     pub struct Layout: u32 {
         // Lowest 4 bits for layout components.
 
@@ -54,7 +55,7 @@ bitflags! {
         /// |2    |4   |4   | dyn | dyn  | 4 | 8 |cols*6|cols*4 |sum(lengths)|
         /// +-----+----+----+-----+------+---+---+------+-------+------------+
         /// ```
-        const INLINE_DEFAULT = Self::WITH_GROUP_ID.bits | Self::WITH_FIELD_SCHEMA.bits;
+        const INLINE_DEFAULT = Self::WITH_GROUP_ID.bits() | Self::WITH_FIELD_SCHEMA.bits();
 
         /// Inline as raw block only, without table names and field names.
         ///
@@ -65,7 +66,7 @@ bitflags! {
         /// |2    |4   |4   |4  | 8 |cols*6|cols*4 |sum(lengths)|
         /// +-----+----+----+---+---+------+-------+------------+
         /// ```
-        const INLINE_AS_RAW_BLOCK = Self::WITH_GROUP_ID.bits | Self::WITH_FIELD_SCHEMA.bits;
+        const INLINE_AS_RAW_BLOCK = Self::WITH_GROUP_ID.bits() | Self::WITH_FIELD_SCHEMA.bits();
 
         /// Inline as data only to save space.
         ///
@@ -191,7 +192,7 @@ impl Layout {
     }
 
     pub fn as_inner(&self) -> u32 {
-        self.bits
+        self.bits()
     }
 }
 

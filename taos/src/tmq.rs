@@ -2,7 +2,7 @@ use taos_query::{
     block_in_place_or_global,
     prelude::{AsAsyncConsumer, RawMeta, Timeout},
     tmq::{Assignment, VGroupId},
-    RawBlock,
+    RawBlock, RawResult,
 };
 
 enum TmqBuilderInner {
@@ -15,22 +15,31 @@ enum ConsumerInner {
     Ws(taos_ws::consumer::Consumer),
 }
 
+#[derive(Debug)]
 enum OffsetInner {
     Native(crate::sys::tmq::Offset),
     Ws(taos_ws::consumer::Offset),
 }
+
+#[derive(Debug)]
 enum MetaInner {
     Native(crate::sys::tmq::Meta),
     Ws(taos_ws::consumer::Meta),
 }
 
+#[derive(Debug)]
 enum DataInner {
     Native(crate::sys::tmq::Data),
     Ws(taos_ws::consumer::Data),
 }
 
+#[derive(Debug)]
 pub struct Offset(OffsetInner);
+
+#[derive(Debug)]
 pub struct Meta(MetaInner);
+
+#[derive(Debug)]
 pub struct Data(DataInner);
 
 pub type MessageSet<Meta, Data> = taos_query::tmq::MessageSet<Meta, Data>;
@@ -41,13 +50,11 @@ pub struct Consumer(ConsumerInner);
 impl taos_query::TBuilder for TmqBuilder {
     type Target = Consumer;
 
-    type Error = super::Error;
-
     fn available_params() -> &'static [&'static str] {
         &[]
     }
 
-    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
         // dbg!(&dsn);
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
@@ -68,7 +75,7 @@ impl taos_query::TBuilder for TmqBuilder {
         ""
     }
 
-    fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
+    fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
         match &self.0 {
             TmqBuilderInner::Native(b) => match &mut conn.0 {
                 ConsumerInner::Native(taos) => Ok(b.ping(taos)?),
@@ -88,18 +95,18 @@ impl taos_query::TBuilder for TmqBuilder {
         }
     }
 
-    fn build(&self) -> Result<Self::Target, Self::Error> {
+    fn build(&self) -> RawResult<Self::Target> {
         match &self.0 {
             TmqBuilderInner::Native(b) => Ok(Consumer(ConsumerInner::Native(b.build()?))),
             TmqBuilderInner::Ws(b) => Ok(Consumer(ConsumerInner::Ws(b.build()?))),
         }
     }
 
-    fn server_version(&self) -> Result<&str, Self::Error> {
+    fn server_version(&self) -> RawResult<&str> {
         todo!()
     }
 
-    fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    fn is_enterprise_edition(&self) -> RawResult<bool> {
         todo!()
     }
 }
@@ -108,8 +115,7 @@ impl taos_query::TBuilder for TmqBuilder {
 impl taos_query::AsyncTBuilder for TmqBuilder {
     type Target = Consumer;
 
-    type Error = super::Error;
-    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+    fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
         // dbg!(&dsn);
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
@@ -130,7 +136,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         ""
     }
 
-    async fn ping(&self, conn: &mut Self::Target) -> Result<(), Self::Error> {
+    async fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
         match &self.0 {
             TmqBuilderInner::Native(b) => match &mut conn.0 {
                 ConsumerInner::Native(taos) => Ok(b.ping(taos).await?),
@@ -150,21 +156,21 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         }
     }
 
-    async fn build(&self) -> Result<Self::Target, Self::Error> {
+    async fn build(&self) -> RawResult<Self::Target> {
         match &self.0 {
             TmqBuilderInner::Native(b) => Ok(Consumer(ConsumerInner::Native(b.build().await?))),
             TmqBuilderInner::Ws(b) => Ok(Consumer(ConsumerInner::Ws(b.build().await?))),
         }
     }
 
-    async fn server_version(&self) -> Result<&str, Self::Error> {
+    async fn server_version(&self) -> RawResult<&str> {
         match &self.0 {
             TmqBuilderInner::Native(b) => Ok(b.server_version().await?),
             TmqBuilderInner::Ws(b) => Ok(b.server_version().await?),
         }
     }
 
-    async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    async fn is_enterprise_edition(&self) -> RawResult<bool> {
         match &self.0 {
             TmqBuilderInner::Native(b) => Ok(b.is_enterprise_edition().await?),
             TmqBuilderInner::Ws(b) => Ok(b.is_enterprise_edition().await?),
@@ -209,9 +215,7 @@ impl taos_query::tmq::IsOffset for Offset {
 
 #[async_trait::async_trait]
 impl taos_query::tmq::IsAsyncMeta for Meta {
-    type Error = super::Error;
-
-    async fn as_raw_meta(&self) -> Result<RawMeta, Self::Error> {
+    async fn as_raw_meta(&self) -> RawResult<RawMeta> {
         match &self.0 {
             MetaInner::Native(data) => {
                 <crate::sys::tmq::Meta as taos_query::tmq::IsAsyncMeta>::as_raw_meta(data)
@@ -226,7 +230,7 @@ impl taos_query::tmq::IsAsyncMeta for Meta {
         }
     }
 
-    async fn as_json_meta(&self) -> Result<taos_query::common::JsonMeta, Self::Error> {
+    async fn as_json_meta(&self) -> RawResult<taos_query::common::JsonMeta> {
         match &self.0 {
             MetaInner::Native(data) => {
                 <crate::sys::tmq::Meta as taos_query::tmq::IsAsyncMeta>::as_json_meta(data)
@@ -244,9 +248,7 @@ impl taos_query::tmq::IsAsyncMeta for Meta {
 
 #[async_trait::async_trait]
 impl taos_query::tmq::IsAsyncData for Data {
-    type Error = super::Error;
-
-    async fn as_raw_data(&self) -> Result<taos_query::common::RawData, Self::Error> {
+    async fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
         match &self.0 {
             DataInner::Native(data) => {
                 <crate::sys::tmq::Data as taos_query::tmq::IsAsyncData>::as_raw_data(data)
@@ -261,7 +263,7 @@ impl taos_query::tmq::IsAsyncData for Data {
         }
     }
 
-    async fn fetch_raw_block(&self) -> Result<Option<taos_query::RawBlock>, Self::Error> {
+    async fn fetch_raw_block(&self) -> RawResult<Option<taos_query::RawBlock>> {
         match &self.0 {
             DataInner::Native(data) => {
                 <crate::sys::tmq::Data as taos_query::tmq::IsAsyncData>::fetch_raw_block(data)
@@ -279,8 +281,6 @@ impl taos_query::tmq::IsAsyncData for Data {
 
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
-    type Error = super::Error;
-
     type Offset = Offset;
 
     type Meta = Meta;
@@ -301,7 +301,7 @@ impl AsAsyncConsumer for Consumer {
     async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
         &mut self,
         topics: I,
-    ) -> Result<(), Self::Error> {
+    ) -> RawResult<()> {
         match &mut self.0 {
             ConsumerInner::Native(c) => {
                 <crate::sys::Consumer as AsAsyncConsumer>::subscribe(c, topics)
@@ -330,7 +330,7 @@ impl AsAsyncConsumer for Consumer {
     async fn recv_timeout(
         &self,
         timeout: Timeout,
-    ) -> Result<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>, Self::Error> {
+    ) -> RawResult<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>> {
         match &self.0 {
             ConsumerInner::Native(c) => {
                 <crate::sys::Consumer as AsAsyncConsumer>::recv_timeout(c, timeout)
@@ -385,7 +385,7 @@ impl AsAsyncConsumer for Consumer {
         }
     }
 
-    async fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
+    async fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         match &self.0 {
             ConsumerInner::Native(c) => match offset.0 {
                 OffsetInner::Native(offset) => {
@@ -433,7 +433,7 @@ impl AsAsyncConsumer for Consumer {
         topic: &str,
         vgroup_id: VGroupId,
         offset: i64,
-    ) -> Result<(), Self::Error> {
+    ) -> RawResult<()> {
         match &mut self.0 {
             ConsumerInner::Native(c) => {
                 <crate::sys::Consumer as AsAsyncConsumer>::offset_seek(c, topic, vgroup_id, offset)
@@ -454,7 +454,7 @@ impl taos_query::tmq::SyncOnAsync for Data {}
 impl taos_query::tmq::SyncOnAsync for Meta {}
 
 impl Iterator for Data {
-    type Item = Result<RawBlock, super::Error>;
+    type Item = RawResult<RawBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
         use taos_query::prelude::IsAsyncData;
@@ -470,7 +470,7 @@ mod tests {
     use crate::TaosBuilder;
 
     #[test]
-    fn builder() -> anyhow::Result<()> {
+    fn builder() -> taos_query::RawResult<()> {
         use taos_query::prelude::*;
         let mut dsn: Dsn = "taos://".parse()?;
         dsn.set("group.id", "group1");
@@ -482,7 +482,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ws_tmq_meta() -> anyhow::Result<()> {
+    async fn test_ws_tmq_meta() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
         //     .filter_level(log::LevelFilter::Debug)
         //     .init();
@@ -499,7 +499,10 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_secs(3));
 
-        taos.exec(format!("create database if not exists {db} wal_retention_period 3600")).await?;
+        taos.exec(format!(
+            "create database if not exists {db} wal_retention_period 3600"
+        ))
+        .await?;
 
         std::thread::sleep(std::time::Duration::from_secs(3));
 
@@ -648,7 +651,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
-    async fn test_tmq() -> anyhow::Result<()> {
+    async fn test_tmq() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
         //     .filter_level(log::LevelFilter::Info)
         //     .init();
@@ -855,7 +858,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
-    async fn test_tmq_offset() -> anyhow::Result<()> {
+    async fn test_tmq_offset() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
         //     .filter_level(log::LevelFilter::Info)
         //     .init();
@@ -1064,7 +1067,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ws_tmq() -> anyhow::Result<()> {
+    async fn test_ws_tmq() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
         // .filter_level(log::LevelFilter::Info)
         // .init();
@@ -1142,12 +1145,15 @@ mod tests {
         .await?;
 
         for _ in 0..10000 {
-            taos.exec("insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            taos.exec(
+                "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL)
             tb1 values(now, true, -2, -3, -4, -5, \
             '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
-            254, 65534, 1, 1)").await?;
+            254, 65534, 1, 1)",
+            )
+            .await?;
         }
         taos.exec(format!("flush database {db}")).await?;
         // tokio::time::sleep(Duration::from_secs(16)).await;
@@ -1281,7 +1287,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ws_tmq_snapshot() -> anyhow::Result<()> {
+    async fn test_ws_tmq_snapshot() -> taos_query::RawResult<()> {
         // std::env::set_var("RUST_LOG", "tokio=warn,taos_ws=trace,info");
         // pretty_env_logger::init();
 
@@ -1358,12 +1364,15 @@ mod tests {
         .await?;
 
         for _ in 0..100 {
-            taos.exec("insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            taos.exec(
+                "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL)
             tb1 values(now, true, -2, -3, -4, -5, \
             '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
-            254, 65534, 1, 1)").await?;
+            254, 65534, 1, 1)",
+            )
+            .await?;
         }
 
         taos.exec_many([
@@ -1494,7 +1503,7 @@ mod tests {
         Ok(())
     }
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ws_tmq_offset() -> anyhow::Result<()> {
+    async fn test_ws_tmq_offset() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
         //     .filter_level(log::LevelFilter::Info)
         //     .init();
@@ -1515,7 +1524,10 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_secs(3));
 
-        taos.exec(format!("create database if not exists {db} wal_retention_period 3600")).await?;
+        taos.exec(format!(
+            "create database if not exists {db} wal_retention_period 3600"
+        ))
+        .await?;
 
         std::thread::sleep(std::time::Duration::from_secs(3));
 

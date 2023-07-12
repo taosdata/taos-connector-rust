@@ -680,7 +680,7 @@ mod tests {
     fn username_with_password() {
         let s = "taos://";
 
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -692,7 +692,7 @@ mod tests {
 
         let s = "taos:///";
 
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -704,7 +704,7 @@ mod tests {
 
         let s = "taos://root@";
 
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -716,7 +716,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
         let s = "taos://root:taosdata@";
 
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -732,7 +732,7 @@ mod tests {
     #[test]
     fn host_port_mix() {
         let s = "taos://localhost";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -747,7 +747,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "taos://root@:6030";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -763,7 +763,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "taos://root@localhost:6030";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -782,7 +782,7 @@ mod tests {
     #[test]
     fn username_with_host() {
         let s = "taos://root@localhost";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -798,7 +798,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "taos://root@:6030";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -814,7 +814,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "taos://root@localhost:6030";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -826,7 +826,7 @@ mod tests {
         );
 
         let s = "taos://root:taosdata@localhost:6030";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -843,7 +843,7 @@ mod tests {
     #[test]
     fn username_with_multi_addresses() {
         let s = "taos://root@host1.domain:6030,host2.domain:6031";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -859,7 +859,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "taos://root:taosdata@host1:6030,host2:6031";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -876,7 +876,7 @@ mod tests {
     #[test]
     fn db_only() {
         let s = "taos:///db1";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -888,7 +888,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "taos:///db1";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -903,7 +903,7 @@ mod tests {
     #[test]
     fn username_with_multi_addresses_database() {
         let s = "taos://root@host1:6030,host2:6031/db1";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -917,7 +917,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "taos://root:taosdata@host1:6030,host2:6031/db1";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -935,7 +935,7 @@ mod tests {
     #[test]
     fn protocol() {
         let s = "taos://root@tcp(host1:6030,host2:6031)/db1";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -950,7 +950,7 @@ mod tests {
         assert_eq!(dsn.to_string(), "taos+tcp://root@host1:6030,host2:6031/db1");
 
         let s = "taos+tcp://root@host1:6030,host2:6031/db1";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -968,7 +968,7 @@ mod tests {
     #[test]
     fn fragment() {
         let s = "postgresql://%2Fvar%2Flib%2Fpostgresql/dbname";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -984,7 +984,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "unix:/path/to/unix.sock";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -996,7 +996,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "sqlite:/c:/full/windows/path/to/file.db";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -1008,7 +1008,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "sqlite:./file.db";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -1020,7 +1020,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = "sqlite://root:pass@//full/unix/path/to/file.db?mode=0666&readonly=true";
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -1041,7 +1041,7 @@ mod tests {
     #[test]
     fn params() {
         let s = r#"taos://?abc=abc"#;
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -1053,7 +1053,7 @@ mod tests {
         assert_eq!(dsn.to_string(), s);
 
         let s = r#"taos://root@localhost?abc=abc"#;
-        let dsn = Dsn::from_str(&s).unwrap();
+        let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
             dsn,
             Dsn {
@@ -1070,7 +1070,7 @@ mod tests {
     #[test]
     fn parse_taos_tmq() {
         let s = "taos://root:taosdata@localhost/aa23d04011eca42cf7d8c1dd05a37985?topics=aa23d04011eca42cf7d8c1dd05a37985&group.id=tg2";
-        let _ = Dsn::from_str(&s).unwrap();
+        let _ = Dsn::from_str(s).unwrap();
     }
 
     #[test]
@@ -1108,7 +1108,7 @@ mod tests {
         let dsn = Dsn::from_str(&format!("taos://root:{e}@localhost:6030?code1={e}")).unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.password.as_deref().unwrap(), p);
-        assert_eq!(dsn.get("code1").as_deref().unwrap(), p);
+        assert_eq!(dsn.get("code1").unwrap(), p);
         assert_eq!(
             dsn.to_string(),
             format!("taos://root:{e}@localhost:6030?code1={e}")
@@ -1123,7 +1123,7 @@ mod tests {
         let dsn = Dsn::from_str(&format!("taos://{e}:{e}@localhost:6030?{e}={e}")).unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.password.as_deref().unwrap(), p);
-        assert_eq!(dsn.get(&p).as_deref().unwrap(), p);
+        assert_eq!(dsn.get(p).unwrap(), p);
         assert_eq!(
             dsn.to_string(),
             format!("taos://{e}:{e}@localhost:6030?{e}={e}")

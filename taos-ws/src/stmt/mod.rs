@@ -5,7 +5,7 @@ use dashmap::DashMap as HashMap;
 
 use taos_query::common::views::views_to_raw_block;
 use taos_query::common::ColumnView;
-use taos_query::prelude::{InlinableWrite, RawError};
+use taos_query::prelude::{InlinableWrite, RawResult};
 use taos_query::stmt::Bindable;
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 
@@ -14,13 +14,11 @@ use tokio::sync::{oneshot, watch};
 
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
-use crate::query::asyn::Error;
 use crate::query::infra::ToMessage;
 use crate::{Taos, TaosBuilder};
 use messages::*;
 
 use std::fmt::Debug;
-use std::result::Result as StdResult;
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -28,7 +26,8 @@ use std::time::Duration;
 
 mod messages;
 
-type StmtResult = StdResult<Option<usize>, RawError>;
+use crate::query::asyn::Error;
+type StmtResult = RawResult<Option<usize>>;
 type StmtSender = std::sync::mpsc::SyncSender<StmtResult>;
 type StmtReceiver = std::sync::mpsc::Receiver<StmtResult>;
 
@@ -64,9 +63,7 @@ impl ToJsonValue for ColumnView {
 }
 
 impl Bindable<super::Taos> for Stmt {
-    type Error = Error;
-
-    fn init(taos: &super::Taos) -> StdResult<Self, Self::Error> {
+    fn init(taos: &super::Taos) -> RawResult<Self> {
         let mut dsn = taos.dsn.clone();
         let database: Option<String> =
             <Taos as taos_query::Queryable>::query_one(taos, "select database()")?;
@@ -76,32 +73,23 @@ impl Bindable<super::Taos> for Stmt {
         Ok(stmt)
     }
 
-    fn prepare<S: AsRef<str>>(&mut self, sql: S) -> StdResult<&mut Self, Self::Error> {
+    fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
         block_in_place_or_global(self.stmt_prepare(sql.as_ref()))?;
         Ok(self)
     }
 
-    fn set_tbname<S: AsRef<str>>(&mut self, sql: S) -> StdResult<&mut Self, Self::Error> {
+    fn set_tbname<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
         block_in_place_or_global(self.stmt_set_tbname(sql.as_ref()))?;
         Ok(self)
     }
 
-    fn set_tags(
-        &mut self,
-        tags: &[taos_query::common::Value],
-    ) -> StdResult<&mut Self, Self::Error> {
-        let tags = tags
-            .into_iter()
-            .map(|tag| tag.to_json_value())
-            .collect_vec();
+    fn set_tags(&mut self, tags: &[taos_query::common::Value]) -> RawResult<&mut Self> {
+        let tags = tags.iter().map(|tag| tag.to_json_value()).collect_vec();
         block_in_place_or_global(self.stmt_set_tags(tags))?;
         Ok(self)
     }
 
-    fn bind(
-        &mut self,
-        params: &[taos_query::common::ColumnView],
-    ) -> StdResult<&mut Self, Self::Error> {
+    fn bind(&mut self, params: &[taos_query::common::ColumnView]) -> RawResult<&mut Self> {
         // This json method for bind
 
         // let columns = params
@@ -114,12 +102,12 @@ impl Bindable<super::Taos> for Stmt {
         Ok(self)
     }
 
-    fn add_batch(&mut self) -> StdResult<&mut Self, Self::Error> {
+    fn add_batch(&mut self) -> RawResult<&mut Self> {
         block_in_place_or_global(self.stmt_add_batch())?;
         Ok(self)
     }
 
-    fn execute(&mut self) -> StdResult<usize, Self::Error> {
+    fn execute(&mut self) -> RawResult<usize> {
         block_in_place_or_global(self.stmt_exec())
     }
 
@@ -133,7 +121,7 @@ pub struct Stmt {
     timeout: Duration,
     ws: WsSender,
     close_signal: watch::Sender<bool>,
-    queries: Arc<HashMap<ReqId, oneshot::Sender<StdResult<StmtId, RawError>>>>,
+    queries: Arc<HashMap<ReqId, oneshot::Sender<RawResult<StmtId>>>>,
     fetches: Arc<HashMap<StmtId, StmtSender>>,
     receiver: Option<StmtReceiver>,
     args: Option<StmtArgs>,
@@ -205,7 +193,7 @@ impl Debug for Stmt {
 //     pub const fn errno(&self) -> taos_error::Code {
 //         match self {
 //             Error::TaosError(error) => error.code(),
-//             _ => taos_error::Code::Failed,
+//             _ => taos_error::Code::FAILED,
 //         }
 //     }
 //     pub fn errstr(&self) -> String {
@@ -216,8 +204,6 @@ impl Debug for Stmt {
 //     }
 // }
 
-type Result<T> = std::result::Result<T, Error>;
-
 impl Drop for Stmt {
     fn drop(&mut self) {
         // send close signal to reader/writer spawned tasks.
@@ -226,8 +212,10 @@ impl Drop for Stmt {
 }
 
 impl Stmt {
-    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> Result<Self> {
-        let (ws, _) = connect_async(info.to_stmt_url()).await?;
+    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
+        let (ws, _) = connect_async(info.to_stmt_url())
+            .await
+            .map_err(Error::from)?;
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 
@@ -235,7 +223,7 @@ impl Stmt {
             req_id,
             req: info.to_conn_request(),
         };
-        sender.send(login.to_msg()).await?;
+        sender.send(login.to_msg()).await.map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {
             match message {
                 Message::Text(text) => {
@@ -364,7 +352,7 @@ impl Stmt {
     /// ws://localhost:6041/
     /// ```
     ///
-    pub async fn from_dsn(dsn: impl IntoDsn) -> Result<Self> {
+    pub async fn from_dsn(dsn: impl IntoDsn) -> RawResult<Self> {
         let info = TaosBuilder::from_dsn(dsn)?;
         Self::from_wsinfo(&info).await
     }
@@ -374,15 +362,15 @@ impl Stmt {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 
-    pub async fn stmt_init(&mut self) -> Result<&mut Self> {
+    pub async fn stmt_init(&mut self) -> RawResult<&mut Self> {
         let req_id = self.req_id();
         let action = StmtSend::Init { req_id };
         let (tx, rx) = oneshot::channel();
         {
             self.queries.insert(req_id, tx);
-            self.ws.send(action.to_msg()).await?;
+            self.ws.send(action.to_msg()).await.map_err(Error::from)?;
         }
-        let stmt_id = rx.await??; // 1. RecvError, 2. TaosError
+        let stmt_id = rx.await.map_err(Error::from)??; // 1. RecvError, 2. TaosError
         let args = StmtArgs { req_id, stmt_id };
 
         let (sender, receiver) = std::sync::mpsc::sync_channel(2);
@@ -394,7 +382,7 @@ impl Stmt {
         Ok(self)
     }
 
-    pub async fn s_stmt<'a>(&'a mut self, sql: &'a str) -> Result<&mut Self> {
+    pub async fn s_stmt<'a>(&'a mut self, sql: &'a str) -> RawResult<&mut Self> {
         let stmt = self.stmt_init().await?;
         stmt.stmt_prepare(sql).await?;
         Ok(self)
@@ -404,50 +392,53 @@ impl Stmt {
         self.timeout = timeout;
         self
     }
-    pub async fn stmt_prepare(&mut self, sql: &str) -> Result<()> {
+    pub async fn stmt_prepare(&mut self, sql: &str) -> RawResult<()> {
         let prepare = StmtSend::Prepare {
             args: self.args.unwrap(),
             sql: sql.to_string(),
         };
-        self.ws.send(prepare.to_msg()).await?;
+        self.ws.send(prepare.to_msg()).await.map_err(Error::from)?;
         let _ = self
             .receiver
             .as_ref()
             .unwrap()
-            .recv_timeout(self.timeout)??;
+            .recv_timeout(self.timeout)
+            .map_err(Error::from)??;
         Ok(())
     }
-    pub async fn stmt_add_batch(&mut self) -> Result<()> {
+    pub async fn stmt_add_batch(&mut self) -> RawResult<()> {
         log::trace!("add batch");
         let message = StmtSend::AddBatch(self.args.unwrap());
-        self.ws.send(message.to_msg()).await?;
+        self.ws.send(message.to_msg()).await.map_err(Error::from)?;
         let _ = self
             .receiver
             .as_ref()
             .unwrap()
-            .recv_timeout(self.timeout)??;
+            .recv_timeout(self.timeout)
+            .map_err(Error::from)??;
         Ok(())
     }
-    pub async fn stmt_bind(&mut self, columns: Vec<serde_json::Value>) -> Result<()> {
+    pub async fn stmt_bind(&mut self, columns: Vec<serde_json::Value>) -> RawResult<()> {
         let message = StmtSend::Bind {
             args: self.args.unwrap(),
-            columns: columns,
+            columns,
         };
         {
             log::trace!("bind with: {message:?}");
             log::trace!("bind string: {}", message.to_msg());
-            self.ws.send(message.to_msg()).await?;
+            self.ws.send(message.to_msg()).await.map_err(Error::from)?;
         }
         log::trace!("begin receive");
         let _ = self
             .receiver
             .as_ref()
             .unwrap()
-            .recv_timeout(self.timeout)??;
+            .recv_timeout(self.timeout)
+            .map_err(Error::from)??;
         Ok(())
     }
 
-    async fn stmt_bind_block(&mut self, columns: &[ColumnView]) -> Result<()> {
+    async fn stmt_bind_block(&mut self, columns: &[ColumnView]) -> RawResult<()> {
         let args = self.args.unwrap();
 
         let mut bytes = Vec::new();
@@ -455,9 +446,9 @@ impl Stmt {
         // p0+8 uint64 stmt_id
         // p0+16 uint64 (1 (set tag) 2 (bind))
         // p0+24 raw block
-        bytes.write_u64_le(args.req_id)?;
-        bytes.write_u64_le(args.stmt_id)?;
-        bytes.write_u64_le(2)?; // bind: 2
+        bytes.write_u64_le(args.req_id).map_err(Error::from)?;
+        bytes.write_u64_le(args.stmt_id).map_err(Error::from)?;
+        bytes.write_u64_le(2).map_err(Error::from)?; // bind: 2
 
         let block = views_to_raw_block(columns);
 
@@ -469,55 +460,75 @@ impl Stmt {
             RawBlock::parse_from_raw_block(block, taos_query::prelude::Precision::Millisecond)
         );
 
-        self.ws.send(Message::Binary(bytes)).await?;
+        self.ws
+            .send(Message::Binary(bytes))
+            .await
+            .map_err(Error::from)?;
         let _ = self
             .receiver
             .as_ref()
             .unwrap()
-            .recv_timeout(self.timeout)??;
+            .recv_timeout(self.timeout)
+            .map_err(Error::from)??;
 
         Ok(())
     }
 
     /// Call bind and add batch.
-    pub async fn bind_all(&mut self, columns: Vec<serde_json::Value>) -> Result<()> {
+    pub async fn bind_all(&mut self, columns: Vec<serde_json::Value>) -> RawResult<()> {
         self.stmt_bind(columns).await?;
         self.stmt_add_batch().await
     }
 
-    pub async fn stmt_set_tbname(&mut self, name: &str) -> Result<()> {
+    pub async fn stmt_set_tbname(&mut self, name: &str) -> RawResult<()> {
         let message = StmtSend::SetTableName {
             args: self.args.unwrap(),
             name: name.to_string(),
         };
-        self.ws.send_timeout(message.to_msg(), self.timeout).await?;
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
         let _ = self
             .receiver
             .as_ref()
             .unwrap()
-            .recv_timeout(self.timeout)??;
+            .recv_timeout(self.timeout)
+            .map_err(Error::from)??;
         Ok(())
     }
 
-    pub async fn stmt_set_tags(&mut self, tags: Vec<serde_json::Value>) -> Result<()> {
+    pub async fn stmt_set_tags(&mut self, tags: Vec<serde_json::Value>) -> RawResult<()> {
         let message = StmtSend::SetTags {
             args: self.args.unwrap(),
-            tags: tags,
+            tags,
         };
-        self.ws.send_timeout(message.to_msg(), self.timeout).await?;
-        let _ = self.receiver.as_ref().unwrap().recv_timeout(self.timeout)?;
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
+        let _ = self
+            .receiver
+            .as_ref()
+            .unwrap()
+            .recv_timeout(self.timeout)
+            .map_err(Error::from)?;
         Ok(())
     }
 
-    pub async fn stmt_exec(&mut self) -> Result<usize> {
+    pub async fn stmt_exec(&mut self) -> RawResult<usize> {
         log::trace!("exec");
         let message = StmtSend::Exec(self.args.unwrap());
-        self.ws.send_timeout(message.to_msg(), self.timeout).await?;
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
         if let Some(affected) = self
             .receiver
             .as_ref()
             .unwrap()
-            .recv_timeout(self.timeout)??
+            .recv_timeout(self.timeout)
+            .map_err(Error::from)??
         {
             self.affected_rows += affected;
             Ok(affected)

@@ -54,7 +54,7 @@ impl<'a> Future for QueryFuture<'a> {
         let state = unsafe { &mut *self.state.get() };
         if state.done {
             let d = state.time.elapsed();
-            log::debug!(
+            log::trace!(
                 "Waken {:?} after callback received",
                 d - state.callback_cost.unwrap()
             );
@@ -73,9 +73,9 @@ impl<'a> Future for QueryFuture<'a> {
                 code: c_int,
             ) {
                 let param = Box::from_raw(param as *mut (Arc<UnsafeCell<State>>, Waker));
-                let mut s = { &mut *param.0.get() };
+                let s = { &mut *param.0.get() };
                 let cost = s.time.elapsed();
-                log::debug!("Received query callback in {:?}", cost);
+                log::trace!("Received query callback in {:?}", cost);
                 s.callback_cost.replace(cost);
                 if res.is_null() && code == 0 {
                     unreachable!("query callback should be ok or error");

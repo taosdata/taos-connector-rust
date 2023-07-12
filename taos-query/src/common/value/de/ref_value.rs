@@ -15,12 +15,12 @@ impl<'de, 'v> serde::de::EnumAccess<'de> for &'v Value {
         V: de::DeserializeSeed<'de>,
     {
         let s = self.strict_as_str();
-        return Ok((
+        Ok((
             seed.deserialize(StringDeserializer {
                 input: s.to_string(),
             })?,
             UnitOnly,
-        ));
+        ))
     }
 }
 

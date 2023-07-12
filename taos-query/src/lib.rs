@@ -1,6 +1,8 @@
 //! This is the common query traits/types for TDengine connectors.
 //!
 #![cfg_attr(nightly, feature(const_slice_index))]
+#![allow(clippy::len_without_is_empty)]
+#![allow(clippy::type_complexity)]
 
 use std::{
     collections::BTreeMap,
@@ -37,6 +39,9 @@ pub mod prelude;
 
 pub use prelude::sync::{Fetchable, Queryable};
 pub use prelude::{AsyncFetchable, AsyncQueryable};
+
+pub use taos_error::Error as RawError;
+pub type RawResult<T> = std::result::Result<T, RawError>;
 
 static mut RT: MaybeUninit<tokio::runtime::Runtime> = MaybeUninit::uninit();
 static INIT: std::sync::Once = std::sync::Once::new();
@@ -88,29 +93,28 @@ impl Display for PingError {
 /// A struct is `Connectable` when it can be build from a `Dsn`.
 pub trait TBuilder: Sized + Send + Sync + 'static {
     type Target: Send + Sync + 'static;
-    type Error: std::error::Error + From<DsnError>;
 
     /// A list of parameters available in DSN.
     fn available_params() -> &'static [&'static str];
 
     /// Connect with dsn without connection checking.
-    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error>;
+    fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self>;
 
     /// Get client version.
     fn client_version() -> &'static str;
 
     /// Get server version.
     #[doc(hidden)]
-    fn server_version(&self) -> Result<&str, Self::Error>;
+    fn server_version(&self) -> RawResult<&str>;
 
     /// Check if the server is an enterprise edition.
     #[doc(hidden)]
-    fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    fn is_enterprise_edition(&self) -> RawResult<bool> {
         Ok(false)
     }
 
     /// Check a connection is still alive.
-    fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error>;
+    fn ping(&self, _: &mut Self::Target) -> RawResult<()>;
 
     /// Check if it's ready to connect.
     ///
@@ -119,7 +123,7 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
     fn ready(&self) -> bool;
 
     /// Create a new connection from this struct.
-    fn build(&self) -> Result<Self::Target, Self::Error>;
+    fn build(&self) -> RawResult<Self::Target>;
 
     /// Build connection pool with [r2d2::Pool]
     ///
@@ -130,7 +134,7 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
     /// - min_idle: 2.
     /// - connection_timeout: 60s.
     #[cfg(feature = "r2d2")]
-    fn pool(self) -> Result<r2d2::Pool<Manager<Self>>, r2d2::Error> {
+    fn pool(self) -> RawResult<r2d2::Pool<Manager<Self>>, r2d2::Error> {
         self.pool_builder().build(Manager::new(self))
     }
 
@@ -151,7 +155,7 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
     fn with_pool_builder(
         self,
         builder: r2d2::Builder<Manager<Self>>,
-    ) -> Result<r2d2::Pool<Manager<Self>>, r2d2::Error> {
+    ) -> RawResult<r2d2::Pool<Manager<Self>>, r2d2::Error> {
         builder.build(Manager::new(self))
     }
 }
@@ -162,11 +166,11 @@ impl<T: TBuilder> r2d2::ManageConnection for Manager<T> {
 
     type Error = T::Error;
 
-    fn connect(&self) -> Result<Self::Connection, Self::Error> {
+    fn connect(&self) -> RawResult<Self::Connection> {
         self.deref().build()
     }
 
-    fn is_valid(&self, conn: &mut Self::Connection) -> Result<(), Self::Error> {
+    fn is_valid(&self, conn: &mut Self::Connection) -> RawResult<()> {
         self.deref().ping(conn)
     }
 
@@ -179,26 +183,25 @@ impl<T: TBuilder> r2d2::ManageConnection for Manager<T> {
 #[async_trait]
 pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
     type Target: Send + Sync + 'static;
-    type Error: std::error::Error + From<DsnError>;
 
     /// Connect with dsn without connection checking.
-    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error>;
+    fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self>;
 
     /// Get client version.
     fn client_version() -> &'static str;
 
     /// Get server version.
     #[doc(hidden)]
-    async fn server_version(&self) -> Result<&str, Self::Error>;
+    async fn server_version(&self) -> RawResult<&str>;
 
     /// Check if the server is an enterprise edition.
     #[doc(hidden)]
-    async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    async fn is_enterprise_edition(&self) -> RawResult<bool> {
         Ok(false)
     }
 
     /// Check a connection is still alive.
-    async fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error>;
+    async fn ping(&self, _: &mut Self::Target) -> RawResult<()>;
 
     /// Check if it's ready to connect.
     ///
@@ -207,22 +210,20 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
     async fn ready(&self) -> bool;
 
     /// Create a new connection from this struct.
-    async fn build(&self) -> Result<Self::Target, Self::Error>;
+    async fn build(&self) -> RawResult<Self::Target>;
 
     /// Build connection pool with [deadpool::managed::Pool].
     ///
     /// Default:
     /// - max_size: 500
     #[cfg(feature = "deadpool")]
-    fn pool(
-        self,
-    ) -> Result<deadpool::managed::Pool<Manager<Self>>, deadpool::managed::BuildError<Self::Error>>
-    {
+    fn pool(self) -> RawResult<deadpool::managed::Pool<Manager<Self>>> {
         let config = self.default_pool_config();
         self.pool_builder()
             .config(config)
             .runtime(deadpool::Runtime::Tokio1)
             .build()
+            .map_err(RawError::from_any)
     }
 
     /// [deadpool::managed::PoolBuilder] generation from config.
@@ -247,12 +248,12 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
     fn with_pool_config(
         self,
         config: deadpool::managed::PoolConfig,
-    ) -> Result<deadpool::managed::Pool<Manager<Self>>, deadpool::managed::BuildError<Self::Error>>
-    {
+    ) -> RawResult<deadpool::managed::Pool<Manager<Self>>> {
         deadpool::managed::Pool::builder(Manager { manager: self })
             .config(config)
             .runtime(deadpool::Runtime::Tokio1)
             .build()
+            .map_err(RawError::from_any)
     }
 }
 
@@ -288,7 +289,7 @@ impl<T: TBuilder> Manager<T> {
     }
     /// Build a connection manager from a DSN.
     #[inline]
-    pub fn from_dsn<D: IntoDsn>(dsn: D) -> Result<(Self, BTreeMap<String, String>), T::Error> {
+    pub fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<(Self, BTreeMap<String, String>)> {
         let mut dsn = dsn.into_dsn()?;
 
         let params = T::available_params();
@@ -304,7 +305,7 @@ impl<T: TBuilder> Manager<T> {
 
     #[cfg(feature = "r2d2")]
     #[inline]
-    pub fn into_pool(self) -> Result<r2d2::Pool<Self>, r2d2::Error> {
+    pub fn into_pool(self) -> RawResult<r2d2::Pool<Self>, r2d2::Error> {
         r2d2::Pool::new(self)
     }
 
@@ -313,7 +314,7 @@ impl<T: TBuilder> Manager<T> {
     pub fn into_pool_with_builder(
         self,
         builder: r2d2::Builder<Self>,
-    ) -> Result<r2d2::Pool<Self>, r2d2::Error> {
+    ) -> RawResult<r2d2::Pool<Self>, r2d2::Error> {
         builder.build(self)
     }
 }
@@ -333,9 +334,9 @@ pub type PoolBuilder<T> = r2d2::Builder<Manager<T>>;
 #[async_trait]
 impl<T: AsyncTBuilder> deadpool::managed::Manager for Manager<T> {
     type Type = <T as AsyncTBuilder>::Target;
-    type Error = <T as AsyncTBuilder>::Error;
+    type Error = RawError;
 
-    async fn create(&self) -> Result<Self::Type, Self::Error> {
+    async fn create(&self) -> RawResult<Self::Type> {
         self.manager.build().await
     }
 
@@ -356,7 +357,7 @@ mod tests {
     struct MyResultSet;
 
     impl Iterator for MyResultSet {
-        type Item = Result<RawBlock, Error>;
+        type Item = RawResult<RawBlock>;
 
         fn next(&mut self) -> Option<Self::Item> {
             static mut AVAILABLE: bool = true;
@@ -377,7 +378,6 @@ mod tests {
     }
 
     impl<'q> crate::Fetchable for MyResultSet {
-        type Error = Error;
         fn fields(&self) -> &[Field] {
             static mut F: Option<Vec<Field>> = None;
             unsafe { F.get_or_insert(vec![Field::new("a", Ty::TinyInt, 1)]) };
@@ -398,7 +398,7 @@ mod tests {
 
         fn update_summary(&mut self, _rows: usize) {}
 
-        fn fetch_raw_block(&mut self) -> Result<Option<RawBlock>, Self::Error> {
+        fn fetch_raw_block(&mut self) -> RawResult<Option<RawBlock>> {
             static mut B: AtomicUsize = AtomicUsize::new(4);
             unsafe {
                 if B.load(std::sync::atomic::Ordering::SeqCst) == 0 {
@@ -442,13 +442,11 @@ mod tests {
     impl TBuilder for Conn {
         type Target = MyResultSet;
 
-        type Error = Error;
-
         fn available_params() -> &'static [&'static str] {
             &[]
         }
 
-        fn from_dsn<D: IntoDsn>(_dsn: D) -> Result<Self, Self::Error> {
+        fn from_dsn<D: IntoDsn>(_dsn: D) -> RawResult<Self> {
             Ok(Self)
         }
 
@@ -460,29 +458,27 @@ mod tests {
             true
         }
 
-        fn build(&self) -> Result<Self::Target, Self::Error> {
+        fn build(&self) -> RawResult<Self::Target> {
             Ok(MyResultSet)
         }
 
-        fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error> {
+        fn ping(&self, _: &mut Self::Target) -> RawResult<()> {
             Ok(())
         }
 
-        fn server_version(&self) -> Result<&str, Self::Error> {
+        fn server_version(&self) -> RawResult<&str> {
             todo!()
         }
 
-        fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+        fn is_enterprise_edition(&self) -> RawResult<bool> {
             todo!()
         }
     }
 
     impl Queryable for Conn {
-        type Error = anyhow::Error;
-
         type ResultSet = MyResultSet;
 
-        fn query<T: AsRef<str>>(&self, _sql: T) -> Result<MyResultSet, Self::Error> {
+        fn query<T: AsRef<str>>(&self, _sql: T) -> RawResult<MyResultSet> {
             Ok(MyResultSet)
         }
 
@@ -490,23 +486,23 @@ mod tests {
             &self,
             _sql: T,
             _req_id: u64,
-        ) -> Result<Self::ResultSet, Self::Error> {
+        ) -> RawResult<Self::ResultSet> {
             Ok(MyResultSet)
         }
 
-        fn exec<T: AsRef<str>>(&self, _sql: T) -> Result<usize, Self::Error> {
+        fn exec<T: AsRef<str>>(&self, _sql: T) -> RawResult<usize> {
             Ok(1)
         }
 
-        fn write_raw_meta(&self, _: &RawMeta) -> Result<(), Self::Error> {
+        fn write_raw_meta(&self, _: &RawMeta) -> RawResult<()> {
             Ok(())
         }
 
-        fn write_raw_block(&self, _: &RawBlock) -> Result<(), Self::Error> {
+        fn write_raw_block(&self, _: &RawBlock) -> RawResult<()> {
             Ok(())
         }
 
-        fn put(&self, _data: &SmlData) -> Result<(), Self::Error> {
+        fn put(&self, _data: &SmlData) -> RawResult<()> {
             Ok(())
         }
     }

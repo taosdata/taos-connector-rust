@@ -32,11 +32,13 @@ use serde::de::Visitor;
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde_repr::Serialize_repr)]
 #[repr(u8)]
 #[non_exhaustive]
+#[derive(Default)]
 pub enum Ty {
     /// Null is only a value, not a *real* type, a nullable data type could be represented as [`Option<T>`] in Rust.
     ///
     /// A data type should never be Null.
     #[doc(hidden)]
+    #[default]
     Null = 0,
     /// The `BOOL` type in sql, will be represented as [bool] in Rust.
     Bool = 1,
@@ -83,12 +85,6 @@ pub enum Ty {
     /// 19, Not supported now.
     #[doc(hidden)]
     MediumBlob, // 19
-}
-
-impl Default for Ty {
-    fn default() -> Self {
-        Ty::Null
-    }
 }
 
 impl<'de> serde::Deserialize<'de> for Ty {
@@ -313,10 +309,10 @@ impl Ty {
               }
           }
         }
-        return _var_str!(
+        _var_str!(
             Null Bool TinyInt SmallInt Int BigInt UTinyInt USmallInt UInt UBigInt
             Float Double VarChar NChar Timestamp Json VarBinary Decimal Blob MediumBlob
-        );
+        )
     }
 
     #[inline]

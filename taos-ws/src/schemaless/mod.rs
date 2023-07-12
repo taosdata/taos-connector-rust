@@ -13,7 +13,7 @@ use dashmap::DashMap as HashMap;
 
 use taos_query::prelude::{Code, RawError};
 
-use taos_query::prelude::tokio;
+use taos_query::prelude::{tokio, RawResult};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 
@@ -27,7 +27,6 @@ use infra::*;
 
 use std::fmt::Debug;
 
-use std::result::Result as StdResult;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,7 +36,7 @@ type WsSender = tokio::sync::mpsc::Sender<Message>;
 
 use futures::channel::oneshot;
 use oneshot::channel as query_channel;
-type QueryChannelSender = oneshot::Sender<StdResult<WsRecvData, RawError>>;
+type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
 type QueryInner = HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = HashMap<ResId, ReqId>;
@@ -52,22 +51,23 @@ struct WsQuerySender {
 }
 
 impl WsQuerySender {
-    async fn send_recv(&self, msg: WsSend) -> Result<WsRecvData> {
+    async fn send_recv(&self, msg: WsSend) -> RawResult<WsRecvData> {
         let send_timeout = Duration::from_millis(1000);
         let req_id = msg.req_id();
         let (tx, rx) = query_channel();
 
         self.queries.insert(req_id, tx);
 
-        match msg {
-            _ => {
-                log::trace!("[req id: {req_id}] prepare message: {msg:?}");
-                self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
-            }
+        {
+            log::trace!("[req id: {req_id}] prepare message: {msg:?}");
+            self.sender
+                .send_timeout(msg.to_msg(), send_timeout)
+                .await
+                .map_err(Error::from)?;
         }
         // handle the error
         log::trace!("[req id: {req_id}] message sent, wait for receiving");
-        Ok(rx.await.unwrap()?)
+        rx.await.unwrap()
     }
 }
 
@@ -102,8 +102,6 @@ impl WS_ERROR_NO {
         Code::new(*self as _)
     }
 }
-
-type Result<T> = std::result::Result<T, Error>;
 
 async fn read_queries(
     mut reader: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
@@ -270,7 +268,7 @@ async fn read_queries(
     //     .await;
     for k in keys {
         if let Some((_, sender)) = queries_sender.remove(&k) {
-            let _ = sender.send(Err(RawError::from_any("websocket connection is closed")));
+            let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
         }
     }
 }
@@ -283,7 +281,7 @@ impl WsTaos {
     /// ```
     ///
 
-    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> Result<Self> {
+    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = Some(1024 * 1024 * 16);
 
@@ -301,7 +299,7 @@ impl WsTaos {
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
-        sender.send(version.to_msg()).await?;
+        sender.send(version.to_msg()).await.map_err(Error::from)?;
 
         let duration = Duration::from_secs(2);
         let version = match tokio::time::timeout(duration, reader.next()).await {
@@ -321,7 +319,7 @@ impl WsTaos {
             },
             _ => "2.x".to_string(),
         };
-        let is_v3 = !version.starts_with("2");
+        let is_v3 = !version.starts_with('2');
 
         // use unsafe to transmute
         let login = WsSend::Conn {
@@ -329,7 +327,7 @@ impl WsTaos {
             req: unsafe { std::mem::transmute(info.to_conn_request()) },
         };
         log::trace!("login send: {:?}", login);
-        sender.send(login.to_msg()).await?;
+        sender.send(login.to_msg()).await.map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {
             match message {
                 Message::Text(text) => {
@@ -409,7 +407,7 @@ impl WsTaos {
         })
     }
 
-    pub async fn s_put(&self, sml: &SmlData) -> Result<()> {
+    pub async fn s_put(&self, sml: &SmlData) -> RawResult<()> {
         let action = WsSend::Insert {
             protocol: sml.protocol() as u8,
             precision: sml.precision().into(),
@@ -417,12 +415,12 @@ impl WsTaos {
             ttl: sml.ttl(),
             req_id: sml.req_id(),
         };
-        log::debug!("put send: {:?}", action);
+        log::trace!("put send: {:?}", action);
         let req = self.sender.send_recv(action).await?;
 
         match req {
             WsRecvData::Insert(res) => {
-                log::debug!("put resp : {:?}", res);
+                log::trace!("put resp : {:?}", res);
                 Ok(())
             }
             _ => {

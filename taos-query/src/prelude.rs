@@ -16,12 +16,14 @@ pub use crate::tmq::{AsAsyncConsumer, IsAsyncData, IsAsyncMeta};
 pub use crate::AsyncTBuilder;
 #[cfg(feature = "deadpool")]
 pub use crate::Pool;
+pub use crate::RawResult;
 pub use _priv::*;
 pub use futures::stream::{Stream, StreamExt, TryStreamExt};
 pub use r#async::*;
 pub use tokio;
 
 pub mod sync {
+    pub use crate::RawResult;
     pub use crate::TBuilder;
     #[cfg(feature = "r2d2")]
     pub use crate::{Pool, PoolBuilder};
@@ -42,10 +44,6 @@ pub mod sync {
     use crate::common::*;
     use crate::helpers::*;
 
-    use crate::common::RawBlock;
-
-    // pub use crate::{Fetchable, Queryable};
-
     pub struct IRowsIter<'a, T>
     where
         T: Fetchable,
@@ -60,7 +58,7 @@ pub mod sync {
     where
         T: Fetchable,
     {
-        fn fetch(&mut self) -> Result<Option<RowView<'a>>, T::Error> {
+        fn fetch(&mut self) -> RawResult<Option<RowView<'a>>> {
             if let Some(block) = self.iter.next().transpose()? {
                 self.block = Some(block);
                 self.rows = self.block.as_mut().map(|raw| raw.rows());
@@ -70,7 +68,7 @@ pub mod sync {
                 Ok(None)
             }
         }
-        fn next_row(&mut self) -> Result<Option<RowView<'a>>, T::Error> {
+        fn next_row(&mut self) -> RawResult<Option<RowView<'a>>> {
             // has block
             if let Some(rows) = self.rows.as_mut() {
                 // check if block over.
@@ -90,7 +88,7 @@ pub mod sync {
     where
         T: Fetchable,
     {
-        type Item = Result<RowView<'a>, T::Error>;
+        type Item = RawResult<RowView<'a>>;
 
         fn next(&mut self) -> Option<Self::Item> {
             self.next_row().transpose()
@@ -108,7 +106,7 @@ pub mod sync {
     where
         T: Fetchable,
     {
-        type Item = Result<RawBlock, T::Error>;
+        type Item = RawResult<RawBlock>;
 
         fn next(&mut self) -> Option<Self::Item> {
             self.query
@@ -126,8 +124,6 @@ pub mod sync {
     }
 
     pub trait Fetchable: Sized {
-        type Error: From<taos_error::Error>;
-
         fn affected_rows(&self) -> i32;
 
         fn precision(&self) -> Precision;
@@ -144,7 +140,7 @@ pub mod sync {
         fn update_summary(&mut self, nrows: usize);
 
         #[doc(hidden)]
-        fn fetch_raw_block(&mut self) -> Result<Option<RawBlock>, Self::Error>;
+        fn fetch_raw_block(&mut self) -> RawResult<Option<RawBlock>>;
 
         /// Iterator for raw data blocks.
         fn blocks(&mut self) -> IBlockIter<'_, Self> {
@@ -163,14 +159,11 @@ pub mod sync {
 
         fn deserialize<T: DeserializeOwned>(
             &mut self,
-        ) -> std::iter::Map<
-            IRowsIter<'_, Self>,
-            fn(Result<RowView, Self::Error>) -> Result<T, Self::Error>,
-        > {
-            self.rows().map(|row| Ok(T::deserialize(&mut row?)?))
+        ) -> std::iter::Map<IRowsIter<'_, Self>, fn(RawResult<RowView>) -> RawResult<T>> {
+            self.rows().map(|row| T::deserialize(&mut row?))
         }
 
-        fn to_rows_vec(&mut self) -> Result<Vec<Vec<Value>>, Self::Error> {
+        fn to_rows_vec(&mut self) -> RawResult<Vec<Vec<Value>>> {
             self.blocks()
                 .map_ok(|raw| raw.to_values())
                 .flatten_ok()
@@ -179,34 +172,31 @@ pub mod sync {
     }
 
     /// The synchronous query trait for TDengine connection.
-    pub trait Queryable
-    // where
-    //     Self::ResultSet: Iterator<Item = Result<RawData, Self::Error>>,
+    pub trait Queryable // where
+    //     Self::ResultSet: Iterator<Item = Result<RawData>>,
     {
-        type Error: From<<Self::ResultSet as Fetchable>::Error>;
-
         type ResultSet: Fetchable;
 
-        fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error>;
+        fn query<T: AsRef<str>>(&self, sql: T) -> RawResult<Self::ResultSet>;
 
         fn query_with_req_id<T: AsRef<str>>(
             &self,
             sql: T,
             req_id: u64,
-        ) -> Result<Self::ResultSet, Self::Error>;
+        ) -> RawResult<Self::ResultSet>;
 
-        fn exec<T: AsRef<str>>(&self, sql: T) -> Result<usize, Self::Error> {
+        fn exec<T: AsRef<str>>(&self, sql: T) -> RawResult<usize> {
             self.query(sql).map(|res| res.affected_rows() as _)
         }
 
-        fn write_raw_meta(&self, _: &RawMeta) -> Result<(), Self::Error>;
+        fn write_raw_meta(&self, _: &RawMeta) -> RawResult<()>;
 
-        fn write_raw_block(&self, _: &RawBlock) -> Result<(), Self::Error>;
+        fn write_raw_block(&self, _: &RawBlock) -> RawResult<()>;
 
         fn exec_many<T: AsRef<str>, I: IntoIterator<Item = T>>(
             &self,
             input: I,
-        ) -> Result<usize, Self::Error> {
+        ) -> RawResult<usize> {
             input
                 .into_iter()
                 .map(|sql| self.exec(sql))
@@ -216,10 +206,7 @@ pub mod sync {
                 })
         }
 
-        fn query_one<T: AsRef<str>, O: DeserializeOwned>(
-            &self,
-            sql: T,
-        ) -> Result<Option<O>, Self::Error> {
+        fn query_one<T: AsRef<str>, O: DeserializeOwned>(&self, sql: T) -> RawResult<Option<O>> {
             self.query(sql)?
                 .deserialize::<O>()
                 .next()
@@ -227,18 +214,14 @@ pub mod sync {
         }
 
         /// Short for `SELECT server_version()` as [String].
-        fn server_version(&self) -> Result<Cow<str>, Self::Error> {
+        fn server_version(&self) -> RawResult<Cow<str>> {
             Ok(self
                 .query_one::<_, String>("SELECT server_version()")?
                 .expect("should always has result")
                 .into())
         }
 
-        fn create_topic(
-            &self,
-            name: impl AsRef<str>,
-            sql: impl AsRef<str>,
-        ) -> Result<(), Self::Error> {
+        fn create_topic(&self, name: impl AsRef<str>, sql: impl AsRef<str>) -> RawResult<()> {
             let (name, sql) = (name.as_ref(), sql.as_ref());
             let query = format!("create topic if not exists {name} as {sql}");
 
@@ -250,7 +233,7 @@ pub mod sync {
             &self,
             name: impl AsRef<str>,
             db: impl std::fmt::Display,
-        ) -> Result<(), Self::Error> {
+        ) -> RawResult<()> {
             let name = name.as_ref();
             let query = format!("create topic if not exists {name} as database `{db}`");
 
@@ -258,7 +241,7 @@ pub mod sync {
             Ok(())
         }
 
-        fn databases(&self) -> Result<Vec<ShowDatabase>, Self::Error> {
+        fn databases(&self) -> RawResult<Vec<ShowDatabase>> {
             self.query("show databases")?
                 .deserialize()
                 .try_collect()
@@ -270,14 +253,14 @@ pub mod sync {
         /// ## Compatibility
         ///
         /// This is a 3.x-only API.
-        fn topics(&self) -> Result<Vec<Topic>, Self::Error> {
+        fn topics(&self) -> RawResult<Vec<Topic>> {
             self.query("SELECT * FROM information_schema.ins_topics")?
                 .deserialize()
                 .try_collect()
                 .map_err(Into::into)
         }
 
-        fn describe(&self, table: &str) -> Result<Describe, Self::Error> {
+        fn describe(&self, table: &str) -> RawResult<Describe> {
             Ok(Describe(
                 self.query(format!("describe `{table}`"))?
                     .deserialize()
@@ -286,11 +269,11 @@ pub mod sync {
         }
 
         /// Check if database exists
-        fn database_exists(&self, name: &str) -> Result<bool, Self::Error> {
+        fn database_exists(&self, name: &str) -> RawResult<bool> {
             Ok(self.exec(format!("show `{name}`.stables")).is_ok())
         }
 
-        fn put(&self, data: &SmlData) -> Result<(), Self::Error>;
+        fn put(&self, data: &SmlData) -> RawResult<()>;
     }
 }
 
@@ -298,13 +281,14 @@ mod r#async {
     use itertools::Itertools;
     use serde::de::DeserializeOwned;
     use std::borrow::Cow;
+    use std::marker::PhantomData;
     use std::pin::Pin;
     use std::task::{Context, Poll};
-    use std::{fmt::Debug, marker::PhantomData};
 
     use crate::common::*;
     use crate::helpers::*;
     pub use crate::stmt::Bindable;
+    pub use crate::RawResult;
 
     pub use super::_priv::*;
     pub use crate::util::AsyncInlinable;
@@ -320,14 +304,14 @@ mod r#async {
     use async_trait::async_trait;
 
     pub struct AsyncBlocks<'a, T> {
-        query: Pin<Box<&'a mut T>>,
+        query: &'a mut T,
     }
 
     impl<'a, T> Stream for AsyncBlocks<'a, T>
     where
         T: AsyncFetchable,
     {
-        type Item = Result<RawBlock, T::Error>;
+        type Item = RawResult<RawBlock>;
 
         fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             self.query.fetch_raw_block(cx).map(|raw| {
@@ -352,10 +336,7 @@ mod r#async {
     where
         T: AsyncFetchable,
     {
-        fn fetch(
-            self: &mut Self,
-            cx: &mut Context<'_>,
-        ) -> Poll<Result<Option<RowView<'a>>, T::Error>> {
+        fn fetch(&mut self, cx: &mut Context<'_>) -> Poll<RawResult<Option<RowView<'a>>>> {
             let poll = self.blocks.try_poll_next_unpin(cx);
             match poll {
                 Poll::Ready(block) => match block.transpose() {
@@ -371,10 +352,7 @@ mod r#async {
                 Poll::Pending => Poll::Pending,
             }
         }
-        fn next_row(
-            self: &mut Self,
-            cx: &mut Context<'_>,
-        ) -> Poll<Result<Option<RowView<'a>>, T::Error>> {
+        fn next_row(&mut self, cx: &mut Context<'_>) -> Poll<RawResult<Option<RowView<'a>>>> {
             // has block
             if let Some(rows) = self.rows.as_mut() {
                 // check if block over.
@@ -394,7 +372,7 @@ mod r#async {
     where
         T: AsyncFetchable,
     {
-        type Item = Result<RowView<'a>, T::Error>;
+        type Item = RawResult<RowView<'a>>;
 
         fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             self.next_row(cx).map(|row| row.transpose())
@@ -413,7 +391,7 @@ mod r#async {
         T: AsyncFetchable,
         V: DeserializeOwned,
     {
-        type Item = Result<V, T::Error>;
+        type Item = RawResult<V>;
 
         fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             use futures::stream::*;
@@ -426,8 +404,6 @@ mod r#async {
     #[cfg(feature = "async")]
     #[async_trait]
     pub trait AsyncFetchable: Sized + Send + Sync {
-        type Error: From<taos_error::Error> + Send + Sync;
-
         fn affected_rows(&self) -> i32;
 
         fn precision(&self) -> Precision;
@@ -448,15 +424,10 @@ mod r#async {
         fn update_summary(&mut self, nrows: usize);
 
         #[doc(hidden)]
-        fn fetch_raw_block(
-            self: &mut Self,
-            cx: &mut Context<'_>,
-        ) -> Poll<Result<Option<RawBlock>, Self::Error>>;
+        fn fetch_raw_block(&mut self, cx: &mut Context<'_>) -> Poll<RawResult<Option<RawBlock>>>;
 
         fn blocks(&mut self) -> AsyncBlocks<'_, Self> {
-            AsyncBlocks {
-                query: Box::pin(self),
-            }
+            AsyncBlocks { query: self }
         }
 
         fn rows(&mut self) -> AsyncRows<'_, Self> {
@@ -468,7 +439,7 @@ mod r#async {
         }
 
         /// Records is a row-based 2-dimension matrix of values.
-        async fn to_records(&mut self) -> Result<Vec<Vec<Value>>, Self::Error> {
+        async fn to_records(&mut self) -> RawResult<Vec<Vec<Value>>> {
             let future = self.rows().map_ok(RowView::into_values).try_collect();
             future.await
         }
@@ -488,16 +459,15 @@ mod r#async {
     /// The synchronous query trait for TDengine connection.
     #[async_trait]
     pub trait AsyncQueryable: Send + Sync + Sized {
-        type Error: Debug + From<<Self::AsyncResultSet as AsyncFetchable>::Error> + Send;
         // type B: for<'b> BlockExt<'b, 'b>;
         type AsyncResultSet: AsyncFetchable;
 
         async fn query<T: AsRef<str> + Send + Sync>(
             &self,
             sql: T,
-        ) -> Result<Self::AsyncResultSet, Self::Error>;
+        ) -> RawResult<Self::AsyncResultSet>;
 
-        async fn put(&self, schemaless_data: &SmlData) -> Result<(), Self::Error>;
+        async fn put(&self, schemaless_data: &SmlData) -> RawResult<()>;
 
         // async fn put_line_protocol;
         // async fn put_opentsdb_lines;
@@ -507,19 +477,19 @@ mod r#async {
             &self,
             sql: T,
             req_id: u64,
-        ) -> Result<Self::AsyncResultSet, Self::Error>;
+        ) -> RawResult<Self::AsyncResultSet>;
 
-        async fn exec<T: AsRef<str> + Send + Sync>(&self, sql: T) -> Result<usize, Self::Error> {
+        async fn exec<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<usize> {
             let sql = sql.as_ref();
             // log::trace!("exec sql: {sql}");
             self.query(sql).await.map(|res| res.affected_rows() as _)
         }
 
-        async fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error>;
+        async fn write_raw_meta(&self, meta: &RawMeta) -> RawResult<()>;
 
-        async fn write_raw_block(&self, block: &RawBlock) -> Result<(), Self::Error>;
+        async fn write_raw_block(&self, block: &RawBlock) -> RawResult<()>;
 
-        async fn exec_many<T, I>(&self, input: I) -> Result<usize, Self::Error>
+        async fn exec_many<T, I>(&self, input: I) -> RawResult<usize>
         where
             T: AsRef<str> + Send + Sync,
             I::IntoIter: Send,
@@ -550,7 +520,7 @@ mod r#async {
         async fn query_one<T: AsRef<str> + Send + Sync, O: DeserializeOwned + Send>(
             &self,
             sql: T,
-        ) -> Result<Option<O>, Self::Error> {
+        ) -> RawResult<Option<O>> {
             use futures::StreamExt;
             // log::trace!("query one with sql: {}", sql.as_ref());
             self.query(sql)
@@ -565,7 +535,7 @@ mod r#async {
         }
 
         /// Short for `SELECT server_version()` as [String].
-        async fn server_version(&self) -> Result<Cow<str>, Self::Error> {
+        async fn server_version(&self) -> RawResult<Cow<str>> {
             Ok(self
                 .query_one::<_, String>("SELECT server_version()")
                 .await?
@@ -574,7 +544,7 @@ mod r#async {
         }
 
         /// Short for `CREATE DATABASE IF NOT EXISTS {name}`.
-        async fn create_database<N: AsRef<str> + Send>(&self, name: N) -> Result<(), Self::Error> {
+        async fn create_database<N: AsRef<str> + Send>(&self, name: N) -> RawResult<()> {
             let query = format!("CREATE DATABASE IF NOT EXISTS {}", name.as_ref());
 
             self.query(query).await?;
@@ -582,7 +552,7 @@ mod r#async {
         }
 
         /// Short for `USE {name}`.
-        async fn use_database<N: AsRef<str> + Send>(&self, name: N) -> Result<(), Self::Error> {
+        async fn use_database<N: AsRef<str> + Send>(&self, name: N) -> RawResult<()> {
             let query = format!("USE `{}`", name.as_ref());
 
             self.query(query).await?;
@@ -594,7 +564,7 @@ mod r#async {
             &self,
             name: N,
             sql: S,
-        ) -> Result<(), Self::Error> {
+        ) -> RawResult<()> {
             let (name, sql) = (name.as_ref(), sql.as_ref());
             let query = format!("CREATE TOPIC IF NOT EXISTS {name} AS {sql}");
 
@@ -607,7 +577,7 @@ mod r#async {
             &self,
             name: impl AsRef<str> + Send + Sync + 'async_trait,
             db: impl std::fmt::Display + Send + 'async_trait,
-        ) -> Result<(), Self::Error> {
+        ) -> RawResult<()> {
             let name = name.as_ref();
             let query = format!("create topic if not exists {name} with meta as database `{db}`");
 
@@ -632,7 +602,7 @@ mod r#async {
         }
 
         /// Short for `SHOW DATABASES`.
-        async fn databases(&self) -> Result<Vec<ShowDatabase>, Self::Error> {
+        async fn databases(&self) -> RawResult<Vec<ShowDatabase>> {
             use futures::stream::TryStreamExt;
             Ok(self
                 .query("SHOW DATABASES")
@@ -647,14 +617,14 @@ mod r#async {
         /// ## Compatibility
         ///
         /// This is a 3.x-only API.
-        async fn topics(&self) -> Result<Vec<Topic>, Self::Error> {
+        async fn topics(&self) -> RawResult<Vec<Topic>> {
             let sql = "SELECT * FROM information_schema.ins_topics";
             log::trace!("query one with sql: {sql}");
             Ok(self.query(sql).await?.deserialize().try_collect().await?)
         }
 
         /// Get table meta information.
-        async fn describe(&self, table: &str) -> Result<Describe, Self::Error> {
+        async fn describe(&self, table: &str) -> RawResult<Describe> {
             Ok(Describe(
                 self.query(format!("DESCRIBE `{table}`"))
                     .await?
@@ -665,12 +635,12 @@ mod r#async {
         }
 
         /// Check if database exists
-        async fn database_exists(&self, name: &str) -> Result<bool, Self::Error> {
+        async fn database_exists(&self, name: &str) -> RawResult<bool> {
             Ok(self.exec(format!("show `{name}`.stables")).await.is_ok())
         }
 
         /// Sync version of `exec`.
-        fn exec_sync<T: AsRef<str> + Send + Sync>(&self, sql: T) -> Result<usize, Self::Error> {
+        fn exec_sync<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<usize> {
             futures::executor::block_on(self.exec(sql))
         }
 
@@ -678,7 +648,7 @@ mod r#async {
         fn query_sync<T: AsRef<str> + Send + Sync>(
             &self,
             sql: T,
-        ) -> Result<Self::AsyncResultSet, Self::Error> {
+        ) -> RawResult<Self::AsyncResultSet> {
             futures::executor::block_on(self.query(sql))
         }
     }

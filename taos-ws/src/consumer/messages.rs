@@ -252,7 +252,7 @@ fn test_serde_recv_data() {
         "action": "poll",
         "req_id": 1
     }"#;
-    let d: TmqRecv = serde_json::from_str(&json).unwrap();
+    let d: TmqRecv = serde_json::from_str(json).unwrap();
     let _ = dbg!(d.ok());
 }
 

@@ -196,8 +196,8 @@ impl Display for MetaCreate {
                 columns,
                 tags,
             } => {
-                debug_assert!(columns.len() > 0, "{:?}", self);
-                debug_assert!(tags.len() > 0);
+                debug_assert!(!columns.is_empty(), "{:?}", self);
+                debug_assert!(!tags.is_empty());
 
                 f.write_fmt(format_args!("`{}`", table_name))?;
                 f.write_char('(')?;
@@ -214,7 +214,7 @@ impl Display for MetaCreate {
                 tags,
                 tag_num,
             } => {
-                if tags.len() > 0 {
+                if !tags.is_empty() {
                     f.write_fmt(format_args!(
                         "`{}` USING `{}` ({}) TAGS({})",
                         table_name,
@@ -245,7 +245,7 @@ impl Display for MetaCreate {
                 table_name,
                 columns,
             } => {
-                debug_assert!(columns.len() > 0);
+                debug_assert!(!columns.is_empty());
 
                 f.write_fmt(format_args!("`{}`", table_name))?;
                 f.write_char('(')?;

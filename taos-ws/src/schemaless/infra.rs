@@ -83,7 +83,7 @@ fn test_serde_send() {
         req_id: 1,
         req: WsConnReq::new("root", "taosdata", "db"),
     };
-    let v = serde_json::to_value(&s).unwrap();
+    let v = serde_json::to_value(s).unwrap();
     let j = serde_json::json!({
         "action": "conn",
         "args": {

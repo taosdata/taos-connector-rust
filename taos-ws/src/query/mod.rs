@@ -1,5 +1,6 @@
 use once_cell::sync::OnceCell;
 use taos_query::common::SmlData;
+use taos_query::prelude::RawResult;
 use taos_query::{block_in_place_or_global, common::RawMeta, AsyncQueryable};
 
 pub mod asyn;
@@ -41,14 +42,9 @@ unsafe impl Sync for Taos {}
 
 #[async_trait::async_trait]
 impl taos_query::AsyncQueryable for Taos {
-    type Error = asyn::Error;
-
     type AsyncResultSet = asyn::ResultSet;
 
-    async fn query<T: AsRef<str> + Send + Sync>(
-        &self,
-        sql: T,
-    ) -> Result<Self::AsyncResultSet, Self::Error> {
+    async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
         if let Some(ws) = self.async_client.get() {
             ws.s_query(sql.as_ref()).await
         } else {
@@ -64,7 +60,7 @@ impl taos_query::AsyncQueryable for Taos {
         &self,
         sql: T,
         req_id: u64,
-    ) -> Result<Self::AsyncResultSet, Self::Error> {
+    ) -> RawResult<Self::AsyncResultSet> {
         if let Some(ws) = self.async_client.get() {
             ws.s_query_with_req_id(sql.as_ref(), req_id).await
         } else {
@@ -76,7 +72,7 @@ impl taos_query::AsyncQueryable for Taos {
         }
     }
 
-    async fn write_raw_meta(&self, raw: &RawMeta) -> Result<(), Self::Error> {
+    async fn write_raw_meta(&self, raw: &RawMeta) -> RawResult<()> {
         if let Some(ws) = self.async_client.get() {
             ws.write_meta(raw).await
         } else {
@@ -88,7 +84,7 @@ impl taos_query::AsyncQueryable for Taos {
         }
     }
 
-    async fn write_raw_block(&self, block: &taos_query::RawBlock) -> Result<(), Self::Error> {
+    async fn write_raw_block(&self, block: &taos_query::RawBlock) -> RawResult<()> {
         if let Some(ws) = self.async_client.get() {
             ws.write_raw_block(block).await
         } else {
@@ -100,7 +96,7 @@ impl taos_query::AsyncQueryable for Taos {
         }
     }
 
-    async fn put(&self, data: &SmlData) -> Result<(), Self::Error> {
+    async fn put(&self, data: &SmlData) -> RawResult<()> {
         if let Some(ws) = self.async_sml.get() {
             ws.s_put(data).await
         } else {
@@ -111,35 +107,29 @@ impl taos_query::AsyncQueryable for Taos {
 }
 
 impl taos_query::Queryable for Taos {
-    type Error = asyn::Error;
-
     type ResultSet = asyn::ResultSet;
 
-    fn query<T: AsRef<str>>(&self, sql: T) -> Result<Self::ResultSet, Self::Error> {
+    fn query<T: AsRef<str>>(&self, sql: T) -> RawResult<Self::ResultSet> {
         let sql = sql.as_ref();
         block_in_place_or_global(<Self as AsyncQueryable>::query(self, sql))
     }
 
-    fn query_with_req_id<T: AsRef<str>>(
-        &self,
-        sql: T,
-        req_id: u64,
-    ) -> Result<Self::ResultSet, Self::Error> {
+    fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> RawResult<Self::ResultSet> {
         let sql = sql.as_ref();
         block_in_place_or_global(<Self as AsyncQueryable>::query_with_req_id(
             self, sql, req_id,
         ))
     }
 
-    fn write_raw_meta(&self, meta: &RawMeta) -> Result<(), Self::Error> {
+    fn write_raw_meta(&self, meta: &RawMeta) -> RawResult<()> {
         block_in_place_or_global(<Self as AsyncQueryable>::write_raw_meta(self, meta))
     }
 
-    fn write_raw_block(&self, block: &taos_query::RawBlock) -> Result<(), Self::Error> {
+    fn write_raw_block(&self, block: &taos_query::RawBlock) -> RawResult<()> {
         block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))
     }
 
-    fn put(&self, sml_data: &SmlData) -> Result<(), Self::Error> {
+    fn put(&self, sml_data: &SmlData) -> RawResult<()> {
         block_in_place_or_global(<Self as AsyncQueryable>::put(self, sml_data))
     }
 }

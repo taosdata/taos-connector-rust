@@ -52,7 +52,7 @@ jobs:
         with:
           cond: ${{ github.base_ref == 'main' }}
           if_true: 'main'  
-          if_false: '3.0' 
+          if_false: 'main' 
 
       - name: Checkout tdengine
         uses: actions/checkout@v2
@@ -72,6 +72,7 @@ jobs:
             TDengine/contrib/libuv
             TDengine/contrib/lz4
             TDengine/contrib/zlib
+            TDengine/contrib/rocksdb
           key: ${{ runner.os }}-TDengine-build-main
 
       - name: Build & Install TDengine

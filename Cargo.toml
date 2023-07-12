@@ -10,17 +10,19 @@ members = [
   "taos-ws-sys",
   "taos",
 ]
+resolver = "2"
 
 [workspace.package]
 edition = "2021"
-version = "0.8.10"
+version = "0.8.15"
+
 authors = ["Linhe Huo <linhe.huo@gmail.com>"]
 categories = ["database", "api-bindings", "asynchronous"]
-keywords = ["timeseries", "database", "tdengine", "taosdata", "connection"]
-license = "MIT OR Apache-2.0"
 description = "Driver for TDengine - a timeseries database and analysis platform"
 documentation = "https://docs.rs/taos"
 homepage = "https://tdengine.com"
-repository = "https://github.com/taosdata/taos-connector-rust.git"
+keywords = ["timeseries", "database", "tdengine", "taosdata", "connection"]
+license = "MIT OR Apache-2.0"
 readme = "./README.md"
+repository = "https://github.com/taosdata/taos-connector-rust.git"
 rust-version = "1.65"

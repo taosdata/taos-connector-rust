@@ -24,8 +24,7 @@ impl IsColumnView for VarCharView {
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         Self::from_iter::<String, _, _, _>(
             iter.map(|v| v.to_str().map(|v| v.into_owned()))
-                .collect_vec()
-                .into_iter(),
+                .collect_vec(),
         )
     }
 }
@@ -37,10 +36,7 @@ impl VarCharView {
 
     /// A iterator only decide if the value at some row index is NULL or not.
     pub fn is_null_iter(&self) -> VarCharNullsIter {
-        VarCharNullsIter {
-            view: &self,
-            row: 0,
-        }
+        VarCharNullsIter { view: self, row: 0 }
     }
 
     /// Build a nulls vector.
@@ -120,7 +116,7 @@ impl VarCharView {
         if range.end > self.len() {
             range.end = self.len();
         }
-        if range.len() == 0 {
+        if range.is_empty() {
             return None;
         }
         let (offsets, range) = unsafe { self.offsets.slice_unchecked(range.clone()) };
@@ -170,7 +166,7 @@ impl VarCharView {
             );
             wtr.write_all(offsets_bytes)?;
             wtr.write_all(&bytes)?;
-            return Ok(offsets_bytes.len() + bytes.len());
+            Ok(offsets_bytes.len() + bytes.len())
         }
         // let offsets = self.offsets.as_bytes();
         // dbg!(self, offsets);
@@ -195,7 +191,7 @@ impl VarCharView {
             if let Some(s) = i {
                 let s: &str = s.as_ref();
                 offsets.push(data.len() as i32);
-                data.write_inlined_str::<2>(&s).unwrap();
+                data.write_inlined_str::<2>(s).unwrap();
             } else {
                 offsets.push(-1);
             }
@@ -283,7 +279,7 @@ fn test_slice() {
             assert_eq!(
                 slice.to_vec().as_slice(),
                 &data[start..end]
-                    .into_iter()
+                    .iter()
                     .map(|s| s.map(ToString::to_string))
                     .collect_vec()
             );

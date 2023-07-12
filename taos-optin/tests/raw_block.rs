@@ -14,9 +14,9 @@ fn raw_block() -> anyhow::Result<()> {
 
     dbg!(inner.schemas());
 
-    dbg!(unsafe { inner.get_ref_unchecked(0, field_count as usize - 1) });
+    dbg!(unsafe { inner.get_ref_unchecked(0, field_count - 1) });
     for row in 0..dbg!(inner.nrows()) as usize {
-        for col in 0..field_count as usize {
+        for col in 0..field_count {
             println!("({row}, {col}): ");
             let v = unsafe { inner.get_ref_unchecked(row, col) };
             dbg!(v);
@@ -39,7 +39,7 @@ async fn raw_block_async() -> anyhow::Result<()> {
         dbg!(inner.schemas());
 
         for row in 0..dbg!(inner.nrows()) as usize {
-            for col in 0..inner.ncols() as usize {
+            for col in 0..inner.ncols() {
                 println!("({row}, {col}): ");
                 let v = unsafe { inner.get_ref_unchecked(row, col) };
                 dbg!(v);
@@ -88,8 +88,7 @@ fn raw_block_full_test() -> anyhow::Result<()> {
         String::from_utf8(
             buf.as_ref()
                 .iter()
-                .map(|b| escape_default(*b))
-                .flatten()
+                .flat_map(|b| escape_default(*b))
                 .collect(),
         )
         .unwrap()
@@ -99,13 +98,13 @@ fn raw_block_full_test() -> anyhow::Result<()> {
 
     let schemas = inner.schemas();
     for i in 0..field_count {
-        let col = schemas[i as usize];
-        let field = &fields[i as usize];
+        let col = schemas[i];
+        let field = &fields[i];
         println!("{field:?}, {col:#x?}");
     }
-    dbg!(unsafe { inner.get_ref_unchecked(0, field_count as usize - 1) });
+    dbg!(unsafe { inner.get_ref_unchecked(0, field_count - 1) });
     for row in 0..dbg!(inner.nrows()) as usize {
-        for col in 0..field_count as usize {
+        for col in 0..field_count {
             println!("({row}, {col}): ");
             let v = unsafe { inner.get_ref_unchecked(row, col) };
 

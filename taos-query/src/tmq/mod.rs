@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     common::{JsonMeta, RawData, RawMeta},
-    RawBlock,
+    RawBlock, RawResult,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -62,7 +62,7 @@ pub enum TimeoutError {
 impl FromStr for Timeout {
     type Err = TimeoutError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         if s.is_empty() {
             return Err(TimeoutError::Empty);
         }
@@ -137,24 +137,20 @@ impl<M, D> MessageSet<M, D> {
 
 #[async_trait::async_trait]
 pub trait IsAsyncMeta {
-    type Error;
+    async fn as_raw_meta(&self) -> RawResult<RawMeta>;
 
-    async fn as_raw_meta(&self) -> Result<RawMeta, Self::Error>;
-
-    async fn as_json_meta(&self) -> Result<JsonMeta, Self::Error>;
+    async fn as_json_meta(&self) -> RawResult<JsonMeta>;
 }
 
 impl<T> IsMeta for T
 where
     T: IsAsyncMeta + SyncOnAsync,
 {
-    type Error = T::Error;
-
-    fn as_raw_meta(&self) -> Result<RawMeta, Self::Error> {
+    fn as_raw_meta(&self) -> RawResult<RawMeta> {
         crate::block_in_place_or_global(T::as_raw_meta(self))
     }
 
-    fn as_json_meta(&self) -> Result<JsonMeta, Self::Error> {
+    fn as_json_meta(&self) -> RawResult<JsonMeta> {
         crate::block_in_place_or_global(T::as_json_meta(self))
     }
 }
@@ -164,55 +160,45 @@ impl<T> IsAsyncMeta for T
 where
     T: IsMeta + AsyncOnSync + Send + Sync,
 {
-    type Error = T::Error;
-
-    async fn as_raw_meta(&self) -> Result<RawMeta, Self::Error> {
+    async fn as_raw_meta(&self) -> RawResult<RawMeta> {
         <T as IsMeta>::as_raw_meta(self)
     }
 
-    async fn as_json_meta(&self) -> Result<JsonMeta, Self::Error> {
+    async fn as_json_meta(&self) -> RawResult<JsonMeta> {
         <T as IsMeta>::as_json_meta(self)
     }
 }
 
 pub trait IsMeta {
-    type Error;
+    fn as_raw_meta(&self) -> RawResult<RawMeta>;
 
-    fn as_raw_meta(&self) -> Result<RawMeta, Self::Error>;
-
-    fn as_json_meta(&self) -> Result<JsonMeta, Self::Error>;
+    fn as_json_meta(&self) -> RawResult<JsonMeta>;
 }
 
 #[async_trait::async_trait]
 pub trait IsAsyncData {
-    type Error;
-
-    async fn as_raw_data(&self) -> Result<RawData, Self::Error>;
-    async fn fetch_raw_block(&self) -> Result<Option<RawBlock>, Self::Error>;
+    async fn as_raw_data(&self) -> RawResult<RawData>;
+    async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>>;
 }
 
 pub trait IsData {
-    type Error;
-
-    fn as_raw_data(&self) -> Result<RawData, Self::Error>;
-    fn fetch_raw_block(&self) -> Result<Option<RawBlock>, Self::Error>;
+    fn as_raw_data(&self) -> RawResult<RawData>;
+    fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>>;
 }
 
 #[async_trait::async_trait]
 pub trait AsyncMessage {
-    type Error;
-
     /// Check if the message contains meta.
     fn has_meta(&self) -> bool;
     /// Check if the message contains data.
     fn has_data(&self) -> bool;
 
     /// Return raw data as bytes.
-    async fn as_raw_data(&self) -> Result<RawData, Self::Error>;
+    async fn as_raw_data(&self) -> RawResult<RawData>;
 
     /// Extract meta message.
-    async fn get_meta(&self) -> Result<Option<RawMeta>, Self::Error>;
-    async fn fetch_raw_block(&self) -> Result<Option<RawBlock>, Self::Error>;
+    async fn get_meta(&self) -> RawResult<Option<RawMeta>>;
+    async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>>;
 }
 
 pub type VGroupId = i32;
@@ -266,10 +252,9 @@ impl Assignment {
 }
 
 pub trait AsConsumer: Sized {
-    type Error;
     type Offset: IsOffset;
     type Meta: IsMeta;
-    type Data: IntoIterator<Item = Result<RawBlock, Self::Error>>;
+    type Data: IntoIterator<Item = RawResult<RawBlock>>;
 
     /// Default timeout getter for message stream.
     fn default_timeout(&self) -> Timeout {
@@ -279,24 +264,22 @@ pub trait AsConsumer: Sized {
     fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
         &mut self,
         topics: I,
-    ) -> Result<(), Self::Error>;
+    ) -> RawResult<()>;
 
     /// None means wait until next message come.
     fn recv_timeout(
         &self,
         timeout: Timeout,
-    ) -> Result<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>, Self::Error>;
+    ) -> RawResult<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>>;
 
-    fn recv(
-        &self,
-    ) -> Result<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>, Self::Error> {
+    fn recv(&self) -> RawResult<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>> {
         self.recv_timeout(self.default_timeout())
     }
 
     fn iter_data_only(
         &self,
         timeout: Timeout,
-    ) -> Box<dyn '_ + Iterator<Item = Result<(Self::Offset, Self::Data), Self::Error>>> {
+    ) -> Box<dyn '_ + Iterator<Item = RawResult<(Self::Offset, Self::Data)>>> {
         Box::new(
             self.iter_with_timeout(timeout)
                 .filter_map_ok(|m| m.1.into_data().map(|data| (m.0, data))),
@@ -306,7 +289,7 @@ pub trait AsConsumer: Sized {
     fn iter_with_timeout(&self, timeout: Timeout) -> MessageSetsIter<'_, Self> {
         MessageSetsIter {
             consumer: self,
-            timeout: timeout,
+            timeout,
         }
     }
 
@@ -314,7 +297,7 @@ pub trait AsConsumer: Sized {
         self.iter_with_timeout(self.default_timeout())
     }
 
-    fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error>;
+    fn commit(&self, offset: Self::Offset) -> RawResult<()>;
 
     fn unsubscribe(self) {
         drop(self)
@@ -322,8 +305,7 @@ pub trait AsConsumer: Sized {
 
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>>;
 
-    fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64)
-        -> Result<(), Self::Error>;
+    fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()>;
 }
 
 pub struct MessageSetsIter<'a, C> {
@@ -335,7 +317,7 @@ impl<'a, C> Iterator for MessageSetsIter<'a, C>
 where
     C: AsConsumer,
 {
-    type Item = Result<(C::Offset, MessageSet<C::Meta, C::Data>), C::Error>;
+    type Item = RawResult<(C::Offset, MessageSet<C::Meta, C::Data>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.consumer.recv_timeout(self.timeout).transpose()
@@ -344,7 +326,6 @@ where
 
 #[async_trait::async_trait]
 pub trait AsAsyncConsumer: Sized + Send + Sync {
-    type Error;
     type Offset: IsOffset;
     type Meta: IsAsyncMeta;
     type Data: IsAsyncData;
@@ -354,13 +335,13 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
         &mut self,
         topics: I,
-    ) -> Result<(), Self::Error>;
+    ) -> RawResult<()>;
 
     /// None means wait until next message come.
     async fn recv_timeout(
         &self,
         timeout: Timeout,
-    ) -> Result<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>, Self::Error>;
+    ) -> RawResult<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>>;
 
     fn stream_with_timeout(
         &self,
@@ -370,7 +351,7 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
             dyn '_
                 + Send
                 + futures::Stream<
-                    Item = Result<(Self::Offset, MessageSet<Self::Meta, Self::Data>), Self::Error>,
+                    Item = RawResult<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>,
                 >,
         >,
     > {
@@ -387,14 +368,14 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
             dyn '_
                 + Send
                 + futures::Stream<
-                    Item = Result<(Self::Offset, MessageSet<Self::Meta, Self::Data>), Self::Error>,
+                    Item = RawResult<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>,
                 >,
         >,
     > {
         self.stream_with_timeout(self.default_timeout())
     }
 
-    async fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error>;
+    async fn commit(&self, offset: Self::Offset) -> RawResult<()>;
 
     async fn unsubscribe(self) {
         drop(self)
@@ -404,12 +385,8 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
 
     async fn topic_assignment(&self, topic: &str) -> Vec<Assignment>;
 
-    async fn offset_seek(
-        &mut self,
-        topic: &str,
-        vgroup_id: VGroupId,
-        offset: i64,
-    ) -> Result<(), Self::Error>;
+    async fn offset_seek(&mut self, topic: &str, vgroup_id: VGroupId, offset: i64)
+        -> RawResult<()>;
 }
 
 /// Marker trait to impl sync on async impl.
@@ -421,10 +398,8 @@ impl<C> AsConsumer for C
 where
     C: AsAsyncConsumer + SyncOnAsync,
     C::Meta: IsMeta,
-    C::Data: IntoIterator<Item = Result<RawBlock, C::Error>>,
+    C::Data: IntoIterator<Item = RawResult<RawBlock>>,
 {
-    type Error = C::Error;
-
     type Offset = C::Offset;
 
     type Meta = C::Meta;
@@ -434,18 +409,18 @@ where
     fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
         &mut self,
         topics: I,
-    ) -> Result<(), Self::Error> {
+    ) -> RawResult<()> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::subscribe(self, topics))
     }
 
     fn recv_timeout(
         &self,
         timeout: Timeout,
-    ) -> Result<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>, Self::Error> {
+    ) -> RawResult<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::recv_timeout(self, timeout))
     }
 
-    fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
+    fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit(self, offset))
     }
 
@@ -453,12 +428,7 @@ where
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::assignments(self))
     }
 
-    fn offset_seek(
-        &mut self,
-        topic: &str,
-        vg_id: VGroupId,
-        offset: i64,
-    ) -> Result<(), Self::Error> {
+    fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::offset_seek(
             self, topic, vg_id, offset,
         ))
@@ -485,18 +455,18 @@ where
 //     async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
 //         &mut self,
 //         topics: I,
-//     ) -> Result<(), Self::Error> {
+//     ) -> Result<()> {
 //         <C as AsConsumer>::subscribe(self, topics)
 //     }
 
 //     async fn recv_timeout(
 //         &self,
 //         timeout: Timeout,
-//     ) -> Result<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>, Self::Error> {
+//     ) -> Result<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>> {
 //         <C as AsConsumer>::recv_timeout(self, timeout)
 //     }
 
-//     async fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
+//     async fn commit(&self, offset: Self::Offset) -> Result<()> {
 //         <C as AsConsumer>::commit(self, offset)
 //     }
 // }

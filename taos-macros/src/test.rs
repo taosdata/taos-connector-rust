@@ -42,11 +42,11 @@ impl Params {
                     let _ = iter.next();
                 }
                 // Check if is async function
-                Ident(ident) if ident.to_string() == "async" => {
+                Ident(ident) if *ident == "async" => {
                     params.is_async = true;
                 }
                 // Parse function name and parameters
-                Ident(ident) if ident.to_string() == "fn" => {
+                Ident(ident) if *ident == "fn" => {
                     if let Some(Ident(ident)) = iter.next() {
                         params.fn_name = ident.to_string();
                     } else {
@@ -74,7 +74,7 @@ impl Params {
                         return_type_tt.push(ident.clone());
                     }
 
-                    while let Some(token) = iter.next() {
+                    for token in iter.by_ref() {
                         if let Group(group) = token {
                             let v = group.delimiter();
                             if v == Delimiter::Brace {
@@ -138,7 +138,7 @@ impl Attr {
             // panic!("{}", &t);
             // dbg!(&t);
             match t {
-                TokenTree::Ident(ident) if ident.to_string() == "databases" => {
+                TokenTree::Ident(ident) if ident == "databases" => {
                     const EXPECT: &str = "expect `[test(databases = \"\")]`";
                     let _ = iter.next();
                     let value = iter.next().expect(EXPECT);
@@ -149,7 +149,7 @@ impl Attr {
                         _ => unreachable!("expect `[test(databases = \"\")]`"),
                     }
                 }
-                TokenTree::Ident(ident) if ident.to_string() == "rt" => {
+                TokenTree::Ident(ident) if ident == "rt" => {
                     const EXPECT: &str = "`[test(rt = \"tokio|async_std\")]`";
                     let _ = iter.next();
                     let value = iter.next().expect(EXPECT);
@@ -158,7 +158,7 @@ impl Attr {
                         _ => unreachable!("expect {EXPECT}"),
                     }
                 }
-                TokenTree::Ident(ident) if ident.to_string() == "naming" => {
+                TokenTree::Ident(ident) if ident == "naming" => {
                     const EXPECT: &str =
                         "`[test(naming = \"random|uuid-v1|sequential|<custom>\")]`";
                     let _ = iter.next();
@@ -168,7 +168,7 @@ impl Attr {
                         _ => unreachable!("expect {EXPECT}"),
                     }
                 }
-                TokenTree::Ident(ident) if ident.to_string() == "dropping" => {
+                TokenTree::Ident(ident) if ident == "dropping" => {
                     const EXPECT: &str = "`[test(drop = \"none|before|after|always\")]`";
                     let _ = iter.next();
                     let value = iter.next().expect(EXPECT);
@@ -177,7 +177,7 @@ impl Attr {
                         _ => unreachable!("expect {EXPECT}"),
                     }
                 }
-                TokenTree::Ident(ident) if ident.to_string() == "precision" => {
+                TokenTree::Ident(ident) if ident == "precision" => {
                     const EXPECT: &str = "`[test(drop = \"ms|us|ns|random|cyclic\")]`";
                     let _ = iter.next();
                     let value = iter.next().expect(EXPECT);
@@ -187,9 +187,7 @@ impl Attr {
                     }
                 }
 
-                TokenTree::Ident(ident)
-                    if ident.to_string() == "log_level" || ident.to_string() == "log-level" =>
-                {
+                TokenTree::Ident(ident) if ident == "log_level" || ident == "log-level" => {
                     const EXPECT: &str = "`[test(log_level = \"trace|debug|info|warn|error\")]`";
                     let _ = iter.next();
                     let value = iter.next().expect(EXPECT);
@@ -357,7 +355,7 @@ fn parse_database_requires(params: &[TokenTree]) -> Requires {
     while let Some(t) = iter.next() {
         use TokenTree::*;
         match t {
-            Ident(ident) if ident.to_string() == "taos" || ident.to_string() == "_taos" => {
+            Ident(ident) if *ident == "taos" || *ident == "_taos" => {
                 let _ = iter.next();
                 let _ = iter.next();
                 let ty = iter.next().unwrap();
@@ -365,15 +363,13 @@ fn parse_database_requires(params: &[TokenTree]) -> Requires {
                 has_taos = true;
                 ret = Requires::TaosOnly;
             }
-            Ident(ident) if ident.to_string() == "database" || ident.to_string() == "_database" => {
+            Ident(ident) if *ident == "database" || *ident == "_database" => {
                 if !has_taos {
                     panic!("please use test fn parameters: `taos: &Taos, database: &str`");
                 }
                 ret = Requires::WithDatabase;
             }
-            Ident(ident)
-                if ident.to_string() == "databases" || ident.to_string() == "_databases" =>
-            {
+            Ident(ident) if *ident == "databases" || *ident == "_databases" => {
                 if !has_taos {
                     panic!("please use test fn parameters: `taos: &Taos, databases: &[String]`");
                 }
@@ -519,7 +515,7 @@ mod tests {
                 Ok(())
             }
         };
-        let params = super::Params::from_tokens(fn_item.clone().into());
+        let params = super::Params::from_tokens(fn_item.clone());
         dbg!(params);
         let tokens = attr.with_params(fn_item);
 

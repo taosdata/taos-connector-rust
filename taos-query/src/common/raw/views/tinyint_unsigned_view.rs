@@ -79,7 +79,7 @@ impl UTinyIntView {
 
     #[inline(always)]
     unsafe fn get_raw_at(&self, index: usize) -> *const Item {
-        self.data.as_ptr().offset((index * ITEM_SIZE) as isize) as _
+        self.data.as_ptr().add(index * ITEM_SIZE) as _
     }
 
     /// Get nullable value at `row` index.
@@ -101,7 +101,7 @@ impl UTinyIntView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|v| BorrowedValue::UTinyInt(v))
+            .map(BorrowedValue::UTinyInt)
             .unwrap_or(BorrowedValue::Null(Ty::UTinyInt))
     }
 
@@ -129,7 +129,7 @@ impl UTinyIntView {
         if range.end > self.len() {
             range.end = self.len();
         }
-        if range.len() == 0 {
+        if range.is_empty() {
             return None;
         }
 
@@ -208,7 +208,7 @@ impl<A: Into<Option<Item>>> FromIterator<A> for View {
             data: Bytes::from({
                 let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
                 std::mem::forget(values);
-                unsafe { Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE) }
+                unsafe { Vec::from_raw_parts(ptr, len * ITEM_SIZE, cap * ITEM_SIZE) }
             }),
         }
     }

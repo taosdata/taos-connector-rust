@@ -12,7 +12,7 @@ pub(super) mod tmq {
         into_c_str::IntoCStr,
         raw::{ApiEntry, TmqApi},
         types::{tmq_resp_err_t, tmq_t},
-        RawError, RawRes,
+        RawRes, RawResult,
     };
 
     use super::Topics;
@@ -31,7 +31,7 @@ pub(super) mod tmq {
         fn as_ptr(&self) -> *mut tmq_t {
             self.ptr
         }
-        pub(crate) fn subscribe(&mut self, topics: &Topics) -> Result<(), RawError> {
+        pub(crate) fn subscribe(&mut self, topics: &Topics) -> RawResult<()> {
             unsafe {
                 (self.tmq.tmq_subscribe)(self.as_ptr(), topics.as_ptr()).ok_or(format!(
                     "subscribe failed with topics: [{}]",
@@ -57,15 +57,15 @@ pub(super) mod tmq {
             tl
         }
 
-        pub fn commit_sync(&self, msg: RawRes) -> Result<(), RawError> {
+        pub fn commit_sync(&self, msg: RawRes) -> RawResult<()> {
             unsafe { (self.tmq.tmq_commit_sync)(self.as_ptr(), msg.as_ptr() as _) }
                 .ok_or("commit failed")
         }
 
-        pub async fn commit(&self, msg: RawRes) -> Result<(), RawError> {
+        pub async fn commit(&self, msg: RawRes) -> RawResult<()> {
             // use tokio::sync::oneshot::{channel, Sender};
             use std::sync::mpsc::{channel, Sender};
-            let (sender, rx) = channel::<Result<(), RawError>>();
+            let (sender, rx) = channel::<RawResult<()>>();
             unsafe extern "C" fn tmq_commit_async_cb(
                 _tmq: *mut tmq_t,
                 resp: tmq_resp_err_t,
@@ -133,43 +133,31 @@ pub(super) mod tmq {
 
         pub fn unsubscribe(&mut self) {
             unsafe {
-                log::trace!("unsubscribe {:p}", self.as_ptr());
                 (self.tmq.tmq_unsubscribe)(self.as_ptr());
-                log::trace!("consumer closed safely");
             }
         }
 
         pub fn get_topic_assignment(&self, topic_name: &str) -> Vec<Assignment> {
-            let assignments_ptr: *mut *mut Assignment =
-                Box::into_raw(Box::new(std::ptr::null_mut()));
-            let mut assignment_num: i32 = 0;
-
-            let tmq_resp;
+            let pt: *mut *mut Assignment = Box::into_raw(Box::new(std::ptr::null_mut()));
             if let Some(tmq_get_topic_assignment) = self.tmq.tmq_get_topic_assignment {
-                tmq_resp = unsafe {
+                let mut num: i32 = 0;
+
+                let tmq_resp = unsafe {
                     tmq_get_topic_assignment(
                         self.as_ptr(),
                         topic_name.into_c_str().as_ptr(),
-                        assignments_ptr,
-                        &mut assignment_num,
+                        pt,
+                        &mut num,
                     )
                 };
+
+                if tmq_resp.is_err() || num == 0 {
+                    return vec![];
+                }
+                unsafe { std::slice::from_raw_parts(*pt, num as usize).to_vec() }
             } else {
-                // unimplemented!("does not support tmq_get_topic_assignment")
-                return vec![];
+                vec![]
             }
-
-            let err_str = self.err_as_str(tmq_resp);
-            if tmq_resp.is_err() {
-                return vec![];
-            } 
-
-            let assignments =
-                unsafe { std::slice::from_raw_parts(*assignments_ptr, assignment_num as usize) };
-
-            let assignments = assignments.to_vec();
-
-            assignments
         }
 
         pub fn offset_seek(
@@ -177,7 +165,7 @@ pub(super) mod tmq {
             topic_name: &str,
             vgroup_id: VGroupId,
             offset: i64,
-        ) -> Result<(), RawError> {
+        ) -> RawResult<()> {
             let tmq_resp;
             if let Some(tmq_offset_seek) = self.tmq.tmq_offset_seek {
                 tmq_resp = unsafe {
@@ -192,7 +180,7 @@ pub(super) mod tmq {
                 // unimplemented!("does not support tmq_offset_seek")
                 return Ok(());
             }
-            log::debug!(
+            log::trace!(
                 "offset_seek tmq_resp: {:?}, topic_name: {}, vgroup_id: {}, offset: {}",
                 tmq_resp,
                 topic_name,
@@ -201,7 +189,7 @@ pub(super) mod tmq {
             );
 
             let err_str = self.err_as_str(tmq_resp);
-            log::debug!("offset_seek tmq_resp as str: {}", err_str);
+            log::trace!("offset_seek tmq_resp as str: {}", err_str);
 
             tmq_resp.ok_or(format!("offset seek failed: {err_str}"))
         }
@@ -246,7 +234,7 @@ pub(super) mod conf {
             .with_table_name()
         }
 
-        pub(crate) fn from_dsn(dsn: &Dsn, api: TmqConfApi) -> Result<Self, RawError> {
+        pub(crate) fn from_dsn(dsn: &Dsn, api: TmqConfApi) -> RawResult<Self> {
             let mut conf = Self::new(api);
             macro_rules! _set_opt {
                 ($f:ident, $c:literal) => {
@@ -318,18 +306,14 @@ pub(super) mod conf {
         pub(crate) fn with<K: AsRef<str>, V: AsRef<str>>(
             mut self,
             iter: impl Iterator<Item = (K, V)>,
-        ) -> Result<Self, RawError> {
+        ) -> RawResult<Self> {
             for (k, v) in iter {
                 self.set(k, v)?;
             }
             Ok(self)
         }
 
-        fn set<K: AsRef<str>, V: AsRef<str>>(
-            &mut self,
-            key: K,
-            value: V,
-        ) -> Result<&mut Self, RawError> {
+        fn set<K: AsRef<str>, V: AsRef<str>>(&mut self, key: K, value: V) -> RawResult<&mut Self> {
             unsafe { self.api.set(self.as_ptr(), key.as_ref(), value.as_ref()) }.map(|_| self)
         }
 
@@ -339,16 +323,14 @@ pub(super) mod conf {
         //     }
         // }
 
-        pub(crate) fn build(&self) -> Result<*mut tmq_t, RawError> {
+        pub(crate) fn build(&self) -> RawResult<*mut tmq_t> {
             unsafe { self.api.consumer(self.as_ptr()) }
         }
     }
 
     impl Drop for Conf {
         fn drop(&mut self) {
-            log::trace!("tmq config destroy");
             unsafe { self.api.destroy(self.as_ptr()) };
-            log::trace!("tmq config destroyed safely");
         }
     }
 }
@@ -357,11 +339,9 @@ pub(super) mod list {
     use std::ffi::CStr;
     use std::os::raw::c_char;
 
-    use taos_query::prelude::RawError;
+    use taos_query::prelude::RawResult;
 
     use crate::{into_c_str::IntoCStr, raw::TmqListApi, types::tmq_list_t};
-
-    type Result<T> = std::result::Result<T, RawError>;
 
     #[derive(Debug)]
     pub(crate) struct Topics {
@@ -388,7 +368,7 @@ pub(super) mod list {
         pub(crate) fn from_topics<'a, T: IntoCStr<'a>>(
             api: TmqListApi,
             topics: impl IntoIterator<Item = T>,
-        ) -> Result<Self> {
+        ) -> RawResult<Self> {
             let ptr = unsafe { api.from_c_str_iter(topics)? };
             Ok(Self { api, ptr })
         }
@@ -457,9 +437,7 @@ pub(super) mod list {
     impl Drop for Topics {
         fn drop(&mut self) {
             unsafe {
-                log::trace!("list destroy");
                 self.api.destroy(self.as_ptr());
-                log::trace!("list destroy destroyed");
             }
         }
     }

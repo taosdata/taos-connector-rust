@@ -36,7 +36,7 @@ impl raw_data_t {
         data.extend(self.raw_type.to_le_bytes());
 
         unsafe {
-            let ptr = data.as_mut_ptr().offset(RAW_PTR_OFFSET as isize);
+            let ptr = data.as_mut_ptr().add(RAW_PTR_OFFSET);
             std::ptr::copy_nonoverlapping(self.raw, ptr as _, self.raw_len as _);
             data.set_len(cap);
         }
@@ -71,14 +71,14 @@ impl RawDataInner {
         match self {
             RawDataInner::Raw(raw) => raw.raw_type,
             RawDataInner::Data(bytes) => unsafe {
-                *(bytes.as_ptr().offset(std::mem::size_of::<u32>() as _) as *const u16)
+                *(bytes.as_ptr().add(std::mem::size_of::<u32>()) as *const u16)
             },
         }
     }
     fn raw(&self) -> *const c_void {
         match self {
             RawDataInner::Raw(raw) => raw.raw,
-            RawDataInner::Data(bytes) => unsafe { bytes.as_ptr().offset(RAW_PTR_OFFSET as _) as _ },
+            RawDataInner::Data(bytes) => unsafe { bytes.as_ptr().add(RAW_PTR_OFFSET) as _ },
         }
     }
 

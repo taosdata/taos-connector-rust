@@ -127,7 +127,7 @@ impl TimestampView {
 
     #[inline(always)]
     unsafe fn get_raw_at(&self, index: usize) -> *const Item {
-        self.data.as_ptr().offset((index * ITEM_SIZE) as isize) as _
+        self.data.as_ptr().add(index * ITEM_SIZE) as _
     }
 
     /// Get nullable value at `row` index.
@@ -137,10 +137,7 @@ impl TimestampView {
         } else {
             Some(Timestamp::new(
                 std::ptr::read_unaligned(
-                    self.data
-                        .as_ptr()
-                        .offset((row * std::mem::size_of::<Item>()) as isize)
-                        as _,
+                    self.data.as_ptr().add(row * std::mem::size_of::<Item>()) as _
                 ),
                 // *self.get_raw_at(row),
                 self.precision,
@@ -158,7 +155,7 @@ impl TimestampView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|v| BorrowedValue::Timestamp(v))
+            .map(BorrowedValue::Timestamp)
             .unwrap_or(BorrowedValue::Null(Ty::Timestamp))
     }
 
@@ -186,7 +183,7 @@ impl TimestampView {
         if range.end > self.len() {
             range.end = self.len();
         }
-        if range.len() == 0 {
+        if range.is_empty() {
             return None;
         }
 
@@ -238,6 +235,15 @@ impl<'a> Iterator for TimestampViewIter<'a> {
         }
     }
 
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.row < self.view.len() {
+            let len = self.view.len() - self.row;
+            (len, Some(len))
+        } else {
+            (0, Some(0))
+        }
+    }
+
     fn last(self) -> Option<Self::Item>
     where
         Self: Sized,
@@ -245,6 +251,8 @@ impl<'a> Iterator for TimestampViewIter<'a> {
         self.view.get(self.view.len() - 1)
     }
 }
+
+impl<'a> ExactSizeIterator for TimestampViewIter<'a> {}
 
 pub struct TimestampMillisecondView(View);
 
