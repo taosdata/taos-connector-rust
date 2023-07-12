@@ -63,17 +63,10 @@ impl<T> Drop for WsMaybeError<T> {
     fn drop(&mut self) {
         if !self.data.is_null() {
             log::trace!("dropping obj {}", self.type_id);
-            let _ = unsafe { self.data.read() };
+            // let _ = unsafe { self.data.read() };
+            let _ = unsafe { Box::from_raw(self.data) };
         }
     }
-}
-
-#[test]
-fn test_result() {
-    assert_eq!(
-        std::mem::size_of::<WsMaybeError<ResultSet>>(),
-        std::mem::size_of::<WsMaybeError<()>>()
-    );
 }
 
 impl<T> WsMaybeError<T> {
@@ -803,6 +796,15 @@ pub fn init_env() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_result() {
+        assert_eq!(
+            std::mem::size_of::<WsMaybeError<ResultSet>>(),
+            std::mem::size_of::<WsMaybeError<()>>()
+        );
+    }
+    
     #[test]
     fn dsn_error() {
         init_env();
