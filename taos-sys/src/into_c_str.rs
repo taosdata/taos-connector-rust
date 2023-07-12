@@ -150,7 +150,7 @@ mod test_into_c_str {
     #[test]
     fn c_str_to_c_str() {
         let s = CStr::from_bytes_with_nul(b"abc\0").unwrap();
-        from_c_str(&s);
+        from_c_str(s);
         from_c_str(s);
     }
     #[test]
@@ -162,7 +162,7 @@ mod test_into_c_str {
     #[test]
     fn str_to_c_str() {
         let s = "abc";
-        from_c_str(&s);
+        from_c_str(s);
         from_c_str(s);
     }
     #[test]

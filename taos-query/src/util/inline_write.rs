@@ -30,7 +30,7 @@ pub trait AsyncInlinableWrite: AsyncWrite + Send + Unpin {
         &mut self,
         bytes: &[u8],
     ) -> std::io::Result<usize> {
-        assert_eq!(bytes.len() >> N * 8, 0);
+        debug_assert_eq!(bytes.len() >> (N * 8), 0); // bytes.len() < (2 ^ (8 * N))
         let len = &bytes.len().to_le_bytes()[0..N];
         self.write_all(len).await?;
         self.write_all(bytes).await?;

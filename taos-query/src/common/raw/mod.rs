@@ -1,9 +1,13 @@
+#![allow(clippy::size_of_in_element_count)]
+#![allow(clippy::type_complexity)]
+
 use crate::common::{BorrowedValue, Field, Precision, Ty, Value};
 
 use bytes::Bytes;
 use itertools::Itertools;
 
 use serde::Deserialize;
+use taos_error::Error;
 
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
@@ -12,7 +16,7 @@ use std::{
     fmt::Display,
     ops::Deref,
     ptr::NonNull,
-    sync::Arc,
+    rc::Rc,
 };
 
 pub mod layout;
@@ -22,6 +26,8 @@ mod data;
 
 use layout::Layout;
 
+#[allow(clippy::missing_safety_doc)]
+#[allow(clippy::should_implement_trait)]
 pub mod views;
 
 pub use views::ColumnView;
@@ -95,7 +101,7 @@ impl Header {
 // #[derive(Debug)]
 pub struct RawBlock {
     /// Layout is auto detected.
-    layout: Arc<RefCell<Layout>>,
+    layout: Rc<RefCell<Layout>>,
     /// Raw bytes version, may be v2 or v3.
     version: Version,
     /// Data is required, which could be v2 websocket block or a v3 raw block.
@@ -150,6 +156,10 @@ impl RawBlock {
     pub fn from_views(views: &[ColumnView], precision: Precision) -> Self {
         Self::parse_from_raw_block(views_to_raw_block(views), precision)
     }
+
+    /// # Safety
+    ///
+    /// When using this with correct TDengine 3.x raw block pointer, it's safe.
     pub unsafe fn parse_from_ptr(ptr: *mut c_void, precision: Precision) -> Self {
         let header = &*(ptr as *const Header);
         let len = header.length as usize;
@@ -158,7 +168,11 @@ impl RawBlock {
         Self::parse_from_raw_block(bytes, precision).with_layout(Layout::default())
     }
 
-    pub fn parse_from_ptr_v2(
+    /// # Safety
+    ///
+    /// When using this with correct TDengine 2.x block pointer, it's safe.
+    #[allow(clippy::needless_range_loop)]
+    pub unsafe fn parse_from_ptr_v2(
         ptr: *const *const c_void,
         fields: &[Field],
         lengths: &[u32],
@@ -167,13 +181,11 @@ impl RawBlock {
     ) -> Self {
         let mut bytes = Vec::new();
         for i in 0..fields.len() {
-            unsafe {
-                let slice = ptr.add(i).read();
-                bytes.extend_from_slice(std::slice::from_raw_parts(
-                    slice as *const u8,
-                    lengths[i] as usize * rows,
-                ));
-            }
+            let slice = ptr.add(i).read();
+            bytes.extend_from_slice(std::slice::from_raw_parts(
+                slice as *const u8,
+                lengths[i] as usize * rows,
+            ));
         }
         Self::parse_from_raw_block_v2(bytes, fields, lengths, rows, precision)
     }
@@ -210,19 +222,19 @@ impl RawBlock {
         }
         #[inline(always)]
         fn u_tiny_int_is_null(v: *const u8) -> bool {
-            unsafe { (v as *const u8).read_unaligned() == 0xFF }
+            unsafe { v.read_unaligned() == 0xFF }
         }
         #[inline(always)]
         fn u_small_int_is_null(v: *const u16) -> bool {
-            unsafe { (v as *const u16).read_unaligned() == 0xFFFF }
+            unsafe { v.read_unaligned() == 0xFFFF }
         }
         #[inline(always)]
         fn u_int_is_null(v: *const u32) -> bool {
-            unsafe { (v as *const u32).read_unaligned() == 0xFFFFFFFF }
+            unsafe { v.read_unaligned() == 0xFFFFFFFF }
         }
         #[inline(always)]
         fn u_big_int_is_null(v: *const u64) -> bool {
-            unsafe { (v as *const u64).read_unaligned() == 0xFFFFFFFFFFFFFFFF }
+            unsafe { v.read_unaligned() == 0xFFFFFFFFFFFFFFFF }
         }
         #[inline(always)]
         fn float_is_null(v: *const f32) -> bool {
@@ -245,9 +257,7 @@ impl RawBlock {
         // const U_INT_NULL: u32 = u32::MAX;
         // const U_BIG_INT_NULL: u64 = u64::MAX;
 
-        let layout = Arc::new(RefCell::new(
-            Layout::INLINE_DEFAULT.with_schema_changed().into(),
-        ));
+        let layout = Rc::new(RefCell::new(Layout::INLINE_DEFAULT.with_schema_changed()));
 
         let bytes = bytes.into();
         let cols = fields.len();
@@ -265,9 +275,10 @@ impl RawBlock {
 
         let mut offset = 0;
 
-        for (i, (field, length)) in fields.into_iter().zip(&*lengths).enumerate() {
+        for (i, (field, length)) in fields.iter().zip(lengths).enumerate() {
             macro_rules! _primitive_view {
-                ($ty:ident, $prim:ty) => {{
+                ($ty:ident, $prim:ty) => {
+                    {
                     debug_assert_eq!(field.bytes(), *length);
                     // column start
                     let start = offset;
@@ -330,7 +341,7 @@ impl RawBlock {
                     let data = bytes.slice(start..offset);
                     let data_ptr = data.as_ptr();
 
-                    let offsets = Offsets::from_offsets((0..rows).into_iter().map(|row| unsafe {
+                    let offsets = Offsets::from_offsets((0..rows).map(|row| unsafe {
                         let offset = row as i32 * *length as i32;
                         let ptr = data_ptr.offset(offset as isize);
                         let len = (ptr as *const u16).read_unaligned();
@@ -343,13 +354,13 @@ impl RawBlock {
 
                     columns.push(ColumnView::VarChar(VarCharView { offsets, data }));
 
-                    data_lengths[i] = *length as u32 * rows as u32;
+                    data_lengths[i] = *length * rows as u32;
                 }
                 Ty::Timestamp => {
                     // column start
                     let start = offset;
                     // column end
-                    offset += rows * std::mem::size_of::<i64>() as usize;
+                    offset += rows * std::mem::size_of::<i64>();
                     // byte slice from start to end: `[start, end)`.
                     let data = bytes.slice(start..offset);
                     let nulls = NullBits::from_iter((0..rows).map(|row| unsafe {
@@ -378,7 +389,7 @@ impl RawBlock {
                     let data = bytes.slice(start..offset);
                     let data_ptr = data.as_ptr();
 
-                    let offsets = Offsets::from_offsets((0..rows).into_iter().map(|row| unsafe {
+                    let offsets = Offsets::from_offsets((0..rows).map(|row| unsafe {
                         let offset = row as i32 * *length as i32;
                         let ptr = data_ptr.offset(offset as isize);
                         let len = (ptr as *const u16).read_unaligned();
@@ -398,7 +409,7 @@ impl RawBlock {
                         layout: layout.clone(),
                     }));
 
-                    data_lengths[i] = *length as u32 * rows as u32;
+                    data_lengths[i] = *length * rows as u32;
                 }
                 Ty::Json => {
                     let start = offset;
@@ -406,7 +417,7 @@ impl RawBlock {
                     let data = bytes.slice(start..offset);
                     let data_ptr = data.as_ptr();
 
-                    let offsets = Offsets::from_offsets((0..rows).into_iter().map(|row| unsafe {
+                    let offsets = Offsets::from_offsets((0..rows).map(|row| unsafe {
                         let offset = row as i32 * *length as i32;
                         let ptr = data_ptr.offset(offset as isize);
                         let len = (ptr as *const u16).read_unaligned();
@@ -420,7 +431,7 @@ impl RawBlock {
 
                     columns.push(ColumnView::Json(JsonView { offsets, data }));
 
-                    data_lengths[i] = *length as u32 * rows as u32;
+                    data_lengths[i] = *length * rows as u32;
                 }
                 Ty::VarBinary => todo!(),
                 Ty::Decimal => todo!(),
@@ -450,7 +461,7 @@ impl RawBlock {
     pub fn parse_from_raw_block(bytes: impl Into<Bytes>, precision: Precision) -> Self {
         let schema_start: usize = std::mem::size_of::<Header>();
 
-        let layout = Arc::new(RefCell::new(Layout::INLINE_DEFAULT.into()));
+        let layout = Rc::new(RefCell::new(Layout::INLINE_DEFAULT));
 
         let bytes = bytes.into();
         let ptr = bytes.as_ptr();
@@ -461,7 +472,7 @@ impl RawBlock {
         let cols = header.ncols();
         let len = header.len();
         debug_assert_eq!(bytes.len(), len);
-        let group_id = header.group_id as u64;
+        let group_id = header.group_id;
 
         let schema_end = schema_start + cols * std::mem::size_of::<ColSchema>();
         let schemas = Schemas::from(bytes.slice(schema_start..schema_end));
@@ -518,7 +529,7 @@ impl RawBlock {
                     ColumnView::Timestamp(TimestampView {
                         nulls: NullBits(nulls),
                         data,
-                        precision: precision,
+                        precision,
                     })
                 }
                 Ty::NChar => {
@@ -599,7 +610,7 @@ impl RawBlock {
     }
 
     fn with_layout(mut self, layout: Layout) -> Self {
-        self.layout = Arc::new(RefCell::new(layout));
+        self.layout = Rc::new(RefCell::new(layout));
         self
     }
 
@@ -628,13 +639,13 @@ impl RawBlock {
 
     #[inline]
     pub fn table_name(&self) -> Option<&str> {
-        self.table.as_ref().map(|s| s.as_str())
+        self.table.as_deref()
     }
 
     // todo: db name?
     #[inline]
     pub fn tmq_db_name(&self) -> Option<&str> {
-        self.database.as_ref().map(|s| s.as_str())
+        self.database.as_deref()
     }
 
     #[inline]
@@ -710,6 +721,10 @@ impl RawBlock {
 
     #[inline]
     /// Get one value at `(row, col)` of the block.
+    ///
+    /// # Safety
+    ///
+    /// `(row, col)` should not exceed the block limit.
     pub unsafe fn get_raw_value_unchecked(
         &self,
         row: usize,
@@ -728,6 +743,10 @@ impl RawBlock {
 
     #[inline]
     /// Get one value at `(row, col)` of the block.
+    ///
+    /// # Safety
+    ///
+    /// Ensure that `row` and `col` not exceed the limit of the block.
     pub unsafe fn get_ref_unchecked(&self, row: usize, col: usize) -> BorrowedValue {
         self.columns.get_unchecked(col).get_ref_unchecked(row)
     }
@@ -788,7 +807,7 @@ impl<'a> PrettyBlock<'a> {
 impl<'a> Deref for PrettyBlock<'a> {
     type Target = RawBlock;
     fn deref(&self) -> &Self::Target {
-        &self.raw
+        self.raw
     }
 }
 
@@ -812,25 +831,23 @@ impl<'a> Display for PrettyBlock<'a> {
                     row.map(|s| s.1.to_string().unwrap_or_default()),
                 ));
             }
+        } else if nrows > 2 * MAX_DISPLAY_ROWS {
+            for row in (&mut rows_iter).take(MAX_DISPLAY_ROWS) {
+                table.add_row(Row::from_iter(
+                    row.map(|s| s.1.to_string().unwrap_or_default()),
+                ));
+            }
+            table.add_row(Row::from_iter(std::iter::repeat("...").take(self.ncols())));
+            for row in rows_iter.skip(nrows - 2 * MAX_DISPLAY_ROWS) {
+                table.add_row(Row::from_iter(
+                    row.map(|s| s.1.to_string().unwrap_or_default()),
+                ));
+            }
         } else {
-            if nrows > 2 * MAX_DISPLAY_ROWS {
-                for row in (&mut rows_iter).take(MAX_DISPLAY_ROWS) {
-                    table.add_row(Row::from_iter(
-                        row.map(|s| s.1.to_string().unwrap_or_default()),
-                    ));
-                }
-                table.add_row(Row::from_iter(std::iter::repeat("...").take(self.ncols())));
-                for row in rows_iter.skip(nrows - 2 * MAX_DISPLAY_ROWS) {
-                    table.add_row(Row::from_iter(
-                        row.map(|s| s.1.to_string().unwrap_or_default()),
-                    ));
-                }
-            } else {
-                for row in rows_iter {
-                    table.add_row(Row::from_iter(
-                        row.map(|s| s.1.to_string().unwrap_or_default()),
-                    ));
-                }
+            for row in rows_iter {
+                table.add_row(Row::from_iter(
+                    row.map(|s| s.1.to_string().unwrap_or_default()),
+                ));
             }
         }
 
@@ -855,8 +872,7 @@ impl crate::prelude::sync::Inlinable for InlineBlock {
         use crate::prelude::sync::InlinableRead;
         let version = reader.read_u32()?;
         let len = reader.read_u32()?;
-        let mut bytes = Vec::with_capacity(len as usize);
-        bytes.resize(len as usize, 0);
+        let mut bytes = vec![0; len as usize];
         unsafe {
             std::ptr::copy_nonoverlapping(
                 version.to_le_bytes().as_ptr(),
@@ -891,8 +907,7 @@ impl crate::prelude::AsyncInlinable for InlineBlock {
 
         let version = reader.read_u32_le().await?;
         let len = reader.read_u32_le().await?;
-        let mut bytes = Vec::with_capacity(len as usize);
-        bytes.resize(len as usize, 0);
+        let mut bytes = vec![0; len as usize];
         unsafe {
             std::ptr::copy_nonoverlapping(
                 version.to_le_bytes().as_ptr(),
@@ -936,7 +951,7 @@ impl crate::prelude::sync::Inlinable for RawBlock {
             raw.with_table_name(name);
         }
         if layout.expect_field_names() {
-            let names: Vec<_> = (0..cols as usize)
+            let names: Vec<_> = (0..cols)
                 .map(|_| reader.read_inlined_str::<1>())
                 .try_collect()?;
             raw.with_field_names(names);
@@ -962,7 +977,7 @@ impl crate::prelude::sync::Inlinable for RawBlock {
             raw.with_table_name(name);
         }
         if layout.expect_field_names() {
-            let names: Vec<_> = (0..raw.ncols() as usize)
+            let names: Vec<_> = (0..raw.ncols())
                 .map(|_| reader.read_inlined_str::<1>())
                 .try_collect()?;
             raw.with_field_names(names);
@@ -1074,6 +1089,11 @@ impl SmlData {
     }
 }
 
+impl From<SmlDataBuilderError> for Error {
+    fn from(value: SmlDataBuilderError) -> Self {
+        Error::from_any(value)
+    }
+}
 #[async_trait::async_trait]
 impl crate::prelude::AsyncInlinable for RawBlock {
     async fn read_optional_inlined<R: tokio::io::AsyncRead + Send + Unpin>(

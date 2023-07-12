@@ -94,7 +94,7 @@ fn taos_version() -> String {
     for feat in version2features(parsed_version) {
         println!("cargo:rustc-cfg=taos_{feat}");
     }
-    return version.to_string();
+    version.to_string()
 }
 
 #[derive(Debug, PartialEq, PartialOrd)]

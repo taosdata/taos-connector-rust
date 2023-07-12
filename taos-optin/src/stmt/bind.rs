@@ -133,7 +133,8 @@ mod tests_v2 {
     }
     #[test]
     fn bind_var_char() {
-        for v in [IVarChar::from("abc")].iter() {
+        {
+            let v = &IVarChar::from("abc");
             let bind = TaosBind::from(v);
             dbg!(&bind);
 
@@ -174,7 +175,8 @@ mod tests_v3 {
     // todo: skip this test.
     // #[test]
     fn _bind_var_char() {
-        for v in [IVarChar::from("abc")].iter() {
+        {
+            let v = &IVarChar::from("abc");
             let bind = TaosBind::from(v);
             dbg!(&bind);
             let v1 =

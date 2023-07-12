@@ -145,8 +145,8 @@ impl<'b> BorrowedValue<'b> {
     fn strict_as_str(&self) -> &str {
         use BorrowedValue::*;
         match self {
-            VarChar(v) => *v,
-            NChar(v) => &v,
+            VarChar(v) => v,
+            NChar(v) => v,
             Null(_) => panic!("expect str but value is null"),
             Timestamp(_) => panic!("expect str but value is timestamp"),
             _ => panic!("expect str but only varchar/binary/nchar is supported"),
@@ -217,9 +217,7 @@ impl<'b> BorrowedValue<'b> {
             UInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             UBigInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             Float(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v as f64).unwrap()),
-            Double(v) => {
-                serde_json::Value::Number(serde_json::Number::from_f64(*v as f64).unwrap())
-            }
+            Double(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v).unwrap()),
             VarChar(v) => serde_json::Value::String(v.to_string()),
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => serde_json::Value::Number(
@@ -348,7 +346,7 @@ impl<'b> BorrowedValue<'b> {
             BorrowedValue::USmallInt(v) => Some(v.to_string().into()),
             BorrowedValue::UInt(v) => Some(v.to_string().into()),
             BorrowedValue::UBigInt(v) => Some(v.to_string().into()),
-            BorrowedValue::Json(v) => Some(unsafe { std::str::from_utf8_unchecked(&v) }.into()),
+            BorrowedValue::Json(v) => Some(unsafe { std::str::from_utf8_unchecked(v) }.into()),
             BorrowedValue::VarBinary(_) => todo!(),
             BorrowedValue::Decimal(_) => todo!(),
             BorrowedValue::Blob(_) => todo!(),
@@ -580,9 +578,7 @@ impl Value {
             UInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             UBigInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             Float(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v as f64).unwrap()),
-            Double(v) => {
-                serde_json::Value::Number(serde_json::Number::from_f64(*v as f64).unwrap())
-            }
+            Double(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v).unwrap()),
             VarChar(v) => serde_json::Value::String(v.to_string()),
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => v.clone(),
@@ -619,7 +615,7 @@ impl<'b> PartialEq<Value> for BorrowedValue<'b> {
             (Self::USmallInt(l0), Value::USmallInt(r0)) => l0 == r0,
             (Self::UInt(l0), Value::UInt(r0)) => l0 == r0,
             (Self::UBigInt(l0), Value::UBigInt(r0)) => l0 == r0,
-            (Self::Json(l0), Value::Json(r0)) => l0.as_ref() == &serde_json::to_vec(r0).unwrap(),
+            (Self::Json(l0), Value::Json(r0)) => l0.as_ref() == serde_json::to_vec(r0).unwrap(),
             (Self::VarBinary(l0), Value::VarBinary(r0)) => l0 == r0,
             (Self::Decimal(l0), Value::Decimal(r0)) => l0 == r0,
             (Self::Blob(l0), Value::Blob(r0)) => l0 == r0,
@@ -648,7 +644,7 @@ impl<'b> PartialEq<BorrowedValue<'b>> for Value {
             (BorrowedValue::UInt(l0), Value::UInt(r0)) => l0 == r0,
             (BorrowedValue::UBigInt(l0), Value::UBigInt(r0)) => l0 == r0,
             (BorrowedValue::Json(l0), Value::Json(r0)) => {
-                l0.as_ref() == &serde_json::to_vec(r0).unwrap()
+                l0.as_ref() == serde_json::to_vec(r0).unwrap()
             }
             (BorrowedValue::VarBinary(l0), Value::VarBinary(r0)) => l0 == r0,
             (BorrowedValue::Decimal(l0), Value::Decimal(r0)) => l0 == r0,

@@ -34,8 +34,11 @@ macro_rules! _impl_inline_lines {
 
             impl InlineBytes<$ty> {
                 #[inline]
+                /// # Safety
+                ///
+                /// Do not use it directly.
                 pub unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
-                    std::mem::transmute::<*const u8, &InlineBytes<$ty>>(ptr)
+                    &*ptr.cast::<InlineBytes<$ty>>()
                 }
                 #[inline]
                 #[rustversion::attr(nightly, const)]

@@ -17,7 +17,7 @@ use taos_query::{
         AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsMeta, IsOffset,
         MessageSet, Timeout, VGroupId,
     },
-    Dsn, IntoDsn, RawBlock,
+    Dsn, IntoDsn, RawBlock, RawResult,
 };
 
 use crate::{conn::RawTaos, query::RawRes};
@@ -123,13 +123,11 @@ unsafe impl Sync for TmqBuilder {}
 impl taos_query::TBuilder for TmqBuilder {
     type Target = Consumer;
 
-    type Error = RawError;
-
     fn available_params() -> &'static [&'static str] {
         &["group.id", "client.id", "timeout", "enable.auto.commit"]
     }
 
-    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+    fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let mut dsn = dsn
             .into_dsn()
             .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
@@ -146,7 +144,7 @@ impl taos_query::TBuilder for TmqBuilder {
         RawTaos::version()
     }
 
-    fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error> {
+    fn ping(&self, _: &mut Self::Target) -> RawResult<()> {
         self.build().map(|_| ())
     }
 
@@ -154,7 +152,7 @@ impl taos_query::TBuilder for TmqBuilder {
         true
     }
 
-    fn build(&self) -> Result<Self::Target, Self::Error> {
+    fn build(&self) -> RawResult<Self::Target> {
         self.conf.build().map(|tmq| Consumer {
             tmq,
             timeout: self.timeout,
@@ -162,11 +160,11 @@ impl taos_query::TBuilder for TmqBuilder {
         })
     }
 
-    fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    fn is_enterprise_edition(&self) -> RawResult<bool> {
         unimplemented!()
     }
 
-    fn server_version(&self) -> Result<&str, Self::Error> {
+    fn server_version(&self) -> RawResult<&str> {
         unimplemented!()
     }
 }
@@ -175,9 +173,7 @@ impl taos_query::TBuilder for TmqBuilder {
 impl taos_query::AsyncTBuilder for TmqBuilder {
     type Target = Consumer;
 
-    type Error = RawError;
-
-    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
+    fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let mut dsn = dsn
             .into_dsn()
             .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
@@ -194,7 +190,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         RawTaos::version()
     }
 
-    async fn ping(&self, _: &mut Self::Target) -> Result<(), Self::Error> {
+    async fn ping(&self, _: &mut Self::Target) -> RawResult<()> {
         self.build().await.map(|_| ())
     }
 
@@ -202,7 +198,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         true
     }
 
-    async fn build(&self) -> Result<Self::Target, Self::Error> {
+    async fn build(&self) -> RawResult<Self::Target> {
         self.conf.build().map(|tmq| Consumer {
             tmq,
             timeout: self.timeout,
@@ -210,11 +206,11 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         })
     }
 
-    async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    async fn is_enterprise_edition(&self) -> RawResult<bool> {
         unimplemented!()
     }
 
-    async fn server_version(&self) -> Result<&str, Self::Error> {
+    async fn server_version(&self) -> RawResult<&str> {
         unimplemented!()
     }
 }
@@ -304,9 +300,7 @@ pub struct Meta {
 impl AsyncOnSync for Meta {}
 
 impl IsMeta for Meta {
-    type Error = RawError;
-
-    fn as_raw_meta(&self) -> Result<RawMeta, Self::Error> {
+    fn as_raw_meta(&self) -> RawResult<RawMeta> {
         let raw = self.raw.tmq_get_raw();
 
         let mut data = Vec::new();
@@ -322,7 +316,7 @@ impl IsMeta for Meta {
         Ok(RawMeta::new(data.into()))
     }
 
-    fn as_json_meta(&self) -> Result<taos_query::common::JsonMeta, Self::Error> {
+    fn as_json_meta(&self) -> RawResult<taos_query::common::JsonMeta> {
         let meta = serde_json::from_slice(self.raw.tmq_get_json_meta().as_bytes())
             .map_err(|err| RawError::from_string(err.to_string()))?;
         Ok(meta)
@@ -365,13 +359,11 @@ impl Data {
 
 #[async_trait::async_trait]
 impl IsAsyncData for Data {
-    type Error = RawError;
-
-    async fn as_raw_data(&self) -> Result<taos_query::common::RawData, Self::Error> {
+    async fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
         Ok(self.raw.tmq_get_raw().into())
     }
 
-    async fn fetch_raw_block(&self) -> Result<Option<RawBlock>, Self::Error> {
+    async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
         Ok(self.raw.fetch_raw_message(self.precision))
     }
 }
@@ -399,7 +391,7 @@ pub struct MessageSetIter {
 }
 
 impl Iterator for Data {
-    type Item = Result<RawBlock, RawError>;
+    type Item = RawResult<RawBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.raw.fetch_raw_message(self.precision).map(Ok)
@@ -418,8 +410,6 @@ impl Iterator for Data {
 // }
 
 impl AsConsumer for Consumer {
-    type Error = RawError;
-
     type Offset = Offset;
 
     type Meta = Meta;
@@ -429,7 +419,7 @@ impl AsConsumer for Consumer {
     fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
         &mut self,
         topics: I,
-    ) -> Result<(), Self::Error> {
+    ) -> RawResult<()> {
         let topics = Topics::from_topics(topics.into_iter().map(|s| s.into()))?;
         self.tmq.subscribe(&topics)
     }
@@ -437,12 +427,11 @@ impl AsConsumer for Consumer {
     fn recv_timeout(
         &self,
         timeout: taos_query::tmq::Timeout,
-    ) -> Result<
+    ) -> RawResult<
         Option<(
             Self::Offset,
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
-        Self::Error,
     > {
         Ok(self.tmq.poll_timeout(timeout.as_raw_timeout()).map(|raw| {
             (
@@ -461,7 +450,7 @@ impl AsConsumer for Consumer {
         }))
     }
 
-    fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
+    fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         self.tmq.commit_sync(offset.0).map(|_| ())
     }
 
@@ -478,12 +467,7 @@ impl AsConsumer for Consumer {
         Some(ret)
     }
 
-    fn offset_seek(
-        &mut self,
-        topic: &str,
-        vg_id: VGroupId,
-        offset: i64,
-    ) -> Result<(), Self::Error> {
+    fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
         self.tmq.offset_seek(topic, vg_id, offset)
     }
 }
@@ -491,8 +475,6 @@ impl AsConsumer for Consumer {
 // impl AsyncOnSync for Consumer {}
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
-    type Error = RawError;
-
     type Offset = Offset;
 
     type Meta = Meta;
@@ -502,7 +484,7 @@ impl AsAsyncConsumer for Consumer {
     async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
         &mut self,
         topics: I,
-    ) -> Result<(), Self::Error> {
+    ) -> RawResult<()> {
         let topics = Topics::from_topics(topics.into_iter().map(|s| s.into()))?;
 
         let r = self.tmq.subscribe(&topics);
@@ -510,9 +492,9 @@ impl AsAsyncConsumer for Consumer {
         if let Some(offset) = self.dsn.get("offset") {
             // dbg!(offset);
             let offsets = offset
-                .split(",")
+                .split(',')
                 .map(|s| {
-                    s.split(":")
+                    s.split(':')
                         .map(|i| i.parse::<i64>().unwrap())
                         .collect_vec()
                 })
@@ -528,7 +510,7 @@ impl AsAsyncConsumer for Consumer {
                     offset,
                     vgroup_id
                 );
-                let _ = self.tmq.offset_seek(&topic_name, vgroup_id as i32, offset);
+                let _ = self.tmq.offset_seek(topic_name, vgroup_id as i32, offset);
             }
         }
 
@@ -538,12 +520,11 @@ impl AsAsyncConsumer for Consumer {
     async fn recv_timeout(
         &self,
         timeout: taos_query::tmq::Timeout,
-    ) -> Result<
+    ) -> RawResult<
         Option<(
             Self::Offset,
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
-        Self::Error,
     > {
         log::trace!("waiting for next message");
         let res = match timeout {
@@ -599,7 +580,7 @@ impl AsAsyncConsumer for Consumer {
         res
     }
 
-    async fn commit(&self, offset: Self::Offset) -> Result<(), Self::Error> {
+    async fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         self.tmq.commit(offset.0).await.map(|_| ())
     }
 
@@ -630,7 +611,7 @@ impl AsAsyncConsumer for Consumer {
         topic: &str,
         vgroup_id: VGroupId,
         offset: i64,
-    ) -> Result<(), Self::Error> {
+    ) -> RawResult<()> {
         self.tmq.offset_seek(topic, vgroup_id, offset)
     }
 }
@@ -1005,7 +986,7 @@ mod tests {
                     // meta data can be write to an database seamlessly by raw or json (to sql).
                     let sql = dbg!(json.to_string());
                     if let Err(err) = taos.exec(sql) {
-                        match err.errno() {
+                        match err.code() {
                             Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
                             Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
                             Code::COLUMN_EXISTS => log::trace!("column already exists"),
@@ -1368,7 +1349,7 @@ mod tests {
                         // dbg!(json);
                         let sql = dbg!(json.to_string());
                         if let Err(err) = taos.exec(sql).await {
-                            match err.errno() {
+                            match err.code() {
                                 Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
                                 Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
                                 Code::COLUMN_EXISTS => log::trace!("column already exists"),

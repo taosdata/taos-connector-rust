@@ -103,7 +103,7 @@ impl JsonView {
         if range.end > self.len() {
             range.end = self.len();
         }
-        if range.len() == 0 {
+        if range.is_empty() {
             return None;
         }
         let (offsets, range) = unsafe { self.offsets.slice_unchecked(range.clone()) };
@@ -147,7 +147,7 @@ impl JsonView {
             );
             wtr.write_all(offsets_bytes)?;
             wtr.write_all(&bytes)?;
-            return Ok(offsets_bytes.len() + bytes.len());
+            Ok(offsets_bytes.len() + bytes.len())
         }
         // let offsets = self.offsets.as_bytes();
         // wtr.write_all(offsets)?;
@@ -171,7 +171,7 @@ impl JsonView {
             if let Some(s) = i {
                 let s: &str = s.as_ref();
                 offsets.push(data.len() as i32);
-                data.write_inlined_str::<2>(&s).unwrap();
+                data.write_inlined_str::<2>(s).unwrap();
             } else {
                 offsets.push(-1);
             }
@@ -243,9 +243,7 @@ fn test_slice() {
             assert_eq!(
                 slice.to_vec().as_slice(),
                 &itertools::Itertools::collect_vec(
-                    data[start..end]
-                        .into_iter()
-                        .map(|s| s.map(ToString::to_string))
+                    data[start..end].iter().map(|s| s.map(ToString::to_string))
                 )
             );
         }

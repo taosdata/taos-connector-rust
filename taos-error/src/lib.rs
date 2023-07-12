@@ -1,6 +1,7 @@
 #![cfg_attr(nightly, feature(provide_any, error_generic_member_access))]
 #![cfg_attr(nightly, feature(no_coverage))]
 use std::{
+    any::Any,
     borrow::Cow,
     fmt::{self, Debug, Display},
     str::FromStr,
@@ -70,11 +71,13 @@ impl Debug for Error {
             }
             if let Some(context) = &self.context {
                 f.write_fmt(format_args!("{}", context))?;
-                f.write_str("\n\nCaused by:\n")?;
+                writeln!(f)?;
+                writeln!(f)?;
+                writeln!(f, "Caused by:")?;
 
                 let chain = self.source.chain();
                 for (idx, source) in chain.enumerate() {
-                    write!(f, "{:4}: {}\n", idx, source)?;
+                    writeln!(f, "{:4}: {}", idx, source)?;
                 }
             } else {
                 let mut chain = self.source.chain();
@@ -83,14 +86,20 @@ impl Debug for Error {
                 }
 
                 if self.source.deep() {
-                    f.write_str("\n\nCaused by:\n")?;
+                    writeln!(f)?;
+                    writeln!(f)?;
+                    writeln!(f, "Caused by:")?;
                     for (idx, source) in chain.enumerate() {
-                        write!(f, "{:4}: {}\n", idx, source)?;
+                        writeln!(f, "{:4}: {}", idx, source)?;
                     }
                 }
             }
             #[cfg(nightly)]
-            f.write_fmt(format_args!("\nBacktrace:\n{}", self.source.backtrace()))?;
+            {
+                writeln!(f)?;
+                writeln!(f, "Backtrace:")?;
+                writeln!(f, "{}", self.source.backtrace())?;
+            }
 
             Ok(())
         }
@@ -209,7 +218,7 @@ impl Error {
             Self::new(code, str)
         } else {
             Self {
-                code: code.into(),
+                code,
                 context: None,
                 source: Inner::empty(),
             }
@@ -227,7 +236,18 @@ impl Error {
     }
 
     #[inline]
-    pub fn any(err: impl Into<anyhow::Error>) -> Self {
+    pub fn any(err: impl Into<anyhow::Error> + 'static) -> Self {
+        if err.type_id() == std::any::TypeId::of::<Self>() {
+            // let err = Box::new(&err as &dyn Any);
+            let err = &err as &dyn Any;
+            let err = err.downcast_ref::<Self>().unwrap();
+            dbg!(err);
+            return Self {
+                code: err.code,
+                context: err.context.clone(),
+                source: err.source.clone(),
+            };
+        }
         err.into().into()
     }
 
@@ -248,11 +268,13 @@ impl Error {
 ///
 /// ```rust
 /// # use taos_error::*;
-/// let _ = format_err!(
+/// let err = format_err!(
 ///     code = 0x0618,
 ///     raw = "Message error from native API",
 ///     context = "Query with sql: `select 1`"
 /// );
+/// let err_str = err.to_string();
+/// assert_eq!(err_str, "[0x0618] Query with sql: `select 1`: Internal error: `Message error from native API`");
 /// ```
 ///
 /// It will give the error:
@@ -305,6 +327,7 @@ impl Error {
 /// ```rust
 /// # use taos_error::*;
 /// # use anyhow;
+/// # let message = "message";
 /// let err = Error::from(anyhow::format_err!("Error here: {}", message));
 /// ```
 ///
@@ -329,10 +352,10 @@ macro_rules! format_err {
     // //     $crate::Error::new_with_context($c, format!($arg), $arg2)
     // // };
     (code = $c:expr, raw = $arg:literal, context = $($arg2:tt)*) => {
-        $crate::Error::new_with_context($c, format!($arg), __priv_format!($($arg2)*))
+        $crate::Error::new_with_context($c, format!($arg), $crate::__priv_format!($($arg2)*))
     };
     (code = $c:expr, raw = $arg:ident, context = $($arg2:tt)*) => {
-        $crate::Error::new_with_context($c, $arg, __priv_format!($($arg2)*))
+        $crate::Error::new_with_context($c, $arg, $crate::__priv_format!($($arg2)*))
     };
     (code = $c:expr) => {
         $crate::Error::from_code($c)
@@ -375,7 +398,7 @@ macro_rules! format_err {
         $crate::Error::from_string(format!($($arg)*))
     };
 }
-
+#[macro_export]
 macro_rules! __priv_format {
     ($msg:literal $(,)?) => {
         literal.to_string()
@@ -472,6 +495,8 @@ fn test_bail() {
     dbg!(&err);
     assert!(err.is_err());
     println!("{:?}", err.unwrap_err());
+
+    println!("{:?}", Error::any(use_bail().unwrap_err()));
 }
 
 #[test]
@@ -480,7 +505,7 @@ fn test_display() {
     assert!(dbg!(format!("{}", err)).contains("[0x0000] nothing"));
     let result = std::panic::catch_unwind(|| {
         let err = Error::new(Code::SUCCESS, "Success").context("nothing");
-        Err::<(), _>(err).unwrap();
+        panic!("{:?}", err);
     });
     assert!(result.is_err());
 }

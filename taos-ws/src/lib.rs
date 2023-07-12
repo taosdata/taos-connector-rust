@@ -4,7 +4,7 @@ use std::fmt::{Debug, Display};
 use once_cell::sync::OnceCell;
 
 use taos_query::prelude::Code;
-use taos_query::{DsnError, IntoDsn};
+use taos_query::{DsnError, IntoDsn, RawResult};
 
 mod stmt;
 pub use stmt::Stmt;
@@ -78,33 +78,26 @@ impl From<query::asyn::Error> for Error {
 impl taos_query::TBuilder for TaosBuilder {
     type Target = Taos;
 
-    type Error = Error;
-
     fn available_params() -> &'static [&'static str] {
         &["token"]
     }
 
-    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
-        Ok(Self::from_dsn(dsn.into_dsn()?)?)
+    fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
+        Self::from_dsn(dsn.into_dsn()?)
     }
 
     fn client_version() -> &'static str {
         "0"
     }
-    fn ping(&self, taos: &mut Self::Target) -> Result<(), Self::Error> {
-        taos_query::Queryable::exec(taos, "SELECT 1")
-            .map_err(|e| Error {
-                code: e.errno(),
-                source: e.into(),
-            })
-            .map(|_| ())
+    fn ping(&self, taos: &mut Self::Target) -> RawResult<()> {
+        taos_query::Queryable::exec(taos, "SELECT 1").map(|_| ())
     }
 
     fn ready(&self) -> bool {
         true
     }
 
-    fn build(&self) -> Result<Self::Target, Self::Error> {
+    fn build(&self) -> RawResult<Self::Target> {
         Ok(Taos {
             dsn: self.clone(),
             async_client: OnceCell::new(),
@@ -112,7 +105,7 @@ impl taos_query::TBuilder for TaosBuilder {
         })
     }
 
-    fn server_version(&self) -> Result<&str, Self::Error> {
+    fn server_version(&self) -> RawResult<&str> {
         if let Some(v) = self.server_version.get() {
             Ok(v.as_str())
         } else {
@@ -125,7 +118,7 @@ impl taos_query::TBuilder for TaosBuilder {
             })
         }
     }
-    fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    fn is_enterprise_edition(&self) -> RawResult<bool> {
         if self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
         {
@@ -168,22 +161,16 @@ impl taos_query::TBuilder for TaosBuilder {
 impl taos_query::AsyncTBuilder for TaosBuilder {
     type Target = Taos;
 
-    type Error = Error;
-
-    fn from_dsn<D: IntoDsn>(dsn: D) -> Result<Self, Self::Error> {
-        Ok(Self::from_dsn(dsn.into_dsn()?)?)
+    fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
+        Self::from_dsn(dsn.into_dsn()?)
     }
 
     fn client_version() -> &'static str {
         "0"
     }
-    async fn ping(&self, taos: &mut Self::Target) -> Result<(), Self::Error> {
+    async fn ping(&self, taos: &mut Self::Target) -> RawResult<()> {
         taos_query::AsyncQueryable::exec(taos, "SELECT 1")
             .await
-            .map_err(|e| Error {
-                code: e.errno(),
-                source: e.into(),
-            })
             .map(|_| ())
     }
 
@@ -191,7 +178,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         true
     }
 
-    async fn build(&self) -> Result<Self::Target, Self::Error> {
+    async fn build(&self) -> RawResult<Self::Target> {
         Ok(Taos {
             dsn: self.clone(),
             async_client: OnceCell::new(),
@@ -199,11 +186,11 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         })
     }
 
-    async fn server_version(&self) -> Result<&str, Self::Error> {
+    async fn server_version(&self) -> RawResult<&str> {
         if let Some(v) = self.server_version.get() {
             Ok(v.as_str())
         } else {
-            let conn = <Self as taos_query::AsyncTBuilder>::build(&self).await?;
+            let conn = <Self as taos_query::AsyncTBuilder>::build(self).await?;
             use taos_query::prelude::AsyncQueryable;
             let v: String = AsyncQueryable::query_one(&conn, "select server_version()")
                 .await?
@@ -214,7 +201,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             })
         }
     }
-    async fn is_enterprise_edition(&self) -> Result<bool, Self::Error> {
+    async fn is_enterprise_edition(&self) -> RawResult<bool> {
         match self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
         {
@@ -256,7 +243,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 }
 
 impl TaosBuilder {
-    pub fn from_dsn(dsn: impl IntoDsn) -> Result<Self, DsnError> {
+    pub fn from_dsn(dsn: impl IntoDsn) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
         let scheme = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "http", _) => "ws",

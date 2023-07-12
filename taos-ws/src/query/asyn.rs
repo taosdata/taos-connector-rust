@@ -6,7 +6,7 @@ use dashmap::DashMap as HashMap;
 use itertools::Itertools;
 use std::future::Future;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
-use taos_query::prelude::{Code, RawError};
+use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::InlinableWrite;
 use taos_query::{
     block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
@@ -31,7 +31,6 @@ use std::io::Write;
 use std::mem::transmute;
 use std::pin::Pin;
 // use std::io::Write;
-use std::result::Result as StdResult;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::Poll;
@@ -48,9 +47,9 @@ type WsSender = tokio::sync::mpsc::Sender<Message>;
 
 use futures::channel::oneshot;
 use oneshot::channel as query_channel;
-type QueryChannelSender = oneshot::Sender<StdResult<WsRecvData, RawError>>;
+type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
 // use tokio::sync::mpsc::unbounded_channel as query_channel;
-// type QueryChannelSender = tokio::sync::mpsc::UnboundedSender<StdResult<WsRecvData, RawError>>;
+// type QueryChannelSender = tokio::sync::mpsc::UnboundedSender<Result<WsRecvData, RawError>>;
 type QueryInner = HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = HashMap<ResId, ReqId>;
@@ -77,7 +76,7 @@ impl WsQuerySender {
         self.req_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
-    async fn send_recv(&self, msg: WsSend) -> Result<WsRecvData> {
+    async fn send_recv(&self, msg: WsSend) -> RawResult<WsRecvData> {
         let send_timeout = Duration::from_millis(1000);
         let req_id = msg.req_id();
         let (tx, rx) = query_channel();
@@ -95,30 +94,40 @@ impl WsQuerySender {
                 }
                 self.results.insert(args.id, args.req_id);
 
-                self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
+                self.sender
+                    .send_timeout(msg.to_msg(), send_timeout)
+                    .await
+                    .map_err(Error::from)?;
                 //
             }
             WsSend::Binary(bytes) => {
                 self.sender
                     .send_timeout(Message::Binary(bytes), send_timeout)
-                    .await?;
+                    .await
+                    .map_err(Error::from)?;
             }
             _ => {
                 log::trace!("[req id: {req_id}] prepare  message: {msg:?}");
-                self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
+                self.sender
+                    .send_timeout(msg.to_msg(), send_timeout)
+                    .await
+                    .map_err(Error::from)?;
             }
         }
         // handle the error
         log::trace!("[req id: {req_id}] message sent, wait for receiving");
-        Ok(rx.await.unwrap()?)
+        Ok(rx.await.unwrap().map_err(Error::from)?)
     }
-    async fn send_only(&self, msg: WsSend) -> Result<()> {
+    async fn send_only(&self, msg: WsSend) -> RawResult<()> {
         let send_timeout = Duration::from_millis(1000);
-        self.sender.send_timeout(msg.to_msg(), send_timeout).await?;
+        self.sender
+            .send_timeout(msg.to_msg(), send_timeout)
+            .await
+            .map_err(Error::from)?;
         Ok(())
     }
 
-    fn send_blocking(&self, msg: WsSend) -> Result<()> {
+    fn send_blocking(&self, msg: WsSend) -> RawResult<()> {
         let _ = self.sender.blocking_send(msg.to_msg());
         Ok(())
     }
@@ -146,7 +155,7 @@ pub struct ResultSet {
     precision: Precision,
     summary: (usize, usize),
     timing: Duration,
-    block_future: Option<Pin<Box<dyn Future<Output = Result<Option<RawBlock>>> + Send>>>,
+    block_future: Option<Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>>,
     closer: Option<oneshot::Sender<()>>,
     completed: bool,
 }
@@ -266,7 +275,21 @@ impl Error {
     }
 }
 
-type Result<T> = std::result::Result<T, Error>;
+impl From<Error> for RawError {
+    fn from(value: Error) -> Self {
+        match value {
+            Error::TaosError(error) => error,
+            error => {
+                let code = error.errno();
+                if code == Code::FAILED {
+                    RawError::from_any(error)
+                } else {
+                    RawError::new(code, error.to_string())
+                }
+            }
+        }
+    }
+}
 
 async fn read_queries(
     mut reader: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
@@ -497,12 +520,12 @@ impl WsTaos {
     /// ws://localhost:6041/
     /// ```
     ///
-    pub async fn from_dsn(dsn: impl IntoDsn) -> Result<Self> {
+    pub async fn from_dsn(dsn: impl IntoDsn) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
         let info = TaosBuilder::from_dsn(dsn)?;
         Self::from_wsinfo(&info).await
     }
-    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> Result<Self> {
+    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = Some(1024 * 1024 * 16);
 
@@ -520,7 +543,7 @@ impl WsTaos {
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
-        sender.send(version.to_msg()).await?;
+        sender.send(version.to_msg()).await.map_err(Error::from)?;
 
         let duration = Duration::from_secs(2);
         let version = match tokio::time::timeout(duration, reader.next()).await {
@@ -540,13 +563,13 @@ impl WsTaos {
             },
             _ => "2.x".to_string(),
         };
-        let is_v3 = !version.starts_with("2");
+        let is_v3 = !version.starts_with('2');
 
         let login = WsSend::Conn {
             req_id,
             req: info.to_conn_request(),
         };
-        sender.send(login.to_msg()).await?;
+        sender.send(login.to_msg()).await.map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {
             match message {
                 Message::Text(text) => {
@@ -627,16 +650,17 @@ impl WsTaos {
         })
     }
 
-    pub async fn write_meta(&self, raw: &RawMeta) -> Result<()> {
+    pub async fn write_meta(&self, raw: &RawMeta) -> RawResult<()> {
         let req_id = self.sender.req_id();
         let message_id = req_id;
         let raw_meta_message = 3; // magic number from taosAdapter.
 
         let mut meta = Vec::new();
-        meta.write_u64_le(req_id)?;
-        meta.write_u64_le(message_id)?;
-        meta.write_u64_le(raw_meta_message as u64)?;
-        meta.write_all(&raw.as_bytes())?;
+        meta.write_u64_le(req_id).map_err(Error::from)?;
+        meta.write_u64_le(message_id).map_err(Error::from)?;
+        meta.write_u64_le(raw_meta_message as u64)
+            .map_err(Error::from)?;
+        meta.write_all(&raw.as_bytes()).map_err(Error::from)?;
         let len = meta.len();
 
         log::trace!("write meta with req_id: {req_id}, raw data length: {len}",);
@@ -647,7 +671,7 @@ impl WsTaos {
             _ => unreachable!(),
         }
     }
-    async fn s_write_raw_block(&self, raw: &RawBlock) -> Result<()> {
+    async fn s_write_raw_block(&self, raw: &RawBlock) -> RawResult<()> {
         let req_id = self.sender.req_id();
         let message_id = req_id;
         // if self.version().starts_with('2') {
@@ -657,12 +681,14 @@ impl WsTaos {
             let raw_block_message = 4; // action number from `taosAdapter/controller/rest/const.go:L56`.
 
             let mut meta = Vec::new();
-            meta.write_u64_le(req_id)?;
-            meta.write_u64_le(message_id)?;
-            meta.write_u64_le(raw_block_message as u64)?;
-            meta.write_u32_le(raw.nrows() as u32)?;
-            meta.write_inlined_str::<2>(raw.table_name().unwrap())?;
-            meta.write_all(raw.as_raw_bytes())?;
+            meta.write_u64_le(req_id).map_err(Error::from)?;
+            meta.write_u64_le(message_id).map_err(Error::from)?;
+            meta.write_u64_le(raw_block_message as u64)
+                .map_err(Error::from)?;
+            meta.write_u32_le(raw.nrows() as u32).map_err(Error::from)?;
+            meta.write_inlined_str::<2>(raw.table_name().unwrap())
+                .map_err(Error::from)?;
+            meta.write_all(raw.as_raw_bytes()).map_err(Error::from)?;
 
             let len = meta.len();
             log::trace!("write block with req_id: {req_id}, raw data len: {len}",);
@@ -675,12 +701,14 @@ impl WsTaos {
             let raw_block_message = 5; // action number from `taosAdapter/controller/rest/const.go:L56`.
 
             let mut meta = Vec::new();
-            meta.write_u64_le(req_id)?;
-            meta.write_u64_le(message_id)?;
-            meta.write_u64_le(raw_block_message as u64)?;
-            meta.write_u32_le(raw.nrows() as u32)?;
-            meta.write_inlined_str::<2>(raw.table_name().unwrap())?;
-            meta.write_all(raw.as_raw_bytes())?;
+            meta.write_u64_le(req_id).map_err(Error::from)?;
+            meta.write_u64_le(message_id).map_err(Error::from)?;
+            meta.write_u64_le(raw_block_message as u64)
+                .map_err(Error::from)?;
+            meta.write_u32_le(raw.nrows() as u32).map_err(Error::from)?;
+            meta.write_inlined_str::<2>(raw.table_name().unwrap())
+                .map_err(Error::from)?;
+            meta.write_all(raw.as_raw_bytes()).map_err(Error::from)?;
             let fields = raw
                 .fields()
                 .into_iter()
@@ -689,7 +717,7 @@ impl WsTaos {
 
             let fields =
                 unsafe { std::slice::from_raw_parts(fields.as_ptr() as _, fields.len() * 72) };
-            meta.write_all(fields)?;
+            meta.write_all(fields).map_err(Error::from)?;
             let len = meta.len();
             log::trace!("write block with req_id: {req_id}, raw data len: {len}",);
 
@@ -700,7 +728,7 @@ impl WsTaos {
         }
     }
 
-    pub async fn s_query(&self, sql: &str) -> Result<ResultSet> {
+    pub async fn s_query(&self, sql: &str) -> RawResult<ResultSet> {
         let req_id = self.sender.req_id();
         let action = WsSend::Query {
             req_id,
@@ -771,7 +799,7 @@ impl WsTaos {
         }
     }
 
-    pub async fn s_query_with_req_id(&self, sql: &str, req_id: u64) -> Result<ResultSet> {
+    pub async fn s_query_with_req_id(&self, sql: &str, req_id: u64) -> RawResult<ResultSet> {
         let action = WsSend::Query {
             req_id,
             sql: sql.to_string(),
@@ -839,7 +867,7 @@ impl WsTaos {
         }
     }
 
-    pub async fn s_exec(&self, sql: &str) -> Result<usize> {
+    pub async fn s_exec(&self, sql: &str) -> RawResult<usize> {
         let req_id = self.sender.req_id();
         let action = WsSend::Query {
             req_id,
@@ -857,7 +885,7 @@ impl WsTaos {
 }
 
 impl ResultSet {
-    async fn fetch(&mut self) -> Result<Option<RawBlock>> {
+    async fn fetch(&mut self) -> RawResult<Option<RawBlock>> {
         let args = WsResArgs {
             req_id: self.sender.req_id(),
             id: self.args.id,
@@ -925,8 +953,6 @@ impl ResultSet {
 }
 
 impl AsyncFetchable for ResultSet {
-    type Error = Error;
-
     fn affected_rows(&self) -> i32 {
         self.affected_rows as i32
     }
@@ -949,9 +975,9 @@ impl AsyncFetchable for ResultSet {
     }
 
     fn fetch_raw_block(
-        self: &mut Self,
+        &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<StdResult<Option<RawBlock>, Self::Error>> {
+    ) -> std::task::Poll<RawResult<Option<RawBlock>>> {
         if let Some(mut f) = self.block_future.take() {
             // let mut f = self.block_future.take().unwrap();
             let res = f.poll_unpin(cx);
@@ -980,8 +1006,6 @@ impl AsyncFetchable for ResultSet {
 }
 
 impl taos_query::Fetchable for ResultSet {
-    type Error = Error;
-
     fn affected_rows(&self) -> i32 {
         self.affected_rows as i32
     }
@@ -1004,21 +1028,16 @@ impl taos_query::Fetchable for ResultSet {
         self.summary.1 += nrows;
     }
 
-    fn fetch_raw_block(&mut self) -> StdResult<Option<RawBlock>, Self::Error> {
+    fn fetch_raw_block(&mut self) -> RawResult<Option<RawBlock>> {
         block_in_place_or_global(self.fetch())
     }
 }
 
 #[async_trait::async_trait]
 impl AsyncQueryable for WsTaos {
-    type Error = Error;
-
     type AsyncResultSet = ResultSet;
 
-    async fn query<T: AsRef<str> + Send + Sync>(
-        &self,
-        sql: T,
-    ) -> StdResult<Self::AsyncResultSet, Self::Error> {
+    async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
         self.s_query(sql.as_ref()).await
     }
 
@@ -1026,19 +1045,19 @@ impl AsyncQueryable for WsTaos {
         &self,
         sql: T,
         req_id: u64,
-    ) -> StdResult<Self::AsyncResultSet, Self::Error> {
+    ) -> RawResult<Self::AsyncResultSet> {
         self.s_query_with_req_id(sql.as_ref(), req_id).await
     }
 
-    async fn write_raw_meta(&self, raw: &RawMeta) -> StdResult<(), Self::Error> {
+    async fn write_raw_meta(&self, raw: &RawMeta) -> RawResult<()> {
         self.write_meta(raw).await
     }
 
-    async fn write_raw_block(&self, block: &RawBlock) -> StdResult<(), Self::Error> {
+    async fn write_raw_block(&self, block: &RawBlock) -> RawResult<()> {
         self.s_write_raw_block(block).await
     }
 
-    async fn put(&self, _data: &SmlData) -> Result<()> {
+    async fn put(&self, _data: &SmlData) -> RawResult<()> {
         todo!()
     }
 }

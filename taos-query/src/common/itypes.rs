@@ -200,9 +200,7 @@ impl IValue for INull {
 
     type Inner = ();
 
-    fn into_inner(self) -> Self::Inner {
-        ()
-    }
+    fn into_inner(self) -> Self::Inner {}
 }
 
 /// Primitive type to TDengine data type.

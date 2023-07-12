@@ -51,8 +51,10 @@ macro_rules! _impl_inline_str {
 
             impl InlineJson<$ty> {
                 #[inline]
+                /// # Safety
+                ///
                 pub unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
-                    { std::mem::transmute::<*const u8, &InlineJson<$ty>>(ptr) }
+                    &*ptr.cast::<InlineJson<$ty>>()
                 }
 
                 #[inline]

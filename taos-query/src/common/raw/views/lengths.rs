@@ -31,11 +31,7 @@ impl Lengths {
 
     pub unsafe fn get_unchecked(&self, index: usize) -> u32 {
         unsafe {
-            std::ptr::read_unaligned(
-                self.0
-                    .as_ptr()
-                    .offset((index * std::mem::size_of::<u32>()) as isize) as _,
-            )
+            std::ptr::read_unaligned(self.0.as_ptr().add(index * std::mem::size_of::<u32>()) as _)
         }
     }
 

@@ -76,6 +76,7 @@ impl<'a> Future for QueryFuture<'a> {
                 state.waiting = true;
             }
             #[no_mangle]
+            #[inline(never)]
             unsafe extern "C" fn taos_optin_query_future_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
@@ -100,18 +101,19 @@ impl<'a> Future for QueryFuture<'a> {
                     }
 
                     let result = if code < 0 {
-                        let ptr = (s.api.taos_errstr)(res);
-                        (s.api.taos_free_result)(res);
+                        let str = s.api.err_str(res);
                         let err = RawError::new_with_context(
                             code,
-                            CStr::from_ptr(ptr).to_string_lossy(),
+                            str,
                             format!(
-                                "Error while querying with sql {:?}",
-                                CStr::from_ptr(param.sql)
+                                "Error while querying with sql \"{}\"",
+                                CStr::from_ptr(param.sql).to_string_lossy()
                             ),
                         );
+                        s.api.free_result(res);
                         Err(err)
                     } else {
+                        debug_assert!(!res.is_null());
                         Ok(RawRes::from_ptr_unchecked(s.api.clone(), res))
                     };
 

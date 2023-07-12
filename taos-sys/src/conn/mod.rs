@@ -297,7 +297,7 @@ impl RawTaos {
             }
             Err(e) => {
                 log::trace!("sml insert failed: {:?}", e);
-                return Err(e);
+                Err(e)
             }
         }
     }

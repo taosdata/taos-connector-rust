@@ -12,7 +12,7 @@ pub(super) mod tmq {
         into_c_str::IntoCStr,
         raw::{ApiEntry, TmqApi},
         types::{tmq_resp_err_t, tmq_t},
-        RawError, RawRes,
+        RawRes, RawResult,
     };
 
     use super::Topics;
@@ -31,7 +31,7 @@ pub(super) mod tmq {
         fn as_ptr(&self) -> *mut tmq_t {
             self.ptr
         }
-        pub(crate) fn subscribe(&mut self, topics: &Topics) -> Result<(), RawError> {
+        pub(crate) fn subscribe(&mut self, topics: &Topics) -> RawResult<()> {
             unsafe {
                 (self.tmq.tmq_subscribe)(self.as_ptr(), topics.as_ptr()).ok_or(format!(
                     "subscribe failed with topics: [{}]",
@@ -57,15 +57,15 @@ pub(super) mod tmq {
             tl
         }
 
-        pub fn commit_sync(&self, msg: RawRes) -> Result<(), RawError> {
+        pub fn commit_sync(&self, msg: RawRes) -> RawResult<()> {
             unsafe { (self.tmq.tmq_commit_sync)(self.as_ptr(), msg.as_ptr() as _) }
                 .ok_or("commit failed")
         }
 
-        pub async fn commit(&self, msg: RawRes) -> Result<(), RawError> {
+        pub async fn commit(&self, msg: RawRes) -> RawResult<()> {
             // use tokio::sync::oneshot::{channel, Sender};
             use std::sync::mpsc::{channel, Sender};
-            let (sender, rx) = channel::<Result<(), RawError>>();
+            let (sender, rx) = channel::<RawResult<()>>();
             unsafe extern "C" fn tmq_commit_async_cb(
                 _tmq: *mut tmq_t,
                 resp: tmq_resp_err_t,
@@ -165,7 +165,7 @@ pub(super) mod tmq {
             topic_name: &str,
             vgroup_id: VGroupId,
             offset: i64,
-        ) -> Result<(), RawError> {
+        ) -> RawResult<()> {
             let tmq_resp;
             if let Some(tmq_offset_seek) = self.tmq.tmq_offset_seek {
                 tmq_resp = unsafe {
@@ -234,7 +234,7 @@ pub(super) mod conf {
             .with_table_name()
         }
 
-        pub(crate) fn from_dsn(dsn: &Dsn, api: TmqConfApi) -> Result<Self, RawError> {
+        pub(crate) fn from_dsn(dsn: &Dsn, api: TmqConfApi) -> RawResult<Self> {
             let mut conf = Self::new(api);
             macro_rules! _set_opt {
                 ($f:ident, $c:literal) => {
@@ -306,18 +306,14 @@ pub(super) mod conf {
         pub(crate) fn with<K: AsRef<str>, V: AsRef<str>>(
             mut self,
             iter: impl Iterator<Item = (K, V)>,
-        ) -> Result<Self, RawError> {
+        ) -> RawResult<Self> {
             for (k, v) in iter {
                 self.set(k, v)?;
             }
             Ok(self)
         }
 
-        fn set<K: AsRef<str>, V: AsRef<str>>(
-            &mut self,
-            key: K,
-            value: V,
-        ) -> Result<&mut Self, RawError> {
+        fn set<K: AsRef<str>, V: AsRef<str>>(&mut self, key: K, value: V) -> RawResult<&mut Self> {
             unsafe { self.api.set(self.as_ptr(), key.as_ref(), value.as_ref()) }.map(|_| self)
         }
 
@@ -327,16 +323,14 @@ pub(super) mod conf {
         //     }
         // }
 
-        pub(crate) fn build(&self) -> Result<*mut tmq_t, RawError> {
+        pub(crate) fn build(&self) -> RawResult<*mut tmq_t> {
             unsafe { self.api.consumer(self.as_ptr()) }
         }
     }
 
     impl Drop for Conf {
         fn drop(&mut self) {
-            log::trace!("tmq config destroy");
             unsafe { self.api.destroy(self.as_ptr()) };
-            log::trace!("tmq config destroyed safely");
         }
     }
 }
@@ -345,11 +339,9 @@ pub(super) mod list {
     use std::ffi::CStr;
     use std::os::raw::c_char;
 
-    use taos_query::prelude::RawError;
+    use taos_query::prelude::RawResult;
 
     use crate::{into_c_str::IntoCStr, raw::TmqListApi, types::tmq_list_t};
-
-    type Result<T> = std::result::Result<T, RawError>;
 
     #[derive(Debug)]
     pub(crate) struct Topics {
@@ -376,7 +368,7 @@ pub(super) mod list {
         pub(crate) fn from_topics<'a, T: IntoCStr<'a>>(
             api: TmqListApi,
             topics: impl IntoIterator<Item = T>,
-        ) -> Result<Self> {
+        ) -> RawResult<Self> {
             let ptr = unsafe { api.from_c_str_iter(topics)? };
             Ok(Self { api, ptr })
         }
@@ -445,9 +437,7 @@ pub(super) mod list {
     impl Drop for Topics {
         fn drop(&mut self) {
             unsafe {
-                log::trace!("list destroy");
                 self.api.destroy(self.as_ptr());
-                log::trace!("list destroy destroyed");
             }
         }
     }

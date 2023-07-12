@@ -59,8 +59,12 @@ macro_rules! _impl_inline_str {
 
             impl InlineNChar<$ty> {
                 #[inline]
+                /// # Safety
+                ///
+                /// Do not use it directly.
                 pub unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
-                    std::mem::transmute::<*const u8, &InlineNChar<$ty>>(ptr)
+                    // std::mem::transmute::<*const u8, &InlineNChar<$ty>>(ptr)
+                    &*ptr.cast::<InlineNChar<$ty>>()
                 }
                 #[inline]
                 #[rustversion::attr(nightly, const)]
@@ -89,6 +93,9 @@ macro_rules! _impl_inline_str {
 
                 #[inline]
                 #[allow(mutable_transmutes)]
+                /// # Safety
+                ///
+                /// Do not use it directly.
                 pub unsafe fn into_inline_str(&self) -> &super::InlineStr<$ty> {
                     if self.len() == 0 {
                         return std::mem::transmute(self);
@@ -101,7 +108,7 @@ macro_rules! _impl_inline_str {
                         let mut b = [0; 4];
                         let s = c.encode_utf8(&mut b);
                         // dbg!(c, &s);
-                        std::ptr::copy(s.as_ptr(), ptr.offset(len as isize), s.len());
+                        std::ptr::copy(s.as_ptr(), ptr.add(len), s.len());
                         len += s.len();
                     }
                     v.set_len(len);

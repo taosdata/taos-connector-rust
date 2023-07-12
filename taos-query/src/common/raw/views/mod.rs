@@ -1182,10 +1182,11 @@ impl ColumnView {
 }
 
 pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
-    let mut header = super::Header::default();
-
-    header.nrows = views.first().map(|v| v.len()).unwrap_or(0) as _;
-    header.ncols = views.len() as _;
+    let header = super::Header {
+        nrows: views.first().map(|v| v.len()).unwrap_or(0) as _,
+        ncols: views.len() as _,
+        ..Default::default()
+    };
 
     let ncols = views.len();
 
@@ -1213,8 +1214,7 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
     let length_offset = bytes.len();
     bytes.resize(bytes.len() + ncols * std::mem::size_of::<u32>(), 0);
 
-    let mut lengths = Vec::with_capacity(ncols);
-    lengths.resize(ncols, 0);
+    let mut lengths = vec![0; ncols];
     for (i, view) in views.iter().enumerate() {
         let cur = bytes.len();
         let n = view.write_raw_into(&mut bytes).unwrap();
@@ -1230,7 +1230,7 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
         (*(bytes.as_mut_ptr() as *mut super::Header)).length = bytes.len() as _;
         std::ptr::copy(
             lengths.as_ptr(),
-            bytes.as_mut_ptr().offset(length_offset as isize) as *mut u32,
+            bytes.as_mut_ptr().add(length_offset) as *mut u32,
             lengths.len(),
         );
     }

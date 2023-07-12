@@ -1,6 +1,8 @@
 pub use taos_query;
 pub use taos_query::prelude::*;
 
+pub use taos_query::prelude::RawError as Error;
+
 pub type TaosPool = taos_query::prelude::Pool<TaosBuilder>;
 
 #[cfg(any(feature = "ws", feature = "native", feature = "optin"))]

@@ -1,14 +1,14 @@
+use crate::RawResult;
 use std::fmt::Debug;
 
 pub trait Insertable: Debug {
-    type Error;
-    fn insert(&self, sql: &str) -> Result<usize, Self::Error>;
+    fn insert(&self, sql: &str) -> RawResult<usize>;
 
-    fn insert_raw(&self, table: &str, raw: &[u8]) -> Result<usize, Self::Error>;
+    fn insert_raw(&self, table: &str, raw: &[u8]) -> RawResult<usize>;
 
-    fn insert_named<'a>(&self, table: &str, fields: [&dyn IntoNamedField<'a>]);
+    fn insert_named(&self, table: &str, fields: [&dyn IntoNamedField<'_>]);
 
-    // fn insert_many<T: Any>(&self, table: &str, records: &[dyn Any]) -> Result<usize, Self::Error>;
+    // fn insert_many<T: Any>(&self, table: &str, records: &[dyn Any]) -> Result<usize>;
 
     // fn insert_progressive(&self, stable: &str, ) -> Inserter;
 }
@@ -49,7 +49,7 @@ fn obj() {
     let v = vec![&10 as _, &0.0 as _];
     t1(&v);
 
-    fn insert_named<'a>(_fields: &[&dyn IntoNamedField<'a>]) {}
+    fn insert_named(_fields: &[&dyn IntoNamedField<'_>]) {}
 
     let v = vec![&("a", 0) as _, &("b", 0.0) as _];
     insert_named(&v);

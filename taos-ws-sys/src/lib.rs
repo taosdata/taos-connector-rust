@@ -13,6 +13,7 @@ use taos_query::{
     block_in_place_or_global,
     common::{Field, RawBlock as Block, Timestamp},
     common::{Precision, Ty},
+    prelude::RawError,
     DsnError, Fetchable, Queryable, TBuilder,
 };
 use taos_ws::{
@@ -24,7 +25,7 @@ pub use taos_ws::query::asyn::WS_ERROR_NO;
 
 pub mod stmt;
 
-const EMPTY: &'static CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") };
+const EMPTY: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") };
 static mut C_ERROR_CONTAINER: [u8; 4096] = [0; 4096];
 static mut C_ERRNO: Code = Code::SUCCESS;
 
@@ -216,6 +217,15 @@ impl From<taos_ws::Error> for WsError {
         Self {
             code: e.errno(),
             message: CString::new(e.errstr()).unwrap(),
+            source: None,
+        }
+    }
+}
+impl From<RawError> for WsError {
+    fn from(e: RawError) -> Self {
+        Self {
+            code: e.code(),
+            message: CString::new(e.to_string()).unwrap(),
             source: None,
         }
     }
@@ -583,7 +593,7 @@ pub unsafe extern "C" fn ws_take_timing(rs: *mut WS_RES) -> i64 {
         _ => {
             C_ERRNO = Code::FAILED;
             let dst = C_ERROR_CONTAINER.as_mut_ptr();
-            const NULL_PTR_RES: &'static str = "WS_RES is null";
+            const NULL_PTR_RES: &str = "WS_RES is null";
             std::ptr::copy_nonoverlapping(NULL_PTR_RES.as_ptr(), dst, NULL_PTR_RES.len());
             Code::FAILED.into()
         }
@@ -695,7 +705,7 @@ pub unsafe extern "C" fn ws_fetch_block(
 
             C_ERRNO = Code::FAILED;
             let dst = C_ERROR_CONTAINER.as_mut_ptr();
-            const NULL_PTR_RES: &'static str = "WS_RES is null";
+            const NULL_PTR_RES: &str = "WS_RES is null";
             std::ptr::copy_nonoverlapping(NULL_PTR_RES.as_ptr(), dst, NULL_PTR_RES.len());
             Code::FAILED.into()
         }
@@ -770,12 +780,10 @@ pub unsafe extern "C" fn ws_timestamp_to_rfc3339(
     use_z: bool,
 ) {
     let precision = Precision::from_u8(precision as u8);
-    let s = format!(
-        "{}",
-        Timestamp::new(raw, precision)
-            .to_datetime_with_tz()
-            .to_rfc3339_opts(precision.to_seconds_format(), use_z)
-    );
+    let s = Timestamp::new(raw, precision)
+        .to_datetime_with_tz()
+        .to_rfc3339_opts(precision.to_seconds_format(), use_z)
+        .to_string();
 
     std::ptr::copy_nonoverlapping(s.as_ptr(), dest, s.len());
 }
@@ -944,9 +952,9 @@ mod tests {
                         Ty::Null => println!("NULL"),
                         Ty::Bool => println!("{}", *(v as *const bool)),
                         Ty::TinyInt => println!("{}", *(v as *const i8)),
-                        Ty::SmallInt => println!("{}", *(v as *const i16)),
-                        Ty::Int => println!("{}", *(v as *const i32)),
-                        Ty::BigInt => println!("{}", *(v as *const i64)),
+                        Ty::SmallInt => println!("{}", (v as *const i16).read_unaligned()),
+                        Ty::Int => println!("{}", (v as *const i32).read_unaligned()),
+                        Ty::BigInt => println!("{}", (v as *const i64).read_unaligned()),
                         Ty::Float => println!("{}", *(v as *const f32)),
                         Ty::Double => println!("{}", *(v as *const f64)),
                         Ty::VarChar => println!(

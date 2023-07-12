@@ -107,7 +107,7 @@ impl BoolView {
 
     #[inline(always)]
     unsafe fn get_raw_at(&self, index: usize) -> *const bool {
-        self.data.as_ptr().offset((index) as isize) as _
+        self.data.as_ptr().add(index) as _
     }
 
     /// Get nullable value at `row` index.
@@ -129,7 +129,7 @@ impl BoolView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|v| BorrowedValue::Bool(v))
+            .map(BorrowedValue::Bool)
             .unwrap_or(BorrowedValue::Null(Ty::Bool))
     }
 
@@ -140,7 +140,7 @@ impl BoolView {
             (
                 Ty::Bool,
                 std::mem::size_of::<bool>() as _,
-                self.get_raw_at(row) as *const bool as _,
+                self.get_raw_at(row) as _,
             )
         }
     }
@@ -152,7 +152,7 @@ impl BoolView {
         if range.end >= self.len() {
             range.end = self.len();
         }
-        if range.len() == 0 {
+        if range.is_empty() {
             return None;
         }
 

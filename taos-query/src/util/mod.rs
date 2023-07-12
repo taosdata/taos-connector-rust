@@ -81,7 +81,7 @@ pub trait InlinableWrite: Write {
     ///  Write inlined bytes may not be safe if the input bytes length overflows to the width.
     ///  For example, write `256` bytes with length width `1` is not safe.
     fn write_inlined_bytes<const N: usize>(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        assert_eq!(bytes.len() >> N * 8, 0);
+        debug_assert_eq!(bytes.len() >> (N * 8), 0);
         let l = self.write(&bytes.len().to_le_bytes()[0..N])?;
         self.write_all(bytes)?;
         Ok(l + bytes.len())

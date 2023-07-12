@@ -80,7 +80,7 @@ impl UIntView {
 
     #[inline(always)]
     unsafe fn get_raw_at(&self, index: usize) -> *const Item {
-        self.data.as_ptr().offset((index * ITEM_SIZE) as isize) as _
+        self.data.as_ptr().add(index * ITEM_SIZE) as _
     }
 
     /// Get nullable value at `row` index.
@@ -102,7 +102,7 @@ impl UIntView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|v| BorrowedValue::UInt(v))
+            .map(BorrowedValue::UInt)
             .unwrap_or(BorrowedValue::Null(Ty::UInt))
     }
 
@@ -126,7 +126,7 @@ impl UIntView {
         if range.end >= self.len() {
             range.end = self.len();
         }
-        if range.len() == 0 {
+        if range.is_empty() {
             return None;
         }
 
