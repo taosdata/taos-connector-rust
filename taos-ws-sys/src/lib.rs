@@ -63,7 +63,7 @@ impl<T> Drop for WsMaybeError<T> {
     fn drop(&mut self) {
         if !self.data.is_null() {
             log::trace!("dropping obj {}", self.type_id);
-            let _ = unsafe { self.data.read() };
+            // let _ = unsafe { self.data.read() };
             let _ = unsafe { Box::from_raw(self.data) };
         }
     }
