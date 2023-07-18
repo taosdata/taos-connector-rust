@@ -131,7 +131,8 @@ impl taos_query::TBuilder for TaosBuilder {
         let grant: Option<(String, bool)> = Queryable::query_one(
             &taos,
             "select version, (expire_time < now) from information_schema.ins_cluster",
-        )?;
+        )
+        .unwrap_or_default();
 
         if let Some((edition, expired)) = grant {
             if expired {
@@ -215,7 +216,8 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             &taos,
             "select version, (expire_time < now) from information_schema.ins_cluster",
         )
-        .await?;
+        .await
+        .unwrap_or_default();
 
         if let Some((edition, expired)) = grant {
             if expired {
