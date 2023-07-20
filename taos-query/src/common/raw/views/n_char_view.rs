@@ -72,6 +72,7 @@ impl NCharView {
         self.offsets.get_unchecked(row) < 0
     }
 
+    #[inline]
     pub unsafe fn nchar_to_utf8(&self) {
         if self.version == Version::V3 && *self.is_chars.get() {
             let mut ptr: *const u8 = std::ptr::null();
@@ -163,6 +164,7 @@ impl NCharView {
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
+        self.nchar_to_utf8();
         match self.get_unchecked(row) {
             Some(s) => (Ty::NChar, s.len() as _, s.as_ptr() as _),
             None => (Ty::NChar, 0, std::ptr::null()),
