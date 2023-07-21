@@ -72,7 +72,6 @@ impl NCharView {
         self.offsets.get_unchecked(row) < 0
     }
 
-    #[inline]
     pub unsafe fn nchar_to_utf8(&self) {
         if self.version == Version::V3 && *self.is_chars.get() {
             let mut ptr: *const u8 = std::ptr::null();
