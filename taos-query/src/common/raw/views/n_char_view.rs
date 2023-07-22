@@ -10,7 +10,7 @@ use super::{IsColumnView, Offsets, Version};
 use crate::{
     common::{layout::Layout, BorrowedValue, Ty},
     prelude::InlinableWrite,
-    util::{InlineNChar, InlineStr},
+    util::{InlineStr},
 };
 
 use bytes::Bytes;
@@ -72,28 +72,36 @@ impl NCharView {
         self.offsets.get_unchecked(row) < 0
     }
 
+    #[inline]                                                                   
+    fn ucs4le_to_utf8_in_place(&self) {                                         
+        for offset in &self.offsets {                                           
+            if *offset >= 0 {                                                   
+              unsafe {                                                          
+                  let ptr = self.data.as_ptr();                                 
+                  let pl = ptr.offset(*offset as isize);                        
+                  let pd = ptr.offset(*offset as isize + 2);                    
+                  let ucs4len = *(pl as *const u16) / 4;                        
+                  let ucs4 = std::slice::from_raw_parts(pd as *mut char, ucs4len as usize);
+                  let putf8 = pd as *mut u8;                                    
+                  let mut len = 0usize;                                         
+                  for c in ucs4 {                                               
+                      let mut b = [0; 4];                                       
+                      let s = c.encode_utf8(&mut b);                            
+                      // dbg!(&s);                                              
+                      std::ptr::copy(s.as_ptr(), putf8.add(len), s.len());      
+                      len += s.len();                                           
+                  }                                                             
+                  let putf8len = pl as *mut u16;                                
+                  *putf8len = len as u16;                                       
+              }                                                                 
+            }                                                                   
+        }                                                                       
+    }                                                                                                                                                           
+
     #[inline]
     pub unsafe fn nchar_to_utf8(&self) {
         if self.version == Version::V3 && *self.is_chars.get() {
-            let mut ptr: *const u8 = std::ptr::null();
-            for offset in &self.offsets {
-                if *offset >= 0 {
-                    if ptr.is_null() {
-                        ptr = self.data.as_ptr().offset(*offset as isize);
-                        InlineNChar::<u16>::from_ptr(self.data.as_ptr().offset(*offset as isize))
-                            .into_inline_str();
-                    } else {
-                        let next = self.data.as_ptr().offset(*offset as isize);
-                        if ptr != next {
-                            ptr = next;
-                            InlineNChar::<u16>::from_ptr(
-                                self.data.as_ptr().offset(*offset as isize),
-                            )
-                            .into_inline_str();
-                        }
-                    }
-                }
-            }
+            self.ucs4le_to_utf8_in_place();
             *self.is_chars.get() = false;
             self.layout.borrow_mut().with_nchar_decoded();
         }
