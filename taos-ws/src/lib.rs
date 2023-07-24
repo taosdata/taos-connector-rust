@@ -6,7 +6,7 @@ use once_cell::sync::OnceCell;
 use taos_query::prelude::Code;
 use taos_query::{DsnError, IntoDsn, RawResult};
 
-mod stmt;
+pub mod stmt;
 pub use stmt::Stmt;
 
 // pub mod tmq;
