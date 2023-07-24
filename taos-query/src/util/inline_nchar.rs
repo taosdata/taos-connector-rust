@@ -100,15 +100,17 @@ macro_rules! _impl_inline_str {
                     if self.len() == 0 {
                         return std::mem::transmute(self);
                     }
+                    let chars_len = self.chars_len();
                     let v: &mut super::InlineStr<$ty> = std::mem::transmute(self);
-                    let ptr = self.data.as_ptr() as *mut u8;
-                    let chars = self.chars();
+                    // let ptr = self.data.as_ptr() as *mut u8;
+                    let ptr = v.as_mut_ptr();
+                    let chars = std::slice::from_raw_parts(ptr as *mut char, chars_len);
                     let mut len = 0usize;
                     for c in chars {
                         let mut b = [0; 4];
                         let s = c.encode_utf8(&mut b);
-                        // dbg!(c, &s);
-                        std::ptr::copy(s.as_ptr(), ptr.add(len), s.len());
+                        debug_assert!(s.len() <= 4);
+                        v.replace_utf8(&s, len);
                         len += s.len();
                     }
                     v.set_len(len);
@@ -156,4 +158,17 @@ fn test_inline_nchar() {
         b"\x10\0\0\0\0\0\0\0a\x00\x00\x00b\x00\x00\x00c\x00\x00\x00d\x00\x00\x00",
         "\\x10\\x00\\x00\\x00\\x00\\x00\\x00\\x00a\\x00\\x00\\x00b\\x00\\x00\\x00c\\x00\\x00\\x00d\\x00\\x00\\x00"
     );
+}
+
+#[test]
+fn test_inline_nchar_2() {
+    let mut bytes: [u8; 10] = [8, 0, 45, 78, 0, 0, 135, 101, 0, 0];
+    let bytes = bytes.as_mut_slice();
+    let inline = unsafe { InlineNChar::<u16>::from_ptr(bytes.as_mut_ptr()) };
+    dbg!(&inline);
+    // assert_eq!(inline.len(), 8);
+    assert_eq!(inline.inlined(), bytes);
+    dbg!(inline.printable_inlined().as_str());
+    let p = unsafe { inline.into_inline_str().as_str() };
+    println!("{}", p);
 }
