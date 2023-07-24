@@ -7,6 +7,7 @@ use taos_query::common::Value;
 use taos_query::prelude::Itertools;
 use taos_query::stmt::Bindable;
 use taos_ws::Stmt;
+use taos_ws::stmt::{WsFieldsable, StmtField};
 
 use crate::*;
 
@@ -104,6 +105,48 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
             } else {
                 0
             }
+        }
+        _ => 0,
+    }
+}
+
+#[allow(non_snake_case)]
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_get_tag_fields(
+    stmt: *mut WS_STMT,
+    fields: *mut *mut StmtField,
+    fieldNum: *mut c_int,
+) -> c_int {
+    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+        Some(stmt) => {
+            let fields_vec = stmt.get_tag_fields().unwrap();
+
+            *fieldNum = fields_vec.len() as _;
+
+            *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
+
+            0
+        }
+        _ => 0,
+    }
+}
+
+#[allow(non_snake_case)]
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_get_col_fields(
+    stmt: *mut WS_STMT,
+    fields: *mut *mut StmtField,
+    fieldNum: *mut c_int,
+) -> c_int {
+    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+        Some(stmt) => {
+            let fields_vec = stmt.get_col_fields().unwrap();
+
+            *fieldNum = fields_vec.len() as _;
+
+            *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
+
+            0
         }
         _ => 0,
     }
