@@ -154,13 +154,12 @@ pub struct Stmt {
 
 #[repr(C)]
 #[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
 pub struct StmtField {
-    name: String,
-    field_type: i8,
-    precision: u8,
-    scale: u8,
-    bytes: i32,
+    pub name: String,
+    pub field_type: i8,
+    pub precision: u8,
+    pub scale: u8,
+    pub bytes: i32,
 }
 
 // pub struct WsAsyncStmt {

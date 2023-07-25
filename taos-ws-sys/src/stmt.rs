@@ -6,10 +6,39 @@ use taos_query::block_in_place_or_global;
 use taos_query::common::Value;
 use taos_query::prelude::Itertools;
 use taos_query::stmt::Bindable;
+use taos_ws::stmt::StmtField as WsStmtField;
+use taos_ws::stmt::WsFieldsable;
 use taos_ws::Stmt;
-use taos_ws::stmt::{WsFieldsable, StmtField};
 
 use crate::*;
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct StmtField {
+    name: [c_char; 65usize],
+    r#type: i8,
+    precision: u8,
+    scale: u8,
+    bytes: i32,
+}
+
+impl From<WsStmtField> for StmtField {
+    fn from(f: WsStmtField) -> Self {
+        let f_name = f.name.as_str();
+        let mut name = [0 as c_char; 65usize];
+        unsafe {
+            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len())
+        };
+
+        Self {
+            name,
+            r#type: f.field_type,
+            precision: f.precision,
+            scale: f.scale,
+            bytes: f.bytes,
+        }
+    }
+}
 
 /// Opaque STMT type alias.
 #[allow(non_camel_case_types)]
@@ -119,7 +148,9 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => {
-            let fields_vec = stmt.get_tag_fields().unwrap();
+            let fields_vec: Vec<WsStmtField> = stmt.get_tag_fields().unwrap();
+
+            let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
 
             *fieldNum = fields_vec.len() as _;
 
@@ -140,7 +171,9 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => {
-            let fields_vec = stmt.get_col_fields().unwrap();
+            let fields_vec: Vec<WsStmtField> = stmt.get_col_fields().unwrap();
+
+            let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
 
             *fieldNum = fields_vec.len() as _;
 
