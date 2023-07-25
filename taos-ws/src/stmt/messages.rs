@@ -6,6 +6,8 @@ use serde_with::NoneAsEmptyString;
 use crate::query::infra::{ToMessage, WsConnReq};
 use taos_query::prelude::RawError as Error;
 
+use crate::stmt::StmtField;
+
 pub type ReqId = u64;
 
 /// Type for result ID.
@@ -111,6 +113,8 @@ pub enum StmtSend {
     },
     AddBatch(StmtArgs),
     Exec(StmtArgs),
+    GetTagFields(StmtArgs),
+    GetColFields(StmtArgs),
 }
 
 impl ToMessage for StmtSend {}
@@ -150,6 +154,18 @@ pub enum StmtRecvData {
         #[serde(default)]
         affected: usize,
     },
+    GetTagFields {
+        #[serde(default)]
+        stmt_id: StmtId,
+        #[serde(default)]
+        fields: Vec<StmtField>,
+    },
+    GetColFields {
+        #[serde(default)]
+        stmt_id: StmtId,
+        #[serde(default)]
+        fields: Vec<StmtField>,
+    },
 }
 
 #[serde_as]
@@ -168,6 +184,7 @@ pub enum StmtOk {
     Conn(Result<(), Error>),
     Init(ReqId, Result<StmtId, Error>),
     Stmt(StmtId, Result<Option<usize>, Error>),
+    StmtFields(StmtId, Result<Vec<StmtField>, Error>),
 }
 
 impl StmtRecv {
@@ -209,6 +226,15 @@ impl StmtRecv {
             StmtRecvData::Exec { stmt_id, affected } => StmtOk::Stmt(stmt_id, {
                 if self.code == 0 {
                     Ok(Some(affected))
+                } else {
+                    _e!()
+                }
+            }),
+            StmtRecvData::GetTagFields { stmt_id, fields }
+            | StmtRecvData::GetColFields { stmt_id, fields } 
+            => StmtOk::StmtFields(stmt_id, {
+                if self.code == 0 {
+                    Ok(fields)
                 } else {
                     _e!()
                 }
