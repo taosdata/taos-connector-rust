@@ -76,6 +76,10 @@ macro_rules! _impl_inline_str {
                 pub const fn as_ptr(&self) -> *const u8 {
                     self.data.as_ptr()
                 }
+                #[inline]
+                pub fn as_mut_ptr(&mut self) -> *mut u8 {
+                    self.data.as_mut_ptr()
+                }
 
                 #[inline]
                 #[rustversion::attr(nightly, const)]
@@ -102,9 +106,13 @@ macro_rules! _impl_inline_str {
                     self.len == 0
                 }
 
-                #[inline]
+                #[inline(never)]
                 pub(crate) unsafe fn set_len(&mut self, len: usize) {
                     self.len = len as _;
+                }
+                #[inline(never)]
+                pub(crate) unsafe fn replace_utf8(&mut self, s: &str, pos: usize) {
+                    std::ptr::copy(s.as_ptr(), self.as_mut_ptr().add(pos), s.len());
                 }
             }
         )*
