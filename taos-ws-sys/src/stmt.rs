@@ -759,7 +759,7 @@ mod tests {
 
             assert_eq!(rows, 2);
             ws_stmt_close(stmt);
-            query!(b"drop database ws_stmt_i\0");
+            // query!(b"drop database ws_stmt_i\0");
         }
     }
 
@@ -865,7 +865,7 @@ mod tests {
             }
 
             ws_stmt_close(stmt);
-            query!(b"drop database ws_stmt_i_null\0");
+            // query!(b"drop database ws_stmt_i_null\0");
         }
     }
 
