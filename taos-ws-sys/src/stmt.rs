@@ -139,6 +139,9 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
     }
 }
 
+/// Get tag fields.
+///
+/// Please always use `ws_stmt_reclaim_fields` to free memory.
 #[allow(non_snake_case)]
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_get_tag_fields(
@@ -162,6 +165,9 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
     }
 }
 
+/// Get col fields.
+///
+/// Please always use `ws_stmt_reclaim_fields` to free memory.
 #[allow(non_snake_case)]
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_get_col_fields(
@@ -183,6 +189,12 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
         }
         _ => 0,
     }
+}
+
+/// Same to taos_stmt_reclaim_fields. Free memory of fields that was allocated by `ws_stmt_get_tag_fields` or `ws_stmt_get_col_fields`.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_reclaim_fields(fields: *mut StmtField) {
+    let _ = Box::from_raw(fields);
 }
 
 /// Currently only insert sql is supported.
@@ -1031,15 +1043,19 @@ mod tests {
             let mut tag_fields = std::ptr::null_mut();
             let mut tag_fields_len = 0;
             ws_stmt_get_tag_fields(stmt, &mut tag_fields, &mut tag_fields_len);
-            let tag_fields = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
-            log::debug!("tag_fields: {:?}", tag_fields);
+            let tag_fields_rs = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
+            log::debug!("tag_fields: {:?}", tag_fields_rs);
+            ws_stmt_reclaim_fields(tag_fields);
+            log::debug!("tag_fields: {:?}", tag_fields_rs);
 
             // get stmt column fields
             let mut col_fields = std::ptr::null_mut();
             let mut col_fields_len = 0;
             ws_stmt_get_col_fields(stmt, &mut col_fields, &mut col_fields_len);
-            let col_fields = std::slice::from_raw_parts(col_fields, col_fields_len as _);
-            log::debug!("col_fields: {:?}", col_fields);
+            let col_fields_rs = std::slice::from_raw_parts(col_fields, col_fields_len as _);
+            log::debug!("col_fields: {:?}", col_fields_rs);
+            ws_stmt_reclaim_fields(col_fields);
+            log::debug!("col_fields: {:?}", col_fields_rs);
 
             ws_stmt_close(stmt);
 
