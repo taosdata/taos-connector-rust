@@ -5,13 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [unreleased]
+## [0.9.2] - 2023-07-27
+
+**Full Changelog**: [taos-v0.9.1...v0.9.2](https://github.com/taosdata/taos-connector-rust/compare/taos-v0.9.1...v0.9.2)
 
 ### Bug Fixes
 
 - *sys*: Fix nchar display error ([2c291f1](2c291f1ceed52f546e08dad5d3efabc8caaf8cfb))
 - *ws-sys*: Fix nchar to str ([00c465c](00c465c939717060a288cd8c59f563429f3fc35f))
 
+- Reclaim vec item ([6ad6f81](6ad6f811db820be19e4286eb34396d4a259311d1))
+- Fix csv dsn parse error when use unix glob ([f49a0e5](f49a0e595309a5bd5a4fc12c632f48a6bbeeacd8))
+
+
+### Documentation
+
+
+- Update git cliff config and CHANGELOG.md ([c8848c9](c8848c9b87febe0b4f3cab044f310c968d815052))
+
+
+### Enhancements
+
+
+- Add ws_stmt_reclaim_fields ([cb52f6e](cb52f6e9a38e47051387f586b87a5629a6554f06))
+- Add error handler ([9e18dfa](9e18dfaafec4e435e99db125d737b9cc0fefe318))
 
 
 ### Features
