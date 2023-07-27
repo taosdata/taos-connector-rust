@@ -205,10 +205,11 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
     }
 }
 
-/// Same to taos_stmt_reclaim_fields. Free memory of fields that was allocated by `ws_stmt_get_tag_fields` or `ws_stmt_get_col_fields`.
+/// Free memory of fields that was allocated by `ws_stmt_get_tag_fields` or `ws_stmt_get_col_fields`.
+#[allow(non_snake_case)]
 #[no_mangle]
-pub unsafe extern "C" fn ws_stmt_reclaim_fields(fields: *mut StmtField) {
-    let _ = Box::from_raw(fields);
+pub unsafe extern "C" fn ws_stmt_reclaim_fields(fields: *mut *mut StmtField, fieldNum: c_int) {
+    let _ = Vec::from_raw_parts(*fields, fieldNum as usize, fieldNum as usize);
 }
 
 /// Currently only insert sql is supported.
@@ -1045,7 +1046,7 @@ mod tests {
                 let tag_fields_before_rs =
                     std::slice::from_raw_parts(tag_fields_before, tag_fields_len_before as _);
                 log::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
-                ws_stmt_reclaim_fields(tag_fields_before);
+                ws_stmt_reclaim_fields(&mut tag_fields_before, tag_fields_len_before);
                 log::trace!(
                     "tag_fields_before after reclaim: {:?}",
                     tag_fields_before_rs
@@ -1067,7 +1068,7 @@ mod tests {
                 let col_fields_before_rs =
                     std::slice::from_raw_parts(col_fields_before, col_fields_len_before as _);
                 log::trace!("col_fields_before: {:?}", col_fields_before_rs);
-                ws_stmt_reclaim_fields(col_fields_before);
+                ws_stmt_reclaim_fields(&mut col_fields_before, col_fields_len_before);
                 log::trace!(
                     "col_fields_before after reclaim: {:?}",
                     col_fields_before_rs
@@ -1091,7 +1092,7 @@ mod tests {
                 let tag_fields_after_rs =
                     std::slice::from_raw_parts(tag_fields_after, tag_fields_len_after as _);
                 log::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
-                ws_stmt_reclaim_fields(tag_fields_after);
+                ws_stmt_reclaim_fields(&mut tag_fields_after, tag_fields_len_after);
                 log::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
             }
 
@@ -1129,7 +1130,7 @@ mod tests {
             } else {
                 let tag_fields_rs = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
                 log::debug!("tag_fields: {:?}", tag_fields_rs);
-                ws_stmt_reclaim_fields(tag_fields);
+                ws_stmt_reclaim_fields(&mut tag_fields, tag_fields_len);
                 log::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
             }
 
@@ -1145,8 +1146,8 @@ mod tests {
             } else {
                 let col_fields_rs = std::slice::from_raw_parts(col_fields, col_fields_len as _);
                 log::debug!("col_fields: {:?}", col_fields_rs);
-                ws_stmt_reclaim_fields(col_fields);
-                log::trace!("col_fields after reclaim: {:?}", col_fields_rs);
+                ws_stmt_reclaim_fields(&mut col_fields, col_fields_len);
+                log::debug!("col_fields after reclaim: {:?}", col_fields_rs);
             }
 
             ws_stmt_close(stmt);
@@ -1182,9 +1183,7 @@ mod tests {
 
             execute!(b"drop database if exists ws_stmt_t\0");
             execute!(b"create database ws_stmt_t keep 36500\0");
-            execute!(
-                b"create table ws_stmt_t.s1 (ts timestamp, v int, b binary(100))\0"
-            );
+            execute!(b"create table ws_stmt_t.s1 (ts timestamp, v int, b binary(100))\0");
 
             let stmt = ws_stmt_init(taos);
             let sql = "insert into ws_stmt_t.s1 (ts, v, b) values(?, ?, ?)";
@@ -1208,7 +1207,7 @@ mod tests {
                 let tag_fields_before_rs =
                     std::slice::from_raw_parts(tag_fields_before, tag_fields_len_before as _);
                 log::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
-                ws_stmt_reclaim_fields(tag_fields_before);
+                ws_stmt_reclaim_fields(&mut tag_fields_before, tag_fields_len_before);
                 log::trace!(
                     "tag_fields_before after reclaim: {:?}",
                     tag_fields_before_rs
@@ -1230,7 +1229,7 @@ mod tests {
                 let col_fields_before_rs =
                     std::slice::from_raw_parts(col_fields_before, col_fields_len_before as _);
                 log::trace!("col_fields_before: {:?}", col_fields_before_rs);
-                ws_stmt_reclaim_fields(col_fields_before);
+                ws_stmt_reclaim_fields(&mut col_fields_before, col_fields_len_before);
                 log::trace!(
                     "col_fields_before after reclaim: {:?}",
                     col_fields_before_rs
@@ -1254,7 +1253,7 @@ mod tests {
                 let tag_fields_after_rs =
                     std::slice::from_raw_parts(tag_fields_after, tag_fields_len_after as _);
                 log::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
-                ws_stmt_reclaim_fields(tag_fields_after);
+                ws_stmt_reclaim_fields(&mut tag_fields_after, tag_fields_len_after);
                 log::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
             }
 
@@ -1292,7 +1291,7 @@ mod tests {
             } else {
                 let tag_fields_rs = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
                 log::debug!("tag_fields: {:?}", tag_fields_rs);
-                ws_stmt_reclaim_fields(tag_fields);
+                ws_stmt_reclaim_fields(&mut tag_fields, tag_fields_len);
                 log::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
             }
 
@@ -1308,7 +1307,7 @@ mod tests {
             } else {
                 let col_fields_rs = std::slice::from_raw_parts(col_fields, col_fields_len as _);
                 log::debug!("col_fields: {:?}", col_fields_rs);
-                ws_stmt_reclaim_fields(col_fields);
+                ws_stmt_reclaim_fields(&mut col_fields, col_fields_len);
                 log::trace!("col_fields after reclaim: {:?}", col_fields_rs);
             }
 
