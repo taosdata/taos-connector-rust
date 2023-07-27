@@ -423,6 +423,19 @@ impl ColumnView {
         }
     }
 
+    pub fn reserved_raw_bytes(&self) -> u32 {
+        if self.as_ty().is_primitive() {
+            (null_bits_len(self.len()) // null bytes
+                + self.len() * self.as_ty().fixed_length()) as _
+        } else {
+            match self {
+                ColumnView::Json(view) => view.reserved_raw_bytes(),
+                ColumnView::VarChar(view) => view.reserved_raw_bytes(),
+                ColumnView::NChar(view) => view.reserved_raw_bytes(),
+                _ => (self.len() * self.as_ty().fixed_length()) as _,
+            }
+        }
+    }
     /// Check if a value at `row` is null
     #[inline]
     pub(super) unsafe fn is_null_unchecked(&self, row: usize) -> bool {
@@ -1182,16 +1195,12 @@ impl ColumnView {
 }
 
 pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
+    let ncols = views.len();
     let header = super::Header {
         nrows: views.first().map(|v| v.len()).unwrap_or(0) as _,
-        ncols: views.len() as _,
+        ncols: ncols as _,
         ..Default::default()
     };
-
-    let ncols = views.len();
-
-    let mut bytes = Vec::new();
-    bytes.extend(header.as_bytes());
 
     let schemas = views
         .iter()
@@ -1209,6 +1218,16 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
             ncols * std::mem::size_of::<ColSchema>(),
         )
     };
+    let mut raw_len = std::mem::size_of_val(&header) // Header length = 28
+         + schema_bytes.len() //  Schema = 6 * cols
+          + ncols * std::mem::size_of::<u32>(); //  Lengths = 8 * cols
+    raw_len += views
+        .iter()
+        .map(|view| view.reserved_raw_bytes())
+        .sum::<u32>() as usize;
+
+    let mut bytes = Vec::with_capacity(raw_len);
+    bytes.extend(header.as_bytes());
     bytes.write_all(schema_bytes).unwrap();
 
     let length_offset = bytes.len();
@@ -1218,6 +1237,7 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
     for (i, view) in views.iter().enumerate() {
         let cur = bytes.len();
         let n = view.write_raw_into(&mut bytes).unwrap();
+        debug_assert_eq!(n, view.reserved_raw_bytes() as usize, "type: {}", view.as_ty());
         let len = bytes.len();
         debug_assert!(cur + n == len);
         if !view.as_ty().is_primitive() {
@@ -1234,6 +1254,8 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
             lengths.len(),
         );
     }
+    debug_assert_eq!(raw_len, bytes.len());
+    debug_assert_eq!(raw_len, bytes.capacity());
     bytes
 }
 

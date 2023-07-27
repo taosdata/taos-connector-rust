@@ -247,6 +247,12 @@ impl NCharView {
         // Ok(offsets.len() + self.data.len())
     }
 
+    pub fn reserved_raw_bytes(&self) -> u32 {
+        (self.len() * std::mem::size_of::<i32>() // offsets
+          + self.iter().flatten().map(|value| value.chars().count() * std::mem::size_of::<char>() + std::mem::size_of::<u16>()).sum::<usize>())
+            as _
+    }
+
     pub fn from_iter<
         S: AsRef<str>,
         T: Into<Option<S>>,

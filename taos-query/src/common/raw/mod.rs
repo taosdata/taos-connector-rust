@@ -1215,7 +1215,7 @@ async fn test_raw_from_v2() {
         location: String,
     }
     let rows: Vec<Record> = block.deserialize().try_collect().unwrap();
-    dbg!(rows);
+    dbg!(rows.len(), &rows);
     // dbg!(block);
     let bytes = views_to_raw_block(&block.columns);
     let raw2 = RawBlock::parse_from_raw_block(bytes, block.precision);
@@ -1284,7 +1284,7 @@ fn test_v2_full() {
         4,
         Precision::Millisecond,
     );
-    let bytes = views_to_raw_block(&block.columns);
+    let bytes = views_to_raw_block(&block.columns).clone();
     let raw2 = RawBlock::parse_from_raw_block(bytes, block.precision);
     dbg!(raw2);
 }
@@ -1292,15 +1292,17 @@ fn test_v2_full() {
 #[test]
 fn test_v2_null() {
     let raw = RawBlock::parse_from_raw_block_v2(
-        [0x2, 0].as_slice(),
+        [0x2, 0, 1].as_slice(),
         &[Field::new("b", Ty::Bool, 1)],
         &[1],
-        2,
+        3,
         Precision::Millisecond,
     );
     dbg!(&raw);
     let bytes = views_to_raw_block(&raw.columns);
-    let raw2 = RawBlock::parse_from_raw_block(bytes, raw.precision);
+    let mut new = Vec::new();
+    bytes.clone_into(&mut new);
+    let raw2 = RawBlock::parse_from_raw_block(new, raw.precision);
     dbg!(raw2);
     let (_ty, _len, null) = unsafe { raw.get_raw_value_unchecked(0, 0) };
     assert!(null.is_null());
