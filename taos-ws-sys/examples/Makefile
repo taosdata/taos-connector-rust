@@ -6,3 +6,9 @@ all:
 	gcc -g ws-run-sql.c ${WS_FLAGS} -o ws-run-sql
 
 .phony: all
+
+basic:
+	gcc -g ws-basic.c ${WS_FLAGS} -o ./target/ws-basic && ./target/ws-basic
+
+bind:
+	gcc -g ws-bind.c ${WS_FLAGS} -o ./target/ws-bind && ./target/ws-bind
