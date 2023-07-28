@@ -12,3 +12,6 @@ basic:
 
 bind:
 	gcc -g ws-bind.c ${WS_FLAGS} -o ./target/ws-bind && ./target/ws-bind
+
+muti:
+	gcc -g ws-muti-bind.c ${WS_FLAGS} -o ./target/ws-muti-bind && ./target/ws-muti-bind
