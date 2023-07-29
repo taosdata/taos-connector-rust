@@ -15,3 +15,6 @@ bind:
 
 muti:
 	gcc -g ws-muti-bind.c ${WS_FLAGS} -o ./target/ws-muti-bind && ./target/ws-muti-bind
+
+table:
+	gcc -g ws-table-muti-bind.c ${WS_FLAGS} -o ./target/ws-table-muti-bind && ./target/ws-table-muti-bind
