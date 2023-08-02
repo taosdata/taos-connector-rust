@@ -18,3 +18,6 @@ muti:
 
 table:
 	gcc -g ws-table-muti-bind.c ${WS_FLAGS} -o ./target/ws-table-muti-bind && ./target/ws-table-muti-bind
+
+get-err:
+	gcc -g ws-get-err.c ${WS_FLAGS} -o ./target/ws-get-err && ./target/ws-get-err
