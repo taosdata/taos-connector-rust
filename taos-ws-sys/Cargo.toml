@@ -25,6 +25,7 @@ cbindgen = "0.24.3"
 pretty_env_logger = "0.4.0"
 
 [features]
+features = ["rustls"]
 native-tls-vendored = ["taos-ws/native-tls-vendored"]
 native-tls = ["taos-ws/native-tls"]
 rustls = ["taos-ws/rustls"]
