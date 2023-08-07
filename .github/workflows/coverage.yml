@@ -61,19 +61,19 @@ jobs:
           path: "TDengine"
           ref: ${{ steps.determine-branch.outputs.value }}
 
-      - uses: actions/cache@v3
-        with:
-          path: |
-            TDengine/release/
-            TDengine/debug/
-            TDengine/contrib/cJson
-            TDengine/contrib/cpp-stub
-            TDengine/contrib/googletest
-            TDengine/contrib/libuv
-            TDengine/contrib/lz4
-            TDengine/contrib/zlib
-            TDengine/contrib/rocksdb
-          key: ${{ runner.os }}-TDengine-build-main
+      # - uses: actions/cache@v3
+      #   with:
+      #     path: |
+      #       TDengine/release/
+      #       TDengine/debug/
+      #       TDengine/contrib/cJson
+      #       TDengine/contrib/cpp-stub
+      #       TDengine/contrib/googletest
+      #       TDengine/contrib/libuv
+      #       TDengine/contrib/lz4
+      #       TDengine/contrib/zlib
+      #       TDengine/contrib/rocksdb
+      #     key: ${{ runner.os }}-TDengine-build-main
 
       - name: Build & Install TDengine
         env:
