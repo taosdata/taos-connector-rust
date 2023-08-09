@@ -3,6 +3,8 @@ use itertools::Itertools;
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
 
+use serde::Deserialize;
+
 use taos_query::common::views::views_to_raw_block;
 use taos_query::common::ColumnView;
 use taos_query::prelude::{InlinableWrite, RawResult};
@@ -30,6 +32,10 @@ use crate::query::asyn::Error;
 type StmtResult = RawResult<Option<usize>>;
 type StmtSender = std::sync::mpsc::SyncSender<StmtResult>;
 type StmtReceiver = std::sync::mpsc::Receiver<StmtResult>;
+
+type StmtFieldResult = RawResult<Vec<StmtField>>;
+type StmtFieldSender = std::sync::mpsc::SyncSender<StmtFieldResult>;
+type StmtFieldReceiver = std::sync::mpsc::Receiver<StmtFieldResult>;
 
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 
@@ -116,6 +122,22 @@ impl Bindable<super::Taos> for Stmt {
     }
 }
 
+pub trait WsFieldsable {
+    fn get_tag_fields(&self) -> RawResult<Vec<StmtField>>;
+
+    fn get_col_fields(&self) -> RawResult<Vec<StmtField>>;
+}
+
+impl WsFieldsable for Stmt {
+    fn get_tag_fields(&self) -> RawResult<Vec<StmtField>> {
+        block_in_place_or_global(self.stmt_get_tag_fields())
+    }
+
+    fn get_col_fields(&self) -> RawResult<Vec<StmtField>> {
+        block_in_place_or_global(self.stmt_get_col_fields())
+    }
+}
+
 pub struct Stmt {
     req_id: Arc<AtomicU64>,
     timeout: Duration,
@@ -126,6 +148,18 @@ pub struct Stmt {
     receiver: Option<StmtReceiver>,
     args: Option<StmtArgs>,
     affected_rows: usize,
+    fields_fetches: Arc<HashMap<StmtId, StmtFieldSender>>,
+    fields_receiver: Option<StmtFieldReceiver>,
+}
+
+#[repr(C)]
+#[derive(Debug, Deserialize, Clone)]
+pub struct StmtField {
+    pub name: String,
+    pub field_type: i8,
+    pub precision: u8,
+    pub scale: u8,
+    pub bytes: i32,
 }
 
 // pub struct WsAsyncStmt {
@@ -243,6 +277,9 @@ impl Stmt {
         let queries_sender = queries.clone();
         let fetches_sender = fetches.clone();
 
+        let fields_fetches = Arc::new(HashMap::<StmtId, StmtFieldSender>::new());
+        let fields_fetches_sender = fields_fetches.clone();
+
         let (ws, mut msg_recv) = tokio::sync::mpsc::channel(100);
         let ws2 = ws.clone();
 
@@ -254,7 +291,10 @@ impl Stmt {
             loop {
                 tokio::select! {
                     Some(msg) = msg_recv.recv() => {
-                        sender.send(msg).await.unwrap();
+                        if let Err(err) = sender.send(msg).await {
+                            //
+                            break;
+                        }
                     }
                     _ = rx.changed() => {
                         log::trace!("close sender task");
@@ -289,6 +329,17 @@ impl Stmt {
                                         }
                                         StmtOk::Stmt(stmt_id, res) => {
                                             if let Some(sender) = fetches_sender.get(&stmt_id) {
+                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                // let res = res.clone();
+                                                sender.send(res).unwrap();
+                                            // }) {
+
+                                            } else {
+                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                            }
+                                        }
+                                        StmtOk::StmtFields(stmt_id, res) => {
+                                            if let Some(sender) = fields_fetches_sender.get(&stmt_id) {
                                                 log::trace!("send data to fetches with id {}", stmt_id);
                                                 // let res = res.clone();
                                                 sender.send(res).unwrap();
@@ -344,6 +395,8 @@ impl Stmt {
             receiver: None,
             args: None,
             affected_rows: 0,
+            fields_fetches,
+            fields_receiver: None,
         })
     }
     /// Build TDengine websocket client from dsn.
@@ -379,6 +432,10 @@ impl Stmt {
 
         self.args = Some(args);
         self.receiver = Some(receiver);
+
+        let (fields_sender, fields_receiver) = std::sync::mpsc::sync_channel(2);
+        let _ = self.fields_fetches.insert(stmt_id, fields_sender);
+        self.fields_receiver = Some(fields_receiver);
         Ok(self)
     }
 
@@ -536,6 +593,38 @@ impl Stmt {
             panic!("")
         }
     }
+
+    pub async fn stmt_get_tag_fields(&self) -> RawResult<Vec<StmtField>> {
+        log::trace!("get tag fields");
+        let message = StmtSend::GetTagFields(self.args.unwrap());
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
+        let fields = self
+            .fields_receiver
+            .as_ref()
+            .unwrap()
+            .recv_timeout(self.timeout)
+            .map_err(Error::from)??;
+        Ok(fields)
+    }
+
+    pub async fn stmt_get_col_fields(&self) -> RawResult<Vec<StmtField>> {
+        log::trace!("get col fields");
+        let message = StmtSend::GetColFields(self.args.unwrap());
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
+        let fields = self
+            .fields_receiver
+            .as_ref()
+            .unwrap()
+            .recv_timeout(self.timeout)
+            .map_err(Error::from)??;
+        Ok(fields)
+    }
 }
 
 #[cfg(test)]
@@ -619,6 +708,59 @@ mod tests {
         taos.exec("drop database stmt_sj").await?;
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    async fn test_stmt_get_tag_and_col_fields() -> anyhow::Result<()> {
+        use taos_query::AsyncQueryable;
+
+        let dsn = Dsn::try_from("taos://localhost:6041")?;
+        dbg!(&dsn);
+
+        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
+        taos.exec("drop database if exists stmt_sj").await?;
+        taos.exec("create database stmt_sj").await?;
+        taos.exec("create table stmt_sj.stb (ts timestamp, v int) tags(tj json)")
+            .await?;
+
+        std::env::set_var("RUST_LOG", "debug");
+        // pretty_env_logger::init();
+        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/stmt_sj").await?;
+        let stmt = client
+            .s_stmt("insert into ? using stb tags(?) values(?, ?)")
+            .await?;
+
+        stmt.stmt_set_tbname("tb1").await?;
+
+        stmt.stmt_set_tags(vec![json!(r#"{"name": "value"}"#)])
+            .await?;
+
+        stmt.bind_all(vec![
+            json!([
+                "2022-06-07T11:02:44.022450088+08:00",
+                "2022-06-07T11:02:45.022450088+08:00"
+            ]),
+            json!([2, 3]),
+        ])
+        .await?;
+        let res = stmt.stmt_exec().await?;
+
+        assert_eq!(res, 2);
+        let row: (String, i32, std::collections::HashMap<String, String>) =
+            taos.query_one("select * from stmt_sj.stb").await?.unwrap();
+        dbg!(row);
+
+        let tag_fields = stmt.stmt_get_tag_fields().await?;
+
+        log::debug!("tag fields: {:?}", tag_fields);
+
+        let col_fields = stmt.stmt_get_col_fields().await?;
+
+        log::debug!("col fields: {:?}", col_fields);
+
+        taos.exec("drop database stmt_sj").await?;
+        Ok(())
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_stmt_stable() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;

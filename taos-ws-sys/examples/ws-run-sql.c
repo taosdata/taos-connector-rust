@@ -124,6 +124,11 @@ int main(int argc, char *argv[]) {
           memcpy(tmp, value, len);
           printf("\"%s\"", (char *)tmp);
           break;
+        case TSDB_DATA_TYPE_NCHAR:
+          memset(tmp, 0, 4096);
+          memcpy(tmp, value, len);
+          printf("\"%s\"", (char *)tmp);
+          break;
         case TSDB_DATA_TYPE_JSON:
           memset(tmp, 0, 4096);
           memcpy(tmp, value, len);

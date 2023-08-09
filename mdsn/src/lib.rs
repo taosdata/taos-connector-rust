@@ -96,7 +96,7 @@ impl Dsn {
                         (/(?P<subject>[\w %$@./-]+)?)?                             # for subject
                     | # or
                     # path-like dsn
-                    (?P<path>([\\/.~]$|/\w+[\w %$@:.\\\-/]*|[\.~\w]?[\w %$@:.\\\-/]+))
+                    (?P<path>([\\/.~]$|/\s*\w+[\w\s %$@*:.\\\-/]*|[\.~\w\s]?[\w\s %$@*:.\\\-/]+))
                 ) # abc
                 (\?(?P<params>(?s:.)*))?").unwrap();
         }
@@ -1128,5 +1128,30 @@ mod tests {
             dsn.to_string(),
             format!("taos://{e}:{e}@localhost:6030?{e}={e}")
         );
+    }
+    #[test]
+    fn unix_path_with_glob() {
+        let dsn = Dsn::from_str(&format!("csv:./**.csv?param=1")).unwrap();
+        dbg!(&dsn);
+        assert!(dsn.path.is_some());
+        assert_eq!(dsn.get("param").unwrap(), "1");
+
+        let dsn = Dsn::from_str(&format!("csv:./**.csv?param=1")).unwrap();
+        dbg!(&dsn);
+        assert!(dsn.path.is_some());
+        assert_eq!(dsn.get("param").unwrap(), "1");
+
+        let dsn = Dsn::from_str(&format!("csv:.\\**.csv?param=1")).unwrap();
+        dbg!(&dsn);
+        assert!(dsn.path.is_some());
+        assert_eq!(dsn.get("param").unwrap(), "1");
+    }
+
+
+    #[test]
+    fn unix_path_with_space() {
+        let dsn = Dsn::from_str(&format!("csv:./a b.csv?param=1")).unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.path.unwrap(), "./a b.csv");
     }
 }

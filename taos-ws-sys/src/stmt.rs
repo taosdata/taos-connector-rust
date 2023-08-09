@@ -6,9 +6,39 @@ use taos_query::block_in_place_or_global;
 use taos_query::common::Value;
 use taos_query::prelude::Itertools;
 use taos_query::stmt::Bindable;
+use taos_ws::stmt::StmtField as WsStmtField;
+use taos_ws::stmt::WsFieldsable;
 use taos_ws::Stmt;
 
 use crate::*;
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct StmtField {
+    name: [c_char; 65usize],
+    r#type: i8,
+    precision: u8,
+    scale: u8,
+    bytes: i32,
+}
+
+impl From<WsStmtField> for StmtField {
+    fn from(f: WsStmtField) -> Self {
+        let f_name = f.name.as_str();
+        let mut name = [0 as c_char; 65usize];
+        unsafe {
+            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len())
+        };
+
+        Self {
+            name,
+            r#type: f.field_type,
+            precision: f.precision,
+            scale: f.scale,
+            bytes: f.bytes,
+        }
+    }
+}
 
 /// Opaque STMT type alias.
 #[allow(non_camel_case_types)]
@@ -107,6 +137,79 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
         }
         _ => 0,
     }
+}
+
+/// Get tag fields.
+///
+/// Please always use `ws_stmt_reclaim_fields` to free memory.
+#[allow(non_snake_case)]
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_get_tag_fields(
+    stmt: *mut WS_STMT,
+    fields: *mut *mut StmtField,
+    fieldNum: *mut c_int,
+) -> c_int {
+    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+        Some(stmt) => match stmt.get_tag_fields() {
+            Ok(fields_vec) => {
+                let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
+
+                *fieldNum = fields_vec.len() as _;
+
+                *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
+
+                0
+            }
+
+            Err(e) => {
+                let errno = e.code();
+                stmt.error = Some(WsError::new(errno, &e.to_string()));
+                errno.into()
+            }
+        },
+
+        _ => 0,
+    }
+}
+
+/// Get col fields.
+///
+/// Please always use `ws_stmt_reclaim_fields` to free memory.
+#[allow(non_snake_case)]
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_get_col_fields(
+    stmt: *mut WS_STMT,
+    fields: *mut *mut StmtField,
+    fieldNum: *mut c_int,
+) -> c_int {
+    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+        Some(stmt) => match stmt.get_col_fields() {
+            Ok(fields_vec) => {
+                let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
+
+                *fieldNum = fields_vec.len() as _;
+
+                *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
+
+                0
+            }
+
+            Err(e) => {
+                let errno = e.code();
+                stmt.error = Some(WsError::new(errno, &e.to_string()));
+                errno.into()
+            }
+        },
+
+        _ => 0,
+    }
+}
+
+/// Free memory of fields that was allocated by `ws_stmt_get_tag_fields` or `ws_stmt_get_col_fields`.
+#[allow(non_snake_case)]
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_reclaim_fields(fields: *mut *mut StmtField, fieldNum: c_int) {
+    let _ = Vec::from_raw_parts(*fields, fieldNum as usize, fieldNum as usize);
 }
 
 /// Currently only insert sql is supported.
@@ -885,6 +988,329 @@ mod tests {
             ws_stmt_execute(stmt, &mut rows);
 
             assert_eq!(rows, 2);
+            ws_stmt_close(stmt);
+
+            ws_close(taos)
+        }
+    }
+
+    #[test]
+    fn get_tag_and_col_fields() {
+        use crate::*;
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"drop database if exists ws_stmt_t\0");
+            execute!(b"create database ws_stmt_t keep 36500\0");
+            execute!(
+                b"create table ws_stmt_t.s1 (ts timestamp, v int, b binary(100)) tags(jt json)\0"
+            );
+
+            let stmt = ws_stmt_init(taos);
+            let sql = "insert into ? using ws_stmt_t.s1 tags(?) values(?, ?, ?)";
+            let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            // get tag fields before set tbname
+            let mut tag_fields_before = std::ptr::null_mut();
+            let mut tag_fields_len_before = 0;
+            let code =
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_before, &mut tag_fields_len_before);
+            log::debug!("tag_fields_before code: {}", code);
+            if code != 0 {
+                log::debug!(
+                    "tag_fields_before errstr: {}",
+                    CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                );
+            } else {
+                let tag_fields_before_rs =
+                    std::slice::from_raw_parts(tag_fields_before, tag_fields_len_before as _);
+                log::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
+                ws_stmt_reclaim_fields(&mut tag_fields_before, tag_fields_len_before);
+                log::trace!(
+                    "tag_fields_before after reclaim: {:?}",
+                    tag_fields_before_rs
+                );
+            }
+
+            // get col fields before set tbname
+            let mut col_fields_before = std::ptr::null_mut();
+            let mut col_fields_len_before = 0;
+            let code =
+                ws_stmt_get_col_fields(stmt, &mut col_fields_before, &mut col_fields_len_before);
+            log::debug!("col_fields_before code: {}", code);
+            if code != 0 {
+                log::debug!(
+                    "col_fields_before errstr: {}",
+                    CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                );
+            } else {
+                let col_fields_before_rs =
+                    std::slice::from_raw_parts(col_fields_before, col_fields_len_before as _);
+                log::trace!("col_fields_before: {:?}", col_fields_before_rs);
+                ws_stmt_reclaim_fields(&mut col_fields_before, col_fields_len_before);
+                log::trace!(
+                    "col_fields_before after reclaim: {:?}",
+                    col_fields_before_rs
+                );
+            }
+
+            ws_stmt_set_tbname(stmt, b"ws_stmt_t.t1\0".as_ptr() as _);
+
+            // get tag fields after set tbname
+            let mut tag_fields_after = std::ptr::null_mut();
+            let mut tag_fields_len_after = 0;
+            let code =
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_after, &mut tag_fields_len_after);
+            log::debug!("tag_fields_after code: {}", code);
+            if code != 0 {
+                log::error!(
+                    "tag_fields_after errstr: {}",
+                    CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                );
+            } else {
+                let tag_fields_after_rs =
+                    std::slice::from_raw_parts(tag_fields_after, tag_fields_len_after as _);
+                log::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
+                ws_stmt_reclaim_fields(&mut tag_fields_after, tag_fields_len_after);
+                log::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
+            }
+
+            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+                r#"{"name":"姓名"}"#.to_string(),
+            )])];
+
+            ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
+
+            let params = vec![
+                TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
+                TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
+                TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
+            ];
+            let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            ws_stmt_add_batch(stmt);
+            let mut rows = 0;
+            ws_stmt_execute(stmt, &mut rows);
+
+            assert_eq!(rows, 2);
+
+            // get stmt tag fields
+            let mut tag_fields = std::ptr::null_mut();
+            let mut tag_fields_len = 0;
+            let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields, &mut tag_fields_len);
+            if code != 0 {
+                log::debug!(
+                    "tag_fields errstr: {}",
+                    CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                );
+            } else {
+                let tag_fields_rs = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
+                log::debug!("tag_fields: {:?}", tag_fields_rs);
+                ws_stmt_reclaim_fields(&mut tag_fields, tag_fields_len);
+                log::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
+            }
+
+            // get stmt column fields
+            let mut col_fields = std::ptr::null_mut();
+            let mut col_fields_len = 0;
+            let code = ws_stmt_get_col_fields(stmt, &mut col_fields, &mut col_fields_len);
+            if code != 0 {
+                log::debug!(
+                    "col_fields errstr: {}",
+                    CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                );
+            } else {
+                let col_fields_rs = std::slice::from_raw_parts(col_fields, col_fields_len as _);
+                log::debug!("col_fields: {:?}", col_fields_rs);
+                ws_stmt_reclaim_fields(&mut col_fields, col_fields_len);
+                log::debug!("col_fields after reclaim: {:?}", col_fields_rs);
+            }
+
+            ws_stmt_close(stmt);
+
+            ws_close(taos)
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stmt_api_false_usage() {
+        use crate::*;
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"drop database if exists ws_stmt_t\0");
+            execute!(b"create database ws_stmt_t keep 36500\0");
+            execute!(b"create table ws_stmt_t.s1 (ts timestamp, v int, b binary(100))\0");
+
+            let stmt = ws_stmt_init(taos);
+            let sql = "insert into ws_stmt_t.s1 (ts, v, b) values(?, ?, ?)";
+            let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            // get tag fields before set tbname
+            let mut tag_fields_before = std::ptr::null_mut();
+            let mut tag_fields_len_before = 0;
+            let code =
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_before, &mut tag_fields_len_before);
+            log::debug!("tag_fields_before code: {}", code);
+            if code != 0 {
+                log::error!(
+                    "tag_fields_before errstr: {}",
+                    CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                );
+            } else {
+                let tag_fields_before_rs =
+                    std::slice::from_raw_parts(tag_fields_before, tag_fields_len_before as _);
+                log::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
+                ws_stmt_reclaim_fields(&mut tag_fields_before, tag_fields_len_before);
+                log::trace!(
+                    "tag_fields_before after reclaim: {:?}",
+                    tag_fields_before_rs
+                );
+            }
+
+            // get col fields before set tbname
+            let mut col_fields_before = std::ptr::null_mut();
+            let mut col_fields_len_before = 0;
+            let code =
+                ws_stmt_get_col_fields(stmt, &mut col_fields_before, &mut col_fields_len_before);
+            log::debug!("col_fields_before code: {}", code);
+            if code != 0 {
+                log::error!(
+                    "col_fields_before errstr: {}",
+                    CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                );
+            } else {
+                let col_fields_before_rs =
+                    std::slice::from_raw_parts(col_fields_before, col_fields_len_before as _);
+                log::trace!("col_fields_before: {:?}", col_fields_before_rs);
+                ws_stmt_reclaim_fields(&mut col_fields_before, col_fields_len_before);
+                log::trace!(
+                    "col_fields_before after reclaim: {:?}",
+                    col_fields_before_rs
+                );
+            }
+
+            ws_stmt_set_tbname(stmt, b"ws_stmt_t.t1\0".as_ptr() as _);
+
+            // get tag fields after set tbname
+            let mut tag_fields_after = std::ptr::null_mut();
+            let mut tag_fields_len_after = 0;
+            let code =
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_after, &mut tag_fields_len_after);
+            log::debug!("tag_fields_after code: {}", code);
+            if code != 0 {
+                log::error!(
+                    "tag_fields_after errstr: {}",
+                    CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                );
+            } else {
+                let tag_fields_after_rs =
+                    std::slice::from_raw_parts(tag_fields_after, tag_fields_len_after as _);
+                log::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
+                ws_stmt_reclaim_fields(&mut tag_fields_after, tag_fields_len_after);
+                log::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
+            }
+
+            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+                r#"{"name":"姓名"}"#.to_string(),
+            )])];
+
+            ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
+
+            let params = vec![
+                TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
+                TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
+                TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
+            ];
+            let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            ws_stmt_add_batch(stmt);
+            let mut rows = 0;
+            ws_stmt_execute(stmt, &mut rows);
+
+            assert_eq!(rows, 2);
+
+            // get stmt tag fields
+            let mut tag_fields = std::ptr::null_mut();
+            let mut tag_fields_len = 0;
+            let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields, &mut tag_fields_len);
+            if code != 0 {
+                log::debug!(
+                    "tag_fields errstr: {}",
+                    CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                );
+            } else {
+                let tag_fields_rs = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
+                log::debug!("tag_fields: {:?}", tag_fields_rs);
+                ws_stmt_reclaim_fields(&mut tag_fields, tag_fields_len);
+                log::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
+            }
+
+            // get stmt column fields
+            let mut col_fields = std::ptr::null_mut();
+            let mut col_fields_len = 0;
+            let code = ws_stmt_get_col_fields(stmt, &mut col_fields, &mut col_fields_len);
+            if code != 0 {
+                log::debug!(
+                    "col_fields errstr: {}",
+                    CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                );
+            } else {
+                let col_fields_rs = std::slice::from_raw_parts(col_fields, col_fields_len as _);
+                log::debug!("col_fields: {:?}", col_fields_rs);
+                ws_stmt_reclaim_fields(&mut col_fields, col_fields_len);
+                log::trace!("col_fields after reclaim: {:?}", col_fields_rs);
+            }
+
             ws_stmt_close(stmt);
 
             ws_close(taos)

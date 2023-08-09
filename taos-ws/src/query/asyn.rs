@@ -12,6 +12,7 @@ use taos_query::{
     block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
 };
 use thiserror::Error;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
 use taos_query::prelude::tokio;
 use tokio::net::TcpStream;
@@ -116,7 +117,9 @@ impl WsQuerySender {
         }
         // handle the error
         log::trace!("[req id: {req_id}] message sent, wait for receiving");
-        Ok(rx.await.unwrap().map_err(Error::from)?)
+        let res = rx.await.unwrap().map_err(Error::from)?;
+        log::trace!("[req id: {req_id}] message received: {res:?}");
+        Ok(res)
     }
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
         let send_timeout = Duration::from_millis(1000);
@@ -299,6 +302,17 @@ async fn read_queries(
     is_v3: bool,
     mut close_listener: watch::Receiver<bool>,
 ) {
+    let ws3 = ws2.clone();
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(29));
+        loop {
+            interval.tick().await;
+            if let Err(err) = ws3.send(Message::Ping(b"TAOSX".to_vec())).await {
+                log::trace!("sending ping message error: {err:?}");
+                break;
+            }
+        }
+    });
     'ws: loop {
         tokio::select! {
             Some(message) = reader.next() => {
@@ -312,7 +326,9 @@ async fn read_queries(
                                 WsRecvData::Query(_) => {
                                     if let Some((_, sender)) = queries_sender.remove(&req_id)
                                     {
-                                        sender.send(ok.map(|_| data)).unwrap();
+                                        if let Err(err) = sender.send(ok.map(|_| data)) {
+                                            log::error!("send data with error: {err:?}");
+                                        }
                                     } else {
                                         debug_assert!(!queries_sender.contains_key(&req_id));
                                         log::warn!("req_id {req_id} not detected, message might be lost");
@@ -413,6 +429,8 @@ async fn read_queries(
                             }
                         }
                         Message::Close(close) => {
+                            // taosAdapter should never send close frame to client.
+                            //   So all close frames should be treated as error.
                             if let Some(close) = close {
                                 log::warn!("websocket received close frame: {close:?}");
 
@@ -420,12 +438,15 @@ async fn read_queries(
                                 for e in queries_sender.iter() {
                                     keys.push(*e.key());
                                 }
-                                // queries_sender.for_each_async(|k, _| {
-                                //     keys.push(*k);
-                                // }).await;
+                                let reason = match close.code {
+                                    CloseCode::Size => {
+                                        format!("Message length reaches max limit (code: {})", close.code)
+                                    }
+                                    _ => format!("{}", close),
+                                };
                                 for k in keys {
                                     if let Some((_, sender)) = queries_sender.remove(&k) {
-                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), close.reason.to_string())));
+                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), reason.to_string())));
                                     }
                                 }
                             } else {
@@ -434,9 +455,6 @@ async fn read_queries(
                                 for e in queries_sender.iter() {
                                     keys.push(*e.key());
                                 }
-                                // queries_sender.for_each_async(|k, _| {
-                                //     keys.push(*k);
-                                // }).await;
                                 for k in keys {
                                     if let Some((_, sender)) = queries_sender.remove(&k) {
                                         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
@@ -450,7 +468,7 @@ async fn read_queries(
                         }
                         Message::Pong(_) => {
                             // do nothing
-                            log::warn!("received (unexpected) pong message, do nothing");
+                            log::trace!("received pong message, do nothing");
                         }
                         Message::Frame(frame) => {
                             // do nothing
@@ -611,6 +629,7 @@ impl WsTaos {
                     Some(msg) = msg_recv.recv() => {
                         // dbg!(&msg);
                         if let Err(err) = sender.send(msg).await {
+                            log::error!("Write websocket error: {}", err);
                                 let mut keys = Vec::new();
                                 queries3.iter().for_each(|r| keys.push(*r.key()));
                                 // queries3.for_each_async(|k, _| {
