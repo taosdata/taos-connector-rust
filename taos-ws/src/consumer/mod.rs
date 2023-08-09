@@ -696,7 +696,7 @@ impl TmqBuilder {
         let mut close_listener = rx.clone();
 
         let sending_url = url.clone();
-        static PING_INTERVAL: u64 = 30;
+        static PING_INTERVAL: u64 = 29;
         const PING: &[u8] = b"TAOSX";
 
         tokio::spawn(async move {

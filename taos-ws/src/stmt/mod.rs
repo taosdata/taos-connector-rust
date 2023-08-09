@@ -291,7 +291,10 @@ impl Stmt {
             loop {
                 tokio::select! {
                     Some(msg) = msg_recv.recv() => {
-                        sender.send(msg).await.unwrap();
+                        if let Err(err) = sender.send(msg).await {
+                            //
+                            break;
+                        }
                     }
                     _ = rx.changed() => {
                         log::trace!("close sender task");
