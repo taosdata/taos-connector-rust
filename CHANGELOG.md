@@ -5,9 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.2] - 2023-07-27
+## [taos-v0.9.4] - 2023-08-09
 
-**Full Changelog**: [taos-v0.9.1...v0.9.2](https://github.com/taosdata/taos-connector-rust/compare/taos-v0.9.1...v0.9.2)
+**Full Changelog**: [taos-v0.9.3...taos-v0.9.4](https://github.com/taosdata/taos-connector-rust/compare/taos-v0.9.3...taos-v0.9.4)
+
+### Bug Fixes
+
+- *ws*: Fix some panics in websocket impls ([142a9e9](142a9e9e8806cd3425568179d0afbe0c23ea2487))
+
+
+
+### Features
+
+
+- Use default rustls for taos-ws-sys ([52e9b18](52e9b186a39cd13e15462b46621f89fbb40c148c))
+
+
+## [taos-v0.9.3] - 2023-08-03
+
+**Full Changelog**: [taos-v0.9.2...taos-v0.9.3](https://github.com/taosdata/taos-connector-rust/compare/taos-v0.9.2...taos-v0.9.3)
+
+### Bug Fixes
+
+- *mdsn*: Fix unix path with spaces ([d5aa25f](d5aa25f3dd3ff07b29d90fa9b4d281739eb549ce))
+
+
+
+### Documentation
+
+
+- Add example code ([0cb8868](0cb886841f68c4af8c862c4c26a85a7c3be3cc29))
+- Add example code: basic ([01788f9](01788f96a5d21d2faacd18636f977f3302af3b19))
+- Add example code: stmt bind ([1dcf95b](1dcf95bd1ca8c4b3b85f5168d7718afc12ddc0f3))
+- Add example code: stmt muti bind ([ed81b2d](ed81b2d8228b04886b30846847c900a5511f316a))
+- Add example code: stmt muti bind ([c9b64fd](c9b64fd7b5e8565ef25ec705fe0509f6d7652422))
+- Add ws-table-muti-bind ([69d4054](69d4054c42ac37de52f05561e3440434e70af833))
+- Add example of get err string ([56400af](56400af2c3ba3ddfce6c128dbd41b80575e30a2f))
+
+
+## [taos-v0.9.2] - 2023-07-27
+
+**Full Changelog**: [taos-v0.9.1...taos-v0.9.2](https://github.com/taosdata/taos-connector-rust/compare/taos-v0.9.1...taos-v0.9.2)
 
 ### Bug Fixes
 
