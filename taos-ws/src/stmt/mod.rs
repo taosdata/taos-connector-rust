@@ -293,6 +293,7 @@ impl Stmt {
                     Some(msg) = msg_recv.recv() => {
                         if let Err(err) = sender.send(msg).await {
                             //
+                            log::warn!("Sender error: {err:#}");
                             break;
                         }
                     }
