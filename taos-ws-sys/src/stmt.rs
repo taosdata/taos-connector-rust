@@ -1181,12 +1181,12 @@ mod tests {
                 };
             }
 
-            execute!(b"drop database if exists ws_stmt_t\0");
-            execute!(b"create database ws_stmt_t keep 36500\0");
-            execute!(b"create table ws_stmt_t.s1 (ts timestamp, v int, b binary(100))\0");
+            execute!(b"drop database if exists ws_stmt_false_usage\0");
+            execute!(b"create database ws_stmt_false_usage keep 36500\0");
+            execute!(b"create table ws_stmt_false_usage.s1 (ts timestamp, v int, b binary(100))\0");
 
             let stmt = ws_stmt_init(taos);
-            let sql = "insert into ws_stmt_t.s1 (ts, v, b) values(?, ?, ?)";
+            let sql = "insert into ws_stmt_false_usage.s1 (ts, v, b) values(?, ?, ?)";
             let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
             if code != 0 {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
@@ -1236,7 +1236,7 @@ mod tests {
                 );
             }
 
-            ws_stmt_set_tbname(stmt, b"ws_stmt_t.t1\0".as_ptr() as _);
+            ws_stmt_set_tbname(stmt, b"ws_stmt_false_usage.t1\0".as_ptr() as _);
 
             // get tag fields after set tbname
             let mut tag_fields_after = std::ptr::null_mut();
