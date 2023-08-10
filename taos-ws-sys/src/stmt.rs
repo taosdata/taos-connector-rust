@@ -1018,14 +1018,14 @@ mod tests {
                 };
             }
 
-            execute!(b"drop database if exists ws_stmt_t\0");
-            execute!(b"create database ws_stmt_t keep 36500\0");
+            execute!(b"drop database if exists ws_stmt_tag_and_col\0");
+            execute!(b"create database ws_stmt_tag_and_col keep 36500\0");
             execute!(
-                b"create table ws_stmt_t.s1 (ts timestamp, v int, b binary(100)) tags(jt json)\0"
+                b"create table ws_stmt_tag_and_col.s1 (ts timestamp, v int, b binary(100)) tags(jt json)\0"
             );
 
             let stmt = ws_stmt_init(taos);
-            let sql = "insert into ? using ws_stmt_t.s1 tags(?) values(?, ?, ?)";
+            let sql = "insert into ? using ws_stmt_tag_and_col.s1 tags(?) values(?, ?, ?)";
             let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
             if code != 0 {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
@@ -1075,7 +1075,7 @@ mod tests {
                 );
             }
 
-            ws_stmt_set_tbname(stmt, b"ws_stmt_t.t1\0".as_ptr() as _);
+            ws_stmt_set_tbname(stmt, b"ws_stmt_tag_and_col.t1\0".as_ptr() as _);
 
             // get tag fields after set tbname
             let mut tag_fields_after = std::ptr::null_mut();
