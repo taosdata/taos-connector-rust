@@ -879,7 +879,7 @@ impl TmqBuilder {
 
                                     let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
                                     let err = if let Some(close) = close {
-                                        format!("WebSocket internal error: {}", close.reason)
+                                        format!("WebSocket internal error: {}", close)
                                     } else {
                                         "WebSocket internal error, connection is reset by server".to_string()
                                     };

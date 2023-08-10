@@ -21,6 +21,18 @@ enum ResultSetInner {
 pub struct TaosBuilder(TaosBuilderInner);
 #[derive(Debug)]
 pub struct Taos(pub(super) TaosInner);
+
+impl Taos {
+    /// The connection uses native protocol.
+    pub fn is_native(&self) -> bool {
+        matches!(&self.0, TaosInner::Native(_))
+    }
+
+    /// The connection uses websocket protocol.
+    pub fn is_ws(&self) -> bool {
+        matches!(&self.0, TaosInner::Native(_))
+    }
+}
 pub struct ResultSet(ResultSetInner);
 
 impl taos_query::TBuilder for TaosBuilder {
