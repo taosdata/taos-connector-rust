@@ -28,7 +28,7 @@ taos-ws = {path = "../taos-ws", version = "0.9.4", optional = true}
 anyhow = "1"
 async-trait = "0.1.68"
 chrono = "0.4"
-criterion = {version = "0.4", features = ["html_reports"]}
+criterion = {version = "0.5", features = ["html_reports", "stable"]}
 itertools = "0.10.3"
 log = "0.4"
 pretty_env_logger = "0.4.0"
@@ -39,6 +39,10 @@ tokio = {version = "1", features = ["full"]}
 [[bench]]
 harness = false
 name = "benchmark"
+
+[[bench]]
+harness = false
+name = "query"
 
 [features]
 deadpool = ["taos-query/deadpool"]
