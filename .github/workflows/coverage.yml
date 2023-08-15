@@ -19,7 +19,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           components: rustfmt, clippy, llvm-tools-preview
-          toolchain: nightly
+          toolchain: 1.71.1
           default: true
 
       - name: Install cargo-llvm-cov
