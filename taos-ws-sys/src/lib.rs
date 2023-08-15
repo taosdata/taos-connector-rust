@@ -353,6 +353,10 @@ impl WsResultSet {
         self.rs.affected_rows() as _
     }
 
+    fn affected_rows64(&self) -> i64 {
+        self.rs.affected_rows64() as _
+    }
+
     fn num_of_fields(&self) -> i32 {
         self.rs.num_of_fields() as _
     }
@@ -637,7 +641,16 @@ pub unsafe extern "C" fn ws_errstr(rs: *mut WS_RES) -> *const c_char {
 /// Works exactly the same to taos_affected_rows.
 pub unsafe extern "C" fn ws_affected_rows(rs: *const WS_RES) -> i32 {
     match (rs as *mut WsMaybeError<WsResultSet>).as_ref() {
-        Some(rs) => rs.affected_rows(),
+        Some(rs) => rs.affected_rows() as _,
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+/// Works exactly the same to taos_affected_rows64.
+pub unsafe extern "C" fn ws_affected_rows64(rs: *const WS_RES) -> i64 {
+    match (rs as *mut WsMaybeError<WsResultSet>).as_ref() {
+        Some(rs) => rs.affected_rows64() as _,
         _ => 0,
     }
 }
@@ -891,6 +904,51 @@ mod tests {
             assert!(!taos.is_null());
         }
     }
+
+    #[test]
+    fn test_affected_row() {
+        init_env();
+
+        unsafe {
+            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"drop database if exists ws_affected_row\0");
+            execute!(b"create database ws_affected_row keep 36500\0");
+            execute!(b"create table ws_affected_row.s1 (ts timestamp, v int, b binary(100))\0");
+
+            let row = ws_affected_rows(ws_query(
+                taos,
+                b"insert into ws_affected_row.s1 values (now, 1, 'hello')\0" as *const u8 as _,
+            ));
+            assert_eq!(row, 1);
+
+            let row = ws_affected_rows64(ws_query(
+                taos,
+                b"insert into ws_affected_row.s1 values (now, 2, 'world')\0" as *const u8 as _,
+            ));
+            assert_eq!(row, 1);
+
+            execute!(b"drop database if exists ws_affected_row\0");
+        }
+    }
+
     #[test]
     fn connect() {
         init_env();
@@ -923,6 +981,9 @@ mod tests {
 
             let affected_rows = ws_affected_rows(rs);
             assert!(affected_rows == 0);
+
+            let affected_rows64 = ws_affected_rows64(rs);
+            assert!(affected_rows64 == 0);
 
             let cols = ws_field_count(rs);
             dbg!(cols);

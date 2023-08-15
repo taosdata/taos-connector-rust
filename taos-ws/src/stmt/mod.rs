@@ -148,6 +148,7 @@ pub struct Stmt {
     receiver: Option<StmtReceiver>,
     args: Option<StmtArgs>,
     affected_rows: usize,
+    affected_rows_once: usize,
     fields_fetches: Arc<HashMap<StmtId, StmtFieldSender>>,
     fields_receiver: Option<StmtFieldReceiver>,
 }
@@ -396,6 +397,7 @@ impl Stmt {
             receiver: None,
             args: None,
             affected_rows: 0,
+            affected_rows_once: 0,
             fields_fetches,
             fields_receiver: None,
         })
@@ -589,6 +591,7 @@ impl Stmt {
             .map_err(Error::from)??
         {
             self.affected_rows += affected;
+            self.affected_rows_once = affected;
             Ok(affected)
         } else {
             panic!("")
@@ -625,6 +628,10 @@ impl Stmt {
             .recv_timeout(self.timeout)
             .map_err(Error::from)??;
         Ok(fields)
+    }
+
+    pub fn affected_rows_once(&self) -> usize {
+        self.affected_rows_once
     }
 }
 
