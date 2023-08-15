@@ -692,15 +692,6 @@ pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
     }
 }
 
-/// Get inserted rows int64 in current statement.
-#[no_mangle]
-pub unsafe extern "C" fn ws_stmt_affected_rows64(stmt: *mut WS_STMT) -> i64 {
-    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
-        Some(stmt) => stmt.affected_rows() as _,
-        _ => 0,
-    }
-}
-
 /// Equivalent to ws_errstr
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_errstr(stmt: *mut WS_STMT) -> *const c_char {

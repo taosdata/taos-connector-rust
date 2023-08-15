@@ -353,6 +353,10 @@ impl WsResultSet {
         self.rs.affected_rows() as _
     }
 
+    fn affected_rows64(&self) -> i64 {
+        self.rs.affected_rows64() as _
+    }
+
     fn num_of_fields(&self) -> i32 {
         self.rs.num_of_fields() as _
     }
@@ -637,7 +641,16 @@ pub unsafe extern "C" fn ws_errstr(rs: *mut WS_RES) -> *const c_char {
 /// Works exactly the same to taos_affected_rows.
 pub unsafe extern "C" fn ws_affected_rows(rs: *const WS_RES) -> i32 {
     match (rs as *mut WsMaybeError<WsResultSet>).as_ref() {
-        Some(rs) => rs.affected_rows(),
+        Some(rs) => rs.affected_rows() as _,
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+/// Works exactly the same to taos_affected_rows64.
+pub unsafe extern "C" fn ws_affected_rows64(rs: *const WS_RES) -> i64 {
+    match (rs as *mut WsMaybeError<WsResultSet>).as_ref() {
+        Some(rs) => rs.affected_rows64() as _,
         _ => 0,
     }
 }

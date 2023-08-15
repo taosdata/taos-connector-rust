@@ -969,6 +969,10 @@ impl ResultSet {
     fn free_result(&self) {
         let _ = self.sender.send_blocking(WsSend::FreeResult(self.args));
     }
+
+    pub fn affected_rows64(&self) -> i64 {
+        self.affected_rows as _
+    }
 }
 
 impl AsyncFetchable for ResultSet {
