@@ -111,6 +111,25 @@ pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_c
     }
 }
 
+/// Set sub table name.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_set_sub_tbname(stmt: *mut WS_STMT, name: *const c_char) -> c_int {
+    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+        Some(stmt) => {
+            let name = CStr::from_ptr(name).to_str().unwrap();
+
+            if let Err(e) = stmt.set_tbname(name) {
+                let errno = e.code();
+                stmt.error = Some(WsError::new(errno, &e.to_string()));
+                errno.into()
+            } else {
+                0
+            }
+        }
+        _ => 0,
+    }
+}
+
 /// Set table name and tags.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
@@ -667,6 +686,15 @@ pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut
 /// Get inserted rows in current statement.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
+    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+        Some(stmt) => stmt.affected_rows() as _,
+        _ => 0,
+    }
+}
+
+/// Get inserted rows int64 in current statement.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_affected_rows64(stmt: *mut WS_STMT) -> i64 {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => stmt.affected_rows() as _,
         _ => 0,
