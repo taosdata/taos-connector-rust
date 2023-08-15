@@ -1018,6 +1018,75 @@ mod tests {
             assert_eq!(rows, 2);
             ws_stmt_close(stmt);
 
+            execute!(b"drop database if exists ws_stmt_with_tags\0");
+
+            ws_close(taos)
+        }
+    }
+    #[test]
+    fn stmt_with_sub_table() {
+        use crate::*;
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"drop database if exists ws_stmt_with_sub_table\0");
+            execute!(b"create database ws_stmt_with_sub_table keep 36500\0");
+            execute!(b"use ws_stmt_with_sub_table\0");
+            execute!(
+                b"create STABLE s1 (ts timestamp, v int, b binary(100)) tags(jt json)\0"
+            );
+
+            let stmt = ws_stmt_init(taos);
+            let sql = "insert into ? using s1 tags(?) values(?, ?, ?)";
+            let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+            ws_stmt_set_sub_tbname(stmt, b"sub_t1\0".as_ptr() as _);
+
+            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+                r#"{"name":"姓名"}"#.to_string(),
+            )])];
+
+            ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
+
+            let params = vec![
+                TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
+                TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
+                TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
+            ];
+            let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            ws_stmt_add_batch(stmt);
+            let mut rows = 0;
+            ws_stmt_execute(stmt, &mut rows);
+
+            assert_eq!(rows, 2);
+            ws_stmt_close(stmt);
+
+            execute!(b"drop database if exists ws_stmt_with_sub_table\0");
+
             ws_close(taos)
         }
     }
