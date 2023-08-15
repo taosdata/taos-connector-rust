@@ -904,6 +904,37 @@ mod tests {
             assert!(!taos.is_null());
         }
     }
+
+    #[test]
+    fn test_affected_row() {
+        init_env();
+
+        unsafe {
+            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"drop database if exists ws_affected_row\0");
+            execute!(b"create database ws_affected_row keep 36500\0");
+            execute!(b"create table ws_affected_row.s1 (ts timestamp, v int, b binary(100))\0");
+        }
+    }
+
     #[test]
     fn connect() {
         init_env();
@@ -936,6 +967,9 @@ mod tests {
 
             let affected_rows = ws_affected_rows(rs);
             assert!(affected_rows == 0);
+
+            let affected_rows64 = ws_affected_rows64(rs);
+            assert!(affected_rows64 == 0);
 
             let cols = ws_field_count(rs);
             dbg!(cols);
