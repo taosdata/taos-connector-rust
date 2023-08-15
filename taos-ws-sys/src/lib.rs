@@ -932,6 +932,20 @@ mod tests {
             execute!(b"drop database if exists ws_affected_row\0");
             execute!(b"create database ws_affected_row keep 36500\0");
             execute!(b"create table ws_affected_row.s1 (ts timestamp, v int, b binary(100))\0");
+
+            let row = ws_affected_rows(ws_query(
+                taos,
+                b"insert into ws_affected_row.s1 values (now, 1, 'hello')\0" as *const u8 as _,
+            ));
+            assert_eq!(row, 1);
+
+            let row = ws_affected_rows64(ws_query(
+                taos,
+                b"insert into ws_affected_row.s1 values (now, 2, 'world')\0" as *const u8 as _,
+            ));
+            assert_eq!(row, 1);
+
+            execute!(b"drop database if exists ws_affected_row\0");
         }
     }
 
