@@ -140,8 +140,8 @@ mod tests {
 
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "debug");
-        // pretty_env_logger::init();
+        std::env::set_var("RUST_LOG", "trace");
+        pretty_env_logger::try_init();
         use taos_query::prelude::sync::*;
         let client = TaosBuilder::from_dsn("taosws://localhost:6041/")?.build()?;
         let db = "ws_sync_json";
@@ -381,7 +381,7 @@ mod tests {
 
     #[cfg(feature = "async")]
     // !Websocket tests should always use `multi_thread`
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test()]
     async fn test_client() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();

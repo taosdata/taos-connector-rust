@@ -12,18 +12,21 @@ use taos_query::{
     block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
 };
 use thiserror::Error;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+// use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
 use taos_query::prelude::tokio;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 
 use tokio::time;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::tungstenite::Error as WsError;
-use tokio_tungstenite::{
-    connect_async_with_config, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
+// use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+// use tokio_tungstenite::tungstenite::Error as WsError;
+use tokio_websockets::{
+    Error as WsError, MaybeTlsStream, Message, WebsocketStream as WebSocketStream,
 };
+// use tokio_tungstenite::{
+//     connect_async_with_config, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
+// };
 
 use super::{infra::*, TaosBuilder};
 
@@ -103,7 +106,7 @@ impl WsQuerySender {
             }
             WsSend::Binary(bytes) => {
                 self.sender
-                    .send_timeout(Message::Binary(bytes), send_timeout)
+                    .send_timeout(Message::binary(bytes), send_timeout)
                     .await
                     .map_err(Error::from)?;
             }
@@ -230,6 +233,14 @@ pub enum Error {
     DeError(#[from] DeError),
     #[error("WebSocket internal error: {0}")]
     WsError(#[from] WsError),
+    #[error("WebSocket internal error: {0}")]
+    TungsteniteError(#[from] tokio_tungstenite::tungstenite::Error),
+    #[error(transparent)]
+    TungsteniteSendTimeoutError(
+        #[from] tokio::sync::mpsc::error::SendTimeoutError<tokio_tungstenite::tungstenite::Message>,
+    ),
+    #[error(transparent)]
+    TungsteniteSendError(#[from] tokio::sync::mpsc::error::SendError<tokio_tungstenite::tungstenite::Message>),
     #[error(transparent)]
     IoError(#[from] std::io::Error),
     #[error("Websocket has been closed: {0}")]
@@ -307,7 +318,7 @@ async fn read_queries(
         let mut interval = time::interval(Duration::from_secs(29));
         loop {
             interval.tick().await;
-            if let Err(err) = ws3.send(Message::Ping(b"TAOSX".to_vec())).await {
+            if let Err(err) = ws3.send(Message::ping(b"TAOSX".to_vec())).await {
                 log::trace!("sending ping message error: {err:?}");
                 break;
             }
@@ -318,7 +329,8 @@ async fn read_queries(
             Some(message) = reader.next() => {
                 match message {
                     Ok(message) => match message {
-                        Message::Text(text) => {
+                        m if m.is_text() => {
+                            let text = m.as_text().unwrap();
                             log::trace!("received json response: {text}");
                             let v: WsRecv = serde_json::from_str(&text).unwrap();
                             let (req_id, data, ok) = v.ok();
@@ -393,8 +405,11 @@ async fn read_queries(
                                 _ => unreachable!(),
                             }
                         }
-                        Message::Binary(block) => {
-                            let mut slice = block.as_slice();
+                        // Message::Binary(block) => {
+                        m if m.is_binary() => {
+                            let block = m.as_payload();
+                            let mut slice = block.as_ref();
+                            // let mut slice = block.as_slice();
                             use taos_query::util::InlinableRead;
                             let offset = if is_v3 { 16 } else { 8 };
 
@@ -428,55 +443,75 @@ async fn read_queries(
                                 log::warn!("result id {res_id} not found");
                             }
                         }
-                        Message::Close(close) => {
+                        m if m.is_close() => {
+                            let (code, reason) = m.as_close().unwrap();
+                            log::warn!("websocket received close frame: {reason}({code:?})");
+                                let mut keys = Vec::new();
+                                for e in queries_sender.iter() {
+                                    keys.push(*e.key());
+                                }
+                            for k in keys {
+                                    if let Some((_, sender)) = queries_sender.remove(&k) {
+                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), format!("{reason}({code:?})"))));
+                                    }
+                                }
+                        // Message::Close(close) => {
                             // taosAdapter should never send close frame to client.
                             //   So all close frames should be treated as error.
-                            if let Some(close) = close {
-                                log::warn!("websocket received close frame: {close:?}");
+                            // if let Some(close) = close {
+                            //     log::warn!("websocket received close frame: {close:?}");
 
-                                let mut keys = Vec::new();
-                                for e in queries_sender.iter() {
-                                    keys.push(*e.key());
-                                }
-                                let reason = match close.code {
-                                    CloseCode::Size => {
-                                        format!("Message length reaches max limit (code: {})", close.code)
-                                    }
-                                    _ => format!("{}", close),
-                                };
-                                for k in keys {
-                                    if let Some((_, sender)) = queries_sender.remove(&k) {
-                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), reason.to_string())));
-                                    }
-                                }
-                            } else {
-                                log::warn!("websocket connection is closed normally");
-                                let mut keys = Vec::new();
-                                for e in queries_sender.iter() {
-                                    keys.push(*e.key());
-                                }
-                                for k in keys {
-                                    if let Some((_, sender)) = queries_sender.remove(&k) {
-                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
-                                    }
-                                }
-                            }
+                            //     let mut keys = Vec::new();
+                            //     for e in queries_sender.iter() {
+                            //         keys.push(*e.key());
+                            //     }
+                            //     let reason = match close.code {
+                            //         CloseCode::Size => {
+                            //             format!("Message length reaches max limit (code: {})", close.code)
+                            //         }
+                            //         _ => format!("{}", close),
+                            //     };
+                            //     for k in keys {
+                            //         if let Some((_, sender)) = queries_sender.remove(&k) {
+                            //             let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), reason.to_string())));
+                            //         }
+                            //     }
+                            // } else {
+                            //     log::warn!("websocket connection is closed normally");
+                            //     let mut keys = Vec::new();
+                            //     for e in queries_sender.iter() {
+                            //         keys.push(*e.key());
+                            //     }
+                            //     for k in keys {
+                            //         if let Some((_, sender)) = queries_sender.remove(&k) {
+                            //             let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
+                            //         }
+                            //     }
+                            // }
                             break 'ws;
                         }
-                        Message::Ping(bytes) => {
-                            ws2.send(Message::Pong(bytes)).await.unwrap();
+                        m if m.is_ping() => {
+                            ws2.send(Message::pong(m.into_payload())).await.unwrap();
                         }
-                        Message::Pong(_) => {
-                            // do nothing
-                            log::trace!("received pong message, do nothing");
+                        m => {
+                            log::trace!("Received other message, do nothing: {m:?}");
                         }
-                        Message::Frame(frame) => {
-                            // do nothing
-                            log::warn!("received (unexpected) frame message, do nothing");
-                            log::trace!("* frame data: {frame:?}");
-                        }
+                        // Message::Ping(bytes) => {
+                        //     ws2.send(Message::Pong(bytes)).await.unwrap();
+                        // }
+                        // Message::Pong(_) => {
+                        //     // do nothing
+                        //     log::trace!("received pong message, do nothing");
+                        // }
+                        // Message::Frame(frame) => {
+                        //     // do nothing
+                        //     log::warn!("received (unexpected) frame message, do nothing");
+                        //     log::trace!("* frame data: {frame:?}");
+                        // }
                     },
                     Err(err) => {
+                        log::error!("websocket next message error: {err}, {err:?}");
+                        // continue;
                         let mut keys = Vec::new();
                         for e in queries_sender.iter() {
                                     keys.push(*e.key());
@@ -486,7 +521,7 @@ async fn read_queries(
                         // }).await;
                         for k in keys {
                             if let Some((_, sender)) = queries_sender.remove(&k) {
-                                let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
+                                let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), format!("{err:#}: {err:?}"))));
                             }
                         }
                         break 'ws;
@@ -544,17 +579,19 @@ impl WsTaos {
         Self::from_wsinfo(&info).await
     }
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        let mut config = WebSocketConfig::default();
-        config.max_frame_size = Some(1024 * 1024 * 16);
+        // let mut config = WebSocketConfig::default();
+        // config.max_frame_size = Some(1024 * 1024 * 16);
+        let uri = info.to_query_url().parse().unwrap();
 
-        let (ws, _) = connect_async_with_config(info.to_query_url(), Some(config))
+        let (ws, _) = tokio_websockets::ClientBuilder::from_uri(uri)
+            .connect()
             .await
             .map_err(|err| {
                 let err_string = err.to_string();
                 if err_string.contains("401 Unauthorized") {
                     Error::Unauthorized(info.to_query_url())
                 } else {
-                    err.into()
+                    Error::TaosError(RawError::any(err))
                 }
             })?;
         let req_id = 0;
@@ -565,9 +602,9 @@ impl WsTaos {
 
         let duration = Duration::from_secs(2);
         let version = match tokio::time::timeout(duration, reader.next()).await {
-            Ok(Some(Ok(message))) => match message {
-                Message::Text(text) => {
-                    let v: WsRecv = serde_json::from_str(&text).unwrap();
+            Ok(Some(Ok(message))) => {
+                if let Some(text) = message.as_text() {
+                    let v: WsRecv = serde_json::from_str(text).unwrap();
                     let (_, data, ok) = v.ok();
                     match data {
                         WsRecvData::Version { version } => {
@@ -576,9 +613,10 @@ impl WsTaos {
                         }
                         _ => "2.x".to_string(),
                     }
+                } else {
+                    "2.x".to_string()
                 }
-                _ => "2.x".to_string(),
-            },
+            }
             _ => "2.x".to_string(),
         };
         let is_v3 = !version.starts_with('2');
@@ -590,7 +628,8 @@ impl WsTaos {
         sender.send(login.to_msg()).await.map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {
             match message {
-                Message::Text(text) => {
+                m if m.is_text() => {
+                    let text = m.as_text().unwrap();
                     let v: WsRecv = serde_json::from_str(&text).unwrap();
                     let (_req_id, data, ok) = v.ok();
                     match data {
@@ -1087,12 +1126,12 @@ impl AsyncQueryable for WsTaos {
 
 // Websocket tests should always use `multi_thread`
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+#[tokio::test()]
 async fn test_client() -> anyhow::Result<()> {
     use futures::TryStreamExt;
-    std::env::set_var("RUST_LOG", "debug");
+    std::env::set_var("RUST_LOG", "trace");
     let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-    // pretty_env_logger::init();
+    let _ = pretty_env_logger::try_init();
 
     let client = WsTaos::from_dsn(dsn).await?;
 
@@ -1173,7 +1212,7 @@ async fn ws_show_databases() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test()]
 async fn ws_write_raw_block() -> anyhow::Result<()> {
     let mut raw = RawBlock::parse_from_raw_block_v2(
         &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
