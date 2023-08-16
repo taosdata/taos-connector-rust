@@ -1032,7 +1032,7 @@ mod tests {
     }
 
     /// Partial update a record with different columns.
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ts2035() -> anyhow::Result<()> {
         use taos_query::prelude::*;
 
@@ -1128,7 +1128,7 @@ mod tests {
     }
 
     /// Partial update a record with different columns.
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_delete_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
         // pretty_env_logger::init_timed();
@@ -1397,7 +1397,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     #[ignore]
     async fn test_tmq() -> anyhow::Result<()> {
         // pretty_env_logger::formatted_timed_builder()

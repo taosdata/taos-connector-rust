@@ -1000,7 +1000,7 @@ mod async_tests {
     use crate::AsyncTBuilder;
     use crate::TaosBuilder;
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    #[tokio::test()]
     #[ignore]
     async fn test_put() -> RawResult<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
@@ -1224,7 +1224,7 @@ mod async_tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    #[tokio::test]
     async fn test_is_enterprise_edition() -> RawResult<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
@@ -1238,7 +1238,7 @@ mod async_tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    #[tokio::test]
     async fn test_is_enterprise_edition_ws() -> RawResult<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();

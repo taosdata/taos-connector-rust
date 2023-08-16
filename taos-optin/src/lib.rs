@@ -723,7 +723,7 @@ mod tests {
 
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn long_query_async() -> RawResult<()> {
         use taos_query::prelude::*;
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
@@ -754,7 +754,7 @@ mod tests {
 
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn show_databases_async() -> RawResult<()> {
         use taos_query::prelude::*;
 
@@ -777,7 +777,7 @@ mod tests {
 
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn error_async() -> RawResult<()> {
         use taos_query::prelude::*;
 
@@ -797,7 +797,7 @@ mod tests {
         assert!(err_str.contains("The table name cannot contain '.'"));
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn error_fetch_async() -> RawResult<()> {
         use taos_query::prelude::*;
 
@@ -818,7 +818,7 @@ mod tests {
         // dbg!(err);
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn error_sync() -> RawResult<()> {
         use taos_query::prelude::sync::*;
 
@@ -865,7 +865,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn show_databases_async_v2() -> RawResult<()> {
         use taos_query::prelude::*;
         let builder = TaosBuilder::from_dsn(DSN_V2)?;
