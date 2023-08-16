@@ -240,7 +240,9 @@ pub enum Error {
         #[from] tokio::sync::mpsc::error::SendTimeoutError<tokio_tungstenite::tungstenite::Message>,
     ),
     #[error(transparent)]
-    TungsteniteSendError(#[from] tokio::sync::mpsc::error::SendError<tokio_tungstenite::tungstenite::Message>),
+    TungsteniteSendError(
+        #[from] tokio::sync::mpsc::error::SendError<tokio_tungstenite::tungstenite::Message>,
+    ),
     #[error(transparent)]
     IoError(#[from] std::io::Error),
     #[error("Websocket has been closed: {0}")]
@@ -455,39 +457,6 @@ async fn read_queries(
                                         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), format!("{reason}({code:?})"))));
                                     }
                                 }
-                        // Message::Close(close) => {
-                            // taosAdapter should never send close frame to client.
-                            //   So all close frames should be treated as error.
-                            // if let Some(close) = close {
-                            //     log::warn!("websocket received close frame: {close:?}");
-
-                            //     let mut keys = Vec::new();
-                            //     for e in queries_sender.iter() {
-                            //         keys.push(*e.key());
-                            //     }
-                            //     let reason = match close.code {
-                            //         CloseCode::Size => {
-                            //             format!("Message length reaches max limit (code: {})", close.code)
-                            //         }
-                            //         _ => format!("{}", close),
-                            //     };
-                            //     for k in keys {
-                            //         if let Some((_, sender)) = queries_sender.remove(&k) {
-                            //             let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), reason.to_string())));
-                            //         }
-                            //     }
-                            // } else {
-                            //     log::warn!("websocket connection is closed normally");
-                            //     let mut keys = Vec::new();
-                            //     for e in queries_sender.iter() {
-                            //         keys.push(*e.key());
-                            //     }
-                            //     for k in keys {
-                            //         if let Some((_, sender)) = queries_sender.remove(&k) {
-                            //             let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
-                            //         }
-                            //     }
-                            // }
                             break 'ws;
                         }
                         m if m.is_ping() => {
@@ -581,9 +550,11 @@ impl WsTaos {
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
         // let mut config = WebSocketConfig::default();
         // config.max_frame_size = Some(1024 * 1024 * 16);
+        let config = tokio_websockets::Config::default().frame_size(1024 * 1024 * 32);
         let uri = info.to_query_url().parse().unwrap();
 
         let (ws, _) = tokio_websockets::ClientBuilder::from_uri(uri)
+            .config(config)
             .connect()
             .await
             .map_err(|err| {
