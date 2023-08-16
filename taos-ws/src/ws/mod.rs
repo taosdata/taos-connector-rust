@@ -5,7 +5,6 @@ mod tests {
     use crate::query::infra::WsResArgs;
     use crate::query::WsConnReq;
 
-    use super::*;
     use futures::SinkExt;
     use futures::StreamExt;
     use tokio_websockets::{ClientBuilder, Message};
@@ -69,7 +68,7 @@ mod tests {
 
         let (sender, receiver) = tokio::sync::mpsc::channel(1024);
 
-        let send_handle = tokio::spawn(async move {
+        let _ = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(100));
             let mut receiver = receiver;
             loop {

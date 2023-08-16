@@ -1166,11 +1166,11 @@ async fn test_client_cloud() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn ws_show_databases() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     use futures::TryStreamExt;
-    pretty_env_logger::init_timed();
+    let _ = pretty_env_logger::try_init_timed();
     let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
     let client = WsTaos::from_dsn(dsn).await?;
     let mut rs = client.query("show databases").await?;
@@ -1183,7 +1183,7 @@ async fn ws_show_databases() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test()]
+#[tokio::test]
 async fn ws_write_raw_block() -> anyhow::Result<()> {
     let mut raw = RawBlock::parse_from_raw_block_v2(
         &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],

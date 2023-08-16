@@ -725,14 +725,14 @@ mod tests {
         dbg!(&dsn);
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
-        taos.exec("drop database if exists stmt_sj").await?;
-        taos.exec("create database stmt_sj").await?;
-        taos.exec("create table stmt_sj.stb (ts timestamp, v int) tags(tj json)")
+        taos.exec("drop database if exists ws_stmt_sj1").await?;
+        taos.exec("create database ws_stmt_sj1").await?;
+        taos.exec("create table ws_stmt_sj1.stb (ts timestamp, v int) tags(tj json)")
             .await?;
 
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
-        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/stmt_sj").await?;
+        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/ws_stmt_sj1").await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
             .await?;
@@ -754,7 +754,7 @@ mod tests {
 
         assert_eq!(res, 2);
         let row: (String, i32, std::collections::HashMap<String, String>) =
-            taos.query_one("select * from stmt_sj.stb").await?.unwrap();
+            taos.query_one("select * from ws_stmt_sj1.stb").await?.unwrap();
         dbg!(row);
 
         let tag_fields = stmt.stmt_get_tag_fields().await?;
@@ -765,7 +765,7 @@ mod tests {
 
         log::debug!("col fields: {:?}", col_fields);
 
-        taos.exec("drop database stmt_sj").await?;
+        taos.exec("drop database ws_stmt_sj1").await?;
         Ok(())
     }
 
