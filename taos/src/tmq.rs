@@ -481,13 +481,13 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ws_tmq_meta() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
         //     .filter_level(log::LevelFilter::Debug)
         //     .init();
         use taos_query::prelude::*;
-        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos+ws://localhost:6041".to_string());
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
@@ -649,7 +649,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     #[ignore]
     async fn test_tmq() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
@@ -856,7 +856,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     #[ignore]
     async fn test_tmq_offset() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
@@ -1066,7 +1066,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ws_tmq() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
         // .filter_level(log::LevelFilter::Info)
@@ -1286,7 +1286,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ws_tmq_snapshot() -> taos_query::RawResult<()> {
         // std::env::set_var("RUST_LOG", "tokio=warn,taos_ws=trace,info");
         // pretty_env_logger::init();
@@ -1502,7 +1502,7 @@ mod tests {
         .await?;
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ws_tmq_offset() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
         //     .filter_level(log::LevelFilter::Info)

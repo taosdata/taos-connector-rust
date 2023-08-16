@@ -1169,7 +1169,7 @@ impl crate::prelude::AsyncInlinable for RawBlock {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_raw_from_v2() {
     use crate::prelude::AsyncInlinable;
     use std::ops::Deref;

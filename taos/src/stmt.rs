@@ -186,7 +186,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_bindable() -> RawResult<()> {
         use crate::*;
 

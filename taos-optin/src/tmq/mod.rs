@@ -1119,7 +1119,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_tmq() -> anyhow::Result<()> {
         // pretty_env_logger::formatted_timed_builder()
         //     .filter_level(log::LevelFilter::Info)
@@ -1325,7 +1325,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_tmq_offset() -> anyhow::Result<()> {
         // pretty_env_logger::formatted_timed_builder()
         //     .filter_level(log::LevelFilter::Info)

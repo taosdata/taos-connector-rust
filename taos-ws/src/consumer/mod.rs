@@ -995,8 +995,6 @@ pub enum WsTmqError {
     #[error(transparent)]
     SendTimeoutError(#[from] tokio::sync::mpsc::error::SendTimeoutError<Message>),
     #[error("{0}")]
-    RecvTimeout(#[from] std::sync::mpsc::RecvTimeoutError),
-    #[error("{0}")]
     DeError(#[from] DeError),
     #[error("Deserialize json error: {0}")]
     JsonError(#[from] serde_json::Error),
@@ -1050,12 +1048,12 @@ mod tests {
     use super::{TaosBuilder, TmqBuilder};
     use taos_query::prelude::tokio;
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
-        // pretty_env_logger::formatted_builder()
-        //     .filter_level(log::LevelFilter::Info)
-        //     .init();
+        pretty_env_logger::formatted_builder()
+            .filter_level(log::LevelFilter::Info)
+            .init();
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
             .build()
