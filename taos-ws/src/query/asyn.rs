@@ -1145,7 +1145,7 @@ async fn test_client_cloud() -> anyhow::Result<()> {
 async fn ws_show_databases() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     use futures::TryStreamExt;
-    pretty_env_logger::init_timed();
+    let _ = pretty_env_logger::try_init_timed();
     let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
     let client = WsTaos::from_dsn(dsn).await?;
     let mut rs = client.query("show databases").await?;
