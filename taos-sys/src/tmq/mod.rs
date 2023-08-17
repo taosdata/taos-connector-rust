@@ -14,8 +14,8 @@ use taos_query::{
     common::{raw_data_t, Precision, RawMeta},
     prelude::tokio,
     tmq::{
-        AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsMeta, IsOffset,
-        MessageSet, Timeout, VGroupId,
+        AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
+        IsOffset, MessageSet, Timeout, VGroupId,
     },
     Dsn, IntoDsn, RawBlock, RawResult,
 };
@@ -364,6 +364,15 @@ impl IsAsyncData for Data {
     }
 
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
+        Ok(self.raw.fetch_raw_message(self.precision))
+    }
+}
+impl IsData for Data {
+    fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
+        Ok(self.raw.tmq_get_raw().into())
+    }
+
+    fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
         Ok(self.raw.fetch_raw_message(self.precision))
     }
 }

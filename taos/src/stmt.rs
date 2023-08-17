@@ -104,7 +104,7 @@ impl taos_query::stmt::Bindable<super::Taos> for Stmt {
 }
 
 #[async_trait::async_trait]
-impl taos_optin::prelude::AsyncBindable<super::Taos> for Stmt {
+impl taos_query::prelude::AsyncBindable<super::Taos> for Stmt {
     async fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
             crate::TaosInner::Native(taos) => NativeStmt::init(taos)
