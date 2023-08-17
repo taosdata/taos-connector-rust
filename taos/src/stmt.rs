@@ -293,8 +293,8 @@ mod tests {
             c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
         ])
         .await?;
-        let mut stmt = Stmt::init(&taos).unwrap();
-        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
+        let mut stmt = Stmt::init(&taos).await.unwrap();
+        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").await?;
         let params = vec![
             ColumnView::from_millis_timestamp(vec![0]),
             ColumnView::from_bools(vec![true]),
@@ -313,10 +313,13 @@ mod tests {
         ];
         let rows = stmt
             .bind(&params)
+            .await
             .unwrap()
             .add_batch()
+            .await
             .unwrap()
             .execute()
+            .await
             .unwrap();
         assert_eq!(rows, 1);
 
