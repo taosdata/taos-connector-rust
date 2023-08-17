@@ -7,7 +7,6 @@
 use std::{
     collections::BTreeMap,
     fmt::{Debug, Display},
-    mem::MaybeUninit,
     ops::{Deref, DerefMut},
     rc::Rc,
 };
@@ -43,36 +42,21 @@ pub use prelude::{AsyncFetchable, AsyncQueryable};
 pub use taos_error::Error as RawError;
 pub type RawResult<T> = std::result::Result<T, RawError>;
 
-static mut RT: MaybeUninit<tokio::runtime::Runtime> = MaybeUninit::uninit();
-static INIT: std::sync::Once = std::sync::Once::new();
-
-pub fn global_tokio_runtime() -> &'static tokio::runtime::Runtime {
-    unsafe {
-        INIT.call_once(|| {
-            RT.write(
-                tokio::runtime::Builder::new_multi_thread()
+lazy_static::lazy_static! {
+    static ref GLOBAL_RT: tokio::runtime::Runtime = {
+        tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
-                    .unwrap(),
-            );
-        });
-        RT.assume_init_mut()
-    }
+                    .unwrap()
+    };
+}
+
+pub fn global_tokio_runtime() -> &'static tokio::runtime::Runtime {
+    &GLOBAL_RT
 }
 
 pub fn block_in_place_or_global<F: std::future::Future>(fut: F) -> F::Output {
-    use tokio::runtime::Handle;
-    use tokio::task;
-
-    match Handle::try_current() {
-        Ok(handle) => match handle.runtime_flavor() {
-            tokio::runtime::RuntimeFlavor::MultiThread => {
-                task::block_in_place(move || handle.block_on(fut))
-            }
-            _ => global_tokio_runtime().block_on(fut),
-        },
-        Err(_) => global_tokio_runtime().block_on(fut),
-    }
+    global_tokio_runtime().block_on(fut)
 }
 
 pub enum CodecOpts {

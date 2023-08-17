@@ -10,7 +10,6 @@ use std::{
 use taos_error::Code;
 
 use taos_query::{
-    block_in_place_or_global,
     common::{Field, RawBlock as Block, Timestamp},
     common::{Precision, Ty},
     prelude::RawError,
@@ -417,7 +416,7 @@ impl WsResultSet {
     }
 
     fn stop_query(&mut self) {
-        block_in_place_or_global(self.rs.stop());
+        futures::executor::block_on(self.rs.stop());
     }
 }
 

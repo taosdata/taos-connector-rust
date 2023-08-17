@@ -8,8 +8,8 @@ use serde::Deserialize;
 use taos_query::common::views::views_to_raw_block;
 use taos_query::common::ColumnView;
 use taos_query::prelude::{InlinableWrite, RawResult};
-use taos_query::stmt::Bindable;
-use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
+use taos_query::stmt::{AsyncBindable, Bindable};
+use taos_query::{IntoDsn, RawBlock};
 
 use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
@@ -71,27 +71,28 @@ impl ToJsonValue for ColumnView {
 impl Bindable<super::Taos> for Stmt {
     fn init(taos: &super::Taos) -> RawResult<Self> {
         let mut dsn = taos.dsn.clone();
-        let database: Option<String> =
-            <Taos as taos_query::Queryable>::query_one(taos, "select database()")?;
+        let database: Option<String> = futures::executor::block_on(
+            <Taos as taos_query::AsyncQueryable>::query_one(taos, "select database()"),
+        )?;
         dsn.database = database;
-        let mut stmt = block_in_place_or_global(Self::from_wsinfo(&dsn))?;
-        block_in_place_or_global(stmt.stmt_init())?;
+        let mut stmt = futures::executor::block_on(Self::from_wsinfo(&dsn))?;
+        futures::executor::block_on(stmt.stmt_init())?;
         Ok(stmt)
     }
 
     fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
-        block_in_place_or_global(self.stmt_prepare(sql.as_ref()))?;
+        futures::executor::block_on(self.stmt_prepare(sql.as_ref()))?;
         Ok(self)
     }
 
     fn set_tbname<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
-        block_in_place_or_global(self.stmt_set_tbname(sql.as_ref()))?;
+        futures::executor::block_on(self.stmt_set_tbname(sql.as_ref()))?;
         Ok(self)
     }
 
     fn set_tags(&mut self, tags: &[taos_query::common::Value]) -> RawResult<&mut Self> {
         let tags = tags.iter().map(|tag| tag.to_json_value()).collect_vec();
-        block_in_place_or_global(self.stmt_set_tags(tags))?;
+        futures::executor::block_on(self.stmt_set_tags(tags))?;
         Ok(self)
     }
 
@@ -102,22 +103,77 @@ impl Bindable<super::Taos> for Stmt {
         //     .into_iter()
         //     .map(|tag| tag.to_json_value())
         //     .collect_vec();
-        // block_in_place_or_global(self.stmt_bind(columns))?;
+        // futures::executor::block_on(self.stmt_bind(columns))?;
 
-        block_in_place_or_global(self.stmt_bind_block(params))?;
+        futures::executor::block_on(self.stmt_bind_block(params))?;
         Ok(self)
     }
 
     fn add_batch(&mut self) -> RawResult<&mut Self> {
-        block_in_place_or_global(self.stmt_add_batch())?;
+        futures::executor::block_on(self.stmt_add_batch())?;
         Ok(self)
     }
 
     fn execute(&mut self) -> RawResult<usize> {
-        block_in_place_or_global(self.stmt_exec())
+        futures::executor::block_on(self.stmt_exec())
     }
 
     fn affected_rows(&self) -> usize {
+        self.affected_rows
+    }
+}
+
+#[async_trait::async_trait]
+impl AsyncBindable<super::Taos> for Stmt {
+    async fn init(taos: &super::Taos) -> RawResult<Self> {
+        let mut dsn = taos.dsn.clone();
+        let database: Option<String> =
+            <Taos as taos_query::AsyncQueryable>::query_one(taos, "select database()").await?;
+        dsn.database = database;
+        let mut stmt = Self::from_wsinfo(&dsn).await?;
+        stmt.stmt_init().await?;
+        Ok(stmt)
+    }
+
+    async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
+        self.stmt_prepare(sql.as_ref()).await?;
+        Ok(self)
+    }
+
+    async fn set_tbname(&mut self, sql: &str) -> RawResult<&mut Self> {
+        self.stmt_set_tbname(sql.as_ref()).await?;
+        Ok(self)
+    }
+
+    async fn set_tags(&mut self, tags: &[taos_query::common::Value]) -> RawResult<&mut Self> {
+        let tags = tags.iter().map(|tag| tag.to_json_value()).collect_vec();
+        self.stmt_set_tags(tags).await?;
+        Ok(self)
+    }
+
+    async fn bind(&mut self, params: &[taos_query::common::ColumnView]) -> RawResult<&mut Self> {
+        // This json method for bind
+
+        // let columns = params
+        //     .into_iter()
+        //     .map(|tag| tag.to_json_value())
+        //     .collect_vec();
+        // futures::executor::block_on(self.stmt_bind(columns))?;
+
+        self.stmt_bind_block(params).await?;
+        Ok(self)
+    }
+
+    async fn add_batch(&mut self) -> RawResult<&mut Self> {
+        self.stmt_add_batch().await?;
+        Ok(self)
+    }
+
+    async fn execute(&mut self) -> RawResult<usize> {
+        self.stmt_exec().await
+    }
+
+    async fn affected_rows(&self) -> usize {
         self.affected_rows
     }
 }
@@ -130,11 +186,11 @@ pub trait WsFieldsable {
 
 impl WsFieldsable for Stmt {
     fn get_tag_fields(&mut self) -> RawResult<Vec<StmtField>> {
-        block_in_place_or_global(self.stmt_get_tag_fields())
+        futures::executor::block_on(self.stmt_get_tag_fields())
     }
 
     fn get_col_fields(&mut self) -> RawResult<Vec<StmtField>> {
-        block_in_place_or_global(self.stmt_get_col_fields())
+        futures::executor::block_on(self.stmt_get_col_fields())
     }
 }
 
@@ -162,35 +218,6 @@ pub struct StmtField {
     pub scale: u8,
     pub bytes: i32,
 }
-
-// pub struct WsAsyncStmt {
-//     /// Message sending timeout, default is 5min.
-//     timeout: Duration,
-//     ws: WsSender,
-//     fetches: Arc<HashMap<StmtId, StmtSender>>,
-//     receiver: StmtReceiver,
-//     args: StmtArgs,
-// }
-// impl Debug for WsAsyncStmt {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("WsAsyncStmt")
-//             .field("ws", &"...")
-//             .field("fetches", &"...")
-//             .field("receiver", &self.receiver)
-//             .field("args", &self.args)
-//             .finish()
-//     }
-// }
-
-// impl Drop for WsAsyncStmt {
-//     fn drop(&mut self) {
-//         self.fetches.remove(&self.args.stmt_id);
-//         let args = self.args;
-//         let ws = self.ws.clone();
-//         let _ = taos_query::block_in_place_or_global(ws.send(StmtSend::Close(args).to_msg()));
-//     }
-// }
-
 impl Debug for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WsClient")
@@ -199,40 +226,6 @@ impl Debug for Stmt {
             .finish()
     }
 }
-
-// #[derive(Debug, Error)]
-// pub enum Error {
-//     #[error("{0}")]
-//     Dsn(#[from] DsnError),
-//     #[error("{0}")]
-//     FetchError(#[from] oneshot::error::RecvError),
-//     #[error("{0}")]
-//     SendError(#[from] tokio::sync::mpsc::error::SendError<Message>),
-//     #[error(transparent)]
-//     SendTimeoutError(#[from] tokio::sync::mpsc::error::SendTimeoutError<Message>),
-//     #[error("{0}")]
-//     DeError(#[from] DeError),
-//     #[error("{0}")]
-//     WsError(#[from] WsError),
-//     #[error("{0}")]
-//     TaosError(#[from] RawError),
-// }
-
-// impl Error {
-//     pub const fn errno(&self) -> taos_error::Code {
-//         match self {
-//             Error::TaosError(error) => error.code(),
-//             _ => taos_error::Code::FAILED,
-//         }
-//     }
-//     pub fn errstr(&self) -> String {
-//         match self {
-//             Error::TaosError(error) => error.message().to_string(),
-//             _ => format!("{}", self),
-//         }
-//     }
-// }
-
 impl Drop for Stmt {
     fn drop(&mut self) {
         // send close signal to reader/writer spawned tasks.
@@ -690,14 +683,14 @@ mod tests {
         dbg!(&dsn);
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
-        taos.exec("drop database if exists stmt_sj").await?;
-        taos.exec("create database stmt_sj").await?;
-        taos.exec("create table stmt_sj.stb (ts timestamp, v int) tags(tj json)")
+        taos.exec("drop database if exists ws_stmt_sj2").await?;
+        taos.exec("create database ws_stmt_sj2").await?;
+        taos.exec("create table ws_stmt_sj2.stb (ts timestamp, v int) tags(tj json)")
             .await?;
 
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
-        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/stmt_sj").await?;
+        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/ws_stmt_sj2").await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
             .await?;
@@ -719,7 +712,7 @@ mod tests {
 
         assert_eq!(res, 2);
         let row: (String, i32, std::collections::HashMap<String, String>) =
-            taos.query_one("select * from stmt_sj.stb").await?.unwrap();
+            taos.query_one("select * from ws_stmt_sj2.stb").await?.unwrap();
         dbg!(row);
 
         let tag_fields = stmt.stmt_get_tag_fields().await?;
@@ -730,7 +723,7 @@ mod tests {
 
         log::debug!("col fields: {:?}", col_fields);
 
-        taos.exec("drop database stmt_sj").await?;
+        taos.exec("drop database ws_stmt_sj2").await?;
         Ok(())
     }
 

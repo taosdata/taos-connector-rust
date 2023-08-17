@@ -4,6 +4,7 @@ use std::ffi::CStr;
 
 use itertools::Itertools;
 use taos_query::prelude::{Code, RawError};
+use taos_query::stmt::AsyncBindable;
 use taos_query::{common::Ty, stmt::Bindable, Queryable, RawResult};
 
 use crate::types::*;
@@ -62,6 +63,55 @@ impl Bindable<super::Taos> for Stmt {
     }
 
     fn affected_rows(&self) -> usize {
+        self.raw.affected_rows() as _
+    }
+}
+
+#[async_trait::async_trait]
+impl AsyncBindable<super::Taos> for Stmt {
+    async fn init(taos: &super::Taos) -> RawResult<Self> {
+        Ok(Self {
+            raw: RawStmt::from_raw_taos(&taos.raw),
+        })
+    }
+
+    async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
+        self.raw.prepare(sql)?;
+        Ok(self)
+    }
+
+    async fn set_tbname(&mut self, sql: &str) -> RawResult<&mut Self> {
+        self.raw.set_tbname(sql)?;
+        Ok(self)
+    }
+
+    async fn set_tags(&mut self, tags: &[taos_query::common::Value]) -> RawResult<&mut Self> {
+        let tags = tags.iter().map(TaosBind::from_value).collect_vec();
+        self.raw.set_tags(&tags)?;
+        Ok(self)
+    }
+
+    async fn bind(&mut self, params: &[taos_query::common::ColumnView]) -> RawResult<&mut Self> {
+        let params: Vec<DropMultiBind> = params.iter().map(|c| c.into()).collect_vec();
+        self.raw
+            .bind_param_batch(unsafe { std::mem::transmute(params.as_slice()) })?;
+        Ok(self)
+    }
+
+    async fn add_batch(&mut self) -> RawResult<&mut Self> {
+        self.raw.add_batch()?;
+        Ok(self)
+    }
+
+    async fn execute(&mut self) -> RawResult<usize> {
+        self.raw.execute().map_err(Into::into)
+    }
+
+    async fn result_set(&mut self) -> RawResult<<super::Taos as Queryable>::ResultSet> {
+        self.raw.use_result().map_err(Into::into)
+    }
+
+    async fn affected_rows(&self) -> usize {
         self.raw.affected_rows() as _
     }
 }
