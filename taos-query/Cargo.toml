@@ -27,7 +27,7 @@ parse_duration = "2.1"
 prettytable = "0.10.0"
 rust_decimal = { version = "1", features = ["c-repr"] }
 rustversion = "1.0.6"
-taos-error = { path = "../taos-error", version = "0.10.0" }
+taos-error = { path = "../taos-error", version = "0.10.1" }
 thiserror = "1.0"
 url = "2.2.2"
 
