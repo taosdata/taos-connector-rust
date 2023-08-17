@@ -277,11 +277,15 @@ impl RawStmt {
 
 #[cfg(test)]
 mod tests {
-    use taos_query::{prelude::ColumnView, Fetchable, TBuilder};
+    use taos_query::{
+        prelude::ColumnView, stmt::Bindable, Fetchable, Queryable, RawResult, TBuilder,
+    };
 
-    use crate::TaosBuilder;
+    use crate::{stmt::RawStmt, RawTaos, Stmt, TaosBuilder};
 
-    use super::*;
+    use itertools::Itertools;
+
+    use crate::types::*;
 
     #[test]
     fn test_tbname_tags() -> RawResult<()> {
