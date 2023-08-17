@@ -16,7 +16,7 @@ repository = "https://github.com/taosdata/taos-connector-rust.git"
 pest = { version = "2.1", optional = true }
 pest_derive = { version = "2.1", optional = true }
 itertools = "0.10.3"
-thiserror = "1.0.30"
+thiserror = "1.0.47"
 urlencoding = "2.1.0"
 regex = "1"
 lazy_static = "1.4.0"
