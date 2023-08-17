@@ -9,11 +9,11 @@ use dashmap::DashMap as HashMap;
 use taos_query::common::{JsonMeta, RawMeta};
 use taos_query::prelude::{Code, RawError};
 use taos_query::tmq::{
-    AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsOffset, MessageSet,
-    SyncOnAsync, Timeout, VGroupId,
+    AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsData, IsOffset,
+    MessageSet, SyncOnAsync, Timeout, VGroupId,
 };
 use taos_query::util::InlinableRead;
-use taos_query::{block_in_place_or_global, RawResult};
+use taos_query::RawResult;
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
 
@@ -114,7 +114,7 @@ impl TBuilder for TmqBuilder {
     }
 
     fn build(&self) -> RawResult<Self::Target> {
-        block_in_place_or_global(self.build_consumer())
+        taos_query::block_in_place_or_global(self.build_consumer())
     }
 
     fn server_version(&self) -> RawResult<&str> {
@@ -274,7 +274,7 @@ impl Iterator for Data {
     type Item = RawResult<RawBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        block_in_place_or_global(self.fetch_block()).transpose()
+        taos_query::block_in_place_or_global(self.fetch_block()).transpose()
     }
 }
 
@@ -292,6 +292,16 @@ impl IsAsyncData for Data {
     }
 }
 
+impl IsData for Data {
+    fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
+        taos_query::block_in_place_or_global(self.0.fetch_raw_meta())
+            .map(|raw| unsafe { std::mem::transmute(raw) })
+    }
+
+    fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
+        taos_query::block_in_place_or_global(self.fetch_block())
+    }
+}
 pub enum WsMessageSet {
     Meta(Meta),
     Data(Data),
@@ -571,26 +581,28 @@ impl AsConsumer for Consumer {
         &mut self,
         topics: I,
     ) -> RawResult<()> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::subscribe(self, topics))
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::subscribe(self, topics))
     }
 
     fn recv_timeout(
         &self,
         timeout: Timeout,
     ) -> RawResult<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::recv_timeout(self, timeout))
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::recv_timeout(
+            self, timeout,
+        ))
     }
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(self, offset))
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(self, offset))
     }
 
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::assignments(self))
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::assignments(self))
     }
 
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::offset_seek(
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::offset_seek(
             self, topic, vg_id, offset,
         ))
     }
@@ -679,7 +691,7 @@ impl TmqBuilder {
 
     async fn build_consumer(&self) -> RawResult<Consumer> {
         let url = self.info.to_tmq_url();
-        // let (ws, _) = futures::executor::block_on(connect_async(url))?;
+        // let (ws, _) = taos_query::block_in_place_or_global(connect_async(url))?;
         let (ws, _) = connect_async(&url).await.map_err(WsTmqError::from)?;
         let (mut sender, mut reader) = ws.split();
 
@@ -1051,9 +1063,9 @@ mod tests {
     #[tokio::test]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
-        pretty_env_logger::formatted_builder()
+        let _ = pretty_env_logger::formatted_builder()
             .filter_level(log::LevelFilter::Info)
-            .init();
+            .try_init();
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
             .build()

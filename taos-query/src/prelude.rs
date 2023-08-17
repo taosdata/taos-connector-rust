@@ -34,7 +34,7 @@ pub mod sync {
     pub use super::_priv::*;
 
     pub use crate::stmt::Bindable;
-    pub use crate::tmq::{AsConsumer, IsMeta};
+    pub use crate::tmq::{AsConsumer, IsData, IsMeta};
 
     use serde::de::DeserializeOwned;
 
@@ -287,7 +287,7 @@ mod r#async {
 
     use crate::common::*;
     use crate::helpers::*;
-    pub use crate::stmt::Bindable;
+    pub use crate::stmt::AsyncBindable;
     pub use crate::RawResult;
 
     pub use super::_priv::*;

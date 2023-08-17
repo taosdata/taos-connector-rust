@@ -1,7 +1,7 @@
 use once_cell::sync::OnceCell;
 use taos_query::common::SmlData;
 use taos_query::prelude::RawResult;
-use taos_query::{block_in_place_or_global, common::RawMeta, AsyncQueryable};
+use taos_query::{common::RawMeta, AsyncQueryable};
 
 pub mod asyn;
 pub(crate) mod infra;
@@ -23,7 +23,7 @@ pub struct Taos {
 
 impl Taos {
     pub fn version(&self) -> &str {
-        block_in_place_or_global(self.client()).version()
+        futures::executor::block_on(self.client()).version()
     }
 
     async fn client(&self) -> &WsTaos {
@@ -111,26 +111,26 @@ impl taos_query::Queryable for Taos {
 
     fn query<T: AsRef<str>>(&self, sql: T) -> RawResult<Self::ResultSet> {
         let sql = sql.as_ref();
-        block_in_place_or_global(<Self as AsyncQueryable>::query(self, sql))
+        taos_query::block_in_place_or_global(<Self as AsyncQueryable>::query(self, sql))
     }
 
     fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> RawResult<Self::ResultSet> {
         let sql = sql.as_ref();
-        block_in_place_or_global(<Self as AsyncQueryable>::query_with_req_id(
+        futures::executor::block_on(<Self as AsyncQueryable>::query_with_req_id(
             self, sql, req_id,
         ))
     }
 
     fn write_raw_meta(&self, meta: &RawMeta) -> RawResult<()> {
-        block_in_place_or_global(<Self as AsyncQueryable>::write_raw_meta(self, meta))
+        futures::executor::block_on(<Self as AsyncQueryable>::write_raw_meta(self, meta))
     }
 
     fn write_raw_block(&self, block: &taos_query::RawBlock) -> RawResult<()> {
-        block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))
+        futures::executor::block_on(<Self as AsyncQueryable>::write_raw_block(self, block))
     }
 
     fn put(&self, sml_data: &SmlData) -> RawResult<()> {
-        block_in_place_or_global(<Self as AsyncQueryable>::put(self, sml_data))
+        futures::executor::block_on(<Self as AsyncQueryable>::put(self, sml_data))
     }
 }
 

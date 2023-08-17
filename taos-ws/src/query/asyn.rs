@@ -8,9 +8,7 @@ use std::future::Future;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::InlinableWrite;
-use taos_query::{
-    block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
-};
+use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
 use thiserror::Error;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
@@ -191,7 +189,7 @@ impl Drop for ResultSet {
         //     .blocking_send_only(WsSend::FreeResult(self.args));
 
         // tokio::spawn(async move { sender.send_only(WsSend::FreeResult(self.args)).await });
-        // block_in_place_or_global(async move {
+        // taos_query::block_in_place_or_global(async move {
         //     let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
         // });
     }
@@ -1039,7 +1037,7 @@ impl taos_query::Fetchable for ResultSet {
     }
 
     fn fetch_raw_block(&mut self) -> RawResult<Option<RawBlock>> {
-        block_in_place_or_global(self.fetch())
+        taos_query::block_in_place_or_global(self.fetch())
     }
 }
 

@@ -1,5 +1,4 @@
 use taos_query::prelude::Value;
-use taos_query::stmt::Bindable;
 
 use crate::sys::Stmt as NativeStmt;
 use taos_query::prelude::ColumnView;
@@ -15,7 +14,7 @@ enum StmtInner {
 #[derive(Debug)]
 pub struct Stmt(StmtInner);
 
-impl Bindable<super::Taos> for Stmt {
+impl taos_query::stmt::Bindable<super::Taos> for Stmt {
     fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
             crate::TaosInner::Native(taos) => NativeStmt::init(taos)
@@ -100,6 +99,98 @@ impl Bindable<super::Taos> for Stmt {
         match &self.0 {
             StmtInner::Native(stmt) => stmt.affected_rows(),
             StmtInner::Ws(stmt) => stmt.affected_rows(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl taos_optin::prelude::AsyncBindable<super::Taos> for Stmt {
+    async fn init(taos: &super::Taos) -> RawResult<Self> {
+        match &taos.0 {
+            crate::TaosInner::Native(taos) => NativeStmt::init(taos)
+                .await
+                .map(StmtInner::Native)
+                .map(Stmt)
+                .map_err(Into::into),
+            crate::TaosInner::Ws(taos) => WsStmt::init(taos)
+                .await
+                .map(StmtInner::Ws)
+                .map(Stmt)
+                .map_err(Into::into),
+        }
+    }
+
+    async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
+        match &mut self.0 {
+            StmtInner::Native(stmt) => {
+                stmt.prepare(sql).await?;
+            }
+            StmtInner::Ws(stmt) => {
+                stmt.prepare(sql).await?;
+            }
+        }
+        Ok(self)
+    }
+
+    async fn set_tbname(&mut self, name: &str) -> RawResult<&mut Self> {
+        match &mut self.0 {
+            StmtInner::Native(stmt) => {
+                stmt.set_tbname(name).await?;
+            }
+            StmtInner::Ws(stmt) => {
+                stmt.set_tbname(name).await?;
+            }
+        }
+        Ok(self)
+    }
+
+    async fn set_tags(&mut self, tags: &[Value]) -> RawResult<&mut Self> {
+        match &mut self.0 {
+            StmtInner::Native(stmt) => {
+                stmt.set_tags(tags).await?;
+            }
+            StmtInner::Ws(stmt) => {
+                stmt.set_tags(tags).await?;
+            }
+        }
+        Ok(self)
+    }
+
+    async fn bind(&mut self, params: &[ColumnView]) -> RawResult<&mut Self> {
+        match &mut self.0 {
+            StmtInner::Native(stmt) => {
+                stmt.bind(params).await?;
+            }
+            StmtInner::Ws(stmt) => {
+                stmt.bind(params).await?;
+            }
+        }
+        Ok(self)
+    }
+
+    async fn add_batch(&mut self) -> RawResult<&mut Self> {
+        match &mut self.0 {
+            StmtInner::Native(stmt) => {
+                stmt.add_batch().await?;
+            }
+            StmtInner::Ws(stmt) => {
+                stmt.add_batch().await?;
+            }
+        }
+        Ok(self)
+    }
+
+    async fn execute(&mut self) -> RawResult<usize> {
+        match &mut self.0 {
+            StmtInner::Native(stmt) => Ok(stmt.execute().await?),
+            StmtInner::Ws(stmt) => Ok(stmt.execute().await?),
+        }
+    }
+
+    async fn affected_rows(&self) -> usize {
+        match &self.0 {
+            StmtInner::Native(stmt) => stmt.affected_rows().await,
+            StmtInner::Ws(stmt) => stmt.affected_rows().await,
         }
     }
 }

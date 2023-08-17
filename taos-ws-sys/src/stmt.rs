@@ -2,7 +2,6 @@ use std::ffi::c_void;
 use std::fmt::Debug;
 use std::os::raw::*;
 
-use taos_query::block_in_place_or_global;
 use taos_query::common::Value;
 use taos_query::prelude::Itertools;
 use taos_query::stmt::Bindable;
@@ -636,7 +635,7 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
                 .map(|bind| bind.to_json())
                 .collect();
 
-            if let Err(e) = block_in_place_or_global(stmt.stmt_bind(columns)) {
+            if let Err(e) = futures::executor::block_on(stmt.stmt_bind(columns)) {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()

@@ -1,5 +1,4 @@
 use taos_query::{
-    block_in_place_or_global,
     prelude::{AsAsyncConsumer, RawMeta, Timeout},
     tmq::{Assignment, VGroupId},
     RawBlock, RawResult,
@@ -457,8 +456,16 @@ impl Iterator for Data {
     type Item = RawResult<RawBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        use taos_query::prelude::IsAsyncData;
-        block_in_place_or_global(self.fetch_raw_block()).transpose()
+        match &self.0 {
+            DataInner::Native(data) => {
+                <crate::sys::tmq::Data as taos_query::tmq::IsData>::fetch_raw_block(data)
+                    .transpose()
+            }
+            DataInner::Ws(data) => {
+                <taos_ws::consumer::Data as taos_query::tmq::IsData>::fetch_raw_block(data)
+                    .transpose()
+            }
+        }
     }
 }
 // impl taos_query::tmq::AsConsumer for Consumer {}
