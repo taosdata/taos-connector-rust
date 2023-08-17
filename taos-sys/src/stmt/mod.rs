@@ -281,7 +281,7 @@ mod tests {
         prelude::ColumnView, stmt::Bindable, Fetchable, Queryable, RawResult, TBuilder,
     };
 
-    use crate::{stmt::RawStmt, types::* RawTaos, Stmt, TaosBuilder};
+    use crate::{stmt::RawStmt, types::*, RawTaos, Stmt, TaosBuilder};
 
     use itertools::Itertools;
 
