@@ -824,7 +824,7 @@ mod tests {
             std::mem::size_of::<WsMaybeError<()>>()
         );
     }
-    
+
     #[test]
     fn dsn_error() {
         init_env();

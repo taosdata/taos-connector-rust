@@ -711,8 +711,10 @@ mod tests {
         let res = stmt.stmt_exec().await?;
 
         assert_eq!(res, 2);
-        let row: (String, i32, std::collections::HashMap<String, String>) =
-            taos.query_one("select * from ws_stmt_sj2.stb").await?.unwrap();
+        let row: (String, i32, std::collections::HashMap<String, String>) = taos
+            .query_one("select * from ws_stmt_sj2.stb")
+            .await?
+            .unwrap();
         dbg!(row);
 
         let tag_fields = stmt.stmt_get_tag_fields().await?;

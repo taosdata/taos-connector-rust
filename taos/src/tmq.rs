@@ -456,15 +456,14 @@ impl Iterator for Data {
     type Item = RawResult<RawBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        use taos_query::prelude::sync::IsData;
         match &self.0 {
             DataInner::Native(data) => {
                 <crate::sys::tmq::Data as taos_query::tmq::IsData>::fetch_raw_block(data)
-                    .map_err(Into::into)
+                    .transpose()
             }
             DataInner::Ws(data) => {
-                <taos_ws::consumer::Data as taos_query::tmq::IsAsyncData>::fetch_raw_block(data)
-                    .map_err(Into::into)
+                <taos_ws::consumer::Data as taos_query::tmq::IsData>::fetch_raw_block(data)
+                    .transpose()
             }
         }
     }

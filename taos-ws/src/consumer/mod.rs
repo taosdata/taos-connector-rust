@@ -9,8 +9,8 @@ use dashmap::DashMap as HashMap;
 use taos_query::common::{JsonMeta, RawMeta};
 use taos_query::prelude::{Code, RawError};
 use taos_query::tmq::{
-    AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsOffset, MessageSet,
-    SyncOnAsync, Timeout, VGroupId,
+    AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsData, IsOffset,
+    MessageSet, SyncOnAsync, Timeout, VGroupId,
 };
 use taos_query::util::InlinableRead;
 use taos_query::RawResult;
@@ -292,6 +292,16 @@ impl IsAsyncData for Data {
     }
 }
 
+impl IsData for Data {
+    fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
+        taos_query::block_in_place_or_global(self.0.fetch_raw_meta())
+            .map(|raw| unsafe { std::mem::transmute(raw) })
+    }
+
+    fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
+        taos_query::block_in_place_or_global(self.fetch_block())
+    }
+}
 pub enum WsMessageSet {
     Meta(Meta),
     Data(Data),
