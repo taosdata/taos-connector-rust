@@ -116,7 +116,7 @@ impl taos_query::Queryable for Taos {
 
     fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> RawResult<Self::ResultSet> {
         let sql = sql.as_ref();
-        futures::executor::block_on(<Self as AsyncQueryable>::query_with_req_id(
+        taos_query::block_in_place_or_global(<Self as AsyncQueryable>::query_with_req_id(
             self, sql, req_id,
         ))
     }

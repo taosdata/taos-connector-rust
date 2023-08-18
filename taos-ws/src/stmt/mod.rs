@@ -9,7 +9,7 @@ use taos_query::common::views::views_to_raw_block;
 use taos_query::common::ColumnView;
 use taos_query::prelude::{InlinableWrite, RawResult};
 use taos_query::stmt::{AsyncBindable, Bindable};
-use taos_query::{IntoDsn, RawBlock};
+use taos_query::{IntoDsn, RawBlock, block_in_place_or_global};
 
 use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
@@ -71,11 +71,11 @@ impl ToJsonValue for ColumnView {
 impl Bindable<super::Taos> for Stmt {
     fn init(taos: &super::Taos) -> RawResult<Self> {
         let mut dsn = taos.dsn.clone();
-        let database: Option<String> = futures::executor::block_on(
+        let database: Option<String> = block_in_place_or_global(
             <Taos as taos_query::AsyncQueryable>::query_one(taos, "select database()"),
         )?;
         dsn.database = database;
-        let mut stmt = futures::executor::block_on(Self::from_wsinfo(&dsn))?;
+        let mut stmt = block_in_place_or_global(Self::from_wsinfo(&dsn))?;
         futures::executor::block_on(stmt.stmt_init())?;
         Ok(stmt)
     }
@@ -86,13 +86,13 @@ impl Bindable<super::Taos> for Stmt {
     }
 
     fn set_tbname<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
-        futures::executor::block_on(self.stmt_set_tbname(sql.as_ref()))?;
+        block_in_place_or_global(self.stmt_set_tbname(sql.as_ref()))?;
         Ok(self)
     }
 
     fn set_tags(&mut self, tags: &[taos_query::common::Value]) -> RawResult<&mut Self> {
         let tags = tags.iter().map(|tag| tag.to_json_value()).collect_vec();
-        futures::executor::block_on(self.stmt_set_tags(tags))?;
+        block_in_place_or_global(self.stmt_set_tags(tags))?;
         Ok(self)
     }
 
@@ -115,7 +115,7 @@ impl Bindable<super::Taos> for Stmt {
     }
 
     fn execute(&mut self) -> RawResult<usize> {
-        futures::executor::block_on(self.stmt_exec())
+        block_in_place_or_global(self.stmt_exec())
     }
 
     fn affected_rows(&self) -> usize {
@@ -186,11 +186,11 @@ pub trait WsFieldsable {
 
 impl WsFieldsable for Stmt {
     fn get_tag_fields(&mut self) -> RawResult<Vec<StmtField>> {
-        futures::executor::block_on(self.stmt_get_tag_fields())
+        block_in_place_or_global(self.stmt_get_tag_fields())
     }
 
     fn get_col_fields(&mut self) -> RawResult<Vec<StmtField>> {
-        futures::executor::block_on(self.stmt_get_col_fields())
+        block_in_place_or_global(self.stmt_get_col_fields())
     }
 }
 
