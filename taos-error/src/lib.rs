@@ -1,4 +1,4 @@
-#![cfg_attr(nightly, feature(provide_any, error_generic_member_access))]
+#![cfg_attr(nightly, feature(error_generic_member_access))]
 #![cfg_attr(nightly, feature(no_coverage))]
 use std::{
     any::Any,
