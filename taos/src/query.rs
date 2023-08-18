@@ -991,6 +991,7 @@ mod tests {
 
 #[cfg(test)]
 mod async_tests {
+    use anyhow::Context;
     use taos_query::common::SchemalessPrecision;
     use taos_query::common::SchemalessProtocol;
     use taos_query::common::SmlDataBuilder;
@@ -999,6 +1000,39 @@ mod async_tests {
     use crate::AsyncQueryable;
     use crate::AsyncTBuilder;
     use crate::TaosBuilder;
+
+    #[tokio::test()]
+    #[ignore]
+    async fn test_recycle() -> RawResult<()> {
+        std::env::set_var("RUST_LOG", "taos=debug");
+        pretty_env_logger::init();
+        let builder = TaosBuilder::from_dsn("taos+ws://localhost:6041/")?;
+        let pool = builder.pool()?;
+
+        let max_time = 5;
+        for i in 0..max_time {
+            log::debug!("------ loop: {} ------", i);
+            let taos = pool.get().await.context("taos connection error")?;
+            // log taos memory location
+            log::debug!("taos: {:p}", &taos);
+            let r = taos.exec("select server_version()").await;
+            match r {
+                Ok(r) => {
+                    log::debug!("rows: {:?}", r);
+                }
+                Err(e) => {
+                    log::error!("error: {:?}", e);
+                }
+            }
+            drop(taos);
+
+            if i < max_time - 1 {
+                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+            }
+        }
+        
+        Ok(())
+    }
 
     #[tokio::test()]
     #[ignore]
