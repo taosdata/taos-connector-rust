@@ -84,6 +84,7 @@ impl WsTmqSender {
     }
 }
 
+#[derive(Debug)]
 pub struct TmqBuilder {
     info: TaosBuilder,
     conf: TmqInit,
@@ -960,6 +961,7 @@ impl TmqBuilder {
     }
 }
 
+#[derive(Debug)]
 pub struct Consumer {
     conn: WsConnReq,
     tmq_conf: TmqInit,

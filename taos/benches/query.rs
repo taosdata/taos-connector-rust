@@ -41,7 +41,7 @@ fn bench_query(c: &mut Criterion) {
     for records in [1, 10, 20, 30, 40, 50, 75, 100] {
         // c.bench_function("fib 20", |b| b.iter(|| fibonacci(black_box(20))));
         c.bench_with_input(
-            BenchmarkId::new("insert/native", records),
+            BenchmarkId::new("insert", format!("native-{}", records)),
             &p,
             |b, (rt, taos)| {
                 // let now = chro
@@ -76,7 +76,7 @@ fn bench_query(c: &mut Criterion) {
     for records in [1, 10, 20, 30, 40, 50, 75, 100] {
         // c.bench_function("fib 20", |b| b.iter(|| fibonacci(black_box(20))));
         c.bench_with_input(
-            BenchmarkId::new("insert/websocket", records),
+            BenchmarkId::new("insert", format!("ws-{}", records)),
             &p,
             |b, (rt, taos)| {
                 // let now = chro

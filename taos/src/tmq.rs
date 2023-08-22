@@ -4,11 +4,13 @@ use taos_query::{
     RawBlock, RawResult,
 };
 
+#[derive(Debug)]
 enum TmqBuilderInner {
     Native(crate::sys::TmqBuilder),
     Ws(taos_ws::consumer::TmqBuilder),
 }
 
+#[derive(Debug)]
 enum ConsumerInner {
     Native(crate::sys::Consumer),
     Ws(taos_ws::consumer::Consumer),
@@ -43,7 +45,10 @@ pub struct Data(DataInner);
 
 pub type MessageSet<Meta, Data> = taos_query::tmq::MessageSet<Meta, Data>;
 
+#[derive(Debug)]
 pub struct TmqBuilder(TmqBuilderInner);
+
+#[derive(Debug)]
 pub struct Consumer(ConsumerInner);
 
 impl taos_query::TBuilder for TmqBuilder {

@@ -4,8 +4,6 @@ pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
     use std::{ffi::CStr, sync::Arc, time::Duration};
-
-    use itertools::Itertools;
     use taos_query::tmq::{Assignment, VGroupId};
 
     use crate::{
@@ -32,12 +30,12 @@ pub(super) mod tmq {
             self.ptr
         }
         pub(crate) fn subscribe(&mut self, topics: &Topics) -> RawResult<()> {
-            unsafe {
-                (self.tmq.tmq_subscribe)(self.as_ptr(), topics.as_ptr()).ok_or(format!(
-                    "subscribe failed with topics: [{}]",
-                    topics.iter().join(",")
-                ))
+            let rsp = unsafe { (self.tmq.tmq_subscribe)(self.as_ptr(), topics.as_ptr()) };
+            if rsp.is_err() {
+                let str = unsafe { CStr::from_ptr((self.tmq.tmq_err2str)(rsp)) }.to_string_lossy();
+                return Err(taos_query::RawError::new(rsp.0, str));
             }
+            Ok(())
         }
 
         pub fn err_as_str(&self, tmq_resp: tmq_resp_err_t) -> String {
@@ -214,6 +212,7 @@ pub(super) mod conf {
     use taos_query::Dsn;
 
     /* tmq conf */
+    #[derive(Debug)]
     pub struct Conf {
         api: TmqConfApi,
         ptr: *mut tmq_conf_t,

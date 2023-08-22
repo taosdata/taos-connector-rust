@@ -25,6 +25,7 @@ use raw::RawTmq;
 
 use self::raw::{Conf, Topics};
 
+#[derive(Debug)]
 pub struct TmqBuilder {
     dsn: Dsn,
     builder: TaosBuilder,

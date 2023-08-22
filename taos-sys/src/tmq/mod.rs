@@ -110,6 +110,7 @@ impl RawRes {
     }
 }
 
+#[derive(Debug)]
 pub struct TmqBuilder {
     dsn: Dsn,
     conf: Conf,
