@@ -6,6 +6,9 @@ use once_cell::sync::OnceCell;
 use taos_query::prelude::Code;
 use taos_query::{DsnError, IntoDsn, RawResult};
 
+#[cfg(test)]
+mod deflate;
+
 pub mod stmt;
 pub use stmt::Stmt;
 
