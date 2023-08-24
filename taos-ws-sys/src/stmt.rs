@@ -703,7 +703,11 @@ pub unsafe extern "C" fn ws_stmt_add_batch(stmt: *mut WS_STMT) -> c_int {
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut i32) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
-        Some(stmt) => match stmt.safe_deref_mut().unwrap().execute() {
+        Some(stmt) => match stmt
+            .safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+            .and_then(|stmt| stmt.execute())
+        {
             Ok(rows) => {
                 *affected_rows = rows as _;
                 0
