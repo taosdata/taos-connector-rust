@@ -72,6 +72,7 @@ impl<T> WsMaybeError<T> {
     pub fn errno(&self) -> Option<i32> {
         self.error.as_ref().map(|s| s.code.into())
     }
+    
     pub fn errstr(&self) -> Option<*const c_char> {
         self.error.as_ref().map(|s| s.message.as_ptr())
     }
@@ -79,24 +80,11 @@ impl<T> WsMaybeError<T> {
     pub fn safe_deref(&self) -> Option<&T> {
         unsafe { self.data.as_ref() }
     }
+    
     pub fn safe_deref_mut(&self) -> Option<&mut T> {
         unsafe { self.data.as_mut() }
     }
 }
-
-// impl<T> Deref for WsMaybeError<T> {
-//     type Target = T;
-
-//     fn deref(&self) -> &Self::Target {
-//         unsafe { self.data.as_ref().expect("data pointer should not be null") }
-//     }
-// }
-
-// impl<T> DerefMut for WsMaybeError<T> {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         unsafe { self.data.as_mut().expect("data pointer should not be null") }
-//     }
-// }
 
 impl<T: 'static> From<T> for WsMaybeError<T> {
     fn from(value: T) -> Self {
@@ -181,6 +169,7 @@ impl std::error::Error for WsError {
         self.source.as_ref().map(|e| e.as_ref())
     }
 }
+
 impl From<Utf8Error> for WsError {
     fn from(e: Utf8Error) -> Self {
         Self {
@@ -200,6 +189,7 @@ impl From<Error> for WsError {
         }
     }
 }
+
 impl From<&WsError> for WsError {
     fn from(e: &WsError) -> Self {
         Self {
@@ -219,6 +209,7 @@ impl From<taos_ws::Error> for WsError {
         }
     }
 }
+
 impl From<RawError> for WsError {
     fn from(e: RawError) -> Self {
         Self {
