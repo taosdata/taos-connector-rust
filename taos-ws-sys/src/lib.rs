@@ -584,14 +584,6 @@ pub unsafe extern "C" fn ws_query_timeout(
 /// Get taosc execution timing duration as nanoseconds.
 #[no_mangle]
 pub unsafe extern "C" fn ws_take_timing(rs: *mut WS_RES) -> i64 {
-    // let rs: *mut WsMaybeError<WsResultSet> = rs as *mut WsMaybeError<WsResultSet>;
-    // if rs.is_null() || rs.data.is_null() {
-    //     C_ERRNO = Code::FAILED;
-    //     let dst = C_ERROR_CONTAINER.as_mut_ptr();
-    //     const NULL_PTR_RES: &str = "WS_RES is null";
-    //     std::ptr::copy_nonoverlapping(NULL_PTR_RES.as_ptr(), dst, NULL_PTR_RES.len());
-    //     return Code::FAILED.into();
-    // }
     match (rs as *mut WsMaybeError<WsResultSet>)
         .as_mut()
         .and_then(|s| s.safe_deref_mut())
@@ -726,7 +718,10 @@ pub unsafe extern "C" fn ws_fetch_block(
     rows: *mut i32,
 ) -> i32 {
     match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
-        Some(rs) => match rs.safe_deref_mut().unwrap().fetch_block(ptr, rows) {
+        Some(rs) => match rs.safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("res ptr should not be null"))
+            .and_then(|s| s.fetch_block(ptr, rows)) 
+        {
             Ok(()) => 0,
             Err(err) => {
                 let code = err.errno();
