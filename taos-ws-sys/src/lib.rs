@@ -72,7 +72,7 @@ impl<T> WsMaybeError<T> {
     pub fn errno(&self) -> Option<i32> {
         self.error.as_ref().map(|s| s.code.into())
     }
-    
+
     pub fn errstr(&self) -> Option<*const c_char> {
         self.error.as_ref().map(|s| s.message.as_ptr())
     }
@@ -80,7 +80,7 @@ impl<T> WsMaybeError<T> {
     pub fn safe_deref(&self) -> Option<&T> {
         unsafe { self.data.as_ref() }
     }
-    
+
     pub fn safe_deref_mut(&self) -> Option<&mut T> {
         unsafe { self.data.as_mut() }
     }
@@ -717,27 +717,28 @@ pub unsafe extern "C" fn ws_fetch_block(
     ptr: *mut *const c_void,
     rows: *mut i32,
 ) -> i32 {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
-        Some(rs) => match rs.safe_deref_mut()
-            .ok_or_else(|| RawError::from_string("res ptr should not be null"))
-            .and_then(|s| s.fetch_block(ptr, rows)) 
-        {
-            Ok(()) => 0,
-            Err(err) => {
-                let code = err.errno();
-                rs.error = Some(err.into());
-                code.into()
-            }
-        },
-        _ => {
-            *rows = 0;
+    unsafe fn handle_error(error_message: &str, rows: *mut i32) -> i32 {
+        *rows = 0;
 
-            C_ERRNO = Code::FAILED;
-            let dst = C_ERROR_CONTAINER.as_mut_ptr();
-            const NULL_PTR_RES: &str = "WS_RES is null";
-            std::ptr::copy_nonoverlapping(NULL_PTR_RES.as_ptr(), dst, NULL_PTR_RES.len());
-            Code::FAILED.into()
-        }
+        C_ERRNO = Code::FAILED;
+        let dst = C_ERROR_CONTAINER.as_mut_ptr();
+        std::ptr::copy_nonoverlapping(error_message.as_ptr(), dst, error_message.len());
+        Code::FAILED.into()
+    }
+
+    match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
+        Some(rs) => match rs.safe_deref_mut() {
+            Some(s) => match s.fetch_block(ptr, rows) {
+                Ok(()) => 0,
+                Err(err) => {
+                    let code = err.errno();
+                    rs.error = Some(err.into());
+                    code.into()
+                }
+            },
+            None => handle_error("WS_RES data is null", rows),
+        },
+        _ => handle_error("WS_RES is null", rows),
     }
 }
 
