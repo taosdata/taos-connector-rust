@@ -1,7 +1,6 @@
 use std::{
     ffi::{c_void, CStr, CString},
     fmt::{Debug, Display},
-    ops::{Deref, DerefMut},
     os::raw::c_char,
     str::Utf8Error,
     time::Duration,
@@ -73,22 +72,17 @@ impl<T> WsMaybeError<T> {
     pub fn errno(&self) -> Option<i32> {
         self.error.as_ref().map(|s| s.code.into())
     }
+
     pub fn errstr(&self) -> Option<*const c_char> {
         self.error.as_ref().map(|s| s.message.as_ptr())
     }
-}
 
-impl<T> Deref for WsMaybeError<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { self.data.as_ref().expect("data pointer should not be null") }
+    pub fn safe_deref(&self) -> Option<&T> {
+        unsafe { self.data.as_ref() }
     }
-}
 
-impl<T> DerefMut for WsMaybeError<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { self.data.as_mut().expect("data pointer should not be null") }
+    pub fn safe_deref_mut(&self) -> Option<&mut T> {
+        unsafe { self.data.as_mut() }
     }
 }
 
@@ -175,6 +169,7 @@ impl std::error::Error for WsError {
         self.source.as_ref().map(|e| e.as_ref())
     }
 }
+
 impl From<Utf8Error> for WsError {
     fn from(e: Utf8Error) -> Self {
         Self {
@@ -194,6 +189,7 @@ impl From<Error> for WsError {
         }
     }
 }
+
 impl From<&WsError> for WsError {
     fn from(e: &WsError) -> Self {
         Self {
@@ -213,6 +209,7 @@ impl From<taos_ws::Error> for WsError {
         }
     }
 }
+
 impl From<RawError> for WsError {
     fn from(e: RawError) -> Self {
         Self {
@@ -559,7 +556,10 @@ pub unsafe extern "C" fn ws_query(taos: *mut WS_TAOS, sql: *const c_char) -> *mu
 
 #[no_mangle]
 pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
         Some(rs) => {
             rs.stop_query();
         }
@@ -584,7 +584,10 @@ pub unsafe extern "C" fn ws_query_timeout(
 /// Get taosc execution timing duration as nanoseconds.
 #[no_mangle]
 pub unsafe extern "C" fn ws_take_timing(rs: *mut WS_RES) -> i64 {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
         Some(rs) => rs.take_timing().as_nanos() as _,
         _ => {
             C_ERRNO = Code::FAILED;
@@ -639,7 +642,10 @@ pub unsafe extern "C" fn ws_errstr(rs: *mut WS_RES) -> *const c_char {
 #[no_mangle]
 /// Works exactly the same to taos_affected_rows.
 pub unsafe extern "C" fn ws_affected_rows(rs: *const WS_RES) -> i32 {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_ref() {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_ref()
+        .and_then(|s| s.safe_deref())
+    {
         Some(rs) => rs.affected_rows() as _,
         _ => 0,
     }
@@ -648,7 +654,10 @@ pub unsafe extern "C" fn ws_affected_rows(rs: *const WS_RES) -> i32 {
 #[no_mangle]
 /// Works exactly the same to taos_affected_rows64.
 pub unsafe extern "C" fn ws_affected_rows64(rs: *const WS_RES) -> i64 {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_ref() {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_ref()
+        .and_then(|s| s.safe_deref())
+    {
         Some(rs) => rs.affected_rows64() as _,
         _ => 0,
     }
@@ -657,7 +666,10 @@ pub unsafe extern "C" fn ws_affected_rows64(rs: *const WS_RES) -> i64 {
 #[no_mangle]
 /// Returns number of fields in current result set.
 pub unsafe extern "C" fn ws_field_count(rs: *const WS_RES) -> i32 {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_ref() {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_ref()
+        .and_then(|s| s.safe_deref())
+    {
         Some(rs) => rs.num_of_fields(),
         _ => 0,
     }
@@ -666,7 +678,10 @@ pub unsafe extern "C" fn ws_field_count(rs: *const WS_RES) -> i32 {
 #[no_mangle]
 /// If the query is update query or not
 pub unsafe extern "C" fn ws_is_update_query(rs: *const WS_RES) -> bool {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_ref() {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_ref()
+        .and_then(|s| s.safe_deref())
+    {
         Some(rs) => rs.num_of_fields() == 0,
         _ => true,
     }
@@ -675,7 +690,10 @@ pub unsafe extern "C" fn ws_is_update_query(rs: *const WS_RES) -> bool {
 #[no_mangle]
 /// Works like taos_fetch_fields, users should use it along with a `num_of_fields`.
 pub unsafe extern "C" fn ws_fetch_fields(rs: *mut WS_RES) -> *const WS_FIELD {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
         Some(rs) => rs.get_fields(),
         _ => std::ptr::null(),
     }
@@ -684,7 +702,10 @@ pub unsafe extern "C" fn ws_fetch_fields(rs: *mut WS_RES) -> *const WS_FIELD {
 #[no_mangle]
 /// To fetch v2-compatible fields structs.
 pub unsafe extern "C" fn ws_fetch_fields_v2(rs: *mut WS_RES) -> *const WS_FIELD_V2 {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
         Some(rs) => rs.get_fields_v2(),
         _ => std::ptr::null(),
     }
@@ -696,24 +717,28 @@ pub unsafe extern "C" fn ws_fetch_block(
     ptr: *mut *const c_void,
     rows: *mut i32,
 ) -> i32 {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
-        Some(rs) => match rs.fetch_block(ptr, rows) {
-            Ok(()) => 0,
-            Err(err) => {
-                let code = err.errno();
-                rs.error = Some(err.into());
-                code.into()
-            }
-        },
-        _ => {
-            *rows = 0;
+    unsafe fn handle_error(error_message: &str, rows: *mut i32) -> i32 {
+        *rows = 0;
 
-            C_ERRNO = Code::FAILED;
-            let dst = C_ERROR_CONTAINER.as_mut_ptr();
-            const NULL_PTR_RES: &str = "WS_RES is null";
-            std::ptr::copy_nonoverlapping(NULL_PTR_RES.as_ptr(), dst, NULL_PTR_RES.len());
-            Code::FAILED.into()
-        }
+        C_ERRNO = Code::FAILED;
+        let dst = C_ERROR_CONTAINER.as_mut_ptr();
+        std::ptr::copy_nonoverlapping(error_message.as_ptr(), dst, error_message.len());
+        Code::FAILED.into()
+    }
+
+    match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
+        Some(rs) => match rs.safe_deref_mut() {
+            Some(s) => match s.fetch_block(ptr, rows) {
+                Ok(()) => 0,
+                Err(err) => {
+                    let code = err.errno();
+                    rs.error = Some(err.into());
+                    code.into()
+                }
+            },
+            None => handle_error("WS_RES data is null", rows),
+        },
+        _ => handle_error("WS_RES is null", rows),
     }
 }
 
@@ -728,7 +753,10 @@ pub unsafe extern "C" fn ws_free_result(rs: *mut WS_RES) {
 #[no_mangle]
 /// Same to taos_result_precision.
 pub unsafe extern "C" fn ws_result_precision(rs: *const WS_RES) -> i32 {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
         Some(rs) => rs.precision() as i32,
         _ => 0,
     }
@@ -758,7 +786,10 @@ pub unsafe extern "C" fn ws_get_value_in_block(
     ty: *mut u8,
     len: *mut u32,
 ) -> *const c_void {
-    match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
         Some(rs) => {
             let value = rs.get_raw_value(row as _, col as _);
             *ty = value.0 as u8;

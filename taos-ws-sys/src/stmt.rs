@@ -79,7 +79,11 @@ pub unsafe extern "C" fn ws_stmt_prepare(
                 return no;
             }
 
-            if let Err(e) = stmt.prepare(sql) {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|stmt| stmt.prepare(sql))
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -98,7 +102,11 @@ pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_c
         Some(stmt) => {
             let name = CStr::from_ptr(name).to_str().unwrap();
 
-            if let Err(e) = stmt.set_tbname(name) {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|stmt| stmt.set_tbname(name))
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -117,7 +125,11 @@ pub unsafe extern "C" fn ws_stmt_set_sub_tbname(stmt: *mut WS_STMT, name: *const
         Some(stmt) => {
             let name = CStr::from_ptr(name).to_str().unwrap();
 
-            if let Err(e) = stmt.set_tbname(name) {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|stmt| stmt.set_tbname(name))
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -145,7 +157,11 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
                 .map(|bind| bind.to_tag_value())
                 .collect_vec();
 
-            if let Err(e) = stmt.set_tbname_tags(name, &tags) {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|stmt| stmt.set_tbname_tags(name, &tags))
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -168,7 +184,11 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
     fieldNum: *mut c_int,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
-        Some(stmt) => match stmt.get_tag_fields() {
+        Some(stmt) => match stmt
+            .safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+            .and_then(|s| s.get_tag_fields())
+        {
             Ok(fields_vec) => {
                 let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
 
@@ -201,7 +221,11 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
     fieldNum: *mut c_int,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
-        Some(stmt) => match stmt.get_col_fields() {
+        Some(stmt) => match stmt
+            .safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+            .and_then(|s| s.get_col_fields())
+        {
             Ok(fields_vec) => {
                 let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
 
@@ -610,7 +634,11 @@ pub unsafe extern "C" fn ws_stmt_set_tags(
                 .map(|bind| bind.to_tag_value())
                 .collect_vec();
 
-            if let Err(e) = stmt.set_tags(&columns) {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|s| s.set_tags(&columns))
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -635,7 +663,11 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
                 .map(|bind| bind.to_json())
                 .collect();
 
-            if let Err(e) = futures::executor::block_on(stmt.stmt_bind(columns)) {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|s| futures::executor::block_on(s.stmt_bind(columns)))
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -651,7 +683,11 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
 pub unsafe extern "C" fn ws_stmt_add_batch(stmt: *mut WS_STMT) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => {
-            if let Err(e) = stmt.add_batch() {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|stmt| stmt.add_batch())
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -667,7 +703,11 @@ pub unsafe extern "C" fn ws_stmt_add_batch(stmt: *mut WS_STMT) -> c_int {
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut i32) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
-        Some(stmt) => match stmt.execute() {
+        Some(stmt) => match stmt
+            .safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+            .and_then(|stmt| stmt.execute())
+        {
             Ok(rows) => {
                 *affected_rows = rows as _;
                 0
@@ -685,7 +725,10 @@ pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut
 /// Get inserted rows in current statement.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
-    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+    match (stmt as *mut WsMaybeError<Stmt>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
         Some(stmt) => stmt.affected_rows() as _,
         _ => 0,
     }
@@ -694,7 +737,10 @@ pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
 /// Get inserted rows in current statement.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_affected_rows_once(stmt: *mut WS_STMT) -> c_int {
-    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+    match (stmt as *mut WsMaybeError<Stmt>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
         Some(stmt) => stmt.affected_rows_once() as _,
         _ => 0,
     }
