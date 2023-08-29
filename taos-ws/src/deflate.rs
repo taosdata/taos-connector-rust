@@ -14,13 +14,13 @@ use ws_tool::{
 
 #[tokio::test]
 async fn test_ws() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::fmt()
+    let _subscriber = tracing_subscriber::fmt::fmt()
         .with_max_level(Level::INFO)
         .with_file(true)
         .with_line_number(true)
-        .finish()
-        .try_init()
-        .expect("failed to init log");
+        .finish();
+    // _subscriber.try_init().expect("failed to init log");
+
     let uri = "ws://127.0.0.1:6041/rest/ws".try_into().unwrap();
     let config = PMDConfig::default();
 
