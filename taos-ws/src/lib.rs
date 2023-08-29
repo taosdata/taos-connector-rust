@@ -203,6 +203,12 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         }
     }
     async fn is_enterprise_edition(&self) -> RawResult<bool> {
+        use taos_query::prelude::AsyncQueryable;
+
+        let taos = self.build().await?;
+        // Ensue server is ready.
+        taos.exec("select server_status()").await?;
+
         match self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
         {
@@ -210,8 +216,6 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             false => (),
         }
 
-        let taos = self.build().await?;
-        use taos_query::prelude::AsyncQueryable;
         let grant: Option<(String, bool)> = AsyncQueryable::query_one(
             &taos,
             "select version, (expire_time < now) from information_schema.ins_cluster",
