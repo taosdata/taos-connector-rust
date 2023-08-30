@@ -29,18 +29,24 @@ serde_repr = "0.1.8"
 serde_with = "3.0.0"
 taos-query = { path = "../taos-query", version = "0.10.3" }
 thiserror = "1.0.47"
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "io-util", "time"] }
+tokio = { version = "1", features = [
+	"sync",
+	"rt-multi-thread",
+	"macros",
+	"io-util",
+	"time",
+] }
 tokio-tungstenite = { version = "0.18.0" }
-
-[dev-dependencies]
-pretty_env_logger = "0.4.0"
-criterion = { version = "0.3", features = ["stable"] }
-tracing-subscriber = { version = "*", features = ["fmt"] }
 
 ws-tool = { version = "*", git = "https://github.com/PrivateRookie/ws-tool.git", features = [
 	"async",
 	"deflate",
 ] }
+
+[dev-dependencies]
+pretty_env_logger = "0.4.0"
+criterion = { version = "0.3", features = ["stable"] }
+tracing-subscriber = { version = "*", features = ["fmt"] }
 
 tracing = "0.1"
 
