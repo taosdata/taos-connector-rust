@@ -43,11 +43,6 @@ async fn test_ws() -> anyhow::Result<()> {
         req_id: 0,
         req: WsConnReq::new("root", "taosdata"),
     };
-    source
-        .send(OpCode::Text, &serde_json::to_vec(&version).unwrap())
-        .await
-        .unwrap();
-    source.flush().await?;
 
     source
         .send(OpCode::Text, &serde_json::to_vec(&conn).unwrap())
