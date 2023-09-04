@@ -691,6 +691,7 @@ impl WsTaos {
 
         let mut client = ClientBuilder::new()
             .extension(config.ext_string())
+            .header("Accept-Encoding", "gzip, deflate")
             .async_connect(uri, AsyncDeflateCodec::check_fn)
             .await
             .map_err(|err| {
