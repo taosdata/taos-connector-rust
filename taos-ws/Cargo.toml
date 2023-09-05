@@ -41,6 +41,7 @@ tokio-tungstenite = { version = "0.18.0" }
 ws-tool = { version = "*", git = "https://github.com/PrivateRookie/ws-tool.git", features = [
 	"async",
 	"deflate",
+	"async_tls_rustls",
 ] }
 
 [dev-dependencies]
