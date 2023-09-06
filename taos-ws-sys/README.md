@@ -7,3 +7,9 @@ cargo build --release -p taos-ws-sys
 #   libtaosws.so/libtaosws.a in target/libtaosws/ directory.
 ls target/libtaosws*
 ```
+
+With tls support:
+
+```sh
+cargo build --release -p taos-ws-sys --features native-tls-vendored
+```
