@@ -8,8 +8,14 @@ cargo build --release -p taos-ws-sys
 ls target/libtaosws*
 ```
 
-With tls support:
+Build with tls support:
 
 ```sh
 cargo build --release -p taos-ws-sys --features native-tls-vendored
+```
+
+Use libtaosws in taos cli:
+
+```sh
+LD_LIBRARY_PATH=/$src/taos-connector-rust/target/release taos -E "http://localhost:6041"
 ```
