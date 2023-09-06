@@ -556,15 +556,15 @@ pub unsafe extern "C" fn ws_query(taos: *mut WS_TAOS, sql: *const c_char) -> *mu
 
 #[no_mangle]
 pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) {
-    match (rs as *mut WsMaybeError<WsResultSet>)
-        .as_mut()
-        .and_then(|s| s.safe_deref_mut())
-    {
-        Some(rs) => {
-            rs.stop_query();
-        }
-        _ => {}
-    }
+    // match (rs as *mut WsMaybeError<WsResultSet>)
+    //     .as_mut()
+    //     .and_then(|s| s.safe_deref_mut())
+    // {
+    //     Some(rs) => {
+    //         rs.stop_query();
+    //     }
+    //     _ => {}
+    // }
 }
 
 #[no_mangle]
