@@ -17,5 +17,5 @@ cargo build --release -p taos-ws-sys --features native-tls-vendored
 Use libtaosws in taos cli:
 
 ```sh
-LD_LIBRARY_PATH=/$src/taos-connector-rust/target/release taos -E "http://localhost:6041"
+LD_LIBRARY_PATH=/$home/taos-connector-rust/target/release taos -E "http://localhost:6041"
 ```
