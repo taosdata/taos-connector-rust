@@ -4,7 +4,7 @@ use std::fmt::{Debug, Display};
 use once_cell::sync::OnceCell;
 
 use taos_query::prelude::Code;
-use taos_query::{DsnError, IntoDsn, RawResult};
+use taos_query::{DsnError, IntoDsn, RawResult, RawError};
 
 pub mod stmt;
 pub use stmt::Stmt;
@@ -128,15 +128,14 @@ impl taos_query::TBuilder for TaosBuilder {
         let taos = self.build()?;
 
         use taos_query::prelude::sync::Queryable;
-        let grant: Option<(String, bool)> = Queryable::query_one(
+        let grant: RawResult<Option<(String, bool)>> = Queryable::query_one(
             &taos,
             "select version, (expire_time < now) from information_schema.ins_cluster",
-        )
-        .unwrap_or_default();
+        );
 
-        if let Some((edition, expired)) = grant {
+        if let Ok(Some((edition, expired))) = grant {
             if expired {
-                return Ok(false);
+                return Err(RawError::new(Code::FAILED, r#"Enterprise version expired. Please get a new license to activate."#));
             }
             return match edition.trim() {
                 "cloud" | "official" | "trial" => Ok(true),
@@ -144,10 +143,10 @@ impl taos_query::TBuilder for TaosBuilder {
             };
         }
 
-        let grant: Option<(String, (), String)> =
-            Queryable::query_one(&taos, "show grants").unwrap_or_default();
+        let grant: RawResult<Option<(String, (), String)>> =
+            Queryable::query_one(&taos, "show grants");
 
-        if let Some((edition, _, expired)) = grant {
+        if let Ok(Some((edition, _, expired))) = grant {
             match (edition.trim(), expired.trim()) {
                 ("cloud" | "official" | "trial", "false") => Ok(true),
                 _ => Ok(false),
@@ -212,16 +211,15 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 
         let taos = self.build().await?;
         use taos_query::prelude::AsyncQueryable;
-        let grant: Option<(String, bool)> = AsyncQueryable::query_one(
+        let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
             &taos,
             "select version, (expire_time < now) from information_schema.ins_cluster",
         )
-        .await
-        .unwrap_or_default();
+        .await;
 
-        if let Some((edition, expired)) = grant {
+        if let Ok(Some((edition, expired))) = grant {
             if expired {
-                return Ok(false);
+                return Err(RawError::new(Code::FAILED, r#"Enterprise version expired. Please get a new license to activate."#));
             }
             return match edition.trim() {
                 "cloud" | "official" | "trial" => Ok(true),
@@ -229,11 +227,10 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             };
         }
 
-        let grant: Option<(String, (), String)> = AsyncQueryable::query_one(&taos, "show grants")
-            .await
-            .unwrap_or_default();
+        let grant: RawResult<Option<(String, (), String)>> = AsyncQueryable::query_one(&taos, "show grants")
+            .await;
 
-        if let Some((edition, _, expired)) = grant {
+        if let Ok(Some((edition, _, expired))) = grant {
             match (edition.trim(), expired.trim()) {
                 ("cloud" | "official" | "trial", "false") => Ok(true),
                 _ => Ok(false),
