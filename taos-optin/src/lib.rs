@@ -4,10 +4,14 @@ use std::{
     sync::Arc,
 };
 
+use log::warn;
 use once_cell::sync::OnceCell;
 use raw::{ApiEntry, BlockState, RawRes, RawTaos};
 
-use taos_query::{prelude::{Field, Precision, RawBlock, RawMeta, RawResult, Code}, RawError};
+use taos_query::{
+    prelude::{Field, Precision, RawBlock, RawMeta, RawResult},
+    util::Edition,
+};
 
 const MAX_CONNECT_RETRIES: u8 = 16;
 
@@ -402,27 +406,23 @@ impl taos_query::TBuilder for TaosBuilder {
             "select version, (expire_time < now) as valid from information_schema.ins_cluster",
         );
 
-        if let Ok(Some((edition, expired))) = grant {
-            if expired {
-                return Err(RawError::new(Code::FAILED, r#"Enterprise version expired. Please get a new license to activate."#));
-            }
-            return match edition.as_str() {
-                "cloud" | "official" | "trial" => Ok(true),
-                _ => Ok(false),
-            };
-        }
-
-        let grant: RawResult<Option<(String, (), String)>> =
-            Queryable::query_one(taos, "show grants");
-
-        if let Ok(Some((edition, _, expired))) = grant {
-            match (edition.trim(), expired.trim()) {
-                ("cloud" | "official" | "trial", "false") => Ok(true),
-                _ => Ok(false),
-            }
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
         } else {
-            Ok(false)
-        }
+            let grant: RawResult<Option<(String, (), String)>> =
+                Queryable::query_one(taos, "show grants");
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition.is_enterprise_edition())
     }
 }
 
@@ -516,33 +516,31 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     async fn is_enterprise_edition(&self) -> RawResult<bool> {
         let taos = self.inner_connection()?;
         use taos_query::prelude::AsyncQueryable;
+
+        // the latest version of 3.x should work
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
             taos,
             "select version, (expire_time < now) as valid from information_schema.ins_cluster",
         )
         .await;
 
-        if let Ok(Some((edition, expired))) = grant {
-            if expired {
-                return Err(RawError::new(Code::FAILED, r#"Enterprise version expired. Please get a new license to activate."#));
-            }
-            return match edition.as_str() {
-                "cloud" | "official" | "trial" => Ok(true),
-                _ => Ok(false),
-            };
-        }
-
-        let grant: RawResult<Option<(String, (), String)>> = AsyncQueryable::query_one(taos, "show grants")
-            .await;
-
-        if let Ok(Some((edition, _, expired))) = grant {
-            match (edition.trim(), expired.trim()) {
-                ("cloud" | "official" | "trial", "false") => Ok(true),
-                _ => Ok(false),
-            }
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
         } else {
-            Ok(false)
-        }
+            let grant: RawResult<Option<(String, (), String)>> =
+                AsyncQueryable::query_one(taos, "show grants").await;
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition.is_enterprise_edition())
     }
 }
 

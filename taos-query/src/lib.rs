@@ -329,7 +329,10 @@ impl<T: AsyncTBuilder> deadpool::managed::Manager for Manager<T> {
         self.manager.build().await
     }
 
-    async fn recycle(&self, conn: &mut Self::Type) -> deadpool::managed::RecycleResult<Self::Error> {
+    async fn recycle(
+        &self,
+        conn: &mut Self::Type,
+    ) -> deadpool::managed::RecycleResult<Self::Error> {
         self.ping(conn).await.map_err(RawError::from_any)?;
         Ok(())
     }

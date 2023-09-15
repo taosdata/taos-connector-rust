@@ -1120,7 +1120,10 @@ mod tests {
             let version = ws_get_server_info(taos);
             dbg!(CStr::from_ptr(version as _));
 
-            let res = ws_query(taos, b"select count(*) from ws_stop_query.s1\0" as *const u8 as _);
+            let res = ws_query(
+                taos,
+                b"select count(*) from ws_stop_query.s1\0" as *const u8 as _,
+            );
             let cols = ws_field_count(res);
             dbg!(cols);
             let fields = ws_fetch_fields(res);

@@ -17,7 +17,8 @@ async fn main() -> Result<()> {
     let mut stmt = Stmt::init(&taos).await?;
     stmt.prepare(
         "insert into ? using tb1 tags(?) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    ).await?;
+    )
+    .await?;
     stmt.set_tbname("d0").await?;
     stmt.set_tags(&[Value::VarChar("涛思".to_string())]).await?;
 
@@ -37,7 +38,13 @@ async fn main() -> Result<()> {
         ColumnView::from_varchar(vec!["ABC"]),
         ColumnView::from_nchar(vec!["涛思数据"]),
     ];
-    let rows = stmt.bind(&params).await?.add_batch().await?.execute().await?;
+    let rows = stmt
+        .bind(&params)
+        .await?
+        .add_batch()
+        .await?
+        .execute()
+        .await?;
     assert_eq!(rows, 1);
 
     #[derive(Debug, Deserialize)]
