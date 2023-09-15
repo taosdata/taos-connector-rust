@@ -294,7 +294,8 @@ mod tests {
         ])
         .await?;
         let mut stmt = Stmt::init(&taos).await.unwrap();
-        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").await?;
+        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .await?;
         let params = vec![
             ColumnView::from_millis_timestamp(vec![0]),
             ColumnView::from_bools(vec![true]),

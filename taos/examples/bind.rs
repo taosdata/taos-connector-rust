@@ -15,7 +15,8 @@ async fn main() -> Result<()> {
     ])
     .await?;
     let mut stmt = Stmt::init(&taos).await?;
-    stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").await?;
+    stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .await?;
     let params = vec![
         ColumnView::from_millis_timestamp(vec![0]),
         ColumnView::from_bools(vec![true]),
@@ -32,7 +33,13 @@ async fn main() -> Result<()> {
         ColumnView::from_varchar(vec!["ABC"]),
         ColumnView::from_nchar(vec!["涛思数据"]),
     ];
-    let rows = stmt.bind(&params).await?.add_batch().await?.execute().await?;
+    let rows = stmt
+        .bind(&params)
+        .await?
+        .add_batch()
+        .await?
+        .execute()
+        .await?;
     assert_eq!(rows, 1);
 
     #[derive(Debug, Deserialize)]

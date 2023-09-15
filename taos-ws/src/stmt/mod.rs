@@ -9,7 +9,7 @@ use taos_query::common::views::views_to_raw_block;
 use taos_query::common::ColumnView;
 use taos_query::prelude::{InlinableWrite, RawResult};
 use taos_query::stmt::{AsyncBindable, Bindable};
-use taos_query::{IntoDsn, RawBlock, block_in_place_or_global};
+use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 
 use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
