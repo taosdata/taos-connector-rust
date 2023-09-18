@@ -583,7 +583,9 @@ impl WsTaos {
                         _ => unreachable!(),
                     }
                 }
-                _ => unreachable!(),
+                _ => {
+                    return Err(RawError::from_string("unexpected message"));
+                },
             }
         }
 
