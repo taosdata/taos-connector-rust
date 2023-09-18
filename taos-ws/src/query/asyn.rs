@@ -583,7 +583,12 @@ impl WsTaos {
                         _ => unreachable!(),
                     }
                 }
-                _ => unreachable!(),
+                _ => {
+                    return Err(RawError::from_string(format!(
+                        "unexpected message on login: {:?}",
+                        message
+                    )));
+                },
             }
         }
 
