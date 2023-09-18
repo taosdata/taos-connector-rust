@@ -2,13 +2,16 @@ use std::{
     cell::UnsafeCell,
     ffi::{c_char, CStr, CString},
     sync::Arc,
+    time::Duration,
 };
 
+use anyhow::Context;
 use log::warn;
 use once_cell::sync::OnceCell;
 use raw::{ApiEntry, BlockState, RawRes, RawTaos};
 
 use taos_query::{
+    prelude::tokio::time,
     prelude::{Field, Precision, RawBlock, RawMeta, RawResult},
     util::Edition,
 };
@@ -518,17 +521,25 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         use taos_query::prelude::AsyncQueryable;
 
         // the latest version of 3.x should work
-        let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
-            taos,
-            "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+        let grant: RawResult<Option<(String, bool)>> = time::timeout(
+            Duration::from_secs(60),
+            AsyncQueryable::query_one(
+                taos,
+                "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+            ),
         )
-        .await;
+        .await
+        .context("Check cluster edition timeout")?;
 
         let edition = if let Ok(Some((edition, expired))) = grant {
             Edition::new(edition, expired)
         } else {
-            let grant: RawResult<Option<(String, (), String)>> =
-                AsyncQueryable::query_one(taos, "show grants").await;
+            let grant: RawResult<Option<(String, (), String)>> = time::timeout(
+                Duration::from_secs(60),
+                AsyncQueryable::query_one(taos, "show grants"),
+            )
+            .await
+            .context("Check legacy grants timeout")?;
 
             if let Ok(Some((edition, _, expired))) = grant {
                 Edition::new(
