@@ -584,7 +584,10 @@ impl WsTaos {
                     }
                 }
                 _ => {
-                    return Err(RawError::from_string("unexpected message"));
+                    return Err(RawError::from_string(format!(
+                        "unexpected message on login: {:?}",
+                        message
+                    )));
                 },
             }
         }
