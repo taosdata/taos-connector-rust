@@ -215,6 +215,28 @@ impl TimestampView {
         wtr.write_all(&self.data)?;
         Ok(nulls.len() + self.data.len())
     }
+
+    pub fn concat(&self, rhs: &View) -> View {
+        let nulls = NullBits::from_iter(
+            self.nulls
+                .iter()
+                .take(self.len())
+                .chain(rhs.nulls.iter().take(rhs.len())),
+        );
+        let data: Bytes = self
+            .data
+            .as_ref()
+            .iter()
+            .chain(rhs.data.as_ref().iter())
+            .copied()
+            .collect();
+
+        View {
+            nulls,
+            data,
+            precision: self.precision,
+        }
+    }
 }
 
 pub struct TimestampViewIter<'a> {

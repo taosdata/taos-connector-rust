@@ -5,6 +5,7 @@ use crate::common::{BorrowedValue, Field, Precision, Ty, Value};
 
 use bytes::Bytes;
 use itertools::Itertools;
+use rayon::prelude::*;
 
 use serde::Deserialize;
 use taos_error::Error;
@@ -792,6 +793,52 @@ impl RawBlock {
             columns: self.fields(),
         })
     }
+
+    /// Concatenate two blocks into one by rows.
+    ///
+    /// # Panics
+    ///
+    /// If the two blocks have different schemas.
+    pub fn concat(&self, rhs: &Self) -> Self {
+        debug_assert_eq!(self.ncols(), rhs.ncols());
+        #[cfg(debug_assertions)]
+        {
+            for (l, r) in self.fields().into_iter().zip(rhs.fields()) {
+                debug_assert_eq!(l, r);
+            }
+        }
+        let fields = self.field_names();
+        let views = rhs
+            .column_views()
+            .iter()
+            .zip(self.column_views())
+            .collect_vec()
+            .into_par_iter()
+            .map(|(r, l)| r.concat_strictly(l))
+            .collect::<Vec<_>>();
+        let mut block = Self::from_views(&views, self.precision());
+        block.with_field_names(fields);
+        if let Some(table_name) = self.table_name().or(rhs.table_name()) {
+            block.with_table_name(table_name);
+        }
+        block
+    }
+}
+
+impl std::ops::Add for RawBlock {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        self.concat(&rhs)
+    }
+}
+
+impl std::ops::Add for &RawBlock {
+    type Output = RawBlock;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        self.concat(rhs)
+    }
 }
 
 pub struct PrettyBlock<'a> {
@@ -1286,7 +1333,9 @@ fn test_v2_full() {
     );
     let bytes = views_to_raw_block(&block.columns);
     let raw2 = RawBlock::parse_from_raw_block(bytes, block.precision);
-    dbg!(raw2);
+
+    let added = &raw2 + &raw2;
+    dbg!(raw2, added);
 }
 
 #[test]

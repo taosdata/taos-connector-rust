@@ -25,6 +25,52 @@ impl IsColumnView for View {
     }
 }
 
+impl std::ops::Add for View {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        &self + &rhs
+    }
+}
+impl std::ops::Add for &View {
+    type Output = View;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let nulls = NullBits::from_iter(
+            self.nulls
+                .iter()
+                .take(self.len())
+                .chain(rhs.nulls.iter().take(rhs.len())),
+        );
+        let data: Bytes = self
+            .data
+            .as_ref()
+            .iter()
+            .chain(rhs.data.as_ref().iter())
+            .copied()
+            .collect();
+
+        View { nulls, data }
+    }
+}
+
+impl std::ops::Add<View> for &View {
+    type Output = View;
+
+    fn add(self, rhs: View) -> Self::Output {
+        self + &rhs
+    }
+}
+
+impl std::ops::Add<&View> for View {
+    type Output = View;
+
+    fn add(self, rhs: &View) -> Self::Output {
+        &self + rhs
+    }
+}
+
+
 impl UIntView {
     /// Rows
     pub fn len(&self) -> usize {
@@ -153,6 +199,25 @@ impl UIntView {
         wtr.write_all(nulls)?;
         wtr.write_all(&self.data)?;
         Ok(nulls.len() + self.data.len())
+    }
+
+
+    pub fn concat(&self, rhs: &View) -> View {
+        let nulls = NullBits::from_iter(
+            self.nulls
+                .iter()
+                .take(self.len())
+                .chain(rhs.nulls.iter().take(rhs.len())),
+        );
+        let data: Bytes = self
+            .data
+            .as_ref()
+            .iter()
+            .chain(rhs.data.as_ref().iter())
+            .copied()
+            .collect();
+
+        View { nulls, data }
     }
 }
 

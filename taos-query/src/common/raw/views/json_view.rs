@@ -8,6 +8,7 @@ use crate::{
 };
 
 use bytes::Bytes;
+use itertools::Itertools;
 
 #[derive(Debug, Clone)]
 pub struct JsonView {
@@ -22,8 +23,11 @@ impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::Json
     }
-    fn from_borrowed_value_iter<'b>(_: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        todo!()
+    fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
+        Self::from_iter::<String, _, _, _>(
+            iter.map(|v| v.to_str().map(|v| v.into_owned()))
+                .collect_vec(),
+        )
     }
 }
 
@@ -189,6 +193,10 @@ impl JsonView {
             offsets: Offsets(offsets_bytes.into()),
             data: data.into(),
         }
+    }
+
+    pub fn concat(&self, rhs: &Self) -> Self {
+        Self::from_iter::<&InlineJson, _, _, _>(self.iter().chain(rhs.iter()).collect_vec())
     }
 }
 
