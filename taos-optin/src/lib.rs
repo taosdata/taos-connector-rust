@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
-use log::warn;
+use tracing::warn;
 use once_cell::sync::OnceCell;
 use raw::{ApiEntry, BlockState, RawRes, RawTaos};
 
@@ -144,7 +144,7 @@ impl taos_query::Queryable for Taos {
     type ResultSet = ResultSet;
 
     fn query<T: AsRef<str>>(&self, sql: T) -> RawResult<Self::ResultSet> {
-        log::trace!("Query with SQL: {}", sql.as_ref());
+        tracing::trace!("Query with SQL: {}", sql.as_ref());
         self.raw.query(sql.as_ref()).map(ResultSet::new)
     }
 
@@ -153,7 +153,7 @@ impl taos_query::Queryable for Taos {
         _sql: T,
         _req_id: u64,
     ) -> RawResult<Self::ResultSet> {
-        log::trace!("Query with SQL: {}", _sql.as_ref());
+        tracing::trace!("Query with SQL: {}", _sql.as_ref());
         self.raw
             .query_with_req_id(_sql.as_ref(), _req_id)
             .map(ResultSet::new)
@@ -178,7 +178,7 @@ impl taos_query::AsyncQueryable for Taos {
     type AsyncResultSet = ResultSet;
 
     async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
-        log::trace!("Async query with SQL: {}", sql.as_ref());
+        tracing::trace!("Async query with SQL: {}", sql.as_ref());
 
         match self.raw.query_async(sql.as_ref()).await {
             Err(err) if err.code() == 0x2603 => {
@@ -324,10 +324,10 @@ impl taos_query::TBuilder for TaosBuilder {
         let mut dsn = dsn.into_dsn()?;
 
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
-            log::trace!("using library path: {path}");
+            tracing::trace!("using library path: {path}");
             ApiEntry::dlopen(path).unwrap()
         } else {
-            log::trace!("using default library of taos");
+            tracing::trace!("using default library of taos");
             ApiEntry::default()
         };
         let mut auth = Auth::default();
@@ -464,10 +464,10 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         let mut dsn = dsn.into_dsn()?;
 
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
-            log::trace!("using library path: {path}");
+            tracing::trace!("using library path: {path}");
             ApiEntry::dlopen(path).unwrap()
         } else {
-            log::trace!("using default library of taos");
+            tracing::trace!("using default library of taos");
             ApiEntry::default()
         };
         let mut auth = Auth::default();
@@ -964,7 +964,7 @@ mod tests {
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
@@ -1030,7 +1030,7 @@ mod tests {
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
@@ -1100,7 +1100,7 @@ mod tests {
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 

@@ -204,7 +204,7 @@ impl RawStmt {
     #[inline]
     pub fn prepare<'c>(&mut self, sql: impl IntoCStr<'c>) -> RawResult<()> {
         let sql = sql.into_c_str();
-        log::trace!("prepare stmt with sql: {sql:?}");
+        tracing::trace!("prepare stmt with sql: {sql:?}");
         self.ok(unsafe {
             (self.api.taos_stmt_prepare)(self.as_ptr(), sql.as_ptr(), sql.to_bytes().len() as _)
         })

@@ -756,7 +756,7 @@ impl RawTaos {
     #[inline]
     pub fn query<'a, S: IntoCStr<'a>>(&self, sql: S) -> Result<RawRes, RawError> {
         let sql = sql.into_c_str();
-        log::trace!("query with sql: {:?}", sql);
+        tracing::trace!("query with sql: {:?}", sql);
         let ptr = unsafe { (self.c.taos_query)(self.as_ptr(), sql.as_ptr()) };
         if ptr.is_null() {
             let code = self.c.errno(std::ptr::null_mut());
@@ -777,7 +777,7 @@ impl RawTaos {
         req_id: u64,
     ) -> Result<RawRes, RawError> {
         let sql = sql.into_c_str();
-        log::trace!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
+        tracing::trace!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
         if let Some(taos_query_with_req_id) = self.c.taos_query_with_reqid {
             Ok(RawRes {
                 c: self.c.clone(),
@@ -850,7 +850,7 @@ impl RawTaos {
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
                 return Err(taos_query::prelude::RawError::new(code, err));
             }
-            log::trace!("received error code 0x2603, try once");
+            tracing::trace!("received error code 0x2603, try once");
             retries -= 1;
             if retries == 0 {
                 let err = unsafe { taos_errstr(std::ptr::null_mut()) };
@@ -892,13 +892,13 @@ impl RawTaos {
     #[inline]
     pub fn put(&self, sml: &SmlData) -> Result<(), RawError> {
         let data = sml.data().join("\n").to_string();
-        log::trace!("sml insert with data: {}", data.clone());
+        tracing::trace!("sml insert with data: {}", data.clone());
         let length = data.clone().len() as i32;
         let mut total_rows: i32 = 0;
         let res;
 
         if sml.req_id().is_some() && sml.ttl().is_some() {
-            log::trace!(
+            tracing::trace!(
                 "sml insert with req_id: {} and ttl {}",
                 sml.req_id().unwrap(),
                 sml.ttl().unwrap()
@@ -922,7 +922,7 @@ impl RawTaos {
                 unimplemented!("does not support schemaless")
             }
         } else if sml.req_id().is_some() {
-            log::trace!("sml insert with req_id: {}", sml.req_id().unwrap());
+            tracing::trace!("sml insert with req_id: {}", sml.req_id().unwrap());
             if let Some(taos_schemaless_insert_raw_with_reqid) =
                 self.c.taos_schemaless_insert_raw_with_reqid
             {
@@ -941,7 +941,7 @@ impl RawTaos {
                 unimplemented!("does not support schemaless")
             }
         } else if sml.ttl().is_some() {
-            log::trace!("sml insert with ttl: {}", sml.ttl().unwrap());
+            tracing::trace!("sml insert with ttl: {}", sml.ttl().unwrap());
             if let Some(taos_schemaless_insert_raw_ttl) = self.c.taos_schemaless_insert_raw_ttl {
                 res = RawRes::from_ptr(self.c.clone(), unsafe {
                     taos_schemaless_insert_raw_ttl(
@@ -958,7 +958,7 @@ impl RawTaos {
                 unimplemented!("does not support schemaless")
             }
         } else {
-            log::trace!("sml insert without req_id and ttl");
+            tracing::trace!("sml insert without req_id and ttl");
             if let Some(taos_schemaless_insert_raw) = self.c.taos_schemaless_insert_raw {
                 res = RawRes::from_ptr(self.c.clone(), unsafe {
                     taos_schemaless_insert_raw(
@@ -975,14 +975,14 @@ impl RawTaos {
             }
         }
 
-        log::trace!("sml total rows: {}", total_rows);
+        tracing::trace!("sml total rows: {}", total_rows);
         match res {
             Ok(_) => {
-                log::trace!("sml insert success");
+                tracing::trace!("sml insert success");
                 Ok(())
             }
             Err(e) => {
-                log::trace!("sml insert failed: {:?}", e);
+                tracing::trace!("sml insert failed: {:?}", e);
                 Err(e)
             }
         }
@@ -990,7 +990,7 @@ impl RawTaos {
 
     #[inline]
     pub fn close(&mut self) {
-        log::trace!("call taos_close");
+        tracing::trace!("call taos_close");
         unsafe { (self.c.as_ref().taos_close)(self.as_ptr()) }
     }
 }
@@ -1226,7 +1226,7 @@ impl RawRes {
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
         if current.in_use {
-            log::trace!("call back in use");
+            tracing::trace!("call back in use");
             return Poll::Pending;
         }
 
@@ -1234,7 +1234,7 @@ impl RawRes {
             let item = res.map(|block| {
                 block.map(|(ptr, rows)| {
                     assert!(rows > 0);
-                    log::trace!("{:p} current block has {} rows", self.as_ptr(), rows);
+                    tracing::trace!("{:p} current block has {} rows", self.as_ptr(), rows);
                     // has next block.
                     let mut raw = unsafe {
                         RawBlock::parse_from_ptr_v2(

@@ -6,7 +6,6 @@ use std::{fmt::Debug, str::FromStr, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use itertools::Itertools;
-use log::warn;
 use taos_query::{
     common::{raw_data_t, RawMeta},
     prelude::{tokio::time, RawError, RawResult},
@@ -121,7 +120,7 @@ impl taos_query::TBuilder for TmqBuilder {
                     expired.trim() == "false" || expired.trim() == "unlimited",
                 )
             } else {
-                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                tracing::warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
                 Edition::new("unknown", true)
             }
         };
@@ -221,7 +220,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
                     expired.trim() == "false" || expired.trim() == "unlimited",
                 )
             } else {
-                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                tracing::warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
                 Edition::new("unknown", true)
             }
         };
@@ -515,7 +514,7 @@ impl AsAsyncConsumer for Consumer {
             for offset in offsets {
                 let vgroup_id = offset[0];
                 let offset = offset[1];
-                log::trace!(
+                tracing::trace!(
                     "topic {} seeking to offset {} for vgroup {}",
                     &topic_name,
                     offset,
@@ -538,7 +537,7 @@ impl AsAsyncConsumer for Consumer {
         )>,
     > {
         use taos_query::prelude::tokio;
-        log::trace!("Waiting for next message");
+        tracing::trace!("Waiting for next message");
         let res = match timeout {
             Timeout::Never | Timeout::None => {
                 let timeout = Duration::MAX;
@@ -590,11 +589,11 @@ impl AsAsyncConsumer for Consumer {
         };
         match res {
             Ok(res) => {
-                log::trace!("Got a new message");
+                tracing::trace!("Got a new message");
                 Ok(res)
             }
             Err(err) => {
-                log::warn!("Polling message error: {err:?}");
+                tracing::warn!("Polling message error: {err:?}");
                 Err(err)
             }
         }
@@ -611,7 +610,7 @@ impl AsAsyncConsumer for Consumer {
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.to_strings();
-        // log::info!("topics: {:?}", topics);
+        // tracing::info!("topics: {:?}", topics);
         let ret: Vec<(String, Vec<Assignment>)> = topics
             .into_iter()
             .map(|topic| {
@@ -747,7 +746,7 @@ mod tests {
     fn meta() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
         pretty_env_logger::formatted_timed_builder()
-            .filter_level(log::LevelFilter::Trace)
+            .filter_level(tracing::LevelFilter::Trace)
             .init();
 
         let taos = TaosBuilder::from_dsn("taos:///")?.build()?;
@@ -791,7 +790,7 @@ mod tests {
 
         consumer.subscribe([db])?;
 
-        log::trace!("polling start");
+        tracing::trace!("polling start");
 
         for message in consumer.iter_with_timeout(Timeout::from_secs(1)) {
             let (offset, msg) = message?;
@@ -854,7 +853,7 @@ mod tests {
     fn test_tmq_meta_sync() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(log::LevelFilter::Debug)
+        //     .filter_level(tracing::LevelFilter::Debug)
         //     .init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
@@ -992,18 +991,18 @@ mod tests {
                     let sql = dbg!(json.to_string());
                     if let Err(err) = taos.exec(sql) {
                         match err.code() {
-                            Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
-                            Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
-                            Code::COLUMN_EXISTS => log::trace!("column already exists"),
-                            Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
-                            Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
-                            Code::MODIFIED_ALREADY => log::trace!("modified already done"),
-                            Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
-                            Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
-                            Code::INVALID_ROW_BYTES => log::trace!("invalid row bytes"),
-                            Code::DUPLICATED_COLUMN_NAMES => log::trace!("duplicated column names"),
+                            Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                            Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                            Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                            Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                            Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                            Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                            Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                            Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
+                            Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
+                            Code::DUPLICATED_COLUMN_NAMES => tracing::trace!("duplicated column names"),
                             Code::NO_COLUMN_CAN_BE_DROPPED => {
-                                log::trace!("no column can be dropped")
+                                tracing::trace!("no column can be dropped")
                             }
                             _ => {
                                 panic!("{}", err);
@@ -1041,7 +1040,7 @@ mod tests {
         use taos_query::prelude::*;
 
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(log::LevelFilter::Debug)
+        //     .filter_level(tracing::LevelFilter::Debug)
         //     .init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
@@ -1151,20 +1150,20 @@ mod tests {
                         let sql = dbg!(json.to_string());
                         if let Err(err) = taos.exec(sql).await {
                             match err.code() {
-                                Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
-                                Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
-                                Code::COLUMN_EXISTS => log::trace!("column already exists"),
-                                Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
-                                Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
-                                Code::MODIFIED_ALREADY => log::trace!("modified already done"),
-                                Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
-                                Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
-                                Code::INVALID_ROW_BYTES => log::trace!("invalid row bytes"),
+                                Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                                Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                                Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                                Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
+                                Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
                                 Code::DUPLICATED_COLUMN_NAMES => {
-                                    log::trace!("duplicated column names")
+                                    tracing::trace!("duplicated column names")
                                 }
                                 Code::NO_COLUMN_CAN_BE_DROPPED => {
-                                    log::trace!("no column can be dropped")
+                                    tracing::trace!("no column can be dropped")
                                 }
                                 _ => {
                                     panic!("{}", err);
@@ -1200,13 +1199,13 @@ mod tests {
     #[tokio::test]
     async fn test_tmq() -> anyhow::Result<()> {
         // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(log::LevelFilter::Info)
+        //     .filter_level(tracing::LevelFilter::Info)
         //     .init();
 
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let mut dsn = "taos://localhost:6030".to_string();
-        log::info!("dsn: {}", dsn);
+        tracing::info!("dsn: {}", dsn);
 
         let taos = crate::TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec_many([
@@ -1299,7 +1298,7 @@ mod tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
                     topic,
                     database,
@@ -1312,7 +1311,7 @@ mod tests {
                 // 2. data
                 match message {
                     MessageSet::Meta(meta) => {
-                        log::debug!("Meta");
+                        tracing::debug!("Meta");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1324,15 +1323,15 @@ mod tests {
                         }
                     }
                     MessageSet::Data(data) => {
-                        log::debug!("Data");
+                        tracing::debug!("Data");
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
-                        log::debug!("MetaData");
+                        tracing::debug!("MetaData");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1344,8 +1343,8 @@ mod tests {
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                 }
@@ -1354,7 +1353,7 @@ mod tests {
         }
 
         let assignments = consumer.assignments().await.unwrap();
-        log::debug!("assignments: {:?}", assignments);
+        tracing::debug!("assignments: {:?}", assignments);
 
         // seek offset
         for topic_vec_assignment in assignments {
@@ -1365,7 +1364,7 @@ mod tests {
                 let current = assignment.current_offset();
                 let begin = assignment.begin();
                 let end = assignment.end();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
                     topic,
                     vgroup_id,
@@ -1375,20 +1374,20 @@ mod tests {
                 );
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
                 if res.is_err() {
-                    log::error!("seek offset error: {:?}", res);
+                    tracing::error!("seek offset error: {:?}", res);
                     let a = consumer.assignments().await.unwrap();
-                    log::error!("assignments: {:?}", a);
+                    tracing::error!("assignments: {:?}", a);
                     // panic!()
                 }
             }
 
             let topic_assignment = consumer.topic_assignment(topic).await;
-            log::debug!("topic assignment: {:?}", topic_assignment);
+            tracing::debug!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset
         let assignments = consumer.assignments().await.unwrap();
-        log::debug!("after seek offset assignments: {:?}", assignments);
+        tracing::debug!("after seek offset assignments: {:?}", assignments);
 
         consumer.unsubscribe().await;
 
@@ -1406,13 +1405,13 @@ mod tests {
     #[tokio::test]
     async fn test_tmq_offset() -> anyhow::Result<()> {
         // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(log::LevelFilter::Info)
+        //     .filter_level(tracing::LevelFilter::Info)
         //     .init();
 
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let mut dsn = "tmq://localhost:6030?offset=10:20,11:40".to_string();
-        log::info!("dsn: {}", dsn);
+        tracing::info!("dsn: {}", dsn);
 
         let taos = crate::TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec_many([
@@ -1506,7 +1505,7 @@ mod tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
                     topic,
                     database,
@@ -1519,7 +1518,7 @@ mod tests {
                 // 2. data
                 match message {
                     MessageSet::Meta(meta) => {
-                        log::debug!("Meta");
+                        tracing::debug!("Meta");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1531,15 +1530,15 @@ mod tests {
                         }
                     }
                     MessageSet::Data(data) => {
-                        log::debug!("Data");
+                        tracing::debug!("Data");
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
-                        log::debug!("MetaData");
+                        tracing::debug!("MetaData");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1551,8 +1550,8 @@ mod tests {
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                 }
@@ -1561,7 +1560,7 @@ mod tests {
         }
 
         let assignments = consumer.assignments().await.unwrap();
-        log::debug!("assignments: {:?}", assignments);
+        tracing::debug!("assignments: {:?}", assignments);
 
         // seek offset
         for topic_vec_assignment in assignments {
@@ -1572,7 +1571,7 @@ mod tests {
                 let current = assignment.current_offset();
                 let begin = assignment.begin();
                 let end = assignment.end();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
                     topic,
                     vgroup_id,
@@ -1582,20 +1581,20 @@ mod tests {
                 );
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
                 if res.is_err() {
-                    log::error!("seek offset error: {:?}", res);
+                    tracing::error!("seek offset error: {:?}", res);
                     let a = consumer.assignments().await.unwrap();
-                    log::error!("assignments: {:?}", a);
+                    tracing::error!("assignments: {:?}", a);
                     // panic!()
                 }
             }
 
             let topic_assignment = consumer.topic_assignment(topic).await;
-            log::debug!("topic assignment: {:?}", topic_assignment);
+            tracing::debug!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset
         let assignments = consumer.assignments().await.unwrap();
-        log::debug!("after seek offset assignments: {:?}", assignments);
+        tracing::debug!("after seek offset assignments: {:?}", assignments);
 
         consumer.unsubscribe().await;
 
