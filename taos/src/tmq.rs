@@ -113,6 +113,13 @@ impl taos_query::TBuilder for TmqBuilder {
     fn is_enterprise_edition(&self) -> RawResult<bool> {
         todo!()
     }
+
+    fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        match &self.0 {
+            TmqBuilderInner::Native(b) => Ok(b.get_edition()?),
+            TmqBuilderInner::Ws(b) => Ok(b.get_edition()?),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -178,6 +185,13 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         match &self.0 {
             TmqBuilderInner::Native(b) => Ok(b.is_enterprise_edition().await?),
             TmqBuilderInner::Ws(b) => Ok(b.is_enterprise_edition().await?),
+        }
+    }
+
+    async fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        match &self.0 {
+            TmqBuilderInner::Native(b) => Ok(b.get_edition().await?),
+            TmqBuilderInner::Ws(b) => Ok(b.get_edition().await?),
         }
     }
 }

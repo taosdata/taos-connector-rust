@@ -427,6 +427,33 @@ impl taos_query::TBuilder for TaosBuilder {
         };
         Ok(edition.is_enterprise_edition())
     }
+
+    fn get_edition(&self) -> RawResult<Edition> {
+        let taos = self.inner_connection()?;
+        use taos_query::prelude::sync::Queryable;
+        let grant: RawResult<Option<(String, bool)>> = Queryable::query_one(
+            taos,
+            "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+        );
+
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
+        } else {
+            let grant: RawResult<Option<(String, (), String)>> =
+                Queryable::query_one(taos, "show grants");
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition)
+    }
 }
 
 #[async_trait::async_trait]
@@ -552,6 +579,44 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             }
         };
         Ok(edition.is_enterprise_edition())
+    }
+
+    async fn get_edition(&self) -> RawResult<Edition> {
+        let taos = self.inner_connection()?;
+        use taos_query::prelude::AsyncQueryable;
+
+        // the latest version of 3.x should work
+        let grant: RawResult<Option<(String, bool)>> = time::timeout(
+            Duration::from_secs(60),
+            AsyncQueryable::query_one(
+                taos,
+                "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+            ),
+        )
+        .await
+        .context("Check cluster edition timeout")?;
+
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
+        } else {
+            let grant: RawResult<Option<(String, (), String)>> = time::timeout(
+                Duration::from_secs(60),
+                AsyncQueryable::query_one(taos, "show grants"),
+            )
+            .await
+            .context("Check legacy grants timeout")?;
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition)
     }
 }
 

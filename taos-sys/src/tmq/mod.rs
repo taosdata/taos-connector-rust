@@ -17,10 +17,11 @@ use taos_query::{
         AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
         IsOffset, MessageSet, Timeout, VGroupId,
     },
+    util::Edition,
     Dsn, IntoDsn, RawBlock, RawResult,
 };
 
-use crate::{conn::RawTaos, query::RawRes};
+use crate::{conn::RawTaos, query::RawRes, TaosBuilder};
 
 use taos_query::prelude::RawError;
 
@@ -112,6 +113,7 @@ impl RawRes {
 
 #[derive(Debug)]
 pub struct TmqBuilder {
+    builder: TaosBuilder,
     dsn: Dsn,
     conf: Conf,
     timeout: Timeout,
@@ -138,7 +140,12 @@ impl taos_query::TBuilder for TmqBuilder {
         } else {
             Timeout::from_millis(500)
         };
-        Ok(Self { dsn, conf, timeout })
+        Ok(Self {
+            builder: TaosBuilder::from_dsn(&dsn)?,
+            dsn,
+            conf,
+            timeout,
+        })
     }
 
     fn client_version() -> &'static str {
@@ -168,6 +175,33 @@ impl taos_query::TBuilder for TmqBuilder {
     fn server_version(&self) -> RawResult<&str> {
         unimplemented!()
     }
+
+    fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        let taos = self.builder.inner_connection()?;
+        use taos_query::prelude::sync::Queryable;
+        let grant: RawResult<Option<(String, bool)>> = Queryable::query_one(
+            taos,
+            "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+        );
+
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
+        } else {
+            let grant: RawResult<Option<(String, (), String)>> =
+                Queryable::query_one(taos, "show grants");
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                log::warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition)
+    }
 }
 
 #[async_trait::async_trait]
@@ -184,7 +218,12 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         } else {
             Timeout::from_millis(500)
         };
-        Ok(Self { dsn, conf, timeout })
+        Ok(Self {
+            builder: TaosBuilder::from_dsn(&dsn)?,
+            dsn,
+            conf,
+            timeout,
+        })
     }
 
     fn client_version() -> &'static str {
@@ -213,6 +252,33 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 
     async fn server_version(&self) -> RawResult<&str> {
         unimplemented!()
+    }
+
+    async fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        let taos = self.builder.inner_connection()?;
+        use taos_query::prelude::sync::Queryable;
+        let grant: RawResult<Option<(String, bool)>> = Queryable::query_one(
+            taos,
+            "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+        );
+
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
+        } else {
+            let grant: RawResult<Option<(String, (), String)>> =
+                Queryable::query_one(taos, "show grants");
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                log::warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition)
     }
 }
 
