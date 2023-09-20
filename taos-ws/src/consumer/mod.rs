@@ -125,6 +125,10 @@ impl TBuilder for TmqBuilder {
     fn is_enterprise_edition(&self) -> RawResult<bool> {
         todo!()
     }
+
+    fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        unimplemented!()
+    }
 }
 
 #[async_trait::async_trait]
@@ -157,6 +161,10 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 
     async fn is_enterprise_edition(&self) -> RawResult<bool> {
         todo!()
+    }
+
+    async fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        unimplemented!()
     }
 }
 #[derive(Debug)]

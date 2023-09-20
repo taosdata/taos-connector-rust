@@ -97,6 +97,10 @@ impl taos_query::TBuilder for TmqBuilder {
     fn server_version(&self) -> RawResult<&str> {
         self.builder.server_version().map_err(RawError::from_any)
     }
+
+    fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        unimplemented!()
+    }
 }
 
 #[async_trait::async_trait]
@@ -158,6 +162,10 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
             .server_version()
             .await
             .map_err(RawError::from_any)
+    }
+
+    async fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        unimplemented!()
     }
 }
 

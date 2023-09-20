@@ -40,6 +40,7 @@ pub use prelude::sync::{Fetchable, Queryable};
 pub use prelude::{AsyncFetchable, AsyncQueryable};
 
 pub use taos_error::Error as RawError;
+use util::Edition;
 pub type RawResult<T> = std::result::Result<T, RawError>;
 
 lazy_static::lazy_static! {
@@ -100,6 +101,20 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
     #[doc(hidden)]
     fn is_enterprise_edition(&self) -> RawResult<bool> {
         Ok(false)
+    }
+
+    /// Get the edition.
+    #[doc(hidden)]
+    fn get_edition(&self) -> RawResult<Edition>;
+
+    /// Assert the server is an enterprise edition.
+    #[doc(hidden)]
+    fn assert_enterprise_edition(&self) -> RawResult<()> {
+        if let Ok(edition) = self.get_edition() {
+            edition.assert_enterprise_edition()
+        } else {
+            Err(RawError::from_string("get edition failed"))
+        }
     }
 
     /// Check a connection is still alive.
@@ -187,6 +202,20 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
     #[doc(hidden)]
     async fn is_enterprise_edition(&self) -> RawResult<bool> {
         Ok(false)
+    }
+
+    /// Get the edition.
+    #[doc(hidden)]
+    async fn get_edition(&self) -> RawResult<Edition>;
+
+    /// Assert the server is an enterprise edition.
+    #[doc(hidden)]
+    async fn assert_enterprise_edition(&self) -> RawResult<()> {
+        if let Ok(edition) = self.get_edition().await {
+            edition.assert_enterprise_edition()
+        } else {
+            Err(RawError::from_string("get edition failed"))
+        }
     }
 
     /// Check a connection is still alive.
@@ -464,6 +493,10 @@ mod tests {
         }
 
         fn is_enterprise_edition(&self) -> RawResult<bool> {
+            todo!()
+        }
+
+        fn get_edition(&self) -> RawResult<Edition> {
             todo!()
         }
     }

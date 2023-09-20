@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use taos_query::util::Edition;
+
 use super::*;
 
 #[derive(Debug)]
@@ -123,6 +125,17 @@ impl taos_query::TBuilder for TaosBuilder {
             }
         }
     }
+
+    fn get_edition(&self) -> RawResult<Edition> {
+        match &self.0 {
+            TaosBuilderInner::Native(b) => {
+                Ok(<sys::TaosBuilder as taos_query::TBuilder>::get_edition(b)?)
+            }
+            TaosBuilderInner::Ws(b) => Ok(
+                <taos_ws::TaosBuilder as taos_query::TBuilder>::get_edition(b)?,
+            ),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -200,6 +213,15 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
                 <sys::TaosBuilder as taos_query::AsyncTBuilder>::is_enterprise_edition(b).await?,
             ),
             TaosBuilderInner::Ws(b) => Ok(b.is_enterprise_edition().await?),
+        }
+    }
+
+    async fn get_edition(&self) -> RawResult<Edition> {
+        match &self.0 {
+            TaosBuilderInner::Native(b) => {
+                Ok(<sys::TaosBuilder as taos_query::AsyncTBuilder>::get_edition(b).await?)
+            }
+            TaosBuilderInner::Ws(b) => Ok(b.get_edition().await?),
         }
     }
 }
@@ -514,6 +536,107 @@ mod tests {
             "is enterprise edition: {:?}",
             builder.is_enterprise_edition()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_edition() -> RawResult<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        println!("get enterprise edition: {:?}", builder.get_edition());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_edition_ws() -> RawResult<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        println!("get enterprise edition: {:?}", builder.get_edition());
+
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn test_get_edition_cloud() -> RawResult<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        println!("get enterprise edition: {:?}", builder.get_edition());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_assert_enterprise_edition() -> RawResult<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        let res = builder.assert_enterprise_edition();
+        println!("assert enterprise edition: {:?}", res);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_assert_enterprise_edition_ws() -> RawResult<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        let res = builder.assert_enterprise_edition();
+        println!("assert enterprise edition: {:?}", res);
+
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn test_assert_enterprise_edition_cloud() -> RawResult<()> {
+        use taos_query::prelude::sync::*;
+        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        let dsn = Dsn::from_str(&dsn)?;
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
+        assert!(builder.ready());
+
+        let mut conn = builder.build().unwrap();
+        assert!(builder.ping(&mut conn).is_ok());
+
+        let res = builder.assert_enterprise_edition();
+        println!("assert enterprise edition: {:?}", res);
 
         Ok(())
     }
@@ -1284,6 +1407,108 @@ mod async_tests {
         let client = TaosBuilder::from_dsn(dsn)?;
         log::debug!("client: {:?}", &client);
         log::debug!("is_enterprise: {:?}", client.is_enterprise_edition().await?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_edition() -> RawResult<()> {
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
+
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        log::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?;
+        log::debug!("client: {:?}", &client);
+        log::debug!("get enterprise edition: {:?}", client.get_edition().await);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_edition_ws() -> RawResult<()> {
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
+
+        let dsn =
+            std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
+        log::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?;
+        log::debug!("client: {:?}", &client);
+        log::debug!("get enterprise edition: {:?}", client.get_edition().await);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_get_edition_cloud() -> RawResult<()> {
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
+
+        let dsn =
+            std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        log::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?;
+        log::debug!("client: {:?}", &client);
+        log::debug!("get enterprise edition: {:?}", client.get_edition().await);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_assert_enterprise_edition() -> RawResult<()> {
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
+
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        log::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?;
+        log::debug!("client: {:?}", &client);
+
+        let res = client.assert_enterprise_edition().await;
+        log::debug!("assert enterprise edition: {:?}", res);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_assert_enterprise_edition_ws() -> RawResult<()> {
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
+
+        let dsn =
+            std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
+        log::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?;
+        log::debug!("client: {:?}", &client);
+
+        let res = client.assert_enterprise_edition().await;
+        log::debug!("assert enterprise edition: {:?}", res);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_assert_enterprise_edition_cloud() -> RawResult<()> {
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
+
+        let dsn =
+            std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        log::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?;
+        log::debug!("client: {:?}", &client);
+        
+        let res = client.assert_enterprise_edition().await;
+        log::debug!("assert enterprise edition: {:?}", res);
+
         Ok(())
     }
 }
