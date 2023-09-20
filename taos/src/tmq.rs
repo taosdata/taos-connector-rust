@@ -115,7 +115,10 @@ impl taos_query::TBuilder for TmqBuilder {
     }
 
     fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
-        unimplemented!()
+        match &self.0 {
+            TmqBuilderInner::Native(b) => Ok(b.get_edition()?),
+            TmqBuilderInner::Ws(b) => Ok(b.get_edition()?),
+        }
     }
 }
 
