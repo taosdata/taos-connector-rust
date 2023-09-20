@@ -497,7 +497,7 @@ mod tests {
         }
 
         fn get_edition(&self) -> RawResult<Edition> {
-            todo!()
+            Ok(Edition::new("community", false))
         }
     }
 
