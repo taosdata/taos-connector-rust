@@ -82,6 +82,10 @@ impl<'a> Future for QueryFuture<'a> {
                 res: *mut TAOS_RES,
                 code: c_int,
             ) {
+                if param.is_null() {
+                    tracing::error!("query callback param should not be null");
+                    return;
+                }
                 let param = Box::from_raw(param as *mut AsyncQueryParam);
                 if let Some(state) = param.state.upgrade() {
                     // let state = param.read();
@@ -95,7 +99,7 @@ impl<'a> Future for QueryFuture<'a> {
                     if (code & 0xffff) == 0x032C {
                         tracing::warn!("Received 0x032C (Object is creating) error, retry");
                         s.waiting = false;
-                        (s.api.taos_free_result)(res);
+                        s.api.free_result(res);
                         param.waker.wake();
                         return;
                     }
