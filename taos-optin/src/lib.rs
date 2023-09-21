@@ -509,8 +509,9 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         "dynamic"
     }
 
-    async fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
-        conn.raw.query("select 1")?;
+    async fn ping(&self, _: &mut Self::Target) -> RawResult<()> {
+        // use taos_query::prelude::AsyncQueryable;
+        // conn.query("select 1").await?;
         Ok(())
     }
 
