@@ -257,6 +257,7 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
         deadpool::managed::PoolConfig {
             max_size: 500,
             timeouts: deadpool::managed::Timeouts::default(),
+            queue_mode: deadpool::managed::QueueMode::Fifo,
         }
     }
 
@@ -361,6 +362,7 @@ impl<T: AsyncTBuilder> deadpool::managed::Manager for Manager<T> {
     async fn recycle(
         &self,
         conn: &mut Self::Type,
+        _: &deadpool::managed::Metrics
     ) -> deadpool::managed::RecycleResult<Self::Error> {
         self.ping(conn).await.map_err(RawError::from_any)?;
         Ok(())
