@@ -27,7 +27,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 serde_repr = "0.1.8"
 serde_with = "3.0.0"
-taos-query = { path = "../taos-query", version = "0.10.12" }
+taos-query = { path = "../taos-query", version = "0.10.13" }
 thiserror = "1.0.47"
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "io-util", "time"] }
 tokio-tungstenite = { version = "0.18.0" }
