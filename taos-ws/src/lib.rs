@@ -370,19 +370,14 @@ impl TaosBuilder {
     pub(crate) fn to_query_url(&self) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/rest/ws?token={}", self.scheme, self.addr, token)
+                format!("{}://{}/ws?token={}", self.scheme, self.addr, token)
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme, self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme, self.addr),
         }
     }
 
     pub(crate) fn to_stmt_url(&self) -> String {
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!("{}://{}/rest/stmt?token={}", self.scheme, self.addr, token)
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/stmt", self.scheme, self.addr),
-        }
+        TaosBuilder::to_query_url(self)
     }
 
     pub(crate) fn to_tmq_url(&self) -> String {
@@ -395,15 +390,7 @@ impl TaosBuilder {
     }
 
     pub(crate) fn to_schemaless_url(&self) -> String {
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!(
-                    "{}://{}/rest/schemaless?token={}",
-                    self.scheme, self.addr, token
-                )
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/schemaless", self.scheme, self.addr),
-        }
+        TaosBuilder::to_query_url(self)
     }
 
     pub(crate) fn to_conn_request(&self) -> WsConnReq {
