@@ -745,9 +745,7 @@ mod tests {
     #[test]
     fn meta() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        pretty_env_logger::formatted_timed_builder()
-            .filter_level(tracing::LevelFilter::Trace)
-            .init();
+        let _ = pretty_env_logger::formatted_timed_builder().try_init();
 
         let taos = TaosBuilder::from_dsn("taos:///")?.build()?;
         let db = "tmq_meta";
@@ -1000,7 +998,9 @@ mod tests {
                             Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
                             Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
                             Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
-                            Code::DUPLICATED_COLUMN_NAMES => tracing::trace!("duplicated column names"),
+                            Code::DUPLICATED_COLUMN_NAMES => {
+                                tracing::trace!("duplicated column names")
+                            }
                             Code::NO_COLUMN_CAN_BE_DROPPED => {
                                 tracing::trace!("no column can be dropped")
                             }

@@ -532,7 +532,7 @@ impl WsTaos {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = Some(1024 * 1024 * 16);
 
-        let (ws, _) = connect_async_with_config(info.to_query_url(), Some(config))
+        let (ws, _) = connect_async_with_config(info.to_query_url(), Some(config), false)
             .await
             .map_err(|err| {
                 let err_string = err.to_string();
