@@ -65,7 +65,8 @@ impl Default for MessageType {
 pub struct TmqInit {
     pub group_id: String,
     pub client_id: Option<String>,
-    pub offset_reset: Option<String>,
+    #[serde(rename = "offset_rest")]
+    pub offset_reset: Option<String>, // `offset_reset` is `offset_rest` in taosadapter
     pub snapshot_enable: String,
     pub with_table_name: String,
     pub auto_commit: String,
