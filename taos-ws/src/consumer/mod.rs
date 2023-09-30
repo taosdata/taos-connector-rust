@@ -708,8 +708,7 @@ impl TmqBuilder {
                 } else {
                     s.to_string()
                 }
-            })
-            .unwrap_or("false".to_string());
+            });
         let auto_commit_interval_ms = dsn.params.get("auto.commit.interval.ms").and_then(|s| {
             if s.is_empty() {
                 None
@@ -726,8 +725,7 @@ impl TmqBuilder {
                 } else {
                     Some(s.to_string())
                 }
-            })
-            .unwrap_or("true".to_string());
+            });
         let with_table_name = dsn
             .params
             .get("with.table.name")
@@ -737,8 +735,7 @@ impl TmqBuilder {
                 } else {
                     Some(s.to_string())
                 }
-            })
-            .unwrap_or("true".to_string());
+            });
         let timeout = if let Some(timeout) = dsn.get("timeout") {
             Timeout::from_str(timeout).map_err(RawError::from_any)?
         } else {

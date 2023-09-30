@@ -65,11 +65,15 @@ impl Default for MessageType {
 pub struct TmqInit {
     pub group_id: String,
     pub client_id: Option<String>,
-    #[serde(rename = "offset_rest")]
-    pub offset_reset: Option<String>, // `offset_reset` is `offset_rest` in taosadapter
-    pub snapshot_enable: String,
-    pub with_table_name: String,
-    pub auto_commit: String,
+    // `offset_reset` is `offset_rest` in taosadapter
+    #[serde(rename = "offset_rest", skip_serializing_if = "Option::is_none")]
+    pub offset_reset: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_enable: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub with_table_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_commit: Option<String>,
     pub auto_commit_interval_ms: Option<String>,
     pub offset_seek: Option<String>,
 }
@@ -110,6 +114,7 @@ pub enum TmqSend {
 }
 
 unsafe impl Send for TmqSend {}
+
 unsafe impl Sync for TmqSend {}
 
 impl TmqSend {
