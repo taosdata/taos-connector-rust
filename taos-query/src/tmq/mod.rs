@@ -147,11 +147,11 @@ where
     T: IsAsyncMeta + SyncOnAsync,
 {
     fn as_raw_meta(&self) -> RawResult<RawMeta> {
-        futures::executor::block_on(T::as_raw_meta(self))
+        crate::block_in_place_or_global(T::as_raw_meta(self))
     }
 
     fn as_json_meta(&self) -> RawResult<JsonMeta> {
-        futures::executor::block_on(T::as_json_meta(self))
+        crate::block_in_place_or_global(T::as_json_meta(self))
     }
 }
 
@@ -410,26 +410,26 @@ where
         &mut self,
         topics: I,
     ) -> RawResult<()> {
-        futures::executor::block_on(<C as AsAsyncConsumer>::subscribe(self, topics))
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::subscribe(self, topics))
     }
 
     fn recv_timeout(
         &self,
         timeout: Timeout,
     ) -> RawResult<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>> {
-        futures::executor::block_on(<C as AsAsyncConsumer>::recv_timeout(self, timeout))
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::recv_timeout(self, timeout))
     }
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()> {
-        futures::executor::block_on(<C as AsAsyncConsumer>::commit(self, offset))
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit(self, offset))
     }
 
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
-        futures::executor::block_on(<C as AsAsyncConsumer>::assignments(self))
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::assignments(self))
     }
 
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
-        futures::executor::block_on(<C as AsAsyncConsumer>::offset_seek(
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::offset_seek(
             self, topic, vg_id, offset,
         ))
     }

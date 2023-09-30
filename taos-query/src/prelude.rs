@@ -641,7 +641,7 @@ mod r#async {
 
         /// Sync version of `exec`.
         fn exec_sync<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<usize> {
-            futures::executor::block_on(self.exec(sql))
+            crate::block_in_place_or_global(self.exec(sql))
         }
 
         /// Sync version of `query`.
@@ -649,7 +649,7 @@ mod r#async {
             &self,
             sql: T,
         ) -> RawResult<Self::AsyncResultSet> {
-            futures::executor::block_on(self.query(sql))
+            crate::block_in_place_or_global(self.query(sql))
         }
     }
 

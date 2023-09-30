@@ -23,7 +23,7 @@ pub struct Taos {
 
 impl Taos {
     pub fn version(&self) -> &str {
-        futures::executor::block_on(self.client()).version()
+        crate::block_in_place_or_global(self.client()).version()
     }
 
     async fn client(&self) -> &WsTaos {
@@ -122,15 +122,15 @@ impl taos_query::Queryable for Taos {
     }
 
     fn write_raw_meta(&self, meta: &RawMeta) -> RawResult<()> {
-        futures::executor::block_on(<Self as AsyncQueryable>::write_raw_meta(self, meta))
+        crate::block_in_place_or_global(<Self as AsyncQueryable>::write_raw_meta(self, meta))
     }
 
     fn write_raw_block(&self, block: &taos_query::RawBlock) -> RawResult<()> {
-        futures::executor::block_on(<Self as AsyncQueryable>::write_raw_block(self, block))
+        crate::block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))
     }
 
     fn put(&self, sml_data: &SmlData) -> RawResult<()> {
-        futures::executor::block_on(<Self as AsyncQueryable>::put(self, sml_data))
+        crate::block_in_place_or_global(<Self as AsyncQueryable>::put(self, sml_data))
     }
 }
 
