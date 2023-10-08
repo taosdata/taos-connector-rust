@@ -852,105 +852,90 @@ impl TmqBuilder {
                             Ok(message) => match message {
                                 Message::Text(text) => {
                                     log::trace!("json response: {}", text);
-                                    let result: Result<TmqRecv, serde_json::Error> = serde_json::from_str(&text);
-                                    match result {
-                                        Ok(v) => {
-                                            let (req_id, recv, ok) = v.ok();
-                                            match &recv {
-                                                TmqRecvData::Subscribe => {
-                                                    log::trace!("subscribe with: {:?}", req_id);
+                                    let v: TmqRecv = serde_json::from_str(&text).expect(&text);
+                                    let (req_id, recv, ok) = v.ok();
+                                    match &recv {
+                                        TmqRecvData::Subscribe => {
+                                            log::trace!("subscribe with: {:?}", req_id);
 
-                                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                                    {
-                                                        let _ = sender.send(ok.map(|_|recv));
-                                                    }  else {
-                                                        log::warn!("subscribe message received but no receiver alive");
-                                                    }
-                                                },
-                                                TmqRecvData::Unsubscribe => {
-                                                    log::trace!("unsubscribe with: {:?} successed", req_id);
-                                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                                    {
-                                                        let _ = sender.send(ok.map(|_|recv));
-                                                    }  else {
-                                                        log::warn!("unsubscribe message received but no receiver alive");
-                                                    }
-                                                },
-                                                TmqRecvData::Poll(_) => {
-                                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                                    {
-                                                        let _ = sender.send(ok.map(|_|recv));
-                                                    }  else {
-                                                        log::warn!("poll message received but no receiver alive");
-                                                    }
-                                                },
-                                                TmqRecvData::FetchJsonMeta { data }=> {
-                                                    log::trace!("fetch json meta data: {:?}", data);
-                                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                                    {
-                                                        let _ = sender.send(ok.map(|_|recv));
-                                                    }  else {
-                                                        log::warn!("poll message received but no receiver alive");
-                                                    }
-                                                }
-                                                TmqRecvData::FetchRaw { meta: _ }=> {
-                                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                                    {
-                                                        let _ = sender.send(ok.map(|_|recv));
-                                                    }  else {
-                                                        log::warn!("poll message received but no receiver alive");
-                                                    }
-                                                }
-                                                TmqRecvData::Commit=> {
-                                                    log::trace!("commit done: {:?}", recv);
-                                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                                    {
-                                                        let _ = sender.send(ok.map(|_|recv));
-                                                    }  else {
-                                                        log::warn!("poll message received but no receiver alive");
-                                                    }
-                                                }
-                                                TmqRecvData::Fetch(fetch)=> {
-                                                    log::trace!("fetch done: {:?}", fetch);
-                                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                                    {
-                                                        let _ = sender.send(ok.map(|_|recv));
-                                                    }  else {
-                                                        log::warn!("poll message received but no receiver alive");
-                                                    }
-                                                }
-                                                TmqRecvData::Assignment(assignment)=> {
-                                                    log::trace!("assignment done: {:?}", assignment);
-                                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                                    {
-                                                        let _ = sender.send(ok.map(|_|recv));
-                                                    }  else {
-                                                        log::warn!("assignment message received but no receiver alive");
-                                                    }
-                                                }
-                                                TmqRecvData::Seek { timing }=> {
-                                                    log::trace!("seek done: req_id {:?} timing {:?}", &req_id, timing);
-                                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                                    {
-                                                        let _ = sender.send(ok.map(|_|recv));
-                                                    }  else {
-                                                        log::warn!("seek message received but no receiver alive");
-                                                    }
-                                                }
-                                                _ => unreachable!("unknown tmq response"),
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("subscribe message received but no receiver alive");
+                                            }
+                                        },
+                                        TmqRecvData::Unsubscribe => {
+                                            log::trace!("unsubscribe with: {:?} successed", req_id);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("unsubscribe message received but no receiver alive");
+                                            }
+                                        },
+                                        TmqRecvData::Poll(_) => {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("poll message received but no receiver alive");
+                                            }
+                                        },
+                                        TmqRecvData::FetchJsonMeta { data }=> {
+                                            log::trace!("fetch json meta data: {:?}", data);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("poll message received but no receiver alive");
                                             }
                                         }
-                                        Err(err) => {
-                                            let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                            for k in keys {
-                                                if let Some((_, sender)) = queries_sender.remove(&k) {
-                                                    let _ = sender.send(Err(RawError::new(
-                                                        WS_ERROR_NO::WEBSOCKET_ERROR.as_code(),
-                                                        format!("WebSocket deserialization error: {err}")
-                                                    )));
-                                                }
+                                        TmqRecvData::FetchRaw { meta: _ }=> {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("poll message received but no receiver alive");
                                             }
                                         }
+                                        TmqRecvData::Commit=> {
+                                            log::trace!("commit done: {:?}", recv);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("poll message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::Fetch(fetch)=> {
+                                            log::trace!("fetch done: {:?}", fetch);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("poll message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::Assignment(assignment)=> {
+                                            log::trace!("assignment done: {:?}", assignment);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("assignment message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::Seek { timing }=> {
+                                            log::trace!("seek done: req_id {:?} timing {:?}", &req_id, timing);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("seek message received but no receiver alive");
+                                            }
+                                        }
+                                        _ => unreachable!("unknown tmq response"),
                                     }
                                 }
                                 Message::Binary(data) => {
