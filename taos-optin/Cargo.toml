@@ -32,7 +32,7 @@ serde_repr = { version = "0.1.7", optional = true }
 tracing = { version = "0.1", features = ["log"] }
 # taos-error = { version = "0.2.0", path = "../taos-error" }
 taos-macros = { version = "0.*", path = "../taos-macros" }
-taos-query = { version = "0.10.15", path = "../taos-query" }
+taos-query = { version = "0.10.16", path = "../taos-query" }
 
 # time_this = "0.2.4"
 fun_time = "0.2.1"
