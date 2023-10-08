@@ -154,7 +154,8 @@ pub struct TmqPoll {
     pub message_type: MessageType,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default)]
 pub struct TmqFetch {
     pub completed: bool,
     pub table_name: Option<String>,
