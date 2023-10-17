@@ -5,6 +5,7 @@ use derive_more::Deref;
 pub use field::*;
 pub use taos_query::common::{Precision, Ty};
 
+use crate::stmt::bind::ToBind;
 use taos_query::common::{itypes::*, ColumnView, Value};
 
 #[repr(C)]
@@ -168,12 +169,12 @@ impl BindFrom for TaosBindV3 {
             buffer_length: 0,
             buffer: std::ptr::null_mut(),
             length: std::ptr::null_mut(),
-            is_null: std::ptr::null_mut(),
+            is_null: box_into_raw(1) as _,
             num: 1 as _,
         })
     }
 
-    fn from_primitive<T: IsValue + Clone>(v: &T) -> Self {
+    fn from_primitive<T: ToBind>(v: &T) -> Self {
         let mut param = TaosMultiBind::new(T::TY);
         param.buffer_length = v.fixed_length();
         param.buffer = box_into_raw(v.clone()) as *const T as _;
@@ -314,7 +315,7 @@ impl TaosBindV2 {
 
 pub trait BindFrom: Sized {
     fn null() -> Self;
-    fn from_primitive<T: IsValue + Clone>(v: &T) -> Self;
+    fn from_primitive<T: ToBind>(v: &T) -> Self;
     fn from_timestamp(v: i64) -> Self;
     fn from_varchar(v: &str) -> Self;
     fn from_nchar(v: &str) -> Self;
