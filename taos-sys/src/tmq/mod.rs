@@ -734,7 +734,7 @@ mod tests {
         taos.query(format!("use {db}2"))?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false",
+            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build()?;
 
@@ -820,51 +820,36 @@ mod tests {
         let db = null();
         let port = 0;
         let taos = RawTaos::connect(host, user, pass, db, port)?;
-        let taos2 = RawTaos::connect(host, user, pass, db, port)?;
         let db = "tmq_meta";
         taos.query(format!("drop topic if exists {db}"))?;
         taos.query(format!("drop database if exists {db}"))?;
         taos.query(format!(
             "create database {db} keep 36500 wal_retention_period 3600"
         ))?;
-        let db_clone = db.to_string();
+        taos.query(format!("use {db}"))?;
+        taos.query(
+            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
+            "create stable stb1(ts timestamp, v int) tags(jt int, t1 float)",
+        )?;
+        taos.query(
+            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
+            "create table tb1 using stb1 tags(1, 1.1)",
+        )?;
+        taos.query(
+            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
+            "create table cb1 (ts timestamp, v int, c2 bool, c3 varchar(10))",
+        )?;
+        taos.query(
+            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
+            "alter table cb1 add column c4 nchar(10)",
+        )?;
+        taos.query(
+            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
+            "alter table cb1 drop column c4",
+        )?;
 
-        let _ = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(1));
-            taos2.query(format!("use {db_clone}")).unwrap();
-            taos2
-                .query("create stable stb1(ts timestamp, v int) tags(jt int, t1 float)")
-                .unwrap();
-            taos2
-                .query(
-                    // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
-                    "create table tb1 using stb1 tags(1, 1.1)",
-                )
-                .unwrap();
-            taos2
-                .query(
-                    // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
-                    "create table cb1 (ts timestamp, v int, c2 bool, c3 varchar(10))",
-                )
-                .unwrap();
-            taos2
-                .query(
-                    // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
-                    "alter table cb1 add column c4 nchar(10)",
-                )
-                .unwrap();
-            taos2
-                .query(
-                    // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
-                    "alter table cb1 drop column c4",
-                )
-                .unwrap();
-
-            taos2
-                .query("alter table cb1 modify column c3 varchar(100)")
-                .unwrap();
-            taos2.query("alter table cb1 rename column c2 n2").unwrap();
-        });
+        taos.query("alter table cb1 modify column c3 varchar(100)")?;
+        taos.query("alter table cb1 rename column c2 n2")?;
 
         taos.query(format!("create topic {db} with meta as database {db}"))?;
 
@@ -872,7 +857,7 @@ mod tests {
         taos.query(format!("create database {db}2 wal_retention_period 3600"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5")?;
+        let builder = TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
