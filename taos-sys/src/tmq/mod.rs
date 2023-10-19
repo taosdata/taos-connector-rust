@@ -1147,7 +1147,7 @@ mod tests {
             .await?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false",
+            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_ts2035"]).await?;
@@ -1244,7 +1244,7 @@ mod tests {
             .await?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false",
+            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_delete_meta"]).await?;
