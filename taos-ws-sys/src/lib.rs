@@ -19,6 +19,8 @@ use taos_ws::{
     TaosBuilder,
 };
 
+use cargo_metadata::MetadataCommand;
+
 pub use taos_ws::query::asyn::WS_ERROR_NO;
 
 pub mod stmt;
@@ -34,6 +36,10 @@ pub type WS_TAOS = c_void;
 /// Opaque type definition for websocket result set.
 #[allow(non_camel_case_types)]
 pub type WS_RES = c_void;
+
+/// Opaque type definition for websocket row.
+#[allow(non_camel_case_types)]
+pub type WS_ROW = *const *const c_void;
 
 #[derive(Debug)]
 pub struct WsError {
@@ -319,11 +325,20 @@ impl From<&Field> for WS_FIELD {
 }
 
 #[derive(Debug)]
+pub struct ROW {
+    /// Data is used to hold the row data
+    data: Vec<*const c_void>,
+    /// current row to get
+    current_row: usize,
+}
+
+#[derive(Debug)]
 struct WsResultSet {
     rs: ResultSet,
     block: Option<Block>,
     fields: Vec<WS_FIELD>,
     fields_v2: Vec<WS_FIELD_V2>,
+    row: ROW,
 }
 
 // impl Deref for WsResultSet {
@@ -338,6 +353,10 @@ impl WsResultSet {
             block: None,
             fields: Vec::new(),
             fields_v2: Vec::new(),
+            row: ROW {
+                data: Vec::new(),
+                current_row: 0,
+            },
         }
     }
 
@@ -388,6 +407,35 @@ impl WsResultSet {
             *rows = 0;
         }
         log::trace!("fetch block with ptr {ptr:p} with rows {}", *rows);
+        Ok(())
+    }
+
+    unsafe fn fetch_row(&mut self, ptr: *mut *const *const c_void) -> Result<(), Error> {
+        log::trace!("fetch row with ptr {ptr:p}");
+
+        *ptr = std::ptr::null();
+
+        if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
+            self.block = self.rs.fetch_raw_block()?;
+            self.row.current_row = 0;
+        }
+
+        if let Some(block) = self.block.as_ref() {
+            if block.nrows() == 0 {
+                return Ok(());
+            }
+
+            let mut c_void_vec: Vec<*const c_void> = vec![];
+            for col in 0..block.ncols() {
+                let tuple = block.get_raw_value_unchecked(self.row.current_row, col);
+                c_void_vec.push(tuple.2);
+            }
+
+            self.row.data = c_void_vec;
+            *ptr = self.row.data.as_ptr() as _;
+            self.row.current_row = self.row.current_row + 1;
+        }
+        log::trace!("fetch row with ptr {ptr:p}");
         Ok(())
     }
 
@@ -664,6 +712,55 @@ pub unsafe extern "C" fn ws_affected_rows64(rs: *const WS_RES) -> i64 {
 }
 
 #[no_mangle]
+/// use db.
+pub unsafe extern "C" fn ws_select_db(taos: *mut WS_TAOS, db: *const c_char) -> i32 {
+    log::trace!("db {:?}", CStr::from_ptr(db));
+
+    let client = (taos as *mut Taos).as_mut();
+    let client = match client {
+        Some(t) => t,
+        None => return Code::FAILED.into(),
+    };
+
+    let db = CStr::from_ptr(db as _).to_str();
+    let db = match db {
+        Ok(t) => t,
+        Err(_) => return Code::FAILED.into(),
+    };
+
+    let sql = format!("use {db}");
+    let rs = client.query(sql);
+
+    match rs {
+        Err(e) => e.code().into(),
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+/// If the query is update query or not
+pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
+    static mut VERSION_INFO: [u8; 128] = [0; 128];
+
+    let metadata = match MetadataCommand::new().no_deps().exec().ok() {
+        Some(m) => m,
+        _ => return std::ptr::null(),
+    };
+    let package = match metadata
+        .packages
+        .into_iter()
+        .find(|p| p.name == "taos-ws-sys")
+    {
+        Some(x) => x,
+        _ => return std::ptr::null(),
+    };
+
+    let version = package.version.to_string();
+    std::ptr::copy_nonoverlapping(version.as_ptr(), VERSION_INFO.as_mut_ptr(), version.len());
+    return VERSION_INFO.as_ptr() as *const c_char;
+}
+
+#[no_mangle]
 /// Returns number of fields in current result set.
 pub unsafe extern "C" fn ws_field_count(rs: *const WS_RES) -> i32 {
     match (rs as *mut WsMaybeError<WsResultSet>)
@@ -676,7 +773,7 @@ pub unsafe extern "C" fn ws_field_count(rs: *const WS_RES) -> i32 {
 }
 
 #[no_mangle]
-/// If the query is update query or not
+/// If the element is update query or not
 pub unsafe extern "C" fn ws_is_update_query(rs: *const WS_RES) -> bool {
     match (rs as *mut WsMaybeError<WsResultSet>)
         .as_ref()
@@ -739,6 +836,48 @@ pub unsafe extern "C" fn ws_fetch_block(
             None => handle_error("WS_RES data is null", rows),
         },
         _ => handle_error("WS_RES is null", rows),
+    }
+}
+
+#[no_mangle]
+/// If the query is update query or not
+pub unsafe extern "C" fn ws_is_null(rs: *const WS_RES, row: usize, col: usize) -> bool {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_ref()
+        .and_then(|s| s.safe_deref())
+    {
+        Some(rs) => match &(rs.block) {
+            Some(block) => block.is_null(row, col),
+            _ => true,
+        },
+        _ => true,
+    }
+}
+
+#[no_mangle]
+/// Works like taos_fetch_row
+pub unsafe extern "C" fn ws_fetch_row(rs: *mut WS_RES, row: *mut WS_ROW) -> i32 {
+    unsafe fn handle_error(error_message: &str) -> i32 {
+        C_ERRNO = Code::FAILED;
+        let dst = C_ERROR_CONTAINER.as_mut_ptr();
+        std::ptr::copy_nonoverlapping(error_message.as_ptr(), dst, error_message.len());
+        Code::FAILED.into()
+    }
+
+    *row = std::ptr::null();
+    match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
+        Some(rs) => match rs.safe_deref_mut() {
+            Some(s) => match s.fetch_row(row) {
+                Ok(()) => 0,
+                Err(err) => {
+                    let code = err.errno();
+                    rs.error = Some(err.into());
+                    code.into()
+                }
+            },
+            None => handle_error("WS_RES data is null"),
+        },
+        _ => handle_error("WS_RES is null"),
     }
 }
 
@@ -854,6 +993,14 @@ mod tests {
             std::mem::size_of::<WsMaybeError<ResultSet>>(),
             std::mem::size_of::<WsMaybeError<()>>()
         );
+    }
+
+    #[test]
+    fn test_client_info() {
+        unsafe {
+            let pclient_info = ws_get_client_info();
+            dbg!(CStr::from_ptr(pclient_info));
+        }
     }
 
     #[test]
@@ -995,7 +1142,7 @@ mod tests {
             let version = ws_get_server_info(taos);
             dbg!(CStr::from_ptr(version as _));
 
-            let sql = b"select groupid from test.d0 limit 10\0" as *const u8 as _;
+            let sql = b"select ts, phase from test.d0 limit 10\0" as *const u8 as _;
             let rs = ws_query(taos, sql);
 
             let code = ws_errno(rs);
@@ -1029,6 +1176,13 @@ mod tests {
             let code = ws_fetch_block(rs, &mut block as *mut *const c_void, &mut rows as _);
             assert_eq!(code, 0);
 
+            let is_null = ws_is_null(rs, 0, 0);
+            assert_eq!(is_null, false);
+            let is_null = ws_is_null(rs, 0, cols as usize);
+            assert_eq!(is_null, true);
+            let is_null = ws_is_null(rs, 0, 1);
+            assert_eq!(is_null, true);
+
             dbg!(rows);
             for row in 0..rows {
                 for col in 0..cols {
@@ -1048,8 +1202,8 @@ mod tests {
                         Ty::SmallInt => println!("{}", (v as *const i16).read_unaligned()),
                         Ty::Int => println!("{}", (v as *const i32).read_unaligned()),
                         Ty::BigInt => println!("{}", (v as *const i64).read_unaligned()),
-                        Ty::Float => println!("{}", *(v as *const f32)),
-                        Ty::Double => println!("{}", *(v as *const f64)),
+                        Ty::Float => println!("{}", (v as *const f32).read_unaligned()),
+                        Ty::Double => println!("{}", (v as *const f64).read_unaligned()),
                         Ty::VarChar => println!(
                             "{}",
                             std::str::from_utf8(std::slice::from_raw_parts(
@@ -1058,7 +1212,7 @@ mod tests {
                             ))
                             .unwrap()
                         ),
-                        Ty::Timestamp => println!("{}", *(v as *const i64)),
+                        Ty::Timestamp => println!("{}", (v as *const i64).read_unaligned()),
                         Ty::NChar => println!(
                             "{}",
                             std::str::from_utf8(std::slice::from_raw_parts(
@@ -1086,6 +1240,124 @@ mod tests {
                         _ => todo!(),
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn simple_fetch_row_test() {
+        init_env();
+
+        unsafe {
+            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            let version = ws_get_server_info(taos);
+            dbg!(CStr::from_ptr(version as _));
+
+            let sql = b"select ts, groupid, current, location  from test.meters limit 10\0"
+                as *const u8 as _;
+
+            let rs = ws_query(taos, sql);
+
+            let code = ws_errno(rs);
+            let errstr = CStr::from_ptr(ws_errstr(rs));
+
+            if code != 0 {
+                dbg!(errstr);
+                ws_free_result(rs);
+                ws_close(taos);
+                return;
+            }
+            assert_eq!(code, 0, "{errstr:?}");
+
+            let cols = ws_field_count(rs);
+            dbg!(cols);
+            // assert!(num_of_fields == 21);
+            let fields = ws_fetch_fields(rs);
+            let fields = std::slice::from_raw_parts(fields, cols as usize);
+
+            for field in fields {
+                dbg!(field);
+            }
+
+            let mut row_data: WS_ROW = std::ptr::null();
+
+            let mut line_num = 1;
+
+            loop {
+                let code = ws_fetch_row(rs, &mut row_data as *mut WS_ROW);
+                assert_eq!(code, 0);
+                if row_data == std::ptr::null() {
+                    break;
+                }
+                let row_data = std::slice::from_raw_parts(row_data, cols as usize);
+
+                for col in 0..cols {
+                    let col_type = fields[col as usize].r#type;
+                    let ty: Ty = Ty::from(col_type);
+
+                    let v = row_data[col as usize] as *const c_void;
+                    let len = 0u32;
+                    if v.is_null() || ty.is_null() {
+                        println!("NULL");
+                        continue;
+                    }
+                    match ty {
+                        Ty::Null => println!("NULL"),
+                        Ty::Bool => println!("{}", *(v as *const bool)),
+                        Ty::TinyInt => println!("{}", *(v as *const i8)),
+                        Ty::SmallInt => println!("{}", (v as *const i16).read_unaligned()),
+                        Ty::Int => println!("{}", (v as *const i32).read_unaligned()),
+                        Ty::BigInt => println!("{}", (v as *const i64).read_unaligned()),
+                        Ty::Float => println!("{}", (v as *const f32).read_unaligned()),
+                        Ty::Double => println!("{}", (v as *const f64).read_unaligned()),
+                        Ty::VarChar => println!(
+                            "{}",
+                            std::str::from_utf8(std::slice::from_raw_parts(
+                                v as *const u8,
+                                ((v as *const u8).wrapping_sub(2) as *const i16).read_unaligned()
+                                    as usize
+                            ))
+                            .unwrap()
+                        ),
+                        Ty::Timestamp => println!("{}", (v as *const i64).read_unaligned()),
+                        Ty::NChar => println!(
+                            "{}",
+                            std::str::from_utf8(std::slice::from_raw_parts(
+                                v as *const u8,
+                                len as usize
+                            ))
+                            .unwrap()
+                        ),
+                        Ty::UTinyInt => println!("{}", *(v as *const u8)),
+                        Ty::USmallInt => println!("{}", *(v as *const u16)),
+                        Ty::UInt => println!("{}", *(v as *const u32)),
+                        Ty::UBigInt => println!("{}", *(v as *const u64)),
+                        Ty::Json => println!(
+                            "{}",
+                            std::str::from_utf8(std::slice::from_raw_parts(
+                                v as *const u8,
+                                len as usize
+                            ))
+                            .unwrap()
+                        ),
+                        Ty::VarBinary => todo!(),
+                        Ty::Decimal => todo!(),
+                        Ty::Blob => todo!(),
+                        Ty::MediumBlob => todo!(),
+                        _ => todo!(),
+                    }
+                }
+
+                println!("line num = {}", line_num);
+                line_num = line_num + 1;
             }
         }
     }
