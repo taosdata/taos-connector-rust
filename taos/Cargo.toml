@@ -19,10 +19,10 @@ no-default-features = true
 [dependencies]
 async-trait = "0.1"
 log = "0.4.17"
-taos-optin = { path = "../taos-optin", version = "0.10.13", optional = true }
-taos-query = { path = "../taos-query", version = "0.10.13", default-features = false }
-taos-sys = { path = "../taos-sys", version = "0.10.13", optional = true }
-taos-ws = { path = "../taos-ws", version = "0.10.13", optional = true }
+taos-optin = { path = "../taos-optin", version = "0.10.16", optional = true }
+taos-query = { path = "../taos-query", version = "0.10.16", default-features = false }
+taos-sys = { path = "../taos-sys", version = "0.10.16", optional = true }
+taos-ws = { path = "../taos-ws", version = "0.10.16", optional = true }
 futures = { version = "0.3", features = ["executor"] }
 
 [dev-dependencies]
@@ -30,12 +30,12 @@ anyhow = "1"
 async-trait = "0.1.68"
 chrono = "0.4"
 criterion = { version = "0.5", features = ["html_reports", "stable"] }
-itertools = "0.10.3"
+itertools = "0.11.0"
 log = "0.4"
-pretty_env_logger = "0.4.0"
+pretty_env_logger = "0.5.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 
 [[bench]]
 harness = false

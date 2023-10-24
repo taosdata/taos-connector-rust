@@ -734,7 +734,7 @@ mod tests {
         taos.query(format!("use {db}2"))?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false",
+            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build()?;
 
@@ -857,7 +857,7 @@ mod tests {
         taos.query(format!("create database {db}2 wal_retention_period 3600"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5")?;
+        let builder = TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -1147,7 +1147,7 @@ mod tests {
             .await?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false",
+            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_ts2035"]).await?;
@@ -1244,7 +1244,7 @@ mod tests {
             .await?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false",
+            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_delete_meta"]).await?;

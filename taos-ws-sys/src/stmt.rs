@@ -666,7 +666,7 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
             if let Err(e) = stmt
                 .safe_deref_mut()
                 .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
-                .and_then(|s| futures::executor::block_on(s.stmt_bind(columns)))
+                .and_then(|s| crate::block_in_place_or_global(s.stmt_bind(columns)))
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));

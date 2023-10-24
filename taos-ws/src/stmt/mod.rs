@@ -76,12 +76,12 @@ impl Bindable<super::Taos> for Stmt {
         )?;
         dsn.database = database;
         let mut stmt = block_in_place_or_global(Self::from_wsinfo(&dsn))?;
-        futures::executor::block_on(stmt.stmt_init())?;
+        crate::block_in_place_or_global(stmt.stmt_init())?;
         Ok(stmt)
     }
 
     fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
-        futures::executor::block_on(self.stmt_prepare(sql.as_ref()))?;
+        crate::block_in_place_or_global(self.stmt_prepare(sql.as_ref()))?;
         Ok(self)
     }
 
@@ -103,14 +103,14 @@ impl Bindable<super::Taos> for Stmt {
         //     .into_iter()
         //     .map(|tag| tag.to_json_value())
         //     .collect_vec();
-        // futures::executor::block_on(self.stmt_bind(columns))?;
+        // crate::block_in_place_or_global(self.stmt_bind(columns))?;
 
-        futures::executor::block_on(self.stmt_bind_block(params))?;
+        crate::block_in_place_or_global(self.stmt_bind_block(params))?;
         Ok(self)
     }
 
     fn add_batch(&mut self) -> RawResult<&mut Self> {
-        futures::executor::block_on(self.stmt_add_batch())?;
+        crate::block_in_place_or_global(self.stmt_add_batch())?;
         Ok(self)
     }
 
@@ -158,7 +158,7 @@ impl AsyncBindable<super::Taos> for Stmt {
         //     .into_iter()
         //     .map(|tag| tag.to_json_value())
         //     .collect_vec();
-        // futures::executor::block_on(self.stmt_bind(columns))?;
+        // crate::block_in_place_or_global(self.stmt_bind(columns))?;
 
         self.stmt_bind_block(params).await?;
         Ok(self)

@@ -196,7 +196,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
     }
 
     async fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
-        
+
         use taos_query::prelude::AsyncQueryable;
 
         let taos = taos_query::AsyncTBuilder::build(&self.info).await?;
@@ -916,6 +916,15 @@ impl TmqBuilder {
                                             }  else {
                                                 log::warn!("poll message received but no receiver alive");
                                             }
+                                        }
+                                        TmqRecvData::FetchBlock{ data: _ }=> {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                let _ = sender.send(Err(RawError::new(
+                                                    WS_ERROR_NO::WEBSOCKET_ERROR.as_code(),
+                                                    format!("WebSocket internal error: {:?}", &text)
+                                                )));
+                                            }
+                                            break 'ws;
                                         }
                                         TmqRecvData::Assignment(assignment)=> {
                                             log::trace!("assignment done: {:?}", assignment);

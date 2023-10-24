@@ -23,6 +23,8 @@ use query::WsConnReq;
 
 pub mod schemaless;
 
+pub(crate) use taos_query::block_in_place_or_global;
+
 #[derive(Debug, Clone)]
 pub enum WsAuth {
     Token(String),

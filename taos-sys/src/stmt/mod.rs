@@ -9,7 +9,7 @@ use taos_query::{common::Ty, stmt::Bindable, Queryable, RawResult};
 
 use crate::types::*;
 
-mod bind;
+pub(super) mod bind;
 mod multi;
 
 #[derive(Debug)]
