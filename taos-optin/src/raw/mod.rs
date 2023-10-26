@@ -408,19 +408,17 @@ const fn default_lib_name() -> &'static str {
     }
 }
 
-impl Default for ApiEntry {
-    fn default() -> Self {
+impl ApiEntry {
+    pub fn open_default() -> Result<Self, dlopen2::Error> {
         let lib_env = "TAOS_LIBRARY_PATH";
         let path = if let Some(path) = std::env::var_os(lib_env) {
             PathBuf::from(path)
         } else {
             PathBuf::from(default_lib_name())
         };
-        Self::dlopen(path).unwrap()
+        Self::dlopen(path)
     }
-}
-
-impl ApiEntry {
+    
     pub fn dlopen<S>(path: S) -> Result<Self, dlopen2::Error>
     where
         S: AsRef<Path>,
