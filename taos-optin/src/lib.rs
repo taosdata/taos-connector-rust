@@ -249,7 +249,7 @@ impl taos_query::AsyncQueryable for Taos {
 /// }
 /// #
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TaosBuilder {
     // dsn: Dsn,
     auth: Auth,
@@ -325,10 +325,10 @@ impl taos_query::TBuilder for TaosBuilder {
 
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
             tracing::trace!("using library path: {path}");
-            ApiEntry::dlopen(path).unwrap()
+            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
         } else {
             tracing::trace!("using default library of taos");
-            ApiEntry::default()
+            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
         };
         let mut auth = Auth::default();
         // let mut builder = TaosBuilder::default();
@@ -465,10 +465,10 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
             tracing::trace!("using library path: {path}");
-            ApiEntry::dlopen(path).unwrap()
+            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
         } else {
             tracing::trace!("using default library of taos");
-            ApiEntry::default()
+            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
         };
         let mut auth = Auth::default();
         // let mut builder = TaosBuilder::default();
