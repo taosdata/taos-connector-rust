@@ -51,9 +51,9 @@ impl taos_query::TBuilder for TmqBuilder {
             .into_dsn()
             .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
-            ApiEntry::dlopen(path).unwrap()
+            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
         } else {
-            ApiEntry::default()
+            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
         };
         let conf = Conf::from_dsn(&dsn, lib.tmq.unwrap().conf_api)?;
         let timeout = if let Some(timeout) = dsn.params.remove("timeout") {
@@ -137,9 +137,9 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
             .into_dsn()
             .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
-            ApiEntry::dlopen(path).unwrap()
+            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
         } else {
-            ApiEntry::default()
+            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
         };
         let conf = Conf::from_dsn(&dsn, lib.tmq.unwrap().conf_api)?;
         let timeout = if let Some(timeout) = dsn.params.remove("timeout") {
