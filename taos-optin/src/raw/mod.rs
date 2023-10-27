@@ -418,7 +418,7 @@ impl ApiEntry {
         };
         Self::dlopen(path)
     }
-    
+
     pub fn dlopen<S>(path: S) -> Result<Self, dlopen2::Error>
     where
         S: AsRef<Path>,

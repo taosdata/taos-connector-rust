@@ -588,7 +588,7 @@ impl WsTaos {
                         "unexpected message on login: {:?}",
                         message
                     )));
-                },
+                }
             }
         }
 

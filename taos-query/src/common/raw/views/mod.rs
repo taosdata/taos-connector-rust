@@ -358,7 +358,9 @@ impl ColumnView {
     #[inline]
     pub fn concat_strictly(&self, rhs: &ColumnView) -> ColumnView {
         match (self, rhs) {
-            (ColumnView::Timestamp(a), ColumnView::Timestamp(b)) => ColumnView::Timestamp(a.concat(b)),
+            (ColumnView::Timestamp(a), ColumnView::Timestamp(b)) => {
+                ColumnView::Timestamp(a.concat(b))
+            }
             (ColumnView::Bool(a), ColumnView::Bool(b)) => ColumnView::Bool(a.concat(b)),
             (ColumnView::TinyInt(a), ColumnView::TinyInt(b)) => ColumnView::TinyInt(a.concat(b)),
             (ColumnView::UTinyInt(a), ColumnView::UTinyInt(b)) => ColumnView::UTinyInt(a.concat(b)),

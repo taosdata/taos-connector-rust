@@ -16,7 +16,6 @@ pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
 pub use serde::de::value::Error as DeError;
 
 mod error;
-pub use error::*;
 
 pub mod common;
 mod de;
@@ -362,7 +361,7 @@ impl<T: AsyncTBuilder> deadpool::managed::Manager for Manager<T> {
     async fn recycle(
         &self,
         conn: &mut Self::Type,
-        _: &deadpool::managed::Metrics
+        _: &deadpool::managed::Metrics,
     ) -> deadpool::managed::RecycleResult<Self::Error> {
         self.ping(conn).await.map_err(RawError::from_any)?;
         Ok(())

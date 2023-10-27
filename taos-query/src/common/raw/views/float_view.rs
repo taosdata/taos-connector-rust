@@ -70,7 +70,6 @@ impl std::ops::Add<&View> for View {
     }
 }
 
-
 impl FloatView {
     /// Rows
     pub fn len(&self) -> usize {

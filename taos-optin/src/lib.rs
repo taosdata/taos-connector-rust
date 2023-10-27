@@ -6,9 +6,9 @@ use std::{
 };
 
 use anyhow::Context;
-use tracing::warn;
 use once_cell::sync::OnceCell;
 use raw::{ApiEntry, BlockState, RawRes, RawTaos};
+use tracing::warn;
 
 use taos_query::{
     prelude::tokio::time,

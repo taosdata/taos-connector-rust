@@ -68,7 +68,6 @@ impl std::ops::Add<&View> for View {
     }
 }
 
-
 impl SmallIntView {
     /// Rows
     pub fn len(&self) -> usize {

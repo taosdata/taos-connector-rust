@@ -294,7 +294,7 @@ mod r#async {
     pub use crate::util::AsyncInlinable;
     pub use crate::util::AsyncInlinableRead;
     pub use crate::util::AsyncInlinableWrite;
-    pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
+    pub use mdsn::Address;
     pub use serde::de::value::Error as DeError;
 
     pub use futures::stream::{Stream, StreamExt, TryStreamExt};

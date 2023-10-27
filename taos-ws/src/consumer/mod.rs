@@ -13,7 +13,7 @@ use taos_query::tmq::{
     AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsData, IsOffset,
     MessageSet, SyncOnAsync, Timeout, VGroupId,
 };
-use taos_query::util::{InlinableRead, Edition};
+use taos_query::util::{Edition, InlinableRead};
 use taos_query::RawResult;
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
@@ -128,8 +128,18 @@ impl TBuilder for TmqBuilder {
     }
 
     fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
-        if self.info.addr.matches(".cloud.tdengine.com").next().is_some()
-            || self.info.addr.matches(".cloud.taosdata.com").next().is_some()
+        if self
+            .info
+            .addr
+            .matches(".cloud.tdengine.com")
+            .next()
+            .is_some()
+            || self
+                .info
+                .addr
+                .matches(".cloud.taosdata.com")
+                .next()
+                .is_some()
         {
             let edition = Edition::new("cloud", false);
             return Ok(edition);
@@ -196,15 +206,24 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
     }
 
     async fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
-
         use taos_query::prelude::AsyncQueryable;
 
         let taos = taos_query::AsyncTBuilder::build(&self.info).await?;
         // Ensure server is ready.
         taos.exec("select server_status()").await?;
 
-        match self.info.addr.matches(".cloud.tdengine.com").next().is_some()
-            || self.info.addr.matches(".cloud.taosdata.com").next().is_some()
+        match self
+            .info
+            .addr
+            .matches(".cloud.tdengine.com")
+            .next()
+            .is_some()
+            || self
+                .info
+                .addr
+                .matches(".cloud.taosdata.com")
+                .next()
+                .is_some()
         {
             true => {
                 let edition = Edition::new("cloud", false);

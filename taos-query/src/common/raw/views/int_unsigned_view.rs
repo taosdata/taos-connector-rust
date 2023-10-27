@@ -70,7 +70,6 @@ impl std::ops::Add<&View> for View {
     }
 }
 
-
 impl UIntView {
     /// Rows
     pub fn len(&self) -> usize {
@@ -200,7 +199,6 @@ impl UIntView {
         wtr.write_all(&self.data)?;
         Ok(nulls.len() + self.data.len())
     }
-
 
     pub fn concat(&self, rhs: &View) -> View {
         let nulls = NullBits::from_iter(

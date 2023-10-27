@@ -1430,8 +1430,7 @@ mod async_tests {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
 
-        let dsn =
-            std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
+        let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
@@ -1447,8 +1446,7 @@ mod async_tests {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
 
-        let dsn =
-            std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        let dsn = std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
@@ -1480,8 +1478,7 @@ mod async_tests {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
 
-        let dsn =
-            std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
+        let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
@@ -1499,13 +1496,12 @@ mod async_tests {
         std::env::set_var("RUST_LOG", "taos=debug");
         // pretty_env_logger::init();
 
-        let dsn =
-            std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        let dsn = std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         log::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
         log::debug!("client: {:?}", &client);
-        
+
         let res = client.assert_enterprise_edition().await;
         log::debug!("assert enterprise edition: {:?}", res);
 

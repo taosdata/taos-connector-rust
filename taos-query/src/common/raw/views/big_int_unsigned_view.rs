@@ -222,7 +222,6 @@ impl UBigIntView {
 
         View { nulls, data }
     }
-    
 }
 
 pub struct UBigIntViewIter<'a> {
