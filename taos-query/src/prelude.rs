@@ -223,7 +223,7 @@ pub mod sync {
 
         fn create_topic(&self, name: impl AsRef<str>, sql: impl AsRef<str>) -> RawResult<()> {
             let (name, sql) = (name.as_ref(), sql.as_ref());
-            let query = format!("create topic if not exists {name} as {sql}");
+            let query = format!("create topic if not exists `{name}` as {sql}");
 
             self.query(query)?;
             Ok(())
@@ -235,7 +235,7 @@ pub mod sync {
             db: impl std::fmt::Display,
         ) -> RawResult<()> {
             let name = name.as_ref();
-            let query = format!("create topic if not exists {name} as database `{db}`");
+            let query = format!("create topic if not exists `{name}` as database `{db}`");
 
             self.exec(query)?;
             Ok(())
@@ -566,7 +566,7 @@ mod r#async {
             sql: S,
         ) -> RawResult<()> {
             let (name, sql) = (name.as_ref(), sql.as_ref());
-            let query = format!("CREATE TOPIC IF NOT EXISTS {name} AS {sql}");
+            let query = format!("CREATE TOPIC IF NOT EXISTS `{name}` AS {sql}");
 
             self.query(query).await?;
             Ok(())
@@ -579,25 +579,8 @@ mod r#async {
             db: impl std::fmt::Display + Send + 'async_trait,
         ) -> RawResult<()> {
             let name = name.as_ref();
-            let query = format!("create topic if not exists {name} with meta as database `{db}`");
-
-            // todo(@huolinhe): cannot set error. we should use a global error type here (?).
-
-            // let sql: Option<String> = self.query_one(format!("SELECT sql FROM information_schema.ins_topics WHERE topic_name = '{name}'")).await?;
-
-            // if let Some(sql) = sql {
-            //     if sql == query {
-            //         Ok(())
-            //     } else {
-            //         Ok(())
-            //     }
-            // }
-
-            if let Err(err) = self.exec(&query).await {
-                log::trace!("Create topic error: {:?}, try without ``", err);
-                let query = format!("create topic if not exists {name} with meta as database {db}");
-                self.exec(query).await?;
-            }
+            let query = format!("create topic if not exists `{name}` with meta as database `{db}`");
+            self.exec(&query).await?;
             Ok(())
         }
 
