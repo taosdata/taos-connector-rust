@@ -94,7 +94,7 @@ impl taos_query::TBuilder for TaosBuilder {
         "0"
     }
     fn ping(&self, taos: &mut Self::Target) -> RawResult<()> {
-        taos_query::Queryable::exec(taos, "SELECT 1").map(|_| ())
+        taos_query::Queryable::exec(taos, "select server_status()").map(|_| ())
     }
 
     fn ready(&self) -> bool {
@@ -204,7 +204,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         "0"
     }
     async fn ping(&self, taos: &mut Self::Target) -> RawResult<()> {
-        taos_query::AsyncQueryable::exec(taos, "SELECT 1")
+        taos_query::AsyncQueryable::exec(taos, "select server_status()")
             .await
             .map(|_| ())
     }

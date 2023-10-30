@@ -270,15 +270,15 @@ impl Error {
 /// let err = format_err!(
 ///     code = 0x0618,
 ///     raw = "Message error from native API",
-///     context = "Query with sql: `select 1`"
+///     context = "Query with sql: `select server_status()`"
 /// );
 /// let err_str = err.to_string();
-/// assert_eq!(err_str, "[0x0618] Query with sql: `select 1`: Internal error: `Message error from native API`");
+/// assert_eq!(err_str, "[0x0618] Query with sql: `select server_status()`: Internal error: `Message error from native API`");
 /// ```
 ///
 /// It will give the error:
 /// ```text
-/// [0x0618] Query with sql: `select 1`: Internal error: `Message error from native API`
+/// [0x0618] Query with sql: `select server_status()`: Internal error: `Message error from native API`
 /// ```
 ///
 /// For more complex error expressions, use a `format!` like API as this:

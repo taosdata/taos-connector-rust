@@ -317,7 +317,7 @@ impl taos_query::TBuilder for TaosBuilder {
         RawTaos::version()
     }
     fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
-        conn.raw.query("select 1")?;
+        conn.raw.query("select server_status()")?;
         Ok(())
     }
 
@@ -464,7 +464,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         RawTaos::version()
     }
     async fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
-        conn.raw.query("select 1")?;
+        conn.raw.query("select server_status()")?;
         Ok(())
     }
 
