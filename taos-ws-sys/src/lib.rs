@@ -2,6 +2,7 @@ use std::{
     ffi::{c_void, CStr, CString},
     fmt::{Debug, Display},
     os::raw::c_char,
+    os::raw::c_int,
     str::Utf8Error,
     time::Duration,
 };
@@ -978,6 +979,34 @@ pub unsafe fn ws_print_row(rs: *mut WS_RES, row: i32) {
     // }
 }
 
+#[no_mangle]
+/// Same to taos_get_current_db.
+pub unsafe extern "C" fn ws_get_current_db(
+    taos: *mut WS_TAOS,
+    database: *mut c_char,
+    len: c_int,
+    required: *mut c_int,
+) -> i32 {
+    let rs = ws_query(taos, b"SELECT DATABASE()\0" as *const u8 as _);
+    let mut block: *const c_void = std::ptr::null();
+    let mut rows = 0;
+    let mut code = ws_fetch_block(rs, &mut block, &mut rows);
+
+    let mut ty: Ty = Ty::Null;
+    let mut len_actual = 0u32;
+    let res = ws_get_value_in_block(rs, 0, 0, &mut ty as *mut Ty as _, &mut len_actual);
+
+    if len_actual < len as u32 {
+        std::ptr::copy_nonoverlapping(res as _, database, len_actual as usize);
+    } else {
+        std::ptr::copy_nonoverlapping(res as _, database, len as usize);
+        *required = len_actual as _;
+        code = -1;
+    }
+
+    code
+}
+
 #[cfg(test)]
 pub fn init_env() {
     std::env::set_var("RUST_LOG", "debug");
@@ -1408,6 +1437,66 @@ mod tests {
             ws_stop_query(res);
 
             execute!(b"drop database if exists ws_stop_query\0");
+        }
+    }
+
+    #[test]
+    fn test_get_current_db() {
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"drop database if exists ws_get_current_db\0");
+            execute!(b"create database ws_get_current_db keep 36500\0");
+            execute!(b"use ws_get_current_db\0");
+
+            let mut database_buffer: Vec<i8> = vec![0; 10];
+            let database = database_buffer.as_mut_ptr();
+            let len = database_buffer.len() as c_int;
+            let mut required = 0;
+            let r = ws_get_current_db(taos, database, len, &mut required);
+
+            assert_eq!(r, -1);
+            assert_eq!(required, 17);
+            let database = CStr::from_ptr(database as _);
+            assert_eq!(
+                database,
+                CStr::from_bytes_with_nul(b"ws_get_cur\0").unwrap()
+            );
+
+            let mut database_buffer: Vec<i8> = vec![0; 128];
+            let database = database_buffer.as_mut_ptr();
+            let len = database_buffer.len() as c_int;
+            let mut required = 0;
+            let r = ws_get_current_db(taos, database, len, &mut required);
+
+            assert_eq!(r, 0);
+
+            let database = CStr::from_ptr(database as _);
+
+            assert_eq!(
+                database,
+                CStr::from_bytes_with_nul(b"ws_get_current_db\0").unwrap()
+            );
+
+            execute!(b"drop database if exists ws_get_current_db\0");
         }
     }
 }
