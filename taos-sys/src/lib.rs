@@ -373,7 +373,10 @@ impl taos_query::TBuilder for TaosBuilder {
 
         if let Ok(Some((edition, expired))) = grant {
             if expired {
-                return Err(RawError::new(Code::FAILED, r#"Enterprise version expired. Please get a new license to activate."#));
+                return Err(RawError::new(
+                    Code::FAILED,
+                    r#"Enterprise version expired. Please get a new license to activate."#,
+                ));
             }
             return match edition.as_str() {
                 "cloud" | "official" | "trial" => Ok(true),
@@ -493,7 +496,10 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 
         if let Ok(Some((edition, expired))) = grant {
             if expired {
-                return Err(RawError::new(Code::FAILED, r#"Enterprise version expired. Please get a new license to activate."#));
+                return Err(RawError::new(
+                    Code::FAILED,
+                    r#"Enterprise version expired. Please get a new license to activate."#,
+                ));
             }
             return match edition.as_str() {
                 "cloud" | "official" | "trial" => Ok(true),
@@ -501,8 +507,8 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             };
         }
 
-        let grant: RawResult<Option<(String, (), String)>> = AsyncQueryable::query_one(taos, "show grants")
-            .await;
+        let grant: RawResult<Option<(String, (), String)>> =
+            AsyncQueryable::query_one(taos, "show grants").await;
 
         if let Ok(Some((edition, _, expired))) = grant {
             match (edition.trim(), expired.trim()) {

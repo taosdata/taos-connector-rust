@@ -231,8 +231,7 @@ impl StmtRecv {
                 }
             }),
             StmtRecvData::GetTagFields { stmt_id, fields }
-            | StmtRecvData::GetColFields { stmt_id, fields } 
-            => StmtOk::StmtFields(stmt_id, {
+            | StmtRecvData::GetColFields { stmt_id, fields } => StmtOk::StmtFields(stmt_id, {
                 if self.code == 0 {
                     Ok(fields)
                 } else {

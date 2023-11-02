@@ -1147,7 +1147,6 @@ mod tests {
         assert_eq!(dsn.get("param").unwrap(), "1");
     }
 
-
     #[test]
     fn unix_path_with_space() {
         let dsn = Dsn::from_str(&format!("csv:./a b.csv?param=1")).unwrap();
