@@ -485,6 +485,18 @@ mod r#async {
             self.query(sql).await.map(|res| res.affected_rows() as _)
         }
 
+        async fn exec_with_req_id<T: AsRef<str> + Send + Sync>(
+            &self,
+            sql: T,
+            req_id: u64,
+        ) -> RawResult<usize> {
+            let sql = sql.as_ref();
+            // log::trace!("exec sql: {sql}");
+            self.query_with_req_id(sql, req_id)
+                .await
+                .map(|res| res.affected_rows() as _)
+        }
+
         async fn write_raw_meta(&self, meta: &RawMeta) -> RawResult<()>;
 
         async fn write_raw_block(&self, block: &RawBlock) -> RawResult<()>;
