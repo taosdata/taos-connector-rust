@@ -6,14 +6,15 @@ use itertools::Itertools;
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
 
+use log::warn;
 use taos_query::common::{JsonMeta, RawMeta};
 use taos_query::prelude::{Code, RawError};
 use taos_query::tmq::{
-    AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsOffset, MessageSet,
-    SyncOnAsync, Timeout, VGroupId,
+    AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsData, IsOffset,
+    MessageSet, SyncOnAsync, Timeout, VGroupId,
 };
-use taos_query::util::InlinableRead;
-use taos_query::{block_in_place_or_global, RawResult};
+use taos_query::util::{Edition, InlinableRead};
+use taos_query::RawResult;
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
 
@@ -84,6 +85,7 @@ impl WsTmqSender {
     }
 }
 
+#[derive(Debug)]
 pub struct TmqBuilder {
     info: TaosBuilder,
     conf: TmqInit,
@@ -114,7 +116,7 @@ impl TBuilder for TmqBuilder {
     }
 
     fn build(&self) -> RawResult<Self::Target> {
-        block_in_place_or_global(self.build_consumer())
+        taos_query::block_in_place_or_global(self.build_consumer())
     }
 
     fn server_version(&self) -> RawResult<&str> {
@@ -123,6 +125,51 @@ impl TBuilder for TmqBuilder {
 
     fn is_enterprise_edition(&self) -> RawResult<bool> {
         todo!()
+    }
+
+    fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        if self
+            .info
+            .addr
+            .matches(".cloud.tdengine.com")
+            .next()
+            .is_some()
+            || self
+                .info
+                .addr
+                .matches(".cloud.taosdata.com")
+                .next()
+                .is_some()
+        {
+            let edition = Edition::new("cloud", false);
+            return Ok(edition);
+        }
+
+        let taos = TBuilder::build(&self.info)?;
+
+        use taos_query::prelude::sync::Queryable;
+        let grant: RawResult<Option<(String, bool)>> = Queryable::query_one(
+            &taos,
+            "select version, (expire_time < now) from information_schema.ins_cluster",
+        );
+
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
+        } else {
+            let grant: RawResult<Option<(String, (), String)>> =
+                Queryable::query_one(&taos, "show grants");
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition)
     }
 }
 
@@ -156,6 +203,58 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 
     async fn is_enterprise_edition(&self) -> RawResult<bool> {
         todo!()
+    }
+
+    async fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        use taos_query::prelude::AsyncQueryable;
+
+        let taos = taos_query::AsyncTBuilder::build(&self.info).await?;
+        // Ensure server is ready.
+        taos.exec("select server_status()").await?;
+
+        match self
+            .info
+            .addr
+            .matches(".cloud.tdengine.com")
+            .next()
+            .is_some()
+            || self
+                .info
+                .addr
+                .matches(".cloud.taosdata.com")
+                .next()
+                .is_some()
+        {
+            true => {
+                let edition = Edition::new("cloud", false);
+                return Ok(edition);
+            }
+            false => (),
+        }
+
+        let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
+            &taos,
+            "select version, (expire_time < now) from information_schema.ins_cluster",
+        )
+        .await;
+
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
+        } else {
+            let grant: RawResult<Option<(String, (), String)>> =
+                AsyncQueryable::query_one(&taos, "show grants").await;
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition)
     }
 }
 #[derive(Debug)]
@@ -274,7 +373,7 @@ impl Iterator for Data {
     type Item = RawResult<RawBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        block_in_place_or_global(self.fetch_block()).transpose()
+        taos_query::block_in_place_or_global(self.fetch_block()).transpose()
     }
 }
 
@@ -292,6 +391,16 @@ impl IsAsyncData for Data {
     }
 }
 
+impl IsData for Data {
+    fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
+        taos_query::block_in_place_or_global(self.0.fetch_raw_meta())
+            .map(|raw| unsafe { std::mem::transmute(raw) })
+    }
+
+    fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
+        taos_query::block_in_place_or_global(self.fetch_block())
+    }
+}
 pub enum WsMessageSet {
     Meta(Meta),
     Data(Data),
@@ -571,26 +680,28 @@ impl AsConsumer for Consumer {
         &mut self,
         topics: I,
     ) -> RawResult<()> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::subscribe(self, topics))
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::subscribe(self, topics))
     }
 
     fn recv_timeout(
         &self,
         timeout: Timeout,
     ) -> RawResult<Option<(Self::Offset, MessageSet<Self::Meta, Self::Data>)>> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::recv_timeout(self, timeout))
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::recv_timeout(
+            self, timeout,
+        ))
     }
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(self, offset))
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(self, offset))
     }
 
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::assignments(self))
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::assignments(self))
     }
 
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
-        block_in_place_or_global(<Consumer as AsAsyncConsumer>::offset_seek(
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::offset_seek(
             self, topic, vg_id, offset,
         ))
     }
@@ -679,7 +790,7 @@ impl TmqBuilder {
 
     async fn build_consumer(&self) -> RawResult<Consumer> {
         let url = self.info.to_tmq_url();
-        // let (ws, _) = futures::executor::block_on(connect_async(url))?;
+        // let (ws, _) = taos_query::block_in_place_or_global(connect_async(url))?;
         let (ws, _) = connect_async(&url).await.map_err(WsTmqError::from)?;
         let (mut sender, mut reader) = ws.split();
 
@@ -825,6 +936,15 @@ impl TmqBuilder {
                                                 log::warn!("poll message received but no receiver alive");
                                             }
                                         }
+                                        TmqRecvData::FetchBlock{ data: _ }=> {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                let _ = sender.send(Err(RawError::new(
+                                                    WS_ERROR_NO::WEBSOCKET_ERROR.as_code(),
+                                                    format!("WebSocket internal error: {:?}", &text)
+                                                )));
+                                            }
+                                            break 'ws;
+                                        }
                                         TmqRecvData::Assignment(assignment)=> {
                                             log::trace!("assignment done: {:?}", assignment);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
@@ -879,7 +999,7 @@ impl TmqBuilder {
 
                                     let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
                                     let err = if let Some(close) = close {
-                                        format!("WebSocket internal error: {}", close.reason)
+                                        format!("WebSocket internal error: {}", close)
                                     } else {
                                         "WebSocket internal error, connection is reset by server".to_string()
                                     };
@@ -948,6 +1068,7 @@ impl TmqBuilder {
     }
 }
 
+#[derive(Debug)]
 pub struct Consumer {
     conn: WsConnReq,
     tmq_conf: TmqInit,
@@ -994,8 +1115,6 @@ pub enum WsTmqError {
     SendError(#[from] tokio::sync::mpsc::error::SendError<Message>),
     #[error(transparent)]
     SendTimeoutError(#[from] tokio::sync::mpsc::error::SendTimeoutError<Message>),
-    #[error("{0}")]
-    RecvTimeout(#[from] std::sync::mpsc::RecvTimeoutError),
     #[error("{0}")]
     DeError(#[from] DeError),
     #[error("Deserialize json error: {0}")]
@@ -1050,12 +1169,12 @@ mod tests {
     use super::{TaosBuilder, TmqBuilder};
     use taos_query::prelude::tokio;
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
-        // pretty_env_logger::formatted_builder()
-        //     .filter_level(log::LevelFilter::Info)
-        //     .init();
+        let _ = pretty_env_logger::formatted_builder()
+            .filter_level(log::LevelFilter::Info)
+            .try_init();
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
             .build()

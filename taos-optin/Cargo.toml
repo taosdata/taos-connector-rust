@@ -15,31 +15,32 @@ exclude = ["tests/", "examples", "docker-compose.yml"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1"
 async-trait = "0.1"
 bytes = "1.2"
 cfg-if = "1.0.0"
 derive_more = "0.99"
-dlopen2 = "0.4.1"
+dlopen2 = "0.6.1"
 # futures = "0.3.21"
-itertools = "0.10"
+itertools = "0.11.0"
 lazy_static = "1.4.0"
-log = "0.4.16"
-num_enum = "0.6.1"
+num_enum = "0.7.0"
 once_cell = "1.10.0"
-serde = {version = "1", features = ["derive"], optional = true}
+serde = { version = "1", features = ["derive"], optional = true }
 serde_json = "1.0"
-serde_repr = {version = "0.1.7", optional = true}
+serde_repr = { version = "0.1.7", optional = true }
+tracing = { version = "0.1", features = ["log"] }
 # taos-error = { version = "0.2.0", path = "../taos-error" }
-taos-macros = {version = "0.*", path = "../taos-macros"}
-taos-query = {version = "0.9.4", path = "../taos-query"}
+taos-macros = { version = "0.*", path = "../taos-macros" }
+taos-query = { version = "0.10.19", path = "../taos-query" }
 
 # time_this = "0.2.4"
 fun_time = "0.2.1"
 [dev-dependencies]
 anyhow = "1"
-pretty_env_logger = "0.4.0"
-serde = {version = "1", features = ["derive"]}
-tokio = {version = "1", features = ["full"]}
+pretty_env_logger = "0.5.0"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
 
 [features]
 backport = []

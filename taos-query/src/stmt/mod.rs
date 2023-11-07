@@ -1,6 +1,6 @@
 use crate::{
     common::{views::ColumnView, Value},
-    Queryable, RawResult,
+    AsyncQueryable, Queryable, RawResult,
 };
 
 mod column;
@@ -32,6 +32,37 @@ where
     fn affected_rows(&self) -> usize;
 
     fn result_set(&mut self) -> RawResult<Q::ResultSet> {
+        todo!()
+    }
+}
+
+#[async_trait::async_trait]
+pub trait AsyncBindable<Q>
+where
+    Q: AsyncQueryable,
+    Self: Sized,
+{
+    async fn init(taos: &Q) -> RawResult<Self>;
+
+    async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self>;
+
+    async fn set_tbname(&mut self, name: &str) -> RawResult<&mut Self>;
+
+    async fn set_tags(&mut self, tags: &[Value]) -> RawResult<&mut Self>;
+
+    async fn set_tbname_tags(&mut self, name: &str, tags: &[Value]) -> RawResult<&mut Self> {
+        self.set_tbname(name).await?.set_tags(tags).await
+    }
+
+    async fn bind(&mut self, params: &[ColumnView]) -> RawResult<&mut Self>;
+
+    async fn add_batch(&mut self) -> RawResult<&mut Self>;
+
+    async fn execute(&mut self) -> RawResult<usize>;
+
+    async fn affected_rows(&self) -> usize;
+
+    async fn result_set(&mut self) -> RawResult<Q::AsyncResultSet> {
         todo!()
     }
 }

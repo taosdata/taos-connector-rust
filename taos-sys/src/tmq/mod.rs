@@ -14,13 +14,14 @@ use taos_query::{
     common::{raw_data_t, Precision, RawMeta},
     prelude::tokio,
     tmq::{
-        AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsMeta, IsOffset,
-        MessageSet, Timeout, VGroupId,
+        AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
+        IsOffset, MessageSet, Timeout, VGroupId,
     },
+    util::Edition,
     Dsn, IntoDsn, RawBlock, RawResult,
 };
 
-use crate::{conn::RawTaos, query::RawRes};
+use crate::{conn::RawTaos, query::RawRes, TaosBuilder};
 
 use taos_query::prelude::RawError;
 
@@ -110,7 +111,9 @@ impl RawRes {
     }
 }
 
+#[derive(Debug)]
 pub struct TmqBuilder {
+    builder: TaosBuilder,
     dsn: Dsn,
     conf: Conf,
     timeout: Timeout,
@@ -137,7 +140,12 @@ impl taos_query::TBuilder for TmqBuilder {
         } else {
             Timeout::from_millis(500)
         };
-        Ok(Self { dsn, conf, timeout })
+        Ok(Self {
+            builder: TaosBuilder::from_dsn(&dsn)?,
+            dsn,
+            conf,
+            timeout,
+        })
     }
 
     fn client_version() -> &'static str {
@@ -167,6 +175,33 @@ impl taos_query::TBuilder for TmqBuilder {
     fn server_version(&self) -> RawResult<&str> {
         unimplemented!()
     }
+
+    fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        let taos = self.builder.inner_connection()?;
+        use taos_query::prelude::sync::Queryable;
+        let grant: RawResult<Option<(String, bool)>> = Queryable::query_one(
+            taos,
+            "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+        );
+
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
+        } else {
+            let grant: RawResult<Option<(String, (), String)>> =
+                Queryable::query_one(taos, "show grants");
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                log::warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition)
+    }
 }
 
 #[async_trait::async_trait]
@@ -183,7 +218,12 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         } else {
             Timeout::from_millis(500)
         };
-        Ok(Self { dsn, conf, timeout })
+        Ok(Self {
+            builder: TaosBuilder::from_dsn(&dsn)?,
+            dsn,
+            conf,
+            timeout,
+        })
     }
 
     fn client_version() -> &'static str {
@@ -212,6 +252,33 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 
     async fn server_version(&self) -> RawResult<&str> {
         unimplemented!()
+    }
+
+    async fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        let taos = self.builder.inner_connection()?;
+        use taos_query::prelude::sync::Queryable;
+        let grant: RawResult<Option<(String, bool)>> = Queryable::query_one(
+            taos,
+            "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+        );
+
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
+        } else {
+            let grant: RawResult<Option<(String, (), String)>> =
+                Queryable::query_one(taos, "show grants");
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                log::warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition)
     }
 }
 
@@ -364,6 +431,15 @@ impl IsAsyncData for Data {
     }
 
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
+        Ok(self.raw.fetch_raw_message(self.precision))
+    }
+}
+impl IsData for Data {
+    fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
+        Ok(self.raw.tmq_get_raw().into())
+    }
+
+    fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
         Ok(self.raw.fetch_raw_message(self.precision))
     }
 }
@@ -658,7 +734,7 @@ mod tests {
         taos.query(format!("use {db}2"))?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false",
+            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build()?;
 
@@ -781,7 +857,8 @@ mod tests {
         taos.query(format!("create database {db}2 wal_retention_period 3600"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5")?;
+        let builder =
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -1032,7 +1109,7 @@ mod tests {
     }
 
     /// Partial update a record with different columns.
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ts2035() -> anyhow::Result<()> {
         use taos_query::prelude::*;
 
@@ -1071,7 +1148,7 @@ mod tests {
             .await?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false",
+            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_ts2035"]).await?;
@@ -1128,7 +1205,7 @@ mod tests {
     }
 
     /// Partial update a record with different columns.
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_delete_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
         // pretty_env_logger::init_timed();
@@ -1168,7 +1245,7 @@ mod tests {
             .await?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false",
+            "taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_delete_meta"]).await?;
@@ -1397,7 +1474,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     #[ignore]
     async fn test_tmq() -> anyhow::Result<()> {
         // pretty_env_logger::formatted_timed_builder()

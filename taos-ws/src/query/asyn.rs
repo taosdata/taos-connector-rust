@@ -8,9 +8,7 @@ use std::future::Future;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::InlinableWrite;
-use taos_query::{
-    block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
-};
+use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
 use thiserror::Error;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
@@ -37,13 +35,6 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
-// type WsFetchResult = std::result::Result<WsFetchData, RawError>;
-// type FetchSender = std::sync::mpsc::SyncSender<WsFetchResult>;
-// type FetchReceiver = std::sync::mpsc::Receiver<WsFetchResult>;
-// type FetchesSenderMap = Arc<HashMap<ResId, FetchSender>>;
-
-// type QuerySender = tokio::sync::oneshot::Sender<std::result::Result<WsQueryResp, RawError>>;
-// type QueriesSenderMap = Arc<HashMap<ReqId, QuerySender>>;
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 
 use futures::channel::oneshot;
@@ -198,7 +189,7 @@ impl Drop for ResultSet {
         //     .blocking_send_only(WsSend::FreeResult(self.args));
 
         // tokio::spawn(async move { sender.send_only(WsSend::FreeResult(self.args)).await });
-        // block_in_place_or_global(async move {
+        // taos_query::block_in_place_or_global(async move {
         //     let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
         // });
     }
@@ -214,12 +205,6 @@ pub enum Error {
     FetchError(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("{0}")]
     SendError(#[from] tokio::sync::mpsc::error::SendError<Message>),
-    #[error("{0}")]
-    StdSendError(#[from] std::sync::mpsc::SendError<tokio_tungstenite::tungstenite::Message>),
-    #[error("{0}")]
-    RecvError(#[from] std::sync::mpsc::RecvError),
-    #[error(transparent)]
-    RecvTimeout(#[from] std::sync::mpsc::RecvTimeoutError),
     #[error(transparent)]
     SendTimeoutError(#[from] tokio::sync::mpsc::error::SendTimeoutError<Message>),
     #[error("Query timed out with sql: {0}")]
@@ -266,7 +251,7 @@ impl Error {
             Error::IoError(_) => Code::new(WS_ERROR_NO::IO_ERROR as _),
             Error::WsError(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
-            Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
+            // Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
             _ => Code::FAILED,
         }
     }
@@ -547,7 +532,7 @@ impl WsTaos {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = Some(1024 * 1024 * 16);
 
-        let (ws, _) = connect_async_with_config(info.to_query_url(), Some(config))
+        let (ws, _) = connect_async_with_config(info.to_query_url(), Some(config), false)
             .await
             .map_err(|err| {
                 let err_string = err.to_string();
@@ -598,7 +583,12 @@ impl WsTaos {
                         _ => unreachable!(),
                     }
                 }
-                _ => unreachable!(),
+                _ => {
+                    return Err(RawError::from_string(format!(
+                        "unexpected message on login: {:?}",
+                        message
+                    )));
+                }
             }
         }
 
@@ -969,6 +959,10 @@ impl ResultSet {
     fn free_result(&self) {
         let _ = self.sender.send_blocking(WsSend::FreeResult(self.args));
     }
+
+    pub fn affected_rows64(&self) -> i64 {
+        self.affected_rows as _
+    }
 }
 
 impl AsyncFetchable for ResultSet {
@@ -1048,7 +1042,7 @@ impl taos_query::Fetchable for ResultSet {
     }
 
     fn fetch_raw_block(&mut self) -> RawResult<Option<RawBlock>> {
-        block_in_place_or_global(self.fetch())
+        taos_query::block_in_place_or_global(self.fetch())
     }
 }
 
@@ -1081,9 +1075,7 @@ impl AsyncQueryable for WsTaos {
     }
 }
 
-// Websocket tests should always use `multi_thread`
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+#[tokio::test]
 async fn test_client() -> anyhow::Result<()> {
     use futures::TryStreamExt;
     std::env::set_var("RUST_LOG", "debug");
@@ -1126,7 +1118,7 @@ async fn test_client() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+#[tokio::test]
 async fn test_client_cloud() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     // pretty_env_logger::init();
@@ -1152,11 +1144,11 @@ async fn test_client_cloud() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn ws_show_databases() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     use futures::TryStreamExt;
-    pretty_env_logger::init_timed();
+    let _ = pretty_env_logger::try_init_timed();
     let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
     let client = WsTaos::from_dsn(dsn).await?;
     let mut rs = client.query("show databases").await?;
@@ -1169,7 +1161,7 @@ async fn ws_show_databases() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn ws_write_raw_block() -> anyhow::Result<()> {
     let mut raw = RawBlock::parse_from_raw_block_v2(
         &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],

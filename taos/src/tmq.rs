@@ -1,15 +1,16 @@
 use taos_query::{
-    block_in_place_or_global,
     prelude::{AsAsyncConsumer, RawMeta, Timeout},
     tmq::{Assignment, VGroupId},
     RawBlock, RawResult,
 };
 
+#[derive(Debug)]
 enum TmqBuilderInner {
     Native(crate::sys::TmqBuilder),
     Ws(taos_ws::consumer::TmqBuilder),
 }
 
+#[derive(Debug)]
 enum ConsumerInner {
     Native(crate::sys::Consumer),
     Ws(taos_ws::consumer::Consumer),
@@ -44,7 +45,10 @@ pub struct Data(DataInner);
 
 pub type MessageSet<Meta, Data> = taos_query::tmq::MessageSet<Meta, Data>;
 
+#[derive(Debug)]
 pub struct TmqBuilder(TmqBuilderInner);
+
+#[derive(Debug)]
 pub struct Consumer(ConsumerInner);
 
 impl taos_query::TBuilder for TmqBuilder {
@@ -108,6 +112,13 @@ impl taos_query::TBuilder for TmqBuilder {
 
     fn is_enterprise_edition(&self) -> RawResult<bool> {
         todo!()
+    }
+
+    fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        match &self.0 {
+            TmqBuilderInner::Native(b) => Ok(b.get_edition()?),
+            TmqBuilderInner::Ws(b) => Ok(b.get_edition()?),
+        }
     }
 }
 
@@ -174,6 +185,13 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         match &self.0 {
             TmqBuilderInner::Native(b) => Ok(b.is_enterprise_edition().await?),
             TmqBuilderInner::Ws(b) => Ok(b.is_enterprise_edition().await?),
+        }
+    }
+
+    async fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
+        match &self.0 {
+            TmqBuilderInner::Native(b) => Ok(b.get_edition().await?),
+            TmqBuilderInner::Ws(b) => Ok(b.get_edition().await?),
         }
     }
 }
@@ -457,8 +475,16 @@ impl Iterator for Data {
     type Item = RawResult<RawBlock>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        use taos_query::prelude::IsAsyncData;
-        block_in_place_or_global(self.fetch_raw_block()).transpose()
+        match &self.0 {
+            DataInner::Native(data) => {
+                <crate::sys::tmq::Data as taos_query::tmq::IsData>::fetch_raw_block(data)
+                    .transpose()
+            }
+            DataInner::Ws(data) => {
+                <taos_ws::consumer::Data as taos_query::tmq::IsData>::fetch_raw_block(data)
+                    .transpose()
+            }
+        }
     }
 }
 // impl taos_query::tmq::AsConsumer for Consumer {}
@@ -481,13 +507,13 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ws_tmq_meta() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
         //     .filter_level(log::LevelFilter::Debug)
         //     .init();
         use taos_query::prelude::*;
-        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos+ws://localhost:6041".to_string());
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
@@ -649,7 +675,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     #[ignore]
     async fn test_tmq() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
@@ -856,7 +882,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     #[ignore]
     async fn test_tmq_offset() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
@@ -1066,7 +1092,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ws_tmq() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
         // .filter_level(log::LevelFilter::Info)
@@ -1286,7 +1312,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ws_tmq_snapshot() -> taos_query::RawResult<()> {
         // std::env::set_var("RUST_LOG", "tokio=warn,taos_ws=trace,info");
         // pretty_env_logger::init();
@@ -1502,7 +1528,7 @@ mod tests {
         .await?;
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_ws_tmq_offset() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
         //     .filter_level(log::LevelFilter::Info)

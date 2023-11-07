@@ -1,4 +1,4 @@
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_query_error() -> anyhow::Result<()> {
     use taos::*;
     let dsn = "taos://";

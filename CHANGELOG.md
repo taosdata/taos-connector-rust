@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [taos-v0.10.1] - 2023-08-17
+
+**Full Changelog**: [taos-v0.9.5...taos-v0.10.1](https://github.com/taosdata/taos-connector-rust/compare/taos-v0.9.5...taos-v0.10.1)
+
+### Bug Fixes
+
+
+- Fix IsData trait impls for taos-sys ([4a764a3](4a764a398b8f5929084a165f457c44e752ee6a1a))
+
+
+### Features
+
+
+- Use async bind in async prelude ([3f9dd98](3f9dd988d01bcde4ae47313bfb9fdbe72b05c48e))
+
+
+## [taos-v0.9.5] - 2023-08-16
+
+**Full Changelog**: [taos-v0.9.4...taos-v0.9.5](https://github.com/taosdata/taos-connector-rust/compare/taos-v0.9.4...taos-v0.9.5)
+
+### Bug Fixes
+
+
+- Now we support single-thread tokio runtime ([c89bfa8](c89bfa821a821cecb6e840a9b4038c3c93af619f))
+- Use block_in_place under multi-thread runtime only ([b617d28](b617d285f68a9059d37080fef4002d8e8d0aac49))
+
+
+### Enhancements
+
+
+- Ws_affected_rows64, ws_stmt_set_sub_tbname ([881f471](881f4716f587be740a4c0b80d549bcb5ff49ea53))
+- Ws_affected_rows64 ([681d84a](681d84a8d55a613d2de0dc27c44ef8d2a5fba75f))
+- Add affected_rows_once ([c3a9ac1](c3a9ac19d3ddfd1e08b1dbabbac48590278bacce))
+
+
+### Features
+
+
+- Add is_native/is_ws in taos::Taos ([dbf8c0b](dbf8c0b3aec1ec51d38d01bf103f2d5cf9839fd1))
+
+
+### Testing
+
+
+- Add case for ws_stmt_set_sub_tbname ([4f02b51](4f02b51a836ab7ada54e010afa6843e85ab42285))
+- Add case affected_row ([90698bc](90698bc80ffc8336843198a7adc733fe61c77821))
+- Update case affected_row ([d582daa](d582daa77f09f506dc78eac9d62b0cf8f3d6dfaf))
+
+
+### Dev
+
+
+- Add query benchmark with critierion ([568a150](568a150d45ad9b1558d063aa9fc7953c8a2d9cf8))
+
+
 ## [taos-v0.9.4] - 2023-08-09
 
 **Full Changelog**: [taos-v0.9.3...taos-v0.9.4](https://github.com/taosdata/taos-connector-rust/compare/taos-v0.9.3...taos-v0.9.4)

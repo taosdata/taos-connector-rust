@@ -350,6 +350,37 @@ impl ColumnView {
         self.concat_as(rhs, self.as_ty())
     }
 
+    /// Concatenate another column view strictly, output a new column view with exact type of self.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the two column views have different types.
+    #[inline]
+    pub fn concat_strictly(&self, rhs: &ColumnView) -> ColumnView {
+        match (self, rhs) {
+            (ColumnView::Timestamp(a), ColumnView::Timestamp(b)) => {
+                ColumnView::Timestamp(a.concat(b))
+            }
+            (ColumnView::Bool(a), ColumnView::Bool(b)) => ColumnView::Bool(a.concat(b)),
+            (ColumnView::TinyInt(a), ColumnView::TinyInt(b)) => ColumnView::TinyInt(a.concat(b)),
+            (ColumnView::UTinyInt(a), ColumnView::UTinyInt(b)) => ColumnView::UTinyInt(a.concat(b)),
+            (ColumnView::SmallInt(a), ColumnView::SmallInt(b)) => ColumnView::SmallInt(a.concat(b)),
+            (ColumnView::USmallInt(a), ColumnView::USmallInt(b)) => {
+                ColumnView::USmallInt(a.concat(b))
+            }
+            (ColumnView::Int(a), ColumnView::Int(b)) => ColumnView::Int(a.concat(b)),
+            (ColumnView::UInt(a), ColumnView::UInt(b)) => ColumnView::UInt(a.concat(b)),
+            (ColumnView::BigInt(a), ColumnView::BigInt(b)) => ColumnView::BigInt(a.concat(b)),
+            (ColumnView::UBigInt(a), ColumnView::UBigInt(b)) => ColumnView::UBigInt(a.concat(b)),
+            (ColumnView::Float(a), ColumnView::Float(b)) => ColumnView::Float(a.concat(b)),
+            (ColumnView::Double(a), ColumnView::Double(b)) => ColumnView::Double(a.concat(b)),
+            (ColumnView::VarChar(a), ColumnView::VarChar(b)) => ColumnView::VarChar(a.concat(b)),
+            (ColumnView::NChar(a), ColumnView::NChar(b)) => ColumnView::NChar(a.concat(b)),
+            (ColumnView::Json(a), ColumnView::Json(b)) => ColumnView::Json(a.concat(b)),
+            _ => panic!("strict concat needs same schema: {self:?}, {rhs:?}"),
+        }
+    }
+
     /// Concatenate another column view, output a new column view with specified type `ty`.
     #[inline]
     pub fn concat_as(&self, rhs: &ColumnView, ty: Ty) -> ColumnView {
@@ -520,66 +551,6 @@ impl ColumnView {
             ColumnView::Json(view) => view.slice(range).map(ColumnView::Json),
         }
     }
-
-    // pub fn into_column(&self) -> Column {
-    //     match self {
-    //         ColumnView::Bool(view) => Column::Bool(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.as_raw_slice().to_vec(),
-    //         ),
-    //         ColumnView::TinyInt(view) => Column::TinyInt(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.as_raw_slice().to_vec(),
-    //         ),
-    //         ColumnView::SmallInt(view) => Column::SmallInt(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.as_raw_slice().to_vec(),
-    //         ),
-    //         ColumnView::Int(view) => Column::Int(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.as_raw_slice().to_vec(),
-    //         ),
-    //         ColumnView::BigInt(view) => Column::BigInt(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.as_raw_slice().to_vec(),
-    //         ),
-    //         ColumnView::Float(view) => Column::Float(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.as_raw_slice().to_vec(),
-    //         ),
-    //         ColumnView::Double(view) => Column::Double(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.as_raw_slice().to_vec(),
-    //         ),
-    //         ColumnView::VarChar(view) => Column::VarBinary(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.iter()
-    //                 .map(|v| v.map(|s| s.as_bytes().to_vec()).unwrap_or_default())
-    //                 .collect(),
-    //         ),
-    //         ColumnView::Timestamp(_) => todo!(),
-    //         ColumnView::NChar(view) => {
-    //             Column::NChar(view.iter().map(|s| s.map(|s| s.to_string())).collect())
-    //         }
-    //         ColumnView::UTinyInt(view) => Column::UTinyInt(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.as_raw_slice().to_vec(),
-    //         ),
-    //         ColumnView::USmallInt(view) => Column::USmallInt(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.as_raw_slice().to_vec(),
-    //         ),
-    //         ColumnView::UInt(view) => Column::UInt(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.as_raw_slice().to_vec(),
-    //         ),
-    //         ColumnView::UBigInt(view) => Column::UBigInt(
-    //             bitvec_simd::BitVec::from_bool_iterator(view.is_null_iter()),
-    //             view.as_raw_slice().to_vec(),
-    //         ),
-    //         ColumnView::Json(_) => todo!(),
-    //     }
-    // }
 
     pub(super) fn write_raw_into<W: Write>(&self, wtr: &mut W) -> std::io::Result<usize> {
         match self {
@@ -1236,64 +1207,6 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
     }
     bytes
 }
-
-// pub fn views_to_raw_block_(views: &[ColumnView]) -> RawBlock {
-//     let mut header = super::Header::default();
-
-//     header.nrows = views.first().map(|v| v.len()).unwrap_or(0) as _;
-//     header.ncols = views.len() as _;
-
-//     let ncols = views.len();
-
-//     let mut bytes = Vec::new();
-//     bytes.extend(header.as_bytes());
-
-//     let schemas = views
-//         .iter()
-//         .map(|view| {
-//             let ty = view.as_ty();
-//             ColSchema {
-//                 ty,
-//                 len: ty.fixed_length() as _,
-//             }
-//         })
-//         .collect_vec();
-
-//     let schema_bytes = unsafe {
-//         std::slice::from_raw_parts(
-//             schemas.as_ptr() as *const u8,
-//             ncols * std::mem::size_of::<ColSchema>(),
-//         )
-//     };
-//     let schemas = Schemas(Bytes::copy_from_slice(schema_bytes));
-//     // bytes.write_all(schema_bytes).unwrap();
-
-//     let length_offset = bytes.len();
-//     bytes.resize(bytes.len() + ncols * std::mem::size_of::<u32>(), 0);
-
-//     let mut lengths = Vec::with_capacity(ncols);
-//     lengths.resize(ncols, 0);
-//     for (i, view) in views.iter().enumerate() {
-//         let cur = bytes.len();
-//         let n = view.write_raw_into(&mut bytes).unwrap();
-//         let len = bytes.len();
-//         debug_assert!(cur + n == len);
-//         if !view.as_ty().is_primitive() {
-//             lengths[i] = (n - header.nrows() * 4) as _;
-//         } else {
-//             lengths[i] = (header.nrows() * view.as_ty().fixed_length()) as _;
-//         }
-//     }
-//     unsafe {
-//         (*(bytes.as_mut_ptr() as *mut super::Header)).length = bytes.len() as _;
-//         std::ptr::copy(
-//             lengths.as_ptr(),
-//             bytes.as_mut_ptr().offset(length_offset as isize) as *mut u32,
-//             lengths.len(),
-//         );
-//     }
-//     bytes
-// }
 
 impl From<Value> for ColumnView {
     fn from(value: Value) -> Self {

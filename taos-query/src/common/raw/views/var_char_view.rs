@@ -210,6 +210,10 @@ impl VarCharView {
             data: data.into(),
         }
     }
+
+    pub fn concat(&self, rhs: &Self) -> Self {
+        Self::from_iter::<&InlineStr, _, _, _>(self.iter().chain(rhs.iter()).collect_vec())
+    }
 }
 
 pub struct VarCharIter<'a> {

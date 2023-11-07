@@ -21,6 +21,43 @@ pub use inline_str::InlineStr;
 pub use inline_read::AsyncInlinableRead;
 pub use inline_write::AsyncInlinableWrite;
 
+use crate::{RawError, RawResult};
+
+#[derive(Debug)]
+pub struct Edition {
+    pub edition: String,
+    pub expired: bool,
+}
+
+impl Edition {
+    pub fn new(edition: impl Into<String>, expired: bool) -> Self {
+        Self {
+            edition: edition.into(),
+            expired,
+        }
+    }
+    pub fn is_enterprise_edition(&self) -> bool {
+        match (self.edition.as_str(), self.expired) {
+            ("cloud", _) => true,
+            ("official" | "trial", false) => true,
+            _ => false,
+        }
+    }
+    pub fn assert_enterprise_edition(&self) -> RawResult<()> {
+        match (self.edition.as_str(), self.expired) {
+            ("cloud", _) => Ok(()),
+            ("official" | "trial", false) => Ok(()),
+            ("official" | "trial", true) => {
+                Err(RawError::from_string("your edition is expired".to_string()))
+            }
+            _ => Err(RawError::from_string(format!(
+                "edition: {}; expired: {}",
+                self.edition, self.expired
+            ))),
+        }
+    }
+}
+
 pub trait InlinableWrite: Write {
     #[inline]
     /// Write `usize` length as little endian `N` bytes.

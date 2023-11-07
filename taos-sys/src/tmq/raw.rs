@@ -224,6 +224,7 @@ pub(super) mod conf {
     use super::RawTmq;
 
     /* tmq conf */
+    #[derive(Debug)]
     pub struct Conf(*mut tmq_conf_t);
 
     impl Conf {

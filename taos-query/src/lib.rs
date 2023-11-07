@@ -7,7 +7,6 @@
 use std::{
     collections::BTreeMap,
     fmt::{Debug, Display},
-    mem::MaybeUninit,
     ops::{Deref, DerefMut},
     rc::Rc,
 };
@@ -17,7 +16,6 @@ pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
 pub use serde::de::value::Error as DeError;
 
 mod error;
-pub use error::*;
 
 pub mod common;
 mod de;
@@ -41,33 +39,24 @@ pub use prelude::sync::{Fetchable, Queryable};
 pub use prelude::{AsyncFetchable, AsyncQueryable};
 
 pub use taos_error::Error as RawError;
+use util::Edition;
 pub type RawResult<T> = std::result::Result<T, RawError>;
 
-static mut RT: MaybeUninit<tokio::runtime::Runtime> = MaybeUninit::uninit();
-static INIT: std::sync::Once = std::sync::Once::new();
-
-pub fn global_tokio_runtime() -> &'static tokio::runtime::Runtime {
-    unsafe {
-        INIT.call_once(|| {
-            RT.write(
-                tokio::runtime::Builder::new_multi_thread()
+lazy_static::lazy_static! {
+    static ref GLOBAL_RT: tokio::runtime::Runtime = {
+        tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
-                    .unwrap(),
-            );
-        });
-        RT.assume_init_mut()
-    }
+                    .unwrap()
+    };
+}
+
+pub fn global_tokio_runtime() -> &'static tokio::runtime::Runtime {
+    &GLOBAL_RT
 }
 
 pub fn block_in_place_or_global<F: std::future::Future>(fut: F) -> F::Output {
-    use tokio::runtime::Handle;
-    use tokio::task;
-
-    match Handle::try_current() {
-        Ok(handle) => task::block_in_place(move || handle.block_on(fut)),
-        Err(_) => global_tokio_runtime().block_on(fut),
-    }
+    global_tokio_runtime().block_on(fut)
 }
 
 pub enum CodecOpts {
@@ -111,6 +100,20 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
     #[doc(hidden)]
     fn is_enterprise_edition(&self) -> RawResult<bool> {
         Ok(false)
+    }
+
+    /// Get the edition.
+    #[doc(hidden)]
+    fn get_edition(&self) -> RawResult<Edition>;
+
+    /// Assert the server is an enterprise edition.
+    #[doc(hidden)]
+    fn assert_enterprise_edition(&self) -> RawResult<()> {
+        if let Ok(edition) = self.get_edition() {
+            edition.assert_enterprise_edition()
+        } else {
+            Err(RawError::from_string("get edition failed"))
+        }
     }
 
     /// Check a connection is still alive.
@@ -200,6 +203,20 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
         Ok(false)
     }
 
+    /// Get the edition.
+    #[doc(hidden)]
+    async fn get_edition(&self) -> RawResult<Edition>;
+
+    /// Assert the server is an enterprise edition.
+    #[doc(hidden)]
+    async fn assert_enterprise_edition(&self) -> RawResult<()> {
+        if let Ok(edition) = self.get_edition().await {
+            edition.assert_enterprise_edition()
+        } else {
+            Err(RawError::from_string("get edition failed"))
+        }
+    }
+
     /// Check a connection is still alive.
     async fn ping(&self, _: &mut Self::Target) -> RawResult<()>;
 
@@ -239,6 +256,7 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
         deadpool::managed::PoolConfig {
             max_size: 500,
             timeouts: deadpool::managed::Timeouts::default(),
+            queue_mode: deadpool::managed::QueueMode::Fifo,
         }
     }
 
@@ -340,7 +358,12 @@ impl<T: AsyncTBuilder> deadpool::managed::Manager for Manager<T> {
         self.manager.build().await
     }
 
-    async fn recycle(&self, _: &mut Self::Type) -> deadpool::managed::RecycleResult<Self::Error> {
+    async fn recycle(
+        &self,
+        conn: &mut Self::Type,
+        _: &deadpool::managed::Metrics,
+    ) -> deadpool::managed::RecycleResult<Self::Error> {
+        self.ping(conn).await.map_err(RawError::from_any)?;
         Ok(())
     }
 }
@@ -472,6 +495,10 @@ mod tests {
 
         fn is_enterprise_edition(&self) -> RawResult<bool> {
             todo!()
+        }
+
+        fn get_edition(&self) -> RawResult<Edition> {
+            Ok(Edition::new("community", false))
         }
     }
 
