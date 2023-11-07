@@ -13,10 +13,9 @@ use tracing::warn;
 use taos_query::{
     prelude::tokio::time,
     {
-    prelude::{Code, Field, Precision, RawBlock, RawMeta, RawResult},
-    util::Edition,
-},
-    RawError,
+        prelude::{Field, Precision, RawBlock, RawMeta, RawResult},
+        util::Edition,
+    },
 };
 
 const MAX_CONNECT_RETRIES: u8 = 16;

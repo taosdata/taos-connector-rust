@@ -279,7 +279,7 @@ impl Stmt {
             loop {
                 tokio::select! {
                     Some(msg) = msg_recv.recv() => {
-                        if let Err(_err) = sender.send(msg).await {
+                        if let Err(err) = sender.send(msg).await {
                             //
                             log::warn!("Sender error: {err:#}");
                             break;
