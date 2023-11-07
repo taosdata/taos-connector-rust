@@ -8,7 +8,7 @@ use serde::Deserialize;
 use taos_query::common::views::views_to_raw_block;
 use taos_query::common::ColumnView;
 use taos_query::prelude::{InlinableWrite, RawResult};
-use taos_query::stmt::Bindable;
+use taos_query::stmt::{AsyncBindable, Bindable};
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 
 use taos_query::prelude::tokio;
@@ -30,12 +30,12 @@ mod messages;
 
 use crate::query::asyn::Error;
 type StmtResult = RawResult<Option<usize>>;
-type StmtSender = std::sync::mpsc::SyncSender<StmtResult>;
-type StmtReceiver = std::sync::mpsc::Receiver<StmtResult>;
+type StmtSender = tokio::sync::mpsc::Sender<StmtResult>;
+type StmtReceiver = tokio::sync::mpsc::Receiver<StmtResult>;
 
 type StmtFieldResult = RawResult<Vec<StmtField>>;
-type StmtFieldSender = std::sync::mpsc::SyncSender<StmtFieldResult>;
-type StmtFieldReceiver = std::sync::mpsc::Receiver<StmtFieldResult>;
+type StmtFieldSender = tokio::sync::mpsc::Sender<StmtFieldResult>;
+type StmtFieldReceiver = tokio::sync::mpsc::Receiver<StmtFieldResult>;
 
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 
@@ -71,16 +71,17 @@ impl ToJsonValue for ColumnView {
 impl Bindable<super::Taos> for Stmt {
     fn init(taos: &super::Taos) -> RawResult<Self> {
         let mut dsn = taos.dsn.clone();
-        let database: Option<String> =
-            <Taos as taos_query::Queryable>::query_one(taos, "select database()")?;
+        let database: Option<String> = block_in_place_or_global(
+            <Taos as taos_query::AsyncQueryable>::query_one(taos, "select database()"),
+        )?;
         dsn.database = database;
         let mut stmt = block_in_place_or_global(Self::from_wsinfo(&dsn))?;
-        block_in_place_or_global(stmt.stmt_init())?;
+        crate::block_in_place_or_global(stmt.stmt_init())?;
         Ok(stmt)
     }
 
     fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
-        block_in_place_or_global(self.stmt_prepare(sql.as_ref()))?;
+        crate::block_in_place_or_global(self.stmt_prepare(sql.as_ref()))?;
         Ok(self)
     }
 
@@ -102,14 +103,14 @@ impl Bindable<super::Taos> for Stmt {
         //     .into_iter()
         //     .map(|tag| tag.to_json_value())
         //     .collect_vec();
-        // block_in_place_or_global(self.stmt_bind(columns))?;
+        // crate::block_in_place_or_global(self.stmt_bind(columns))?;
 
-        block_in_place_or_global(self.stmt_bind_block(params))?;
+        crate::block_in_place_or_global(self.stmt_bind_block(params))?;
         Ok(self)
     }
 
     fn add_batch(&mut self) -> RawResult<&mut Self> {
-        block_in_place_or_global(self.stmt_add_batch())?;
+        crate::block_in_place_or_global(self.stmt_add_batch())?;
         Ok(self)
     }
 
@@ -122,18 +123,73 @@ impl Bindable<super::Taos> for Stmt {
     }
 }
 
-pub trait WsFieldsable {
-    fn get_tag_fields(&self) -> RawResult<Vec<StmtField>>;
+#[async_trait::async_trait]
+impl AsyncBindable<super::Taos> for Stmt {
+    async fn init(taos: &super::Taos) -> RawResult<Self> {
+        let mut dsn = taos.dsn.clone();
+        let database: Option<String> =
+            <Taos as taos_query::AsyncQueryable>::query_one(taos, "select database()").await?;
+        dsn.database = database;
+        let mut stmt = Self::from_wsinfo(&dsn).await?;
+        stmt.stmt_init().await?;
+        Ok(stmt)
+    }
 
-    fn get_col_fields(&self) -> RawResult<Vec<StmtField>>;
+    async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
+        self.stmt_prepare(sql.as_ref()).await?;
+        Ok(self)
+    }
+
+    async fn set_tbname(&mut self, sql: &str) -> RawResult<&mut Self> {
+        self.stmt_set_tbname(sql.as_ref()).await?;
+        Ok(self)
+    }
+
+    async fn set_tags(&mut self, tags: &[taos_query::common::Value]) -> RawResult<&mut Self> {
+        let tags = tags.iter().map(|tag| tag.to_json_value()).collect_vec();
+        self.stmt_set_tags(tags).await?;
+        Ok(self)
+    }
+
+    async fn bind(&mut self, params: &[taos_query::common::ColumnView]) -> RawResult<&mut Self> {
+        // This json method for bind
+
+        // let columns = params
+        //     .into_iter()
+        //     .map(|tag| tag.to_json_value())
+        //     .collect_vec();
+        // crate::block_in_place_or_global(self.stmt_bind(columns))?;
+
+        self.stmt_bind_block(params).await?;
+        Ok(self)
+    }
+
+    async fn add_batch(&mut self) -> RawResult<&mut Self> {
+        self.stmt_add_batch().await?;
+        Ok(self)
+    }
+
+    async fn execute(&mut self) -> RawResult<usize> {
+        self.stmt_exec().await
+    }
+
+    async fn affected_rows(&self) -> usize {
+        self.affected_rows
+    }
+}
+
+pub trait WsFieldsable {
+    fn get_tag_fields(&mut self) -> RawResult<Vec<StmtField>>;
+
+    fn get_col_fields(&mut self) -> RawResult<Vec<StmtField>>;
 }
 
 impl WsFieldsable for Stmt {
-    fn get_tag_fields(&self) -> RawResult<Vec<StmtField>> {
+    fn get_tag_fields(&mut self) -> RawResult<Vec<StmtField>> {
         block_in_place_or_global(self.stmt_get_tag_fields())
     }
 
-    fn get_col_fields(&self) -> RawResult<Vec<StmtField>> {
+    fn get_col_fields(&mut self) -> RawResult<Vec<StmtField>> {
         block_in_place_or_global(self.stmt_get_col_fields())
     }
 }
@@ -148,6 +204,7 @@ pub struct Stmt {
     receiver: Option<StmtReceiver>,
     args: Option<StmtArgs>,
     affected_rows: usize,
+    affected_rows_once: usize,
     fields_fetches: Arc<HashMap<StmtId, StmtFieldSender>>,
     fields_receiver: Option<StmtFieldReceiver>,
 }
@@ -161,35 +218,6 @@ pub struct StmtField {
     pub scale: u8,
     pub bytes: i32,
 }
-
-// pub struct WsAsyncStmt {
-//     /// Message sending timeout, default is 5min.
-//     timeout: Duration,
-//     ws: WsSender,
-//     fetches: Arc<HashMap<StmtId, StmtSender>>,
-//     receiver: StmtReceiver,
-//     args: StmtArgs,
-// }
-// impl Debug for WsAsyncStmt {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("WsAsyncStmt")
-//             .field("ws", &"...")
-//             .field("fetches", &"...")
-//             .field("receiver", &self.receiver)
-//             .field("args", &self.args)
-//             .finish()
-//     }
-// }
-
-// impl Drop for WsAsyncStmt {
-//     fn drop(&mut self) {
-//         self.fetches.remove(&self.args.stmt_id);
-//         let args = self.args;
-//         let ws = self.ws.clone();
-//         let _ = taos_query::block_in_place_or_global(ws.send(StmtSend::Close(args).to_msg()));
-//     }
-// }
-
 impl Debug for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WsClient")
@@ -198,46 +226,6 @@ impl Debug for Stmt {
             .finish()
     }
 }
-
-// #[derive(Debug, Error)]
-// pub enum Error {
-//     #[error("{0}")]
-//     Dsn(#[from] DsnError),
-//     #[error("{0}")]
-//     FetchError(#[from] oneshot::error::RecvError),
-//     #[error("{0}")]
-//     SendError(#[from] tokio::sync::mpsc::error::SendError<Message>),
-//     #[error(transparent)]
-//     SendTimeoutError(#[from] tokio::sync::mpsc::error::SendTimeoutError<Message>),
-//     #[error("{0}")]
-//     StdSendError(#[from] std::sync::mpsc::SendError<tokio_tungstenite::tungstenite::Message>),
-//     #[error("{0}")]
-//     RecvError(#[from] std::sync::mpsc::RecvError),
-//     #[error("{0}")]
-//     RecvTimeout(#[from] std::sync::mpsc::RecvTimeoutError),
-//     #[error("{0}")]
-//     DeError(#[from] DeError),
-//     #[error("{0}")]
-//     WsError(#[from] WsError),
-//     #[error("{0}")]
-//     TaosError(#[from] RawError),
-// }
-
-// impl Error {
-//     pub const fn errno(&self) -> taos_error::Code {
-//         match self {
-//             Error::TaosError(error) => error.code(),
-//             _ => taos_error::Code::FAILED,
-//         }
-//     }
-//     pub fn errstr(&self) -> String {
-//         match self {
-//             Error::TaosError(error) => error.message().to_string(),
-//             _ => format!("{}", self),
-//         }
-//     }
-// }
-
 impl Drop for Stmt {
     fn drop(&mut self) {
         // send close signal to reader/writer spawned tasks.
@@ -291,8 +279,9 @@ impl Stmt {
             loop {
                 tokio::select! {
                     Some(msg) = msg_recv.recv() => {
-                        if let Err(_err) = sender.send(msg).await {
+                        if let Err(err) = sender.send(msg).await {
                             //
+                            log::warn!("Sender error: {err:#}");
                             break;
                         }
                     }
@@ -331,7 +320,7 @@ impl Stmt {
                                             if let Some(sender) = fetches_sender.get(&stmt_id) {
                                                 log::trace!("send data to fetches with id {}", stmt_id);
                                                 // let res = res.clone();
-                                                sender.send(res).unwrap();
+                                                sender.send(res).await.unwrap();
                                             // }) {
 
                                             } else {
@@ -342,7 +331,7 @@ impl Stmt {
                                             if let Some(sender) = fields_fetches_sender.get(&stmt_id) {
                                                 log::trace!("send data to fetches with id {}", stmt_id);
                                                 // let res = res.clone();
-                                                sender.send(res).unwrap();
+                                                sender.send(res).await.unwrap();
                                             // }) {
 
                                             } else {
@@ -395,6 +384,7 @@ impl Stmt {
             receiver: None,
             args: None,
             affected_rows: 0,
+            affected_rows_once: 0,
             fields_fetches,
             fields_receiver: None,
         })
@@ -426,14 +416,14 @@ impl Stmt {
         let stmt_id = rx.await.map_err(Error::from)??; // 1. RecvError, 2. TaosError
         let args = StmtArgs { req_id, stmt_id };
 
-        let (sender, receiver) = std::sync::mpsc::sync_channel(2);
+        let (sender, receiver) = tokio::sync::mpsc::channel(2);
 
         let _ = self.fetches.insert(stmt_id, sender);
 
         self.args = Some(args);
         self.receiver = Some(receiver);
 
-        let (fields_sender, fields_receiver) = std::sync::mpsc::sync_channel(2);
+        let (fields_sender, fields_receiver) = tokio::sync::mpsc::channel(2);
         let _ = self.fields_fetches.insert(stmt_id, fields_sender);
         self.fields_receiver = Some(fields_receiver);
         Ok(self)
@@ -455,24 +445,18 @@ impl Stmt {
             sql: sql.to_string(),
         };
         self.ws.send(prepare.to_msg()).await.map_err(Error::from)?;
-        let _ = self
-            .receiver
-            .as_ref()
-            .unwrap()
-            .recv_timeout(self.timeout)
-            .map_err(Error::from)??;
+        let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt prepare response"),
+        )??;
         Ok(())
     }
     pub async fn stmt_add_batch(&mut self) -> RawResult<()> {
         log::trace!("add batch");
         let message = StmtSend::AddBatch(self.args.unwrap());
         self.ws.send(message.to_msg()).await.map_err(Error::from)?;
-        let _ = self
-            .receiver
-            .as_ref()
-            .unwrap()
-            .recv_timeout(self.timeout)
-            .map_err(Error::from)??;
+        let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt add batch response"),
+        )??;
         Ok(())
     }
     pub async fn stmt_bind(&mut self, columns: Vec<serde_json::Value>) -> RawResult<()> {
@@ -486,12 +470,9 @@ impl Stmt {
             self.ws.send(message.to_msg()).await.map_err(Error::from)?;
         }
         log::trace!("begin receive");
-        let _ = self
-            .receiver
-            .as_ref()
-            .unwrap()
-            .recv_timeout(self.timeout)
-            .map_err(Error::from)??;
+        let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt bind response"),
+        )??;
         Ok(())
     }
 
@@ -521,12 +502,9 @@ impl Stmt {
             .send(Message::Binary(bytes))
             .await
             .map_err(Error::from)?;
-        let _ = self
-            .receiver
-            .as_ref()
-            .unwrap()
-            .recv_timeout(self.timeout)
-            .map_err(Error::from)??;
+        let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt bind block response"),
+        )??;
 
         Ok(())
     }
@@ -546,12 +524,9 @@ impl Stmt {
             .send_timeout(message.to_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
-        let _ = self
-            .receiver
-            .as_ref()
-            .unwrap()
-            .recv_timeout(self.timeout)
-            .map_err(Error::from)??;
+        let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt set_tbname response"),
+        )??;
         Ok(())
     }
 
@@ -564,12 +539,9 @@ impl Stmt {
             .send_timeout(message.to_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
-        let _ = self
-            .receiver
-            .as_ref()
-            .unwrap()
-            .recv_timeout(self.timeout)
-            .map_err(Error::from)?;
+        let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt set_tags response"),
+        )??;
         Ok(())
     }
 
@@ -580,50 +552,45 @@ impl Stmt {
             .send_timeout(message.to_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
-        if let Some(affected) = self
-            .receiver
-            .as_ref()
-            .unwrap()
-            .recv_timeout(self.timeout)
-            .map_err(Error::from)??
-        {
+        if let Some(affected) = self.receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt exec response"),
+        )?? {
             self.affected_rows += affected;
+            self.affected_rows_once = affected;
             Ok(affected)
         } else {
             panic!("")
         }
     }
 
-    pub async fn stmt_get_tag_fields(&self) -> RawResult<Vec<StmtField>> {
+    pub async fn stmt_get_tag_fields(&mut self) -> RawResult<Vec<StmtField>> {
         log::trace!("get tag fields");
         let message = StmtSend::GetTagFields(self.args.unwrap());
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
-        let fields = self
-            .fields_receiver
-            .as_ref()
-            .unwrap()
-            .recv_timeout(self.timeout)
-            .map_err(Error::from)??;
+        let fields = self.fields_receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt get_tag_fields response"),
+        )??;
         Ok(fields)
     }
 
-    pub async fn stmt_get_col_fields(&self) -> RawResult<Vec<StmtField>> {
+    pub async fn stmt_get_col_fields(&mut self) -> RawResult<Vec<StmtField>> {
         log::trace!("get col fields");
         let message = StmtSend::GetColFields(self.args.unwrap());
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
-        let fields = self
-            .fields_receiver
-            .as_ref()
-            .unwrap()
-            .recv_timeout(self.timeout)
-            .map_err(Error::from)??;
+        let fields = self.fields_receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt get_col_fields response"),
+        )??;
         Ok(fields)
+    }
+
+    pub fn affected_rows_once(&self) -> usize {
+        self.affected_rows_once
     }
 }
 
@@ -636,8 +603,7 @@ mod tests {
 
     use taos_query::prelude::tokio;
 
-    // Websocket tests should always use `multi_thread`
-    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    #[tokio::test()]
     async fn test_client() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 
@@ -666,7 +632,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    #[tokio::test()]
     async fn test_stmt_stable_with_json() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 
@@ -709,7 +675,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    #[tokio::test]
     async fn test_stmt_get_tag_and_col_fields() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 
@@ -717,14 +683,14 @@ mod tests {
         dbg!(&dsn);
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
-        taos.exec("drop database if exists stmt_sj").await?;
-        taos.exec("create database stmt_sj").await?;
-        taos.exec("create table stmt_sj.stb (ts timestamp, v int) tags(tj json)")
+        taos.exec("drop database if exists ws_stmt_sj2").await?;
+        taos.exec("create database ws_stmt_sj2").await?;
+        taos.exec("create table ws_stmt_sj2.stb (ts timestamp, v int) tags(tj json)")
             .await?;
 
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
-        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/stmt_sj").await?;
+        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/ws_stmt_sj2").await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
             .await?;
@@ -745,8 +711,10 @@ mod tests {
         let res = stmt.stmt_exec().await?;
 
         assert_eq!(res, 2);
-        let row: (String, i32, std::collections::HashMap<String, String>) =
-            taos.query_one("select * from stmt_sj.stb").await?.unwrap();
+        let row: (String, i32, std::collections::HashMap<String, String>) = taos
+            .query_one("select * from ws_stmt_sj2.stb")
+            .await?
+            .unwrap();
         dbg!(row);
 
         let tag_fields = stmt.stmt_get_tag_fields().await?;
@@ -757,11 +725,11 @@ mod tests {
 
         log::debug!("col fields: {:?}", col_fields);
 
-        taos.exec("drop database stmt_sj").await?;
+        taos.exec("drop database ws_stmt_sj2").await?;
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    #[tokio::test]
     async fn test_stmt_stable() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 

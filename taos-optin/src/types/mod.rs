@@ -3,7 +3,7 @@ use std::{fmt::Debug, mem::ManuallyDrop, os::raw::*, ptr};
 mod field;
 use derive_more::Deref;
 pub(crate) use field::from_raw_fields;
-pub use taos_query::common::{Precision, Ty};
+pub use taos_query::common::Ty;
 
 use taos_query::common::{itypes::*, ColumnView, Value};
 

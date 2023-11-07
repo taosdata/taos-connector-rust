@@ -92,7 +92,7 @@ impl<'a> IntoIterator for &'a NullBits {
         NullsIter {
             nulls: self,
             row: 0,
-            len: dbg!(self.0.len() * u8::BITS as usize),
+            len: self.0.len() * u8::BITS as usize,
         }
     }
 }

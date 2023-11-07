@@ -2,14 +2,20 @@ use std::{
     cell::UnsafeCell,
     ffi::{c_char, CStr, CString},
     sync::Arc,
+    time::Duration,
 };
 
+use anyhow::Context;
 use once_cell::sync::OnceCell;
 use raw::{ApiEntry, BlockState, RawRes, RawTaos};
+use tracing::warn;
 
 use taos_query::{
-    prelude::{Code, Field, Precision, RawBlock, RawMeta, RawResult},
-    RawError,
+    prelude::tokio::time,
+    {
+        prelude::{Field, Precision, RawBlock, RawMeta, RawResult},
+        util::Edition,
+    },
 };
 
 const MAX_CONNECT_RETRIES: u8 = 16;
@@ -140,7 +146,7 @@ impl taos_query::Queryable for Taos {
     type ResultSet = ResultSet;
 
     fn query<T: AsRef<str>>(&self, sql: T) -> RawResult<Self::ResultSet> {
-        log::trace!("Query with SQL: {}", sql.as_ref());
+        tracing::trace!("Query with SQL: {}", sql.as_ref());
         self.raw.query(sql.as_ref()).map(ResultSet::new)
     }
 
@@ -149,7 +155,7 @@ impl taos_query::Queryable for Taos {
         _sql: T,
         _req_id: u64,
     ) -> RawResult<Self::ResultSet> {
-        log::trace!("Query with SQL: {}", _sql.as_ref());
+        tracing::trace!("Query with SQL: {}", _sql.as_ref());
         self.raw
             .query_with_req_id(_sql.as_ref(), _req_id)
             .map(ResultSet::new)
@@ -174,7 +180,7 @@ impl taos_query::AsyncQueryable for Taos {
     type AsyncResultSet = ResultSet;
 
     async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
-        log::trace!("Async query with SQL: {}", sql.as_ref());
+        tracing::trace!("Async query with SQL: {}", sql.as_ref());
 
         match self.raw.query_async(sql.as_ref()).await {
             Err(err) if err.code() == 0x2603 => {
@@ -245,7 +251,7 @@ impl taos_query::AsyncQueryable for Taos {
 /// }
 /// #
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TaosBuilder {
     // dsn: Dsn,
     auth: Auth,
@@ -320,11 +326,11 @@ impl taos_query::TBuilder for TaosBuilder {
         let mut dsn = dsn.into_dsn()?;
 
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
-            log::trace!("using library path: {path}");
-            ApiEntry::dlopen(path).unwrap()
+            tracing::trace!("using library path: {path}");
+            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
         } else {
-            log::trace!("using default library of taos");
-            ApiEntry::default()
+            tracing::trace!("using default library of taos");
+            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
         };
         let mut auth = Auth::default();
         // let mut builder = TaosBuilder::default();
@@ -366,7 +372,7 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
-        conn.raw.query("select 1")?;
+        conn.raw.query("select server_status()")?;
         Ok(())
     }
 
@@ -405,30 +411,50 @@ impl taos_query::TBuilder for TaosBuilder {
             "select version, (expire_time < now) as valid from information_schema.ins_cluster",
         );
 
-        if let Ok(Some((edition, expired))) = grant {
-            if expired {
-                return Err(RawError::new(
-                    Code::FAILED,
-                    r#"Enterprise version expired. Please get a new license to activate."#,
-                ));
-            }
-            return match edition.as_str() {
-                "cloud" | "official" | "trial" => Ok(true),
-                _ => Ok(false),
-            };
-        }
-
-        let grant: RawResult<Option<(String, (), String)>> =
-            Queryable::query_one(taos, "show grants");
-
-        if let Ok(Some((edition, _, expired))) = grant {
-            match (edition.trim(), expired.trim()) {
-                ("cloud" | "official" | "trial", "false") => Ok(true),
-                _ => Ok(false),
-            }
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
         } else {
-            Ok(false)
-        }
+            let grant: RawResult<Option<(String, (), String)>> =
+                Queryable::query_one(taos, "show grants");
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition.is_enterprise_edition())
+    }
+
+    fn get_edition(&self) -> RawResult<Edition> {
+        let taos = self.inner_connection()?;
+        use taos_query::prelude::sync::Queryable;
+        let grant: RawResult<Option<(String, bool)>> = Queryable::query_one(
+            taos,
+            "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+        );
+
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
+        } else {
+            let grant: RawResult<Option<(String, (), String)>> =
+                Queryable::query_one(taos, "show grants");
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition)
     }
 }
 
@@ -440,11 +466,11 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         let mut dsn = dsn.into_dsn()?;
 
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
-            log::trace!("using library path: {path}");
-            ApiEntry::dlopen(path).unwrap()
+            tracing::trace!("using library path: {path}");
+            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
         } else {
-            log::trace!("using default library of taos");
-            ApiEntry::default()
+            tracing::trace!("using default library of taos");
+            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
         };
         let mut auth = Auth::default();
         // let mut builder = TaosBuilder::default();
@@ -485,8 +511,9 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         "dynamic"
     }
 
-    async fn ping(&self, conn: &mut Self::Target) -> RawResult<()> {
-        conn.raw.query("select 1")?;
+    async fn ping(&self, _: &mut Self::Target) -> RawResult<()> {
+        // use taos_query::prelude::AsyncQueryable;
+        // conn.query("select server_status()").await?;
         Ok(())
     }
 
@@ -522,36 +549,77 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     async fn is_enterprise_edition(&self) -> RawResult<bool> {
         let taos = self.inner_connection()?;
         use taos_query::prelude::AsyncQueryable;
-        let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
-            taos,
-            "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+
+        // the latest version of 3.x should work
+        let grant: RawResult<Option<(String, bool)>> = time::timeout(
+            Duration::from_secs(60),
+            AsyncQueryable::query_one(
+                taos,
+                "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+            ),
         )
-        .await;
+        .await
+        .context("Check cluster edition timeout")?;
 
-        if let Ok(Some((edition, expired))) = grant {
-            if expired {
-                return Err(RawError::new(
-                    Code::FAILED,
-                    r#"Enterprise version expired. Please get a new license to activate."#,
-                ));
-            }
-            return match edition.as_str() {
-                "cloud" | "official" | "trial" => Ok(true),
-                _ => Ok(false),
-            };
-        }
-
-        let grant: RawResult<Option<(String, (), String)>> =
-            AsyncQueryable::query_one(taos, "show grants").await;
-
-        if let Ok(Some((edition, _, expired))) = grant {
-            match (edition.trim(), expired.trim()) {
-                ("cloud" | "official" | "trial", "false") => Ok(true),
-                _ => Ok(false),
-            }
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
         } else {
-            Ok(false)
-        }
+            let grant: RawResult<Option<(String, (), String)>> = time::timeout(
+                Duration::from_secs(60),
+                AsyncQueryable::query_one(taos, "show grants"),
+            )
+            .await
+            .context("Check legacy grants timeout")?;
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition.is_enterprise_edition())
+    }
+
+    async fn get_edition(&self) -> RawResult<Edition> {
+        let taos = self.inner_connection()?;
+        use taos_query::prelude::AsyncQueryable;
+
+        // the latest version of 3.x should work
+        let grant: RawResult<Option<(String, bool)>> = time::timeout(
+            Duration::from_secs(60),
+            AsyncQueryable::query_one(
+                taos,
+                "select version, (expire_time < now) as valid from information_schema.ins_cluster",
+            ),
+        )
+        .await
+        .context("Check cluster edition timeout")?;
+
+        let edition = if let Ok(Some((edition, expired))) = grant {
+            Edition::new(edition, expired)
+        } else {
+            let grant: RawResult<Option<(String, (), String)>> = time::timeout(
+                Duration::from_secs(60),
+                AsyncQueryable::query_one(taos, "show grants"),
+            )
+            .await
+            .context("Check legacy grants timeout")?;
+
+            if let Ok(Some((edition, _, expired))) = grant {
+                Edition::new(
+                    edition.trim(),
+                    expired.trim() == "false" || expired.trim() == "unlimited",
+                )
+            } else {
+                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                Edition::new("unknown", true)
+            }
+        };
+        Ok(edition)
     }
 }
 
@@ -729,7 +797,7 @@ mod tests {
 
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn long_query_async() -> RawResult<()> {
         use taos_query::prelude::*;
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
@@ -760,7 +828,7 @@ mod tests {
 
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn show_databases_async() -> RawResult<()> {
         use taos_query::prelude::*;
 
@@ -783,7 +851,7 @@ mod tests {
 
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn error_async() -> RawResult<()> {
         use taos_query::prelude::*;
 
@@ -803,7 +871,7 @@ mod tests {
         assert!(err_str.contains("The table name cannot contain '.'"));
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn error_fetch_async() -> RawResult<()> {
         use taos_query::prelude::*;
 
@@ -824,7 +892,7 @@ mod tests {
         // dbg!(err);
         Ok(())
     }
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn error_sync() -> RawResult<()> {
         use taos_query::prelude::sync::*;
 
@@ -871,7 +939,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn show_databases_async_v2() -> RawResult<()> {
         use taos_query::prelude::*;
         let builder = TaosBuilder::from_dsn(DSN_V2)?;
@@ -899,7 +967,7 @@ mod tests {
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
@@ -965,7 +1033,7 @@ mod tests {
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
@@ -1035,7 +1103,7 @@ mod tests {
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 

@@ -34,7 +34,7 @@ pub mod sync {
     pub use super::_priv::*;
 
     pub use crate::stmt::Bindable;
-    pub use crate::tmq::{AsConsumer, IsMeta};
+    pub use crate::tmq::{AsConsumer, IsData, IsMeta};
 
     use serde::de::DeserializeOwned;
 
@@ -223,7 +223,7 @@ pub mod sync {
 
         fn create_topic(&self, name: impl AsRef<str>, sql: impl AsRef<str>) -> RawResult<()> {
             let (name, sql) = (name.as_ref(), sql.as_ref());
-            let query = format!("create topic if not exists {name} as {sql}");
+            let query = format!("create topic if not exists `{name}` as {sql}");
 
             self.query(query)?;
             Ok(())
@@ -235,7 +235,7 @@ pub mod sync {
             db: impl std::fmt::Display,
         ) -> RawResult<()> {
             let name = name.as_ref();
-            let query = format!("create topic if not exists {name} as database `{db}`");
+            let query = format!("create topic if not exists `{name}` as database `{db}`");
 
             self.exec(query)?;
             Ok(())
@@ -287,14 +287,14 @@ mod r#async {
 
     use crate::common::*;
     use crate::helpers::*;
-    pub use crate::stmt::Bindable;
+    pub use crate::stmt::AsyncBindable;
     pub use crate::RawResult;
 
     pub use super::_priv::*;
     pub use crate::util::AsyncInlinable;
     pub use crate::util::AsyncInlinableRead;
     pub use crate::util::AsyncInlinableWrite;
-    pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
+    pub use mdsn::Address;
     pub use serde::de::value::Error as DeError;
 
     pub use futures::stream::{Stream, StreamExt, TryStreamExt};
@@ -578,7 +578,7 @@ mod r#async {
             sql: S,
         ) -> RawResult<()> {
             let (name, sql) = (name.as_ref(), sql.as_ref());
-            let query = format!("CREATE TOPIC IF NOT EXISTS {name} AS {sql}");
+            let query = format!("CREATE TOPIC IF NOT EXISTS `{name}` AS {sql}");
 
             self.query(query).await?;
             Ok(())
@@ -591,25 +591,8 @@ mod r#async {
             db: impl std::fmt::Display + Send + 'async_trait,
         ) -> RawResult<()> {
             let name = name.as_ref();
-            let query = format!("create topic if not exists {name} with meta as database `{db}`");
-
-            // todo(@huolinhe): cannot set error. we should use a global error type here (?).
-
-            // let sql: Option<String> = self.query_one(format!("SELECT sql FROM information_schema.ins_topics WHERE topic_name = '{name}'")).await?;
-
-            // if let Some(sql) = sql {
-            //     if sql == query {
-            //         Ok(())
-            //     } else {
-            //         Ok(())
-            //     }
-            // }
-
-            if let Err(err) = self.exec(&query).await {
-                log::trace!("Create topic error: {:?}, try without ``", err);
-                let query = format!("create topic if not exists {name} with meta as database {db}");
-                self.exec(query).await?;
-            }
+            let query = format!("create topic if not exists `{name}` with meta as database `{db}`");
+            self.exec(&query).await?;
             Ok(())
         }
 
@@ -653,7 +636,7 @@ mod r#async {
 
         /// Sync version of `exec`.
         fn exec_sync<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<usize> {
-            futures::executor::block_on(self.exec(sql))
+            crate::block_in_place_or_global(self.exec(sql))
         }
 
         /// Sync version of `query`.
@@ -661,7 +644,7 @@ mod r#async {
             &self,
             sql: T,
         ) -> RawResult<Self::AsyncResultSet> {
-            futures::executor::block_on(self.query(sql))
+            crate::block_in_place_or_global(self.query(sql))
         }
     }
 

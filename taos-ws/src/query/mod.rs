@@ -1,7 +1,7 @@
 use once_cell::sync::OnceCell;
 use taos_query::common::SmlData;
 use taos_query::prelude::RawResult;
-use taos_query::{block_in_place_or_global, common::RawMeta, AsyncQueryable};
+use taos_query::{common::RawMeta, AsyncQueryable};
 
 pub mod asyn;
 pub(crate) mod infra;
@@ -23,7 +23,7 @@ pub struct Taos {
 
 impl Taos {
     pub fn version(&self) -> &str {
-        block_in_place_or_global(self.client()).version()
+        crate::block_in_place_or_global(self.client()).version()
     }
 
     async fn client(&self) -> &WsTaos {
@@ -111,26 +111,26 @@ impl taos_query::Queryable for Taos {
 
     fn query<T: AsRef<str>>(&self, sql: T) -> RawResult<Self::ResultSet> {
         let sql = sql.as_ref();
-        block_in_place_or_global(<Self as AsyncQueryable>::query(self, sql))
+        taos_query::block_in_place_or_global(<Self as AsyncQueryable>::query(self, sql))
     }
 
     fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> RawResult<Self::ResultSet> {
         let sql = sql.as_ref();
-        block_in_place_or_global(<Self as AsyncQueryable>::query_with_req_id(
+        taos_query::block_in_place_or_global(<Self as AsyncQueryable>::query_with_req_id(
             self, sql, req_id,
         ))
     }
 
     fn write_raw_meta(&self, meta: &RawMeta) -> RawResult<()> {
-        block_in_place_or_global(<Self as AsyncQueryable>::write_raw_meta(self, meta))
+        crate::block_in_place_or_global(<Self as AsyncQueryable>::write_raw_meta(self, meta))
     }
 
     fn write_raw_block(&self, block: &taos_query::RawBlock) -> RawResult<()> {
-        block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))
+        crate::block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))
     }
 
     fn put(&self, sml_data: &SmlData) -> RawResult<()> {
-        block_in_place_or_global(<Self as AsyncQueryable>::put(self, sml_data))
+        crate::block_in_place_or_global(<Self as AsyncQueryable>::put(self, sml_data))
     }
 }
 
@@ -357,7 +357,7 @@ mod tests {
         Ok(())
     }
 
-    // #[tokio::test(flavor = "multi_thread")]
+    // #[tokio::test]
     async fn _ws_select_from_meters() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "info");
         // pretty_env_logger::init_timed();
@@ -380,8 +380,7 @@ mod tests {
     }
 
     #[cfg(feature = "async")]
-    // !Websocket tests should always use `multi_thread`
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_client() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();

@@ -63,14 +63,14 @@ impl<'a> Future for QueryFuture<'a> {
 
         if let Some(result) = state.result.take() {
             let d = state.time.elapsed();
-            log::trace!(
+            tracing::trace!(
                 "Waken {:?} after callback received",
                 d - state.callback_cost.unwrap()
             );
             Poll::Ready(result)
         } else {
             if state.waiting {
-                log::trace!("It's waked but still waiting for taos_query_a callback.");
+                tracing::trace!("It's waked but still waiting for taos_query_a callback.");
                 return Poll::Pending;
             } else {
                 state.waiting = true;
@@ -82,20 +82,24 @@ impl<'a> Future for QueryFuture<'a> {
                 res: *mut TAOS_RES,
                 code: c_int,
             ) {
+                if param.is_null() {
+                    tracing::error!("query callback param should not be null");
+                    return;
+                }
                 let param = Box::from_raw(param as *mut AsyncQueryParam);
                 if let Some(state) = param.state.upgrade() {
                     // let state = param.read();
                     let s = { &mut *state.get() };
                     let cost = s.time.elapsed();
-                    log::trace!("Received query callback in {:?}", cost);
+                    tracing::trace!("Received query callback in {:?}", cost);
                     s.callback_cost.replace(cost);
                     if res.is_null() && code == 0 {
                         unreachable!("query callback should be ok or error");
                     }
                     if (code & 0xffff) == 0x032C {
-                        log::warn!("Received 0x032C (Object is creating) error, retry");
+                        tracing::warn!("Received 0x032C (Object is creating) error, retry");
                         s.waiting = false;
-                        (s.api.taos_free_result)(res);
+                        s.api.free_result(res);
                         param.waker.wake();
                         return;
                     }
@@ -121,7 +125,7 @@ impl<'a> Future for QueryFuture<'a> {
                     s.waiting = false;
                     param.waker.wake();
                 } else {
-                    log::trace!("Query callback received but no listener");
+                    tracing::trace!("Query callback received but no listener");
                 }
             }
 
@@ -145,7 +149,7 @@ impl<'a> QueryFuture<'a> {
     pub fn new(taos: RawTaos, sql: impl IntoCStr<'a>) -> Self {
         let state = Arc::new(UnsafeCell::new(State::new(taos.c.clone())));
         let sql = sql.into_c_str();
-        log::trace!("query with: {}", sql.to_str().unwrap_or("<...>"));
+        tracing::trace!("query with: {}", sql.to_str().unwrap_or("<...>"));
 
         QueryFuture {
             raw: taos,

@@ -4,8 +4,6 @@ pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
     use std::{ffi::CStr, sync::Arc, time::Duration};
-
-    use itertools::Itertools;
     use taos_query::tmq::{Assignment, VGroupId};
 
     use crate::{
@@ -32,12 +30,12 @@ pub(super) mod tmq {
             self.ptr
         }
         pub(crate) fn subscribe(&mut self, topics: &Topics) -> RawResult<()> {
-            unsafe {
-                (self.tmq.tmq_subscribe)(self.as_ptr(), topics.as_ptr()).ok_or(format!(
-                    "subscribe failed with topics: [{}]",
-                    topics.iter().join(",")
-                ))
+            let rsp = unsafe { (self.tmq.tmq_subscribe)(self.as_ptr(), topics.as_ptr()) };
+            if rsp.is_err() {
+                let str = unsafe { CStr::from_ptr((self.tmq.tmq_err2str)(rsp)) }.to_string_lossy();
+                return Err(taos_query::RawError::new(rsp.0, str));
             }
+            Ok(())
         }
 
         pub fn err_as_str(&self, tmq_resp: tmq_resp_err_t) -> String {
@@ -74,12 +72,12 @@ pub(super) mod tmq {
                 let offsets = resp.ok_or("commit failed").map(|_| ());
                 let sender = param as *mut Sender<_>;
                 let sender = Box::from_raw(sender);
-                log::trace!("commit async callback");
+                tracing::trace!("commit async callback");
                 sender.send(offsets).unwrap();
             }
 
             unsafe {
-                log::trace!("commit async with {:p}", msg.as_ptr());
+                tracing::trace!("commit async with {:p}", msg.as_ptr());
                 (self.tmq.tmq_commit_async)(
                     self.as_ptr(),
                     msg.as_ptr(),
@@ -91,7 +89,7 @@ pub(super) mod tmq {
         }
 
         pub fn poll_timeout(&self, timeout: i64) -> Option<RawRes> {
-            log::trace!("poll next message with timeout {}", timeout);
+            tracing::trace!("poll next message with timeout {}", timeout);
             let res = unsafe { (self.tmq.tmq_consumer_poll)(self.as_ptr(), timeout) };
             if res.is_null() {
                 None
@@ -108,7 +106,7 @@ pub(super) mod tmq {
             loop {
                 // poll with 50ms timeout.
                 // let ptr = UnsafeCell::new(self.0);
-                log::trace!("try poll next message with 200ms timeout");
+                tracing::trace!("try poll next message with 200ms timeout");
                 let raw = self.clone();
                 let res = tokio::task::spawn_blocking(move || {
                     let raw = raw;
@@ -123,7 +121,7 @@ pub(super) mod tmq {
                 .await
                 .unwrap_or_default();
                 if let Some(res) = res {
-                    log::trace!("received tmq message in {:?}", elapsed.elapsed());
+                    tracing::trace!("received tmq message in {:?}", elapsed.elapsed());
                     break res;
                 } else {
                     tokio::time::sleep(Duration::from_millis(1)).await;
@@ -180,7 +178,7 @@ pub(super) mod tmq {
                 // unimplemented!("does not support tmq_offset_seek")
                 return Ok(());
             }
-            log::trace!(
+            tracing::trace!(
                 "offset_seek tmq_resp: {:?}, topic_name: {}, vgroup_id: {}, offset: {}",
                 tmq_resp,
                 topic_name,
@@ -189,7 +187,7 @@ pub(super) mod tmq {
             );
 
             let err_str = self.err_as_str(tmq_resp);
-            log::trace!("offset_seek tmq_resp as str: {}", err_str);
+            tracing::trace!("offset_seek tmq_resp as str: {}", err_str);
 
             tmq_resp.ok_or(format!("offset seek failed: {err_str}"))
         }
@@ -214,6 +212,7 @@ pub(super) mod conf {
     use taos_query::Dsn;
 
     /* tmq conf */
+    #[derive(Debug)]
     pub struct Conf {
         api: TmqConfApi,
         ptr: *mut tmq_conf_t,
@@ -273,13 +272,13 @@ pub(super) mod conf {
         }
 
         pub(crate) fn enable_heartbeat_background(mut self) -> Self {
-            log::trace!("[tmq-conf] enable heartbeat in the background");
+            tracing::trace!("[tmq-conf] enable heartbeat in the background");
             let _ = self.set("enable.heartbeat.background", "true");
             self
         }
 
         pub(crate) fn enable_snapshot(mut self) -> Self {
-            log::trace!("[tmq-conf] enable snapshot");
+            tracing::trace!("[tmq-conf] enable snapshot");
             self.set("experimental.snapshot.enable", "true")
                 .expect("enable experimental snapshot");
             self
@@ -292,7 +291,7 @@ pub(super) mod conf {
         // }
 
         pub fn with_table_name(mut self) -> Self {
-            log::trace!("set msg.with.table.name as true");
+            tracing::trace!("set msg.with.table.name as true");
             self.set("msg.with.table.name", "true")
                 .expect("set group.id should always be ok");
             self

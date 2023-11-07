@@ -2,7 +2,6 @@ use std::ffi::c_void;
 use std::fmt::Debug;
 use std::os::raw::*;
 
-use taos_query::block_in_place_or_global;
 use taos_query::common::Value;
 use taos_query::prelude::Itertools;
 use taos_query::stmt::Bindable;
@@ -80,7 +79,11 @@ pub unsafe extern "C" fn ws_stmt_prepare(
                 return no;
             }
 
-            if let Err(e) = stmt.prepare(sql) {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|stmt| stmt.prepare(sql))
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -99,7 +102,34 @@ pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_c
         Some(stmt) => {
             let name = CStr::from_ptr(name).to_str().unwrap();
 
-            if let Err(e) = stmt.set_tbname(name) {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|stmt| stmt.set_tbname(name))
+            {
+                let errno = e.code();
+                stmt.error = Some(WsError::new(errno, &e.to_string()));
+                errno.into()
+            } else {
+                0
+            }
+        }
+        _ => 0,
+    }
+}
+
+/// Set sub table name.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_set_sub_tbname(stmt: *mut WS_STMT, name: *const c_char) -> c_int {
+    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+        Some(stmt) => {
+            let name = CStr::from_ptr(name).to_str().unwrap();
+
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|stmt| stmt.set_tbname(name))
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -127,7 +157,11 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
                 .map(|bind| bind.to_tag_value())
                 .collect_vec();
 
-            if let Err(e) = stmt.set_tbname_tags(name, &tags) {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|stmt| stmt.set_tbname_tags(name, &tags))
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -150,7 +184,11 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
     fieldNum: *mut c_int,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
-        Some(stmt) => match stmt.get_tag_fields() {
+        Some(stmt) => match stmt
+            .safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+            .and_then(|s| s.get_tag_fields())
+        {
             Ok(fields_vec) => {
                 let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
 
@@ -183,7 +221,11 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
     fieldNum: *mut c_int,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
-        Some(stmt) => match stmt.get_col_fields() {
+        Some(stmt) => match stmt
+            .safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+            .and_then(|s| s.get_col_fields())
+        {
             Ok(fields_vec) => {
                 let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
 
@@ -592,7 +634,11 @@ pub unsafe extern "C" fn ws_stmt_set_tags(
                 .map(|bind| bind.to_tag_value())
                 .collect_vec();
 
-            if let Err(e) = stmt.set_tags(&columns) {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|s| s.set_tags(&columns))
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -617,7 +663,11 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
                 .map(|bind| bind.to_json())
                 .collect();
 
-            if let Err(e) = block_in_place_or_global(stmt.stmt_bind(columns)) {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|s| crate::block_in_place_or_global(s.stmt_bind(columns)))
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -633,7 +683,11 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
 pub unsafe extern "C" fn ws_stmt_add_batch(stmt: *mut WS_STMT) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => {
-            if let Err(e) = stmt.add_batch() {
+            if let Err(e) = stmt
+                .safe_deref_mut()
+                .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+                .and_then(|stmt| stmt.add_batch())
+            {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
@@ -649,7 +703,11 @@ pub unsafe extern "C" fn ws_stmt_add_batch(stmt: *mut WS_STMT) -> c_int {
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut i32) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
-        Some(stmt) => match stmt.execute() {
+        Some(stmt) => match stmt
+            .safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+            .and_then(|stmt| stmt.execute())
+        {
             Ok(rows) => {
                 *affected_rows = rows as _;
                 0
@@ -667,8 +725,23 @@ pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut
 /// Get inserted rows in current statement.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
-    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+    match (stmt as *mut WsMaybeError<Stmt>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
         Some(stmt) => stmt.affected_rows() as _,
+        _ => 0,
+    }
+}
+
+/// Get inserted rows in current statement.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_affected_rows_once(stmt: *mut WS_STMT) -> c_int {
+    match (stmt as *mut WsMaybeError<Stmt>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
+        Some(stmt) => stmt.affected_rows_once() as _,
         _ => 0,
     }
 }
@@ -953,19 +1026,19 @@ mod tests {
                 };
             }
 
-            execute!(b"drop database if exists ws_stmt_t\0");
-            execute!(b"create database ws_stmt_t keep 36500\0");
+            execute!(b"drop database if exists ws_stmt_with_tags\0");
+            execute!(b"create database ws_stmt_with_tags keep 36500\0");
             execute!(
-                b"create table ws_stmt_t.s1 (ts timestamp, v int, b binary(100)) tags(jt json)\0"
+                b"create table ws_stmt_with_tags.s1 (ts timestamp, v int, b binary(100)) tags(jt json)\0"
             );
 
             let stmt = ws_stmt_init(taos);
-            let sql = "insert into ? using ws_stmt_t.s1 tags(?) values(?, ?, ?)";
+            let sql = "insert into ? using ws_stmt_with_tags.s1 tags(?) values(?, ?, ?)";
             let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
             if code != 0 {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
             }
-            ws_stmt_set_tbname(stmt, b"ws_stmt_t.t1\0".as_ptr() as _);
+            ws_stmt_set_tbname(stmt, b"ws_stmt_with_tags.t1\0".as_ptr() as _);
 
             let tags = vec![TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
@@ -989,6 +1062,203 @@ mod tests {
 
             assert_eq!(rows, 2);
             ws_stmt_close(stmt);
+
+            execute!(b"drop database if exists ws_stmt_with_tags\0");
+
+            ws_close(taos)
+        }
+    }
+
+    #[test]
+    fn test_stmt_affected_rows() {
+        use crate::*;
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let c_string = CString::new($sql).expect("CString conversion failed");
+                    let c_string_ptr = c_string.as_ptr();
+                    let rs = ws_query(taos, c_string_ptr);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+            let db = "ws_stmt_affected_rows";
+            execute!(format!("drop database if exists {db}"));
+            execute!(format!("create database {db} keep 36500"));
+            execute!(format!("use {db}"));
+            execute!("create STABLE s1 (ts timestamp, v int, b binary(100)) tags(jt json)");
+
+            let stmt = ws_stmt_init(taos);
+            let sql = "insert into ? using s1 tags(?) values(?, ?, ?)";
+            let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+            ws_stmt_set_tbname(stmt, b"t1\0".as_ptr() as _);
+
+            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+                r#"{"name":"姓名"}"#.to_string(),
+            )])];
+
+            ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
+
+            let params = vec![
+                TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
+                TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
+                TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
+            ];
+            let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            ws_stmt_add_batch(stmt);
+            let mut rows = 0;
+            ws_stmt_execute(stmt, &mut rows);
+
+            assert_eq!(rows, 2);
+
+            let affected_rows_once = ws_stmt_affected_rows_once(stmt);
+
+            assert_eq!(affected_rows_once, 2);
+            let affected_rows = ws_stmt_affected_rows(stmt);
+
+            assert_eq!(affected_rows, 2);
+
+            // add batch again, affected_rows_once should be 2, affected_rows should be 4
+
+            let params = vec![
+                TaosMultiBind::from_raw_timestamps(vec![false, false], &[2, 3]),
+                TaosMultiBind::from_primitives(vec![false, false], &[4, 5]),
+                TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
+            ];
+            let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            ws_stmt_add_batch(stmt);
+            let mut rows = 0;
+            ws_stmt_execute(stmt, &mut rows);
+
+            assert_eq!(rows, 2);
+
+            let affected_rows_once = ws_stmt_affected_rows_once(stmt);
+
+            assert_eq!(affected_rows_once, 2);
+
+            let affected_rows = ws_stmt_affected_rows(stmt);
+
+            assert_eq!(affected_rows, 4);
+
+            // add batch again, affected_rows_once should be 2, affected_rows should be 6
+
+            let params = vec![
+                TaosMultiBind::from_raw_timestamps(vec![false, false], &[4, 5]),
+                TaosMultiBind::from_primitives(vec![false, false], &[6, 7]),
+                TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
+            ];
+
+            let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
+
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            ws_stmt_add_batch(stmt);
+            let mut rows = 0;
+            ws_stmt_execute(stmt, &mut rows);
+
+            assert_eq!(rows, 2);
+
+            let affected_rows_once = ws_stmt_affected_rows_once(stmt);
+
+            assert_eq!(affected_rows_once, 2);
+
+            let affected_rows = ws_stmt_affected_rows(stmt);
+
+            assert_eq!(affected_rows, 6);
+
+            ws_stmt_close(stmt);
+
+            // execute!(format!("drop database if exists {db}"));
+
+            ws_close(taos)
+        }
+    }
+
+    #[test]
+    fn stmt_with_sub_table() {
+        use crate::*;
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"drop database if exists ws_stmt_with_sub_table\0");
+            execute!(b"create database ws_stmt_with_sub_table keep 36500\0");
+            execute!(b"use ws_stmt_with_sub_table\0");
+            execute!(b"create STABLE s1 (ts timestamp, v int, b binary(100)) tags(jt json)\0");
+
+            let stmt = ws_stmt_init(taos);
+            let sql = "insert into ? using s1 tags(?) values(?, ?, ?)";
+            let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+            ws_stmt_set_sub_tbname(stmt, b"sub_t1\0".as_ptr() as _);
+
+            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+                r#"{"name":"姓名"}"#.to_string(),
+            )])];
+
+            ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
+
+            let params = vec![
+                TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
+                TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
+                TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
+            ];
+            let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            ws_stmt_add_batch(stmt);
+            let mut rows = 0;
+            ws_stmt_execute(stmt, &mut rows);
+
+            assert_eq!(rows, 2);
+            ws_stmt_close(stmt);
+
+            execute!(b"drop database if exists ws_stmt_with_sub_table\0");
 
             ws_close(taos)
         }
@@ -1018,14 +1288,14 @@ mod tests {
                 };
             }
 
-            execute!(b"drop database if exists ws_stmt_t\0");
-            execute!(b"create database ws_stmt_t keep 36500\0");
+            execute!(b"drop database if exists ws_stmt_tag_and_col\0");
+            execute!(b"create database ws_stmt_tag_and_col keep 36500\0");
             execute!(
-                b"create table ws_stmt_t.s1 (ts timestamp, v int, b binary(100)) tags(jt json)\0"
+                b"create table ws_stmt_tag_and_col.s1 (ts timestamp, v int, b binary(100)) tags(jt json)\0"
             );
 
             let stmt = ws_stmt_init(taos);
-            let sql = "insert into ? using ws_stmt_t.s1 tags(?) values(?, ?, ?)";
+            let sql = "insert into ? using ws_stmt_tag_and_col.s1 tags(?) values(?, ?, ?)";
             let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
             if code != 0 {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
@@ -1075,7 +1345,7 @@ mod tests {
                 );
             }
 
-            ws_stmt_set_tbname(stmt, b"ws_stmt_t.t1\0".as_ptr() as _);
+            ws_stmt_set_tbname(stmt, b"ws_stmt_tag_and_col.t1\0".as_ptr() as _);
 
             // get tag fields after set tbname
             let mut tag_fields_after = std::ptr::null_mut();
@@ -1181,12 +1451,12 @@ mod tests {
                 };
             }
 
-            execute!(b"drop database if exists ws_stmt_t\0");
-            execute!(b"create database ws_stmt_t keep 36500\0");
-            execute!(b"create table ws_stmt_t.s1 (ts timestamp, v int, b binary(100))\0");
+            execute!(b"drop database if exists ws_stmt_false_usage\0");
+            execute!(b"create database ws_stmt_false_usage keep 36500\0");
+            execute!(b"create table ws_stmt_false_usage.s1 (ts timestamp, v int, b binary(100))\0");
 
             let stmt = ws_stmt_init(taos);
-            let sql = "insert into ws_stmt_t.s1 (ts, v, b) values(?, ?, ?)";
+            let sql = "insert into ws_stmt_false_usage.s1 (ts, v, b) values(?, ?, ?)";
             let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
             if code != 0 {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
@@ -1236,7 +1506,7 @@ mod tests {
                 );
             }
 
-            ws_stmt_set_tbname(stmt, b"ws_stmt_t.t1\0".as_ptr() as _);
+            ws_stmt_set_tbname(stmt, b"ws_stmt_false_usage.t1\0".as_ptr() as _);
 
             // get tag fields after set tbname
             let mut tag_fields_after = std::ptr::null_mut();

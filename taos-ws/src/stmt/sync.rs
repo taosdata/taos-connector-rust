@@ -1,4 +1,3 @@
-use taos_query::block_in_place_or_global;
 
 pub use super::*;
 
@@ -8,12 +7,12 @@ pub struct WsSyncStmtClient {
 
 impl WsSyncStmtClient {
     pub(crate) fn new(info: &TaosBuilder) -> Result<Self> {
-        let client = block_in_place_or_global(WsStmtClient::from_wsinfo(info))?;
+        let client = crate::block_in_place_or_global(WsStmtClient::from_wsinfo(info))?;
         Ok(Self { client })
     }
 
     pub fn stmt_init(&self) -> Result<WsSyncStmt> {
-        let stmt = block_in_place_or_global(self.client.stmt_init())?;
+        let stmt = crate::block_in_place_or_global(self.client.stmt_init())?;
         Ok(WsSyncStmt {
             stmt,
             affected_rows: 0,
@@ -29,7 +28,7 @@ pub struct WsSyncStmt {
 impl WsSyncStmt {
     pub fn prepare(&mut self, sql: &str) -> Result<()> {
         self.affected_rows = 0;
-        block_in_place_or_global(self.stmt.prepare(sql))
+        crate::block_in_place_or_global(self.stmt.prepare(sql))
     }
 
     pub fn set_timeout(&mut self, timeout: Duration) -> &mut Self {
@@ -37,23 +36,23 @@ impl WsSyncStmt {
         self
     }
     pub fn add_batch(&mut self) -> Result<()> {
-        block_in_place_or_global(self.stmt.add_batch())
+        crate::block_in_place_or_global(self.stmt.add_batch())
     }
     pub fn bind(&mut self, columns: Vec<serde_json::Value>) -> Result<()> {
-        block_in_place_or_global(self.stmt.bind(columns))
+        crate::block_in_place_or_global(self.stmt.bind(columns))
     }
 
     /// Call bind and add batch.
     pub fn bind_all(&mut self, columns: Vec<serde_json::Value>) -> Result<()> {
-        block_in_place_or_global(self.stmt.bind_all(columns))
+        crate::block_in_place_or_global(self.stmt.bind_all(columns))
     }
 
     pub fn set_tbname(&mut self, name: &str) -> Result<()> {
-        block_in_place_or_global(self.stmt.set_tbname(name))
+        crate::block_in_place_or_global(self.stmt.set_tbname(name))
     }
 
     pub fn set_tags(&mut self, tags: Vec<serde_json::Value>) -> Result<()> {
-        block_in_place_or_global(self.stmt.set_tags(tags))
+        crate::block_in_place_or_global(self.stmt.set_tags(tags))
     }
 
     pub fn set_tbname_tags(&mut self, name: &str, tags: Vec<serde_json::Value>) -> Result<()> {
@@ -62,7 +61,7 @@ impl WsSyncStmt {
     }
 
     pub fn exec(&mut self) -> Result<usize> {
-        let rows = block_in_place_or_global(self.stmt.exec())?;
+        let rows = crate::block_in_place_or_global(self.stmt.exec())?;
         self.affected_rows += rows;
         Ok(rows)
     }

@@ -1,5 +1,3 @@
-#![cfg_attr(coverage_nightly, feature(no_coverage))]
-
 //! M-DSN: A Multi-address DSN(Data Source Name) parser.
 //!
 //! M-DSN support two kind of DSN format:

@@ -287,6 +287,10 @@ impl NCharView {
             })),
         }
     }
+
+    pub fn concat(&self, rhs: &Self) -> Self {
+        Self::from_iter::<&str, _, _, _>(self.iter().chain(rhs.iter()).collect_vec())
+    }
 }
 
 pub struct NCharViewIter<'a> {
