@@ -28,6 +28,19 @@ impl taos_query::stmt::Bindable<super::Taos> for Stmt {
         }
     }
 
+    fn init_with_req_id(taos: &super::Taos, req_id: u64) -> RawResult<Self> {
+        match &taos.0 {
+            crate::TaosInner::Native(taos) => NativeStmt::init_with_req_id(taos, req_id)
+                .map(StmtInner::Native)
+                .map(Stmt)
+                .map_err(Into::into),
+            crate::TaosInner::Ws(taos) => WsStmt::init_with_req_id(taos, req_id)
+                .map(StmtInner::Ws)
+                .map(Stmt)
+                .map_err(Into::into),
+        }
+    }
+
     fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
         match &mut self.0 {
             StmtInner::Native(stmt) => {
@@ -113,6 +126,21 @@ impl taos_query::prelude::AsyncBindable<super::Taos> for Stmt {
                 .map(Stmt)
                 .map_err(Into::into),
             crate::TaosInner::Ws(taos) => WsStmt::init(taos)
+                .await
+                .map(StmtInner::Ws)
+                .map(Stmt)
+                .map_err(Into::into),
+        }
+    }
+
+    async fn init_with_req_id(taos: &super::Taos, req_id: u64) -> RawResult<Self> {
+        match &taos.0 {
+            crate::TaosInner::Native(taos) => NativeStmt::init_with_req_id(taos, req_id)
+                .await
+                .map(StmtInner::Native)
+                .map(Stmt)
+                .map_err(Into::into),
+            crate::TaosInner::Ws(taos) => WsStmt::init_with_req_id(taos, req_id)
                 .await
                 .map(StmtInner::Ws)
                 .map(Stmt)
