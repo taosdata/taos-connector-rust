@@ -344,6 +344,8 @@ pub(crate) struct TmqApi {
 pub(crate) struct StmtApi {
     pub(crate) taos_stmt_init: unsafe extern "C" fn(taos: *mut TAOS) -> *mut TAOS_STMT,
 
+    pub(crate) taos_stmt_init_with_reqid: unsafe extern "C" fn(taos: *mut TAOS, req_id: u64) -> *mut TAOS_STMT,
+
     pub(crate) taos_stmt_prepare:
         unsafe extern "C" fn(stmt: *mut TAOS_STMT, sql: *const c_char, length: c_ulong) -> c_int,
 
@@ -496,6 +498,7 @@ impl ApiEntry {
             // stmt
             symbol!(
                 taos_stmt_init,
+                taos_stmt_init_with_reqid,
                 taos_stmt_prepare,
                 taos_stmt_set_tbname_tags,
                 taos_stmt_set_tbname,
@@ -517,6 +520,7 @@ impl ApiEntry {
 
             let stmt = StmtApi {
                 taos_stmt_init,
+                taos_stmt_init_with_reqid,
                 taos_stmt_prepare,
                 taos_stmt_set_tbname_tags,
                 taos_stmt_set_tbname,
