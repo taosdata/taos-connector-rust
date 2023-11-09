@@ -80,6 +80,17 @@ impl Bindable<super::Taos> for Stmt {
         Ok(stmt)
     }
 
+    fn init_with_req_id(taos: &super::Taos, req_id: u64) -> RawResult<Self> {
+        let mut dsn = taos.dsn.clone();
+        let database: Option<String> = block_in_place_or_global(
+            <Taos as taos_query::AsyncQueryable>::query_one(taos, "select database()"),
+        )?;
+        dsn.database = database;
+        let mut stmt = block_in_place_or_global(Self::from_wsinfo(&dsn))?;
+        crate::block_in_place_or_global(stmt.taos_stmt_init_with_req_id(req_id))?;
+        Ok(stmt)
+    }
+
     fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
         crate::block_in_place_or_global(self.stmt_prepare(sql.as_ref()))?;
         Ok(self)
@@ -132,6 +143,16 @@ impl AsyncBindable<super::Taos> for Stmt {
         dsn.database = database;
         let mut stmt = Self::from_wsinfo(&dsn).await?;
         stmt.stmt_init().await?;
+        Ok(stmt)
+    }
+
+    async fn init_with_req_id(taos: &super::Taos, req_id: u64) -> RawResult<Self> {
+        let mut dsn = taos.dsn.clone();
+        let database: Option<String> =
+            <Taos as taos_query::AsyncQueryable>::query_one(taos, "select database()").await?;
+        dsn.database = database;
+        let mut stmt = Self::from_wsinfo(&dsn).await?;
+        stmt.taos_stmt_init_with_req_id(req_id).await?;
         Ok(stmt)
     }
 
@@ -407,6 +428,29 @@ impl Stmt {
 
     pub async fn stmt_init(&mut self) -> RawResult<&mut Self> {
         let req_id = self.req_id();
+        let action = StmtSend::Init { req_id };
+        let (tx, rx) = oneshot::channel();
+        {
+            self.queries.insert(req_id, tx);
+            self.ws.send(action.to_msg()).await.map_err(Error::from)?;
+        }
+        let stmt_id = rx.await.map_err(Error::from)??; // 1. RecvError, 2. TaosError
+        let args = StmtArgs { req_id, stmt_id };
+
+        let (sender, receiver) = tokio::sync::mpsc::channel(2);
+
+        let _ = self.fetches.insert(stmt_id, sender);
+
+        self.args = Some(args);
+        self.receiver = Some(receiver);
+
+        let (fields_sender, fields_receiver) = tokio::sync::mpsc::channel(2);
+        let _ = self.fields_fetches.insert(stmt_id, fields_sender);
+        self.fields_receiver = Some(fields_receiver);
+        Ok(self)
+    }
+
+    pub async fn taos_stmt_init_with_req_id(&mut self, req_id: u64) -> RawResult<&mut Self> {
         let action = StmtSend::Init { req_id };
         let (tx, rx) = oneshot::channel();
         {
