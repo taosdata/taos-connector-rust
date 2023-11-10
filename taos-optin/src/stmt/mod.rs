@@ -214,7 +214,7 @@ impl RawStmt {
         RawStmt {
             c: taos.c.clone(),
             api: taos.c.stmt,
-            ptr: unsafe { (taos.c.stmt.taos_stmt_init_with_reqid)(taos.as_ptr(), req_id) },
+            ptr: unsafe { (taos.c.stmt.taos_stmt_init_with_reqid.unwrap())(taos.as_ptr(), req_id) },
             tbname: None,
         }
     }
