@@ -429,7 +429,7 @@ impl AsConsumer for Consumer {
     ) -> RawResult<()> {
         let topics = topics.into_iter().map(|item| item.into()).collect_vec();
         let topics = Topics::from_topics(self.tmq.tmq.list_api, topics)?;
-        dbg!(&topics);
+        // dbg!(&topics);
         self.tmq.subscribe(&topics)
     }
 
