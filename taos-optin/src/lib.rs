@@ -729,8 +729,10 @@ unsafe impl Sync for ResultSet {}
 
 #[cfg(test)]
 pub(crate) mod constants {
-    pub const DSN_V2: &str = "taos://localhost:16030?libraryPath=tests/libs/libtaos.so.2.6.0.16";
-    pub const DSN_V3: &str = "taos://localhost:26030?libraryPath=tests/libs/libtaos.so.3.0.1.5";
+    // pub const DSN_V2: &str = "taos://localhost:16030?libraryPath=tests/libs/libtaos.so.2.6.0.16";
+    // pub const DSN_V3: &str = "taos://localhost:26030?libraryPath=tests/libs/libtaos.so.3.0.1.5";
+    pub const DSN_V2: &str = "taos://localhost:6030";
+    pub const DSN_V3: &str = "taos://localhost:6030";
 }
 
 #[cfg(test)]
@@ -800,7 +802,7 @@ mod tests {
         use taos_query::prelude::*;
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
         let taos = builder.build().await?;
-        let mut set = taos.query("select * from test.meters limit 100000").await?;
+        let mut set = taos.query("show databases").await?;
 
         set.blocks()
             .try_for_each_concurrent(10, |block| async move {
@@ -810,7 +812,7 @@ mod tests {
             .await?;
         println!("summary: {:?}", set.summary());
 
-        let mut set = taos.query("select * from test.meters limit 100000").await?;
+        let mut set = taos.query("show databases").await?;
 
         set.rows()
             .try_for_each_concurrent(10, |row| async move {
