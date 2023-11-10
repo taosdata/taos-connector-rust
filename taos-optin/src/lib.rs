@@ -877,17 +877,15 @@ mod tests {
         let _ = pretty_env_logger::try_init();
         let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build().await?;
-        let mut set = taos.query("select * from test.meters").await?;
-        set.blocks()
-            .enumerate()
-            .map(|(idx, ok)| ok.map(|v| (idx, v)))
-            .try_for_each(|(idx, block)| async move {
-                println!("block {idx}: {}", block.pretty_format());
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                Ok(())
-            })
-            .await?;
-        // dbg!(err);
+        let err = taos.query("select * from test.meters").await.unwrap_err();
+
+        tracing::trace!("{:?}", err);
+
+        assert!(err.code() == 0x2662);
+        let err_str = err.to_string();
+        assert!(err_str.contains("0x2662"));
+        assert!(err_str.contains("Database not exist"));
+
         Ok(())
     }
     #[tokio::test]
