@@ -783,7 +783,7 @@ mod tests {
         taos.query(format!("create database {db}2"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5")?;
+        let builder = TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -792,12 +792,12 @@ mod tests {
 
         for message in consumer.iter_with_timeout(Timeout::from_secs(1)) {
             let (offset, msg) = message?;
-            println!("offset: {:?}", offset);
+            tracing::debug!("offset: {:?}", offset);
 
             match msg {
                 MessageSet::Meta(meta) => {
                     let json = meta.to_json();
-                    dbg!(json);
+                    tracing::debug!("json: {:?}", json);
                     taos.write_raw_meta(&meta.as_raw_meta()?)?;
                     // taos.w
                 }
@@ -838,7 +838,7 @@ mod tests {
         let mut query = taos.query("describe stb1")?;
         for row in query.rows() {
             let raw = row?;
-            dbg!(raw);
+            tracing::debug!("raw: {:?}", raw);
         }
 
         taos.query("drop database tmq_meta2")?;
