@@ -668,7 +668,7 @@ mod tests {
         taos.query(format!("use {db}2"))?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false",
+            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build()?;
 
@@ -676,12 +676,12 @@ mod tests {
 
         for message in consumer.iter_with_timeout(Timeout::from_secs(1)) {
             let (offset, msg) = message?;
-            println!("offset: {:?}", offset);
+            tracing::debug!("offset: {:?}", offset);
 
             match msg {
                 MessageSet::Meta(meta) => {
                     let json = meta.to_json();
-                    dbg!(json);
+                    tracing::debug!("json: {:?}", json);
                     taos.write_raw_meta(&meta.as_raw_meta()?)?;
                     // taos.w
                 }
@@ -702,17 +702,17 @@ mod tests {
                 MessageSet::MetaData(meta, data) => {
                     // meta
                     let json = meta.to_json();
-                    dbg!(json);
+                    tracing::debug!("json: {:?}", json);
                     taos.write_raw_meta(&meta.as_raw_meta()?)?;
 
                     // data
                     for raw in data {
                         let raw = raw?;
-                        dbg!(raw.table_name().unwrap());
+                        tracing::debug!("raw: {:?}", raw);
                         let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
                         for col in raw.columns() {
                             for value in col {
-                                print!("{}\t", value);
+                                tracing::debug!("value in col {}\n", value);
                             }
                         }
                         println!();
@@ -729,12 +729,12 @@ mod tests {
         let mut query = taos.query("describe stb1")?;
         for row in query.rows() {
             let raw = row?;
-            dbg!(raw);
+            tracing::debug!("raw: {:?}", raw);
         }
         let mut query = taos.query("select count(*) from stb1")?;
         for row in query.rows() {
             let raw = row?;
-            dbg!(raw);
+            tracing::debug!("raw: {:?}", raw);
         }
 
         taos.query(format!("drop database {db}2"))?;
