@@ -26,6 +26,10 @@ impl Bindable<super::Taos> for Stmt {
         })
     }
 
+    fn init_with_req_id(taos: &super::Taos, req_id: u64) -> RawResult<Self> {
+        unimplemented!()
+    }
+
     fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
         self.raw.prepare(sql.as_ref())?;
         Ok(self)
@@ -73,6 +77,10 @@ impl AsyncBindable<super::Taos> for Stmt {
         Ok(Self {
             raw: RawStmt::from_raw_taos(&taos.raw),
         })
+    }
+
+    async fn init_with_req_id(taos: &super::Taos, req_id: u64) -> RawResult<Self> {
+        unimplemented!()
     }
 
     async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {

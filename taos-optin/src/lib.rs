@@ -12,10 +12,8 @@ use tracing::warn;
 
 use taos_query::{
     prelude::tokio::time,
-    {
-        prelude::{Field, Precision, RawBlock, RawMeta, RawResult},
-        util::Edition,
-    },
+    prelude::{Field, Precision, RawBlock, RawMeta, RawResult},
+    util::Edition,
 };
 
 const MAX_CONNECT_RETRIES: u8 = 16;
@@ -731,8 +729,10 @@ unsafe impl Sync for ResultSet {}
 
 #[cfg(test)]
 pub(crate) mod constants {
-    pub const DSN_V2: &str = "taos://localhost:16030?libraryPath=tests/libs/libtaos.so.2.6.0.16";
-    pub const DSN_V3: &str = "taos://localhost:26030?libraryPath=tests/libs/libtaos.so.3.0.1.5";
+    // pub const DSN_V2: &str = "taos://localhost:16030?libraryPath=tests/libs/libtaos.so.2.6.0.16";
+    // pub const DSN_V3: &str = "taos://localhost:26030?libraryPath=tests/libs/libtaos.so.3.0.1.5";
+    pub const DSN_V2: &str = "taos://localhost:6030";
+    pub const DSN_V3: &str = "taos://localhost:6030";
 }
 
 #[cfg(test)]
@@ -802,7 +802,7 @@ mod tests {
         use taos_query::prelude::*;
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
         let taos = builder.build().await?;
-        let mut set = taos.query("select * from test.meters limit 100000").await?;
+        let mut set = taos.query("show databases").await?;
 
         set.blocks()
             .try_for_each_concurrent(10, |block| async move {
@@ -812,7 +812,7 @@ mod tests {
             .await?;
         println!("summary: {:?}", set.summary());
 
-        let mut set = taos.query("select * from test.meters limit 100000").await?;
+        let mut set = taos.query("show databases").await?;
 
         set.rows()
             .try_for_each_concurrent(10, |row| async move {
@@ -879,17 +879,15 @@ mod tests {
         let _ = pretty_env_logger::try_init();
         let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build().await?;
-        let mut set = taos.query("select * from test.meters").await?;
-        set.blocks()
-            .enumerate()
-            .map(|(idx, ok)| ok.map(|v| (idx, v)))
-            .try_for_each(|(idx, block)| async move {
-                println!("block {idx}: {}", block.pretty_format());
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                Ok(())
-            })
-            .await?;
-        // dbg!(err);
+        let err = taos.query("select * from test.meters").await.unwrap_err();
+
+        tracing::trace!("{:?}", err);
+
+        assert!(err.code() == 0x2662);
+        let err_str = err.to_string();
+        assert!(err_str.contains("0x2662"));
+        assert!(err_str.contains("Database not exist"));
+
         Ok(())
     }
     #[tokio::test]
@@ -971,7 +969,7 @@ mod tests {
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
-        let db = "test_schemaless";
+        let db = "test_schemaless_optin";
 
         client.exec(format!("drop database if exists {db}"))?;
 
@@ -1037,7 +1035,7 @@ mod tests {
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
-        let db = "test_schemaless";
+        let db = "test_schemaless_telnet_optin";
 
         client.exec(format!("drop database if exists {db}"))?;
 
@@ -1107,7 +1105,7 @@ mod tests {
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
-        let db = "test_schemaless";
+        let db = "test_schemaless_json_optin";
 
         client.exec(format!("drop database if exists {db}"))?;
 
