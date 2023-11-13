@@ -641,6 +641,109 @@ mod tests {
     use crate::TaosBuilder;
 
     #[test]
+    fn test_write_raw_block_with_req_id() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+
+        let taos = TaosBuilder::from_dsn("taos:///")?.build()?;
+        let db = "test_write_raw_block_req_id";
+        taos.query(format!("drop topic if exists {db}"))?;
+        taos.query(format!("drop database if exists {db}"))?;
+        taos.query(format!("create database {db} keep 36500 vgroups 1"))?;
+        taos.query(format!("use {db}"))?;
+        taos.query(
+            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
+            "create stable stb1(ts timestamp, v int) tags(jt int, t1 float)",
+        )?;
+        taos.query(
+            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
+            "insert into tb2 using stb1 tags(2, 2.2) values(now, 0) (now + 1s, 0) tb3 using stb1 tags (3, 3.3) values (now, 3) (now +1s, 3)",
+        )?;
+
+        taos.query(format!("create topic {db} with meta as database {db}"))?;
+
+        taos.query(format!("drop database if exists {db}2"))?;
+        taos.query(format!("create database {db}2"))?;
+        taos.query(format!("use {db}2"))?;
+
+        let builder = TmqBuilder::from_dsn(
+            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
+        )?;
+        let mut consumer = builder.build()?;
+
+        consumer.subscribe([db])?;
+
+        for message in consumer.iter_with_timeout(Timeout::from_secs(1)) {
+            let (offset, msg) = message?;
+            tracing::debug!("offset: {:?}", offset);
+
+            match msg {
+                MessageSet::Meta(meta) => {
+                    let json = meta.to_json();
+                    tracing::debug!("json: {:?}", json);
+                    taos.write_raw_meta(&meta.as_raw_meta()?)?;
+                    // taos.w
+                }
+                MessageSet::Data(data) => {
+                    for raw in data {
+                        let raw = raw?;
+                        dbg!(raw.table_name().unwrap());
+                        let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
+                        for col in raw.columns() {
+                            for value in col {
+                                print!("{}\t", value);
+                            }
+                        }
+                        println!();
+                        let req_id = 1002;
+                        taos.write_raw_block_with_req_id(&raw, req_id)?;
+                    }
+                }
+                MessageSet::MetaData(meta, data) => {
+                    // meta
+                    let json = meta.to_json();
+                    tracing::debug!("json: {:?}", json);
+                    taos.write_raw_meta(&meta.as_raw_meta()?)?;
+
+                    // data
+                    for raw in data {
+                        let raw = raw?;
+                        tracing::debug!("raw: {:?}", raw);
+                        let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
+                        for col in raw.columns() {
+                            for value in col {
+                                tracing::debug!("value in col {}\n", value);
+                            }
+                        }
+                        println!();
+                        let req_id = 1003;
+                        taos.write_raw_block_with_req_id(&raw, req_id)?;
+                    }
+                }
+            }
+
+            let _ = consumer.commit(offset);
+        }
+
+        consumer.unsubscribe();
+
+        let mut query = taos.query("describe stb1")?;
+        for row in query.rows() {
+            let raw = row?;
+            tracing::debug!("raw: {:?}", raw);
+        }
+        let mut query = taos.query("select count(*) from stb1")?;
+        for row in query.rows() {
+            let raw = row?;
+            tracing::debug!("raw: {:?}", raw);
+        }
+
+        taos.query(format!("drop database {db}2"))?;
+        taos.query(format!("drop topic {db}")).unwrap();
+        taos.query(format!("drop database {db}"))?;
+        Ok(())
+    }
+
+    #[test]
     fn metadata() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
 
@@ -1041,6 +1144,95 @@ mod async_tests {
     use std::time::Duration;
 
     use super::TmqBuilder;
+
+    #[tokio::test]
+    async fn test_write_raw_block_with_req_id() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
+        let db = "test_write_raw_block_req_id";
+        taos.exec_many([
+            format!("drop topic if exists {db}").as_str(),
+            format!("drop database if exists {db}").as_str(),
+            format!("create database {db} keep 36500 vgroups 1").as_str(),
+            format!("use {db}").as_str(),
+            "create stable stb1(ts timestamp, v int) tags(jt int, t1 float)",
+            "insert into tb2 using stb1 tags(2, 2.2) values(now, 0) (now + 1s, 0) tb3 using stb1 tags (3, 3.3) values (now, 3) (now +1s, 3)",
+            format!("create topic {db} with meta as database {db}").as_str(),
+            format!("drop database if exists {db}2").as_str(),
+            format!("create database {db}2").as_str(),
+            format!("use {db}2").as_str(),
+
+        ]).await?;
+
+        let builder = TmqBuilder::from_dsn(
+            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
+        )?;
+        let mut consumer = builder.build().await?;
+
+        consumer.subscribe([db]).await?;
+
+        for message in taos_query::tmq::AsConsumer::iter_with_timeout(&consumer, Timeout::from_secs(1)) {
+            let (offset, msg) = message?;
+            tracing::debug!("offset: {:?}", offset);
+
+            match msg {
+                MessageSet::Meta(meta) => {
+                    let json = meta.to_json();
+                    tracing::debug!("json: {:?}", json);
+                    taos.write_raw_meta(&meta.as_raw_meta().await?).await?;
+                    // taos.w
+                }
+                MessageSet::Data(data) => {
+                    for raw in data {
+                        let raw = raw?;
+                        dbg!(raw.table_name().unwrap());
+                        let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
+                        for col in raw.columns() {
+                            for value in col {
+                                print!("{}\t", value);
+                            }
+                        }
+                        println!();
+                        let req_id = 1002;
+                        taos.write_raw_block_with_req_id(&raw, req_id).await?;
+                    }
+                }
+                MessageSet::MetaData(meta, data) => {
+                    // meta
+                    let json = meta.to_json();
+                    tracing::debug!("json: {:?}", json);
+                    taos.write_raw_meta(&meta.as_raw_meta().await?).await?;
+
+                    // data
+                    for raw in data {
+                        let raw = raw?;
+                        tracing::debug!("raw: {:?}", raw);
+                        let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
+                        for col in raw.columns() {
+                            for value in col {
+                                tracing::debug!("value in col {}\n", value);
+                            }
+                        }
+                        println!();
+                        let req_id = 1003;
+                        taos.write_raw_block_with_req_id(&raw, req_id).await?;
+                    }
+                }
+            }
+
+            let _ = consumer.commit(offset).await;
+        }
+
+        consumer.unsubscribe().await;
+
+        taos.exec_many([
+            format!("drop database {db}2").as_str(),
+            format!("drop topic {db}").as_str(),
+            format!("drop database {db}").as_str(),
+        ]).await?;
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_tmq_meta() -> anyhow::Result<()> {

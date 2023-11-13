@@ -82,6 +82,15 @@ pub struct ApiEntry {
             tbname: *const c_char,
         ) -> i32,
     >,
+    taos_write_raw_block_with_reqid: Option<
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            nrows: i32,
+            ptr: *const c_char,
+            tbname: *const c_char,
+            req_id: u64,
+        ) -> i32,
+    >,
     taos_write_raw_block_with_fields: Option<
         unsafe extern "C" fn(
             taos: *mut TAOS,
@@ -90,6 +99,17 @@ pub struct ApiEntry {
             tbname: *const c_char,
             fields: *const c_field_t,
             fields_count: i32,
+        ) -> i32,
+    >,
+    taos_write_raw_block_with_fields_with_reqid: Option<
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            nrows: i32,
+            ptr: *const c_char,
+            tbname: *const c_char,
+            fields: *const c_field_t,
+            fields_count: i32,
+            req_id: u64,
         ) -> i32,
     >,
 
@@ -486,12 +506,14 @@ impl ApiEntry {
                 taos_fetch_raw_block_a,
                 tmq_write_raw,
                 taos_write_raw_block,
+                taos_write_raw_block_with_reqid,
                 taos_query_with_reqid,
                 taos_schemaless_insert_raw,
                 taos_schemaless_insert_raw_with_reqid,
                 taos_schemaless_insert_raw_ttl,
                 taos_schemaless_insert_raw_ttl_with_reqid,
                 taos_write_raw_block_with_fields,
+                taos_write_raw_block_with_fields_with_reqid,
                 taos_get_raw_block,
                 taos_result_block
             );
@@ -629,7 +651,9 @@ impl ApiEntry {
                 taos_query_with_reqid,
                 tmq_write_raw,
                 taos_write_raw_block,
+                taos_write_raw_block_with_reqid,
                 taos_write_raw_block_with_fields,
+                taos_write_raw_block_with_fields_with_reqid,
                 taos_result_block,
 
                 taos_free_result,
@@ -888,6 +912,41 @@ impl RawTaos {
             ))
         } else {
             unimplemented!("2.x does not support write raw block")
+        }
+    }
+
+    #[inline]
+    pub fn write_raw_block_with_req_id(
+        &self,
+        block: &RawBlock,
+        req_id: u64,
+    ) -> Result<(), RawError> {
+        let nrows = block.nrows();
+        let name = block
+            .table_name()
+            .ok_or_else(|| RawError::new(Code::FAILED, "raw block should have table name"))?;
+        let ptr = block.as_raw_bytes().as_ptr();
+        if let Some(f) = self.c.taos_write_raw_block_with_fields_with_reqid {
+            let fields: Vec<_> = block.fields().into_iter().map(|f| f.to_c_field()).collect();
+            err_or!(f(
+                self.as_ptr(),
+                nrows as _,
+                ptr as _,
+                name.into_c_str().as_ptr(),
+                fields.as_ptr() as _,
+                fields.len() as _,
+                req_id
+            ))
+        } else if let Some(f) = self.c.taos_write_raw_block_with_reqid {
+            err_or!(f(
+                self.as_ptr(),
+                nrows as _,
+                ptr as _,
+                name.into_c_str().as_ptr(),
+                req_id
+            ))
+        } else {
+            self.write_raw_block(block)
         }
     }
 

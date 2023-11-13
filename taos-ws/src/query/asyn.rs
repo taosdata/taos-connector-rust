@@ -1070,6 +1070,10 @@ impl AsyncQueryable for WsTaos {
         self.s_write_raw_block(block).await
     }
 
+    async fn write_raw_block_with_req_id(&self, block: &RawBlock, req_id: u64) -> RawResult<()> {
+        todo!("write_raw_block_with_req_id")
+    }
+
     async fn put(&self, _data: &SmlData) -> RawResult<()> {
         todo!()
     }

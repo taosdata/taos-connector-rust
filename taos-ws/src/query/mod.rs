@@ -96,6 +96,14 @@ impl taos_query::AsyncQueryable for Taos {
         }
     }
 
+    async fn write_raw_block_with_req_id(
+        &self,
+        block: &taos_query::RawBlock,
+        req_id: u64,
+    ) -> RawResult<()> {
+        todo!("write_raw_block_with_req_id")
+    }
+
     async fn put(&self, data: &SmlData) -> RawResult<()> {
         if let Some(ws) = self.async_sml.get() {
             ws.s_put(data).await
@@ -127,6 +135,16 @@ impl taos_query::Queryable for Taos {
 
     fn write_raw_block(&self, block: &taos_query::RawBlock) -> RawResult<()> {
         crate::block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block(self, block))
+    }
+
+    fn write_raw_block_with_req_id(
+        &self,
+        block: &taos_query::RawBlock,
+        req_id: u64,
+    ) -> RawResult<()> {
+        crate::block_in_place_or_global(<Self as AsyncQueryable>::write_raw_block_with_req_id(
+            self, block, req_id,
+        ))
     }
 
     fn put(&self, sml_data: &SmlData) -> RawResult<()> {
