@@ -193,6 +193,8 @@ pub mod sync {
 
         fn write_raw_block(&self, _: &RawBlock) -> RawResult<()>;
 
+        fn write_raw_block_with_req_id(&self, _: &RawBlock, _: u64) -> RawResult<()>;
+
         fn exec_many<T: AsRef<str>, I: IntoIterator<Item = T>>(
             &self,
             input: I,
@@ -500,6 +502,9 @@ mod r#async {
         async fn write_raw_meta(&self, meta: &RawMeta) -> RawResult<()>;
 
         async fn write_raw_block(&self, block: &RawBlock) -> RawResult<()>;
+
+        async fn write_raw_block_with_req_id(&self, block: &RawBlock, req_id: u64)
+            -> RawResult<()>;
 
         async fn exec_many<T, I>(&self, input: I) -> RawResult<usize>
         where
