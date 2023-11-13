@@ -529,6 +529,10 @@ mod tests {
             Ok(())
         }
 
+        fn write_raw_block_with_req_id(&self, _: &RawBlock, _: u64) -> RawResult<()> {
+            Ok(())
+        }
+
         fn put(&self, _data: &SmlData) -> RawResult<()> {
             Ok(())
         }
