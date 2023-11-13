@@ -13,6 +13,8 @@ where
 {
     fn init(taos: &Q) -> RawResult<Self>;
 
+    fn init_with_req_id(taos: &Q, req_id: u64) -> RawResult<Self>;
+
     fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self>;
 
     fn set_tbname<S: AsRef<str>>(&mut self, name: S) -> RawResult<&mut Self>;
@@ -43,6 +45,8 @@ where
     Self: Sized,
 {
     async fn init(taos: &Q) -> RawResult<Self>;
+
+    async fn init_with_req_id(taos: &Q, req_id: u64) -> RawResult<Self>;
 
     async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self>;
 

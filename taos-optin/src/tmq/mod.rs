@@ -429,7 +429,7 @@ impl AsConsumer for Consumer {
     ) -> RawResult<()> {
         let topics = topics.into_iter().map(|item| item.into()).collect_vec();
         let topics = Topics::from_topics(self.tmq.tmq.list_api, topics)?;
-        dbg!(&topics);
+        // dbg!(&topics);
         self.tmq.subscribe(&topics)
     }
 
@@ -636,8 +636,6 @@ impl AsAsyncConsumer for Consumer {
 }
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::TmqBuilder;
 
     use crate::TaosBuilder;
@@ -668,7 +666,7 @@ mod tests {
         taos.query(format!("use {db}2"))?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false",
+            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build()?;
 
@@ -676,12 +674,12 @@ mod tests {
 
         for message in consumer.iter_with_timeout(Timeout::from_secs(1)) {
             let (offset, msg) = message?;
-            println!("offset: {:?}", offset);
+            tracing::debug!("offset: {:?}", offset);
 
             match msg {
                 MessageSet::Meta(meta) => {
                     let json = meta.to_json();
-                    dbg!(json);
+                    tracing::debug!("json: {:?}", json);
                     taos.write_raw_meta(&meta.as_raw_meta()?)?;
                     // taos.w
                 }
@@ -702,17 +700,17 @@ mod tests {
                 MessageSet::MetaData(meta, data) => {
                     // meta
                     let json = meta.to_json();
-                    dbg!(json);
+                    tracing::debug!("json: {:?}", json);
                     taos.write_raw_meta(&meta.as_raw_meta()?)?;
 
                     // data
                     for raw in data {
                         let raw = raw?;
-                        dbg!(raw.table_name().unwrap());
+                        tracing::debug!("raw: {:?}", raw);
                         let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
                         for col in raw.columns() {
                             for value in col {
-                                print!("{}\t", value);
+                                tracing::debug!("value in col {}\n", value);
                             }
                         }
                         println!();
@@ -729,12 +727,12 @@ mod tests {
         let mut query = taos.query("describe stb1")?;
         for row in query.rows() {
             let raw = row?;
-            dbg!(raw);
+            tracing::debug!("raw: {:?}", raw);
         }
         let mut query = taos.query("select count(*) from stb1")?;
         for row in query.rows() {
             let raw = row?;
-            dbg!(raw);
+            tracing::debug!("raw: {:?}", raw);
         }
 
         taos.query(format!("drop database {db}2"))?;
@@ -742,6 +740,7 @@ mod tests {
         taos.query(format!("drop database {db}"))?;
         Ok(())
     }
+    
     #[test]
     fn meta() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
@@ -783,7 +782,8 @@ mod tests {
         taos.query(format!("create database {db}2"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5")?;
+        let builder =
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -792,12 +792,12 @@ mod tests {
 
         for message in consumer.iter_with_timeout(Timeout::from_secs(1)) {
             let (offset, msg) = message?;
-            println!("offset: {:?}", offset);
+            tracing::debug!("offset: {:?}", offset);
 
             match msg {
                 MessageSet::Meta(meta) => {
                     let json = meta.to_json();
-                    dbg!(json);
+                    tracing::debug!("json: {:?}", json);
                     taos.write_raw_meta(&meta.as_raw_meta()?)?;
                     // taos.w
                 }
@@ -838,7 +838,7 @@ mod tests {
         let mut query = taos.query("describe stb1")?;
         for row in query.rows() {
             let raw = row?;
-            dbg!(raw);
+            tracing::debug!("raw: {:?}", raw);
         }
 
         taos.query("drop database tmq_meta2")?;
@@ -1033,6 +1033,14 @@ mod tests {
         ])?;
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod async_tests {
+
+    use std::time::Duration;
+
+    use super::TmqBuilder;
 
     #[tokio::test]
     async fn test_tmq_meta() -> anyhow::Result<()> {
@@ -1208,12 +1216,14 @@ mod tests {
         tracing::info!("dsn: {}", dsn);
 
         let taos = crate::TaosBuilder::from_dsn(&dsn)?.build().await?;
+        let db_name = "test_tmq";
+        let topic_name = "test_tmq";
         taos.exec_many([
-            "drop topic if exists ws_abc1",
-            "drop database if exists ws_abc1",
-            "create database ws_abc1 wal_retention_period 3600",
-            "create topic ws_abc1 with meta as database ws_abc1",
-            "use ws_abc1",
+            format!("drop topic if exists {db_name}").as_str(),
+            format!("drop database if exists {db_name}").as_str(),
+            format!("create database {db_name}").as_str(),
+            format!("create topic {topic_name} with meta as database {db_name}").as_str(),
+            format!("use {db_name}").as_str(),
             // kind 1: create super table using all types
             "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
             c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
@@ -1276,10 +1286,11 @@ mod tests {
         ])
         .await?;
 
+        let db2_name = "test_tmq2";
         taos.exec_many([
-            "drop database if exists db2",
-            "create database if not exists db2 wal_retention_period 3600",
-            "use db2",
+            format!("drop database if exists {db2_name}").as_str(),
+            format!("create database {db2_name} wal_retention_period 3600").as_str(),
+            format!("use {db2_name}").as_str(),
         ])
         .await?;
 
@@ -1287,7 +1298,7 @@ mod tests {
         dsn.push_str("?group.id=10&timeout=1000ms");
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;
-        consumer.subscribe(["ws_abc1"]).await?;
+        consumer.subscribe([topic_name]).await?;
 
         {
             let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
@@ -1394,9 +1405,9 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         taos.exec_many([
-            "drop database db2",
-            "drop topic ws_abc1",
-            "drop database ws_abc1",
+            format!("drop topic {topic_name}").as_str(),
+            format!("drop database {db_name}").as_str(),
+            format!("drop database {db2_name}").as_str(),
         ])
         .await?;
         Ok(())

@@ -37,6 +37,12 @@ impl Bindable<super::Taos> for Stmt {
         })
     }
 
+    fn init_with_req_id(taos: &super::Taos, req_id: u64) -> RawResult<Self> {
+        Ok(Self {
+            raw: RawStmt::from_raw_taos_with_req_id(&taos.raw, req_id),
+        })
+    }
+
     fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<&mut Self> {
         self.raw.prepare(sql.as_ref())?;
         Ok(self)
@@ -88,6 +94,12 @@ impl AsyncBindable<super::Taos> for Stmt {
     async fn init(taos: &super::Taos) -> RawResult<Self> {
         Ok(Self {
             raw: RawStmt::from_raw_taos(&taos.raw),
+        })
+    }
+
+    async fn init_with_req_id(taos: &super::Taos, req_id: u64) -> RawResult<Self> {
+        Ok(Self {
+            raw: RawStmt::from_raw_taos_with_req_id(&taos.raw, req_id),
         })
     }
 
@@ -193,6 +205,16 @@ impl RawStmt {
             c: taos.c.clone(),
             api: taos.c.stmt,
             ptr: unsafe { (taos.c.stmt.taos_stmt_init)(taos.as_ptr()) },
+            tbname: None,
+        }
+    }
+
+    #[inline]
+    pub fn from_raw_taos_with_req_id(taos: &RawTaos, req_id: u64) -> RawStmt {
+        RawStmt {
+            c: taos.c.clone(),
+            api: taos.c.stmt,
+            ptr: unsafe { (taos.c.stmt.taos_stmt_init_with_reqid.unwrap())(taos.as_ptr(), req_id) },
             tbname: None,
         }
     }
@@ -510,6 +532,135 @@ mod tests {
         assert_eq!(row.12, "ABC");
         assert_eq!(row.13, "涛思数据");
         taos.query("drop database test_bindable")?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_stmt_with_req_id() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        let taos = TaosBuilder::from_dsn("taos:///")?.build()?;
+        taos.exec_many([
+            "drop database if exists test_db_stmt",
+            "create database test_db_stmt keep 36500",
+            "use test_db_stmt",
+            "create table tb1 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
+            c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
+            c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
+        ])?;
+        let req_id = 1000;
+        let mut stmt = Stmt::init_with_req_id(&taos, req_id)?;
+        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
+        let params = vec![
+            ColumnView::from_millis_timestamp(vec![0]),
+            ColumnView::from_bools(vec![true]),
+            ColumnView::from_tiny_ints(vec![0]),
+            ColumnView::from_small_ints(vec![0]),
+            ColumnView::from_ints(vec![0]),
+            ColumnView::from_big_ints(vec![0]),
+            ColumnView::from_unsigned_tiny_ints(vec![0]),
+            ColumnView::from_unsigned_small_ints(vec![0]),
+            ColumnView::from_unsigned_ints(vec![0]),
+            ColumnView::from_unsigned_big_ints(vec![0]),
+            ColumnView::from_floats(vec![0.0]),
+            ColumnView::from_doubles(vec![0.]),
+            ColumnView::from_varchar(vec!["ABC"]),
+            ColumnView::from_nchar(vec!["涛思数据"]),
+        ];
+        let rows = stmt.bind(&params)?.add_batch()?.execute()?;
+        assert_eq!(rows, 1);
+
+        let rows: Vec<(
+            String,
+            bool,
+            i8,
+            i16,
+            i32,
+            i64,
+            u8,
+            u16,
+            u32,
+            u64,
+            f32,
+            f64,
+            String,
+            String,
+        )> = taos
+            .query("select * from tb1")?
+            .deserialize()
+            .try_collect()?;
+        let row = &rows[0];
+        assert_eq!(row.12, "ABC");
+        assert_eq!(row.13, "涛思数据");
+        taos.query("drop database test_db_stmt")?;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod async_tests {
+    use crate::prelude::*;
+
+    #[tokio::test]
+    async fn test_stmt_with_req_id() -> anyhow::Result<()> {
+        let taos = TaosBuilder::from_dsn("taos:///")?.build().await?;
+        taos.exec_many([
+            "drop database if exists test_db_stmt_async",
+            "create database test_db_stmt_async keep 36500",
+            "use test_db_stmt_async",
+            "create table tb1 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
+            c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
+            c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
+        ])
+        .await?;
+        let req_id = 1000;
+        let mut stmt = Stmt::init_with_req_id(&taos, req_id).await?;
+        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").await?;
+        let params = vec![
+            ColumnView::from_millis_timestamp(vec![0]),
+            ColumnView::from_bools(vec![true]),
+            ColumnView::from_tiny_ints(vec![0]),
+            ColumnView::from_small_ints(vec![0]),
+            ColumnView::from_ints(vec![0]),
+            ColumnView::from_big_ints(vec![0]),
+            ColumnView::from_unsigned_tiny_ints(vec![0]),
+            ColumnView::from_unsigned_small_ints(vec![0]),
+            ColumnView::from_unsigned_ints(vec![0]),
+            ColumnView::from_unsigned_big_ints(vec![0]),
+            ColumnView::from_floats(vec![0.0]),
+            ColumnView::from_doubles(vec![0.]),
+            ColumnView::from_varchar(vec!["ABC"]),
+            ColumnView::from_nchar(vec!["涛思数据"]),
+        ];
+        let rows = stmt.bind(&params).await?.add_batch().await?.execute().await?;
+        assert_eq!(rows, 1);
+
+        let rows: Vec<(
+            String,
+            bool,
+            i8,
+            i16,
+            i32,
+            i64,
+            u8,
+            u16,
+            u32,
+            u64,
+            f32,
+            f64,
+            String,
+            String,
+        )> = taos
+            .query("select * from tb1")
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+        let row = &rows[0];
+        assert_eq!(row.12, "ABC");
+        assert_eq!(row.13, "涛思数据");
+        taos.query("drop database test_db_stmt_async").await?;
 
         Ok(())
     }
