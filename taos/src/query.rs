@@ -403,6 +403,19 @@ impl AsyncQueryable for Taos {
         }
     }
 
+    async fn write_raw_block_with_req_id(&self, block: &RawBlock, req_id: u64) -> RawResult<()> {
+        match &self.0 {
+            TaosInner::Native(taos) => taos
+                .write_raw_block_with_req_id(block, req_id)
+                .await
+                .map_err(Into::into),
+            TaosInner::Ws(taos) => taos
+                .write_raw_block_with_req_id(block, req_id)
+                .await
+                .map_err(Into::into),
+        }
+    }
+
     async fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
         match &self.0 {
             TaosInner::Native(_) => todo!(),
@@ -468,6 +481,23 @@ impl taos_query::Queryable for Taos {
             TaosInner::Ws(taos) => {
                 <taos_ws::Taos as taos_query::Queryable>::write_raw_block(taos, block)
                     .map_err(Into::into)
+            }
+        }
+    }
+
+    fn write_raw_block_with_req_id(&self, block: &RawBlock, req_id: u64) -> RawResult<()> {
+        match &self.0 {
+            TaosInner::Native(taos) => {
+                <crate::sys::Taos as taos_query::Queryable>::write_raw_block_with_req_id(
+                    taos, block, req_id,
+                )
+                .map_err(Into::into)
+            }
+            TaosInner::Ws(taos) => {
+                <taos_ws::Taos as taos_query::Queryable>::write_raw_block_with_req_id(
+                    taos, block, req_id,
+                )
+                .map_err(Into::into)
             }
         }
     }

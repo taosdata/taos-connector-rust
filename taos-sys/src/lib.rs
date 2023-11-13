@@ -118,6 +118,10 @@ impl taos_query::Queryable for Taos {
         self.raw.write_raw_block(block)
     }
 
+    fn write_raw_block_with_req_id(&self, _: &RawBlock, _: u64) -> RawResult<()> {
+        unimplemented!("write_raw_block_with_req_id")
+    }
+
     fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
         self.raw.put(data)
     }
@@ -147,6 +151,10 @@ impl AsyncQueryable for Taos {
 
     async fn write_raw_block(&self, block: &RawBlock) -> RawResult<()> {
         self.raw.write_raw_block(block)
+    }
+
+    async fn write_raw_block_with_req_id(&self, _: &RawBlock, _: u64) -> RawResult<()> {
+        unimplemented!("write_raw_block_with_req_id")
     }
 
     async fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
