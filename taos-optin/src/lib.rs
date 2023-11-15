@@ -16,7 +16,7 @@ use taos_query::{
     util::Edition,
 };
 
-const MAX_CONNECT_RETRIES: u8 = 16;
+const MAX_CONNECT_RETRIES: u8 = 2;
 
 mod version {
     use std::fmt::Display;
@@ -272,7 +272,7 @@ impl TaosBuilder {
         } else {
             let ptr = self
                 .lib
-                .connect_with_retries(&self.auth, MAX_CONNECT_RETRIES)?;
+                .connect_with_retries(&self.auth, self.auth.max_retries())?;
 
             let raw = RawTaos::new(self.lib.clone(), ptr)?;
             let taos = Ok(Taos { raw });
@@ -288,6 +288,7 @@ struct Auth {
     pass: Option<CString>,
     db: Option<CString>,
     port: u16,
+    max_retries: u8,
 }
 
 impl Auth {
@@ -317,6 +318,9 @@ impl Auth {
     }
     pub(crate) fn port(&self) -> u16 {
         self.port
+    }
+    pub(crate) fn max_retries(&self) -> u8 {
+        self.max_retries
     }
 }
 
@@ -364,6 +368,12 @@ impl taos_query::TBuilder for TaosBuilder {
 
         lib.options(types::TSDB_OPTION::ShellActivityTimer, "3600");
 
+        if let Some(max_retries) = params.get("maxRetries") {
+            auth.max_retries = max_retries.parse().unwrap_or(MAX_CONNECT_RETRIES);
+        } else {
+            auth.max_retries = MAX_CONNECT_RETRIES;
+        }
+
         Ok(Self {
             // dsn,
             auth,
@@ -389,7 +399,7 @@ impl taos_query::TBuilder for TaosBuilder {
     fn build(&self) -> RawResult<Self::Target> {
         let ptr = self
             .lib
-            .connect_with_retries(&self.auth, MAX_CONNECT_RETRIES)?;
+            .connect_with_retries(&self.auth, self.auth.max_retries())?;
 
         let raw = RawTaos::new(self.lib.clone(), ptr)?;
         Ok(Taos { raw })
@@ -504,6 +514,12 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 
         lib.options(types::TSDB_OPTION::ShellActivityTimer, "3600");
 
+        if let Some(max_retries) = params.get("maxRetries") {
+            auth.max_retries = max_retries.parse().unwrap_or(MAX_CONNECT_RETRIES);
+        } else {
+            auth.max_retries = MAX_CONNECT_RETRIES;
+        }
+
         Ok(Self {
             // dsn,
             auth,
@@ -530,7 +546,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     async fn build(&self) -> RawResult<Self::Target> {
         let ptr = self
             .lib
-            .connect_with_retries(&self.auth, MAX_CONNECT_RETRIES)?;
+            .connect_with_retries(&self.auth, self.auth.max_retries())?;
 
         let raw = RawTaos::new(self.lib.clone(), ptr)?;
         Ok(Taos { raw })
@@ -805,6 +821,33 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn builder_retry_once() -> RawResult<()> {
+        use taos_query::prelude::*;
+
+        let builder = TaosBuilder::from_dsn("taos://localhost:6041?maxRetries=1")?;
+        assert!(builder.ready().await);
+
+        let res = builder.build().await;
+        assert!(res.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn builder_retry_default() -> RawResult<()> {
+        use taos_query::prelude::*;
+
+        let builder = TaosBuilder::from_dsn("taos://localhost:6041")?;
+        assert!(builder.ready().await);
+
+        let res = builder.build().await;
+        assert!(res.is_err());
+
+        Ok(())
+    }
+    
     #[tokio::test]
     async fn long_query_async() -> RawResult<()> {
         use taos_query::prelude::*;
