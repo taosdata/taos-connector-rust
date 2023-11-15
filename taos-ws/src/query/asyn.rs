@@ -737,6 +737,62 @@ impl WsTaos {
         }
     }
 
+    async fn s_write_raw_block_with_req_id(&self, raw: &RawBlock, req_id: u64) -> RawResult<()> {
+        let message_id = req_id;
+        // if self.version().starts_with('2') {
+        //     panic!("TDengine v2.x does not support to write_raw_block");
+        // }
+        if self.version().starts_with("3.0.1.") {
+            let raw_block_message = 4; // action number from `taosAdapter/controller/rest/const.go:L56`.
+
+            let mut meta = Vec::new();
+            meta.write_u64_le(req_id).map_err(Error::from)?;
+            meta.write_u64_le(message_id).map_err(Error::from)?;
+            meta.write_u64_le(raw_block_message as u64)
+                .map_err(Error::from)?;
+            meta.write_u32_le(raw.nrows() as u32).map_err(Error::from)?;
+            meta.write_inlined_str::<2>(raw.table_name().unwrap())
+                .map_err(Error::from)?;
+            meta.write_all(raw.as_raw_bytes()).map_err(Error::from)?;
+
+            let len = meta.len();
+            log::trace!("write block with req_id: {req_id}, raw data len: {len}",);
+
+            match self.sender.send_recv(WsSend::Binary(meta)).await? {
+                WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
+                _ => Err(RawError::from_string("write raw block error"))?,
+            }
+        } else {
+            let raw_block_message = 5; // action number from `taosAdapter/controller/rest/const.go:L56`.
+
+            let mut meta = Vec::new();
+            meta.write_u64_le(req_id).map_err(Error::from)?;
+            meta.write_u64_le(message_id).map_err(Error::from)?;
+            meta.write_u64_le(raw_block_message as u64)
+                .map_err(Error::from)?;
+            meta.write_u32_le(raw.nrows() as u32).map_err(Error::from)?;
+            meta.write_inlined_str::<2>(raw.table_name().unwrap())
+                .map_err(Error::from)?;
+            meta.write_all(raw.as_raw_bytes()).map_err(Error::from)?;
+            let fields = raw
+                .fields()
+                .into_iter()
+                .map(|f| f.to_c_field())
+                .collect_vec();
+
+            let fields =
+                unsafe { std::slice::from_raw_parts(fields.as_ptr() as _, fields.len() * 72) };
+            meta.write_all(fields).map_err(Error::from)?;
+            let len = meta.len();
+            log::trace!("write block with req_id: {req_id}, raw data len: {len}",);
+
+            match self.sender.send_recv(WsSend::Binary(meta)).await? {
+                WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
+                _ => Err(RawError::from_string("write raw block error"))?,
+            }
+        }
+    }
+
     pub async fn s_query(&self, sql: &str) -> RawResult<ResultSet> {
         let req_id = self.sender.req_id();
         let action = WsSend::Query {
@@ -1071,7 +1127,7 @@ impl AsyncQueryable for WsTaos {
     }
 
     async fn write_raw_block_with_req_id(&self, block: &RawBlock, req_id: u64) -> RawResult<()> {
-        todo!("write_raw_block_with_req_id")
+        self.s_write_raw_block_with_req_id(block, req_id).await
     }
 
     async fn put(&self, _data: &SmlData) -> RawResult<()> {
