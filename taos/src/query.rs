@@ -1146,6 +1146,9 @@ mod tests {
         use taos_query::prelude::sync::*;
         use crate::TmqBuilder;
 
+        std::env::set_var("RUST_LOG", "taos=trace");
+        // pretty_env_logger::init();
+
         let taos = TaosBuilder::from_dsn("http://localhost:6041")?.build()?;
         let db = "test_ws_write_raw_block_req_id";
         taos.query(format!("drop topic if exists {db}"))?;
