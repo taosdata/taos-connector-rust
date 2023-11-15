@@ -1272,3 +1272,56 @@ async fn ws_write_raw_block() -> anyhow::Result<()> {
     assert_eq!(client.exec("drop database write_raw_block_test").await?, 0);
     Ok(())
 }
+
+#[tokio::test]
+async fn ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
+    let mut raw = RawBlock::parse_from_raw_block_v2(
+        &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
+        &[
+            Field::new("ts", taos_query::common::Ty::Timestamp, 8),
+            Field::new("v", taos_query::common::Ty::Bool, 1),
+        ],
+        &[8, 1],
+        1,
+        Precision::Millisecond,
+    );
+    raw.with_table_name("tb1");
+    dbg!(&raw);
+
+    use futures::TryStreamExt;
+    std::env::set_var("RUST_LOG", "debug");
+    let dsn = std::env::var("TDENGINE_TEST_DSN").unwrap_or("http://localhost:6041".to_string());
+    // pretty_env_logger::init();
+
+    let client = WsTaos::from_dsn(dsn).await?;
+
+    let _version = client.version();
+
+    client
+        .exec_many([
+            "drop database if exists test_ws_write_raw_block_with_req_id",
+            "create database test_ws_write_raw_block_with_req_id keep 36500",
+            "use test_ws_write_raw_block_with_req_id",
+            "create table if not exists tb1(ts timestamp, v bool)",
+        ])
+        .await?;
+    
+    let req_id = 10003;
+    client.write_raw_block_with_req_id(&raw, req_id).await?;
+
+    let mut rs = client.query("select * from tb1").await?;
+
+    #[derive(Debug, serde::Deserialize)]
+    #[allow(dead_code)]
+    struct A {
+        ts: String,
+        v: Option<bool>,
+    }
+
+    let values: Vec<A> = rs.deserialize().try_collect().await?;
+
+    dbg!(values);
+
+    assert_eq!(client.exec("drop database test_ws_write_raw_block_with_req_id").await?, 0);
+    Ok(())
+}
