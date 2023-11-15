@@ -712,14 +712,14 @@ impl ApiEntry {
         mut retries: u8,
     ) -> Result<*mut TAOS, RawError> {
         if retries == 0 {
-            retries = 5;
+            retries = 1;
         }
         loop {
             let ptr = self.connect(auth);
             if ptr.is_null() {
                 retries -= 1;
                 let err = self.check(ptr).unwrap_err();
-                if retries == 0 {
+                if retries <= 0 {
                     break Err(err);
                 }
                 if err.code() == 0x000B {
