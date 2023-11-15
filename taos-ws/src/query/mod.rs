@@ -101,7 +101,15 @@ impl taos_query::AsyncQueryable for Taos {
         block: &taos_query::RawBlock,
         req_id: u64,
     ) -> RawResult<()> {
-        todo!("write_raw_block_with_req_id")
+        if let Some(ws) = self.async_client.get() {
+            ws.write_raw_block_with_req_id(block, req_id).await
+        } else {
+            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
+            self.async_client
+                .get_or_init(|| async_client)
+                .write_raw_block_with_req_id(block, req_id)
+                .await
+        }
     }
 
     async fn put(&self, data: &SmlData) -> RawResult<()> {
