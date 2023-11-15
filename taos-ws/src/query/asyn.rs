@@ -739,9 +739,7 @@ impl WsTaos {
 
     async fn s_write_raw_block_with_req_id(&self, raw: &RawBlock, req_id: u64) -> RawResult<()> {
         let message_id = req_id;
-        // if self.version().starts_with('2') {
-        //     panic!("TDengine v2.x does not support to write_raw_block");
-        // }
+
         if self.version().starts_with("3.0.1.") {
             let raw_block_message = 4; // action number from `taosAdapter/controller/rest/const.go:L56`.
 
