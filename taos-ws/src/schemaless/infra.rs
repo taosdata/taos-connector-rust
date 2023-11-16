@@ -17,6 +17,8 @@ pub struct WsConnReq {
     pub(crate) password: Option<String>,
     #[serde_as(as = "NoneAsEmptyString")]
     pub(crate) db: Option<String>,
+    #[serde_as(as = "NoneAsEmptyString")]
+    pub(crate) mode: Option<i32>,    
 }
 
 impl WsConnReq {
@@ -30,6 +32,7 @@ impl WsConnReq {
             user: Some(user.into()),
             password: Some(password.into()),
             db: Some(db.into()),
+            mode: None
         }
     }
     // pub fn with_database(mut self, db: impl Into<String>) -> Self {
