@@ -532,7 +532,7 @@ impl WsTaos {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = Some(1024 * 1024 * 16);
 
-        let (ws, _) = connect_async_with_config(info.to_query_url(), Some(config), false)
+        let res = connect_async_with_config(info.to_ws_url(), Some(config), false)
             .await
             .map_err(|err| {
                 let err_string = err.to_string();
@@ -541,7 +541,27 @@ impl WsTaos {
                 } else {
                     err.into()
                 }
-            })?;
+            });
+            
+        let (ws, _) = match res {
+            Ok(res) => res,
+            Err(err) => {
+                if err.to_string().contains("404 Not Found") {
+                    connect_async_with_config(info.to_query_url(), Some(config), false)
+                        .await
+                        .map_err(|err| {
+                            let err_string = err.to_string();
+                            if err_string.contains("401 Unauthorized") {
+                                Error::Unauthorized(info.to_query_url())
+                            } else {
+                                err.into()
+                            }
+                        })?
+                } else {
+                    return Err(err.into());
+                }
+            }
+        };
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 
