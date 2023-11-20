@@ -408,6 +408,15 @@ impl TaosBuilder {
         }
     }
 
+    pub(crate) fn to_ws_url(&self) -> String {
+        match &self.auth {
+            WsAuth::Token(token) => {
+                format!("{}://{}/ws?token={}", self.scheme, self.addr, token)
+            }
+            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme, self.addr),
+        }
+    }
+
     pub(crate) fn to_conn_request(&self) -> WsConnReq {
         match &self.auth {
             WsAuth::Token(_token) => WsConnReq {
