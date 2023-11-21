@@ -14,6 +14,7 @@ use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
 
+use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::query::infra::ToMessage;
@@ -257,7 +258,9 @@ impl Drop for Stmt {
 impl Stmt {
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
         
-        let ws = info.build_stream(info.to_stmt_url()).await?;
+        let (ws, _) = connect_async(info.to_ws_url())
+            .await
+            .map_err(Error::from)?;
         
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
@@ -738,6 +741,9 @@ mod tests {
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
             .await?;
+
+        // let tag_fields = stmt.stmt_get_tag_fields().await;
+        // dbg!(tag_fields);
 
         stmt.stmt_set_tbname("tb1").await?;
 
