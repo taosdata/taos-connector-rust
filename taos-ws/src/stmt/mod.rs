@@ -258,7 +258,7 @@ impl Drop for Stmt {
 impl Stmt {
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
         
-        let (ws, _) = connect_async(info.to_ws_url())
+        let (ws, _) = connect_async(info.to_stmt_url())
             .await
             .map_err(Error::from)?;
         
