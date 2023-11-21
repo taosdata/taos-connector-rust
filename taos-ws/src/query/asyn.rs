@@ -17,10 +17,9 @@ use tokio::net::TcpStream;
 use tokio::sync::watch;
 
 use tokio::time;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{
-    connect_async_with_config, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
+    tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
 };
 
 use super::{infra::*, TaosBuilder};
@@ -529,39 +528,9 @@ impl WsTaos {
         Self::from_wsinfo(&info).await
     }
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        let mut config = WebSocketConfig::default();
-        config.max_frame_size = Some(1024 * 1024 * 16);
 
-        let res = connect_async_with_config(info.to_ws_url(), Some(config), false)
-            .await
-            .map_err(|err| {
-                let err_string = err.to_string();
-                if err_string.contains("401 Unauthorized") {
-                    Error::Unauthorized(info.to_query_url())
-                } else {
-                    err.into()
-                }
-            });
-            
-        let (ws, _) = match res {
-            Ok(res) => res,
-            Err(err) => {
-                if err.to_string().contains("404 Not Found") {
-                    connect_async_with_config(info.to_query_url(), Some(config), false)
-                        .await
-                        .map_err(|err| {
-                            let err_string = err.to_string();
-                            if err_string.contains("401 Unauthorized") {
-                                Error::Unauthorized(info.to_query_url())
-                            } else {
-                                err.into()
-                            }
-                        })?
-                } else {
-                    return Err(err.into());
-                }
-            }
-        };
+        let ws = info.build_stream(info.to_query_url()).await?;
+
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 

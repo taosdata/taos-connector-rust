@@ -47,7 +47,7 @@ name = "query"
 
 [features]
 deadpool = ["taos-query/deadpool"]
-default = ["ws-rustls", "native", "deadpool"]
+default = ["ws-rustls", "optin", "deadpool"]
 native = ["taos-sys"]
 optin = ["taos-optin"]
 r2d2 = ["taos-query/r2d2"]

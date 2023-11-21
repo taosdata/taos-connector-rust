@@ -418,7 +418,7 @@ impl AsyncQueryable for Taos {
 
     async fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
         match &self.0 {
-            TaosInner::Native(_) => todo!(),
+            TaosInner::Native(taos) => taos.put(data).await.map_err(Into::into),
             TaosInner::Ws(taos) => taos.put(data).await.map_err(Into::into),
         }
     }
