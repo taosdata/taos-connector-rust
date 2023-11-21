@@ -17,10 +17,9 @@ use tokio::net::TcpStream;
 use tokio::sync::watch;
 
 use tokio::time;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{
-    connect_async_with_config, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
+    tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
 };
 
 use super::{infra::*, TaosBuilder};
@@ -529,39 +528,9 @@ impl WsTaos {
         Self::from_wsinfo(&info).await
     }
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        let mut config = WebSocketConfig::default();
-        config.max_frame_size = Some(1024 * 1024 * 16);
 
-        let res = connect_async_with_config(info.to_ws_url(), Some(config), false)
-            .await
-            .map_err(|err| {
-                let err_string = err.to_string();
-                if err_string.contains("401 Unauthorized") {
-                    Error::Unauthorized(info.to_query_url())
-                } else {
-                    err.into()
-                }
-            });
-            
-        let (ws, _) = match res {
-            Ok(res) => res,
-            Err(err) => {
-                if err.to_string().contains("404 Not Found") {
-                    connect_async_with_config(info.to_query_url(), Some(config), false)
-                        .await
-                        .map_err(|err| {
-                            let err_string = err.to_string();
-                            if err_string.contains("401 Unauthorized") {
-                                Error::Unauthorized(info.to_query_url())
-                            } else {
-                                err.into()
-                            }
-                        })?
-                } else {
-                    return Err(err.into());
-                }
-            }
-        };
+        let ws = info.build_stream(info.to_query_url()).await?;
+
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 
@@ -1158,6 +1127,48 @@ async fn test_client() -> anyhow::Result<()> {
     use futures::TryStreamExt;
     std::env::set_var("RUST_LOG", "debug");
     let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+    // pretty_env_logger::init();
+
+    let client = WsTaos::from_dsn(dsn).await?;
+
+    let _version = client.version();
+    assert_eq!(client.exec("drop database if exists abc_a").await?, 0);
+    assert_eq!(client.exec("create database abc_a").await?, 0);
+    assert_eq!(
+        client
+            .exec("create table abc_a.tb1(ts timestamp, v int)")
+            .await?,
+        0
+    );
+    assert_eq!(
+        client
+            .exec("insert into abc_a.tb1 values(1655793421375, 1)")
+            .await?,
+        1
+    );
+
+    // let mut rs = client.s_query("select * from abc_a.tb1").unwrap().unwrap();
+    let mut rs = client.query("select * from abc_a.tb1").await?;
+
+    #[derive(Debug, serde::Deserialize)]
+    #[allow(dead_code)]
+    struct A {
+        ts: String,
+        v: i32,
+    }
+
+    let values: Vec<A> = rs.deserialize().try_collect().await?;
+
+    dbg!(values);
+
+    assert_eq!(client.exec("drop database abc_a").await?, 0);
+    Ok(())
+}
+#[tokio::test]
+async fn test_client_95() -> anyhow::Result<()> {
+    use futures::TryStreamExt;
+    std::env::set_var("RUST_LOG", "debug");
+    let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://192.168.1.95:6041".to_string());
     // pretty_env_logger::init();
 
     let client = WsTaos::from_dsn(dsn).await?;
