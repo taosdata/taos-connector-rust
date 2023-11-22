@@ -618,3 +618,106 @@ pub const fn error_str_of(code: u32) -> Option<&'static str> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_str_of_known_codes() {
+        assert_eq!(error_str_of(0x0001), Some("Action in progress"));
+        assert_eq!(error_str_of(0x0002), Some("Authentication required"));
+        assert_eq!(error_str_of(0x0003), Some("Authentication failure"));
+        assert_eq!(error_str_of(0x0004), Some("Redirect"));
+        assert_eq!(error_str_of(0x0005), Some("System not ready"));
+        assert_eq!(error_str_of(0x0006), Some("Message already processed"));
+        assert_eq!(error_str_of(0x0007), Some("Last session not finished"));
+        assert_eq!(error_str_of(0x0008), Some("Mismatched meter id"));
+        assert_eq!(
+            error_str_of(0x0009),
+            Some("Processing of request timed out")
+        );
+        assert_eq!(
+            error_str_of(0x000A),
+            Some("Number of sessions reached limit")
+        );
+        assert_eq!(error_str_of(0x000B), Some("Unable to establish connection"));
+        assert_eq!(
+            error_str_of(0x000C),
+            Some("Unexpected generic error in RPC")
+        );
+        assert_eq!(error_str_of(0x000D), Some("Unexpected response"));
+        assert_eq!(error_str_of(0x000E), Some("Invalid value"));
+        assert_eq!(error_str_of(0x000F), Some("Invalid transaction id"));
+        assert_eq!(error_str_of(0x0010), Some("Invalid session id"));
+        assert_eq!(error_str_of(0x0011), Some("Invalid message type"));
+        assert_eq!(error_str_of(0x0012), Some("Invalid response type"));
+        assert_eq!(
+            error_str_of(0x0013),
+            Some("Client and server's time is not synchronized")
+        );
+        assert_eq!(error_str_of(0x0014), Some("Database not ready"));
+        assert_eq!(error_str_of(0x0015), Some("Unable to resolve FQDN"));
+        assert_eq!(error_str_of(0x0016), Some("Invalid app version"));
+        assert_eq!(error_str_of(0x0017), Some("Shortcut (port already in use)"));
+        assert_eq!(error_str_of(0x0018), Some("Conn is broken"));
+        assert_eq!(error_str_of(0x0019), Some("Conn read timeout"));
+        assert_eq!(
+            error_str_of(0x0020),
+            Some("some vnode/qnode/mnode(s) out of service")
+        );
+        assert_eq!(error_str_of(0x0022), Some("rpc open too many session"));
+        assert_eq!(error_str_of(0x0100), Some("Operation not supported"));
+        assert_eq!(error_str_of(0x0101), Some("Memory corrupted"));
+        assert_eq!(error_str_of(0x0102), Some("Out of Memory"));
+        assert_eq!(error_str_of(0x0103), Some("Invalid config message"));
+        assert_eq!(error_str_of(0x0104), Some("Data file corrupted"));
+        assert_eq!(error_str_of(0x0105), Some("Ref out of memory"));
+        assert_eq!(error_str_of(0x0106), Some("too many Ref Objs"));
+        assert_eq!(error_str_of(0x0107), Some("Ref ID is removed"));
+        assert_eq!(error_str_of(0x0108), Some("Invalid Ref ID"));
+        assert_eq!(error_str_of(0x0109), Some("Ref is already there"));
+        assert_eq!(error_str_of(0x010A), Some("Ref is not there"));
+        assert_eq!(error_str_of(0x0110), Some("Unexpected generic error"));
+        assert_eq!(error_str_of(0x0111), Some("Action in progress"));
+        assert_eq!(error_str_of(0x0112), Some("Out of range"));
+        assert_eq!(error_str_of(0x0115), Some("Invalid message"));
+        assert_eq!(error_str_of(0x0116), Some("Invalid message len"));
+        assert_eq!(error_str_of(0x0117), Some("Invalid pointer"));
+        assert_eq!(error_str_of(0x0118), Some("Invalid parameters"));
+        assert_eq!(error_str_of(0x0119), Some("Invalid config option"));
+        assert_eq!(error_str_of(0x011A), Some("Invalid option"));
+        assert_eq!(error_str_of(0x011B), Some("Invalid json format"));
+        assert_eq!(error_str_of(0x011C), Some("Invalid version number"));
+        assert_eq!(error_str_of(0x011D), Some("Invalid version string"));
+        assert_eq!(error_str_of(0x011E), Some("Version not compatible"));
+        assert_eq!(error_str_of(0x011F), Some("Checksum error"));
+        assert_eq!(error_str_of(0x0120), Some("Failed to compress msg"));
+        assert_eq!(error_str_of(0x0121), Some("Message not processed"));
+        assert_eq!(error_str_of(0x0122), Some("Config not found"));
+        assert_eq!(error_str_of(0x0123), Some("Repeat initialization"));
+        assert_eq!(
+            error_str_of(0x0124),
+            Some("Cannot add duplicate keys to hash")
+        );
+        assert_eq!(error_str_of(0x0125), Some("Retry needed"));
+        assert_eq!(error_str_of(0x0126), Some("Out of memory in rpc queue"));
+        assert_eq!(error_str_of(0x0127), Some("Invalid timestamp format"));
+        assert_eq!(error_str_of(0x0128), Some("Msg decode error"));
+        assert_eq!(error_str_of(0x0129), Some("No available disk"));
+        assert_eq!(error_str_of(0x012A), Some("Not found"));
+        assert_eq!(error_str_of(0x012B), Some("Out of disk space"));
+        assert_eq!(error_str_of(0x012C), Some("Operation timeout"));
+        assert_eq!(error_str_of(0x012D), Some("Msg encode error"));
+        assert_eq!(error_str_of(0x012E), Some("No enough disk space"));
+        assert_eq!(error_str_of(0x0130), Some("Database is starting up"));
+        assert_eq!(error_str_of(0x0131), Some("Database is closing down"));
+        assert_eq!(error_str_of(0x0132), Some("Invalid data format"));
+        assert_eq!(error_str_of(0x0133), Some("Invalid configuration value"));
+    }
+
+    #[test]
+    fn test_error_str_of_unknown_code() {
+        assert_eq!(error_str_of(0xFFFF), None);
+    }
+}
