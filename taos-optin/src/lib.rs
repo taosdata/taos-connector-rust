@@ -463,7 +463,7 @@ impl taos_query::TBuilder for TaosBuilder {
             if let Ok(Some((edition, _, expired))) = grant {
                 Edition::new(
                     edition.trim(),
-                    expired.trim() == "false" || expired.trim() == "unlimited",
+                    !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
                 warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
@@ -634,7 +634,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             if let Ok(Some((edition, _, expired))) = grant {
                 Edition::new(
                     edition.trim(),
-                    expired.trim() == "false" || expired.trim() == "unlimited",
+                    !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
                 warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
@@ -847,7 +847,7 @@ mod tests {
 
         Ok(())
     }
-    
+
     #[tokio::test]
     async fn long_query_async() -> RawResult<()> {
         use taos_query::prelude::*;
