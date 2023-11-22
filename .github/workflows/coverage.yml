@@ -90,7 +90,7 @@ jobs:
           nohup sudo taosadapter > /dev/null 2>&1 &
 
       - name: Generate code coverage
-        run: cargo llvm-cov --workspace --exclude taos-sys --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
