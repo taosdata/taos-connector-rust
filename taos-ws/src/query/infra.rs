@@ -16,8 +16,7 @@ pub type ResId = u64;
 pub struct WsConnReq {
     pub(crate) user: Option<String>,
     pub(crate) password: Option<String>,
-  //  #[serde_as(as = "NoneAsEmptyString")]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "NoneAsEmptyString")]
     pub(crate) db: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) mode: Option<u32>,
