@@ -1504,7 +1504,7 @@ mod tests {
     fn test_bi_mode() {
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"http://vm98:6041?conn_mode=1\0" as *const u8 as _);
+            let taos = ws_connect_with_dsn(b"http://localhost:6041?conn_mode=1\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
