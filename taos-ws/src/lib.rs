@@ -384,16 +384,10 @@ impl TaosBuilder {
     pub(crate) fn to_query_url(&self) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/ws?token={}", self.scheme, self.addr, token)
+                format!("{}://{}/rest/ws?token={}", self.scheme, self.addr, token)
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme, self.addr),
-        }
-        // match &self.auth {
-        //     WsAuth::Token(token) => {
-        //         format!("{}://{}/rest/ws?token={}", self.scheme, self.addr, token)
-        //     }
-        //     WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme, self.addr),
-        // }    
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme, self.addr),
+        }    
     }
 
     pub(crate) fn to_stmt_url(&self) -> String {
