@@ -1140,6 +1140,110 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        use crate::TmqBuilder;
+
+        std::env::set_var("RUST_LOG", "taos=trace");
+        // pretty_env_logger::init();
+
+        let taos = TaosBuilder::from_dsn("http://localhost:6041")?.build()?;
+        let db = "test_ws_write_raw_block_req_id";
+        taos.query(format!("drop topic if exists {db}"))?;
+        taos.query(format!("drop database if exists {db}"))?;
+        taos.query(format!("create database {db} keep 36500 vgroups 1"))?;
+        taos.query(format!("use {db}"))?;
+        taos.query(
+            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
+            "create stable stb1(ts timestamp, v int) tags(jt int, t1 float)",
+        )?;
+        taos.query(
+            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
+            "insert into tb2 using stb1 tags(2, 2.2) values(now, 0) (now + 1s, 0) tb3 using stb1 tags (3, 3.3) values (now, 3) (now +1s, 3)",
+        )?;
+
+        taos.query(format!("create topic {db} with meta as database {db}"))?;
+
+        taos.query(format!("drop database if exists {db}2"))?;
+        taos.query(format!("create database {db}2"))?;
+        taos.query(format!("use {db}2"))?;
+
+        let builder = TmqBuilder::from_dsn(
+            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
+        )?;
+        let mut consumer = builder.build()?;
+
+        consumer.subscribe([db])?;
+
+        for message in consumer.iter_with_timeout(Timeout::from_secs(1)) {
+            let (offset, msg) = message?;
+            log::debug!("offset: {:?}", offset);
+
+            match msg {
+                MessageSet::Meta(meta) => {
+
+                    taos.write_raw_meta(&meta.as_raw_meta()?)?;
+                    // taos.w
+                }
+                MessageSet::Data(data) => {
+                    for raw in data {
+                        let raw = raw?;
+                        dbg!(raw.table_name().unwrap());
+                        let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
+                        for col in raw.columns() {
+                            for value in col {
+                                print!("{}\t", value);
+                            }
+                        }
+                        println!();
+                        let req_id = 1002;
+                        taos.write_raw_block_with_req_id(&raw, req_id)?;
+                    }
+                }
+                MessageSet::MetaData(meta, data) => {
+                    // meta
+                    taos.write_raw_meta(&meta.as_raw_meta()?)?;
+
+                    // data
+                    for raw in data {
+                        let raw = raw?;
+                        log::debug!("raw: {:?}", raw);
+                        let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
+                        for col in raw.columns() {
+                            for value in col {
+                                log::debug!("value in col {}\n", value);
+                            }
+                        }
+                        println!();
+                        let req_id = 1003;
+                        taos.write_raw_block_with_req_id(&raw, req_id)?;
+                    }
+                }
+            }
+
+            let _ = consumer.commit(offset);
+        }
+
+        consumer.unsubscribe();
+
+        let mut query = taos.query("describe stb1")?;
+        for row in query.rows() {
+            let raw = row?;
+            log::debug!("raw: {:?}", raw);
+        }
+        let mut query = taos.query("select count(*) from stb1")?;
+        for row in query.rows() {
+            let raw = row?;
+            log::debug!("raw: {:?}", raw);
+        }
+
+        taos.query(format!("drop database {db}2"))?;
+        taos.query(format!("drop topic {db}")).unwrap();
+        taos.query(format!("drop database {db}"))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
