@@ -17,7 +17,7 @@ pub struct WsConnReq {
     pub(crate) password: Option<String>,
     #[serde_as(as = "NoneAsEmptyString")]
     pub(crate) db: Option<String>,
-    #[serde_as(as = "NoneAsEmptyString")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) mode: Option<i32>,    
 }
 
