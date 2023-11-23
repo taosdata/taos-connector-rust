@@ -96,7 +96,6 @@ fn test_serde_send() {
             "user": "root",
             "password": "taosdata",
             "db": "",
-            "mode":0,
         }
     });
     assert_eq!(v, j);
