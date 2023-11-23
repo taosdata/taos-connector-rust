@@ -20,10 +20,15 @@ pub use query::ResultSet;
 pub use query::Taos;
 
 use query::WsConnReq;
+use query::Error as QueryError;
 
 pub mod schemaless;
 
 pub(crate) use taos_query::block_in_place_or_global;
+use tokio_tungstenite::{WebSocketStream, connect_async_with_config};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::MaybeTlsStream;
+use tokio::net::TcpStream;
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
@@ -420,6 +425,15 @@ impl TaosBuilder {
         }
     }
 
+    pub(crate) fn to_ws_url(&self) -> String {
+        match &self.auth {
+            WsAuth::Token(token) => {
+                format!("{}://{}/ws?token={}", self.scheme, self.addr, token)
+            }
+            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme, self.addr),
+        }
+    }
+
     pub(crate) fn to_conn_request(&self) -> WsConnReq {
         let mode = match self.conn_mode{
             Some(1) => Some(0), //for adapter, 0 is bi mode
@@ -440,5 +454,42 @@ impl TaosBuilder {
                 mode
             },
         }
+    }
+
+    pub(crate) async fn build_stream(&self, url: String) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+        let mut config = WebSocketConfig::default();
+        config.max_frame_size = Some(1024 * 1024 * 16);
+
+        let res = connect_async_with_config(self.to_ws_url(), Some(config), false)
+            .await
+            .map_err(|err| {
+                let err_string = err.to_string();
+                if err_string.contains("401 Unauthorized") {
+                    QueryError::Unauthorized(self.to_ws_url())
+                } else {
+                    err.into()
+                }
+            });
+            
+        let (ws, _) = match res {
+            Ok(res) => res,
+            Err(err) => {
+                if err.to_string().contains("404 Not Found") {
+                    connect_async_with_config(&url, Some(config), false)
+                        .await
+                        .map_err(|err| {
+                            let err_string = err.to_string();
+                            if err_string.contains("401 Unauthorized") {
+                                QueryError::Unauthorized(url)
+                            } else {
+                                err.into()
+                            }
+                        })?
+                } else {
+                    return Err(err.into());
+                }
+            }
+        };
+        Ok(ws)
     }
 }
