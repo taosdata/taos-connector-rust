@@ -44,6 +44,7 @@ pub struct TaosBuilder {
     database: Option<String>,
     server_version: OnceCell<String>,
     // timeout: Duration,
+    conn_mode: Option<u32>
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -333,6 +334,15 @@ impl TaosBuilder {
             ("taos" | "taosws" | "tmq", Some("wss" | "https")) => "wss",
             _ => Err(DsnError::InvalidDriver(dsn.to_string()))?,
         };
+
+        let conn_mode =  match dsn.params.get("conn_mode") {
+            Some(s) => match s.parse::<u32>() {
+                Ok(num) => Some(num),
+                Err(_) => Err(DsnError::InvalidDriver(dsn.to_string()))?,
+            }
+            None => None
+        };
+
         let token = dsn.params.remove("token");
 
         let addr = match dsn.addresses.first() {
@@ -360,6 +370,7 @@ impl TaosBuilder {
                 database: dsn.subject,
                 server_version: OnceCell::new(),
                 // timeout,
+                conn_mode
             })
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
@@ -371,6 +382,7 @@ impl TaosBuilder {
                 database: dsn.subject,
                 server_version: OnceCell::new(),
                 // timeout,
+                conn_mode
             })
         }
     }
@@ -380,7 +392,7 @@ impl TaosBuilder {
                 format!("{}://{}/rest/ws?token={}", self.scheme, self.addr, token)
             }
             WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme, self.addr),
-        }
+        }    
     }
 
     pub(crate) fn to_stmt_url(&self) -> String {
@@ -423,16 +435,23 @@ impl TaosBuilder {
     }
 
     pub(crate) fn to_conn_request(&self) -> WsConnReq {
+        let mode = match self.conn_mode{
+            Some(1) => Some(0), //for adapter, 0 is bi mode
+            _ => None,
+        };
+
         match &self.auth {
             WsAuth::Token(_token) => WsConnReq {
                 user: Some("root".to_string()),
                 password: Some("taosdata".to_string()),
                 db: self.database.as_ref().map(Clone::clone),
+                mode
             },
             WsAuth::Plain(user, pass) => WsConnReq {
                 user: Some(user.to_string()),
                 password: Some(pass.to_string()),
                 db: self.database.as_ref().map(Clone::clone),
+                mode
             },
         }
     }

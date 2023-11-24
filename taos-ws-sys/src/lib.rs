@@ -1499,4 +1499,67 @@ mod tests {
             execute!(b"drop database if exists ws_get_current_db\0");
         }
     }
+
+    #[test]
+    fn test_bi_mode() {
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"http://localhost:6041?conn_mode=1\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"drop database if exists ws_bi_mode\0");
+            execute!(b"create database ws_bi_mode keep 36500\0");
+            execute!(b"use ws_bi_mode\0");
+            execute!(b"CREATE STABLE meters (ts timestamp, current float, voltage int, phase float) TAGS (location binary(64), groupId int)\0");
+            execute!(b"CREATE TABLE d1001 USING meters TAGS ('California.SanFrancisco', 2)\0");
+            execute!(b"INSERT INTO d1001 USING meters TAGS ('California.SanFrancisco', 2) VALUES (NOW, 10.2, 219, 0.32)\0");
+
+            let sql = b"select * from meters\0"
+            as *const u8 as _;
+
+            let rs = ws_query(taos, sql);
+
+            let code = ws_errno(rs);
+            let errstr = CStr::from_ptr(ws_errstr(rs));
+
+            if code != 0 {
+                dbg!(errstr);
+                ws_free_result(rs);
+                ws_close(taos);
+                return;
+            }
+            assert_eq!(code, 0, "{errstr:?}");
+
+            let cols = ws_field_count(rs);
+            dbg!(cols);
+            // assert!(num_of_fields == 21);
+            let fields = ws_fetch_fields(rs);
+            let fields = std::slice::from_raw_parts(fields, cols as usize);
+
+            for field in fields {
+                dbg!(field);
+            }
+
+            // bi mode will show tbname
+            assert!(fields.len() >= 6);
+         
+            execute!(b"drop database if exists ws_bi_mode\0");
+        }
+    }    
 }

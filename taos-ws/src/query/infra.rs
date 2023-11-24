@@ -18,6 +18,8 @@ pub struct WsConnReq {
     pub(crate) password: Option<String>,
     #[serde_as(as = "NoneAsEmptyString")]
     pub(crate) db: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) mode: Option<u32>,
 }
 
 impl WsConnReq {
@@ -27,6 +29,7 @@ impl WsConnReq {
             user: Some(user.into()),
             password: Some(password.into()),
             db: None,
+            mode: None,
         }
     }
     // pub fn with_database(mut self, db: impl Into<String>) -> Self {
@@ -92,7 +95,7 @@ fn test_serde_send() {
             "req_id": 1,
             "user": "root",
             "password": "taosdata",
-            "db": ""
+            "db": "",
         }
     });
     assert_eq!(v, j);
