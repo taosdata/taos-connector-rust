@@ -884,6 +884,18 @@ pub unsafe extern "C" fn ws_fetch_row(rs: *mut WS_RES, row: *mut WS_ROW) -> i32 
 }
 
 #[no_mangle]
+/// Returns number of fields in current result set.
+pub unsafe extern "C" fn ws_num_fields(rs: *const WS_RES) -> i32 {
+    match (rs as *mut WsMaybeError<WsResultSet>)
+        .as_ref()
+        .and_then(|s| s.safe_deref())
+    {
+        Some(rs) => rs.num_of_fields(),
+        _ => 0,
+    }
+}
+
+#[no_mangle]
 /// Same to taos_free_result. Every websocket result-set object should be freed with this method.
 pub unsafe extern "C" fn ws_free_result(rs: *mut WS_RES) {
     if !rs.is_null() {
@@ -1437,6 +1449,47 @@ mod tests {
             ws_stop_query(res);
 
             execute!(b"drop database if exists ws_stop_query\0");
+        }
+    }
+
+    #[test]
+    fn test_ws_num_fields() {
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"drop database if exists ws_num_fields\0");
+            execute!(b"create database ws_num_fields keep 36500\0");
+            execute!(b"create table ws_num_fields.s1 (ts timestamp, v int, b binary(100))\0");
+
+            let version = ws_get_server_info(taos);
+            dbg!(CStr::from_ptr(version as _));
+
+            let res = ws_query(
+                taos,
+                b"select count(*) from ws_num_fields.s1\0" as *const u8 as _,
+            );
+            let cols = ws_field_count(res);
+            dbg!(cols);
+
+            execute!(b"drop database if exists ws_num_fields\0");
         }
     }
 
