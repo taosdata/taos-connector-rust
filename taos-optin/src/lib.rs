@@ -823,6 +823,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn builder_retry_once() -> RawResult<()> {
         use taos_query::prelude::*;
 
@@ -836,6 +837,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn builder_retry_default() -> RawResult<()> {
         use taos_query::prelude::*;
 

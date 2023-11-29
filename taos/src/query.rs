@@ -369,7 +369,12 @@ impl AsyncQueryable for Taos {
     ) -> RawResult<Self::AsyncResultSet> {
         log::trace!("Query with SQL: {}", sql.as_ref());
         match &self.0 {
-            TaosInner::Native(_) => todo!(),
+            TaosInner::Native(taos) => taos
+                .query_with_req_id(sql, req_id)
+                .await
+                .map(ResultSetInner::Native)
+                .map(ResultSet)
+                .map_err(Into::into),
             TaosInner::Ws(taos) => taos
                 .query_with_req_id(sql, req_id)
                 .await
