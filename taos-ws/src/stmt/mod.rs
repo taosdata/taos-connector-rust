@@ -791,6 +791,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_stmt_use_result() -> anyhow::Result<()> {
+        use taos_query::AsyncQueryable;
+
+        let dsn = Dsn::try_from("taos://localhost:6041")?;
+        dbg!(&dsn);
+
+        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
+        taos.exec("drop database if exists ws_stmt_sj2").await?;
+        taos.exec("create database ws_stmt_sj2").await?;
+        taos.exec("create table ws_stmt_sj2.stb (ts timestamp, v int) tags(tj json)")
+            .await?;
+
+        std::env::set_var("RUST_LOG", "debug");
+        // pretty_env_logger::init();
+        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/ws_stmt_sj2").await?;
+        let stmt = client
+            .s_stmt("insert into ? using stb tags(?) values(?, ?)")
+            .await?;
+
+        stmt.stmt_set_tbname("tb1").await?;
+
+        stmt.stmt_set_tags(vec![json!(r#"{"name": "value"}"#)])
+            .await?;
+
+        stmt.bind_all(vec![
+            json!([
+                "2022-06-07T11:02:44.022450088+08:00",
+                "2022-06-07T11:02:45.022450088+08:00"
+            ]),
+            json!([2, 3]),
+        ])
+        .await?;
+        let res = stmt.stmt_exec().await?;
+
+        assert_eq!(res, 2);
+        let row: (String, i32, std::collections::HashMap<String, String>) = taos
+            .query_one("select * from ws_stmt_sj2.stb")
+            .await?
+            .unwrap();
+        dbg!(row);
+
+        let res = stmt.use_result().await?;
+
+        log::debug!("use result: {:?}", res);
+
+        taos.exec("drop database ws_stmt_sj2").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_stmt_stable() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 
