@@ -256,9 +256,8 @@ impl Drop for Stmt {
 
 impl Stmt {
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        
         let ws = info.build_stream(info.to_stmt_url()).await?;
-        
+
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 
