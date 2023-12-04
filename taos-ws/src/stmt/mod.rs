@@ -804,7 +804,7 @@ mod tests {
             .await?;
 
         std::env::set_var("RUST_LOG", "debug");
-        // pretty_env_logger::init();
+        pretty_env_logger::init();
         let mut client = Stmt::from_dsn("taos+ws://localhost:6041/ws_stmt_sj2").await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
