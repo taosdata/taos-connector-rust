@@ -169,6 +169,12 @@ pub enum StmtRecvData {
         #[serde(default)]
         fields: Vec<StmtField>,
     },
+    UseResult {
+        #[serde(default)]
+        stmt_id: StmtId,
+        #[serde(default)]
+        fields: Vec<StmtField>,
+    },
 }
 
 #[serde_as]
@@ -235,6 +241,13 @@ impl StmtRecv {
             }),
             StmtRecvData::GetTagFields { stmt_id, fields }
             | StmtRecvData::GetColFields { stmt_id, fields } => StmtOk::StmtFields(stmt_id, {
+                if self.code == 0 {
+                    Ok(fields)
+                } else {
+                    _e!()
+                }
+            }),
+            StmtRecvData::UseResult { stmt_id, fields } => StmtOk::StmtFields(stmt_id, {
                 if self.code == 0 {
                     Ok(fields)
                 } else {
