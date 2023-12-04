@@ -9,6 +9,7 @@ use taos_query::prelude::RawError as Error;
 use crate::stmt::StmtField;
 
 pub type ReqId = u64;
+pub type ResId = u64;
 
 /// Type for result ID.
 pub type StmtId = u64;
@@ -117,7 +118,11 @@ pub enum StmtSend {
     GetColFields(StmtArgs),
     UseResult(StmtArgs),
     StmtNumParams(StmtArgs),
-    StmtGetParam(StmtArgs),
+    StmtGetParam{
+        #[serde(flatten)]
+        args: StmtArgs,
+        index: usize,
+    },
 }
 
 impl ToMessage for StmtSend {}
@@ -173,7 +178,13 @@ pub enum StmtRecvData {
         #[serde(default)]
         stmt_id: StmtId,
         #[serde(default)]
-        fields: Vec<StmtField>,
+        result_id: u64,
+    },
+    StmtNumParams {
+        #[serde(default)]
+        stmt_id: StmtId,
+        #[serde(default)]
+        num_params: usize,
     },
 }
 
@@ -247,9 +258,17 @@ impl StmtRecv {
                     _e!()
                 }
             }),
-            StmtRecvData::UseResult { stmt_id, fields } => StmtOk::StmtFields(stmt_id, {
+            StmtRecvData::UseResult { stmt_id, result_id } => StmtOk::Stmt(stmt_id, {
+                dbg!(&self.code, &self.message, &result_id);
                 if self.code == 0 {
-                    Ok(fields)
+                    Ok(Some(result_id as usize))
+                } else {
+                    _e!()
+                }
+            }),
+            StmtRecvData::StmtNumParams { stmt_id, num_params } => StmtOk::Stmt(stmt_id, {
+                if self.code == 0 {
+                    Ok(Some(num_params))
                 } else {
                     _e!()
                 }
