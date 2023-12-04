@@ -321,7 +321,8 @@ impl Stmt {
                         match message {
                             Ok(message) => match message {
                                 Message::Text(text) => {
-                                    log::trace!("json response: {}", text);
+                                    // FIXME: change to trace before release
+                                    log::debug!("json response: {}", text);
                                     let v: StmtRecv = serde_json::from_str(&text).unwrap();
                                     match v.ok() {
                                         StmtOk::Conn(_) => {
@@ -637,14 +638,33 @@ impl Stmt {
     }
 
     pub async fn use_result(&mut self) -> RawResult<()> {
-        log::trace!("use result");
         let message = StmtSend::UseResult(self.args.unwrap());
+        // FIXME: change to trace before release
+        log::debug!("use result message: {:#?}", &message);
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
         Ok(())
     }
+
+    pub async fn stmt_num_params(&mut self) -> RawResult<usize> {
+        let message = StmtSend::StmtNumParams(self.args.unwrap());
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
+        let num_params = self.receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt num_params response"),
+        )??;
+        match num_params {
+            Some(num_params) => Ok(num_params),
+            None => Err(taos_query::RawError::from_string(
+                "Can't receive stmt num_params response",
+            )),
+        }
+    }
+
 }
 
 #[cfg(test)]
@@ -806,6 +826,7 @@ mod tests {
         .await?;
 
         std::env::set_var("RUST_LOG", "debug");
+        // FIXME: only init for debug
         pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
         let stmt = client
@@ -837,6 +858,60 @@ mod tests {
         let res = stmt.use_result().await?;
 
         log::debug!("use result: {:?}", res);
+
+        taos.exec(format!("drop database {db}")).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stmt_num_params() -> anyhow::Result<()> {
+        use taos_query::AsyncQueryable;
+
+        let dsn = Dsn::try_from("taos://localhost:6041")?;
+
+        let db = "ws_stmt_num_params";
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+        taos.exec(format!("create database {db}")).await?;
+        taos.exec(format!(
+            "create table {db}.stb (ts timestamp, v int) tags(tj json)"
+        ))
+        .await?;
+
+        std::env::set_var("RUST_LOG", "debug");
+        // FIXME: only init for debug
+        pretty_env_logger::init();
+        let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
+        let stmt = client
+            .s_stmt("insert into ? using stb tags(?) values(?, ?)")
+            .await?;
+
+        stmt.stmt_set_tbname("tb1").await?;
+
+        stmt.stmt_set_tags(vec![json!(r#"{"name": "value"}"#)])
+            .await?;
+
+        stmt.bind_all(vec![
+            json!([
+                "2022-06-07T11:02:44.022450088+08:00",
+                "2022-06-07T11:02:45.022450088+08:00"
+            ]),
+            json!([2, 3]),
+        ])
+        .await?;
+        let res = stmt.stmt_exec().await?;
+
+        assert_eq!(res, 2);
+        let row: (String, i32, std::collections::HashMap<String, String>) = taos
+            .query_one(format!("select * from {db}.stb"))
+            .await?
+            .unwrap();
+        dbg!(row);
+
+        let res = stmt.stmt_num_params().await?;
+
+        log::debug!("stmt num params: {:?}", res);
 
         taos.exec(format!("drop database {db}")).await?;
         Ok(())
