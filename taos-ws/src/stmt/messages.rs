@@ -115,6 +115,9 @@ pub enum StmtSend {
     Exec(StmtArgs),
     GetTagFields(StmtArgs),
     GetColFields(StmtArgs),
+    UseResult(StmtArgs),
+    StmtNumParams(StmtArgs),
+    StmtGetParam(StmtArgs),
 }
 
 impl ToMessage for StmtSend {}
