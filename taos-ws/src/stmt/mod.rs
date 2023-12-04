@@ -637,7 +637,7 @@ impl Stmt {
     }
 
     pub async fn use_result(&mut self) -> RawResult<()> {
-        log::info!("use result");
+        log::trace!("use result");
         let message = StmtSend::UseResult(self.args.unwrap());
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
