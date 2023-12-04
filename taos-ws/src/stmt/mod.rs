@@ -794,17 +794,20 @@ mod tests {
         use taos_query::AsyncQueryable;
 
         let dsn = Dsn::try_from("taos://localhost:6041")?;
-        dbg!(&dsn);
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
-        taos.exec("drop database if exists ws_stmt_sj2").await?;
-        taos.exec("create database ws_stmt_sj2").await?;
-        taos.exec("create table ws_stmt_sj2.stb (ts timestamp, v int) tags(tj json)")
-            .await?;
+        let db = "ws_stmt_use_result";
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+        taos.exec(format!("create database {db}")).await?;
+        taos.exec(format!(
+            "create table {db}.stb (ts timestamp, v int) tags(tj json)"
+        ))
+        .await?;
 
         std::env::set_var("RUST_LOG", "debug");
         pretty_env_logger::init();
-        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/ws_stmt_sj2").await?;
+        let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
             .await?;
@@ -826,7 +829,7 @@ mod tests {
 
         assert_eq!(res, 2);
         let row: (String, i32, std::collections::HashMap<String, String>) = taos
-            .query_one("select * from ws_stmt_sj2.stb")
+            .query_one(format!("select * from {db}.stb"))
             .await?
             .unwrap();
         dbg!(row);
@@ -835,7 +838,7 @@ mod tests {
 
         log::debug!("use result: {:?}", res);
 
-        taos.exec("drop database ws_stmt_sj2").await?;
+        taos.exec(format!("drop database {db}")).await?;
         Ok(())
     }
 
