@@ -636,6 +636,16 @@ impl Stmt {
     pub fn affected_rows_once(&self) -> usize {
         self.affected_rows_once
     }
+
+    pub async fn use_result(&mut self) -> RawResult<()> {
+        log::info!("use result");
+        let message = StmtSend::UseResult(self.args.unwrap());
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
