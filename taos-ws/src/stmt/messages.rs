@@ -6,10 +6,9 @@ use serde_with::NoneAsEmptyString;
 use crate::query::infra::{ToMessage, WsConnReq};
 use taos_query::prelude::RawError as Error;
 
-use crate::stmt::StmtField;
+use crate::stmt::{StmtField, StmtParam};
 
 pub type ReqId = u64;
-pub type ResId = u64;
 
 /// Type for result ID.
 pub type StmtId = u64;
@@ -118,10 +117,10 @@ pub enum StmtSend {
     GetColFields(StmtArgs),
     UseResult(StmtArgs),
     StmtNumParams(StmtArgs),
-    StmtGetParam{
+    StmtGetParam {
         #[serde(flatten)]
         args: StmtArgs,
-        index: usize,
+        index: i64,
     },
 }
 
@@ -186,6 +185,16 @@ pub enum StmtRecvData {
         #[serde(default)]
         num_params: usize,
     },
+    StmtGetParam {
+        #[serde(default)]
+        stmt_id: StmtId,
+        #[serde(default)]
+        index: i64,
+        #[serde(default)]
+        data_type: i64,
+        #[serde(default)]
+        length: i64,
+    },
 }
 
 #[serde_as]
@@ -205,6 +214,7 @@ pub enum StmtOk {
     Init(ReqId, Result<StmtId, Error>),
     Stmt(StmtId, Result<Option<usize>, Error>),
     StmtFields(StmtId, Result<Vec<StmtField>, Error>),
+    StmtParam(StmtId, Result<StmtParam, Error>),
 }
 
 impl StmtRecv {
@@ -266,9 +276,28 @@ impl StmtRecv {
                     _e!()
                 }
             }),
-            StmtRecvData::StmtNumParams { stmt_id, num_params } => StmtOk::Stmt(stmt_id, {
+            StmtRecvData::StmtNumParams {
+                stmt_id,
+                num_params,
+            } => StmtOk::Stmt(stmt_id, {
                 if self.code == 0 {
                     Ok(Some(num_params))
+                } else {
+                    _e!()
+                }
+            }),
+            StmtRecvData::StmtGetParam {
+                stmt_id,
+                index,
+                data_type,
+                length,
+            } => StmtOk::StmtParam(stmt_id, {
+                if self.code == 0 {
+                    Ok(StmtParam {
+                        index,
+                        data_type,
+                        length,
+                    })
                 } else {
                     _e!()
                 }

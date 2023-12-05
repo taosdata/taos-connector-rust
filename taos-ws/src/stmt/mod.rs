@@ -37,6 +37,10 @@ type StmtFieldResult = RawResult<Vec<StmtField>>;
 type StmtFieldSender = tokio::sync::mpsc::Sender<StmtFieldResult>;
 type StmtFieldReceiver = tokio::sync::mpsc::Receiver<StmtFieldResult>;
 
+type StmtParamResult = RawResult<StmtParam>;
+type StmtParamSender = tokio::sync::mpsc::Sender<StmtParamResult>;
+type StmtParamReceiver = tokio::sync::mpsc::Receiver<StmtParamResult>;
+
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 
 trait ToJsonValue {
@@ -228,6 +232,17 @@ pub struct Stmt {
     affected_rows_once: usize,
     fields_fetches: Arc<HashMap<StmtId, StmtFieldSender>>,
     fields_receiver: Option<StmtFieldReceiver>,
+    param_fetches: Arc<HashMap<StmtId, StmtParamSender>>,
+    param_receiver: Option<StmtParamReceiver>,
+    // sender: WsQuerySender,
+}
+
+#[repr(C)]
+#[derive(Debug, Deserialize, Clone)]
+pub struct StmtParam {
+    pub index: i64,
+    pub data_type: i64,
+    pub length: i64,
 }
 
 #[repr(C)]
@@ -287,6 +302,9 @@ impl Stmt {
 
         let fields_fetches = Arc::new(HashMap::<StmtId, StmtFieldSender>::new());
         let fields_fetches_sender = fields_fetches.clone();
+
+        let param_fetches = Arc::new(HashMap::<StmtId, StmtParamSender>::new());
+        let param_fetches_sender = param_fetches.clone();
 
         let (ws, mut msg_recv) = tokio::sync::mpsc::channel(100);
         let ws2 = ws.clone();
@@ -353,8 +371,15 @@ impl Stmt {
                                                 log::trace!("send data to fetches with id {}", stmt_id);
                                                 // let res = res.clone();
                                                 sender.send(res).await.unwrap();
-                                            // }) {
 
+                                            } else {
+                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                            }
+                                        }
+                                        StmtOk::StmtParam(stmt_id, res) => {
+                                            if let Some(sender) = param_fetches_sender.get(&stmt_id) {
+                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                sender.send(res).await.unwrap();
                                             } else {
                                                 log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
@@ -408,6 +433,8 @@ impl Stmt {
             affected_rows_once: 0,
             fields_fetches,
             fields_receiver: None,
+            param_fetches,
+            param_receiver: None,
         })
     }
     /// Build TDengine websocket client from dsn.
@@ -447,6 +474,11 @@ impl Stmt {
         let (fields_sender, fields_receiver) = tokio::sync::mpsc::channel(2);
         let _ = self.fields_fetches.insert(stmt_id, fields_sender);
         self.fields_receiver = Some(fields_receiver);
+
+        let (param_sender, param_receiver) = tokio::sync::mpsc::channel(2);
+        let _ = self.param_fetches.insert(stmt_id, param_sender);
+        self.param_receiver = Some(param_receiver);
+
         Ok(self)
     }
 
@@ -470,6 +502,11 @@ impl Stmt {
         let (fields_sender, fields_receiver) = tokio::sync::mpsc::channel(2);
         let _ = self.fields_fetches.insert(stmt_id, fields_sender);
         self.fields_receiver = Some(fields_receiver);
+
+        let (param_sender, param_receiver) = tokio::sync::mpsc::channel(2);
+        let _ = self.param_fetches.insert(stmt_id, param_sender);
+        self.param_receiver = Some(param_receiver);
+
         Ok(self)
     }
 
@@ -665,6 +702,20 @@ impl Stmt {
         }
     }
 
+    pub async fn stmt_get_param(&mut self, index: i64) -> RawResult<StmtParam> {
+        let message = StmtSend::StmtGetParam {
+            args: self.args.unwrap(),
+            index,
+        };
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
+        let param = self.param_receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt get_param response"),
+        )??;
+        Ok(param)
+    }
 }
 
 #[cfg(test)]
@@ -909,9 +960,14 @@ mod tests {
             .unwrap();
         dbg!(row);
 
-        let res = stmt.stmt_num_params().await?;
+        let num_params = stmt.stmt_num_params().await?;
 
-        log::debug!("stmt num params: {:?}", res);
+        log::debug!("stmt num params: {:?}", num_params);
+
+        for i in 0..num_params {
+            let param = stmt.stmt_get_param(i as i64).await?;
+            log::debug!("param {}: {:?}", i, param);
+        }
 
         taos.exec(format!("drop database {db}")).await?;
         Ok(())
