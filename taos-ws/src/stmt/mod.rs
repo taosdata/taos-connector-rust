@@ -455,31 +455,7 @@ impl Stmt {
 
     pub async fn stmt_init(&mut self) -> RawResult<&mut Self> {
         let req_id = self.req_id();
-        let action = StmtSend::Init { req_id };
-        let (tx, rx) = oneshot::channel();
-        {
-            self.queries.insert(req_id, tx);
-            self.ws.send(action.to_msg()).await.map_err(Error::from)?;
-        }
-        let stmt_id = rx.await.map_err(Error::from)??; // 1. RecvError, 2. TaosError
-        let args = StmtArgs { req_id, stmt_id };
-
-        let (sender, receiver) = tokio::sync::mpsc::channel(2);
-
-        let _ = self.fetches.insert(stmt_id, sender);
-
-        self.args = Some(args);
-        self.receiver = Some(receiver);
-
-        let (fields_sender, fields_receiver) = tokio::sync::mpsc::channel(2);
-        let _ = self.fields_fetches.insert(stmt_id, fields_sender);
-        self.fields_receiver = Some(fields_receiver);
-
-        let (param_sender, param_receiver) = tokio::sync::mpsc::channel(2);
-        let _ = self.param_fetches.insert(stmt_id, param_sender);
-        self.param_receiver = Some(param_receiver);
-
-        Ok(self)
+        self.taos_stmt_init_with_req_id(req_id).await
     }
 
     pub async fn taos_stmt_init_with_req_id(&mut self, req_id: u64) -> RawResult<&mut Self> {
@@ -915,7 +891,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stmt_num_params() -> anyhow::Result<()> {
+    async fn test_stmt_num_params_and_get_param() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 
         let dsn = Dsn::try_from("taos://localhost:6041")?;
