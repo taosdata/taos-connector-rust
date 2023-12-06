@@ -1327,13 +1327,14 @@ impl RawRes {
                 let api = &*param.1;
                 // state.done = true;
                 state.in_use = false;
-                if num_of_rows < 0 {
+                if num_of_rows >= 0 {
                     // error
-                    state.result.replace(Err(RawError::new_with_context(
+                    let old = state.result.replace(Err(RawError::new_with_context(
                         num_of_rows,
                         api.err_str(res),
                         "fetch_rows_a",
                     )));
+                    drop(old);
                 } else {
                     // success
                     if num_of_rows > 0 {
