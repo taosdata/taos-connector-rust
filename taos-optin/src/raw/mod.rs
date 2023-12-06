@@ -786,10 +786,10 @@ impl RawTaos {
         let ptr = unsafe { (self.c.taos_query)(self.as_ptr(), sql.as_ptr()) };
         if ptr.is_null() {
             let code = self.c.errno(std::ptr::null_mut());
-            let str = self.c.errno(std::ptr::null_mut());
+            let str = self.c.err_str(std::ptr::null_mut());
             return Err(RawError::new_with_context(
                 code,
-                str,
+                str.to_string(),
                 format!("Query with sql: {:?}", sql),
             ));
         }
@@ -1327,7 +1327,7 @@ impl RawRes {
                 let api = &*param.1;
                 // state.done = true;
                 state.in_use = false;
-                if num_of_rows >= 0 {
+                if num_of_rows < 0 {
                     // error
                     let old = state.result.replace(Err(RawError::new_with_context(
                         num_of_rows,
