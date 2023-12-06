@@ -6,7 +6,7 @@ use serde_with::NoneAsEmptyString;
 use crate::query::infra::{ToMessage, WsConnReq};
 use taos_query::prelude::RawError as Error;
 
-use crate::stmt::{StmtField, StmtParam};
+use crate::stmt::{StmtField, StmtParam, StmtUseResult};
 
 pub type ReqId = u64;
 
@@ -178,6 +178,16 @@ pub enum StmtRecvData {
         stmt_id: StmtId,
         #[serde(default)]
         result_id: u64,
+        #[serde(default)]
+        fields_count: i64,
+        #[serde(default)]
+        fields_names: Option<Vec<String>>,
+        #[serde(default)]
+        fields_types: Option<Vec<u8>>,
+        #[serde(default)]
+        fields_lengths: Option<Vec<u32>>,
+        #[serde(default)]
+        precision: i64,
     },
     StmtNumParams {
         #[serde(default)]
@@ -215,6 +225,7 @@ pub enum StmtOk {
     Stmt(StmtId, Result<Option<usize>, Error>),
     StmtFields(StmtId, Result<Vec<StmtField>, Error>),
     StmtParam(StmtId, Result<StmtParam, Error>),
+    StmtUseResult(StmtId, Result<StmtUseResult, Error>),
 }
 
 impl StmtRecv {
@@ -268,10 +279,25 @@ impl StmtRecv {
                     _e!()
                 }
             }),
-            StmtRecvData::UseResult { stmt_id, result_id } => StmtOk::Stmt(stmt_id, {
-                dbg!(&self.code, &self.message, &result_id);
+            StmtRecvData::UseResult {
+                stmt_id,
+                result_id,
+                fields_count,
+                fields_names,
+                fields_types,
+                fields_lengths,
+                precision,
+            } => StmtOk::StmtUseResult(stmt_id, {
                 if self.code == 0 {
-                    Ok(Some(result_id as usize))
+                    Ok(StmtUseResult {
+                        result_id,
+                        fields_count,
+                        fields_names,
+                        fields_types: fields_types
+                            .map(|v| v.into_iter().map(|v| v.into()).collect()),
+                        fields_lengths,
+                        precision: precision.into(),
+                    })
                 } else {
                     _e!()
                 }
@@ -295,7 +321,7 @@ impl StmtRecv {
                 if self.code == 0 {
                     Ok(StmtParam {
                         index,
-                        data_type,
+                        data_type: data_type.into(),
                         length,
                     })
                 } else {

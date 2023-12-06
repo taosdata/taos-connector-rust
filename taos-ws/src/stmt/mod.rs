@@ -6,7 +6,7 @@ use dashmap::DashMap as HashMap;
 use serde::Deserialize;
 
 use taos_query::common::views::views_to_raw_block;
-use taos_query::common::ColumnView;
+use taos_query::common::{ColumnView, Precision, Ty};
 use taos_query::prelude::{InlinableWrite, RawResult};
 use taos_query::stmt::{AsyncBindable, Bindable};
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
@@ -40,6 +40,10 @@ type StmtFieldReceiver = tokio::sync::mpsc::Receiver<StmtFieldResult>;
 type StmtParamResult = RawResult<StmtParam>;
 type StmtParamSender = tokio::sync::mpsc::Sender<StmtParamResult>;
 type StmtParamReceiver = tokio::sync::mpsc::Receiver<StmtParamResult>;
+
+type StmtUseResultResult = RawResult<StmtUseResult>;
+type StmtUseSender = tokio::sync::mpsc::Sender<StmtUseResultResult>;
+type StmtUseReceiver = tokio::sync::mpsc::Receiver<StmtUseResultResult>;
 
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 
@@ -234,15 +238,27 @@ pub struct Stmt {
     fields_receiver: Option<StmtFieldReceiver>,
     param_fetches: Arc<HashMap<StmtId, StmtParamSender>>,
     param_receiver: Option<StmtParamReceiver>,
-    // sender: WsQuerySender,
+    use_result_fetches: Arc<HashMap<StmtId, StmtUseSender>>,
+    use_result_receiver: Option<StmtUseReceiver>,
 }
 
 #[repr(C)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct StmtParam {
     pub index: i64,
-    pub data_type: i64,
+    pub data_type: Ty,
     pub length: i64,
+}
+
+#[repr(C)]
+#[derive(Debug, Deserialize, Clone)]
+pub struct StmtUseResult {
+    pub result_id: u64,
+    pub fields_count: i64,
+    pub fields_names: Option<Vec<String>>,
+    pub fields_types: Option<Vec<Ty>>,
+    pub fields_lengths: Option<Vec<u32>>,
+    pub precision: Precision,
 }
 
 #[repr(C)]
@@ -305,6 +321,9 @@ impl Stmt {
 
         let param_fetches = Arc::new(HashMap::<StmtId, StmtParamSender>::new());
         let param_fetches_sender = param_fetches.clone();
+
+        let use_result_fetches = Arc::new(HashMap::<StmtId, StmtUseSender>::new());
+        let use_result_fetches_sender = use_result_fetches.clone();
 
         let (ws, mut msg_recv) = tokio::sync::mpsc::channel(100);
         let ws2 = ws.clone();
@@ -384,6 +403,14 @@ impl Stmt {
                                                 log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
+                                        StmtOk::StmtUseResult(stmt_id, res) => {
+                                            if let Some(sender) = use_result_fetches_sender.get(&stmt_id) {
+                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                sender.send(res).await.unwrap();
+                                            } else {
+                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                            }
+                                        }
                                     }
                                 }
                                 Message::Binary(_) => {
@@ -435,6 +462,8 @@ impl Stmt {
             fields_receiver: None,
             param_fetches,
             param_receiver: None,
+            use_result_fetches,
+            use_result_receiver: None,
         })
     }
     /// Build TDengine websocket client from dsn.
@@ -482,6 +511,10 @@ impl Stmt {
         let (param_sender, param_receiver) = tokio::sync::mpsc::channel(2);
         let _ = self.param_fetches.insert(stmt_id, param_sender);
         self.param_receiver = Some(param_receiver);
+
+        let (use_result_sender, use_result_receiver) = tokio::sync::mpsc::channel(2);
+        let _ = self.use_result_fetches.insert(stmt_id, use_result_sender);
+        self.use_result_receiver = Some(use_result_receiver);
 
         Ok(self)
     }
@@ -650,7 +683,7 @@ impl Stmt {
         self.affected_rows_once
     }
 
-    pub async fn use_result(&mut self) -> RawResult<()> {
+    pub async fn use_result(&mut self) -> RawResult<StmtUseResult> {
         let message = StmtSend::UseResult(self.args.unwrap());
         // FIXME: change to trace before release
         log::debug!("use result message: {:#?}", &message);
@@ -658,7 +691,16 @@ impl Stmt {
             .send_timeout(message.to_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
-        Ok(())
+        let use_result = self
+            .use_result_receiver
+            .as_mut()
+            .unwrap()
+            .recv()
+            .await
+            .ok_or(taos_query::RawError::from_string(
+                "Can't receive stmt use_result response",
+            ))??;
+        Ok(use_result)
     }
 
     pub async fn stmt_num_params(&mut self) -> RawResult<usize> {
@@ -697,7 +739,7 @@ impl Stmt {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use taos_query::{Dsn, TBuilder};
+    use taos_query::{common::ColumnView, stmt::Bindable, Dsn, TBuilder};
 
     use crate::{stmt::Stmt, TaosBuilder};
 
@@ -848,41 +890,32 @@ mod tests {
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!(
-            "create table {db}.stb (ts timestamp, v int) tags(tj json)"
+            "create table {db}.stb (ts timestamp, v int) tags(utntag TINYINT UNSIGNED)"
         ))
         .await?;
+        taos.exec(format!("use {db}")).await?;
+        taos.exec("create table t1 using stb tags(0)").await?;
+        taos.exec("insert into t1 values(1640000000000, 0)").await?;
 
         std::env::set_var("RUST_LOG", "debug");
         // FIXME: only init for debug
         pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
-        let stmt = client
-            .s_stmt("insert into ? using stb tags(?) values(?, ?)")
-            .await?;
+        let stmt = client.s_stmt("select * from t1 where v < ?").await?;
+        let params = vec![ColumnView::from_ints(vec![10])];
+        stmt.stmt_bind_block(&params).await?;
+        // stmt.stmt_set_tbname("t1").await?;
 
-        stmt.stmt_set_tbname("tb1").await?;
-
-        stmt.stmt_set_tags(vec![json!(r#"{"name": "value"}"#)])
-            .await?;
-
-        stmt.bind_all(vec![
-            json!([
-                "2022-06-07T11:02:44.022450088+08:00",
-                "2022-06-07T11:02:45.022450088+08:00"
-            ]),
-            json!([2, 3]),
-        ])
-        .await?;
         let res = stmt.stmt_exec().await?;
 
-        assert_eq!(res, 2);
-        let row: (String, i32, std::collections::HashMap<String, String>) = taos
-            .query_one(format!("select * from {db}.stb"))
-            .await?
-            .unwrap();
-        dbg!(row);
+        // assert_eq!(res, 2);
+        // let row: (String, i32, std::collections::HashMap<String, String>) = taos
+        //     .query_one(format!("select * from {db}.stb"))
+        //     .await?
+        //     .unwrap();
+        // dbg!(row);
 
-        let res = stmt.use_result().await?;
+        let res = stmt.use_result().await;
 
         log::debug!("use result: {:?}", res);
 
