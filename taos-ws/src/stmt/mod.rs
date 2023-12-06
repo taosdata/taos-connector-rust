@@ -902,18 +902,16 @@ mod tests {
         pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
         let stmt = client.s_stmt("select * from t1 where v < ?").await?;
+        // stmt.stmt_set_tbname("t1").await?;
+
         let params = vec![ColumnView::from_ints(vec![10])];
         stmt.stmt_bind_block(&params).await?;
-        // stmt.stmt_set_tbname("t1").await?;
 
         let res = stmt.stmt_exec().await?;
 
-        // assert_eq!(res, 2);
-        // let row: (String, i32, std::collections::HashMap<String, String>) = taos
-        //     .query_one(format!("select * from {db}.stb"))
-        //     .await?
-        //     .unwrap();
-        // dbg!(row);
+        dbg!(res);
+
+        assert_eq!(res, 0);
 
         let res = stmt.use_result().await;
 
