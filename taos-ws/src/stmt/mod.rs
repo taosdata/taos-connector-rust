@@ -739,7 +739,7 @@ impl Stmt {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use taos_query::{common::ColumnView, stmt::Bindable, Dsn, TBuilder};
+    use taos_query::{common::ColumnView, Dsn, TBuilder};
 
     use crate::{stmt::Stmt, TaosBuilder};
 
@@ -902,7 +902,6 @@ mod tests {
         pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
         let stmt = client.s_stmt("select * from t1 where v < ?").await?;
-        // stmt.stmt_set_tbname("t1").await?;
 
         let params = vec![ColumnView::from_ints(vec![10])];
         stmt.stmt_bind_block(&params).await?;
@@ -916,6 +915,63 @@ mod tests {
         let res = stmt.use_result().await;
 
         log::debug!("use result: {:?}", res);
+
+        taos.exec(format!("drop database {db}")).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stmt_use_result_usage_error() -> anyhow::Result<()> {
+        use taos_query::AsyncQueryable;
+
+        let dsn = Dsn::try_from("taos://localhost:6041")?;
+
+        let db = "ws_stmt_use_result_usage_error";
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+        taos.exec(format!("create database {db}")).await?;
+        taos.exec(format!(
+            "create table {db}.stb (ts timestamp, v int) tags(utntag TINYINT UNSIGNED)"
+        ))
+        .await?;
+        taos.exec(format!("use {db}")).await?;
+        taos.exec("create table t1 using stb tags(0)").await?;
+        taos.exec("insert into t1 values(1640000000000, 0)").await?;
+
+        std::env::set_var("RUST_LOG", "debug");
+        // only init for debug
+        // pretty_env_logger::init();
+        let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
+        let stmt = client
+            .s_stmt("insert into ? using stb tags(?) values(?, ?)")
+            .await?;
+
+        stmt.stmt_set_tbname("tb1").await?;
+
+        stmt.stmt_set_tags(vec![json!(1)])
+            .await?;
+
+        stmt.bind_all(vec![
+            json!([
+                "2022-06-07T11:02:44.022450088+08:00",
+                "2022-06-07T11:02:45.022450088+08:00"
+            ]),
+            json!([2, 3]),
+        ])
+        .await?;
+
+        let res = stmt.stmt_exec().await?;
+
+        dbg!(res);
+
+        assert_eq!(res, 2);
+
+        let res = stmt.use_result().await;
+
+        log::debug!("use result: {:?}", res);
+
+        assert!(res.is_err());
 
         taos.exec(format!("drop database {db}")).await?;
         Ok(())
