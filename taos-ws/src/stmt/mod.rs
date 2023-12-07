@@ -898,8 +898,8 @@ mod tests {
         taos.exec("insert into t1 values(1640000000000, 0)").await?;
 
         std::env::set_var("RUST_LOG", "debug");
-        // FIXME: only init for debug
-        pretty_env_logger::init();
+        // only init for debug
+        // pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
         let stmt = client.s_stmt("select * from t1 where v < ?").await?;
 
@@ -994,8 +994,8 @@ mod tests {
         .await?;
 
         std::env::set_var("RUST_LOG", "debug");
-        // FIXME: only init for debug
-        pretty_env_logger::init();
+        // only init for debug
+        // pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
