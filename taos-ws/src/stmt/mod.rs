@@ -683,6 +683,10 @@ impl Stmt {
         self.affected_rows_once
     }
 
+    pub fn s_num_params(&mut self) -> RawResult<usize> {
+        block_in_place_or_global(self.stmt_num_params())
+    }
+
     pub async fn use_result(&mut self) -> RawResult<StmtUseResult> {
         let message = StmtSend::UseResult(self.args.unwrap());
         // FIXME: change to trace before release
