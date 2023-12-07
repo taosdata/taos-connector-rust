@@ -168,13 +168,13 @@ impl Error {
     #[inline(always)]
     pub fn new_with_context(
         code: impl Into<Code>,
-        err: impl Display,
-        context: impl Display,
+        err: impl Into<String>,
+        context: impl Into<String>,
     ) -> Self {
         Self {
             code: code.into(),
-            context: Some(context.to_string()),
-            source: err.to_string().into(),
+            context: Some(context.into()),
+            source: err.into().into(),
         }
     }
     #[inline]
@@ -187,10 +187,10 @@ impl Error {
     }
 
     #[inline]
-    pub fn context(mut self, context: impl Display) -> Self {
+    pub fn context(mut self, context: impl Into<String>) -> Self {
         self.context = Some(match self.context {
-            Some(pre) => format!("{}: {}", context, pre),
-            None => format!("{}", context),
+            Some(pre) => format!("{}: {}", context.into(), pre),
+            None => context.into(),
         });
         self
     }

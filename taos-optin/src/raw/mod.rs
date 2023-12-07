@@ -786,10 +786,10 @@ impl RawTaos {
         let ptr = unsafe { (self.c.taos_query)(self.as_ptr(), sql.as_ptr()) };
         if ptr.is_null() {
             let code = self.c.errno(std::ptr::null_mut());
-            let str = self.c.errno(std::ptr::null_mut());
+            let str = self.c.err_str(std::ptr::null_mut());
             return Err(RawError::new_with_context(
                 code,
-                str,
+                str.to_string(),
                 format!("Query with sql: {:?}", sql),
             ));
         }
@@ -1313,42 +1313,42 @@ impl RawRes {
             Poll::Ready(item)
         } else {
             current.in_use = true;
-            let param = Box::new((Arc::downgrade(state), self.c.clone(), cx.waker().clone()));
+            let param = Box::new((state.clone(), self.c.clone(), cx.waker().clone()));
             #[no_mangle]
             unsafe extern "C" fn taos_optin_fetch_rows_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
-                let param = param as *mut (Weak<UnsafeCell<BlockState>>, Arc<ApiEntry>, Waker);
+                let param = param as *mut (Arc<UnsafeCell<BlockState>>, Arc<ApiEntry>, Waker);
                 let param = Box::from_raw(param);
-                if let Some(state) = param.0.upgrade() {
-                    let state = &mut *state.get();
-                    let api = &*param.1;
-                    // state.done = true;
-                    state.in_use = false;
-                    if num_of_rows < 0 {
-                        // error
-                        state.result.replace(Err(RawError::new_with_context(
-                            num_of_rows,
-                            api.err_str(res),
-                            "fetch_rows_a",
-                        )));
+                let state = param.0;
+                let state = &mut *state.get();
+                let api = &*param.1;
+                // state.done = true;
+                state.in_use = false;
+                if num_of_rows < 0 {
+                    // error
+                    let old = state.result.replace(Err(RawError::new_with_context(
+                        num_of_rows,
+                        api.err_str(res),
+                        "fetch_rows_a",
+                    )));
+                    drop(old);
+                } else {
+                    // success
+                    if num_of_rows > 0 {
+                        // has a block
+                        let block = (param.1.taos_result_block.unwrap())(res).read() as _;
+                        state
+                            .result
+                            .replace(Ok(Some((block, num_of_rows as usize))));
                     } else {
-                        // success
-                        if num_of_rows > 0 {
-                            // has a block
-                            let block = (param.1.taos_result_block.unwrap())(res).read() as _;
-                            state
-                                .result
-                                .replace(Ok(Some((block, num_of_rows as usize))));
-                        } else {
-                            // retrieving completed
-                            state.result.replace(Ok(None));
-                        }
+                        // retrieving completed
+                        state.result.replace(Ok(None));
                     }
-                    param.2.wake()
                 }
+                param.2.wake()
             }
             unsafe {
                 (self.c.taos_fetch_rows_a)(
