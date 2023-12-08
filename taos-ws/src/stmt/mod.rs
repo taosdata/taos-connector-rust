@@ -687,6 +687,10 @@ impl Stmt {
         block_in_place_or_global(self.stmt_num_params())
     }
 
+    pub fn s_get_param(&mut self, index: i64) -> RawResult<StmtParam> {
+        block_in_place_or_global(self.stmt_get_param(index))
+    }
+
     pub async fn use_result(&mut self) -> RawResult<StmtUseResult> {
         let message = StmtSend::UseResult(self.args.unwrap());
         // FIXME: change to trace before release
