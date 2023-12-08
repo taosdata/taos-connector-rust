@@ -1472,20 +1472,31 @@ mod tests {
                 };
             }
 
-            execute!(b"drop database if exists ws_stmt_tag_and_col\0");
-            execute!(b"create database ws_stmt_tag_and_col keep 36500\0");
-            execute!(
-                b"create table ws_stmt_tag_and_col.s1 (ts timestamp, v int, b binary(100)) tags(jt json)\0"
-            );
+            macro_rules! exec_string {
+                ($s:expr) => {
+                    let sql = CString::new($s).expect("CString conversion failed");
+                    execute!(sql.as_ptr());
+                };
+            }
+
+            let db = "ws_stmt_num_params";
+
+            exec_string!(format!("drop database if exists {db}"));
+
+            exec_string!(format!("create database {db} keep 36500"));
+            exec_string!(format!(
+                "create table {db}.s1 (ts timestamp, v int, b binary(100)) tags(jt json)"
+            ));
 
             let stmt = ws_stmt_init(taos);
-            let sql = "insert into ? using ws_stmt_tag_and_col.s1 tags(?) values(?, ?, ?)";
+            let sql = format!("insert into ? using {db}.s1 tags(?) values(?, ?, ?)");
             let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
             if code != 0 {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
             }
 
-            ws_stmt_set_tbname(stmt, b"ws_stmt_tag_and_col.t1\0".as_ptr() as _);
+            let table_name = format!("{db}.t1");
+            ws_stmt_set_tbname(stmt, table_name.as_ptr() as _);
 
             let tags = vec![TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
