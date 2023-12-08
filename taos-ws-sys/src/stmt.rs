@@ -769,6 +769,35 @@ pub unsafe extern "C" fn ws_stmt_num_params(stmt: *mut WS_STMT, nums: *mut c_int
     }
 }
 
+/// Get param by index in current statement.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_get_param(
+    stmt: *mut WS_STMT,
+    idx: c_int,
+    r#type: *mut c_int,
+    bytes: *mut c_int,
+) -> c_int {
+    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+        Some(stmt) => match stmt
+            .safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+            .and_then(|stmt| stmt.s_get_param(idx as _))
+        {
+            Ok(param) => {
+                *r#type = param.data_type as _;
+                *bytes = param.length as _;
+                0
+            }
+            Err(e) => {
+                let errno = e.code();
+                stmt.error = Some(WsError::new(errno, &e.to_string()));
+                errno.into()
+            }
+        },
+        _ => 0,
+    }
+}
+
 /// Equivalent to ws_errstr
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_errstr(stmt: *mut WS_STMT) -> *const c_char {
@@ -1530,6 +1559,22 @@ mod tests {
                 );
             } else {
                 log::debug!("num_params: {}", num_params);
+            }
+
+            // for each param
+            for i in 0..num_params {
+                // get param
+                let mut r#type = 0;
+                let mut bytes = 0;
+                let code = ws_stmt_get_param(stmt, i, &mut r#type, &mut bytes);
+                if code != 0 {
+                    log::debug!(
+                        "param errstr: {}",
+                        CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                    );
+                } else {
+                    log::debug!("param type: {} bytes: {}", r#type, bytes);
+                }
             }
 
             ws_stmt_close(stmt);
