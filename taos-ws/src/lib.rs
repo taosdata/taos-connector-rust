@@ -474,7 +474,7 @@ impl TaosBuilder {
         let (ws, _) = match res {
             Ok(res) => res,
             Err(err) => {
-                if err.to_string().contains("404 Not Found") {
+                if err.to_string().contains("404 Not Found") || err.to_string().contains("400") {
                     connect_async_with_config(&url, Some(config), false)
                         .await
                         .map_err(|err| {
