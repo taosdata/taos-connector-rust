@@ -358,8 +358,7 @@ impl Stmt {
                         match message {
                             Ok(message) => match message {
                                 Message::Text(text) => {
-                                    // FIXME: change to trace before release
-                                    log::debug!("json response: {}", text);
+                                    log::trace!("json response: {}", text);
                                     let v: StmtRecv = serde_json::from_str(&text).unwrap();
                                     match v.ok() {
                                         StmtOk::Conn(_) => {
