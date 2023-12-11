@@ -1582,6 +1582,75 @@ mod tests {
             ws_close(taos)
         }
     }
+    #[test]
+    fn stmt_use_result() {
+        use crate::*;
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            macro_rules! exec_string {
+                ($s:expr) => {
+                    let sql = CString::new($s).expect("CString conversion failed");
+                    execute!(sql.as_ptr());
+                };
+            }
+
+            let db = "ws_stmt_use_result";
+
+            exec_string!(format!("drop database if exists {db}"));
+
+            exec_string!(format!("create database {db} keep 36500"));
+            exec_string!(format!(
+                "create table {db}.stb (ts timestamp, v int) tags(utntag TINYINT UNSIGNED)"
+            ));
+
+            exec_string!(format!("use {db}"));
+            execute!(b"create table t1 using stb tags(0)\0");
+            execute!(b"insert into t1 values(1640000000000, 0)\0");
+
+            let stmt = ws_stmt_init(taos);
+            let sql = format!("select * from t1 where v < ?");
+            let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            let params = vec![TaosMultiBind::from_primitives(vec![false], &[10])];
+            let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            ws_stmt_add_batch(stmt);
+            let mut rows = 0;
+            ws_stmt_execute(stmt, &mut rows);
+
+            let res = ws_stmt_use_result(stmt);
+            dbg!(res);
+
+            ws_stmt_close(stmt);
+
+            ws_close(taos)
+        }
+    }
 
     #[test]
     #[should_panic]
