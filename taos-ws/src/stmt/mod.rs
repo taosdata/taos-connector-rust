@@ -696,8 +696,7 @@ impl Stmt {
 
     pub async fn use_result(&mut self) -> RawResult<StmtUseResult> {
         let message = StmtSend::UseResult(self.args.unwrap());
-        // FIXME: change to trace before release
-        log::debug!("use result message: {:#?}", &message);
+        log::trace!("use result message: {:#?}", &message);
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
             .await
