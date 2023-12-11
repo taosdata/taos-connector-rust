@@ -798,6 +798,25 @@ pub unsafe extern "C" fn ws_stmt_get_param(
     }
 }
 
+/// Get use result in current statement.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_use_result(stmt: *mut WS_STMT) -> *mut WS_RES {
+    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+        Some(stmt) => match stmt
+            .safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+            .and_then(|stmt| stmt.s_use_result())
+        {
+            Ok(res) => Box::into_raw(Box::new(res)) as _,
+            Err(e) => {
+                stmt.error = Some(e.into());
+                std::ptr::null_mut()
+            }
+        },
+        _ => std::ptr::null_mut(),
+    }
+}
+
 /// Equivalent to ws_errstr
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_errstr(stmt: *mut WS_STMT) -> *const c_char {
