@@ -911,7 +911,7 @@ mod tests {
 
         std::env::set_var("RUST_LOG", "debug");
         // only init for debug
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
         let stmt = client.s_stmt("select * from t1 where v < ?").await?;
 
