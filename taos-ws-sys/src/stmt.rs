@@ -1604,7 +1604,7 @@ mod tests {
     #[test]
     fn stmt_use_result() {
         use crate::*;
-        // init_env();
+        init_env();
         unsafe {
             let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
