@@ -691,6 +691,10 @@ impl Stmt {
         block_in_place_or_global(self.stmt_get_param(index))
     }
 
+    pub fn s_use_result(&mut self) -> RawResult<StmtUseResult> {
+        block_in_place_or_global(self.use_result())
+    }
+
     pub async fn use_result(&mut self) -> RawResult<StmtUseResult> {
         let message = StmtSend::UseResult(self.args.unwrap());
         // FIXME: change to trace before release
@@ -907,7 +911,7 @@ mod tests {
 
         std::env::set_var("RUST_LOG", "debug");
         // only init for debug
-        // pretty_env_logger::init();
+        pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
         let stmt = client.s_stmt("select * from t1 where v < ?").await?;
 
