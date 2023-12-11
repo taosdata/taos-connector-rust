@@ -746,6 +746,58 @@ pub unsafe extern "C" fn ws_stmt_affected_rows_once(stmt: *mut WS_STMT) -> c_int
     }
 }
 
+/// Get num_params in current statement.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_num_params(stmt: *mut WS_STMT, nums: *mut c_int) -> c_int {
+    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+        Some(stmt) => match stmt
+            .safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+            .and_then(|stmt| stmt.s_num_params())
+        {
+            Ok(n) => {
+                *nums = n as _;
+                0
+            }
+            Err(e) => {
+                let errno = e.code();
+                stmt.error = Some(WsError::new(errno, &e.to_string()));
+                errno.into()
+            }
+        },
+        _ => 0,
+    }
+}
+
+/// Get param by index in current statement.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_get_param(
+    stmt: *mut WS_STMT,
+    idx: c_int,
+    r#type: *mut c_int,
+    bytes: *mut c_int,
+) -> c_int {
+    match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
+        Some(stmt) => match stmt
+            .safe_deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
+            .and_then(|stmt| stmt.s_get_param(idx as _))
+        {
+            Ok(param) => {
+                *r#type = param.data_type as _;
+                *bytes = param.length as _;
+                0
+            }
+            Err(e) => {
+                let errno = e.code();
+                stmt.error = Some(WsError::new(errno, &e.to_string()));
+                errno.into()
+            }
+        },
+        _ => 0,
+    }
+}
+
 /// Equivalent to ws_errstr
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_errstr(stmt: *mut WS_STMT) -> *const c_char {
@@ -1418,6 +1470,111 @@ mod tests {
                 log::debug!("col_fields: {:?}", col_fields_rs);
                 ws_stmt_reclaim_fields(&mut col_fields, col_fields_len);
                 log::debug!("col_fields after reclaim: {:?}", col_fields_rs);
+            }
+
+            ws_stmt_close(stmt);
+
+            ws_close(taos)
+        }
+    }
+    #[test]
+    fn stmt_num_params_and_get_param() {
+        use crate::*;
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            macro_rules! exec_string {
+                ($s:expr) => {
+                    let sql = CString::new($s).expect("CString conversion failed");
+                    execute!(sql.as_ptr());
+                };
+            }
+
+            let db = "ws_stmt_num_params";
+
+            exec_string!(format!("drop database if exists {db}"));
+
+            exec_string!(format!("create database {db} keep 36500"));
+            exec_string!(format!(
+                "create table {db}.s1 (ts timestamp, v int, b binary(100)) tags(jt json)"
+            ));
+
+            let stmt = ws_stmt_init(taos);
+            let sql = format!("insert into ? using {db}.s1 tags(?) values(?, ?, ?)");
+            let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            let table_name = format!("{db}.t1");
+            ws_stmt_set_tbname(stmt, table_name.as_ptr() as _);
+
+            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+                r#"{"name":"姓名"}"#.to_string(),
+            )])];
+
+            ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
+
+            let params = vec![
+                TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
+                TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
+                TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
+            ];
+            let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
+            if code != 0 {
+                dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
+            }
+
+            ws_stmt_add_batch(stmt);
+            let mut rows = 0;
+            ws_stmt_execute(stmt, &mut rows);
+
+            assert_eq!(rows, 2);
+
+            // get num_params
+            let mut num_params = 0;
+            let code = ws_stmt_num_params(stmt, &mut num_params);
+            if code != 0 {
+                log::debug!(
+                    "num_params errstr: {}",
+                    CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                );
+            } else {
+                log::debug!("num_params: {}", num_params);
+            }
+
+            // for each param
+            for i in 0..num_params {
+                // get param
+                let mut r#type = 0;
+                let mut bytes = 0;
+                let code = ws_stmt_get_param(stmt, i, &mut r#type, &mut bytes);
+                if code != 0 {
+                    log::debug!(
+                        "param errstr: {}",
+                        CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
+                    );
+                } else {
+                    log::debug!("param type: {} bytes: {}", r#type, bytes);
+                }
             }
 
             ws_stmt_close(stmt);
