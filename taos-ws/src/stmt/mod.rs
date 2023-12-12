@@ -6,7 +6,7 @@ use dashmap::DashMap as HashMap;
 use serde::Deserialize;
 
 use taos_query::common::views::views_to_raw_block;
-use taos_query::common::ColumnView;
+use taos_query::common::{ColumnView, Precision, Ty};
 use taos_query::prelude::{InlinableWrite, RawResult};
 use taos_query::stmt::{AsyncBindable, Bindable};
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
@@ -36,6 +36,14 @@ type StmtReceiver = tokio::sync::mpsc::Receiver<StmtResult>;
 type StmtFieldResult = RawResult<Vec<StmtField>>;
 type StmtFieldSender = tokio::sync::mpsc::Sender<StmtFieldResult>;
 type StmtFieldReceiver = tokio::sync::mpsc::Receiver<StmtFieldResult>;
+
+type StmtParamResult = RawResult<StmtParam>;
+type StmtParamSender = tokio::sync::mpsc::Sender<StmtParamResult>;
+type StmtParamReceiver = tokio::sync::mpsc::Receiver<StmtParamResult>;
+
+type StmtUseResultResult = RawResult<StmtUseResult>;
+type StmtUseSender = tokio::sync::mpsc::Sender<StmtUseResultResult>;
+type StmtUseReceiver = tokio::sync::mpsc::Receiver<StmtUseResultResult>;
 
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 
@@ -228,6 +236,29 @@ pub struct Stmt {
     affected_rows_once: usize,
     fields_fetches: Arc<HashMap<StmtId, StmtFieldSender>>,
     fields_receiver: Option<StmtFieldReceiver>,
+    param_fetches: Arc<HashMap<StmtId, StmtParamSender>>,
+    param_receiver: Option<StmtParamReceiver>,
+    use_result_fetches: Arc<HashMap<StmtId, StmtUseSender>>,
+    use_result_receiver: Option<StmtUseReceiver>,
+}
+
+#[repr(C)]
+#[derive(Debug, Deserialize, Clone)]
+pub struct StmtParam {
+    pub index: i64,
+    pub data_type: Ty,
+    pub length: i64,
+}
+
+#[repr(C)]
+#[derive(Debug, Deserialize, Clone)]
+pub struct StmtUseResult {
+    pub result_id: u64,
+    pub fields_count: i64,
+    pub fields_names: Option<Vec<String>>,
+    pub fields_types: Option<Vec<Ty>>,
+    pub fields_lengths: Option<Vec<u32>>,
+    pub precision: Precision,
 }
 
 #[repr(C)]
@@ -256,9 +287,8 @@ impl Drop for Stmt {
 
 impl Stmt {
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        
         let ws = info.build_stream(info.to_stmt_url()).await?;
-        
+
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 
@@ -288,6 +318,12 @@ impl Stmt {
 
         let fields_fetches = Arc::new(HashMap::<StmtId, StmtFieldSender>::new());
         let fields_fetches_sender = fields_fetches.clone();
+
+        let param_fetches = Arc::new(HashMap::<StmtId, StmtParamSender>::new());
+        let param_fetches_sender = param_fetches.clone();
+
+        let use_result_fetches = Arc::new(HashMap::<StmtId, StmtUseSender>::new());
+        let use_result_fetches_sender = use_result_fetches.clone();
 
         let (ws, mut msg_recv) = tokio::sync::mpsc::channel(100);
         let ws2 = ws.clone();
@@ -353,8 +389,23 @@ impl Stmt {
                                                 log::trace!("send data to fetches with id {}", stmt_id);
                                                 // let res = res.clone();
                                                 sender.send(res).await.unwrap();
-                                            // }) {
 
+                                            } else {
+                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                            }
+                                        }
+                                        StmtOk::StmtParam(stmt_id, res) => {
+                                            if let Some(sender) = param_fetches_sender.get(&stmt_id) {
+                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                sender.send(res).await.unwrap();
+                                            } else {
+                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                            }
+                                        }
+                                        StmtOk::StmtUseResult(stmt_id, res) => {
+                                            if let Some(sender) = use_result_fetches_sender.get(&stmt_id) {
+                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                sender.send(res).await.unwrap();
                                             } else {
                                                 log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
@@ -408,6 +459,10 @@ impl Stmt {
             affected_rows_once: 0,
             fields_fetches,
             fields_receiver: None,
+            param_fetches,
+            param_receiver: None,
+            use_result_fetches,
+            use_result_receiver: None,
         })
     }
     /// Build TDengine websocket client from dsn.
@@ -428,26 +483,7 @@ impl Stmt {
 
     pub async fn stmt_init(&mut self) -> RawResult<&mut Self> {
         let req_id = self.req_id();
-        let action = StmtSend::Init { req_id };
-        let (tx, rx) = oneshot::channel();
-        {
-            self.queries.insert(req_id, tx);
-            self.ws.send(action.to_msg()).await.map_err(Error::from)?;
-        }
-        let stmt_id = rx.await.map_err(Error::from)??; // 1. RecvError, 2. TaosError
-        let args = StmtArgs { req_id, stmt_id };
-
-        let (sender, receiver) = tokio::sync::mpsc::channel(2);
-
-        let _ = self.fetches.insert(stmt_id, sender);
-
-        self.args = Some(args);
-        self.receiver = Some(receiver);
-
-        let (fields_sender, fields_receiver) = tokio::sync::mpsc::channel(2);
-        let _ = self.fields_fetches.insert(stmt_id, fields_sender);
-        self.fields_receiver = Some(fields_receiver);
-        Ok(self)
+        self.taos_stmt_init_with_req_id(req_id).await
     }
 
     pub async fn taos_stmt_init_with_req_id(&mut self, req_id: u64) -> RawResult<&mut Self> {
@@ -470,6 +506,15 @@ impl Stmt {
         let (fields_sender, fields_receiver) = tokio::sync::mpsc::channel(2);
         let _ = self.fields_fetches.insert(stmt_id, fields_sender);
         self.fields_receiver = Some(fields_receiver);
+
+        let (param_sender, param_receiver) = tokio::sync::mpsc::channel(2);
+        let _ = self.param_fetches.insert(stmt_id, param_sender);
+        self.param_receiver = Some(param_receiver);
+
+        let (use_result_sender, use_result_receiver) = tokio::sync::mpsc::channel(2);
+        let _ = self.use_result_fetches.insert(stmt_id, use_result_sender);
+        self.use_result_receiver = Some(use_result_receiver);
+
         Ok(self)
     }
 
@@ -636,12 +681,75 @@ impl Stmt {
     pub fn affected_rows_once(&self) -> usize {
         self.affected_rows_once
     }
+
+    pub fn s_num_params(&mut self) -> RawResult<usize> {
+        block_in_place_or_global(self.stmt_num_params())
+    }
+
+    pub fn s_get_param(&mut self, index: i64) -> RawResult<StmtParam> {
+        block_in_place_or_global(self.stmt_get_param(index))
+    }
+
+    pub fn s_use_result(&mut self) -> RawResult<StmtUseResult> {
+        block_in_place_or_global(self.use_result())
+    }
+
+    pub async fn use_result(&mut self) -> RawResult<StmtUseResult> {
+        let message = StmtSend::UseResult(self.args.unwrap());
+        log::trace!("use result message: {:#?}", &message);
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
+        let use_result = self
+            .use_result_receiver
+            .as_mut()
+            .unwrap()
+            .recv()
+            .await
+            .ok_or(taos_query::RawError::from_string(
+                "Can't receive stmt use_result response",
+            ))??;
+        Ok(use_result)
+    }
+
+    pub async fn stmt_num_params(&mut self) -> RawResult<usize> {
+        let message = StmtSend::StmtNumParams(self.args.unwrap());
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
+        let num_params = self.receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt num_params response"),
+        )??;
+        match num_params {
+            Some(num_params) => Ok(num_params),
+            None => Err(taos_query::RawError::from_string(
+                "Can't receive stmt num_params response",
+            )),
+        }
+    }
+
+    pub async fn stmt_get_param(&mut self, index: i64) -> RawResult<StmtParam> {
+        let message = StmtSend::StmtGetParam {
+            args: self.args.unwrap(),
+            index,
+        };
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
+        let param = self.param_receiver.as_mut().unwrap().recv().await.ok_or(
+            taos_query::RawError::from_string("Can't receive stmt get_param response"),
+        )??;
+        Ok(param)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use taos_query::{Dsn, TBuilder};
+    use taos_query::{common::ColumnView, Dsn, TBuilder};
 
     use crate::{stmt::Stmt, TaosBuilder};
 
@@ -777,6 +885,164 @@ mod tests {
         log::debug!("col fields: {:?}", col_fields);
 
         taos.exec("drop database ws_stmt_sj2").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stmt_use_result() -> anyhow::Result<()> {
+        use taos_query::AsyncQueryable;
+
+        let dsn = Dsn::try_from("taos://localhost:6041")?;
+
+        let db = "ws_stmt_use_result";
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+        taos.exec(format!("create database {db}")).await?;
+        taos.exec(format!(
+            "create table {db}.stb (ts timestamp, v int) tags(utntag TINYINT UNSIGNED)"
+        ))
+        .await?;
+        taos.exec(format!("use {db}")).await?;
+        taos.exec("create table t1 using stb tags(0)").await?;
+        taos.exec("insert into t1 values(1640000000000, 0)").await?;
+
+        std::env::set_var("RUST_LOG", "debug");
+        // only init for debug
+        // pretty_env_logger::init();
+        let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
+        let stmt = client.s_stmt("select * from t1 where v < ?").await?;
+
+        let params = vec![ColumnView::from_ints(vec![10])];
+        stmt.stmt_bind_block(&params).await?;
+
+        let res = stmt.stmt_exec().await?;
+
+        dbg!(res);
+
+        assert_eq!(res, 0);
+
+        let res = stmt.use_result().await;
+
+        log::debug!("use result: {:?}", res);
+
+        taos.exec(format!("drop database {db}")).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stmt_use_result_usage_error() -> anyhow::Result<()> {
+        use taos_query::AsyncQueryable;
+
+        let dsn = Dsn::try_from("taos://localhost:6041")?;
+
+        let db = "ws_stmt_use_result_usage_error";
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+        taos.exec(format!("create database {db}")).await?;
+        taos.exec(format!(
+            "create table {db}.stb (ts timestamp, v int) tags(utntag TINYINT UNSIGNED)"
+        ))
+        .await?;
+        taos.exec(format!("use {db}")).await?;
+        taos.exec("create table t1 using stb tags(0)").await?;
+        taos.exec("insert into t1 values(1640000000000, 0)").await?;
+
+        std::env::set_var("RUST_LOG", "debug");
+        // only init for debug
+        // pretty_env_logger::init();
+        let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
+        let stmt = client
+            .s_stmt("insert into ? using stb tags(?) values(?, ?)")
+            .await?;
+
+        stmt.stmt_set_tbname("tb1").await?;
+
+        stmt.stmt_set_tags(vec![json!(1)])
+            .await?;
+
+        stmt.bind_all(vec![
+            json!([
+                "2022-06-07T11:02:44.022450088+08:00",
+                "2022-06-07T11:02:45.022450088+08:00"
+            ]),
+            json!([2, 3]),
+        ])
+        .await?;
+
+        let res = stmt.stmt_exec().await?;
+
+        dbg!(res);
+
+        assert_eq!(res, 2);
+
+        let res = stmt.use_result().await;
+
+        log::debug!("use result: {:?}", res);
+
+        assert!(res.is_err());
+
+        taos.exec(format!("drop database {db}")).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stmt_num_params_and_get_param() -> anyhow::Result<()> {
+        use taos_query::AsyncQueryable;
+
+        let dsn = Dsn::try_from("taos://localhost:6041")?;
+
+        let db = "ws_stmt_num_params";
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+        taos.exec(format!("create database {db}")).await?;
+        taos.exec(format!(
+            "create table {db}.stb (ts timestamp, v int) tags(tj json)"
+        ))
+        .await?;
+
+        std::env::set_var("RUST_LOG", "debug");
+        // only init for debug
+        // pretty_env_logger::init();
+        let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
+        let stmt = client
+            .s_stmt("insert into ? using stb tags(?) values(?, ?)")
+            .await?;
+
+        stmt.stmt_set_tbname("tb1").await?;
+
+        stmt.stmt_set_tags(vec![json!(r#"{"name": "value"}"#)])
+            .await?;
+
+        stmt.bind_all(vec![
+            json!([
+                "2022-06-07T11:02:44.022450088+08:00",
+                "2022-06-07T11:02:45.022450088+08:00"
+            ]),
+            json!([2, 3]),
+        ])
+        .await?;
+        let res = stmt.stmt_exec().await?;
+
+        assert_eq!(res, 2);
+        let row: (String, i32, std::collections::HashMap<String, String>) = taos
+            .query_one(format!("select * from {db}.stb"))
+            .await?
+            .unwrap();
+        dbg!(row);
+
+        let num_params = stmt.stmt_num_params().await?;
+
+        log::debug!("stmt num params: {:?}", num_params);
+
+        for i in 0..num_params {
+            let param = stmt.stmt_get_param(i as i64).await?;
+            log::debug!("param {}: {:?}", i, param);
+        }
+
+        taos.exec(format!("drop database {db}")).await?;
         Ok(())
     }
 
