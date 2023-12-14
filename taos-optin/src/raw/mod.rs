@@ -1320,6 +1320,8 @@ impl RawRes {
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
+                // sleep 5s
+                std::thread::sleep(std::time::Duration::from_secs(15));
                 let param = param as *mut (Weak<UnsafeCell<BlockState>>, Arc<ApiEntry>, Waker);
                 debug_assert!(
                     !param.is_null(),
