@@ -1321,6 +1321,14 @@ impl RawRes {
                 num_of_rows: c_int,
             ) {
                 let param = param as *mut (Weak<UnsafeCell<BlockState>>, Arc<ApiEntry>, Waker);
+                debug_assert!(
+                    !param.is_null(),
+                    "param should not be null, but got null {}",
+                    num_of_rows
+                );
+                let ptr = std::ptr::read_volatile(param as *mut *mut usize);
+                debug_assert!(!ptr.is_null(), "param value should not be null, maybe changed by other thread? num_of_rows: {}", num_of_rows);
+                debug_assert_ne!(ptr.read_volatile(), 0, "weak ptr should never be changed since its rust std implementation (num_of_rows: {})", num_of_rows);
                 let param = Box::from_raw(param);
                 if let Some(state) = param.0.upgrade() {
                     let state = &mut *state.get();
