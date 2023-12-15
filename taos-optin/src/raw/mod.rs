@@ -1313,30 +1313,40 @@ impl RawRes {
             Poll::Ready(item)
         } else {
             current.in_use = true;
-            let param = Box::new((Arc::downgrade(state), self.c.clone(), cx.waker().clone()));
+            const MARKER_SIZE: usize = 128;
+            struct Param {
+                _marker: [u8; MARKER_SIZE],
+                state: Weak<UnsafeCell<BlockState>>,
+                c: Arc<ApiEntry>,
+                waker: Waker,
+            }
+            let param = Box::new(Param {
+                _marker: [1; MARKER_SIZE],
+                state: Arc::downgrade(state),
+                c: self.c.clone(),
+                waker: cx.waker().clone(),
+            });
+            // let param = Box::new((Arc::downgrade(state), self.c.clone(), cx.waker().clone()));
             #[no_mangle]
             unsafe extern "C" fn taos_optin_fetch_rows_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
-                // sleep 15s if data is fetching
-                // if num_of_rows < 0 || num_of_rows > 1000 {
-                //     std::thread::sleep(std::time::Duration::from_secs(15));
-                // }
-                let param = param as *mut (Weak<UnsafeCell<BlockState>>, Arc<ApiEntry>, Waker);
+                let param = param as *mut Param;
                 debug_assert!(
                     !param.is_null(),
                     "param should not be null, but got null {}",
                     num_of_rows
                 );
-                let ptr = std::ptr::read_volatile(param as *mut *mut usize);
-                debug_assert!(!ptr.is_null(), "param value should not be null, maybe changed by other thread? num_of_rows: {}", num_of_rows);
-                debug_assert_ne!(ptr.read_volatile(), 0, "weak ptr should never be changed since its rust std implementation (num_of_rows: {})", num_of_rows);
+                // let ptr = std::ptr::read_volatile(param as *mut *mut usize);
+                // debug_assert!(!ptr.is_null(), "param value should not be null, maybe changed by other thread? num_of_rows: {}", num_of_rows);
+                // debug_assert_ne!(ptr.read_volatile(), 0, "weak ptr should never be changed since its rust std implementation (num_of_rows: {})", num_of_rows);
                 let param = Box::from_raw(param);
-                if let Some(state) = param.0.upgrade() {
+                debug_assert_eq!(param._marker, [1; MARKER_SIZE], "marker should not be changed");
+                if let Some(state) = param.state.upgrade() {
                     let state = &mut *state.get();
-                    let api = &*param.1;
+                    let api = &*param.c;
                     // state.done = true;
                     state.in_use = false;
                     if num_of_rows < 0 {
@@ -1350,7 +1360,7 @@ impl RawRes {
                         // success
                         if num_of_rows > 0 {
                             // has a block
-                            let block = (param.1.taos_result_block.unwrap())(res).read() as _;
+                            let block = (param.c.taos_result_block.unwrap())(res).read() as _;
                             state
                                 .result
                                 .replace(Ok(Some((block, num_of_rows as usize))));
@@ -1359,7 +1369,7 @@ impl RawRes {
                             state.result.replace(Ok(None));
                         }
                     }
-                    param.2.wake()
+                    param.waker.wake()
                 }
             }
             unsafe {
