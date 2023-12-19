@@ -4,7 +4,10 @@ pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
     use std::{ffi::CStr, sync::Arc, time::Duration};
-    use taos_query::tmq::{Assignment, VGroupId};
+    use taos_query::{
+        tmq::{Assignment, VGroupId},
+        RawError,
+    };
 
     use crate::{
         into_c_str::IntoCStr,
@@ -190,6 +193,35 @@ pub(super) mod tmq {
             tracing::trace!("offset_seek tmq_resp as str: {}", err_str);
 
             tmq_resp.ok_or(format!("offset seek failed: {err_str}"))
+        }
+
+        pub fn committed(&self, topic_name: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+            let tmq_resp;
+            if let Some(tmq_committed) = self.tmq.tmq_committed {
+                tmq_resp = unsafe {
+                    tmq_committed(self.as_ptr(), topic_name.into_c_str().as_ptr(), vgroup_id)
+                };
+            } else {
+                unimplemented!("does not support tmq_committed");
+            }
+            tracing::trace!(
+                "committed tmq_resp: {:?}, topic_name: {}, vgroup_id: {}",
+                tmq_resp,
+                topic_name,
+                vgroup_id
+            );
+
+            if tmq_resp.0 as i32 > 0 {
+                return Ok(tmq_resp.0 as _);
+            } else {
+                let err_str = self.err_as_str(tmq_resp);
+                tracing::trace!("committed tmq_resp err string: {}", err_str);
+
+                return Err(RawError::new(
+                    tmq_resp.0,
+                    format!("get committed failed: {err_str}"),
+                ));
+            }
         }
 
         pub fn close(&mut self) {
