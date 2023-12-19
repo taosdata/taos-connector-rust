@@ -690,6 +690,10 @@ impl AsAsyncConsumer for Consumer {
     ) -> RawResult<()> {
         self.tmq.offset_seek(topic, vgroup_id, offset)
     }
+
+    async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        unimplemented!("committed")
+    }
 }
 
 #[cfg(test)]
