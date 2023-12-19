@@ -387,6 +387,8 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
 
     async fn offset_seek(&mut self, topic: &str, vgroup_id: VGroupId, offset: i64)
         -> RawResult<()>;
+
+    async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
 }
 
 /// Marker trait to impl sync on async impl.
