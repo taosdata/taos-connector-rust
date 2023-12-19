@@ -546,6 +546,14 @@ impl AsConsumer for Consumer {
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
         self.tmq.offset_seek(topic, vg_id, offset)
     }
+
+    fn committed(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        unimplemented!("committed")
+    }
+
+    fn position(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        unimplemented!("position")
+    }
 }
 
 // impl AsyncOnSync for Consumer {}

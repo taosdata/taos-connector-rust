@@ -306,6 +306,10 @@ pub trait AsConsumer: Sized {
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>>;
 
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()>;
+
+    fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
+
+    fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
 }
 
 pub struct MessageSetsIter<'a, C> {
@@ -435,6 +439,18 @@ where
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::offset_seek(
             self, topic, vg_id, offset,
+        ))
+    }
+
+    fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::committed(
+            self, topic, vgroup_id,
+        ))
+    }
+
+    fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::position(
+            self, topic, vgroup_id,
         ))
     }
 }

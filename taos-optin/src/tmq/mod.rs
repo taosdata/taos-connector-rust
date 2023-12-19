@@ -480,6 +480,14 @@ impl AsConsumer for Consumer {
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
         self.tmq.offset_seek(topic, vg_id, offset)
     }
+
+    fn committed(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        self.tmq.committed(topic, vg_id)
+    }
+
+    fn position(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        self.tmq.position(topic, vg_id)
+    }
 }
 
 // impl AsyncOnSync for Consumer {}
@@ -1141,6 +1149,203 @@ mod tests {
             "drop database sys_tmq_meta_sync2",
             "drop topic sys_tmq_meta_sync",
             "drop database sys_tmq_meta_sync",
+        ])?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_tmq_committed() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        // let _ = pretty_env_logger::formatted_builder()
+        //     .filter_level(tracing::log::LevelFilter::Debug)
+        //     .try_init();
+
+        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
+
+        let source = "tmq_source_sync_1";
+        let target = "tmq_target_sync_1";
+
+        taos.exec_many([
+            format!("drop topic if exists {source}").as_str(),
+            format!("drop database if exists {source}").as_str(),
+            format!("create database {source} wal_retention_period 3600").as_str(),
+            format!("create topic {source} with meta as database {source}").as_str(),
+            format!("use {source}").as_str(),
+            "show databases",
+            "select database()",
+            // kind 1: create super table using all types
+            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 json)",
+            "describe stb1",
+            // kind 2: create child table with json tag
+            "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
+            "create table tb1 using stb1 tags(NULL)",
+            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)
+            tb1 values(now, true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            // kind 3: create super table with all types except json (especially for tags)
+            "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
+            t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
+            t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
+            // kind 4: create child table with all types except json
+            "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)",
+            // kind 5: create common table
+            "create table `table` (ts timestamp, v int)",
+            // kind 6: column in super table
+            "alter table stb1 add column new1 bool",
+            "alter table stb1 add column new2 tinyint",
+            "alter table stb1 add column new10 nchar(16)",
+            "alter table stb1 modify column new10 nchar(32)",
+            "alter table stb1 drop column new10",
+            "alter table stb1 drop column new2",
+            "alter table stb1 drop column new1",
+            // kind 7: add tag in super table
+            "alter table `stb2` add tag new1 bool",
+            "alter table `stb2` rename tag new1 new1_new",
+            "alter table `stb2` modify tag t10 nchar(32)",
+            "alter table `stb2` drop tag new1_new",
+            // kind 8: column in common table
+            "alter table `table` add column new1 bool",
+            "alter table `table` add column new2 tinyint",
+            "alter table `table` add column new10 nchar(16)",
+            "alter table `table` modify column new10 nchar(32)",
+            "alter table `table` rename column new10 new10_new",
+            "alter table `table` drop column new10_new",
+            "alter table `table` drop column new2",
+            "alter table `table` drop column new1",
+            // kind 9: drop normal table
+            "drop table `table`",
+            // kind 10: drop child table
+            "drop table `tb2`, `tb1`",
+            // kind 11: drop super table
+            "drop table `stb2`",
+            "drop table `stb1`",
+        ])?;
+
+        taos.exec_many([
+            format!("drop database if exists {target}").as_str(),
+            format!("create database if not exists {target} wal_retention_period 3600").as_str(),
+            format!("use {target}").as_str(),
+        ])?;
+
+        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest&experimental.snapshot.enable=false")?;
+        let mut consumer = builder.build()?;
+        consumer.subscribe([source])?;
+
+        let iter = consumer.iter_with_timeout(Timeout::from_millis(500));
+
+        for msg in iter {
+            let (offset, message) = msg?;
+            // Offset contains information for topic name, database name and vgroup id,
+            //  similar to kafka topic/partition/offset.
+            let topic: &str = offset.topic();
+            let _database = offset.database();
+            let vgroup_id = offset.vgroup_id();
+
+            // Different to kafka message, TDengine consumer would consume two kind of messages.
+            //
+            // 1. meta
+            // 2. data
+            match message {
+                MessageSet::Meta(meta) => {
+                    let raw = meta.as_raw_meta()?;
+                    taos.write_raw_meta(&raw)?;
+
+                    let json = meta.as_json_meta()?;
+                    match &json {
+                        taos_query::common::JsonMeta::Create(m) => match m {
+                            taos_query::common::MetaCreate::Super {
+                                table_name,
+                                columns: _,
+                                tags: _,
+                            } => {
+                                let desc = taos.describe(table_name.as_str())?;
+                                tracing::trace!("{:?}", desc);
+                            }
+                            taos_query::common::MetaCreate::Child {
+                                table_name,
+                                using: _,
+                                tags: _,
+                                tag_num: _,
+                            } => {
+                                let desc = taos.describe(table_name.as_str())?;
+                                tracing::trace!("{:?}", desc);
+                            }
+                            taos_query::common::MetaCreate::Normal {
+                                table_name,
+                                columns: _,
+                            } => {
+                                let desc = taos.describe(table_name.as_str())?;
+                                tracing::trace!("{:?}", desc);
+                            }
+                        },
+                        _ => (),
+                    }
+
+                    // meta data can be write to an database seamlessly by raw or json (to sql).
+                    let sql = json.to_string();
+                    if let Err(err) = taos.exec(sql) {
+                        match err.code() {
+                            Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                            Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                            Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                            Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                            Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                            Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                            Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                            Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
+                            Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
+                            Code::DUPLICATED_COLUMN_NAMES => {
+                                tracing::trace!("duplicated column names")
+                            }
+                            Code::NO_COLUMN_CAN_BE_DROPPED => {
+                                tracing::trace!("no column can be dropped")
+                            }
+                            _ => {
+                                tracing::debug!("{}", err);
+                            }
+                        }
+                    }
+                }
+                MessageSet::Data(data) => {
+                    // data message may have more than one data block for various tables.
+                    for block in data {
+                        let block = block?;
+                        // let block = block?;
+                        tracing::trace!("{:?}", block.table_name());
+                        tracing::trace!("{:?}", block);
+                    }
+                }
+                _ => (),
+            }
+            let committed = consumer.committed(topic, vgroup_id);
+            tracing::info!("committed: {:?}", committed);
+
+            let pos = consumer.position(topic, vgroup_id);
+            tracing::info!("position: {:?}", pos);
+
+            consumer.commit(offset)?;
+        }
+
+        consumer.unsubscribe();
+
+        taos.exec_many([
+            format!("drop database {target}").as_str(),
+            format!("drop topic {source}").as_str(),
+            format!("drop database {source}").as_str(),
         ])?;
         Ok(())
     }

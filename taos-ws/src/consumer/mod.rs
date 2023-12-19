@@ -713,6 +713,18 @@ impl AsConsumer for Consumer {
             self, topic, vg_id, offset,
         ))
     }
+
+    fn committed(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::committed(
+            self, topic, vg_id,
+        ))
+    }
+
+    fn position(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::position(
+            self, topic, vg_id,
+        ))
+    }
 }
 
 impl TmqBuilder {
