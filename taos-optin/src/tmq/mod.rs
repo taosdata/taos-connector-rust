@@ -633,6 +633,10 @@ impl AsAsyncConsumer for Consumer {
     ) -> RawResult<()> {
         self.tmq.offset_seek(topic, vgroup_id, offset)
     }
+
+    async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        self.tmq.committed(topic, vgroup_id)
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -843,7 +847,7 @@ mod tests {
         taos.query(format!("drop database {db}"))?;
         Ok(())
     }
-    
+
     #[test]
     fn meta() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
@@ -1172,7 +1176,9 @@ mod async_tests {
 
         consumer.subscribe([db]).await?;
 
-        for message in taos_query::tmq::AsConsumer::iter_with_timeout(&consumer, Timeout::from_secs(1)) {
+        for message in
+            taos_query::tmq::AsConsumer::iter_with_timeout(&consumer, Timeout::from_secs(1))
+        {
             let (offset, msg) = message?;
             tracing::debug!("offset: {:?}", offset);
 
@@ -1230,7 +1236,8 @@ mod async_tests {
             format!("drop database {db}2").as_str(),
             format!("drop topic {db}").as_str(),
             format!("drop database {db}").as_str(),
-        ]).await?;
+        ])
+        .await?;
         Ok(())
     }
 
