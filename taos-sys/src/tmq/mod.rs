@@ -694,6 +694,10 @@ impl AsAsyncConsumer for Consumer {
     async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
         unimplemented!("committed")
     }
+
+    async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        unimplemented!("position")
+    }
 }
 
 #[cfg(test)]

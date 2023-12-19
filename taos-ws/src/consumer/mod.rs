@@ -668,6 +668,10 @@ impl AsAsyncConsumer for Consumer {
         todo!()
     }
 
+    async fn position(&self, _: &str, _: VGroupId) -> RawResult<i64> {
+        todo!()
+    }
+
     fn default_timeout(&self) -> Timeout {
         self.timeout
     }

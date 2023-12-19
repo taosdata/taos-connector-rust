@@ -480,6 +480,21 @@ impl AsAsyncConsumer for Consumer {
             }
         }
     }
+
+    async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        match &self.0 {
+            ConsumerInner::Native(c) => {
+                <crate::sys::Consumer as AsAsyncConsumer>::position(c, topic, vgroup_id)
+                    .await
+                    .map_err(Into::into)
+            }
+            ConsumerInner::Ws(c) => {
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::position(c, topic, vgroup_id)
+                    .await
+                    .map_err(Into::into)
+            }
+        }
+    }
 }
 
 impl taos_query::tmq::SyncOnAsync for Consumer {}

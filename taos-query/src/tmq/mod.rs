@@ -389,6 +389,8 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
         -> RawResult<()>;
 
     async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
+
+    async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
 }
 
 /// Marker trait to impl sync on async impl.

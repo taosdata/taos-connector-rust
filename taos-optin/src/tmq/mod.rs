@@ -637,6 +637,10 @@ impl AsAsyncConsumer for Consumer {
     async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
         self.tmq.committed(topic, vgroup_id)
     }
+
+    async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        self.tmq.position(topic, vgroup_id)
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -1154,7 +1158,7 @@ mod async_tests {
         use taos_query::prelude::*;
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
-        let db = "test_write_raw_block_req_id";
+        let db = "test_write_raw_block_req_id_async";
         taos.exec_many([
             format!("drop topic if exists {db}").as_str(),
             format!("drop database if exists {db}").as_str(),
@@ -1614,6 +1618,7 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_tmq_committed() -> anyhow::Result<()> {
+        // TODO: remove logger before release
         let _ = pretty_env_logger::formatted_builder()
             .filter_level(tracing::log::LevelFilter::Debug)
             .try_init();
@@ -1769,6 +1774,10 @@ mod async_tests {
                 }
                 let committed = consumer.committed(topic, vgroup_id).await;
                 tracing::info!("committed: {:?} vgroup_id: {}", committed, vgroup_id);
+
+                let pos = consumer.position(topic, vgroup_id).await;
+                tracing::info!("position: {:?} vgroup_id: {}", pos, vgroup_id);
+
                 consumer.commit(offset).await?;
             }
         }
@@ -1796,8 +1805,10 @@ mod async_tests {
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
 
                 let committed = consumer.committed(topic, vgroup_id).await;
-
                 tracing::info!("committed: {:?} vgroup_id: {}", committed, vgroup_id);
+
+                let pos = consumer.position(topic, vgroup_id).await;
+                tracing::info!("position: {:?} vgroup_id: {}", pos, vgroup_id);
 
                 if res.is_err() {
                     tracing::error!("seek offset error: {:?}", res);

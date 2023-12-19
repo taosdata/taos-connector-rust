@@ -224,6 +224,35 @@ pub(super) mod tmq {
             }
         }
 
+        pub fn position(&self, topic_name: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+            let tmq_resp;
+            if let Some(tmq_position) = self.tmq.tmq_position {
+                tmq_resp = unsafe {
+                    tmq_position(self.as_ptr(), topic_name.into_c_str().as_ptr(), vgroup_id)
+                };
+            } else {
+                unimplemented!("does not support tmq_position");
+            }
+            tracing::trace!(
+                "position tmq_resp: {:?}, topic_name: {}, vgroup_id: {}",
+                tmq_resp,
+                topic_name,
+                vgroup_id
+            );
+
+            if tmq_resp.0 as i32 > 0 {
+                return Ok(tmq_resp.0 as _);
+            } else {
+                let err_str = self.err_as_str(tmq_resp);
+                tracing::trace!("position tmq_resp err string: {}", err_str);
+
+                return Err(RawError::new(
+                    tmq_resp.0,
+                    format!("get position failed: {err_str}"),
+                ));
+            }
+        }
+
         pub fn close(&mut self) {
             unsafe {
                 (self.tmq.tmq_consumer_close)(self.as_ptr());

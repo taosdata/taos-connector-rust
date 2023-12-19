@@ -361,6 +361,14 @@ pub(crate) struct TmqApi {
         ) -> tmq_resp_err_t,
     >,
 
+    pub(crate) tmq_position: Option<
+        unsafe extern "C" fn(
+            tmq: *mut tmq_t,
+            topic_name: *const c_char,
+            vgroup_id: i32,
+        ) -> tmq_resp_err_t,
+    >,
+
     pub(crate) tmq_err2str: unsafe extern "C" fn(err: tmq_resp_err_t) -> *const c_char,
 
     pub(crate) conf_api: TmqConfApi,
@@ -598,7 +606,12 @@ impl ApiEntry {
                     tmq_err2str,
                     tmq_consumer_new
                 );
-                optional_symbol!(tmq_get_topic_assignment, tmq_offset_seek, tmq_committed);
+                optional_symbol!(
+                    tmq_get_topic_assignment,
+                    tmq_offset_seek,
+                    tmq_committed,
+                    tmq_position
+                );
 
                 let conf_api = TmqConfApi {
                     tmq_conf_new,
@@ -633,6 +646,7 @@ impl ApiEntry {
                     tmq_get_topic_assignment,
                     tmq_offset_seek,
                     tmq_committed,
+                    tmq_position,
                     tmq_err2str,
 
                     conf_api,
