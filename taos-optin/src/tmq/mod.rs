@@ -1916,7 +1916,7 @@ mod async_tests {
         .await?;
 
         // dsn.params.insert("group.id".to_string(), "abc".to_string());
-        dsn.push_str("&group.id=10&timeout=1000ms");
+        dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest&experimental.snapshot.enable=false");
         let builder = TmqBuilder::from_dsn(&dsn)?;
         // dbg!(&builder.dsn);
         let mut consumer = builder.build().await?;
