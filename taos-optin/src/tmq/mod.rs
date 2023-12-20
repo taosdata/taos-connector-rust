@@ -615,8 +615,16 @@ impl AsAsyncConsumer for Consumer {
         self.tmq.commit(offset.0.clone()).await.map(|_| ())
     }
 
-    async fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
-        self.tmq.commit_offset_sync(topic_name, vgroup_id, offset)
+    async fn commit_offset(
+        &self,
+        topic_name: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
+    ) -> RawResult<()> {
+        self.tmq
+            .commit_offset_async(topic_name, vgroup_id, offset)
+            .await
+            .map(|_| ())
     }
 
     fn default_timeout(&self) -> Timeout {
@@ -1164,9 +1172,9 @@ mod tests {
     #[test]
     fn test_tmq_committed() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        // let _ = pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::log::LevelFilter::Debug)
-        //     .try_init();
+        let _ = pretty_env_logger::formatted_builder()
+            .filter_level(tracing::log::LevelFilter::Debug)
+            .try_init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
 
@@ -1852,10 +1860,9 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_tmq_committed() -> anyhow::Result<()> {
-        // TODO: remove logger before release
-        let _ = pretty_env_logger::formatted_builder()
-            .filter_level(tracing::log::LevelFilter::Debug)
-            .try_init();
+        // let _ = pretty_env_logger::formatted_builder()
+        //     .filter_level(tracing::log::LevelFilter::Debug)
+        //     .try_init();
 
         use taos_query::prelude::*;
         let mut dsn = "tmq://localhost:6030?".to_string();
@@ -2036,19 +2043,65 @@ mod async_tests {
                     begin,
                     end
                 );
-                let res = consumer.offset_seek(topic, vgroup_id, end).await;
 
                 let committed = consumer.committed(topic, vgroup_id).await;
-                tracing::info!("committed: {:?} vgroup_id: {}", committed, vgroup_id);
+                tracing::info!(
+                    "before commit_offset committed: {:?} vgroup_id: {}",
+                    committed,
+                    vgroup_id
+                );
 
                 let pos = consumer.position(topic, vgroup_id).await;
-                tracing::info!("position: {:?} vgroup_id: {}", pos, vgroup_id);
+                tracing::info!(
+                    "before commit_offset position: {:?} vgroup_id: {}",
+                    pos,
+                    vgroup_id
+                );
+
+                let res = consumer.commit_offset(topic, vgroup_id, end).await;
+
+                let committed = consumer.committed(topic, vgroup_id).await;
+                tracing::info!(
+                    "after commit_offset committed: {:?} vgroup_id: {}",
+                    committed,
+                    vgroup_id
+                );
+
+                let pos = consumer.position(topic, vgroup_id).await;
+                tracing::info!(
+                    "after commit_offset position: {:?} vgroup_id: {}",
+                    pos,
+                    vgroup_id
+                );
 
                 if res.is_err() {
                     tracing::error!("seek offset error: {:?}", res);
                     let a = consumer.assignments().await.unwrap();
                     tracing::error!("assignments: {:?}", a);
-                    // panic!()
+                }
+
+                // commit offset out of range, expect error
+
+                let res = consumer.commit_offset(topic, vgroup_id, end + 1).await;
+
+                let committed = consumer.committed(topic, vgroup_id).await;
+                tracing::info!(
+                    "after commit_offset committed: {:?} vgroup_id: {}",
+                    committed,
+                    vgroup_id
+                );
+
+                let pos = consumer.position(topic, vgroup_id).await;
+                tracing::info!(
+                    "after commit_offset position: {:?} vgroup_id: {}",
+                    pos,
+                    vgroup_id
+                );
+
+                if res.is_err() {
+                    tracing::error!("seek offset error: {:?}", res);
+                    let a = consumer.assignments().await.unwrap();
+                    tracing::error!("assignments: {:?}", a);
                 }
             }
 
