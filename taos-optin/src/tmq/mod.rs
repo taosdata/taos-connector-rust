@@ -464,6 +464,10 @@ impl AsConsumer for Consumer {
         self.tmq.commit_sync(offset.0.clone()).map(|_| ())
     }
 
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        self.tmq.commit_offset_sync(topic_name, vgroup_id, offset)
+    }
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.to_strings();
@@ -609,6 +613,10 @@ impl AsAsyncConsumer for Consumer {
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         self.tmq.commit(offset.0.clone()).await.map(|_| ())
+    }
+
+    async fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        self.tmq.commit_offset_sync(topic_name, vgroup_id, offset)
     }
 
     fn default_timeout(&self) -> Timeout {
@@ -1332,13 +1340,34 @@ mod tests {
                 _ => (),
             }
             let committed = consumer.committed(topic, vgroup_id);
-            tracing::info!("committed: {:?}", committed);
+            tracing::debug!("committed: {:?}", committed);
 
             let pos = consumer.position(topic, vgroup_id);
-            tracing::info!("position: {:?}", pos);
+            tracing::debug!("position: {:?}", pos);
 
             consumer.commit(offset)?;
         }
+
+        let assignments = consumer.assignments().unwrap();
+        tracing::debug!("assignments: {:?}", assignments);
+
+        for (topic, vec_assignment) in assignments {
+            for assignment in vec_assignment {
+                let vgroup_id = assignment.vgroup_id();
+                let end = assignment.end();
+
+                let committed = consumer.committed(topic.as_str(), vgroup_id);
+                tracing::debug!("committed before: {:?}", committed);
+
+                let _ = consumer.commit_offset(&topic, vgroup_id, end);
+
+                let committed = consumer.committed(topic.as_str(), vgroup_id);
+                tracing::debug!("committed after: {:?}", committed);
+            }
+        }
+
+        let assignments = consumer.assignments().unwrap();
+        tracing::debug!("assignments: {:?}", assignments);
 
         consumer.unsubscribe();
 
