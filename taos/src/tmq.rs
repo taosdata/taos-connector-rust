@@ -441,6 +441,19 @@ impl AsAsyncConsumer for Consumer {
         }
     }
 
+    async fn list_topics(&self) -> RawResult<Vec<String>> {
+        match &self.0 {
+            ConsumerInner::Native(c) => {
+                <crate::sys::Consumer as AsAsyncConsumer>::list_topics(c).await.map_err(Into::into)
+            }
+            ConsumerInner::Ws(c) => {
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::list_topics(c)
+                    .await
+                    .map_err(Into::into)
+            }
+        }
+    }
+
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         match &self.0 {
             ConsumerInner::Native(c) => {
