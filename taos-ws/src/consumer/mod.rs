@@ -612,6 +612,15 @@ impl AsAsyncConsumer for Consumer {
         Ok(())
     }
 
+    async fn commit_offset(
+        &self,
+        _topic_name: &str,
+        _vgroup_id: VGroupId,
+        _offset: i64,
+    ) -> RawResult<()> {
+        todo!()
+    }
+
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.topics.clone();
         log::trace!("topics: {:?}", topics);
@@ -702,6 +711,12 @@ impl AsConsumer for Consumer {
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(self, offset))
+    }
+
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit_offset(
+            self, topic_name, vgroup_id, offset,
+        ))
     }
 
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
