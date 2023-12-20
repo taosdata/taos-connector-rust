@@ -424,6 +424,23 @@ impl AsAsyncConsumer for Consumer {
         }
     }
 
+    async fn commit_offset(&self, topic: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        match &self.0 {
+            ConsumerInner::Native(c) => <crate::sys::Consumer as AsAsyncConsumer>::commit_offset(
+                c, topic, vgroup_id, offset,
+            )
+            .await
+            .map_err(Into::into),
+            ConsumerInner::Ws(c) => {
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::commit_offset(
+                    c, topic, vgroup_id, offset,
+                )
+                .await
+                .map_err(Into::into)
+            }
+        }
+    }
+
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         match &self.0 {
             ConsumerInner::Native(c) => {
