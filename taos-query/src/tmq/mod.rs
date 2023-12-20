@@ -305,6 +305,8 @@ pub trait AsConsumer: Sized {
         drop(self)
     }
 
+    fn list_topics(&self) -> RawResult<Vec<String>>;
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>>;
 
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()>;
@@ -394,6 +396,8 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
         drop(self)
     }
 
+    async fn list_topics(&self) -> RawResult<Vec<String>>;
+
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>>;
 
     async fn topic_assignment(&self, topic: &str) -> Vec<Assignment>;
@@ -445,6 +449,10 @@ where
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit_offset(
             self, topic_name, vgroup_id, offset,
         ))
+    }
+
+    fn list_topics(&self) -> RawResult<Vec<String>> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::list_topics(self))
     }
 
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
