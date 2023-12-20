@@ -112,6 +112,44 @@ pub(super) mod tmq {
             rx.recv().unwrap()
         }
 
+        pub async fn commit_offset_async(
+            &self,
+            topic_name: &str,
+            vgroup_id: VGroupId,
+            offset: i64,
+        ) -> RawResult<()> {
+            if let Some(tmq_commit_offset_async) = self.tmq.tmq_commit_offset_async {
+                use std::sync::mpsc::{channel, Sender};
+                let (sender, rx) = channel::<RawResult<()>>();
+                unsafe extern "C" fn tmq_commit_offset_async_cb(
+                    _tmq: *mut tmq_t,
+                    resp: tmq_resp_err_t,
+                    param: *mut std::os::raw::c_void,
+                ) {
+                    let offsets = resp.ok_or("commit offset failed").map(|_| ());
+                    let sender = param as *mut Sender<_>;
+                    let sender = Box::from_raw(sender);
+                    tracing::trace!("commit offset async callback");
+                    sender.send(offsets).unwrap();
+                }
+
+                unsafe {
+                    tracing::trace!("commit offset async with {:p}", self.as_ptr());
+                    (tmq_commit_offset_async)(
+                        self.as_ptr(),
+                        topic_name.into_c_str().as_ptr(),
+                        vgroup_id,
+                        offset,
+                        tmq_commit_offset_async_cb,
+                        Box::into_raw(Box::new(sender)) as *mut _,
+                    )
+                }
+                rx.recv().unwrap()
+            } else {
+                unimplemented!("does not support tmq_commit_offset_async");
+            }
+        }
+
         pub fn poll_timeout(&self, timeout: i64) -> Option<RawRes> {
             tracing::trace!("poll next message with timeout {}", timeout);
             let res = unsafe { (self.tmq.tmq_consumer_poll)(self.as_ptr(), timeout) };
