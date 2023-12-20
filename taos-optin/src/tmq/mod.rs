@@ -468,6 +468,12 @@ impl AsConsumer for Consumer {
         self.tmq.commit_offset_sync(topic_name, vgroup_id, offset)
     }
 
+    fn list_topics(&self) -> RawResult<Vec<String>> {
+        let topics = self.tmq.subscription();
+        let topics = topics.to_strings();
+        Ok(topics)
+    }
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.to_strings();
@@ -629,6 +635,12 @@ impl AsAsyncConsumer for Consumer {
 
     fn default_timeout(&self) -> Timeout {
         self.timeout
+    }
+
+    async fn list_topics(&self) -> RawResult<Vec<String>> {
+        let topics = self.tmq.subscription();
+        let topics = topics.to_strings();
+        Ok(topics)
     }
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
@@ -1172,9 +1184,9 @@ mod tests {
     #[test]
     fn test_tmq_committed() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        let _ = pretty_env_logger::formatted_builder()
-            .filter_level(tracing::log::LevelFilter::Debug)
-            .try_init();
+        // let _ = pretty_env_logger::formatted_builder()
+        //     .filter_level(tracing::log::LevelFilter::Info)
+        //     .try_init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
 
@@ -1259,7 +1271,14 @@ mod tests {
 
         let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest&experimental.snapshot.enable=false")?;
         let mut consumer = builder.build()?;
+
+        let topics = consumer.list_topics()?;
+        tracing::info!("topics before subcribe:{:?}", topics);
+
         consumer.subscribe([source])?;
+
+        let topics = consumer.list_topics()?;
+        tracing::info!("topics after subcribe:{:?}", topics);
 
         let iter = consumer.iter_with_timeout(Timeout::from_millis(500));
 
@@ -1861,7 +1880,7 @@ mod async_tests {
     #[tokio::test]
     async fn test_tmq_committed() -> anyhow::Result<()> {
         // let _ = pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::log::LevelFilter::Debug)
+        //     .filter_level(tracing::log::LevelFilter::Info)
         //     .try_init();
 
         use taos_query::prelude::*;
@@ -1952,7 +1971,14 @@ mod async_tests {
         let builder = TmqBuilder::from_dsn(&dsn)?;
 
         let mut consumer = builder.build().await?;
+
+        let topics = consumer.list_topics().await?;
+        tracing::info!("topics before subcribe:{:?}", topics);
+
         consumer.subscribe([source]).await?;
+
+        let topics = consumer.list_topics().await?;
+        tracing::info!("topics after subcribe:{:?}", topics);
 
         {
             let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
@@ -2014,10 +2040,10 @@ mod async_tests {
                     }
                 }
                 let committed = consumer.committed(topic, vgroup_id).await;
-                tracing::info!("committed: {:?} vgroup_id: {}", committed, vgroup_id);
+                tracing::debug!("committed: {:?} vgroup_id: {}", committed, vgroup_id);
 
                 let pos = consumer.position(topic, vgroup_id).await;
-                tracing::info!("position: {:?} vgroup_id: {}", pos, vgroup_id);
+                tracing::debug!("position: {:?} vgroup_id: {}", pos, vgroup_id);
 
                 consumer.commit(offset).await?;
             }
@@ -2045,14 +2071,14 @@ mod async_tests {
                 );
 
                 let committed = consumer.committed(topic, vgroup_id).await;
-                tracing::info!(
+                tracing::debug!(
                     "before commit_offset committed: {:?} vgroup_id: {}",
                     committed,
                     vgroup_id
                 );
 
                 let pos = consumer.position(topic, vgroup_id).await;
-                tracing::info!(
+                tracing::debug!(
                     "before commit_offset position: {:?} vgroup_id: {}",
                     pos,
                     vgroup_id
@@ -2061,14 +2087,14 @@ mod async_tests {
                 let res = consumer.commit_offset(topic, vgroup_id, end).await;
 
                 let committed = consumer.committed(topic, vgroup_id).await;
-                tracing::info!(
+                tracing::debug!(
                     "after commit_offset committed: {:?} vgroup_id: {}",
                     committed,
                     vgroup_id
                 );
 
                 let pos = consumer.position(topic, vgroup_id).await;
-                tracing::info!(
+                tracing::debug!(
                     "after commit_offset position: {:?} vgroup_id: {}",
                     pos,
                     vgroup_id
