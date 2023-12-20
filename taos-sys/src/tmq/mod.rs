@@ -530,6 +530,10 @@ impl AsConsumer for Consumer {
         self.tmq.commit_sync(offset.0).map(|_| ())
     }
 
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        unimplemented!("commit_offset")
+    }
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.into_strings();
@@ -666,6 +670,10 @@ impl AsAsyncConsumer for Consumer {
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         self.tmq.commit(offset.0).await.map(|_| ())
+    }
+
+    async fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        unimplemented!("commit_offset")
     }
 
     fn default_timeout(&self) -> Timeout {
