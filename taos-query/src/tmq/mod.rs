@@ -299,6 +299,8 @@ pub trait AsConsumer: Sized {
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()>;
 
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()>;
+
     fn unsubscribe(self) {
         drop(self)
     }
@@ -381,6 +383,13 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()>;
 
+    async fn commit_offset(
+        &self,
+        topic_name: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
+    ) -> RawResult<()>;
+
     async fn unsubscribe(self) {
         drop(self)
     }
@@ -432,6 +441,12 @@ where
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit(self, offset))
     }
 
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit_offset(
+            self, topic_name, vgroup_id, offset,
+        ))
+    }
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::assignments(self))
     }
@@ -443,15 +458,11 @@ where
     }
 
     fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
-        crate::block_in_place_or_global(<C as AsAsyncConsumer>::committed(
-            self, topic, vgroup_id,
-        ))
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::committed(self, topic, vgroup_id))
     }
 
     fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
-        crate::block_in_place_or_global(<C as AsAsyncConsumer>::position(
-            self, topic, vgroup_id,
-        ))
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::position(self, topic, vgroup_id))
     }
 }
 
