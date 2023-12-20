@@ -534,6 +534,10 @@ impl AsConsumer for Consumer {
         unimplemented!("commit_offset")
     }
 
+    fn list_topics(&self) -> RawResult<Vec<String>> {
+        unimplemented!("list_topics")
+    }
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.into_strings();
@@ -678,6 +682,10 @@ impl AsAsyncConsumer for Consumer {
 
     fn default_timeout(&self) -> Timeout {
         self.timeout
+    }
+
+    async fn list_topics(&self) -> RawResult<Vec<String>> {
+        unimplemented!("list_topics")
     }
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
