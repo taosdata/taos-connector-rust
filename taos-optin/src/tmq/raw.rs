@@ -63,6 +63,27 @@ pub(super) mod tmq {
                 .ok_or("commit failed")
         }
 
+        pub fn commit_offset_sync(
+            &self,
+            topic_name: &str,
+            vgroup_id: VGroupId,
+            offset: i64,
+        ) -> RawResult<()> {
+            if let Some(tmq_commit_offset_sync) = self.tmq.tmq_commit_offset_sync {
+                unsafe {
+                    tmq_commit_offset_sync(
+                        self.as_ptr(),
+                        topic_name.into_c_str().as_ptr(),
+                        vgroup_id,
+                        offset,
+                    )
+                    .ok_or("commit failed")
+                }
+            } else {
+                unimplemented!("does not support tmq_commit_offset_sync");
+            }
+        }
+
         pub async fn commit(&self, msg: RawRes) -> RawResult<()> {
             // use tokio::sync::oneshot::{channel, Sender};
             use std::sync::mpsc::{channel, Sender};
