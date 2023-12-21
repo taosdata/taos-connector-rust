@@ -1649,7 +1649,7 @@ mod tests {
         }
         consumer.unsubscribe();
 
-        std::thread::sleep(Duration::from_secs(1));
+        std::thread::sleep(Duration::from_secs(10));
 
         taos.exec_many([
             "drop database ws_tmq_meta_sync32",
