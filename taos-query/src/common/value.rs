@@ -703,7 +703,29 @@ mod tests {
         assert_eq!(tiny_int_value.to_u8(), Some(42));
         assert_eq!(tiny_int_value.to_u16(), Some(42));
         assert_eq!(tiny_int_value.to_u32(), Some(42));
-        assert_eq!(tiny_int_value.to_u64(), Some(42));        
+        assert_eq!(tiny_int_value.to_u64(), Some(42));
+
+        let float_value = BorrowedValue::Float(3.14);
+        assert_eq!(float_value.to_f32(), Some(3.14));
+        assert_eq!(float_value.to_f64(), Some(3.14));
+    }
+
+    #[test]
+    fn test_value() {
+        let null_value = Value::Null(Ty::Int);
+        assert_eq!(null_value.ty(), Ty::Int);
+        assert_eq!(null_value.to_sql_value(), "NULL".to_string());
+        assert_eq!(null_value.to_string(), Ok("".to_string()));
+        assert_eq!(null_value.to_json_value(), serde_json::Value::Null);
+        let null_value_borrowed = null_value.to_borrowed_value();
+        assert_eq!(null_value_borrowed.ty(), Ty::Int);
+        assert_eq!(null_value_borrowed.to_sql_value(), "NULL".to_string());
+        assert_eq!(null_value_borrowed.to_string(), Ok("".to_string()));
+        assert_eq!(null_value_borrowed.to_json_value(), serde_json::Value::Null);
+        assert_eq!(null_value_borrowed.to_value(), null_value);
+        assert_eq!(null_value_borrowed.clone().into_value(), null_value);
+        assert_eq!(null_value_borrowed, null_value);
+        assert_eq!(null_value_borrowed, &null_value);
     }
 
     #[test]
