@@ -1597,7 +1597,7 @@ mod tests {
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync3"])?;
 
-        let iter = consumer.iter_with_timeout(Timeout::from_secs(5));
+        let iter = consumer.iter_with_timeout(Timeout::from_secs(1));
 
         for msg in iter {
             let (offset, message) = msg?;
@@ -1649,7 +1649,7 @@ mod tests {
         }
         consumer.unsubscribe();
 
-        std::thread::sleep(Duration::from_secs(10));
+        std::thread::sleep(Duration::from_secs(1));
 
         taos.exec_many([
             "drop database ws_tmq_meta_sync32",
