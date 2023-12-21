@@ -1273,12 +1273,12 @@ mod tests {
         let mut consumer = builder.build()?;
 
         let topics = consumer.list_topics()?;
-        tracing::info!("topics before subcribe:{:?}", topics);
+        tracing::debug!("topics before subcribe:{:?}", topics);
 
         consumer.subscribe([source])?;
 
         let topics = consumer.list_topics()?;
-        tracing::info!("topics after subcribe:{:?}", topics);
+        tracing::debug!("topics after subcribe:{:?}", topics);
 
         let iter = consumer.iter_with_timeout(Timeout::from_millis(500));
 
