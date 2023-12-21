@@ -694,6 +694,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_borrowed_value_to_native() {
+        let tiny_int_value = BorrowedValue::TinyInt(42);
+        assert_eq!(tiny_int_value.to_i8(), Some(42));
+        assert_eq!(tiny_int_value.to_i16(), Some(42));
+        assert_eq!(tiny_int_value.to_i32(), Some(42));
+        assert_eq!(tiny_int_value.to_i64(), Some(42));
+        assert_eq!(tiny_int_value.to_u8(), Some(42));
+        assert_eq!(tiny_int_value.to_u16(), Some(42));
+        assert_eq!(tiny_int_value.to_u32(), Some(42));
+        assert_eq!(tiny_int_value.to_u64(), Some(42));        
+    }
+
+    #[test]
     fn test_ty() {
         let null_value = BorrowedValue::Null(Ty::Int);
         assert_eq!(null_value.ty(), Ty::Int);
@@ -788,5 +801,8 @@ mod tests {
         let timestamp_value = BorrowedValue::Timestamp(Timestamp::new(1, Precision::Millisecond));
         assert_eq!(timestamp_value.to_sql_value(), "1".to_string());
 
+        let nchar_value = Value::NChar("hello".to_string());
+        let b_nchar_value = nchar_value.to_borrowed_value();
+        assert_eq!(b_nchar_value.to_sql_value(), "\"hello\"".to_string());
     }
 }
