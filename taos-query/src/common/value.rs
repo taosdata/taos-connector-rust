@@ -707,8 +707,8 @@ mod tests {
         assert_eq!(tiny_int_value.to_u64(), Some(42));
 
         let float_value = BorrowedValue::Float(3.14);
-        log::debug!("float_value: {:?}", float_value.to_f32());
-        log::debug!("float_value: {:?}", float_value.to_f64());
+        println!("float_value: {:?}", float_value.to_f32());
+        println!("float_value: {:?}", float_value.to_f64());
     }
 
     #[test]
@@ -718,14 +718,19 @@ mod tests {
         assert_eq!(null_value.to_sql_value(), "NULL".to_string());
         assert_eq!(null_value.to_string(), Ok("".to_string()));
         assert_eq!(null_value.to_json_value(), serde_json::Value::Null);
+        assert_eq!(format!("{}", null_value), "NULL");
         let null_value_borrowed = null_value.to_borrowed_value();
         assert_eq!(null_value_borrowed.ty(), Ty::Int);
         assert_eq!(null_value_borrowed.to_sql_value(), "NULL".to_string());
         assert_eq!(null_value_borrowed.to_string(), Ok("".to_string()));
         assert_eq!(null_value_borrowed.to_json_value(), serde_json::Value::Null);
+        assert_eq!(format!("{}", null_value_borrowed), "NULL");
+        println!("{:?}", null_value_borrowed.to_str());
+        assert_eq!(null_value_borrowed.to_bool(), None);
         assert_eq!(null_value_borrowed.to_value(), null_value);
         assert_eq!(null_value_borrowed.clone().into_value(), null_value);
         assert_eq!(null_value_borrowed, null_value);
+        assert_eq!(null_value, null_value_borrowed);
         assert_eq!(null_value_borrowed, &null_value);
     }
 
@@ -736,14 +741,22 @@ mod tests {
         assert_eq!(bool_value.to_sql_value(), "true".to_string());
         assert_eq!(bool_value.to_string(), Ok("true".to_string()));
         assert_eq!(bool_value.to_json_value(), serde_json::Value::Bool(true));
+        assert_eq!(format!("{}", bool_value), "true");
         let bool_value_borrowed = bool_value.to_borrowed_value();
         assert_eq!(bool_value_borrowed.ty(), Ty::Bool);
         assert_eq!(bool_value_borrowed.to_sql_value(), "true".to_string());
         assert_eq!(bool_value_borrowed.to_string(), Ok("true".to_string()));
-        assert_eq!(bool_value_borrowed.to_json_value(), serde_json::Value::Bool(true));
+        assert_eq!(
+            bool_value_borrowed.to_json_value(),
+            serde_json::Value::Bool(true)
+        );
+        assert_eq!(format!("{}", bool_value_borrowed), "true");
+        println!("{:?}", bool_value_borrowed.to_str());
+        assert_eq!(bool_value_borrowed.to_bool(), Some(true));
         assert_eq!(bool_value_borrowed.to_value(), bool_value);
         assert_eq!(bool_value_borrowed.clone().into_value(), bool_value);
         assert_eq!(bool_value_borrowed, bool_value);
+        assert_eq!(bool_value, bool_value_borrowed);
         assert_eq!(bool_value_borrowed, &bool_value);
     }
 
@@ -753,7 +766,11 @@ mod tests {
         assert_eq!(tiny_int_value.ty(), Ty::TinyInt);
         assert_eq!(tiny_int_value.to_sql_value(), "42".to_string());
         assert_eq!(tiny_int_value.to_string(), Ok("42".to_string()));
-        assert_eq!(tiny_int_value.to_json_value(), serde_json::Value::Number(42.into()));
+        assert_eq!(
+            tiny_int_value.to_json_value(),
+            serde_json::Value::Number(42.into())
+        );
+        assert_eq!(format!("{}", tiny_int_value), "42");
         let tiny_int_value_borrowed = tiny_int_value.to_borrowed_value();
         assert_eq!(tiny_int_value_borrowed.ty(), Ty::TinyInt);
         assert_eq!(tiny_int_value_borrowed.to_sql_value(), "42".to_string());
@@ -762,12 +779,13 @@ mod tests {
             tiny_int_value_borrowed.to_json_value(),
             serde_json::Value::Number(42.into())
         );
+        assert_eq!(format!("{}", tiny_int_value_borrowed), "42");
+        println!("{:?}", tiny_int_value_borrowed.to_str());
+        assert_eq!(tiny_int_value_borrowed.to_bool(), Some(true));
         assert_eq!(tiny_int_value_borrowed.to_value(), tiny_int_value);
-        assert_eq!(
-            tiny_int_value_borrowed.clone().into_value(),
-            tiny_int_value
-        );
+        assert_eq!(tiny_int_value_borrowed.clone().into_value(), tiny_int_value);
         assert_eq!(tiny_int_value_borrowed, tiny_int_value);
+        assert_eq!(tiny_int_value, tiny_int_value_borrowed);
         assert_eq!(tiny_int_value_borrowed, &tiny_int_value);
     }
 
