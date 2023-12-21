@@ -686,3 +686,107 @@ _impl_primitive_from!(f32, Float);
 _impl_primitive_from!(f64, Double);
 _impl_primitive_from!(Timestamp, Timestamp);
 mod de;
+
+#[cfg(test)]
+mod tests {
+    use crate::common::Precision;
+
+    use super::*;
+
+    #[test]
+    fn test_ty() {
+        let null_value = BorrowedValue::Null(Ty::Int);
+        assert_eq!(null_value.ty(), Ty::Int);
+
+        let bool_value = BorrowedValue::Bool(true);
+        assert_eq!(bool_value.ty(), Ty::Bool);
+
+        let tiny_int_value = BorrowedValue::TinyInt(42);
+        assert_eq!(tiny_int_value.ty(), Ty::TinyInt);
+
+        let small_int_value = BorrowedValue::SmallInt(1000);
+        assert_eq!(small_int_value.ty(), Ty::SmallInt);
+
+        let int_value = BorrowedValue::Int(-500);
+        assert_eq!(int_value.ty(), Ty::Int);
+
+        let big_int_value = BorrowedValue::BigInt(1234567890);
+        assert_eq!(big_int_value.ty(), Ty::BigInt);
+
+        let utiny_int_value = BorrowedValue::UTinyInt(42);
+        assert_eq!(utiny_int_value.ty(), Ty::UTinyInt);
+
+        let usmall_int_value = BorrowedValue::USmallInt(1000);
+        assert_eq!(usmall_int_value.ty(), Ty::USmallInt);
+
+        let uint_value = BorrowedValue::UInt(5000);
+        assert_eq!(uint_value.ty(), Ty::UInt);
+
+        let ubig_int_value = BorrowedValue::UBigInt(1234567890);
+        assert_eq!(ubig_int_value.ty(), Ty::UBigInt);
+
+        let float_value = BorrowedValue::Float(3.14);
+        assert_eq!(float_value.ty(), Ty::Float);
+
+        let double_value = BorrowedValue::Double(2.71828);
+        assert_eq!(double_value.ty(), Ty::Double);
+
+        let varchar_value = BorrowedValue::VarChar("hello");
+        assert_eq!(varchar_value.ty(), Ty::VarChar);
+
+        let timestamp_value = BorrowedValue::Timestamp(Timestamp::new(1, Precision::Millisecond));
+        assert_eq!(timestamp_value.ty(), Ty::Timestamp);
+
+        let blob_value = BorrowedValue::Blob(&[1, 2, 3]);
+        assert_eq!(blob_value.ty(), Ty::Blob);
+
+        let medium_blob_value = BorrowedValue::MediumBlob(&[1, 2, 3]);
+        assert_eq!(medium_blob_value.ty(), Ty::MediumBlob);
+    }
+
+    #[test]
+    fn test_to_sql_value() {
+        let null_value = BorrowedValue::Null(Ty::Int);
+        assert_eq!(null_value.to_sql_value(), "NULL".to_string());
+
+        let bool_value = BorrowedValue::Bool(true);
+        assert_eq!(bool_value.to_sql_value(), "true".to_string());
+
+        let tiny_int_value = BorrowedValue::TinyInt(42);
+        assert_eq!(tiny_int_value.to_sql_value(), "42".to_string());
+
+        let small_int_value = BorrowedValue::SmallInt(1000);
+        assert_eq!(small_int_value.to_sql_value(), "1000".to_string());
+
+        let int_value = BorrowedValue::Int(-500);
+        assert_eq!(int_value.to_sql_value(), "-500".to_string());
+
+        let big_int_value = BorrowedValue::BigInt(1234567890);
+        assert_eq!(big_int_value.to_sql_value(), "1234567890".to_string());
+
+        let utiny_int_value = BorrowedValue::UTinyInt(42);
+        assert_eq!(utiny_int_value.to_sql_value(), "42".to_string());
+
+        let usmall_int_value = BorrowedValue::USmallInt(1000);
+        assert_eq!(usmall_int_value.to_sql_value(), "1000".to_string());
+
+        let uint_value = BorrowedValue::UInt(5000);
+        assert_eq!(uint_value.to_sql_value(), "5000".to_string());
+
+        let ubig_int_value = BorrowedValue::UBigInt(1234567890);
+        assert_eq!(ubig_int_value.to_sql_value(), "1234567890".to_string());
+
+        let float_value = BorrowedValue::Float(3.14);
+        assert_eq!(float_value.to_sql_value(), "3.14".to_string());
+
+        let double_value = BorrowedValue::Double(2.71828);
+        assert_eq!(double_value.to_sql_value(), "2.71828".to_string());
+
+        let varchar_value = BorrowedValue::VarChar("hello");
+        assert_eq!(varchar_value.to_sql_value(), "\"hello\"".to_string());
+
+        let timestamp_value = BorrowedValue::Timestamp(Timestamp::new(1, Precision::Millisecond));
+        assert_eq!(timestamp_value.to_sql_value(), "1".to_string());
+
+    }
+}
