@@ -1267,7 +1267,7 @@ mod async_tests {
     #[ignore]
     async fn test_recycle() -> RawResult<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
         let builder = TaosBuilder::from_dsn("taos+ws://localhost:6041/")?;
         let pool = builder.pool()?;
 

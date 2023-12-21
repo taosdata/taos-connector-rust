@@ -3,9 +3,9 @@ use taos::sync::*;
 
 // #[test]
 fn _test_tmq_meta_sync() -> anyhow::Result<()> {
-    pretty_env_logger::formatted_timed_builder()
-        .filter_level(log::LevelFilter::Trace)
-        .init();
+    // pretty_env_logger::formatted_timed_builder()
+    //     .filter_level(log::LevelFilter::Debug)
+    //     .init();
     use taos_query::prelude::sync::*;
     let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
     let mut dsn = Dsn::from_str(&dsn)?;
