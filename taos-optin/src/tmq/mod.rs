@@ -891,7 +891,7 @@ mod tests {
     #[test]
     fn meta() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        let _ = pretty_env_logger::formatted_timed_builder().try_init();
+        // let _ = pretty_env_logger::formatted_timed_builder().try_init();
 
         let taos = TaosBuilder::from_dsn("taos:///")?.build()?;
         let db = "tmq_meta";
