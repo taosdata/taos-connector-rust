@@ -299,13 +299,21 @@ pub trait AsConsumer: Sized {
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()>;
 
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()>;
+
     fn unsubscribe(self) {
         drop(self)
     }
 
+    fn list_topics(&self) -> RawResult<Vec<String>>;
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>>;
 
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()>;
+
+    fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
+
+    fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
 }
 
 pub struct MessageSetsIter<'a, C> {
@@ -377,9 +385,18 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()>;
 
+    async fn commit_offset(
+        &self,
+        topic_name: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
+    ) -> RawResult<()>;
+
     async fn unsubscribe(self) {
         drop(self)
     }
+
+    async fn list_topics(&self) -> RawResult<Vec<String>>;
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>>;
 
@@ -387,6 +404,10 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
 
     async fn offset_seek(&mut self, topic: &str, vgroup_id: VGroupId, offset: i64)
         -> RawResult<()>;
+
+    async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
+
+    async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
 }
 
 /// Marker trait to impl sync on async impl.
@@ -424,6 +445,16 @@ where
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit(self, offset))
     }
 
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit_offset(
+            self, topic_name, vgroup_id, offset,
+        ))
+    }
+
+    fn list_topics(&self) -> RawResult<Vec<String>> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::list_topics(self))
+    }
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::assignments(self))
     }
@@ -432,6 +463,14 @@ where
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::offset_seek(
             self, topic, vg_id, offset,
         ))
+    }
+
+    fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::committed(self, topic, vgroup_id))
+    }
+
+    fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::position(self, topic, vgroup_id))
     }
 }
 

@@ -530,6 +530,14 @@ impl AsConsumer for Consumer {
         self.tmq.commit_sync(offset.0).map(|_| ())
     }
 
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        unimplemented!("commit_offset")
+    }
+
+    fn list_topics(&self) -> RawResult<Vec<String>> {
+        unimplemented!("list_topics")
+    }
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.into_strings();
@@ -545,6 +553,14 @@ impl AsConsumer for Consumer {
 
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
         self.tmq.offset_seek(topic, vg_id, offset)
+    }
+
+    fn committed(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        unimplemented!("committed")
+    }
+
+    fn position(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        unimplemented!("position")
     }
 }
 
@@ -660,8 +676,16 @@ impl AsAsyncConsumer for Consumer {
         self.tmq.commit(offset.0).await.map(|_| ())
     }
 
+    async fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        unimplemented!("commit_offset")
+    }
+
     fn default_timeout(&self) -> Timeout {
         self.timeout
+    }
+
+    async fn list_topics(&self) -> RawResult<Vec<String>> {
+        unimplemented!("list_topics")
     }
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
@@ -689,6 +713,14 @@ impl AsAsyncConsumer for Consumer {
         offset: i64,
     ) -> RawResult<()> {
         self.tmq.offset_seek(topic, vgroup_id, offset)
+    }
+
+    async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        unimplemented!("committed")
+    }
+
+    async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        unimplemented!("position")
     }
 }
 

@@ -335,6 +335,26 @@ pub(crate) struct TmqApi {
         param: *mut c_void,
     ),
 
+    pub(crate) tmq_commit_offset_sync: Option<
+        unsafe extern "C" fn(
+            tmq: *mut tmq_t,
+            topic_name: *const c_char,
+            vgroup_id: i32,
+            offset: i64,
+        ) -> tmq_resp_err_t,
+    >,
+
+    pub(crate) tmq_commit_offset_async: Option<
+        unsafe extern "C" fn(
+            tmq: *mut tmq_t,
+            topic_name: *const c_char,
+            vgroup_id: i32,
+            offset: i64,
+            cb: tmq_commit_cb,
+            param: *mut c_void,
+        ),
+    >,
+
     pub(crate) tmq_get_topic_assignment: Option<
         unsafe extern "C" fn(
             tmq: *mut tmq_t,
@@ -350,6 +370,22 @@ pub(crate) struct TmqApi {
             topic_name: *const c_char,
             vgroup_id: i32,
             offset: i64,
+        ) -> tmq_resp_err_t,
+    >,
+
+    pub(crate) tmq_committed: Option<
+        unsafe extern "C" fn(
+            tmq: *mut tmq_t,
+            topic_name: *const c_char,
+            vgroup_id: i32,
+        ) -> tmq_resp_err_t,
+    >,
+
+    pub(crate) tmq_position: Option<
+        unsafe extern "C" fn(
+            tmq: *mut tmq_t,
+            topic_name: *const c_char,
+            vgroup_id: i32,
         ) -> tmq_resp_err_t,
     >,
 
@@ -590,7 +626,14 @@ impl ApiEntry {
                     tmq_err2str,
                     tmq_consumer_new
                 );
-                optional_symbol!(tmq_get_topic_assignment, tmq_offset_seek);
+                optional_symbol!(
+                    tmq_get_topic_assignment,
+                    tmq_offset_seek,
+                    tmq_commit_offset_sync,
+                    tmq_commit_offset_async,
+                    tmq_committed,
+                    tmq_position
+                );
 
                 let conf_api = TmqConfApi {
                     tmq_conf_new,
@@ -622,8 +665,12 @@ impl ApiEntry {
                     tmq_consumer_close,
                     tmq_commit_sync,
                     tmq_commit_async,
+                    tmq_commit_offset_sync,
+                    tmq_commit_offset_async,
                     tmq_get_topic_assignment,
                     tmq_offset_seek,
+                    tmq_committed,
+                    tmq_position,
                     tmq_err2str,
 
                     conf_api,

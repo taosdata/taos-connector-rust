@@ -612,6 +612,19 @@ impl AsAsyncConsumer for Consumer {
         Ok(())
     }
 
+    async fn commit_offset(
+        &self,
+        _topic_name: &str,
+        _vgroup_id: VGroupId,
+        _offset: i64,
+    ) -> RawResult<()> {
+        todo!()
+    }
+
+    async fn list_topics(&self) -> RawResult<Vec<String>> {
+        todo!()
+    }
+
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.topics.clone();
         log::trace!("topics: {:?}", topics);
@@ -664,6 +677,14 @@ impl AsAsyncConsumer for Consumer {
         Ok(())
     }
 
+    async fn committed(&self, _: &str, _: VGroupId) -> RawResult<i64> {
+        todo!()
+    }
+
+    async fn position(&self, _: &str, _: VGroupId) -> RawResult<i64> {
+        todo!()
+    }
+
     fn default_timeout(&self) -> Timeout {
         self.timeout
     }
@@ -696,6 +717,16 @@ impl AsConsumer for Consumer {
         taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(self, offset))
     }
 
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit_offset(
+            self, topic_name, vgroup_id, offset,
+        ))
+    }
+
+    fn list_topics(&self) -> RawResult<Vec<String>> {
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::list_topics(self))
+    }
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::assignments(self))
     }
@@ -703,6 +734,18 @@ impl AsConsumer for Consumer {
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
         taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::offset_seek(
             self, topic, vg_id, offset,
+        ))
+    }
+
+    fn committed(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::committed(
+            self, topic, vg_id,
+        ))
+    }
+
+    fn position(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::position(
+            self, topic, vg_id,
         ))
     }
 }

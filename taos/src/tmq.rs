@@ -424,6 +424,36 @@ impl AsAsyncConsumer for Consumer {
         }
     }
 
+    async fn commit_offset(&self, topic: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        match &self.0 {
+            ConsumerInner::Native(c) => <crate::sys::Consumer as AsAsyncConsumer>::commit_offset(
+                c, topic, vgroup_id, offset,
+            )
+            .await
+            .map_err(Into::into),
+            ConsumerInner::Ws(c) => {
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::commit_offset(
+                    c, topic, vgroup_id, offset,
+                )
+                .await
+                .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn list_topics(&self) -> RawResult<Vec<String>> {
+        match &self.0 {
+            ConsumerInner::Native(c) => {
+                <crate::sys::Consumer as AsAsyncConsumer>::list_topics(c).await.map_err(Into::into)
+            }
+            ConsumerInner::Ws(c) => {
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::list_topics(c)
+                    .await
+                    .map_err(Into::into)
+            }
+        }
+    }
+
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         match &self.0 {
             ConsumerInner::Native(c) => {
@@ -463,6 +493,36 @@ impl AsAsyncConsumer for Consumer {
             )
             .await
             .map_err(Into::into),
+        }
+    }
+
+    async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        match &self.0 {
+            ConsumerInner::Native(c) => {
+                <crate::sys::Consumer as AsAsyncConsumer>::committed(c, topic, vgroup_id)
+                    .await
+                    .map_err(Into::into)
+            }
+            ConsumerInner::Ws(c) => {
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::committed(c, topic, vgroup_id)
+                    .await
+                    .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        match &self.0 {
+            ConsumerInner::Native(c) => {
+                <crate::sys::Consumer as AsAsyncConsumer>::position(c, topic, vgroup_id)
+                    .await
+                    .map_err(Into::into)
+            }
+            ConsumerInner::Ws(c) => {
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::position(c, topic, vgroup_id)
+                    .await
+                    .map_err(Into::into)
+            }
         }
     }
 }

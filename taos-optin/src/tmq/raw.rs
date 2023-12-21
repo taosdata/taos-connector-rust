@@ -4,7 +4,10 @@ pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
     use std::{ffi::CStr, sync::Arc, time::Duration};
-    use taos_query::tmq::{Assignment, VGroupId};
+    use taos_query::{
+        tmq::{Assignment, VGroupId},
+        RawError,
+    };
 
     use crate::{
         into_c_str::IntoCStr,
@@ -60,6 +63,27 @@ pub(super) mod tmq {
                 .ok_or("commit failed")
         }
 
+        pub fn commit_offset_sync(
+            &self,
+            topic_name: &str,
+            vgroup_id: VGroupId,
+            offset: i64,
+        ) -> RawResult<()> {
+            if let Some(tmq_commit_offset_sync) = self.tmq.tmq_commit_offset_sync {
+                unsafe {
+                    tmq_commit_offset_sync(
+                        self.as_ptr(),
+                        topic_name.into_c_str().as_ptr(),
+                        vgroup_id,
+                        offset,
+                    )
+                    .ok_or("commit failed")
+                }
+            } else {
+                unimplemented!("does not support tmq_commit_offset_sync");
+            }
+        }
+
         pub async fn commit(&self, msg: RawRes) -> RawResult<()> {
             // use tokio::sync::oneshot::{channel, Sender};
             use std::sync::mpsc::{channel, Sender};
@@ -86,6 +110,44 @@ pub(super) mod tmq {
                 )
             }
             rx.recv().unwrap()
+        }
+
+        pub async fn commit_offset_async(
+            &self,
+            topic_name: &str,
+            vgroup_id: VGroupId,
+            offset: i64,
+        ) -> RawResult<()> {
+            if let Some(tmq_commit_offset_async) = self.tmq.tmq_commit_offset_async {
+                use std::sync::mpsc::{channel, Sender};
+                let (sender, rx) = channel::<RawResult<()>>();
+                unsafe extern "C" fn tmq_commit_offset_async_cb(
+                    _tmq: *mut tmq_t,
+                    resp: tmq_resp_err_t,
+                    param: *mut std::os::raw::c_void,
+                ) {
+                    let offsets = resp.ok_or("commit offset failed").map(|_| ());
+                    let sender = param as *mut Sender<_>;
+                    let sender = Box::from_raw(sender);
+                    tracing::trace!("commit offset async callback");
+                    sender.send(offsets).unwrap();
+                }
+
+                unsafe {
+                    tracing::trace!("commit offset async with {:p}", self.as_ptr());
+                    (tmq_commit_offset_async)(
+                        self.as_ptr(),
+                        topic_name.into_c_str().as_ptr(),
+                        vgroup_id,
+                        offset,
+                        tmq_commit_offset_async_cb,
+                        Box::into_raw(Box::new(sender)) as *mut _,
+                    )
+                }
+                rx.recv().unwrap()
+            } else {
+                unimplemented!("does not support tmq_commit_offset_async");
+            }
         }
 
         pub fn poll_timeout(&self, timeout: i64) -> Option<RawRes> {
@@ -190,6 +252,64 @@ pub(super) mod tmq {
             tracing::trace!("offset_seek tmq_resp as str: {}", err_str);
 
             tmq_resp.ok_or(format!("offset seek failed: {err_str}"))
+        }
+
+        pub fn committed(&self, topic_name: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+            let tmq_resp;
+            if let Some(tmq_committed) = self.tmq.tmq_committed {
+                tmq_resp = unsafe {
+                    tmq_committed(self.as_ptr(), topic_name.into_c_str().as_ptr(), vgroup_id)
+                };
+            } else {
+                unimplemented!("does not support tmq_committed");
+            }
+            tracing::trace!(
+                "committed tmq_resp: {:?}, topic_name: {}, vgroup_id: {}",
+                tmq_resp,
+                topic_name,
+                vgroup_id
+            );
+
+            if tmq_resp.0 as i32 > 0 {
+                return Ok(tmq_resp.0 as _);
+            } else {
+                let err_str = self.err_as_str(tmq_resp);
+                tracing::trace!("committed tmq_resp err string: {}", err_str);
+
+                return Err(RawError::new(
+                    tmq_resp.0,
+                    format!("get committed failed: {err_str}"),
+                ));
+            }
+        }
+
+        pub fn position(&self, topic_name: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+            let tmq_resp;
+            if let Some(tmq_position) = self.tmq.tmq_position {
+                tmq_resp = unsafe {
+                    tmq_position(self.as_ptr(), topic_name.into_c_str().as_ptr(), vgroup_id)
+                };
+            } else {
+                unimplemented!("does not support tmq_position");
+            }
+            tracing::trace!(
+                "position tmq_resp: {:?}, topic_name: {}, vgroup_id: {}",
+                tmq_resp,
+                topic_name,
+                vgroup_id
+            );
+
+            if tmq_resp.0 as i32 > 0 {
+                return Ok(tmq_resp.0 as _);
+            } else {
+                let err_str = self.err_as_str(tmq_resp);
+                tracing::trace!("position tmq_resp err string: {}", err_str);
+
+                return Err(RawError::new(
+                    tmq_resp.0,
+                    format!("get position failed: {err_str}"),
+                ));
+            }
         }
 
         pub fn close(&mut self) {
