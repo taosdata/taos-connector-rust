@@ -1973,12 +1973,12 @@ mod async_tests {
         let mut consumer = builder.build().await?;
 
         let topics = consumer.list_topics().await?;
-        tracing::info!("topics before subcribe:{:?}", topics);
+        tracing::debug!("topics before subcribe:{:?}", topics);
 
         consumer.subscribe([source]).await?;
 
         let topics = consumer.list_topics().await?;
-        tracing::info!("topics after subcribe:{:?}", topics);
+        tracing::debug!("topics after subcribe:{:?}", topics);
 
         {
             let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
