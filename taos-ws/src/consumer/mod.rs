@@ -622,7 +622,8 @@ impl AsAsyncConsumer for Consumer {
     }
 
     async fn list_topics(&self) -> RawResult<Vec<String>> {
-        todo!()
+        let topics = self.topics.clone();
+        Ok(topics)
     }
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
@@ -677,12 +678,42 @@ impl AsAsyncConsumer for Consumer {
         Ok(())
     }
 
-    async fn committed(&self, _: &str, _: VGroupId) -> RawResult<i64> {
-        todo!()
+    async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        let req_id = self.sender.req_id();
+        let action = TmqSend::Committed(OffsetArgs {
+            req_id,
+            topic_vgroup_ids: vec![OffsetInnerArgs {
+                topic: topic.to_string(),
+                vgroup_id,
+            }],
+        });
+
+        let data = self.sender.send_recv(action).await?;
+        if let TmqRecvData::Committed { committed } = data {
+            let offset = committed[0];
+            Ok(offset)
+        } else {
+            Ok(0)
+        }
     }
 
-    async fn position(&self, _: &str, _: VGroupId) -> RawResult<i64> {
-        todo!()
+    async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        let req_id = self.sender.req_id();
+        let action = TmqSend::Position(OffsetArgs {
+            req_id,
+            topic_vgroup_ids: vec![OffsetInnerArgs {
+                topic: topic.to_string(),
+                vgroup_id,
+            }],
+        });
+
+        let data = self.sender.send_recv(action).await?;
+        if let TmqRecvData::Position { position } = data {
+            let offset = position[0];
+            Ok(offset)
+        } else {
+            Ok(0)
+        }
     }
 
     fn default_timeout(&self) -> Timeout {
@@ -1006,6 +1037,25 @@ impl TmqBuilder {
                                                 log::warn!("seek message received but no receiver alive");
                                             }
                                         }
+                                        TmqRecvData::Committed { committed }=> {
+                                            log::trace!("committed done: {:?}", committed);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("committed message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::Position { position }=> {
+                                            log::trace!("position done: {:?}", position);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("position message received but no receiver alive");
+                                            }
+                                        }
+
                                         _ => unreachable!("unknown tmq response"),
                                     }
                                 }
