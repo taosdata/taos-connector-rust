@@ -955,11 +955,11 @@ mod tests {
 
         client.exec(format!("drop database if exists {db}"))?;
 
-        std::thread::sleep(std::time::Duration::from_secs(3));
+        std::thread::sleep(std::time::Duration::from_millis(10));
 
         client.exec(format!("create database if not exists {db}"))?;
 
-        std::thread::sleep(std::time::Duration::from_secs(3));
+        std::thread::sleep(std::time::Duration::from_millis(10));
 
         // should specify database before insert
         client.exec(format!("use {db}"))?;
@@ -1267,7 +1267,7 @@ mod async_tests {
     #[ignore]
     async fn test_recycle() -> RawResult<()> {
         std::env::set_var("RUST_LOG", "taos=debug");
-        pretty_env_logger::init();
+        // pretty_env_logger::init();
         let builder = TaosBuilder::from_dsn("taos+ws://localhost:6041/")?;
         let pool = builder.pool()?;
 

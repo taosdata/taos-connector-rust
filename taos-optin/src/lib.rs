@@ -885,8 +885,8 @@ mod tests {
     async fn show_databases_async() -> RawResult<()> {
         use taos_query::prelude::*;
 
-        std::env::set_var("RUST_LOG", "trace");
-        let _ = pretty_env_logger::try_init();
+        std::env::set_var("RUST_LOG", "debug");
+        // let _ = pretty_env_logger::try_init();
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
         let taos = builder.build().await?;
         let mut set = taos.query("show databases").await?;
@@ -908,8 +908,8 @@ mod tests {
     async fn error_async() -> RawResult<()> {
         use taos_query::prelude::*;
 
-        std::env::set_var("RUST_LOG", "trace");
-        let _ = pretty_env_logger::try_init();
+        std::env::set_var("RUST_LOG", "debug");
+        // let _ = pretty_env_logger::try_init();
         let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build().await?;
         let err = taos
@@ -928,8 +928,8 @@ mod tests {
     async fn error_fetch_async() -> RawResult<()> {
         use taos_query::prelude::*;
 
-        std::env::set_var("RUST_LOG", "trace");
-        let _ = pretty_env_logger::try_init();
+        std::env::set_var("RUST_LOG", "debug");
+        // let _ = pretty_env_logger::try_init();
         let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build().await?;
         let err = taos.query("select * from test.meters").await.unwrap_err();
@@ -947,8 +947,8 @@ mod tests {
     async fn error_sync() -> RawResult<()> {
         use taos_query::prelude::sync::*;
 
-        std::env::set_var("RUST_LOG", "trace");
-        let _ = pretty_env_logger::try_init();
+        std::env::set_var("RUST_LOG", "debug");
+        // let _ = pretty_env_logger::try_init();
         let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build()?;
         let err = taos
@@ -1014,7 +1014,7 @@ mod tests {
     fn test_put_line() -> anyhow::Result<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
         std::env::set_var("RUST_LOG", "taos=debug");
-        let _ = pretty_env_logger::try_init();
+        // let _ = pretty_env_logger::try_init();
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());

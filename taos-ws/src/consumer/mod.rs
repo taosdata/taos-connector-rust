@@ -1215,9 +1215,9 @@ mod tests {
     #[tokio::test]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
         use taos_query::prelude::*;
-        let _ = pretty_env_logger::formatted_builder()
-            .filter_level(log::LevelFilter::Info)
-            .try_init();
+        // let _ = pretty_env_logger::formatted_builder()
+        //     .filter_level(log::LevelFilter::Info)
+        //     .try_init();
 
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
             .build()
@@ -1597,7 +1597,7 @@ mod tests {
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync3"])?;
 
-        let iter = consumer.iter_with_timeout(Timeout::from_secs(5));
+        let iter = consumer.iter_with_timeout(Timeout::from_secs(1));
 
         for msg in iter {
             let (offset, message) = msg?;

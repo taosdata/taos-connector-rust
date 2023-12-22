@@ -1319,7 +1319,7 @@ mod tests {
     #[test]
     fn get_tag_and_col_fields() {
         use crate::*;
-        init_env();
+        // init_env();
         unsafe {
             let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
@@ -1587,7 +1587,7 @@ mod tests {
     #[should_panic]
     fn test_stmt_api_false_usage() {
         use crate::*;
-        init_env();
+        // init_env();
         unsafe {
             let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {

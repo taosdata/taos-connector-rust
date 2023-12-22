@@ -4,7 +4,7 @@ use taos_optin::TaosBuilder;
 #[test]
 fn sync_json_with_req_id() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
-    pretty_env_logger::init();
+    // pretty_env_logger::init();
     use taos_query::prelude::sync::*;
     let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
     let dsn = Dsn::from_str(&dsn)?;

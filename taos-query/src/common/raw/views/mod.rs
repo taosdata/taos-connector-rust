@@ -1230,3 +1230,78 @@ impl From<Value> for ColumnView {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_column_view_null() {
+        let null_value = Value::Null(Ty::Int);
+        let null_column_view = ColumnView::from(null_value);
+        assert_eq!(null_column_view.len(), 1);
+        assert_eq!(null_column_view.as_ty(), Ty::Int);
+    }
+
+    #[test]
+    fn test_column_view_bool() {
+        let bool_value = Value::Bool(true);
+        let bool_column_view = ColumnView::from(bool_value);
+        assert_eq!(bool_column_view.len(), 1);
+        assert_eq!(bool_column_view.as_ty(), Ty::Bool);
+        assert_eq!(ColumnView::null(1, Ty::Bool).len(), 1);
+        assert_eq!(bool_column_view.max_variable_length(), 1);
+        println!("{:?}", bool_column_view.slice(0..1));
+        println!("{:?}", bool_column_view.cast(Ty::TinyInt).unwrap());
+        println!("{:?}", bool_column_view.cast(Ty::SmallInt).unwrap());
+        println!("{:?}", bool_column_view.cast(Ty::Int).unwrap());
+        println!("{:?}", bool_column_view.cast(Ty::BigInt).unwrap());
+        println!("{:?}", bool_column_view.cast(Ty::UTinyInt).unwrap());
+        println!("{:?}", bool_column_view.cast(Ty::USmallInt).unwrap());
+        println!("{:?}", bool_column_view.cast(Ty::UInt).unwrap());
+        println!("{:?}", bool_column_view.cast(Ty::UBigInt).unwrap());
+        println!("{:?}", bool_column_view.cast(Ty::Float).unwrap());
+        println!("{:?}", bool_column_view.cast(Ty::Double).unwrap());
+        println!("{:?}", bool_column_view.cast(Ty::VarChar).unwrap());
+        println!("{:?}", bool_column_view.cast(Ty::NChar).unwrap());
+    }
+
+    #[test]
+    fn test_concat_iter() {
+        let column_view_int = ColumnView::from(vec![1, 2, 3]);
+
+        let iterator_values = vec![
+            BorrowedValue::Int(7),
+            BorrowedValue::UInt(8),
+            BorrowedValue::Int(9),
+        ];
+
+        let result_column_int =
+            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::Int);
+        assert_eq!(result_column_int.len(), 6);
+
+        let result_column_uint =
+            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::UInt);
+        assert_eq!(result_column_uint.len(), 6);
+
+        let result_column_bigint =
+            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::BigInt);
+        assert_eq!(result_column_bigint.len(), 6);
+
+        let result_column_ubigint =
+        column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::UBigInt);
+        assert_eq!(result_column_ubigint.len(), 6);
+
+        let result_column_float =
+            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::Float);
+        assert_eq!(result_column_float.len(), 6);
+
+        let result_column_double =
+            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::Double);
+        assert_eq!(result_column_double.len(), 6);
+
+        let result_column_varchar =
+            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::VarChar);
+        assert_eq!(result_column_varchar.len(), 6);
+    }
+}
