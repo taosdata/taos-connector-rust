@@ -2,7 +2,7 @@ use std::{alloc::Layout, fmt::Debug, ops::Range};
 
 use bytes::Bytes;
 
-const fn null_bits_len(len: usize) -> usize {
+pub(super) const fn null_bits_len(len: usize) -> usize {
     (len + 7) / 8
 }
 /// A bitmap for nulls.
