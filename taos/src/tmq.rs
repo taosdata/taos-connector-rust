@@ -671,6 +671,9 @@ mod async_tests {
         .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
+        dsn.params.insert("experimental.snapshot.enable".to_string(), "false".to_string());
+        dsn.params.insert("auto.offset.reset".to_string(), "earliest".to_string());
+
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["ws_abc1"]).await?;
@@ -831,6 +834,9 @@ mod async_tests {
         .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
+        dsn.params.insert("experimental.snapshot.enable".to_string(), "false".to_string());
+        dsn.params.insert("auto.offset.reset".to_string(), "earliest".to_string());
+
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["ws_abc1"]).await?;
@@ -1039,6 +1045,9 @@ mod async_tests {
         .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
+        dsn.params.insert("experimental.snapshot.enable".to_string(), "false".to_string());
+        dsn.params.insert("auto.offset.reset".to_string(), "earliest".to_string());
+
         let builder = TmqBuilder::from_dsn(&dsn)?;
         // dbg!(&builder);
         let mut consumer = builder.build().await?;
@@ -1258,7 +1267,9 @@ mod async_tests {
         .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
-        dsn.set("experimental.snapshot.enable", "true");
+        dsn.params.insert("experimental.snapshot.enable".to_string(), "false".to_string());
+        dsn.params.insert("auto.offset.reset".to_string(), "earliest".to_string());
+
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;
         consumer.subscribe([db]).await?;
@@ -1475,7 +1486,9 @@ mod async_tests {
         .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
-        dsn.set("experimental.snapshot.enable", "false");
+        dsn.params.insert("experimental.snapshot.enable".to_string(), "false".to_string());
+        dsn.params.insert("auto.offset.reset".to_string(), "earliest".to_string());
+
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;
         consumer.subscribe([db]).await?;
@@ -1696,6 +1709,9 @@ mod async_tests {
         .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
+        dsn.params.insert("experimental.snapshot.enable".to_string(), "false".to_string());
+        dsn.params.insert("auto.offset.reset".to_string(), "earliest".to_string());
+
         let builder = TmqBuilder::from_dsn(&dsn)?;
         // dbg!(&builder);
         let mut consumer = builder.build().await?;
