@@ -1856,9 +1856,9 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_ws_tmq_committed() -> taos_query::RawResult<()> {
-        pretty_env_logger::formatted_timed_builder()
-            .filter_level(log::LevelFilter::Info)
-            .init();
+        // pretty_env_logger::formatted_timed_builder()
+        //     .filter_level(log::LevelFilter::Info)
+        //     .init();
 
         use taos_query::prelude::*;
 
@@ -2074,6 +2074,17 @@ mod async_tests {
 
                 let position = consumer.position(topic, vgroup_id).await?;
                 log::info!("after seek position: {:?}", position);
+
+                let res = consumer.commit_offset(topic, vgroup_id, end).await;
+                if res.is_err() {
+                    log::error!("commit offset response: {:?}", res);
+                }
+
+                let committed = consumer.committed(topic, vgroup_id).await?;
+                log::info!("after commit committed: {:?}", committed);
+
+                let position = consumer.position(topic, vgroup_id).await?;
+                log::info!("after commit position: {:?}", position);
             }
 
             let topic_assignment = consumer.topic_assignment(topic).await;
