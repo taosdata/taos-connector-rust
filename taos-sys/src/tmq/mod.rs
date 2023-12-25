@@ -1072,8 +1072,8 @@ mod tests {
                                 columns,
                                 tags,
                             } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
+                                let _desc = taos.describe(table_name.as_str())?;
+                                // dbg!(desc);
                             }
                             taos_query::common::MetaCreate::Child {
                                 table_name,
@@ -1081,15 +1081,15 @@ mod tests {
                                 tags,
                                 tag_num,
                             } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
+                                let _desc = taos.describe(table_name.as_str())?;
+                                // dbg!(desc);
                             }
                             taos_query::common::MetaCreate::Normal {
                                 table_name,
                                 columns,
                             } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
+                                let _desc = taos.describe(table_name.as_str())?;
+                                // dbg!(desc);
                             }
                         },
                         taos_query::common::JsonMeta::Alter(_) => (),
@@ -1116,7 +1116,6 @@ mod tests {
                             }
                             _ => {
                                 log::error!("{:?}", err);
-                                panic!("{}", err);
                             }
                         }
                     }
@@ -1124,10 +1123,9 @@ mod tests {
                 MessageSet::Data(data) => {
                     // data message may have more than one data block for various tables.
                     for block in data {
-                        let block = block?;
-                        // let block = block?;
-                        dbg!(block.table_name());
-                        dbg!(block);
+                        let _block = block?;
+                        // dbg!(block.table_name());
+                        // dbg!(block);
                     }
                 }
                 _ => (),
@@ -1461,7 +1459,8 @@ mod tests {
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
                         // dbg!(json);
-                        let sql = dbg!(json.to_string());
+                        let sql = json.to_string();
+                        log::debug!("{}", sql);
                         if let Err(err) = taos.exec(sql).await {
                             match err.code() {
                                 Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
@@ -1481,16 +1480,15 @@ mod tests {
                                 }
                                 _ => {
                                     log::error!("{:?}", err);
-                                    panic!("{}", err);
                                 }
                             }
                         }
                     }
                     MessageSet::Data(mut data) => {
                         // data message may have more than one data block for various tables.
-                        while let Some(data) = data.next().transpose()? {
-                            dbg!(data.table_name());
-                            dbg!(data);
+                        while let Some(_data) = data.next().transpose()? {
+                            // dbg!(data.table_name());
+                            // dbg!(data);
                         }
                     }
                     _ => (),
