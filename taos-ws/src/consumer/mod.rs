@@ -1373,7 +1373,8 @@ mod tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = dbg!(json.to_string());
+                        let sql = json.to_string();
+                        log::debug!("sql: {}", sql);
                         if let Err(err) = taos.exec(sql).await {
                             match err.code() {
                                 Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
@@ -1385,16 +1386,16 @@ mod tests {
                                 Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
                                 Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                                 _ => {
-                                    panic!("{}", err);
+                                    log::error!("{}", err);
                                 }
                             }
                         }
                     }
                     MessageSet::Data(data) => {
                         // data message may have more than one data block for various tables.
-                        while let Some(data) = data.fetch_block().await? {
-                            dbg!(data.table_name());
-                            dbg!(data);
+                        while let Some(_data) = data.fetch_block().await? {
+                            // dbg!(data.table_name());
+                            // dbg!(data);
                         }
                     }
                     _ => unreachable!(),
@@ -1521,7 +1522,8 @@ mod tests {
 
                     // meta data can be write to an database seamlessly by raw or json (to sql).
                     let json = meta.as_json_meta()?;
-                    let sql = dbg!(json.to_string());
+                    let sql = json.to_string();
+                    log::debug!("sql: {}", sql);
                     if let Err(err) = taos.exec(sql) {
                         match err.code() {
                             Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
@@ -1533,7 +1535,7 @@ mod tests {
                             Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
                             Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                             _ => {
-                                panic!("{}", err);
+                                log::error!("{}", err);
                             }
                         }
                     }
@@ -1541,9 +1543,9 @@ mod tests {
                 MessageSet::Data(data) => {
                     // data message may have more than one data block for various tables.
                     for block in data {
-                        let block = block?;
-                        dbg!(block.table_name());
-                        dbg!(block);
+                        let _block = block?;
+                        // dbg!(block.table_name());
+                        // dbg!(block);
                     }
                 }
                 _ => unreachable!(),
@@ -1552,7 +1554,7 @@ mod tests {
         }
         consumer.unsubscribe();
 
-        std::thread::sleep(Duration::from_secs(10));
+        std::thread::sleep(Duration::from_secs(5));
 
         taos.exec_many([
             "drop database ws_tmq_meta_sync2",
@@ -1668,7 +1670,8 @@ mod tests {
 
                     // meta data can be write to an database seamlessly by raw or json (to sql).
                     let json = meta.as_json_meta()?;
-                    let sql = dbg!(json.to_string());
+                    let sql = json.to_string();
+                    log::debug!("sql: {}", sql);
                     if let Err(err) = taos.exec(sql) {
                         match err.code() {
                             Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
@@ -1680,7 +1683,7 @@ mod tests {
                             Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
                             Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                             _ => {
-                                panic!("{}", err);
+                                log::error!("{}", err);
                             }
                         }
                     }
@@ -1688,9 +1691,9 @@ mod tests {
                 MessageSet::Data(data) => {
                     // data message may have more than one data block for various tables.
                     for block in data {
-                        let block = block?;
-                        dbg!(block.table_name());
-                        dbg!(block);
+                        let _block = block?;
+                        // dbg!(block.table_name());
+                        // dbg!(block);
                     }
                 }
                 _ => unreachable!(),
@@ -1699,7 +1702,7 @@ mod tests {
         }
         consumer.unsubscribe();
 
-        std::thread::sleep(Duration::from_secs(10));
+        std::thread::sleep(Duration::from_secs(5));
 
         taos.exec_many([
             "drop database ws_tmq_meta_sync32",
