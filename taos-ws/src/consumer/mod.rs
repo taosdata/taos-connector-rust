@@ -614,11 +614,20 @@ impl AsAsyncConsumer for Consumer {
 
     async fn commit_offset(
         &self,
-        _topic_name: &str,
-        _vgroup_id: VGroupId,
-        _offset: i64,
+        topic_name: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
     ) -> RawResult<()> {
-        todo!()
+        let req_id = self.sender.req_id();
+        let action = TmqSend::CommitOffset(OffsetSeekArgs {
+            req_id,
+            topic: topic_name.to_string(),
+            vgroup_id,
+            offset,
+        });
+
+        let _ = self.sender.send_recv(action).await?;
+        Ok(())
     }
 
     async fn list_topics(&self) -> RawResult<Vec<String>> {
@@ -1055,6 +1064,14 @@ impl TmqBuilder {
                                                 log::warn!("position message received but no receiver alive");
                                             }
                                         }
+                                        TmqRecvData::CommitOffset { timing }=> {
+                                            log::trace!("commit offset done: {:?}", timing);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            } else {
+                                                log::warn!("commit offset message received but no receiver alive");
+                                            }
+                                        }
 
                                         _ => unreachable!("unknown tmq response"),
                                     }
@@ -1420,7 +1437,7 @@ mod tests {
     fn test_ws_tmq_meta_sync() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(log::LevelFilter::Debug)
+        //     .filter_level(log::LevelFilter::Info)
         //     .init();
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?.build()?;
@@ -1501,7 +1518,10 @@ mod tests {
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync"])?;
 
-        let iter = consumer.iter_with_timeout(Timeout::from_secs(5));
+        let topics = consumer.list_topics();
+        log::debug!("topics: {:?}", topics);
+
+        let iter = consumer.iter_with_timeout(Timeout::from_secs(1));
 
         for msg in iter {
             let (offset, message) = msg?;
@@ -1552,6 +1572,42 @@ mod tests {
             }
             consumer.commit(offset)?;
         }
+
+        // get assignments
+        let assignments = consumer.assignments();
+        log::debug!("assignments all: {:?}", assignments);
+
+        if let Some(assignments) = assignments {
+            for (topic, assignment_vec) in assignments {
+                for assignment in assignment_vec {
+                    log::debug!("assignment: {:?} {:?}", topic, assignment);
+                    let vgroup_id = assignment.vgroup_id();
+                    let end = assignment.end();
+
+                    let position = consumer.position(&topic, vgroup_id);
+                    log::debug!("position: {:?}", position);
+                    let committed = consumer.committed(&topic, vgroup_id);
+                    log::debug!("committed: {:?}", committed);
+
+                    let res = consumer.offset_seek(&topic, vgroup_id, end);
+                    log::debug!("seek: {:?}", res);
+
+                    let position = consumer.position(&topic, vgroup_id);
+                    log::debug!("after seek position: {:?}", position);
+                    let committed = consumer.committed(&topic, vgroup_id);
+                    log::debug!("after seek committed: {:?}", committed);
+
+                    let res = consumer.commit_offset(&topic, vgroup_id, end);
+                    log::debug!("commit offset: {:?}", res);
+
+                    let position = consumer.position(&topic, vgroup_id);
+                    log::debug!("after commit offset position: {:?}", position);
+                    let committed = consumer.committed(&topic, vgroup_id);
+                    log::debug!("after commit offset committed: {:?}", committed);
+                }
+            }
+        }
+
         consumer.unsubscribe();
 
         std::thread::sleep(Duration::from_secs(5));
