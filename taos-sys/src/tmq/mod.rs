@@ -676,7 +676,12 @@ impl AsAsyncConsumer for Consumer {
         self.tmq.commit(offset.0).await.map(|_| ())
     }
 
-    async fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+    async fn commit_offset(
+        &self,
+        topic_name: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
+    ) -> RawResult<()> {
         unimplemented!("commit_offset")
     }
 
@@ -890,7 +895,7 @@ mod tests {
         taos.query(format!("use {db}2"))?;
 
         let builder =
-            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -1036,7 +1041,7 @@ mod tests {
             "use sys_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms")?;
+        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["sys_tmq_meta_sync"])?;
 
@@ -1431,7 +1436,7 @@ mod tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms")?;
+        let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_tmq_meta"]).await?;
 
@@ -1596,6 +1601,13 @@ mod tests {
         .await?;
 
         dsn.params.insert("group.id".to_string(), "abc".to_string());
+        dsn.params.insert(
+            "experimental.snapshot.enable".to_string(),
+            "false".to_string(),
+        );
+        dsn.params
+            .insert("auto.offset.reset".to_string(), "earliest".to_string());
+
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["ws_abc1"]).await?;
