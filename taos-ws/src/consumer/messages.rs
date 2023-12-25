@@ -121,6 +121,7 @@ pub enum TmqSend {
     Seek(OffsetSeekArgs),
     Committed(OffsetArgs),
     Position(OffsetArgs),
+    CommitOffset(OffsetSeekArgs),
 }
 
 unsafe impl Send for TmqSend {}
@@ -149,6 +150,7 @@ impl TmqSend {
             TmqSend::Seek(args) => args.req_id,
             TmqSend::Committed(args) => args.req_id,
             TmqSend::Position(args) => args.req_id,
+            TmqSend::CommitOffset(args) => args.req_id,
         }
     }
 }
@@ -238,6 +240,9 @@ pub enum TmqRecvData {
     },
     Position {
         position: Vec<i64>,
+    },
+    CommitOffset {
+        timing: i64,
     },
 }
 
