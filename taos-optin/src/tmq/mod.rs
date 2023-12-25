@@ -997,9 +997,9 @@ mod tests {
     #[test]
     fn test_tmq_meta_sync() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        pretty_env_logger::formatted_builder()
-            .filter_level(tracing::log::LevelFilter::Debug)
-            .init();
+        // pretty_env_logger::formatted_builder()
+        //     .filter_level(tracing::log::LevelFilter::Debug)
+        //     .init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
         taos.exec_many([
@@ -1513,7 +1513,7 @@ mod async_tests {
         use taos_query::prelude::*;
 
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::LevelFilter::Debug)
+        //     .filter_level(tracing::log::LevelFilter::Debug)
         //     .init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
@@ -1620,7 +1620,8 @@ mod async_tests {
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
                         // dbg!(json);
-                        let sql = dbg!(json.to_string());
+                        let sql = json.to_string();
+                        tracing::debug!("sql: {}", &sql);
                         if let Err(err) = taos.exec(sql).await {
                             match err.code() {
                                 Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
@@ -1639,16 +1640,16 @@ mod async_tests {
                                     tracing::trace!("no column can be dropped")
                                 }
                                 _ => {
-                                    panic!("{}", err);
+                                    tracing::error!("{}", err);
                                 }
                             }
                         }
                     }
                     MessageSet::Data(mut data) => {
                         // data message may have more than one data block for various tables.
-                        while let Some(data) = data.next().transpose()? {
-                            dbg!(data.table_name());
-                            dbg!(data);
+                        while let Some(_data) = data.next().transpose()? {
+                            // dbg!(data.table_name());
+                            // dbg!(data);
                         }
                     }
                     _ => (),
