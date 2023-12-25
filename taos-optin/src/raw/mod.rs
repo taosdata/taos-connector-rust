@@ -852,10 +852,10 @@ impl RawTaos {
         let sql = sql.into_c_str();
         tracing::trace!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
         if let Some(taos_query_with_req_id) = self.c.taos_query_with_reqid {
-            Ok(RawRes {
-                c: self.c.clone(),
-                ptr: unsafe { (taos_query_with_req_id)(self.as_ptr(), sql.as_ptr(), req_id) },
-            })
+            RawRes::from_ptr(
+                self.c.clone(),
+                unsafe { (taos_query_with_req_id)(self.as_ptr(), sql.as_ptr(), req_id) }
+            )
         } else {
             unimplemented!("2.x does not support req_id")
         }
