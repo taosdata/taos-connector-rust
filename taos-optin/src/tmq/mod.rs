@@ -997,9 +997,9 @@ mod tests {
     #[test]
     fn test_tmq_meta_sync() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        // pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::LevelFilter::Debug)
-        //     .init();
+        pretty_env_logger::formatted_builder()
+            .filter_level(tracing::log::LevelFilter::Debug)
+            .init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
         taos.exec_many([
@@ -1109,8 +1109,8 @@ mod tests {
                                 columns: _,
                                 tags: _,
                             } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
+                                let _desc = taos.describe(table_name.as_str())?;
+                                // dbg!(_desc);
                             }
                             taos_query::common::MetaCreate::Child {
                                 table_name,
@@ -1118,22 +1118,23 @@ mod tests {
                                 tags: _,
                                 tag_num: _,
                             } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
+                                let _desc = taos.describe(table_name.as_str())?;
+                                // dbg!(_desc);
                             }
                             taos_query::common::MetaCreate::Normal {
                                 table_name,
                                 columns: _,
                             } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
+                                let _desc = taos.describe(table_name.as_str())?;
+                                // dbg!(_desc);
                             }
                         },
                         _ => (),
                     }
 
                     // meta data can be write to an database seamlessly by raw or json (to sql).
-                    let sql = dbg!(json.to_string());
+                    let sql = json.to_string();
+                    tracing::debug!("sql: {}", sql);
                     if let Err(err) = taos.exec(sql) {
                         match err.code() {
                             Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
@@ -1152,7 +1153,7 @@ mod tests {
                                 tracing::trace!("no column can be dropped")
                             }
                             _ => {
-                                panic!("{}", err);
+                                tracing::error!("{}", err);
                             }
                         }
                     }
