@@ -1148,8 +1148,8 @@ mod tests {
 
     #[test]
     fn test_ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
-        use taos_query::prelude::sync::*;
         use crate::TmqBuilder;
+        use taos_query::prelude::sync::*;
 
         std::env::set_var("RUST_LOG", "taos=trace");
         // pretty_env_logger::init();
@@ -1188,7 +1188,6 @@ mod tests {
 
             match msg {
                 MessageSet::Meta(meta) => {
-
                     taos.write_raw_meta(&meta.as_raw_meta()?)?;
                     // taos.w
                 }
@@ -1643,6 +1642,64 @@ mod async_tests {
 
         let res = client.assert_enterprise_edition().await;
         log::debug!("assert enterprise edition: {:?}", res);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_varchar() -> anyhow::Result<()> {
+        // pretty_env_logger::formatted_timed_builder()
+        //     .filter_level(log::LevelFilter::Trace)
+        //     .init();
+        let dsn = "taos://";
+
+        let pool = TaosBuilder::from_dsn(dsn)?.pool()?;
+
+        let taos = pool.get().await?;
+
+        let db = "test_varchar";
+
+        macro_rules! assert_eq {
+            ($left:expr, $right:expr) => {
+                let _ = taos
+                    .exec_with_req_id(&format!("drop database {db}"), 1)
+                    .await;
+                if $left != $right {
+                    panic!(
+                        "assertion failed: `(left == right)` (left: `{:?}`, right: `{:?}`)",
+                        $left, $right
+                    )
+                }
+            };
+        }
+
+        // prepare database
+        taos.exec_many([
+            format!("DROP DATABASE IF EXISTS `{db}`"),
+            format!("CREATE DATABASE `{db}`"),
+            format!("USE `{db}`"),
+        ])
+        .await?;
+
+        taos.exec_with_req_id("create table `tb0001` (`ts` TIMESTAMP,`data` FLOAT,`quality` INT) tags (`varchar` BINARY(64),`aid` INT,`bid` INT)", 0).await?;
+
+        let sql = // create child table
+        r#"create table if not exists `subtable00000000001` using `tb0001` (`varchar`,`aid`,`bid`) tags("涛思数据-涛思数据-涛思数据-涛思数据-涛思数据-涛思数据-涛思数据-涛思数据",1,2)"#;
+        match taos.exec_with_req_id(&sql, 0).await {
+            Err(e) => {
+                dbg!(&e);
+                assert_eq!(e.code(), 0x2605);
+            }
+            Ok(_) => {
+                // Actually, the sql should return error 0x2605, but it success.
+
+                // If not error, the table is created.
+                let desc = taos.describe("subtable00000000001").await;
+                dbg!(&desc);
+                let len = desc.unwrap().len();
+                assert_eq!(len, 6);
+            }
+        }
 
         Ok(())
     }
