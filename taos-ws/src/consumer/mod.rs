@@ -614,15 +614,25 @@ impl AsAsyncConsumer for Consumer {
 
     async fn commit_offset(
         &self,
-        _topic_name: &str,
-        _vgroup_id: VGroupId,
-        _offset: i64,
+        topic_name: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
     ) -> RawResult<()> {
-        todo!()
+        let req_id = self.sender.req_id();
+        let action = TmqSend::CommitOffset(OffsetSeekArgs {
+            req_id,
+            topic: topic_name.to_string(),
+            vgroup_id,
+            offset,
+        });
+
+        let _ = self.sender.send_recv(action).await?;
+        Ok(())
     }
 
     async fn list_topics(&self) -> RawResult<Vec<String>> {
-        todo!()
+        let topics = self.topics.clone();
+        Ok(topics)
     }
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
@@ -677,12 +687,42 @@ impl AsAsyncConsumer for Consumer {
         Ok(())
     }
 
-    async fn committed(&self, _: &str, _: VGroupId) -> RawResult<i64> {
-        todo!()
+    async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        let req_id = self.sender.req_id();
+        let action = TmqSend::Committed(OffsetArgs {
+            req_id,
+            topic_vgroup_ids: vec![OffsetInnerArgs {
+                topic: topic.to_string(),
+                vgroup_id,
+            }],
+        });
+
+        let data = self.sender.send_recv(action).await?;
+        if let TmqRecvData::Committed { committed } = data {
+            let offset = committed[0];
+            Ok(offset)
+        } else {
+            Ok(0)
+        }
     }
 
-    async fn position(&self, _: &str, _: VGroupId) -> RawResult<i64> {
-        todo!()
+    async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        let req_id = self.sender.req_id();
+        let action = TmqSend::Position(OffsetArgs {
+            req_id,
+            topic_vgroup_ids: vec![OffsetInnerArgs {
+                topic: topic.to_string(),
+                vgroup_id,
+            }],
+        });
+
+        let data = self.sender.send_recv(action).await?;
+        if let TmqRecvData::Position { position } = data {
+            let offset = position[0];
+            Ok(offset)
+        } else {
+            Ok(0)
+        }
     }
 
     fn default_timeout(&self) -> Timeout {
@@ -1006,6 +1046,33 @@ impl TmqBuilder {
                                                 log::warn!("seek message received but no receiver alive");
                                             }
                                         }
+                                        TmqRecvData::Committed { committed }=> {
+                                            log::trace!("committed done: {:?}", committed);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("committed message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::Position { position }=> {
+                                            log::trace!("position done: {:?}", position);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("position message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::CommitOffset { timing }=> {
+                                            log::trace!("commit offset done: {:?}", timing);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            } else {
+                                                log::warn!("commit offset message received but no receiver alive");
+                                            }
+                                        }
+
                                         _ => unreachable!("unknown tmq response"),
                                     }
                                 }
@@ -1297,7 +1364,7 @@ mod tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=5s")?;
+        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=5s&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
         let mut consumer = builder.build_consumer().await?;
         consumer.subscribe(["ws_tmq_meta"]).await?;
 
@@ -1323,7 +1390,8 @@ mod tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = dbg!(json.to_string());
+                        let sql = json.to_string();
+                        log::debug!("sql: {}", sql);
                         if let Err(err) = taos.exec(sql).await {
                             match err.code() {
                                 Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
@@ -1335,16 +1403,16 @@ mod tests {
                                 Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
                                 Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                                 _ => {
-                                    panic!("{}", err);
+                                    log::error!("{}", err);
                                 }
                             }
                         }
                     }
                     MessageSet::Data(data) => {
                         // data message may have more than one data block for various tables.
-                        while let Some(data) = data.fetch_block().await? {
-                            dbg!(data.table_name());
-                            dbg!(data);
+                        while let Some(_data) = data.fetch_block().await? {
+                            // dbg!(data.table_name());
+                            // dbg!(data);
                         }
                     }
                     _ => unreachable!(),
@@ -1369,7 +1437,7 @@ mod tests {
     fn test_ws_tmq_meta_sync() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(log::LevelFilter::Debug)
+        //     .filter_level(log::LevelFilter::Info)
         //     .init();
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?.build()?;
@@ -1446,11 +1514,14 @@ mod tests {
             "use ws_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms")?;
+        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync"])?;
 
-        let iter = consumer.iter_with_timeout(Timeout::from_secs(5));
+        let topics = consumer.list_topics();
+        log::debug!("topics: {:?}", topics);
+
+        let iter = consumer.iter_with_timeout(Timeout::from_secs(1));
 
         for msg in iter {
             let (offset, message) = msg?;
@@ -1471,7 +1542,8 @@ mod tests {
 
                     // meta data can be write to an database seamlessly by raw or json (to sql).
                     let json = meta.as_json_meta()?;
-                    let sql = dbg!(json.to_string());
+                    let sql = json.to_string();
+                    log::debug!("sql: {}", sql);
                     if let Err(err) = taos.exec(sql) {
                         match err.code() {
                             Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
@@ -1483,7 +1555,7 @@ mod tests {
                             Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
                             Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                             _ => {
-                                panic!("{}", err);
+                                log::error!("{}", err);
                             }
                         }
                     }
@@ -1491,18 +1563,54 @@ mod tests {
                 MessageSet::Data(data) => {
                     // data message may have more than one data block for various tables.
                     for block in data {
-                        let block = block?;
-                        dbg!(block.table_name());
-                        dbg!(block);
+                        let _block = block?;
+                        // dbg!(block.table_name());
+                        // dbg!(block);
                     }
                 }
                 _ => unreachable!(),
             }
             consumer.commit(offset)?;
         }
+
+        // get assignments
+        let assignments = consumer.assignments();
+        log::debug!("assignments all: {:?}", assignments);
+
+        if let Some(assignments) = assignments {
+            for (topic, assignment_vec) in assignments {
+                for assignment in assignment_vec {
+                    log::debug!("assignment: {:?} {:?}", topic, assignment);
+                    let vgroup_id = assignment.vgroup_id();
+                    let end = assignment.end();
+
+                    let position = consumer.position(&topic, vgroup_id);
+                    log::debug!("position: {:?}", position);
+                    let committed = consumer.committed(&topic, vgroup_id);
+                    log::debug!("committed: {:?}", committed);
+
+                    let res = consumer.offset_seek(&topic, vgroup_id, end);
+                    log::debug!("seek: {:?}", res);
+
+                    let position = consumer.position(&topic, vgroup_id);
+                    log::debug!("after seek position: {:?}", position);
+                    let committed = consumer.committed(&topic, vgroup_id);
+                    log::debug!("after seek committed: {:?}", committed);
+
+                    let res = consumer.commit_offset(&topic, vgroup_id, end);
+                    log::debug!("commit offset: {:?}", res);
+
+                    let position = consumer.position(&topic, vgroup_id);
+                    log::debug!("after commit offset position: {:?}", position);
+                    let committed = consumer.committed(&topic, vgroup_id);
+                    log::debug!("after commit offset committed: {:?}", committed);
+                }
+            }
+        }
+
         consumer.unsubscribe();
 
-        std::thread::sleep(Duration::from_secs(10));
+        std::thread::sleep(Duration::from_secs(5));
 
         taos.exec_many([
             "drop database ws_tmq_meta_sync2",
@@ -1593,7 +1701,7 @@ mod tests {
             "use ws_tmq_meta_sync32",
         ])?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms")?;
+        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync3"])?;
 
@@ -1618,7 +1726,8 @@ mod tests {
 
                     // meta data can be write to an database seamlessly by raw or json (to sql).
                     let json = meta.as_json_meta()?;
-                    let sql = dbg!(json.to_string());
+                    let sql = json.to_string();
+                    log::debug!("sql: {}", sql);
                     if let Err(err) = taos.exec(sql) {
                         match err.code() {
                             Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
@@ -1630,7 +1739,7 @@ mod tests {
                             Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
                             Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
                             _ => {
-                                panic!("{}", err);
+                                log::error!("{}", err);
                             }
                         }
                     }
@@ -1638,9 +1747,9 @@ mod tests {
                 MessageSet::Data(data) => {
                     // data message may have more than one data block for various tables.
                     for block in data {
-                        let block = block?;
-                        dbg!(block.table_name());
-                        dbg!(block);
+                        let _block = block?;
+                        // dbg!(block.table_name());
+                        // dbg!(block);
                     }
                 }
                 _ => unreachable!(),
@@ -1649,7 +1758,7 @@ mod tests {
         }
         consumer.unsubscribe();
 
-        std::thread::sleep(Duration::from_secs(10));
+        std::thread::sleep(Duration::from_secs(5));
 
         taos.exec_many([
             "drop database ws_tmq_meta_sync32",

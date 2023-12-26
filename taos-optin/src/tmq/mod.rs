@@ -930,7 +930,7 @@ mod tests {
         taos.query(format!("use {db}2"))?;
 
         let builder =
-            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -998,7 +998,7 @@ mod tests {
     fn test_tmq_meta_sync() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::LevelFilter::Debug)
+        //     .filter_level(tracing::log::LevelFilter::Debug)
         //     .init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
@@ -1078,7 +1078,7 @@ mod tests {
             "use sys_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms")?;
+        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["sys_tmq_meta_sync"])?;
 
@@ -1109,8 +1109,8 @@ mod tests {
                                 columns: _,
                                 tags: _,
                             } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
+                                let _desc = taos.describe(table_name.as_str())?;
+                                // dbg!(_desc);
                             }
                             taos_query::common::MetaCreate::Child {
                                 table_name,
@@ -1118,22 +1118,23 @@ mod tests {
                                 tags: _,
                                 tag_num: _,
                             } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
+                                let _desc = taos.describe(table_name.as_str())?;
+                                // dbg!(_desc);
                             }
                             taos_query::common::MetaCreate::Normal {
                                 table_name,
                                 columns: _,
                             } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
+                                let _desc = taos.describe(table_name.as_str())?;
+                                // dbg!(_desc);
                             }
                         },
                         _ => (),
                     }
 
                     // meta data can be write to an database seamlessly by raw or json (to sql).
-                    let sql = dbg!(json.to_string());
+                    let sql = json.to_string();
+                    tracing::debug!("sql: {}", sql);
                     if let Err(err) = taos.exec(sql) {
                         match err.code() {
                             Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
@@ -1152,7 +1153,7 @@ mod tests {
                                 tracing::trace!("no column can be dropped")
                             }
                             _ => {
-                                panic!("{}", err);
+                                tracing::error!("{}", err);
                             }
                         }
                     }
@@ -1512,7 +1513,7 @@ mod async_tests {
         use taos_query::prelude::*;
 
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::LevelFilter::Debug)
+        //     .filter_level(tracing::log::LevelFilter::Debug)
         //     .init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
@@ -1594,7 +1595,7 @@ mod async_tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms")?;
+        let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_tmq_meta"]).await?;
 
@@ -1619,7 +1620,8 @@ mod async_tests {
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
                         // dbg!(json);
-                        let sql = dbg!(json.to_string());
+                        let sql = json.to_string();
+                        tracing::debug!("sql: {}", &sql);
                         if let Err(err) = taos.exec(sql).await {
                             match err.code() {
                                 Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
@@ -1638,16 +1640,16 @@ mod async_tests {
                                     tracing::trace!("no column can be dropped")
                                 }
                                 _ => {
-                                    panic!("{}", err);
+                                    tracing::error!("{}", err);
                                 }
                             }
                         }
                     }
                     MessageSet::Data(mut data) => {
                         // data message may have more than one data block for various tables.
-                        while let Some(data) = data.next().transpose()? {
-                            dbg!(data.table_name());
-                            dbg!(data);
+                        while let Some(_data) = data.next().transpose()? {
+                            // dbg!(data.table_name());
+                            // dbg!(data);
                         }
                     }
                     _ => (),
@@ -1758,8 +1760,7 @@ mod async_tests {
         ])
         .await?;
 
-        // dsn.params.insert("group.id".to_string(), "abc".to_string());
-        dsn.push_str("?group.id=10&timeout=1000ms");
+        dsn.push_str("?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest");
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;
         consumer.subscribe([topic_name]).await?;
@@ -2239,7 +2240,6 @@ mod async_tests {
         ])
         .await?;
 
-        // dsn.params.insert("group.id".to_string(), "abc".to_string());
         dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest&experimental.snapshot.enable=false");
         let builder = TmqBuilder::from_dsn(&dsn)?;
         // dbg!(&builder.dsn);

@@ -45,6 +45,18 @@ pub struct OffsetSeekArgs {
     pub(crate) offset: i64,
 }
 
+#[derive(Debug, Serialize, Default, Clone)]
+pub struct OffsetArgs {
+    pub(crate) req_id: ReqId,
+    pub(crate) topic_vgroup_ids: Vec<OffsetInnerArgs>
+}
+
+#[derive(Debug, Serialize, Default, Clone)]
+pub struct OffsetInnerArgs {
+    pub(crate) topic: String,
+    pub(crate) vgroup_id: i32,
+}
+
 #[derive(Debug, Deserialize_repr, Serialize_repr, Clone, Copy)]
 #[repr(i32)]
 pub enum MessageType {
@@ -107,6 +119,9 @@ pub enum TmqSend {
     Commit(MessageArgs),
     Assignment(TopicAssignmentArgs),
     Seek(OffsetSeekArgs),
+    Committed(OffsetArgs),
+    Position(OffsetArgs),
+    CommitOffset(OffsetSeekArgs),
 }
 
 unsafe impl Send for TmqSend {}
@@ -133,6 +148,9 @@ impl TmqSend {
             TmqSend::Commit(args) => args.req_id,
             TmqSend::Assignment(args) => args.req_id,
             TmqSend::Seek(args) => args.req_id,
+            TmqSend::Committed(args) => args.req_id,
+            TmqSend::Position(args) => args.req_id,
+            TmqSend::CommitOffset(args) => args.req_id,
         }
     }
 }
@@ -215,6 +233,15 @@ pub enum TmqRecvData {
     Close,
     Assignment(TopicAssignment),
     Seek {
+        timing: i64,
+    },
+    Committed {
+        committed: Vec<i64>,
+    },
+    Position {
+        position: Vec<i64>,
+    },
+    CommitOffset {
         timing: i64,
     },
 }
