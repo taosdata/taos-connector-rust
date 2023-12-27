@@ -1296,4 +1296,100 @@ mod tests {
         let b_nchar_value = nchar_value.to_borrowed_value();
         assert_eq!(b_nchar_value.to_sql_value(), "\"hello\"".to_string());
     }
+
+    #[test]
+    fn test_to_json_value() {
+        let null_value = BorrowedValue::Null(Ty::Int);
+        assert_eq!(null_value.to_json_value(), serde_json::Value::Null);
+
+        let bool_value = BorrowedValue::Bool(true);
+        assert_eq!(bool_value.to_json_value(), serde_json::Value::Bool(true));
+
+        let tiny_int_value = BorrowedValue::TinyInt(42);
+        assert_eq!(
+            tiny_int_value.to_json_value(),
+            serde_json::Value::Number(42.into())
+        );
+
+        let small_int_value = BorrowedValue::SmallInt(1000);
+        assert_eq!(
+            small_int_value.to_json_value(),
+            serde_json::Value::Number(1000.into())
+        );
+
+        let int_value = BorrowedValue::Int(-500);
+        assert_eq!(
+            int_value.to_json_value(),
+            serde_json::Value::Number((-500).into())
+        );
+
+        let big_int_value = BorrowedValue::BigInt(1234567890);
+        assert_eq!(
+            big_int_value.to_json_value(),
+            serde_json::Value::Number(1234567890.into())
+        );
+
+        let utiny_int_value = BorrowedValue::UTinyInt(42);
+        assert_eq!(
+            utiny_int_value.to_json_value(),
+            serde_json::Value::Number(42.into())
+        );
+
+        let usmall_int_value = BorrowedValue::USmallInt(1000);
+        assert_eq!(
+            usmall_int_value.to_json_value(),
+            serde_json::Value::Number(1000.into())
+        );
+
+        let uint_value = BorrowedValue::UInt(5000);
+        assert_eq!(
+            uint_value.to_json_value(),
+            serde_json::Value::Number(5000.into())
+        );
+
+        let ubig_int_value = BorrowedValue::UBigInt(1234567890);
+        assert_eq!(
+            ubig_int_value.to_json_value(),
+            serde_json::Value::Number(1234567890.into())
+        );
+
+        let float_value = BorrowedValue::Float(3.14);
+        assert_eq!(
+            float_value.to_json_value(),
+            serde_json::json!(3.140000104904175)
+        );
+
+        let double_value = BorrowedValue::Double(2.71828);
+        assert_eq!(
+            double_value.to_json_value(),
+            serde_json::json!(2.71828)
+        );
+
+        let varchar_value = BorrowedValue::VarChar("hello");
+        assert_eq!(
+            varchar_value.to_json_value(),
+            serde_json::Value::String("hello".to_string())
+        );
+
+        let timestamp_value = BorrowedValue::Timestamp(Timestamp::new(1, Precision::Millisecond));
+        assert_eq!(
+            timestamp_value.to_json_value(),
+            serde_json::Value::Number(1.into())
+        );
+
+        let json_value = Value::Json(serde_json::json!({"hello": "world"}));
+        let b_json_value = json_value.to_borrowed_value();
+        assert_eq!(
+            b_json_value.to_json_value(),
+            serde_json::json!({"hello": "world"})
+        );
+
+        let nchar_value = Value::NChar("hello".to_string());
+        let b_nchar_value = nchar_value.to_borrowed_value();
+        assert_eq!(
+            b_nchar_value.to_json_value(),
+            serde_json::Value::String("hello".to_string())
+        );
+
+    }
 }
