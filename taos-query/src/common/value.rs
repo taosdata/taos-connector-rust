@@ -220,9 +220,7 @@ impl<'b> BorrowedValue<'b> {
             Double(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v).unwrap()),
             VarChar(v) => serde_json::Value::String(v.to_string()),
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
-            Json(v) => serde_json::Value::Number(
-                serde_json::from_slice(v).expect("json should always be deserialized"),
-            ),
+            Json(v) => serde_json::from_slice(v).expect("json should always be deserialized"),
             NChar(str) => serde_json::Value::String(str.to_string()),
             VarBinary(_) => todo!(),
             Decimal(_) => todo!(),
@@ -1139,10 +1137,7 @@ mod tests {
         assert_eq!(format!("{}", nchar_value), "hello");
         let nchar_value_borrowed = nchar_value.to_borrowed_value();
         assert_eq!(nchar_value_borrowed.ty(), Ty::NChar);
-        assert_eq!(
-            nchar_value_borrowed.to_sql_value(),
-            "\"hello\"".to_string()
-        );
+        assert_eq!(nchar_value_borrowed.to_sql_value(), "\"hello\"".to_string());
         assert_eq!(nchar_value_borrowed.to_string(), Ok("hello".to_string()));
         assert_eq!(
             nchar_value_borrowed.to_json_value(),
@@ -1185,8 +1180,14 @@ mod tests {
             json_value_borrowed.to_string(),
             Ok("{\"hello\":\"world\"}".to_string())
         );
-
-        assert_eq!(format!("{}", json_value_borrowed), "{\\\"hello\\\":\\\"world\\\"}");
+        assert_eq!(
+            json_value_borrowed.to_json_value(),
+            serde_json::json!({"hello": "world"})
+        );
+        assert_eq!(
+            format!("{}", json_value_borrowed),
+            "{\\\"hello\\\":\\\"world\\\"}"
+        );
         println!("{:?}", json_value_borrowed.to_str());
         assert_eq!(json_value_borrowed.to_bool(), Some(true));
         assert_eq!(json_value_borrowed.to_value(), json_value);
