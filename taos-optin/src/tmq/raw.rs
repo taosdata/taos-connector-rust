@@ -349,7 +349,7 @@ pub(super) mod conf {
             }
             .disable_auto_commit()
             .enable_heartbeat_background()
-            .enable_snapshot()
+            .disable_snapshot()
             .with_table_name()
         }
 
@@ -397,6 +397,7 @@ pub(super) mod conf {
             self
         }
 
+        #[allow(dead_code)]
         pub(crate) fn enable_snapshot(mut self) -> Self {
             tracing::trace!("[tmq-conf] enable snapshot");
             self.set("experimental.snapshot.enable", "true")
@@ -404,11 +405,11 @@ pub(super) mod conf {
             self
         }
 
-        // pub fn disable_snapshot(mut self) -> Self {
-        //     self.set("experimental.snapshot.enable", "false")
-        //         .expect("enable experimental snapshot");
-        //     self
-        // }
+        pub(crate) fn disable_snapshot(mut self) -> Self {
+            self.set("experimental.snapshot.enable", "false")
+                .expect("disable experimental snapshot");
+            self
+        }
 
         pub fn with_table_name(mut self) -> Self {
             tracing::trace!("set msg.with.table.name as true");
