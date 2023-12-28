@@ -1514,7 +1514,7 @@ mod tests {
             "use ws_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync"])?;
 
@@ -1701,7 +1701,7 @@ mod tests {
             "use ws_tmq_meta_sync32",
         ])?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync3"])?;
 
