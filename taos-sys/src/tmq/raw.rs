@@ -235,7 +235,7 @@ pub(super) mod conf {
             Self(unsafe { tmq_conf_new() })
                 .disable_auto_commit()
                 .enable_heartbeat_background()
-                .enable_snapshot()
+                .disable_snapshot()
                 .with_table_name()
         }
 

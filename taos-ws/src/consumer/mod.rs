@@ -829,7 +829,7 @@ impl TmqBuilder {
                     Some(s.to_string())
                 }
             })
-            .unwrap_or("true".to_string());
+            .unwrap_or("false".to_string());
         let with_table_name = dsn
             .params
             .get("with.table.name")
@@ -1364,7 +1364,7 @@ mod tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=5s&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=5s&auto.offset.reset=earliest")?;
         let mut consumer = builder.build_consumer().await?;
         consumer.subscribe(["ws_tmq_meta"]).await?;
 
@@ -1514,7 +1514,7 @@ mod tests {
             "use ws_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync"])?;
 
@@ -1701,7 +1701,7 @@ mod tests {
             "use ws_tmq_meta_sync32",
         ])?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync3"])?;
 

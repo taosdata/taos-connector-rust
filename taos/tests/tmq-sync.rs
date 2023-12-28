@@ -85,10 +85,7 @@ fn _test_tmq_meta_sync() -> anyhow::Result<()> {
     ])?;
 
     dsn.params.insert("group.id".to_string(), "abc".to_string());
-    dsn.params.insert(
-        "experimental.snapshot.enable".to_string(),
-        "false".to_string(),
-    );
+
     dsn.params
         .insert("auto.offset.reset".to_string(), "earliest".to_string());
 
