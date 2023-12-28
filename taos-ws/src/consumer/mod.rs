@@ -1364,7 +1364,7 @@ mod tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=5s&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=5s&auto.offset.reset=earliest")?;
         let mut consumer = builder.build_consumer().await?;
         consumer.subscribe(["ws_tmq_meta"]).await?;
 
