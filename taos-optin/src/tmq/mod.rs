@@ -710,7 +710,7 @@ mod tests {
         taos.query(format!("use {db}2"))?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
+            "taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build()?;
 
@@ -813,7 +813,7 @@ mod tests {
         taos.query(format!("use {db}2"))?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
+            "taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build()?;
 
@@ -930,7 +930,7 @@ mod tests {
         taos.query(format!("use {db}2"))?;
 
         let builder =
-            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -1078,7 +1078,7 @@ mod tests {
             "use sys_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["sys_tmq_meta_sync"])?;
 
@@ -1270,7 +1270,7 @@ mod tests {
             format!("use {target}").as_str(),
         ])?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest&experimental.snapshot.enable=false")?;
+        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         let topics = consumer.list_topics()?;
@@ -1436,7 +1436,7 @@ mod async_tests {
         ]).await?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
+            "taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build().await?;
 
@@ -1595,7 +1595,7 @@ mod async_tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_tmq_meta"]).await?;
 
@@ -1760,7 +1760,7 @@ mod async_tests {
         ])
         .await?;
 
-        dsn.push_str("?group.id=10&timeout=1000ms&experimental.snapshot.enable=false&auto.offset.reset=earliest");
+        dsn.push_str("?group.id=10&timeout=1000ms&auto.offset.reset=earliest");
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;
         consumer.subscribe([topic_name]).await?;
@@ -1968,7 +1968,7 @@ mod async_tests {
         ])
         .await?;
 
-        dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest&experimental.snapshot.enable=false");
+        dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest");
         let builder = TmqBuilder::from_dsn(&dsn)?;
 
         let mut consumer = builder.build().await?;
@@ -2240,7 +2240,7 @@ mod async_tests {
         ])
         .await?;
 
-        dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest&experimental.snapshot.enable=false");
+        dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest");
         let builder = TmqBuilder::from_dsn(&dsn)?;
         // dbg!(&builder.dsn);
         let mut consumer = builder.build().await?;
