@@ -829,7 +829,7 @@ impl TmqBuilder {
                     Some(s.to_string())
                 }
             })
-            .unwrap_or("true".to_string());
+            .unwrap_or("false".to_string());
         let with_table_name = dsn
             .params
             .get("with.table.name")
