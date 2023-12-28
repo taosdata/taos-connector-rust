@@ -1176,7 +1176,7 @@ mod tests {
         taos.query(format!("use {db}2"))?;
 
         let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
+            "taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build()?;
 
