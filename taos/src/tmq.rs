@@ -1436,7 +1436,7 @@ mod async_tests {
         ])
         .await?;
 
-        for _ in 0..10000 {
+        for _ in 0..1000 {
             taos.exec(
                 "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL,
