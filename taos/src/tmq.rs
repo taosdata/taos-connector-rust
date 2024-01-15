@@ -1223,6 +1223,194 @@ mod async_tests {
             NULL, NULL, NULL, NULL)",
             // kind 5: create common table
             "create table `table` (ts timestamp, v int)",
+
+        ])
+        .await?;
+
+        taos.exec_many([
+            format!("drop database if exists {db2}"),
+            format!("create database if not exists {db2} wal_retention_period 1"),
+            format!("use {db2}"),
+        ])
+        .await?;
+
+        dsn.params.insert("group.id".to_string(), "abc".to_string());
+
+        dsn.params
+            .insert("auto.offset.reset".to_string(), "earliest".to_string());
+
+        let builder = TmqBuilder::from_dsn(&dsn)?;
+        let mut consumer = builder.build().await?;
+        consumer.subscribe([db]).await?;
+
+        {
+            let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
+
+            while let Some((offset, message)) = stream.try_next().await? {
+                // Offset contains information for topic name, database name and vgroup id,
+                //  similar to kafka topic/partition/offset.
+                let topic: &str = offset.topic();
+                let database = offset.database();
+                let vgroup_id = offset.vgroup_id();
+                log::debug!(
+                    "topic: {}, database: {}, vgroup_id: {}",
+                    topic,
+                    database,
+                    vgroup_id
+                );
+
+                // Different to kafka message, TDengine consumer would consume two kind of messages.
+                //
+                // 1. meta
+                // 2. data
+                match message {
+                    MessageSet::Meta(meta) => {
+                        log::debug!("Meta");
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        // meta data can be write to an database seamlessly by raw or json (to sql).
+                        let json = meta.as_json_meta().await?;
+                        let sql = json.to_string();
+                        // dbg!(&sql);
+                        if let Err(err) = taos.exec(sql).await {
+                            log::error!("meta error: {}", err);
+                        }
+                    }
+                    MessageSet::Data(data) => {
+                        log::debug!("Data");
+                        // data message may have more than one data block for various tables.
+                        while let Some(data) = data.fetch_raw_block().await? {
+                            log::debug!("table_name: {:?}", data.table_name());
+                            log::debug!("data: {:?}", data);
+                        }
+                    }
+                    MessageSet::MetaData(meta, data) => {
+                        log::debug!("MetaData");
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        // meta data can be write to an database seamlessly by raw or json (to sql).
+                        let json = meta.as_json_meta().await?;
+                        let sql = json.to_string();
+                        if let Err(err) = taos.exec(sql).await {
+                            println!("metadata error: {}", err);
+                        }
+                        // data message may have more than one data block for various tables.
+                        while let Some(data) = data.fetch_raw_block().await? {
+                            log::debug!("table_name: {:?}", data.table_name());
+                            log::debug!("data: {:?}", data);
+                        }
+                    }
+                }
+                consumer.commit(offset).await?;
+            }
+        }
+
+        let assignments = consumer.assignments().await.unwrap();
+        // dbg!(&assignments);
+        log::info!("assignments: {:?}", assignments);
+
+        // seek offset
+        for topic_vec_assignment in assignments {
+            let topic = &topic_vec_assignment.0;
+            let vec_assignment = topic_vec_assignment.1;
+            for assignment in vec_assignment {
+                let vgroup_id = assignment.vgroup_id();
+                let current = assignment.current_offset();
+                let begin = assignment.begin();
+                let end = assignment.end();
+                log::info!(
+                    "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
+                    topic,
+                    vgroup_id,
+                    current,
+                    begin,
+                    end
+                );
+                let res = consumer.offset_seek(topic, vgroup_id, end).await;
+                if res.is_err() {
+                    log::error!("seek offset error: {:?}", res);
+                    let a = consumer.assignments().await.unwrap();
+                    log::error!("assignments: {:?}", a);
+                    // panic!()
+                }
+            }
+
+            let topic_assignment = consumer.topic_assignment(topic).await;
+            log::info!("topic assignment: {:?}", topic_assignment);
+        }
+
+        // after seek offset
+        let assignments = consumer.assignments().await.unwrap();
+        log::info!("after seek offset assignments: {:?}", assignments);
+
+        consumer.unsubscribe().await;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        taos.exec_many([
+            format!("drop database {db2}"),
+            format!("drop topic {db}"),
+            format!("drop database {db}"),
+        ])
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_ws_flush_db() -> taos_query::RawResult<()> {
+        // pretty_env_logger::formatted_timed_builder()
+        // .filter_level(log::LevelFilter::Info)
+        // .init();
+
+        use taos_query::prelude::*;
+        // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let dsn = "taosws://localhost:6041".to_string();
+        log::info!("dsn: {}", dsn);
+        let mut dsn = Dsn::from_str(&dsn)?;
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+
+        let db = "ws_tmq_flush_1";
+        let db2 = "ws_tmq_flush_1_dest";
+
+        taos.exec_many([
+            format!("drop topic if exists {db}").as_str(),
+            format!("drop database if exists {db}").as_str(),
+            format!("create database {db} wal_retention_period 1").as_str(),
+            format!("create topic {db} with meta as database {db}").as_str(),
+            format!("use {db}").as_str(),
+            // kind 1: create super table using all types
+            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 json)",
+            // kind 2: create child table with json tag
+            "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
+            "create table tb1 using stb1 tags(NULL)",
+            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)
+            tb1 values(now, true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            // kind 3: create super table with all types except json (especially for tags)
+            "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
+            t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
+            t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
+            // kind 4: create child table with all types except json
+            "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)",
+            // kind 5: create common table
+            "create table `table` (ts timestamp, v int)",
             // kind 6: column in super table
             "alter table stb1 add column new1 bool",
             "alter table stb1 add column new2 tinyint",
@@ -1260,7 +1448,7 @@ mod async_tests {
             .await?;
         }
         taos.exec(format!("flush database {db}")).await?;
-        // tokio::time::sleep(Duration::from_secs(16)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
         taos.exec_many([
             format!("drop database if exists {db2}"),
@@ -1273,6 +1461,8 @@ mod async_tests {
 
         dsn.params
             .insert("auto.offset.reset".to_string(), "earliest".to_string());
+        dsn.params
+            .insert("experimental.snapshot.enable".to_string(), "true".to_string());
 
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;
