@@ -309,7 +309,7 @@ impl From<Error> for RawError {
 }
 
 async fn read_queries(
-    mut reader: AsyncDeflateRecv<OwnedReadHalf>,
+    mut reader: AsyncDeflateRecv<tokio::io::ReadHalf<tokio::net::TcpStream>>,
     queries_sender: QueryAgent,
     fetches_sender: Arc<QueryResMapper>,
     ws2: WsSender,
@@ -337,8 +337,8 @@ async fn read_queries(
     'ws: loop {
         tokio::select! {
             Ok(frame) = reader.receive() => {
-                let (header, payload) = frame.parts();
-                let code = header.opcode();
+                let (header, payload) = frame;
+                let code = header.code;
                 match code {
                     OpCode::Text => {
 
@@ -715,8 +715,8 @@ impl WsTaos {
         let duration = Duration::from_secs(2);
         let version = match tokio::time::timeout(duration, sink.receive()).await {
             Ok(Ok(frame)) => {
-                let (header, payload) = frame.parts();
-                let code = header.opcode();
+                let (header, payload) = frame;
+                let code = header.code;
                 match code {
                     OpCode::Text => {
                         let v: WsRecv = serde_json::from_slice(&payload).unwrap();
@@ -745,8 +745,8 @@ impl WsTaos {
             .await
             .map_err(Error::from)?;
         if let Ok(frame) = sink.receive().await {
-            let (header, payload) = frame.parts();
-            let code = header.opcode();
+            let (header, payload) = frame;
+            let code = header.code;
             match code {
                 OpCode::Text => {
                     let v: WsRecv = serde_json::from_slice(&payload).unwrap();

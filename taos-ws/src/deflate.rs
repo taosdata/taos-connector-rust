@@ -107,9 +107,9 @@ async fn test_ws() -> anyhow::Result<()> {
     let handle = tokio::spawn(async move {
         loop {
             let frame = sink.receive().await.unwrap();
-            let (header, payload) = frame.parts();
-            dbg!(&header.opcode(), &payload);
-            let code = header.opcode();
+            let (header, payload) = frame;
+            dbg!(&header.code, &payload);
+            let code = header.code;
 
             match code {
                 OpCode::Binary => {
