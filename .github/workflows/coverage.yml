@@ -129,6 +129,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-build-${{ inputs.tdengine_branch }}-
 
+      
+      - name: install TDengine
+        run: |
+          tar -zxvf server.tar.gz
+          cd release && sudo sh install.sh
+
       - uses: actions/checkout@v3
 
       - name: Set up Rust
@@ -162,11 +168,6 @@ jobs:
           sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config libgflags2.2 libgflags-dev libgeos-dev -y
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
-
-      - name: install TDengine
-        run: |
-          tar -zxvf server.tar.gz
-          cd release && sudo sh install.sh
 
       - name: Copy taos.cfg
         run: |
