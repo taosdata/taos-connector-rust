@@ -56,7 +56,13 @@ pub fn global_tokio_runtime() -> &'static tokio::runtime::Runtime {
 }
 
 pub fn block_in_place_or_global<F: std::future::Future>(fut: F) -> F::Output {
-    global_tokio_runtime().block_on(fut)
+    use tokio::runtime::Handle;
+    use tokio::task;
+
+    match Handle::try_current() {
+        Ok(handle) => task::block_in_place(move || handle.block_on(fut)),
+        Err(_) => global_tokio_runtime().block_on(fut),
+    }
 }
 
 pub enum CodecOpts {
