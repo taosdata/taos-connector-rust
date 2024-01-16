@@ -29,11 +29,25 @@ serde_repr = "0.1.8"
 serde_with = "3.0.0"
 taos-query = { path = "../taos-query", version = "0.11.1" }
 thiserror = "1.0.47"
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "io-util", "time"] }
+tokio = { version = "1", features = [
+    "sync",
+    "rt-multi-thread",
+    "macros",
+    "io-util",
+    "time",
+] }
 tokio-tungstenite = { version = "0.20.1" }
+ws-tool = { version = "0.11", features = [
+    "async",
+    "deflate",
+    "async_tls_rustls",
+] }
 
 [dev-dependencies]
 pretty_env_logger = "0.5.0"
+criterion = { version = "0.3", features = ["stable"] }
+tracing-subscriber = { version = "*", features = ["fmt"] }
+tracing = "0.1"
 
 [package.metadata.docs.rs]
 features = ["rustls"]
