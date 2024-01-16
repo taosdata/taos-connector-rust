@@ -68,10 +68,10 @@ impl Describe {
         let col_sql = cols.into_iter().map(|f| f.sql_repr()).join(",");
 
         if tags.is_empty() {
-            format!("create table if not exists {table} ({col_sql})")
+            format!("create table if not exists `{table}` ({col_sql})")
         } else {
             let tags_sql = tags.into_iter().map(|f| f.sql_repr()).join(",");
-            format!("create table if not exists {table} ({col_sql}) tags({tags_sql})")
+            format!("create table if not exists `{table}` ({col_sql}) tags({tags_sql})")
         }
     }
 }
