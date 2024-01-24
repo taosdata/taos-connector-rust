@@ -59,7 +59,14 @@ features = ["rustls"]
 default = ["tmq"]
 
 rustls = ["tokio-tungstenite/rustls-tls-native-roots"]
-native-tls = ["tokio-tungstenite/native-tls", "ws-tool/async_tls_native"]
-native-tls-vendored = ["tokio-tungstenite/native-tls-vendored", "native-tls", "ws-tool/async_tls_native"]
+native-tls = [
+    "tokio-tungstenite/native-tls",
+    "ws-tool/async_tls_native",
+    "ws-tool/native-tls",
+]
+native-tls-vendored = [
+    "tokio-tungstenite/native-tls-vendored",
+    "native-tls",
+]
 sync = []
 tmq = []
