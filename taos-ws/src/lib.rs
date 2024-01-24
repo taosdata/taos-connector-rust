@@ -32,7 +32,6 @@ use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::{connect_async_with_config, WebSocketStream};
 
 use ws_tool::codec::{AsyncDeflateCodec, WindowBit};
-// use ws_tool::simple::ClientConfig;
 
 pub mod client;
 pub use client::ClientConfig;
@@ -507,51 +506,45 @@ impl TaosBuilder {
         &self,
         url: String,
     ) -> RawResult<AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>> {
-        let res: Result<
-            AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>,
-            QueryError,
-        > = ClientConfig {
+        let mut config = ClientConfig {
             window: Some(WindowBit::Fifteen),
 
             extra_headers: hashmap! {
                 "Accept-Encoding".to_string() => "gzip, deflate".to_string(),
             },
             ..Default::default()
-        }
-        .async_connect_with(self.to_ws_url(), AsyncDeflateCodec::check_fn)
-        .await
-        .map_err(|err| {
-            let err_string = err.to_string();
-            if err_string.contains("401 Unauthorized") {
-                QueryError::Unauthorized(self.to_ws_url())
-            } else {
-                err.into()
-            }
-        });
+        };
+        let res: Result<
+            AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>,
+            QueryError,
+        > = config
+            .async_connect_with(self.to_ws_url(), AsyncDeflateCodec::check_fn)
+            .await
+            .map_err(|err| {
+                let err_string = err.to_string();
+                if err_string.contains("401 Unauthorized") {
+                    QueryError::Unauthorized(self.to_ws_url())
+                } else {
+                    err.into()
+                }
+            });
 
         let ws: AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>> = match res {
             Ok(res) => res,
             Err(err) => {
                 let uri = url.clone();
                 if err.to_string().contains("404 Not Found") || err.to_string().contains("400") {
-                    ClientConfig {
-                        window: Some(WindowBit::Fifteen),
-
-                        extra_headers: hashmap! {
-                            "Accept-Encoding".to_string() => "gzip, deflate".to_string(),
-                        },
-                        ..Default::default()
-                    }
-                    .async_connect_with(uri, AsyncDeflateCodec::check_fn)
-                    .await
-                    .map_err(|err| {
-                        let err_string = err.to_string();
-                        if err_string.contains("401 Unauthorized") {
-                            QueryError::Unauthorized(url)
-                        } else {
-                            err.into()
-                        }
-                    })?
+                    config
+                        .async_connect_with(uri, AsyncDeflateCodec::check_fn)
+                        .await
+                        .map_err(|err| {
+                            let err_string = err.to_string();
+                            if err_string.contains("401 Unauthorized") {
+                                QueryError::Unauthorized(url)
+                            } else {
+                                err.into()
+                            }
+                        })?
                 } else {
                     return Err(err.into());
                 }
