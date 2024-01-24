@@ -2,6 +2,7 @@
 use std::fmt::{Debug, Display};
 
 use log::warn;
+use maplit::hashmap;
 use once_cell::sync::OnceCell;
 
 use taos_query::prelude::Code;
@@ -29,6 +30,12 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::{connect_async_with_config, WebSocketStream};
+
+use ws_tool::codec::{AsyncDeflateCodec, WindowBit};
+// use ws_tool::simple::ClientConfig;
+
+pub mod client;
+pub use client::ClientConfig;
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
@@ -495,21 +502,81 @@ impl TaosBuilder {
         };
         Ok(ws)
     }
+
+    pub(crate) async fn ws_tool_build_stream(
+        &self,
+        url: String,
+    ) -> RawResult<AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>> {
+        let res: Result<
+            AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>,
+            QueryError,
+        > = ClientConfig {
+            window: Some(WindowBit::Fifteen),
+
+            extra_headers: hashmap! {
+                "Accept-Encoding".to_string() => "gzip, deflate".to_string(),
+            },
+            ..Default::default()
+        }
+        .async_connect_with(self.to_ws_url(), AsyncDeflateCodec::check_fn)
+        .await
+        .map_err(|err| {
+            let err_string = err.to_string();
+            if err_string.contains("401 Unauthorized") {
+                QueryError::Unauthorized(self.to_ws_url())
+            } else {
+                err.into()
+            }
+        });
+
+        let ws: AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>> = match res {
+            Ok(res) => res,
+            Err(err) => {
+                let uri = url.clone();
+                if err.to_string().contains("404 Not Found") || err.to_string().contains("400") {
+                    ClientConfig {
+                        window: Some(WindowBit::Fifteen),
+
+                        extra_headers: hashmap! {
+                            "Accept-Encoding".to_string() => "gzip, deflate".to_string(),
+                        },
+                        ..Default::default()
+                    }
+                    .async_connect_with(uri, AsyncDeflateCodec::check_fn)
+                    .await
+                    .map_err(|err| {
+                        let err_string = err.to_string();
+                        if err_string.contains("401 Unauthorized") {
+                            QueryError::Unauthorized(url)
+                        } else {
+                            err.into()
+                        }
+                    })?
+                } else {
+                    return Err(err.into());
+                }
+            }
+        };
+
+        Ok(ws)
+    }
 }
 
+#[cfg(feature = "rustls")]
 #[cfg(test)]
 mod lib_tests {
-
-    use std::time::Duration;
 
     use crate::{
         query::infra::{ToMessage, WsRecv, WsSend},
         *,
     };
     use futures::{SinkExt, StreamExt};
+    use std::time::Duration;
     use tracing::*;
     use tracing_subscriber::util::SubscriberInitExt;
+    use ws_tool::frame::OpCode;
 
+    #[cfg(feature = "rustls")]
     #[tokio::test]
     async fn test_build_stream() -> Result<(), anyhow::Error> {
         let _subscriber = tracing_subscriber::fmt::fmt()
@@ -517,11 +584,12 @@ mod lib_tests {
             .with_file(true)
             .with_line_number(true)
             .finish();
-        _subscriber.try_init().expect("failed to init log");
+        let _ = _subscriber.try_init();
 
-        let dsn = "ws://root:taosdata@localhost:6041";
+        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         let builder = TaosBuilder::from_dsn(dsn).unwrap();
-        let url = builder.to_ws_url();
+        let url = builder.to_query_url();
+        info!("url: {}", url);
         let ws = builder.build_stream(url).await.unwrap();
         trace!("ws: {:?}", ws);
 
@@ -541,7 +609,57 @@ mod lib_tests {
             }
         });
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "rustls")]
+    #[tokio::test]
+    async fn test_ws_tool_build_stream() -> Result<(), anyhow::Error> {
+        let _subscriber = tracing_subscriber::fmt::fmt()
+            .with_max_level(Level::INFO)
+            .with_file(true)
+            .with_line_number(true)
+            .finish();
+        let _ = _subscriber.try_init();
+
+        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
+        let url = builder.to_query_url();
+        let ws = builder.ws_tool_build_stream(url).await.unwrap();
+
+        let (mut sink, mut source) = ws.split();
+
+        let version = WsSend::Version;
+        source
+            .send(OpCode::Text, &serde_json::to_vec(&version)?)
+            .await?;
+
+        let _handle = tokio::spawn(async move {
+            loop {
+                let frame = sink.receive().await.unwrap();
+                let (header, payload) = frame;
+                trace!("header.code: {:?}, payload: {:?}", &header.code, &payload);
+                let code = header.code;
+
+                match code {
+                    OpCode::Binary => {
+                        println!("{:?}", payload);
+                    }
+                    OpCode::Text => {
+                        let recv: crate::query::infra::WsRecv =
+                            serde_json::from_slice(&payload).unwrap();
+                        info!("recv: {:?}", recv);
+                        assert_eq!(recv.code, 0);
+                    }
+                    _ => (),
+                }
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
 
         Ok(())
     }
