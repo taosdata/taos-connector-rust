@@ -1,15 +1,15 @@
 use derive_more::Deref;
-use futures::{FutureExt, StreamExt, SinkExt};
+use futures::{FutureExt, SinkExt, StreamExt};
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
 use itertools::Itertools;
-use tokio_tungstenite::tungstenite::Message;
 use std::future::Future;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::InlinableWrite;
 use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
 use thiserror::Error;
+use tokio_tungstenite::tungstenite::Message;
 
 use taos_query::prelude::tokio;
 use tokio::io::BufStream;
@@ -442,37 +442,19 @@ async fn read_queries(
                     }
                     OpCode::Close => {
                         // taosAdapter should never send close frame to client.
-                        //   So all close frames should be treated as error.
-                        // if let Some(close) = payload {
-                        //     log::warn!("websocket received close frame: {close:?}");
+                        // So all close frames should be treated as error.
 
-                        //     let mut keys = Vec::new();
-                        //     for e in queries_sender.iter() {
-                        //         keys.push(*e.key());
-                        //     }
-                        //     let reason = match close.code {
-                        //         CloseCode::Size => {
-                        //             format!("Message length reaches max limit (code: {})", close.code)
-                        //         }
-                        //         _ => format!("{}", close),
-                        //     };
-                        //     for k in keys {
-                        //         if let Some((_, sender)) = queries_sender.remove(&k) {
-                        //             let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), reason.to_string())));
-                        //         }
-                        //     }
-                        // } else {
-                            log::warn!("websocket connection is closed normally");
-                            let mut keys = Vec::new();
-                            for e in queries_sender.iter() {
-                                keys.push(*e.key());
+                        log::warn!("websocket connection is closed normally");
+                        let mut keys = Vec::new();
+                        for e in queries_sender.iter() {
+                            keys.push(*e.key());
+                        }
+                        for k in keys {
+                            if let Some((_, sender)) = queries_sender.remove(&k) {
+                                let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
                             }
-                            for k in keys {
-                                if let Some((_, sender)) = queries_sender.remove(&k) {
-                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
-                                }
-                            }
-                        // }
+                        }
+
                         break 'ws;
                     }
                     OpCode::Ping => {
@@ -766,9 +748,7 @@ impl WsTaos {
                             log::error!("Write websocket error: {}", err);
                                 let mut keys = Vec::new();
                                 queries3.iter().for_each(|r| keys.push(*r.key()));
-                                // queries3.for_each_async(|k, _| {
-                                //     keys.push(*k);
-                                // }).await;
+
                                 for k in keys {
                                     if let Some((_, sender)) = queries3.remove(&k) {
                                         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
