@@ -75,13 +75,13 @@ impl ClientConfig {
                     {
                         panic!("")
                     }
-                } else if cfg!(feature = "native-tls") {
-                    #[cfg(feature = "native-tls")]
+                } else if cfg!(feature = "sync-native-tls") {
+                    #[cfg(feature = "sync-native-tls")]
                     {
                         let stream = connector::wrap_native_tls(stream, host, self.certs.clone())?;
                         builder.with_stream(uri, stream::SyncStream::NativeTls(stream), check_fn)
                     }
-                    #[cfg(not(feature = "native-tls"))]
+                    #[cfg(not(feature = "sync-native-tls"))]
                     {
                         panic!("")
                     }
