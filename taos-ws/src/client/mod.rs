@@ -207,3 +207,54 @@ impl ClientConfig {
         Ok((uri, mode, builder))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maplit::hashmap;
+    use tracing::*;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    #[tokio::test]
+    async fn test_async_connect_with() {
+        let _subscriber = tracing_subscriber::fmt::fmt()
+            .with_max_level(Level::INFO)
+            .with_file(true)
+            .with_line_number(true)
+            .finish();
+        let _ = _subscriber.try_init();
+
+        let check_fn =
+            |_: String, _: http::Response<()>, _: tokio::io::BufStream<stream::AsyncStream>| Ok(());
+
+        // Test Accept-Encoding with gzip, deflate
+        let mut config = ClientConfig {
+            window: Some(WindowBit::Fifteen),
+
+            extra_headers: hashmap! {
+                "Accept-Encoding".to_string() => "gzip, deflate".to_string(),
+            },
+            ..Default::default()
+        };
+
+        let result = config
+            .async_connect_with("ws://localhost:6041/ws", check_fn)
+            .await;
+        assert!(result.is_ok());
+
+        // Test Accept-Encoding with gzip only
+        let mut config = ClientConfig {
+            window: Some(WindowBit::Fifteen),
+
+            extra_headers: hashmap! {
+                "Accept-Encoding".to_string() => "gzip".to_string(),
+            },
+            ..Default::default()
+        };
+
+        let result = config
+            .async_connect_with("ws://localhost:6041/ws", check_fn)
+            .await;
+        assert!(result.is_ok());
+    }
+}
