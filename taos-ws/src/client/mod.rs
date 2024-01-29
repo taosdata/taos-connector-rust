@@ -605,7 +605,7 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        // Test Accept-Encoding with gzip only
+        // Test Accept-Encoding without deflate
         let mut config = ClientConfig {
             window: Some(WindowBit::Fifteen),
 
