@@ -1257,198 +1257,396 @@ impl AsyncQueryable for WsTaos {
     }
 }
 
-#[tokio::test]
-async fn test_client() -> anyhow::Result<()> {
+#[cfg(test)]
+mod tests {
     use futures::TryStreamExt;
-    std::env::set_var("RUST_LOG", "debug");
-    let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-    // pretty_env_logger::init();
 
-    let client = WsTaos::from_dsn(dsn).await?;
+    use super::*;
 
-    let _version = client.version();
-    assert_eq!(client.exec("drop database if exists abc_a").await?, 0);
-    assert_eq!(client.exec("create database abc_a").await?, 0);
-    assert_eq!(
-        client
-            .exec("create table abc_a.tb1(ts timestamp, v int)")
-            .await?,
-        0
-    );
-    assert_eq!(
-        client
-            .exec("insert into abc_a.tb1 values(1655793421375, 1)")
-            .await?,
-        1
-    );
+    #[tokio::test]
+    async fn test_client() -> anyhow::Result<()> {
+        use futures::TryStreamExt;
+        std::env::set_var("RUST_LOG", "debug");
+        let dsn =
+            std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        // pretty_env_logger::init();
 
-    // let mut rs = client.s_query("select * from abc_a.tb1").unwrap().unwrap();
-    let mut rs = client.query("select * from abc_a.tb1").await?;
+        let client = WsTaos::from_dsn(dsn).await?;
 
-    #[derive(Debug, serde::Deserialize)]
-    #[allow(dead_code)]
-    struct A {
-        ts: String,
-        v: i32,
-    }
-
-    let values: Vec<A> = rs.deserialize().try_collect().await?;
-
-    dbg!(values);
-
-    assert_eq!(client.exec("drop database abc_a").await?, 0);
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_client_cloud() -> anyhow::Result<()> {
-    std::env::set_var("RUST_LOG", "debug");
-    // pretty_env_logger::init();
-    let dsn = std::env::var("TDENGINE_ClOUD_DSN");
-    if dsn.is_err() {
-        println!("Skip test when not in cloud");
-        return Ok(());
-    }
-    let dsn = dsn.unwrap();
-    let client = WsTaos::from_dsn(dsn).await?;
-    let mut rs = client.query("select * from test.meters limit 10").await?;
-
-    let values = rs.to_records().await?;
-    for row in values {
-        use itertools::Itertools;
-        println!(
-            "{}",
-            row.into_iter()
-                .map(|value| format!("{value:?}"))
-                .join(" | ")
+        let _version = client.version();
+        assert_eq!(client.exec("drop database if exists abc_a").await?, 0);
+        assert_eq!(client.exec("create database abc_a").await?, 0);
+        assert_eq!(
+            client
+                .exec("create table abc_a.tb1(ts timestamp, v int)")
+                .await?,
+            0
         );
-    }
-    Ok(())
-}
+        assert_eq!(
+            client
+                .exec("insert into abc_a.tb1 values(1655793421375, 1)")
+                .await?,
+            1
+        );
 
-#[tokio::test]
-async fn ws_show_databases() -> anyhow::Result<()> {
-    std::env::set_var("RUST_LOG", "debug");
-    use futures::TryStreamExt;
-    // let _ = pretty_env_logger::try_init_timed();
-    let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-    let client = WsTaos::from_dsn(dsn).await?;
-    let mut rs = client.query("show databases").await?;
+        let mut rs = client.query("select * from abc_a.tb1").await?;
 
-    let mut blocks = rs.blocks();
-    while let Some(block) = blocks.try_next().await? {
-        let values = block.to_values();
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct A {
+            ts: String,
+            v: i32,
+        }
+
+        let values: Vec<A> = rs.deserialize().try_collect().await?;
+
         dbg!(values);
-    }
-    Ok(())
-}
 
-#[tokio::test]
-async fn ws_write_raw_block() -> anyhow::Result<()> {
-    let mut raw = RawBlock::parse_from_raw_block_v2(
-        &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
-        &[
-            Field::new("ts", taos_query::common::Ty::Timestamp, 8),
-            Field::new("v", taos_query::common::Ty::Bool, 1),
-        ],
-        &[8, 1],
-        1,
-        Precision::Millisecond,
-    );
-    raw.with_table_name("tb1");
-    dbg!(&raw);
-
-    use futures::TryStreamExt;
-    std::env::set_var("RUST_LOG", "debug");
-    let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-    // pretty_env_logger::init();
-
-    let client = WsTaos::from_dsn(dsn).await?;
-
-    let _version = client.version();
-
-    client
-        .exec_many([
-            "drop database if exists write_raw_block_test",
-            "create database write_raw_block_test keep 36500",
-            "use write_raw_block_test",
-            "create table if not exists tb1(ts timestamp, v bool)",
-        ])
-        .await?;
-
-    client.write_raw_block(&raw).await?;
-
-    let mut rs = client.query("select * from tb1").await?;
-
-    #[derive(Debug, serde::Deserialize)]
-    #[allow(dead_code)]
-    struct A {
-        ts: String,
-        v: Option<bool>,
+        assert_eq!(client.exec("drop database abc_a").await?, 0);
+        Ok(())
     }
 
-    let values: Vec<A> = rs.deserialize().try_collect().await?;
+    #[tokio::test]
+    async fn test_client_cloud() -> anyhow::Result<()> {
+        std::env::set_var("RUST_LOG", "debug");
+        // pretty_env_logger::init();
+        let dsn = std::env::var("TDENGINE_ClOUD_DSN");
+        if dsn.is_err() {
+            println!("Skip test when not in cloud");
+            return Ok(());
+        }
+        let dsn = dsn.unwrap();
+        let client = WsTaos::from_dsn(dsn).await?;
+        let mut rs = client.query("select * from test.meters limit 10").await?;
 
-    dbg!(values);
-
-    assert_eq!(client.exec("drop database write_raw_block_test").await?, 0);
-    Ok(())
-}
-
-#[tokio::test]
-async fn ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
-    let mut raw = RawBlock::parse_from_raw_block_v2(
-        &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
-        &[
-            Field::new("ts", taos_query::common::Ty::Timestamp, 8),
-            Field::new("v", taos_query::common::Ty::Bool, 1),
-        ],
-        &[8, 1],
-        1,
-        Precision::Millisecond,
-    );
-    raw.with_table_name("tb1");
-    dbg!(&raw);
-
-    use futures::TryStreamExt;
-    std::env::set_var("RUST_LOG", "debug");
-    let dsn = std::env::var("TDENGINE_TEST_DSN").unwrap_or("http://localhost:6041".to_string());
-    // pretty_env_logger::init();
-
-    let client = WsTaos::from_dsn(dsn).await?;
-
-    let _version = client.version();
-
-    client
-        .exec_many([
-            "drop database if exists test_ws_write_raw_block_with_req_id",
-            "create database test_ws_write_raw_block_with_req_id keep 36500",
-            "use test_ws_write_raw_block_with_req_id",
-            "create table if not exists tb1(ts timestamp, v bool)",
-        ])
-        .await?;
-
-    let req_id = 10003;
-    client.write_raw_block_with_req_id(&raw, req_id).await?;
-
-    let mut rs = client.query("select * from tb1").await?;
-
-    #[derive(Debug, serde::Deserialize)]
-    #[allow(dead_code)]
-    struct A {
-        ts: String,
-        v: Option<bool>,
+        let values = rs.to_records().await?;
+        for row in values {
+            use itertools::Itertools;
+            println!(
+                "{}",
+                row.into_iter()
+                    .map(|value| format!("{value:?}"))
+                    .join(" | ")
+            );
+        }
+        Ok(())
     }
 
-    let values: Vec<A> = rs.deserialize().try_collect().await?;
+    #[tokio::test]
+    async fn ws_show_databases() -> anyhow::Result<()> {
+        std::env::set_var("RUST_LOG", "debug");
+        use futures::TryStreamExt;
+        // let _ = pretty_env_logger::try_init_timed();
+        let dsn =
+            std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        let client = WsTaos::from_dsn(dsn).await?;
+        let mut rs = client.query("show databases").await?;
 
-    dbg!(values);
+        let mut blocks = rs.blocks();
+        while let Some(block) = blocks.try_next().await? {
+            let values = block.to_values();
+            dbg!(values);
+        }
+        Ok(())
+    }
 
-    assert_eq!(
+    #[tokio::test]
+    async fn ws_write_raw_block() -> anyhow::Result<()> {
+        let mut raw = RawBlock::parse_from_raw_block_v2(
+            &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
+            &[
+                Field::new("ts", taos_query::common::Ty::Timestamp, 8),
+                Field::new("v", taos_query::common::Ty::Bool, 1),
+            ],
+            &[8, 1],
+            1,
+            Precision::Millisecond,
+        );
+        raw.with_table_name("tb1");
+        dbg!(&raw);
+
+        use futures::TryStreamExt;
+        std::env::set_var("RUST_LOG", "debug");
+        let dsn =
+            std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        // pretty_env_logger::init();
+
+        let client = WsTaos::from_dsn(dsn).await?;
+
+        let _version = client.version();
+
         client
-            .exec("drop database test_ws_write_raw_block_with_req_id")
-            .await?,
-        0
-    );
-    Ok(())
+            .exec_many([
+                "drop database if exists write_raw_block_test",
+                "create database write_raw_block_test keep 36500",
+                "use write_raw_block_test",
+                "create table if not exists tb1(ts timestamp, v bool)",
+            ])
+            .await?;
+
+        client.write_raw_block(&raw).await?;
+
+        let mut rs = client.query("select * from tb1").await?;
+
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct A {
+            ts: String,
+            v: Option<bool>,
+        }
+
+        let values: Vec<A> = rs.deserialize().try_collect().await?;
+
+        dbg!(values);
+
+        assert_eq!(client.exec("drop database write_raw_block_test").await?, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
+        let mut raw = RawBlock::parse_from_raw_block_v2(
+            &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
+            &[
+                Field::new("ts", taos_query::common::Ty::Timestamp, 8),
+                Field::new("v", taos_query::common::Ty::Bool, 1),
+            ],
+            &[8, 1],
+            1,
+            Precision::Millisecond,
+        );
+        raw.with_table_name("tb1");
+        dbg!(&raw);
+
+        use futures::TryStreamExt;
+        std::env::set_var("RUST_LOG", "debug");
+        let dsn = std::env::var("TDENGINE_TEST_DSN").unwrap_or("http://localhost:6041".to_string());
+        // pretty_env_logger::init();
+
+        let client = WsTaos::from_dsn(dsn).await?;
+
+        let _version = client.version();
+
+        client
+            .exec_many([
+                "drop database if exists test_ws_write_raw_block_with_req_id",
+                "create database test_ws_write_raw_block_with_req_id keep 36500",
+                "use test_ws_write_raw_block_with_req_id",
+                "create table if not exists tb1(ts timestamp, v bool)",
+            ])
+            .await?;
+
+        let req_id = 10003;
+        client.write_raw_block_with_req_id(&raw, req_id).await?;
+
+        let mut rs = client.query("select * from tb1").await?;
+
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct A {
+            ts: String,
+            v: Option<bool>,
+        }
+
+        let values: Vec<A> = rs.deserialize().try_collect().await?;
+
+        dbg!(values);
+
+        assert_eq!(
+            client
+                .exec("drop database test_ws_write_raw_block_with_req_id")
+                .await?,
+            0
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn ws_persistent_connection() -> anyhow::Result<()> {
+        std::env::set_var("RUST_LOG", "trace");
+        pretty_env_logger::init();
+        let client = WsTaos::from_dsn("taosws://localhost:6041/").await?;
+        let db = "ws_persistent_connection";
+        assert_eq!(
+            client.exec(format!("drop database if exists {db}")).await?,
+            0
+        );
+        assert_eq!(
+            client
+                .exec(format!("create database {db} keep 36500"))
+                .await?,
+            0
+        );
+        assert_eq!(
+            client.exec(
+                format!("create table {db}.stb1(ts timestamp,\
+                    b1 bool, c8i1 tinyint, c16i1 smallint, c32i1 int, c64i1 bigint,\
+                    c8u1 tinyint unsigned, c16u1 smallint unsigned, c32u1 int unsigned, c64u1 bigint unsigned,\
+                    cb1 binary(100), cn1 nchar(10),
+
+                    b2 bool, c8i2 tinyint, c16i2 smallint, c32i2 int, c64i2 bigint,\
+                    c8u2 tinyint unsigned, c16u2 smallint unsigned, c32u2 int unsigned, c64u2 bigint unsigned,\
+                    cb2 binary(10), cn2 nchar(16)) tags (jt json)")
+            ).await?,
+            0
+        );
+
+        // loop 100 times to test persistent connection
+        // do not run in ci env
+        for _ in 0..100 {
+            assert_eq!(
+                client
+                    .exec(format!(
+                        r#"insert into {db}.tb1 using {db}.stb1 tags('{{"key":"数据"}}')
+                   values(0,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
+                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
+                         (65535,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
+                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
+                    ))
+                    .await?,
+                2
+            );
+            assert_eq!(
+                client
+                    .exec(format!(
+                        r#"insert into {db}.tb2 using {db}.stb1 tags(NULL)
+                   values(1,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
+                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
+                         (65536,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
+                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
+                    ))
+                    .await?,
+                2
+            );
+            // wait to test persistent connection
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+
+        assert_eq!(client.exec(format!("drop database {db}")).await?, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ws_async_data_flow() -> anyhow::Result<()> {
+        std::env::set_var("RUST_LOG", "debug");
+        // pretty_env_logger::init();
+        let client = WsTaos::from_dsn("taosws://localhost:6041/").await?;
+        let db = "ws_async_data_flow";
+        assert_eq!(
+            client.exec(format!("drop database if exists {db}")).await?,
+            0
+        );
+        assert_eq!(
+            client
+                .exec(format!("create database {db} keep 36500"))
+                .await?,
+            0
+        );
+        assert_eq!(
+            client.exec(
+                format!("create table {db}.stb1(ts timestamp,\
+                    b1 bool, c8i1 tinyint, c16i1 smallint, c32i1 int, c64i1 bigint,\
+                    c8u1 tinyint unsigned, c16u1 smallint unsigned, c32u1 int unsigned, c64u1 bigint unsigned,\
+                    cb1 binary(100), cn1 nchar(10),
+
+                    b2 bool, c8i2 tinyint, c16i2 smallint, c32i2 int, c64i2 bigint,\
+                    c8u2 tinyint unsigned, c16u2 smallint unsigned, c32u2 int unsigned, c64u2 bigint unsigned,\
+                    cb2 binary(10), cn2 nchar(16)) tags (jt json)")
+            ).await?,
+            0
+        );
+        assert_eq!(
+            client
+                .exec(format!(
+                    r#"insert into {db}.tb1 using {db}.stb1 tags('{{"key":"数据"}}')
+                   values(0,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
+                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
+                         (65535,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
+                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
+                ))
+                .await?,
+            2
+        );
+        assert_eq!(
+            client
+                .exec(format!(
+                    r#"insert into {db}.tb2 using {db}.stb1 tags(NULL)
+                   values(1,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
+                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
+                         (65536,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
+                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
+                ))
+                .await?,
+            2
+        );
+
+        let mut rs = client
+            .query(format!("select * from {db}.tb1 order by ts limit 1"))
+            .await?;
+
+        #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
+        #[allow(dead_code)]
+        struct A {
+            ts: String,
+            b1: bool,
+            c8i1: i8,
+            c16i1: i16,
+            c32i1: i32,
+            c64i1: i64,
+            c8u1: u8,
+            c16u1: u16,
+            c32u1: u32,
+            c64u1: u64,
+
+            c8i2: i8,
+            c16i2: i16,
+            c32i2: i32,
+            c64i2: i64,
+            c8u2: u8,
+            c16u2: u16,
+            c32u2: u32,
+            c64u2: u64,
+
+            cb1: String,
+            cb2: String,
+            cn1: String,
+            cn2: String,
+        }
+
+        let values: Vec<A> = rs.deserialize().try_collect().await?;
+
+        dbg!(&values);
+
+        assert_eq!(
+            values[0],
+            A {
+                ts: "1970-01-01T08:00:00+08:00".to_string(),
+                b1: true,
+                c8i1: -1,
+                c16i1: -2,
+                c32i1: -3,
+                c64i1: -4,
+                c8u1: 1,
+                c16u1: 2,
+                c32u1: 3,
+                c64u1: 4,
+                c8i2: -5,
+                c16i2: -6,
+                c32i2: -7,
+                c64i2: -8,
+                c8u2: 5,
+                c16u2: 6,
+                c32u2: 7,
+                c64u2: 8,
+                cb1: "abc".to_string(),
+                cb2: "def".to_string(),
+                cn1: "涛思".to_string(),
+                cn2: "数据".to_string(),
+            }
+        );
+
+        assert_eq!(client.exec(format!("drop database {db}")).await?, 0);
+        Ok(())
+    }
 }
