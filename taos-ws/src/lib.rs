@@ -589,7 +589,7 @@ mod lib_tests {
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
-        sender.send(version.to_msg()).await?;
+        sender.send(version.to_tungstenite_msg()).await?;
 
         let _handle = tokio::spawn(async move {
             loop {

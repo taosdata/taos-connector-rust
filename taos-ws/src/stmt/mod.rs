@@ -296,7 +296,7 @@ impl Stmt {
             req_id,
             req: info.to_conn_request(),
         };
-        sender.send(login.to_msg()).await.map_err(Error::from)?;
+        sender.send(login.to_tungstenite_msg()).await.map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {
             match message {
                 Message::Text(text) => {
@@ -491,7 +491,7 @@ impl Stmt {
         let (tx, rx) = oneshot::channel();
         {
             self.queries.insert(req_id, tx);
-            self.ws.send(action.to_msg()).await.map_err(Error::from)?;
+            self.ws.send(action.to_tungstenite_msg()).await.map_err(Error::from)?;
         }
         let stmt_id = rx.await.map_err(Error::from)??; // 1. RecvError, 2. TaosError
         let args = StmtArgs { req_id, stmt_id };
@@ -533,7 +533,7 @@ impl Stmt {
             args: self.args.unwrap(),
             sql: sql.to_string(),
         };
-        self.ws.send(prepare.to_msg()).await.map_err(Error::from)?;
+        self.ws.send(prepare.to_tungstenite_msg()).await.map_err(Error::from)?;
         let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
             taos_query::RawError::from_string("Can't receive stmt prepare response"),
         )??;
@@ -542,7 +542,7 @@ impl Stmt {
     pub async fn stmt_add_batch(&mut self) -> RawResult<()> {
         log::trace!("add batch");
         let message = StmtSend::AddBatch(self.args.unwrap());
-        self.ws.send(message.to_msg()).await.map_err(Error::from)?;
+        self.ws.send(message.to_tungstenite_msg()).await.map_err(Error::from)?;
         let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
             taos_query::RawError::from_string("Can't receive stmt add batch response"),
         )??;
@@ -555,8 +555,8 @@ impl Stmt {
         };
         {
             log::trace!("bind with: {message:?}");
-            log::trace!("bind string: {}", message.to_msg());
-            self.ws.send(message.to_msg()).await.map_err(Error::from)?;
+            log::trace!("bind string: {}", message.to_tungstenite_msg());
+            self.ws.send(message.to_tungstenite_msg()).await.map_err(Error::from)?;
         }
         log::trace!("begin receive");
         let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
@@ -610,7 +610,7 @@ impl Stmt {
             name: name.to_string(),
         };
         self.ws
-            .send_timeout(message.to_msg(), self.timeout)
+            .send_timeout(message.to_tungstenite_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
         let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
@@ -625,7 +625,7 @@ impl Stmt {
             tags,
         };
         self.ws
-            .send_timeout(message.to_msg(), self.timeout)
+            .send_timeout(message.to_tungstenite_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
         let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
@@ -638,7 +638,7 @@ impl Stmt {
         log::trace!("exec");
         let message = StmtSend::Exec(self.args.unwrap());
         self.ws
-            .send_timeout(message.to_msg(), self.timeout)
+            .send_timeout(message.to_tungstenite_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
         if let Some(affected) = self.receiver.as_mut().unwrap().recv().await.ok_or(
@@ -656,7 +656,7 @@ impl Stmt {
         log::trace!("get tag fields");
         let message = StmtSend::GetTagFields(self.args.unwrap());
         self.ws
-            .send_timeout(message.to_msg(), self.timeout)
+            .send_timeout(message.to_tungstenite_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
         let fields = self.fields_receiver.as_mut().unwrap().recv().await.ok_or(
@@ -669,7 +669,7 @@ impl Stmt {
         log::trace!("get col fields");
         let message = StmtSend::GetColFields(self.args.unwrap());
         self.ws
-            .send_timeout(message.to_msg(), self.timeout)
+            .send_timeout(message.to_tungstenite_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
         let fields = self.fields_receiver.as_mut().unwrap().recv().await.ok_or(
@@ -698,7 +698,7 @@ impl Stmt {
         let message = StmtSend::UseResult(self.args.unwrap());
         log::trace!("use result message: {:#?}", &message);
         self.ws
-            .send_timeout(message.to_msg(), self.timeout)
+            .send_timeout(message.to_tungstenite_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
         let use_result = self
@@ -716,7 +716,7 @@ impl Stmt {
     pub async fn stmt_num_params(&mut self) -> RawResult<usize> {
         let message = StmtSend::StmtNumParams(self.args.unwrap());
         self.ws
-            .send_timeout(message.to_msg(), self.timeout)
+            .send_timeout(message.to_tungstenite_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
         let num_params = self.receiver.as_mut().unwrap().recv().await.ok_or(
@@ -736,7 +736,7 @@ impl Stmt {
             index,
         };
         self.ws
-            .send_timeout(message.to_msg(), self.timeout)
+            .send_timeout(message.to_tungstenite_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
         let param = self.param_receiver.as_mut().unwrap().recv().await.ok_or(
