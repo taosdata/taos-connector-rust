@@ -87,7 +87,7 @@ impl WsQuerySender {
                 self.results.insert(args.id, args.req_id);
 
                 self.sender
-                    .send_timeout(msg.ws_tool_to_msg(), send_timeout)
+                    .send_timeout(msg.to_msg(), send_timeout)
                     .await
                     .map_err(Error::from)?;
                 //
@@ -108,7 +108,7 @@ impl WsQuerySender {
             _ => {
                 log::trace!("[req id: {req_id}] prepare  message: {msg:?}");
                 self.sender
-                    .send_timeout(msg.ws_tool_to_msg(), send_timeout)
+                    .send_timeout(msg.to_msg(), send_timeout)
                     .await
                     .map_err(Error::from)?;
             }
@@ -122,14 +122,14 @@ impl WsQuerySender {
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
         let send_timeout = Duration::from_millis(1000);
         self.sender
-            .send_timeout(msg.ws_tool_to_msg(), send_timeout)
+            .send_timeout(msg.to_msg(), send_timeout)
             .await
             .map_err(Error::from)?;
         Ok(())
     }
 
     fn send_blocking(&self, msg: WsSend) -> RawResult<()> {
-        let _ = self.sender.blocking_send(msg.ws_tool_to_msg());
+        let _ = self.sender.blocking_send(msg.to_msg());
         Ok(())
     }
 }
@@ -353,7 +353,7 @@ async fn read_queries(
                                             req_id,
                                             id,
                                         })
-                                        .ws_tool_to_msg(),
+                                        .to_msg(),
                                     )
                                     .await
                                     .unwrap();
