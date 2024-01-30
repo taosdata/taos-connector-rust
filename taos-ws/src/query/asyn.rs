@@ -1492,9 +1492,11 @@ mod tests {
             0
         );
 
-        // loop 100 times to test persistent connection
+        // loop n times to test persistent connection
         // do not run in ci env
-        for _ in 0..100 {
+        let n = 100;
+        let interval = Duration::from_secs(3);
+        for _ in 0..n {
             assert_eq!(
                 client
                     .exec(format!(
@@ -1520,10 +1522,10 @@ mod tests {
                 2
             );
             // wait to test persistent connection
-            tokio::time::sleep(Duration::from_secs(3)).await;
+            tokio::time::sleep(interval).await;
         }
 
-        assert_eq!(client.exec(format!("drop database {db}")).await?, 0);
+        client.exec(format!("drop database {db}")).await?;
         Ok(())
     }
 
@@ -1616,8 +1618,6 @@ mod tests {
 
         let values: Vec<A> = rs.deserialize().try_collect().await?;
 
-        dbg!(&values);
-
         assert_eq!(
             values[0],
             A {
@@ -1646,7 +1646,7 @@ mod tests {
             }
         );
 
-        assert_eq!(client.exec(format!("drop database {db}")).await?, 0);
+        client.exec(format!("drop database {db}")).await?;
         Ok(())
     }
 }
