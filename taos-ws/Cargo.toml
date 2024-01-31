@@ -70,3 +70,4 @@ native-tls-vendored = [
 ]
 sync = []
 tmq = []
+deflate = []

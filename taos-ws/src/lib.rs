@@ -31,6 +31,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::{connect_async_with_config, WebSocketStream};
 
+#[allow(unused_imports)]
 use ws_tool::codec::{AsyncDeflateCodec, WindowBit};
 
 pub mod client;
@@ -506,14 +507,23 @@ impl TaosBuilder {
         &self,
         url: String,
     ) -> RawResult<AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>> {
-        let mut config = ClientConfig {
-            window: Some(WindowBit::Fifteen),
+        let mut config = ClientConfig::default();
 
-            extra_headers: hashmap! {
+        #[cfg(feature = "deflate")]
+        {
+            config.window = Some(WindowBit::Fifteen);
+            config.extra_headers = hashmap! {
                 "Accept-Encoding".to_string() => "gzip, deflate".to_string(),
-            },
-            ..Default::default()
-        };
+            };
+        }
+        #[cfg(not(feature = "deflate"))]
+        {
+            config.window = None;
+            config.extra_headers = hashmap! {
+                "Accept-Encoding".to_string() => "gzip".to_string(),
+            };
+        }
+
         let res: Result<
             AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>,
             QueryError,
@@ -611,7 +621,72 @@ mod lib_tests {
     #[tokio::test]
     async fn test_ws_tool_build_stream() -> Result<(), anyhow::Error> {
         let _subscriber = tracing_subscriber::fmt::fmt()
-            .with_max_level(Level::INFO)
+            .with_max_level(Level::DEBUG)
+            .with_file(true)
+            .with_line_number(true)
+            .finish();
+        let _ = _subscriber.try_init();
+
+        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
+        let url = builder.to_query_url();
+        let ws = builder.ws_tool_build_stream(url).await.unwrap();
+
+        let (mut sink, mut source) = ws.split();
+
+        let version = WsSend::Version;
+        source
+            .send(OpCode::Text, &serde_json::to_vec(&version)?)
+            .await?;
+
+        let _handle = tokio::spawn(async move {
+            loop {
+                let frame = sink.receive().await.unwrap();
+                let (header, payload) = frame;
+                trace!("header.code: {:?}, payload: {:?}", &header.code, &payload);
+                let code = header.code;
+
+                match code {
+                    OpCode::Binary => {
+                        println!("{:?}", payload);
+                    }
+                    OpCode::Text => {
+                        let recv: crate::query::infra::WsRecv =
+                            serde_json::from_slice(&payload).unwrap();
+                        info!("recv: {:?}", recv);
+                        assert_eq!(recv.code, 0);
+                    }
+                    _ => (),
+                }
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "deflate")]
+#[cfg(test)]
+mod lib_deflate_tests {
+
+    use crate::{
+        query::infra::{ToMessage, WsRecv, WsSend},
+        *,
+    };
+    use futures::{SinkExt, StreamExt};
+    use std::time::Duration;
+    use tracing::*;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use ws_tool::frame::OpCode;
+
+    #[cfg(feature = "deflate")]
+    #[tokio::test]
+    async fn test_ws_tool_build_stream_with_deflate() -> Result<(), anyhow::Error> {
+        let _subscriber = tracing_subscriber::fmt::fmt()
+            .with_max_level(Level::DEBUG)
             .with_file(true)
             .with_line_number(true)
             .finish();
