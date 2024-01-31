@@ -18,7 +18,7 @@ pub struct WsConnReq {
     #[serde_as(as = "NoneAsEmptyString")]
     pub(crate) db: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) mode: Option<i32>,    
+    pub(crate) mode: Option<i32>,
 }
 
 impl WsConnReq {
@@ -32,7 +32,7 @@ impl WsConnReq {
             user: Some(user.into()),
             password: Some(password.into()),
             db: Some(db.into()),
-            mode: None
+            mode: None,
         }
     }
     // pub fn with_database(mut self, db: impl Into<String>) -> Self {
@@ -80,23 +80,28 @@ impl WsSend {
 unsafe impl Send for WsSend {}
 unsafe impl Sync for WsSend {}
 
-#[test]
-fn test_serde_send() {
-    let s = WsSend::Conn {
-        req_id: 1,
-        req: WsConnReq::new("root", "taosdata", "db"),
-    };
-    let v = serde_json::to_value(s).unwrap();
-    let j = serde_json::json!({
-        "action": "conn",
-        "args": {
-            "req_id": 1,
-            "user": "root",
-            "password": "taosdata",
-            "db": "db"
-        }
-    });
-    assert_eq!(v, j);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_serde_send() {
+        let s = WsSend::Conn {
+            req_id: 1,
+            req: WsConnReq::new("root", "taosdata", "db"),
+        };
+        let v = serde_json::to_value(s).unwrap();
+        let j = serde_json::json!({
+            "action": "conn",
+            "args": {
+                "req_id": 1,
+                "user": "root",
+                "password": "taosdata",
+                "db": "db"
+            }
+        });
+        assert_eq!(v, j);
+    }
 }
 
 #[serde_as]
