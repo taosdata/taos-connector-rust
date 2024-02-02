@@ -73,7 +73,7 @@ impl ClientConfig {
                     }
                     #[cfg(not(feature = "rustls"))]
                     {
-                        panic!("")
+                        panic!("for ssl connection, rustls feature is required")
                     }
                 } else if cfg!(feature = "sync-native-tls") {
                     #[cfg(feature = "sync-native-tls")]
@@ -83,7 +83,7 @@ impl ClientConfig {
                     }
                     #[cfg(not(feature = "sync-native-tls"))]
                     {
-                        panic!("")
+                        panic!("for ssl connection, native-tls feature is required")
                     }
                 } else {
                     panic!("for ssl connection, rustls or native-tls feature is required")
@@ -174,7 +174,7 @@ impl ClientConfig {
                     }
                     #[cfg(not(feature = "rustls"))]
                     {
-                        panic!("")
+                        panic!("for ssl connection, rustls feature is required")
                     }
                 } else if cfg!(feature = "sync-native-tls") {
                     #[cfg(feature = "sync-native-tls")]
@@ -184,7 +184,7 @@ impl ClientConfig {
                     }
                     #[cfg(not(feature = "sync-native-tls"))]
                     {
-                        panic!("")
+                        panic!("for ssl connection, native-tls feature is required")
                     }
                 } else {
                     panic!("for ssl connection, rustls or native-tls feature is required")
@@ -319,7 +319,7 @@ impl ClientConfig {
                     }
                     #[cfg(not(feature = "rustls"))]
                     {
-                        panic!("")
+                        panic!("for ssl connection, rustls feature is required")
                     }
                 } else if cfg!(feature = "native-tls") {
                     #[cfg(feature = "native-tls")]
@@ -337,7 +337,7 @@ impl ClientConfig {
                     }
                     #[cfg(not(feature = "native-tls"))]
                     {
-                        panic!("")
+                        panic!("for ssl connection, native-tls feature is required")
                     }
                 } else {
                     panic!("for ssl connection, rustls or native-tls feature is required")
@@ -441,7 +441,7 @@ impl ClientConfig {
                     }
                     #[cfg(not(feature = "rustls"))]
                     {
-                        panic!("")
+                        panic!("for ssl connection, rustls feature is required")
                     }
                 } else if cfg!(feature = "native-tls") {
                     #[cfg(feature = "native-tls")]
@@ -459,7 +459,7 @@ impl ClientConfig {
                     }
                     #[cfg(not(feature = "native-tls"))]
                     {
-                        panic!("")
+                        panic!("for ssl connection, native-tls feature is required")
                     }
                 } else {
                     panic!("for ssl connection, rustls or native-tls feature is required")
