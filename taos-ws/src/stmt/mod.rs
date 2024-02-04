@@ -534,7 +534,7 @@ impl Stmt {
                         let opcode = msg.code;
                         let msg = msg.data;
                         if let Err(err) = source.send(opcode, &msg).await {
-                            //
+                            // ws send error
                             log::warn!("Sender error: {err:#}");
                             break;
                         }
