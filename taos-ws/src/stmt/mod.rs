@@ -962,16 +962,21 @@ mod tests {
     async fn test_client() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
-        taos.exec("drop database if exists stmt").await?;
-        taos.exec("create database stmt").await?;
-        taos.exec("create table stmt.ctb (ts timestamp, v int)")
-            .await?;
+        let default_dsn = "taos://localhost:6041";
+        let db = "stmt";
+        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or(default_dsn.to_string());
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+        taos.exec(format!("create database {db}")).await?;
+        taos.exec(format!("create table {db}.ctb (ts timestamp, v int)")).await?;
 
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
-        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/stmt").await?;
-        let stmt = client.s_stmt("insert into stmt.ctb values(?, ?)").await?;
+        let dsn_stmt = format!("{dsn}/{db}", dsn = dsn, db = db);
+        let mut client = Stmt::from_dsn(dsn_stmt).await?;
+        let s_stmt = format!("insert into {db}.ctb values(?, ?)");
+        let stmt = client.s_stmt(&s_stmt).await?;
 
         stmt.bind_all(vec![
             json!([
