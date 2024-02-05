@@ -996,18 +996,20 @@ mod tests {
     async fn test_stmt_stable_with_json() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 
-        let dsn = Dsn::try_from("taos://localhost:6041")?;
-        dbg!(&dsn);
+        let default_dsn = "taos://localhost:6041";
+        let db = "stmt_sj";
+        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or(default_dsn.to_string());
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
-        taos.exec("drop database if exists stmt_sj").await?;
-        taos.exec("create database stmt_sj").await?;
-        taos.exec("create table stmt_sj.stb (ts timestamp, v int) tags(tj json)")
+        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+        taos.exec(format!("create database {db}")).await?;
+        taos.exec(format!("create table {db}.stb (ts timestamp, v int) tags(tj json)"))
             .await?;
 
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
-        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/stmt_sj").await?;
+        let stmt_dsn = format!("{dsn}/{db}", dsn = dsn, db = db);
+        let mut client = Stmt::from_dsn(&stmt_dsn).await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
             .await?;
