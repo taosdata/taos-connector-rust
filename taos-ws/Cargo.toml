@@ -29,11 +29,28 @@ serde_repr = "0.1.8"
 serde_with = "3.0.0"
 taos-query = { path = "../taos-query", version = "0.11.2" }
 thiserror = "1.0.47"
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "io-util", "time"] }
+tokio = { version = "1", features = [
+    "sync",
+    "rt-multi-thread",
+    "macros",
+    "io-util",
+    "time",
+] }
 tokio-tungstenite = { version = "0.20.1" }
+ws-tool = { version = "0.11", features = [
+    "async",
+    "deflate",
+    "async_tls_rustls",
+] }
+maplit = "1.0"
+tracing = "0.1"
+http = "1.0.0"
+tokio-rustls = "0.23"
 
 [dev-dependencies]
 pretty_env_logger = "0.5.0"
+criterion = { version = "0.3", features = ["stable"] }
+tracing-subscriber = { version = "*", features = ["fmt"] }
 
 [package.metadata.docs.rs]
 features = ["rustls"]
@@ -42,7 +59,15 @@ features = ["rustls"]
 default = ["tmq"]
 
 rustls = ["tokio-tungstenite/rustls-tls-native-roots"]
-native-tls = ["tokio-tungstenite/native-tls"]
-native-tls-vendored = ["tokio-tungstenite/native-tls-vendored", "native-tls"]
+native-tls = [
+    "tokio-tungstenite/native-tls",
+    "ws-tool/async_tls_native",
+    "ws-tool/native-tls",
+]
+native-tls-vendored = [
+    "tokio-tungstenite/native-tls-vendored",
+    "native-tls",
+]
 sync = []
 tmq = []
+deflate = []

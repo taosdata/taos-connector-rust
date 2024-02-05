@@ -1,5 +1,4 @@
 use derive_more::Deref;
-use futures::stream::SplitStream;
 use futures::{FutureExt, SinkExt, StreamExt};
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
@@ -10,16 +9,18 @@ use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::InlinableWrite;
 use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
 use thiserror::Error;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::Message;
 
 use taos_query::prelude::tokio;
-use tokio::net::TcpStream;
+use tokio::io::BufStream;
+use tokio::io::ReadHalf;
 use tokio::sync::watch;
 
 use tokio::time;
-use tokio_tungstenite::tungstenite::Error as WsError;
-use tokio_tungstenite::{
-    tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
+
+use ws_tool::{
+    codec::AsyncDeflateRecv, errors::WsError as WsErrorWst, frame::OpCode, stream::AsyncStream,
+    Message as WsMessage,
 };
 
 use super::{infra::*, TaosBuilder};
@@ -34,7 +35,7 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
-type WsSender = tokio::sync::mpsc::Sender<Message>;
+type WsSender = tokio::sync::mpsc::Sender<WsMessage<bytes::Bytes>>;
 
 use futures::channel::oneshot;
 use oneshot::channel as query_channel;
@@ -93,7 +94,14 @@ impl WsQuerySender {
             }
             WsSend::Binary(bytes) => {
                 self.sender
-                    .send_timeout(Message::Binary(bytes), send_timeout)
+                    .send_timeout(
+                        WsMessage {
+                            code: OpCode::Binary,
+                            data: bytes.into(),
+                            close_code: None,
+                        },
+                        send_timeout,
+                    )
                     .await
                     .map_err(Error::from)?;
             }
@@ -203,17 +211,27 @@ pub enum Error {
     #[error("{0}")]
     FetchError(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("{0}")]
-    SendError(#[from] tokio::sync::mpsc::error::SendError<Message>),
+    SendError(#[from] tokio::sync::mpsc::error::SendError<WsMessage<bytes::Bytes>>),
     #[error(transparent)]
-    SendTimeoutError(#[from] tokio::sync::mpsc::error::SendTimeoutError<Message>),
+    SendTimeoutError(#[from] tokio::sync::mpsc::error::SendTimeoutError<WsMessage<bytes::Bytes>>),
     #[error("Query timed out with sql: {0}")]
     QueryTimeout(String),
     #[error("{0}")]
     TaosError(#[from] RawError),
     #[error("{0}")]
     DeError(#[from] DeError),
+    #[error("WebSocket internal[ws-tool] error: {0}")]
+    WsErrorWst(#[from] WsErrorWst),
     #[error("WebSocket internal error: {0}")]
-    WsError(#[from] WsError),
+    TungsteniteError(#[from] tokio_tungstenite::tungstenite::Error),
+    #[error(transparent)]
+    TungsteniteSendTimeoutError(
+        #[from] tokio::sync::mpsc::error::SendTimeoutError<tokio_tungstenite::tungstenite::Message>,
+    ),
+    #[error(transparent)]
+    TungsteniteSendError(
+        #[from] tokio::sync::mpsc::error::SendError<tokio_tungstenite::tungstenite::Message>,
+    ),
     #[error(transparent)]
     IoError(#[from] std::io::Error),
     #[error("Websocket has been closed: {0}")]
@@ -248,7 +266,7 @@ impl Error {
             Error::Unauthorized(_) => Code::new(WS_ERROR_NO::UNAUTHORIZED as _),
             Error::Dsn(_) => Code::new(WS_ERROR_NO::DSN_ERROR as _),
             Error::IoError(_) => Code::new(WS_ERROR_NO::IO_ERROR as _),
-            Error::WsError(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
+            Error::WsErrorWst(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
             // Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
             _ => Code::FAILED,
@@ -279,7 +297,7 @@ impl From<Error> for RawError {
 }
 
 async fn read_queries(
-    mut reader: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    mut reader: AsyncDeflateRecv<ReadHalf<BufStream<AsyncStream>>>,
     queries_sender: QueryAgent,
     fetches_sender: Arc<QueryResMapper>,
     ws2: WsSender,
@@ -291,7 +309,14 @@ async fn read_queries(
         let mut interval = time::interval(Duration::from_secs(29));
         loop {
             interval.tick().await;
-            if let Err(err) = ws3.send(Message::Ping(b"TAOSX".to_vec())).await {
+            if let Err(err) = ws3
+                .send(WsMessage {
+                    code: OpCode::Ping,
+                    data: b"TAOS".to_vec().into(),
+                    close_code: None,
+                })
+                .await
+            {
                 log::trace!("sending ping message error: {err:?}");
                 break;
             }
@@ -299,182 +324,158 @@ async fn read_queries(
     });
     'ws: loop {
         tokio::select! {
-            Some(message) = reader.next() => {
-                match message {
-                    Ok(message) => match message {
-                        Message::Text(text) => {
-                            log::trace!("received json response: {text}");
-                            let v: WsRecv = serde_json::from_str(&text).unwrap();
-                            let (req_id, data, ok) = v.ok();
-                            match &data {
-                                WsRecvData::Query(_) => {
-                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                    {
-                                        if let Err(err) = sender.send(ok.map(|_| data)) {
-                                            log::error!("send data with error: {err:?}");
-                                        }
-                                    } else {
-                                        debug_assert!(!queries_sender.contains_key(&req_id));
-                                        log::warn!("req_id {req_id} not detected, message might be lost");
-                                    }
-                                }
-                                WsRecvData::Fetch(fetch) => {
-                                    let id = fetch.id;
-                                    if fetch.completed {
-                                        ws2.send(
-                                            WsSend::FreeResult(WsResArgs {
-                                                req_id,
-                                                id,
-                                            })
-                                            .to_msg(),
-                                        )
-                                        .await
-                                        .unwrap();
-                                    }
-                                    // dbg!(&queries_sender);
-                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                    {
-                                        sender.send(ok.map(|_| data)).unwrap();
-                                    } else {
-                                        log::warn!("req_id {req_id} not detected, message might be lost");
-                                    }
-                                }
-                                WsRecvData::FetchBlock => {
-                                    assert!(ok.is_err());
-                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                    {
-                                        sender.send(ok.map(|_| data)).unwrap();
-                                    } else {
-                                        log::warn!("req_id {req_id} not detected, message might be lost");
-                                    }
-                                }
-                                WsRecvData::WriteMeta => {
-                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                    {
-                                        sender.send(ok.map(|_| data)).unwrap();
-                                    } else {
-                                        log::warn!("req_id {req_id} not detected, message might be lost");
-                                    }
-                                }
-                                WsRecvData::WriteRaw => {
-                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                    {
-                                        sender.send(ok.map(|_| data)).unwrap();
-                                    } else {
-                                        log::warn!("req_id {req_id} not detected, message might be lost");
-                                    }
-                                }
-                                WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => {
-                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                    {
-                                        sender.send(ok.map(|_| data)).unwrap();
-                                    } else {
-                                        log::warn!("req_id {req_id} not detected, message might be lost");
-                                    }
-                                }
+            Ok(frame) = reader.receive() => {
+                let (header, payload) = frame;
+                let code = header.code;
+                match code {
+                    OpCode::Text => {
 
-                                // Block type is for binary.
-                                _ => unreachable!(),
-                            }
-                        }
-                        Message::Binary(block) => {
-                            let mut slice = block.as_slice();
-                            use taos_query::util::InlinableRead;
-                            let offset = if is_v3 { 16 } else { 8 };
-
-                            let timing = if is_v3 {
-                                let timing = slice.read_u64().unwrap();
-                                Duration::from_nanos(timing as _)
-                            } else {
-                                Duration::ZERO
-                            };
-
-                            let res_id = slice.read_u64().unwrap();
-                            if let Some((_, req_id)) =  fetches_sender.remove(&res_id) {
-                                if is_v3 {
-                                    // v3
-                                    if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                        log::trace!("send data to fetches with id {}", res_id);
-                                        sender.send(Ok(WsRecvData::Block { timing, raw: block[offset..].to_vec() })).unwrap();
-                                    } else {
-                                        log::warn!("req_id {res_id} not detected, message might be lost");
+                        log::trace!("received json response: {payload}", payload = String::from_utf8_lossy(&payload));
+                        let v: WsRecv = serde_json::from_slice(&payload).unwrap();
+                        let (req_id, data, ok) = v.ok();
+                        match &data {
+                            WsRecvData::Query(_) => {
+                                if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                {
+                                    if let Err(err) = sender.send(ok.map(|_| data)) {
+                                        log::error!("send data with error: {err:?}");
                                     }
                                 } else {
-                                    // v2
-                                    if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                        log::trace!("send data to fetches with id {}", res_id);
-                                        sender.send(Ok(WsRecvData::BlockV2 { timing, raw: block[offset..].to_vec() })).unwrap();
-                                    } else {
-                                        log::warn!("req_id {res_id} not detected, message might be lost");
-                                    }
+                                    debug_assert!(!queries_sender.contains_key(&req_id));
+                                    log::warn!("req_id {req_id} not detected, message might be lost");
                                 }
-                            } else {
-                                log::warn!("result id {res_id} not found");
                             }
-                        }
-                        Message::Close(close) => {
-                            // taosAdapter should never send close frame to client.
-                            //   So all close frames should be treated as error.
-                            if let Some(close) = close {
-                                log::warn!("websocket received close frame: {close:?}");
+                            WsRecvData::Fetch(fetch) => {
+                                let id = fetch.id;
+                                if fetch.completed {
+                                    ws2.send(
+                                        WsSend::FreeResult(WsResArgs {
+                                            req_id,
+                                            id,
+                                        })
+                                        .to_msg(),
+                                    )
+                                    .await
+                                    .unwrap();
+                                }
+                                // dbg!(&queries_sender);
+                                if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                {
+                                    sender.send(ok.map(|_| data)).unwrap();
+                                } else {
+                                    log::warn!("req_id {req_id} not detected, message might be lost");
+                                }
+                            }
+                            WsRecvData::FetchBlock => {
+                                assert!(ok.is_err());
+                                if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                {
+                                    sender.send(ok.map(|_| data)).unwrap();
+                                } else {
+                                    log::warn!("req_id {req_id} not detected, message might be lost");
+                                }
+                            }
+                            WsRecvData::WriteMeta => {
+                                if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                {
+                                    sender.send(ok.map(|_| data)).unwrap();
+                                } else {
+                                    log::warn!("req_id {req_id} not detected, message might be lost");
+                                }
+                            }
+                            WsRecvData::WriteRaw => {
+                                if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                {
+                                    sender.send(ok.map(|_| data)).unwrap();
+                                } else {
+                                    log::warn!("req_id {req_id} not detected, message might be lost");
+                                }
+                            }
+                            WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => {
+                                if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                {
+                                    sender.send(ok.map(|_| data)).unwrap();
+                                } else {
+                                    log::warn!("req_id {req_id} not detected, message might be lost");
+                                }
+                            }
 
-                                let mut keys = Vec::new();
-                                for e in queries_sender.iter() {
-                                    keys.push(*e.key());
-                                }
-                                let reason = match close.code {
-                                    CloseCode::Size => {
-                                        format!("Message length reaches max limit (code: {})", close.code)
-                                    }
-                                    _ => format!("{}", close),
-                                };
-                                for k in keys {
-                                    if let Some((_, sender)) = queries_sender.remove(&k) {
-                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), reason.to_string())));
-                                    }
+                            // Block type is for binary.
+                            _ => unreachable!(),
+                        }
+                    }
+                    OpCode::Binary => {
+                        let block = payload.to_vec();
+                        let mut slice = block.as_slice();
+                        use taos_query::util::InlinableRead;
+                        let offset = if is_v3 { 16 } else { 8 };
+
+                        let timing = if is_v3 {
+                            let timing = slice.read_u64().unwrap();
+                            Duration::from_nanos(timing as _)
+                        } else {
+                            Duration::ZERO
+                        };
+
+                        let res_id = slice.read_u64().unwrap();
+                        if let Some((_, req_id)) =  fetches_sender.remove(&res_id) {
+                            if is_v3 {
+                                // v3
+                                if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                    log::trace!("send data to fetches with id {}", res_id);
+                                    sender.send(Ok(WsRecvData::Block { timing, raw: block[offset..].to_vec() })).unwrap();
+                                } else {
+                                    log::warn!("req_id {res_id} not detected, message might be lost");
                                 }
                             } else {
-                                log::warn!("websocket connection is closed normally");
-                                let mut keys = Vec::new();
-                                for e in queries_sender.iter() {
-                                    keys.push(*e.key());
-                                }
-                                for k in keys {
-                                    if let Some((_, sender)) = queries_sender.remove(&k) {
-                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
-                                    }
+                                // v2
+                                if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                    log::trace!("send data to fetches with id {}", res_id);
+                                    sender.send(Ok(WsRecvData::BlockV2 { timing, raw: block[offset..].to_vec() })).unwrap();
+                                } else {
+                                    log::warn!("req_id {res_id} not detected, message might be lost");
                                 }
                             }
-                            break 'ws;
+                        } else {
+                            log::warn!("result id {res_id} not found");
                         }
-                        Message::Ping(bytes) => {
-                            ws2.send(Message::Pong(bytes)).await.unwrap();
-                        }
-                        Message::Pong(_) => {
-                            // do nothing
-                            log::trace!("received pong message, do nothing");
-                        }
-                        Message::Frame(frame) => {
-                            // do nothing
-                            log::warn!("received (unexpected) frame message, do nothing");
-                            log::trace!("* frame data: {frame:?}");
-                        }
-                    },
-                    Err(err) => {
+                    }
+                    OpCode::Close => {
+                        // taosAdapter should never send close frame to client.
+                        // So all close frames should be treated as error.
+
+                        log::warn!("websocket connection is closed normally");
                         let mut keys = Vec::new();
                         for e in queries_sender.iter() {
-                                    keys.push(*e.key());
-                                }
-                        // queries_sender.for_each_async(|k, _| {
-                        //     keys.push(*k);
-                        // }).await;
+                            keys.push(*e.key());
+                        }
                         for k in keys {
                             if let Some((_, sender)) = queries_sender.remove(&k) {
-                                let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
+                                let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
                             }
                         }
+
                         break 'ws;
                     }
+                    OpCode::Ping => {
+                        let bytes = payload.to_vec();
+                        ws2.send(WsMessage{
+                            code: OpCode::Pong,
+                            data: bytes.into(),
+                            close_code: None
+                        }).await.unwrap();
+                    }
+                    OpCode::Pong => {
+                        // do nothing
+                        log::trace!("received pong message, do nothing");
+                    }
+                    _ => {
+                        let frame = payload;
+                        // do nothing
+                        log::warn!("received (unexpected) frame message, do nothing");
+                        log::trace!("* frame data: {frame:?}");
+                    }
+
                 }
             }
             _ = close_listener.changed() => {
@@ -527,15 +528,15 @@ impl WsTaos {
         let info = TaosBuilder::from_dsn(dsn)?;
         Self::from_wsinfo(&info).await
     }
-    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-
+    #[allow(dead_code)]
+    pub(crate) async fn tung_from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
         let ws = info.build_stream(info.to_query_url()).await?;
 
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
-        sender.send(version.to_msg()).await.map_err(Error::from)?;
+        sender.send(version.to_tungstenite_msg()).await.map_err(Error::from)?;
 
         let duration = Duration::from_secs(2);
         let version = match tokio::time::timeout(duration, reader.next()).await {
@@ -555,13 +556,13 @@ impl WsTaos {
             },
             _ => "2.x".to_string(),
         };
-        let is_v3 = !version.starts_with('2');
+        let _is_v3 = !version.starts_with('2');
 
         let login = WsSend::Conn {
             req_id,
             req: info.to_conn_request(),
         };
-        sender.send(login.to_msg()).await.map_err(Error::from)?;
+        sender.send(login.to_tungstenite_msg()).await.map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {
             match message {
                 Message::Text(text) => {
@@ -590,11 +591,11 @@ impl WsTaos {
         let queries3 = queries2.clone();
 
         let (ws, mut msg_recv) = tokio::sync::mpsc::channel(100);
-        let ws2 = ws.clone();
+        let _ws2 = ws.clone();
 
         // Connection watcher
         let (tx, mut rx) = watch::channel(false);
-        let close_listener = rx.clone();
+        let _close_listener = rx.clone();
 
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(10));
@@ -624,6 +625,140 @@ impl WsTaos {
                     }
                     _ = rx.changed() => {
                         let _ = sender.close().await;
+                        log::trace!("close sender task");
+                        break 'ws;
+                    }
+                }
+            }
+        });
+
+        tokio::spawn(async move {
+            // read_queries(reader, queries2, fetches_sender, ws2, is_v3, close_listener).await
+        });
+        let (ws, mut _msg_recv) = tokio::sync::mpsc::channel(100);
+        let ws_cloned: tokio::sync::mpsc::Sender<WsMessage<bytes::Bytes>> = ws.clone();
+
+        Ok(Self {
+            close_signal: tx,
+            sender: WsQuerySender {
+                version: Version(version),
+                req_id: Default::default(),
+                sender: ws_cloned,
+                queries: queries2_cloned,
+                results,
+            },
+        })
+    }
+
+    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
+        let ws = info.ws_tool_build_stream(info.to_query_url()).await?;
+
+        let req_id = 0;
+        let (mut reader, mut sender) = ws.split();
+
+        let version = WsSend::Version;
+        sender
+            .send(OpCode::Text, &serde_json::to_vec(&version).unwrap())
+            .await
+            .map_err(Error::from)?;
+
+        let duration = Duration::from_secs(2);
+        let version = match tokio::time::timeout(duration, reader.receive()).await {
+            Ok(Ok(frame)) => {
+                let (header, payload) = frame;
+                let code = header.code;
+                match code {
+                    OpCode::Text => {
+                        let v: WsRecv = serde_json::from_slice(&payload).unwrap();
+                        let (_, data, ok) = v.ok();
+                        match data {
+                            WsRecvData::Version { version } => {
+                                ok?;
+                                version
+                            }
+                            _ => "2.x".to_string(),
+                        }
+                    }
+                    _ => "2.x".to_string(),
+                }
+            }
+            _ => "2.x".to_string(),
+        };
+        let is_v3 = !version.starts_with('2');
+
+        let login = WsSend::Conn {
+            req_id,
+            req: info.to_conn_request(),
+        };
+        sender
+            .send(OpCode::Text, &serde_json::to_vec(&login).unwrap())
+            .await
+            .map_err(Error::from)?;
+
+        if let Ok(frame) = reader.receive().await {
+            let (header, payload) = frame;
+            let code = header.code;
+            match code {
+                OpCode::Text => {
+                    let v: WsRecv = serde_json::from_slice(&payload).unwrap();
+                    let (_req_id, data, ok) = v.ok();
+                    match data {
+                        WsRecvData::Conn => ok?,
+                        _ => unreachable!(),
+                    }
+                }
+                _ => {
+                    return Err(RawError::from_string(format!(
+                        "unexpected frame on login: {:?}",
+                        frame
+                    )));
+                }
+            }
+        }
+
+        let queries2 = Arc::new(QueryInner::new());
+
+        let fetches_sender = Arc::new(QueryResMapper::new());
+        let results = fetches_sender.clone();
+
+        let queries2_cloned = queries2.clone();
+        let queries3 = queries2.clone();
+
+        let (ws, mut msg_recv) = tokio::sync::mpsc::channel(100);
+        let ws2: tokio::sync::mpsc::Sender<WsMessage<bytes::Bytes>> = ws.clone();
+
+        // Connection watcher
+        let (tx, mut rx) = watch::channel(false);
+        let close_listener = rx.clone();
+
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_millis(10));
+
+            'ws: loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        //
+                        // println!("10ms passed");
+                    }
+                    Some(msg) = msg_recv.recv() => {
+                        // dbg!(&msg);
+                        let opcode = msg.code;
+                        let msg = msg.data;
+                        if let Err(err) = sender.send(opcode, &msg).await {
+                            log::error!("Write websocket error: {}", err);
+                                let mut keys = Vec::new();
+                                queries3.iter().for_each(|r| keys.push(*r.key()));
+
+                                for k in keys {
+                                    if let Some((_, sender)) = queries3.remove(&k) {
+                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
+                                    }
+                                }
+                                break 'ws;
+                            }
+                    }
+                    _ = rx.changed() => {
+                        let _ = sender.send(OpCode::Close, b"").await;
                         log::trace!("close sender task");
                         break 'ws;
                     }
@@ -1122,193 +1257,396 @@ impl AsyncQueryable for WsTaos {
     }
 }
 
-#[tokio::test]
-async fn test_client() -> anyhow::Result<()> {
+#[cfg(test)]
+mod tests {
     use futures::TryStreamExt;
-    std::env::set_var("RUST_LOG", "debug");
-    let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-    // pretty_env_logger::init();
 
-    let client = WsTaos::from_dsn(dsn).await?;
+    use super::*;
 
-    let _version = client.version();
-    assert_eq!(client.exec("drop database if exists abc_a").await?, 0);
-    assert_eq!(client.exec("create database abc_a").await?, 0);
-    assert_eq!(
-        client
-            .exec("create table abc_a.tb1(ts timestamp, v int)")
-            .await?,
-        0
-    );
-    assert_eq!(
-        client
-            .exec("insert into abc_a.tb1 values(1655793421375, 1)")
-            .await?,
-        1
-    );
+    #[tokio::test]
+    async fn test_client() -> anyhow::Result<()> {
+        use futures::TryStreamExt;
+        std::env::set_var("RUST_LOG", "debug");
+        let dsn =
+            std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        // pretty_env_logger::init();
 
-    // let mut rs = client.s_query("select * from abc_a.tb1").unwrap().unwrap();
-    let mut rs = client.query("select * from abc_a.tb1").await?;
+        let client = WsTaos::from_dsn(dsn).await?;
 
-    #[derive(Debug, serde::Deserialize)]
-    #[allow(dead_code)]
-    struct A {
-        ts: String,
-        v: i32,
-    }
-
-    let values: Vec<A> = rs.deserialize().try_collect().await?;
-
-    dbg!(values);
-
-    assert_eq!(client.exec("drop database abc_a").await?, 0);
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_client_cloud() -> anyhow::Result<()> {
-    std::env::set_var("RUST_LOG", "debug");
-    // pretty_env_logger::init();
-    let dsn = std::env::var("TDENGINE_ClOUD_DSN");
-    if dsn.is_err() {
-        println!("Skip test when not in cloud");
-        return Ok(());
-    }
-    let dsn = dsn.unwrap();
-    let client = WsTaos::from_dsn(dsn).await?;
-    let mut rs = client.query("select * from test.meters limit 10").await?;
-
-    let values = rs.to_records().await?;
-    for row in values {
-        use itertools::Itertools;
-        println!(
-            "{}",
-            row.into_iter()
-                .map(|value| format!("{value:?}"))
-                .join(" | ")
+        let _version = client.version();
+        assert_eq!(client.exec("drop database if exists abc_a").await?, 0);
+        assert_eq!(client.exec("create database abc_a").await?, 0);
+        assert_eq!(
+            client
+                .exec("create table abc_a.tb1(ts timestamp, v int)")
+                .await?,
+            0
         );
-    }
-    Ok(())
-}
+        assert_eq!(
+            client
+                .exec("insert into abc_a.tb1 values(1655793421375, 1)")
+                .await?,
+            1
+        );
 
-#[tokio::test]
-async fn ws_show_databases() -> anyhow::Result<()> {
-    std::env::set_var("RUST_LOG", "debug");
-    use futures::TryStreamExt;
-    // let _ = pretty_env_logger::try_init_timed();
-    let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-    let client = WsTaos::from_dsn(dsn).await?;
-    let mut rs = client.query("show databases").await?;
+        let mut rs = client.query("select * from abc_a.tb1").await?;
 
-    let mut blocks = rs.blocks();
-    while let Some(block) = blocks.try_next().await? {
-        let values = block.to_values();
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct A {
+            ts: String,
+            v: i32,
+        }
+
+        let values: Vec<A> = rs.deserialize().try_collect().await?;
+
         dbg!(values);
-    }
-    Ok(())
-}
 
-#[tokio::test]
-async fn ws_write_raw_block() -> anyhow::Result<()> {
-    let mut raw = RawBlock::parse_from_raw_block_v2(
-        &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
-        &[
-            Field::new("ts", taos_query::common::Ty::Timestamp, 8),
-            Field::new("v", taos_query::common::Ty::Bool, 1),
-        ],
-        &[8, 1],
-        1,
-        Precision::Millisecond,
-    );
-    raw.with_table_name("tb1");
-    dbg!(&raw);
-
-    use futures::TryStreamExt;
-    std::env::set_var("RUST_LOG", "debug");
-    let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-    // pretty_env_logger::init();
-
-    let client = WsTaos::from_dsn(dsn).await?;
-
-    let _version = client.version();
-
-    client
-        .exec_many([
-            "drop database if exists write_raw_block_test",
-            "create database write_raw_block_test keep 36500",
-            "use write_raw_block_test",
-            "create table if not exists tb1(ts timestamp, v bool)",
-        ])
-        .await?;
-
-    client.write_raw_block(&raw).await?;
-
-    let mut rs = client.query("select * from tb1").await?;
-
-    #[derive(Debug, serde::Deserialize)]
-    #[allow(dead_code)]
-    struct A {
-        ts: String,
-        v: Option<bool>,
+        assert_eq!(client.exec("drop database abc_a").await?, 0);
+        Ok(())
     }
 
-    let values: Vec<A> = rs.deserialize().try_collect().await?;
+    #[tokio::test]
+    async fn test_client_cloud() -> anyhow::Result<()> {
+        std::env::set_var("RUST_LOG", "debug");
+        // pretty_env_logger::init();
+        let dsn = std::env::var("TDENGINE_ClOUD_DSN");
+        if dsn.is_err() {
+            println!("Skip test when not in cloud");
+            return Ok(());
+        }
+        let dsn = dsn.unwrap();
+        let client = WsTaos::from_dsn(dsn).await?;
+        let mut rs = client.query("select * from test.meters limit 10").await?;
 
-    dbg!(values);
-
-    assert_eq!(client.exec("drop database write_raw_block_test").await?, 0);
-    Ok(())
-}
-
-#[tokio::test]
-async fn ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
-    let mut raw = RawBlock::parse_from_raw_block_v2(
-        &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
-        &[
-            Field::new("ts", taos_query::common::Ty::Timestamp, 8),
-            Field::new("v", taos_query::common::Ty::Bool, 1),
-        ],
-        &[8, 1],
-        1,
-        Precision::Millisecond,
-    );
-    raw.with_table_name("tb1");
-    dbg!(&raw);
-
-    use futures::TryStreamExt;
-    std::env::set_var("RUST_LOG", "debug");
-    let dsn = std::env::var("TDENGINE_TEST_DSN").unwrap_or("http://localhost:6041".to_string());
-    // pretty_env_logger::init();
-
-    let client = WsTaos::from_dsn(dsn).await?;
-
-    let _version = client.version();
-
-    client
-        .exec_many([
-            "drop database if exists test_ws_write_raw_block_with_req_id",
-            "create database test_ws_write_raw_block_with_req_id keep 36500",
-            "use test_ws_write_raw_block_with_req_id",
-            "create table if not exists tb1(ts timestamp, v bool)",
-        ])
-        .await?;
-    
-    let req_id = 10003;
-    client.write_raw_block_with_req_id(&raw, req_id).await?;
-
-    let mut rs = client.query("select * from tb1").await?;
-
-    #[derive(Debug, serde::Deserialize)]
-    #[allow(dead_code)]
-    struct A {
-        ts: String,
-        v: Option<bool>,
+        let values = rs.to_records().await?;
+        for row in values {
+            use itertools::Itertools;
+            println!(
+                "{}",
+                row.into_iter()
+                    .map(|value| format!("{value:?}"))
+                    .join(" | ")
+            );
+        }
+        Ok(())
     }
 
-    let values: Vec<A> = rs.deserialize().try_collect().await?;
+    #[tokio::test]
+    async fn ws_show_databases() -> anyhow::Result<()> {
+        std::env::set_var("RUST_LOG", "debug");
+        use futures::TryStreamExt;
+        // let _ = pretty_env_logger::try_init_timed();
+        let dsn =
+            std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        let client = WsTaos::from_dsn(dsn).await?;
+        let mut rs = client.query("show databases").await?;
 
-    dbg!(values);
+        let mut blocks = rs.blocks();
+        while let Some(block) = blocks.try_next().await? {
+            let values = block.to_values();
+            dbg!(values);
+        }
+        Ok(())
+    }
 
-    assert_eq!(client.exec("drop database test_ws_write_raw_block_with_req_id").await?, 0);
-    Ok(())
+    #[tokio::test]
+    async fn ws_write_raw_block() -> anyhow::Result<()> {
+        let mut raw = RawBlock::parse_from_raw_block_v2(
+            &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
+            &[
+                Field::new("ts", taos_query::common::Ty::Timestamp, 8),
+                Field::new("v", taos_query::common::Ty::Bool, 1),
+            ],
+            &[8, 1],
+            1,
+            Precision::Millisecond,
+        );
+        raw.with_table_name("tb1");
+        dbg!(&raw);
+
+        use futures::TryStreamExt;
+        std::env::set_var("RUST_LOG", "debug");
+        let dsn =
+            std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        // pretty_env_logger::init();
+
+        let client = WsTaos::from_dsn(dsn).await?;
+
+        let _version = client.version();
+
+        client
+            .exec_many([
+                "drop database if exists write_raw_block_test",
+                "create database write_raw_block_test keep 36500",
+                "use write_raw_block_test",
+                "create table if not exists tb1(ts timestamp, v bool)",
+            ])
+            .await?;
+
+        client.write_raw_block(&raw).await?;
+
+        let mut rs = client.query("select * from tb1").await?;
+
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct A {
+            ts: String,
+            v: Option<bool>,
+        }
+
+        let values: Vec<A> = rs.deserialize().try_collect().await?;
+
+        dbg!(values);
+
+        assert_eq!(client.exec("drop database write_raw_block_test").await?, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
+        let mut raw = RawBlock::parse_from_raw_block_v2(
+            &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
+            &[
+                Field::new("ts", taos_query::common::Ty::Timestamp, 8),
+                Field::new("v", taos_query::common::Ty::Bool, 1),
+            ],
+            &[8, 1],
+            1,
+            Precision::Millisecond,
+        );
+        raw.with_table_name("tb1");
+        dbg!(&raw);
+
+        use futures::TryStreamExt;
+        std::env::set_var("RUST_LOG", "debug");
+        let dsn = std::env::var("TDENGINE_TEST_DSN").unwrap_or("http://localhost:6041".to_string());
+        // pretty_env_logger::init();
+
+        let client = WsTaos::from_dsn(dsn).await?;
+
+        let _version = client.version();
+
+        client
+            .exec_many([
+                "drop database if exists test_ws_write_raw_block_with_req_id",
+                "create database test_ws_write_raw_block_with_req_id keep 36500",
+                "use test_ws_write_raw_block_with_req_id",
+                "create table if not exists tb1(ts timestamp, v bool)",
+            ])
+            .await?;
+
+        let req_id = 10003;
+        client.write_raw_block_with_req_id(&raw, req_id).await?;
+
+        let mut rs = client.query("select * from tb1").await?;
+
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct A {
+            ts: String,
+            v: Option<bool>,
+        }
+
+        let values: Vec<A> = rs.deserialize().try_collect().await?;
+
+        dbg!(values);
+
+        assert_eq!(
+            client
+                .exec("drop database test_ws_write_raw_block_with_req_id")
+                .await?,
+            0
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn ws_persistent_connection() -> anyhow::Result<()> {
+        std::env::set_var("RUST_LOG", "trace");
+        pretty_env_logger::init();
+        let client = WsTaos::from_dsn("taosws://localhost:6041/").await?;
+        let db = "ws_persistent_connection";
+        assert_eq!(
+            client.exec(format!("drop database if exists {db}")).await?,
+            0
+        );
+        assert_eq!(
+            client
+                .exec(format!("create database {db} keep 36500"))
+                .await?,
+            0
+        );
+        assert_eq!(
+            client.exec(
+                format!("create table {db}.stb1(ts timestamp,\
+                    b1 bool, c8i1 tinyint, c16i1 smallint, c32i1 int, c64i1 bigint,\
+                    c8u1 tinyint unsigned, c16u1 smallint unsigned, c32u1 int unsigned, c64u1 bigint unsigned,\
+                    cb1 binary(100), cn1 nchar(10),
+
+                    b2 bool, c8i2 tinyint, c16i2 smallint, c32i2 int, c64i2 bigint,\
+                    c8u2 tinyint unsigned, c16u2 smallint unsigned, c32u2 int unsigned, c64u2 bigint unsigned,\
+                    cb2 binary(10), cn2 nchar(16)) tags (jt json)")
+            ).await?,
+            0
+        );
+
+        // loop n times to test persistent connection
+        // do not run in ci env
+        let n = 100;
+        let interval = Duration::from_secs(3);
+        for _ in 0..n {
+            assert_eq!(
+                client
+                    .exec(format!(
+                        r#"insert into {db}.tb1 using {db}.stb1 tags('{{"key":"数据"}}')
+                   values(0,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
+                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
+                         (65535,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
+                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
+                    ))
+                    .await?,
+                2
+            );
+            assert_eq!(
+                client
+                    .exec(format!(
+                        r#"insert into {db}.tb2 using {db}.stb1 tags(NULL)
+                   values(1,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
+                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
+                         (65536,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
+                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
+                    ))
+                    .await?,
+                2
+            );
+            // wait to test persistent connection
+            tokio::time::sleep(interval).await;
+        }
+
+        client.exec(format!("drop database {db}")).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ws_async_data_flow() -> anyhow::Result<()> {
+        std::env::set_var("RUST_LOG", "debug");
+        // pretty_env_logger::init();
+        let client = WsTaos::from_dsn("taosws://localhost:6041/").await?;
+        let db = "ws_async_data_flow";
+        assert_eq!(
+            client.exec(format!("drop database if exists {db}")).await?,
+            0
+        );
+        assert_eq!(
+            client
+                .exec(format!("create database {db} keep 36500"))
+                .await?,
+            0
+        );
+        assert_eq!(
+            client.exec(
+                format!("create table {db}.stb1(ts timestamp,\
+                    b1 bool, c8i1 tinyint, c16i1 smallint, c32i1 int, c64i1 bigint,\
+                    c8u1 tinyint unsigned, c16u1 smallint unsigned, c32u1 int unsigned, c64u1 bigint unsigned,\
+                    cb1 binary(100), cn1 nchar(10),
+
+                    b2 bool, c8i2 tinyint, c16i2 smallint, c32i2 int, c64i2 bigint,\
+                    c8u2 tinyint unsigned, c16u2 smallint unsigned, c32u2 int unsigned, c64u2 bigint unsigned,\
+                    cb2 binary(10), cn2 nchar(16)) tags (jt json)")
+            ).await?,
+            0
+        );
+        assert_eq!(
+            client
+                .exec(format!(
+                    r#"insert into {db}.tb1 using {db}.stb1 tags('{{"key":"数据"}}')
+                   values(0,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
+                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
+                         (65535,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
+                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
+                ))
+                .await?,
+            2
+        );
+        assert_eq!(
+            client
+                .exec(format!(
+                    r#"insert into {db}.tb2 using {db}.stb1 tags(NULL)
+                   values(1,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
+                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
+                         (65536,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
+                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
+                ))
+                .await?,
+            2
+        );
+
+        let mut rs = client
+            .query(format!("select * from {db}.tb1 order by ts limit 1"))
+            .await?;
+
+        #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
+        #[allow(dead_code)]
+        struct A {
+            ts: String,
+            b1: bool,
+            c8i1: i8,
+            c16i1: i16,
+            c32i1: i32,
+            c64i1: i64,
+            c8u1: u8,
+            c16u1: u16,
+            c32u1: u32,
+            c64u1: u64,
+
+            c8i2: i8,
+            c16i2: i16,
+            c32i2: i32,
+            c64i2: i64,
+            c8u2: u8,
+            c16u2: u16,
+            c32u2: u32,
+            c64u2: u64,
+
+            cb1: String,
+            cb2: String,
+            cn1: String,
+            cn2: String,
+        }
+
+        let values: Vec<A> = rs.deserialize().try_collect().await?;
+
+        assert_eq!(
+            values[0],
+            A {
+                ts: "1970-01-01T08:00:00+08:00".to_string(),
+                b1: true,
+                c8i1: -1,
+                c16i1: -2,
+                c32i1: -3,
+                c64i1: -4,
+                c8u1: 1,
+                c16u1: 2,
+                c32u1: 3,
+                c64u1: 4,
+                c8i2: -5,
+                c16i2: -6,
+                c32i2: -7,
+                c64i2: -8,
+                c8u2: 5,
+                c16u2: 6,
+                c32u2: 7,
+                c64u2: 8,
+                cb1: "abc".to_string(),
+                cb2: "def".to_string(),
+                cn1: "涛思".to_string(),
+                cn2: "数据".to_string(),
+            }
+        );
+
+        client.exec(format!("drop database {db}")).await?;
+        Ok(())
+    }
 }
