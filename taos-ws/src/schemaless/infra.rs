@@ -171,6 +171,13 @@ pub(crate) trait ToMessage: Serialize {
     fn to_tungstenite_msg(&self) -> tokio_tungstenite::tungstenite::Message {
         tokio_tungstenite::tungstenite::Message::Text(serde_json::to_string(self).unwrap())
     }
+    fn to_msg(&self) -> ws_tool::Message<bytes::Bytes> {
+        ws_tool::Message{
+            code: ws_tool::frame::OpCode::Text,
+            data: serde_json::to_vec(self).unwrap().into(),
+            close_code: None,
+        }
+    }
 }
 
 impl ToMessage for WsSend {}
