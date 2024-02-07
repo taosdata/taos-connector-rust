@@ -173,10 +173,9 @@ async fn read_queries(
                         }
                     }
                     OpCode::Close => {
-                        // taosAdapter should never send close frame to client.
-                        // So all close frames should be treated as error.
+                        // get close message from taosadapter
 
-                        log::warn!("websocket connection is closed normally");
+                        log::warn!("websocket connection is closed by server");
                         let mut keys = Vec::new();
                         for e in queries_sender.iter() {
                             keys.push(*e.key());
