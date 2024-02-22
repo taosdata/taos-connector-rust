@@ -30,6 +30,11 @@ use crate::query::infra::{ToMessage, WsConnReq};
 use crate::TaosBuilder;
 use messages::*;
 
+use ws_tool::{
+    codec::AsyncDeflateRecv, errors::WsError as WsErrorWst, frame::OpCode, stream::AsyncStream,
+    Message as WsMessage,
+};
+
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
@@ -116,7 +121,7 @@ impl TBuilder for TmqBuilder {
     }
 
     fn build(&self) -> RawResult<Self::Target> {
-        taos_query::block_in_place_or_global(self.build_consumer())
+        taos_query::block_in_place_or_global(self.tung_build_consumer())
     }
 
     fn server_version(&self) -> RawResult<&str> {
@@ -194,7 +199,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
     }
 
     async fn build(&self) -> RawResult<Self::Target> {
-        self.build_consumer().await
+        self.tung_build_consumer().await
     }
 
     async fn server_version(&self) -> RawResult<&str> {
@@ -871,7 +876,7 @@ impl TmqBuilder {
         })
     }
 
-    async fn build_consumer(&self) -> RawResult<Consumer> {
+    async fn tung_build_consumer(&self) -> RawResult<Consumer> {
         let url = self.info.to_tmq_url();
         // let (ws, _) = taos_query::block_in_place_or_global(connect_async(url))?;
         let (ws, _) = connect_async(&url).await.map_err(WsTmqError::from)?;
@@ -1365,7 +1370,7 @@ mod tests {
         .await?;
 
         let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=5s&auto.offset.reset=earliest")?;
-        let mut consumer = builder.build_consumer().await?;
+        let mut consumer = builder.tung_build_consumer().await?;
         consumer.subscribe(["ws_tmq_meta"]).await?;
 
         {
@@ -1855,7 +1860,7 @@ mod tests {
         .await?;
 
         let builder = TmqBuilder::new(&dsn)?;
-        let mut consumer = builder.build_consumer().await?;
+        let mut consumer = builder.tung_build_consumer().await?;
         consumer.subscribe(["ws_tmq_meta"]).await?;
 
         {
