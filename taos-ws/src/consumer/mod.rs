@@ -1181,6 +1181,312 @@ impl TmqBuilder {
 
         Ok(consumer)
     }
+
+    async fn build_consumer(&self) -> RawResult<Consumer> {
+        let url = self.info.to_tmq_url();
+        // let (ws, _) = taos_query::block_in_place_or_global(connect_async(url))?;
+        let (ws, _) = connect_async(&url).await.map_err(WsTmqError::from)?;
+        let (mut sender, mut reader) = ws.split();
+
+        let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new());
+
+        let queries_sender = queries.clone();
+        let msg_handler = queries.clone();
+
+        let (ws, mut msg_recv) = tokio::sync::mpsc::channel::<Message>(100);
+        let ws2 = ws.clone();
+
+        // Connection watcher
+        let (tx, mut rx) = watch::channel(false);
+        let mut close_listener = rx.clone();
+
+        let sending_url = url.clone();
+        static PING_INTERVAL: u64 = 29;
+        const PING: &[u8] = b"TAOSX";
+
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_secs(PING_INTERVAL));
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        log::trace!("Check websocket message sender alive");
+                        if let Err(err) = sender.send(Message::Ping(PING.to_vec())).await {
+                            log::trace!("sending ping message to {sending_url} error: {err:?}");
+                            // let mut keys = Vec::new();
+                            let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
+
+                            // msg_handler.for_each_async(|k, _| {
+                            //     keys.push(*k);
+                            // }).await;
+                            for k in keys {
+                                if let Some((_, sender)) = msg_handler.remove(&k) {
+                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                        format!("WebSocket internal error: {err}"))));
+                                }
+                            }
+                        }
+                    }
+                    Some(msg) = msg_recv.recv() => {
+                        if msg.is_close() {
+                            let _ = sender.send(msg).await;
+                            let _ = sender.close().await;
+                            break;
+                        }
+                        log::trace!("send message {msg:?}");
+                        if let Err(err) = sender.send(msg).await {
+                            log::trace!("sending message to {sending_url} error: {err:?}");
+                            let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
+                            for k in keys {
+                                if let Some((_, sender)) = msg_handler.remove(&k) {
+                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                        format!("WebSocket internal error: {err}"))));
+                                }
+                            }
+                        }
+                        log::trace!("send message done");
+                    }
+                    _ = rx.changed() => {
+                        let _= sender.send(Message::Close(None)).await;
+                        let _ = sender.close().await;
+                        log::trace!("close tmq sender");
+                        break;
+                    }
+                }
+            }
+        });
+
+        tokio::spawn(async move {
+            let instant = Instant::now();
+            'ws: loop {
+                tokio::select! {
+                    Some(message) = reader.next() => {
+                        match message {
+                            Ok(message) => match message {
+                                Message::Text(text) => {
+                                    log::trace!("json response: {}", text);
+                                    let v: TmqRecv = serde_json::from_str(&text).expect(&text);
+                                    let (req_id, recv, ok) = v.ok();
+                                    match &recv {
+                                        TmqRecvData::Subscribe => {
+                                            log::trace!("subscribe with: {:?}", req_id);
+
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("subscribe message received but no receiver alive");
+                                            }
+                                        },
+                                        TmqRecvData::Unsubscribe => {
+                                            log::trace!("unsubscribe with: {:?} successed", req_id);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("unsubscribe message received but no receiver alive");
+                                            }
+                                        },
+                                        TmqRecvData::Poll(_) => {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("poll message received but no receiver alive");
+                                            }
+                                        },
+                                        TmqRecvData::FetchJsonMeta { data }=> {
+                                            log::trace!("fetch json meta data: {:?}", data);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("poll message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::FetchRaw { meta: _ }=> {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("poll message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::Commit=> {
+                                            log::trace!("commit done: {:?}", recv);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("poll message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::Fetch(fetch)=> {
+                                            log::trace!("fetch done: {:?}", fetch);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("poll message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::FetchBlock{ data: _ }=> {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                let _ = sender.send(Err(RawError::new(
+                                                    WS_ERROR_NO::WEBSOCKET_ERROR.as_code(),
+                                                    format!("WebSocket internal error: {:?}", &text)
+                                                )));
+                                            }
+                                            break 'ws;
+                                        }
+                                        TmqRecvData::Assignment(assignment)=> {
+                                            log::trace!("assignment done: {:?}", assignment);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("assignment message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::Seek { timing }=> {
+                                            log::trace!("seek done: req_id {:?} timing {:?}", &req_id, timing);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("seek message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::Committed { committed }=> {
+                                            log::trace!("committed done: {:?}", committed);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("committed message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::Position { position }=> {
+                                            log::trace!("position done: {:?}", position);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                            {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            }  else {
+                                                log::warn!("position message received but no receiver alive");
+                                            }
+                                        }
+                                        TmqRecvData::CommitOffset { timing }=> {
+                                            log::trace!("commit offset done: {:?}", timing);
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                let _ = sender.send(ok.map(|_|recv));
+                                            } else {
+                                                log::warn!("commit offset message received but no receiver alive");
+                                            }
+                                        }
+
+                                        _ => unreachable!("unknown tmq response"),
+                                    }
+                                }
+                                Message::Binary(data) => {
+                                    // writeUint64(message.buffer, req.ReqID)
+                                    // writeUint64(message.buffer, req.MessageID)
+                                    // writeUint64(message.buffer, TMQRawMetaMessage)
+                                    // writeUint32(message.buffer, length)
+                                    // writeUint16(message.buffer, metaType)
+                                    let mut bytes = Bytes::from(data);
+                                    let part = bytes.slice(24..);
+                                    // dbg!(&bytes);
+                                    use bytes::Buf;
+                                    let timing = bytes.get_u64_le();
+                                    let req_id = bytes.get_u64_le();
+                                    let message_id = bytes.get_u64_le();
+
+
+                                    log::trace!("[{:.2}ms] receive binary message with req_id {} message_id {}",
+                                        Duration::from_nanos(timing).as_secs_f64() / 1000.,
+                                        req_id, message_id);
+
+                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                    {
+                                        sender.send(Ok(TmqRecvData::Bytes(part))).unwrap();
+                                    }  else {
+                                        log::warn!("poll message received but no receiver alive");
+                                    }
+
+
+                                }
+                                Message::Close(close) => {
+                                    log::warn!("websocket connection is closed (unexpected?)");
+
+                                    let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                    let err = if let Some(close) = close {
+                                        format!("WebSocket internal error: {}", close)
+                                    } else {
+                                        "WebSocket internal error, connection is reset by server".to_string()
+                                    };
+                                    for k in keys {
+                                        if let Some((_, sender)) = queries_sender.remove(&k) {
+                                            let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.clone())));
+                                        }
+                                    }
+                                    break 'ws;
+                                }
+                                Message::Ping(bytes) => {
+                                    ws2.send(Message::Pong(bytes)).await.unwrap();
+                                }
+                                Message::Pong(bytes) => {
+                                    if bytes == PING {
+                                        log::trace!("ping/pong handshake success");
+                                    } else {
+                                        // do nothing
+                                        log::warn!("received (unexpected) pong message, do nothing");
+                                    }
+                                }
+                                Message::Frame(frame) => {
+                                    // do no`thing
+                                    log::warn!("received (unexpected) frame message, do nothing");
+                                    log::trace!("* frame data: {frame:?}");
+                                }
+                            },
+                            Err(err) => {
+                                let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                for k in keys {
+                                    if let Some((_, sender)) = queries_sender.remove(&k) {
+                                        let _ = sender.send(Err(RawError::new(
+                                            WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                            format!("WebSocket internal error: {err}")
+                                        )));
+                                    }
+                                }
+                                break 'ws;
+                            }
+                        }
+                    }
+                    _ = close_listener.changed() => {
+                        log::trace!("close reader task");
+                        break 'ws;
+                    }
+                }
+            }
+            log::trace!("Consuming done in {:?}", instant.elapsed());
+        });
+        let consumer = Consumer {
+            conn: self.info.to_conn_request(),
+            tmq_conf: self.conf.clone(),
+            sender: WsTmqSender {
+                req_id: Arc::new(AtomicU64::new(1)),
+                queries,
+                sender: ws,
+                timeout: Timeout::Duration(Duration::MAX),
+            },
+            // fetches,
+            close_signal: tx,
+            timeout: self.timeout,
+            topics: vec![],
+        };
+
+        Ok(consumer)
+    }
 }
 
 #[derive(Debug)]
