@@ -1214,13 +1214,10 @@ impl TmqBuilder {
                     _ = interval.tick() => {
                         log::trace!("Check websocket message sender alive");
                         if let Err(err) = sender.send(OpCode::Ping, &serde_json::to_vec(&PING).unwrap()).await {
+
                             log::trace!("sending ping message to {sending_url} error: {err:?}");
-                            // let mut keys = Vec::new();
                             let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
 
-                            // msg_handler.for_each_async(|k, _| {
-                            //     keys.push(*k);
-                            // }).await;
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
                                     let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
@@ -1383,7 +1380,6 @@ impl TmqBuilder {
                                             log::warn!("commit offset message received but no receiver alive");
                                         }
                                     }
-
                                     _ => unreachable!("unknown tmq response"),
                                 }
                             }
@@ -1407,8 +1403,6 @@ impl TmqBuilder {
                                 } else {
                                     log::warn!("req_id {req_id} not detected, message might be lost");
                                 }
-                                
-
                             }
                             OpCode::Close => {
                                 log::warn!("websocket connection is closed normally");
@@ -1421,7 +1415,6 @@ impl TmqBuilder {
                                         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
                                     }
                                 }
-
                                 break 'ws;
                             }
                             OpCode::Ping => {
