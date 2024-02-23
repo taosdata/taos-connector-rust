@@ -31,7 +31,7 @@ use crate::TaosBuilder;
 use messages::*;
 
 use ws_tool::{
-    codec::AsyncDeflateRecv, errors::WsError as WsErrorWst, frame::OpCode, stream::AsyncStream,
+    errors::WsError as WsErrorWst, frame::OpCode, stream::AsyncStream,
     Message as WsMessage,
 };
 
