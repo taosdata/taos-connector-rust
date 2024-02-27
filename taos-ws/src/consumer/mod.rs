@@ -30,9 +30,7 @@ use crate::query::infra::{ToMessage, WsConnReq};
 use crate::TaosBuilder;
 use messages::*;
 
-use ws_tool::{
-    errors::WsError as WsErrorWst, frame::OpCode, Message as WsMessage,
-};
+use ws_tool::{errors::WsError as WsErrorWst, frame::OpCode, Message as WsMessage};
 
 use std::fmt::Debug;
 use std::str::FromStr;
@@ -1396,7 +1394,7 @@ impl TmqBuilder {
                                 };
 
                                 let req_id = slice.read_u64().unwrap();
-                                
+
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                     log::trace!("send data to fetches with id {}", req_id);
                                     sender.send(Ok(TmqRecvData::Bytes(part.into()))).unwrap();
