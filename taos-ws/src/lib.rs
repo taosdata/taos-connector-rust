@@ -458,7 +458,8 @@ impl TaosBuilder {
 
     pub(crate) async fn build_stream(&self, url: String) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         let mut config = WebSocketConfig::default();
-        config.max_frame_size = Some(1024 * 1024 * 1024);
+        config.max_frame_size = Some(1024 * 1024 * 256);
+        config.max_message_size = Some(1024 * 1024 * 256);
 
         let res = connect_async_with_config(self.to_ws_url(), Some(config), false)
             .await

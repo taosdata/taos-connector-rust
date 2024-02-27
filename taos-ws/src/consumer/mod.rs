@@ -875,7 +875,8 @@ impl TmqBuilder {
 
     async fn build_consumer(&self) -> RawResult<Consumer> {
         let mut config = WebSocketConfig::default();
-        config.max_frame_size = None;
+        config.max_frame_size = Some(1024 * 1024 * 256);
+        config.max_message_size = Some(1024 * 1024 * 256);
 
         let url = self.info.to_tmq_url();
         let (ws, _) = connect_async_with_config(&url, Some(config), false).await.map_err(WsTmqError::from)?;

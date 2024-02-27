@@ -448,7 +448,12 @@ async fn read_queries(
                             break 'ws;
                         }
                         Message::Ping(bytes) => {
-                            ws2.send(Message::Pong(bytes)).await.unwrap();
+                            for _ in 0..5 {
+                                if let Err(err) = ws2.send(Message::Pong(bytes.clone())).await {
+                                    log::warn!("Send pong error: {err:#}");
+                                    tokio::time::sleep(Duration::from_millis(100)).await;
+                                }
+                            }
                         }
                         Message::Pong(_) => {
                             // do nothing
