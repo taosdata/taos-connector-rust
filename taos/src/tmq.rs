@@ -1223,7 +1223,6 @@ mod async_tests {
             NULL, NULL, NULL, NULL)",
             // kind 5: create common table
             "create table `table` (ts timestamp, v int)",
-
         ])
         .await?;
 
@@ -1461,8 +1460,10 @@ mod async_tests {
 
         dsn.params
             .insert("auto.offset.reset".to_string(), "earliest".to_string());
-        dsn.params
-            .insert("experimental.snapshot.enable".to_string(), "true".to_string());
+        dsn.params.insert(
+            "experimental.snapshot.enable".to_string(),
+            "true".to_string(),
+        );
 
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;

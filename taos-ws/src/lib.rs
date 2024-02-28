@@ -563,6 +563,45 @@ impl TaosBuilder {
 
         Ok(ws)
     }
+
+    pub(crate) async fn build_tmq_stream(
+        &self,
+        url: String,
+    ) -> RawResult<AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>> {
+        let mut config = ClientConfig::default();
+
+        #[cfg(feature = "deflate")]
+        {
+            config.window = Some(WindowBit::Fifteen);
+            config.extra_headers = hashmap! {
+                "Accept-Encoding".to_string() => "gzip, deflate".to_string(),
+            };
+        }
+        #[cfg(not(feature = "deflate"))]
+        {
+            config.window = None;
+            config.extra_headers = hashmap! {
+                "Accept-Encoding".to_string() => "gzip".to_string(),
+            };
+        }
+
+        let ws: Result<
+            AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>,
+            QueryError,
+        > = config
+            .async_connect_with(url.clone(), AsyncDeflateCodec::check_fn)
+            .await
+            .map_err(|err| {
+                let err_string = err.to_string();
+                if err_string.contains("401 Unauthorized") {
+                    QueryError::Unauthorized(url)
+                } else {
+                    err.into()
+                }
+            });
+
+        Ok(ws?)
+    }
 }
 
 #[cfg(feature = "rustls")]

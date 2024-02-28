@@ -30,6 +30,8 @@ use crate::query::infra::{ToMessage, WsConnReq};
 use crate::TaosBuilder;
 use messages::*;
 
+use ws_tool::{errors::WsError as WsErrorWst, frame::OpCode, Message as WsMessage};
+
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
@@ -38,7 +40,7 @@ use std::time::{Duration, Instant};
 
 mod messages;
 
-type WsSender = tokio::sync::mpsc::Sender<Message>;
+type WsSender = tokio::sync::mpsc::Sender<WsMessage<bytes::Bytes>>;
 type WsTmqAgent = Arc<HashMap<ReqId, oneshot::Sender<RawResult<TmqRecvData>>>>;
 
 #[derive(Debug, Clone)]
@@ -66,7 +68,7 @@ impl WsTmqSender {
         self.queries.insert(req_id, tx);
 
         self.sender
-            .send_timeout(msg.to_tungstenite_msg(), send_timeout)
+            .send_timeout(msg.to_msg(), send_timeout)
             .await
             .map_err(WsTmqError::from)?;
 
@@ -871,7 +873,8 @@ impl TmqBuilder {
         })
     }
 
-    async fn build_consumer(&self) -> RawResult<Consumer> {
+    #[allow(dead_code)]
+    async fn tung_build_consumer(&self) -> RawResult<Consumer> {
         let url = self.info.to_tmq_url();
         // let (ws, _) = taos_query::block_in_place_or_global(connect_async(url))?;
         let (ws, _) = connect_async(&url).await.map_err(WsTmqError::from)?;
@@ -1159,6 +1162,287 @@ impl TmqBuilder {
             }
             log::trace!("Consuming done in {:?}", instant.elapsed());
         });
+        let (ws, mut _msg_recv) = tokio::sync::mpsc::channel(100);
+        let ws_cloned: tokio::sync::mpsc::Sender<WsMessage<bytes::Bytes>> = ws.clone();
+        let consumer = Consumer {
+            conn: self.info.to_conn_request(),
+            tmq_conf: self.conf.clone(),
+            sender: WsTmqSender {
+                req_id: Arc::new(AtomicU64::new(1)),
+                queries,
+                sender: ws_cloned,
+                timeout: Timeout::Duration(Duration::MAX),
+            },
+            // fetches,
+            close_signal: tx,
+            timeout: self.timeout,
+            topics: vec![],
+        };
+
+        Ok(consumer)
+    }
+
+    async fn build_consumer(&self) -> RawResult<Consumer> {
+        let url = self.info.to_tmq_url();
+        let sending_url = url.clone();
+
+        let ws = self.info.build_tmq_stream(url).await?;
+        let (mut reader, mut sender) = ws.split();
+
+        let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new());
+
+        let queries_sender = queries.clone();
+        let msg_handler = queries.clone();
+
+        let (ws, mut msg_recv) = tokio::sync::mpsc::channel::<WsMessage<bytes::Bytes>>(100);
+        let ws2 = ws.clone();
+
+        // Connection watcher
+        let (tx, mut rx) = watch::channel(false);
+        let mut close_listener = rx.clone();
+
+        static PING_INTERVAL: u64 = 29;
+        const PING: &[u8] = b"TAOS";
+
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_secs(PING_INTERVAL));
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        log::trace!("Check websocket message sender alive");
+                        if let Err(err) = sender.send(OpCode::Ping, &serde_json::to_vec(&PING).unwrap()).await {
+
+                            log::trace!("sending ping message to {sending_url} error: {err:?}");
+                            let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
+
+                            for k in keys {
+                                if let Some((_, sender)) = msg_handler.remove(&k) {
+                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                        format!("WebSocket internal error: {err}"))));
+                                }
+                            }
+                        }
+                    }
+                    Some(msg) = msg_recv.recv() => {
+
+                        log::trace!("send message {msg:?}");
+                        let opcode = msg.code;
+                        let msg = msg.data;
+                        if let Err(err) = sender.send(opcode, &msg).await {
+                            log::trace!("sending message to {sending_url} error: {err:?}");
+                            let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
+                            for k in keys {
+                                if let Some((_, sender)) = msg_handler.remove(&k) {
+                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                        format!("WebSocket internal error: {err}"))));
+                                }
+                            }
+                        }
+                        log::trace!("send message done");
+                    }
+                    _ = rx.changed() => {
+                        let _ = sender.send(OpCode::Close, b"").await;
+                        log::trace!("close tmq sender");
+                        break;
+                    }
+                }
+            }
+        });
+
+        tokio::spawn(async move {
+            let instant = Instant::now();
+            'ws: loop {
+                tokio::select! {
+                    Ok(frame) = reader.receive() => {
+                        let (header, payload) = frame;
+                        let code = header.code;
+                        match code {
+                            OpCode::Text => {
+                                log::trace!("received json response: {payload}", payload = String::from_utf8_lossy(&payload));
+                                let v: TmqRecv = serde_json::from_slice(&payload).unwrap();
+                                let (req_id, recv, ok) = v.ok();
+                                match &recv {
+                                    TmqRecvData::Subscribe => {
+                                        log::trace!("subscribe with: {:?}", req_id);
+
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                        {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        }  else {
+                                            log::warn!("subscribe message received but no receiver alive");
+                                        }
+                                    },
+                                    TmqRecvData::Unsubscribe => {
+                                        log::trace!("unsubscribe with: {:?} successed", req_id);
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                        {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        }  else {
+                                            log::warn!("unsubscribe message received but no receiver alive");
+                                        }
+                                    },
+                                    TmqRecvData::Poll(_) => {
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                        {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        }  else {
+                                            log::warn!("poll message received but no receiver alive");
+                                        }
+                                    },
+                                    TmqRecvData::FetchJsonMeta { data }=> {
+                                        log::trace!("fetch json meta data: {:?}", data);
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                        {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        }  else {
+                                            log::warn!("poll message received but no receiver alive");
+                                        }
+                                    }
+                                    TmqRecvData::FetchRaw { meta: _ }=> {
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                        {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        }  else {
+                                            log::warn!("poll message received but no receiver alive");
+                                        }
+                                    }
+                                    TmqRecvData::Commit=> {
+                                        log::trace!("commit done: {:?}", recv);
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                        {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        }  else {
+                                            log::warn!("poll message received but no receiver alive");
+                                        }
+                                    }
+                                    TmqRecvData::Fetch(fetch)=> {
+                                        log::trace!("fetch done: {:?}", fetch);
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                        {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        }  else {
+                                            log::warn!("poll message received but no receiver alive");
+                                        }
+                                    }
+                                    TmqRecvData::FetchBlock{ data: _ }=> {
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                            let _ = sender.send(Err(RawError::new(
+                                                WS_ERROR_NO::WEBSOCKET_ERROR.as_code(),
+                                                format!("WebSocket internal error")
+                                            )));
+                                        }
+                                        break 'ws;
+                                    }
+                                    TmqRecvData::Assignment(assignment)=> {
+                                        log::trace!("assignment done: {:?}", assignment);
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                        {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        }  else {
+                                            log::warn!("assignment message received but no receiver alive");
+                                        }
+                                    }
+                                    TmqRecvData::Seek { timing }=> {
+                                        log::trace!("seek done: req_id {:?} timing {:?}", &req_id, timing);
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                        {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        }  else {
+                                            log::warn!("seek message received but no receiver alive");
+                                        }
+                                    }
+                                    TmqRecvData::Committed { committed }=> {
+                                        log::trace!("committed done: {:?}", committed);
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                        {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        }  else {
+                                            log::warn!("committed message received but no receiver alive");
+                                        }
+                                    }
+                                    TmqRecvData::Position { position }=> {
+                                        log::trace!("position done: {:?}", position);
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
+                                        {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        }  else {
+                                            log::warn!("position message received but no receiver alive");
+                                        }
+                                    }
+                                    TmqRecvData::CommitOffset { timing }=> {
+                                        log::trace!("commit offset done: {:?}", timing);
+                                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                            let _ = sender.send(ok.map(|_|recv));
+                                        } else {
+                                            log::warn!("commit offset message received but no receiver alive");
+                                        }
+                                    }
+                                    _ => unreachable!("unknown tmq response"),
+                                }
+                            }
+                            OpCode::Binary => {
+                                let block = payload.to_vec();
+                                let mut slice = block.as_slice();
+                                use taos_query::util::InlinableRead;
+                                let offset = 24;
+                                let part = slice[offset..].to_vec();
+
+                                let _timing = {
+                                    let timing = slice.read_u64().unwrap();
+                                    Duration::from_nanos(timing as _)
+                                };
+
+                                let req_id = slice.read_u64().unwrap();
+
+                                if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                    log::trace!("send data to fetches with id {}", req_id);
+                                    sender.send(Ok(TmqRecvData::Bytes(part.into()))).unwrap();
+                                } else {
+                                    log::warn!("req_id {req_id} not detected, message might be lost");
+                                }
+                            }
+                            OpCode::Close => {
+                                log::warn!("websocket connection is closed normally");
+                                let mut keys = Vec::new();
+                                for e in queries_sender.iter() {
+                                    keys.push(*e.key());
+                                }
+                                for k in keys {
+                                    if let Some((_, sender)) = queries_sender.remove(&k) {
+                                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
+                                    }
+                                }
+                                break 'ws;
+                            }
+                            OpCode::Ping => {
+                                let bytes = payload.to_vec();
+                                ws2.send(WsMessage{
+                                    code: OpCode::Pong,
+                                    data: bytes.into(),
+                                    close_code: None
+                                }).await.unwrap();
+                            }
+                            OpCode::Pong => {
+                                // do nothing
+                                log::trace!("received pong message, do nothing");
+                            }
+                            _ => {
+                                let frame = payload;
+                                // do nothing
+                                log::warn!("received (unexpected) frame message, do nothing");
+                                log::trace!("* frame data: {frame:?}");
+                            }
+                        }
+                    }
+                    _ = close_listener.changed() => {
+                        log::trace!("close reader task");
+                        break 'ws;
+                    }
+                }
+            }
+            log::trace!("Consuming done in {:?}", instant.elapsed());
+        });
         let consumer = Consumer {
             conn: self.info.to_conn_request(),
             tmq_conf: self.conf.clone(),
@@ -1222,13 +1506,15 @@ pub enum WsTmqError {
     #[error("{0}")]
     FetchError(#[from] oneshot::error::RecvError),
     #[error("{0}")]
-    SendError(#[from] tokio::sync::mpsc::error::SendError<Message>),
+    SendError(#[from] tokio::sync::mpsc::error::SendError<WsMessage<bytes::Bytes>>),
     #[error(transparent)]
-    SendTimeoutError(#[from] tokio::sync::mpsc::error::SendTimeoutError<Message>),
+    SendTimeoutError(#[from] tokio::sync::mpsc::error::SendTimeoutError<WsMessage<bytes::Bytes>>),
     #[error("{0}")]
     DeError(#[from] DeError),
     #[error("Deserialize json error: {0}")]
     JsonError(#[from] serde_json::Error),
+    #[error("WebSocket internal[ws-tool] error: {0}")]
+    WsErrorWst(#[from] WsErrorWst),
     #[error("{0}")]
     WsError(#[from] WsError),
     #[error("{0}")]
@@ -1364,7 +1650,9 @@ mod tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=5s&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new(
+            "taos://localhost:6041?group.id=10&timeout=5s&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build_consumer().await?;
         consumer.subscribe(["ws_tmq_meta"]).await?;
 
@@ -1514,7 +1802,9 @@ mod tests {
             "use ws_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new(
+            "taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync"])?;
 
@@ -1701,7 +1991,9 @@ mod tests {
             "use ws_tmq_meta_sync32",
         ])?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new(
+            "taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync3"])?;
 
@@ -1765,6 +2057,152 @@ mod tests {
             "drop topic ws_tmq_meta_sync3",
             "drop database ws_tmq_meta_sync3",
         ])?;
+        Ok(())
+    }
+
+    #[cfg(feature = "rustls")]
+    #[tokio::test]
+    async fn test_consumer_cloud() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+        std::env::set_var("RUST_LOG", "debug");
+        // let _ = pretty_env_logger::formatted_builder()
+        //     .filter_level(log::LevelFilter::Debug)
+        //     .try_init();
+        let dsn = std::env::var("TDENGINE_ClOUD_DSN");
+        if dsn.is_err() {
+            println!("Skip test when not in cloud");
+            return Ok(());
+        }
+        let dsn = dsn.unwrap();
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        taos.exec_many([
+            "drop topic if exists ws_tmq_meta",
+            "drop database if exists ws_tmq_meta",
+            "create database ws_tmq_meta wal_retention_period 3600",
+            "create topic ws_tmq_meta with meta as database ws_tmq_meta",
+            "use ws_tmq_meta",
+            // kind 1: create super table using all types
+            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 json)",
+            // kind 2: create child table with json tag
+            "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
+            "create table tb1 using stb1 tags(NULL)",
+            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)
+            tb1 values(now, true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            // kind 3: create super table with all types except json (especially for tags)
+            "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
+            t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
+            t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
+            // kind 4: create child table with all types except json
+            "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)",
+            // kind 5: create common table
+            "create table `table` (ts timestamp, v int)",
+            // kind 6: column in super table
+            "alter table stb1 add column new1 bool",
+            "alter table stb1 add column new2 tinyint",
+            "alter table stb1 add column new10 nchar(16)",
+            "alter table stb1 modify column new10 nchar(32)",
+            "alter table stb1 drop column new10",
+            "alter table stb1 drop column new2",
+            "alter table stb1 drop column new1",
+            // kind 7: add tag in super table
+            "alter table `stb2` add tag new1 bool",
+            "alter table `stb2` rename tag new1 new1_new",
+            "alter table `stb2` modify tag t10 nchar(32)",
+            "alter table `stb2` drop tag new1_new",
+            // kind 8: column in common table
+            "alter table `table` add column new1 bool",
+            "alter table `table` add column new2 tinyint",
+            "alter table `table` add column new10 nchar(16)",
+            "alter table `table` modify column new10 nchar(32)",
+            "alter table `table` rename column new10 new10_new",
+            "alter table `table` drop column new10_new",
+            "alter table `table` drop column new2",
+            "alter table `table` drop column new1",
+        ])
+        .await?;
+
+        taos.exec_many([
+            "drop database if exists ws_tmq_meta2",
+            "create database if not exists ws_tmq_meta2 wal_retention_period 3600",
+            "use ws_tmq_meta2",
+        ])
+        .await?;
+
+        let builder = TmqBuilder::new(&dsn)?;
+        let mut consumer = builder.build_consumer().await?;
+        consumer.subscribe(["ws_tmq_meta"]).await?;
+
+        {
+            let mut stream = consumer.stream();
+
+            while let Some((offset, message)) = stream.try_next().await? {
+                // Offset contains information for topic name, database name and vgroup id,
+                //  similar to kafka topic/partition/offset.
+                let _ = offset.topic();
+                let _ = offset.database();
+                let _ = offset.vgroup_id();
+
+                match message {
+                    MessageSet::Meta(meta) => {
+                        let _raw = meta.as_raw_meta().await?;
+
+                        // meta data can be write to an database seamlessly by raw or json (to sql).
+                        let json = meta.as_json_meta().await?;
+                        let sql = json.to_string();
+                        log::debug!("sql: {}", sql);
+                        if let Err(err) = taos.exec(sql).await {
+                            match err.code() {
+                                Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
+                                Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
+                                Code::COLUMN_EXISTS => log::trace!("column already exists"),
+                                Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
+                                Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
+                                Code::MODIFIED_ALREADY => log::trace!("modified already done"),
+                                Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
+                                Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
+                                _ => {
+                                    log::error!("{}", err);
+                                }
+                            }
+                        }
+                    }
+                    MessageSet::Data(data) => {
+                        // data message may have more than one data block for various tables.
+                        while let Some(_data) = data.fetch_block().await? {
+                            // dbg!(data);
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                consumer.commit(offset).await?;
+            }
+        }
+        consumer.unsubscribe().await;
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        taos.exec_many([
+            "drop database ws_tmq_meta2",
+            "drop topic ws_tmq_meta",
+            "drop database ws_tmq_meta",
+        ])
+        .await?;
         Ok(())
     }
 }
