@@ -524,6 +524,12 @@ impl TaosBuilder {
             };
         }
 
+        log::trace!(
+            "ws_tool config window: {:?}, headers: {:?}",
+            &config.window,
+            &config.extra_headers
+        );
+
         let res: Result<
             AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>,
             QueryError,
