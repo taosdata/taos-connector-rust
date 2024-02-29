@@ -2359,7 +2359,7 @@ mod tmq_deflate_tests {
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
 
         let db = "ws_tmq_deflate";
-        let db2 = "ws_tmq_deflate";
+        let db2 = "ws_tmq_deflate_dest";
 
         taos.exec(format!("drop topic if exists {db}")).await?;
         taos.exec(format!("drop database if exists {db}")).await?;
@@ -2445,7 +2445,7 @@ mod tmq_deflate_tests {
         ])
         .await?;
 
-        dsn.params.insert("group.id".to_string(), "abc".to_string());
+        dsn.params.insert("group.id".to_string(), "ws_tmq_deflate_1".to_string());
 
         dsn.params
             .insert("auto.offset.reset".to_string(), "earliest".to_string());
