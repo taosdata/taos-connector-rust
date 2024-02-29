@@ -2278,3 +2278,68 @@ mod async_tests {
         Ok(())
     }
 }
+
+#[cfg(feature = "deflate")]
+#[cfg(test)]
+mod tmq_deflate_tests {
+
+    use crate::{
+        query::infra::{ToMessage, WsRecv, WsSend},
+        *,
+    };
+    use futures::{SinkExt, StreamExt};
+    use std::time::Duration;
+    use tracing::*;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use ws_tool::frame::OpCode;
+
+    #[cfg(feature = "deflate")]
+    #[tokio::test]
+    async fn test_build_stream_with_deflate() -> Result<(), anyhow::Error> {
+        let _subscriber = tracing_subscriber::fmt::fmt()
+            .with_max_level(Level::DEBUG)
+            .with_file(true)
+            .with_line_number(true)
+            .finish();
+        let _ = _subscriber.try_init();
+
+        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+
+        let builder = TaosBuilder::from_dsn(dsn).unwrap();
+        let url = builder.to_query_url();
+        let ws = builder.ws_tool_build_stream(url).await.unwrap();
+
+        let (mut sink, mut source) = ws.split();
+
+        let version = WsSend::Version;
+        source
+            .send(OpCode::Text, &serde_json::to_vec(&version)?)
+            .await?;
+
+        let _handle = tokio::spawn(async move {
+            loop {
+                let frame = sink.receive().await.unwrap();
+                let (header, payload) = frame;
+                trace!("header.code: {:?}, payload: {:?}", &header.code, &payload);
+                let code = header.code;
+
+                match code {
+                    OpCode::Binary => {
+                        println!("{:?}", payload);
+                    }
+                    OpCode::Text => {
+                        let recv: crate::query::infra::WsRecv =
+                            serde_json::from_slice(&payload).unwrap();
+                        info!("recv: {:?}", recv);
+                        assert_eq!(recv.code, 0);
+                    }
+                    _ => (),
+                }
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+
+        Ok(())
+    }
+}
