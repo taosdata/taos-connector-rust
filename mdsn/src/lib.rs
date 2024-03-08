@@ -91,7 +91,7 @@ impl Dsn {
                         (((?P<protocol2>[\w.-]+)\()?
                             (?P<addr>[\w\-_%.:]*(:\d{0,5})?(,[\w\-:_.]*(:\d{0,5})?)*)?  # for addresses
                         \)?)?
-                        (/(?P<subject>[\w %$@./-]+)?)?                             # for subject
+                        (/(?P<subject>[\w %$@.,/-]+)?)?                             # for subject
                     | # or
                     # path-like dsn
                     (?P<path>([\\/.~]$|/\s*\w+[\w\s %$@*:.\\\-/]*|[\.~\w\s]?[\w\s %$@*:.\\\-/]+))
