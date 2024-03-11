@@ -879,9 +879,10 @@ impl<'a> Display for PrettyBlock<'a> {
         let mut table = Table::new();
         writeln!(
             f,
-            "Table view with {} rows, {} columns",
+            "Table view with {} rows, {} columns, table name \"{}\"",
             self.nrows(),
-            self.ncols()
+            self.ncols(),
+            self.table_name().unwrap_or_default(),
         )?;
         table.set_titles(Row::from_iter(self.field_names()));
         let nrows = self.nrows();
