@@ -237,6 +237,15 @@ impl TimestampView {
             precision: self.precision,
         }
     }
+
+    pub fn cast_precision(&self, precision: Precision) -> TimestampView {
+        if self.precision == precision {
+            self.clone()
+        } else {
+            let data = self.iter().map(|v| v.map(|v| v.cast_precision(precision)));
+            Self::from_nullable_timestamp(data.collect())
+        }
+    }
 }
 
 pub struct TimestampViewIter<'a> {

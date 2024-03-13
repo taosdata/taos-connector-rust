@@ -72,6 +72,23 @@ impl Timestamp {
         use chrono::TimeZone;
         Local.from_utc_datetime(&self.to_naive_datetime())
     }
+
+    pub fn cast_precision(&self, precision: Precision) -> Timestamp {
+        let raw = self.as_raw_i64();
+        match (self.precision(), precision) {
+            (Precision::Millisecond, Precision::Microsecond) => Timestamp::Microseconds(raw * 1000),
+            (Precision::Millisecond, Precision::Nanosecond) => {
+                Timestamp::Nanoseconds(raw * 1_000_000)
+            }
+            (Precision::Microsecond, Precision::Millisecond) => Timestamp::Milliseconds(raw / 1000),
+            (Precision::Microsecond, Precision::Nanosecond) => Timestamp::Nanoseconds(raw * 1000),
+            (Precision::Nanosecond, Precision::Millisecond) => {
+                Timestamp::Milliseconds(raw / 1_000_000)
+            }
+            (Precision::Nanosecond, Precision::Microsecond) => Timestamp::Microseconds(raw / 1000),
+            _ => Timestamp::new(raw, precision),
+        }
+    }
 }
 
 #[cfg(test)]
