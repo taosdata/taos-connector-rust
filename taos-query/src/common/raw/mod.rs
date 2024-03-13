@@ -823,6 +823,21 @@ impl RawBlock {
         }
         block
     }
+
+    /// Cast the block into a new block with new precision.
+    pub fn cast_precision(&self, precision: Precision) -> Self {
+        let views = self
+            .column_views()
+            .iter()
+            .map(|view| view.cast_precision(precision).to_owned())
+            .collect::<Vec<ColumnView>>();
+        let mut block = Self::from_views(&views, precision);
+        block.with_field_names(self.field_names());
+        if let Some(table_name) = self.table_name() {
+            block.with_table_name(table_name);
+        }
+        block
+    }
 }
 
 impl std::ops::Add for RawBlock {

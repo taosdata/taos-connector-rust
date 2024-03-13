@@ -60,7 +60,10 @@ pub(crate) use lengths::*;
 
 mod from;
 
-use crate::common::{BorrowedValue, Ty, Value};
+use crate::{
+    common::{BorrowedValue, Ty, Value},
+    Precision,
+};
 
 use std::{
     ffi::c_void,
@@ -1138,6 +1141,12 @@ impl ColumnView {
         }
     }
 
+    pub fn cast_precision(&self, precision: Precision) -> ColumnView {
+        match self {
+            ColumnView::Timestamp(view) => ColumnView::Timestamp(view.cast_precision(precision)),
+            _ => self.clone(),
+        }
+    }
     pub unsafe fn as_timestamp_view(&self) -> &TimestampView {
         match self {
             ColumnView::Timestamp(view) => view,
@@ -1289,7 +1298,7 @@ mod tests {
         assert_eq!(result_column_bigint.len(), 6);
 
         let result_column_ubigint =
-        column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::UBigInt);
+            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::UBigInt);
         assert_eq!(result_column_ubigint.len(), 6);
 
         let result_column_float =
