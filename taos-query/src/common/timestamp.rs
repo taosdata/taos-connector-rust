@@ -109,6 +109,58 @@ mod tests {
     }
 
     #[test]
+    fn ts_cast_precision() {
+        let precisions = [
+            Precision::Millisecond,
+            Precision::Microsecond,
+            Precision::Nanosecond,
+        ];
+        for (i, prec) in precisions.iter().enumerate() {
+            let ts = Timestamp::new(1_000_000 * (i as i64), *prec);
+            for (j, new_prec) in precisions.iter().enumerate() {
+                let new_ts = ts.cast_precision(*new_prec);
+                assert_eq!(
+                    new_ts.precision(),
+                    *new_prec,
+                    "from {:?} to {:?}",
+                    prec,
+                    new_prec
+                );
+                assert_eq!(
+                    new_ts.to_naive_datetime(),
+                    ts.to_naive_datetime(),
+                    "from {:?} to {:?}",
+                    prec,
+                    new_prec
+                );
+                match (prec, new_prec) {
+                    (Precision::Millisecond, Precision::Microsecond) => {
+                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) * 1000);
+                    }
+                    (Precision::Millisecond, Precision::Nanosecond) => {
+                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) * 1_000_000);
+                    }
+                    (Precision::Microsecond, Precision::Millisecond) => {
+                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) / 1000);
+                    }
+                    (Precision::Microsecond, Precision::Nanosecond) => {
+                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) * 1000);
+                    }
+                    (Precision::Nanosecond, Precision::Millisecond) => {
+                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) / 1_000_000);
+                    }
+                    (Precision::Nanosecond, Precision::Microsecond) => {
+                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) / 1000);
+                    }
+                    _ => {
+                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn ts_debug() {
         let ts = Timestamp::new(0, Precision::Millisecond);
         assert_eq!(format!("{:?}", ts), "1970-01-01T00:00:00");

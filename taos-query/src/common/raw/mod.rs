@@ -1350,7 +1350,29 @@ fn test_v2_full() {
     let raw2 = RawBlock::parse_from_raw_block(bytes, block.precision);
 
     let added = &raw2 + &raw2;
-    dbg!(raw2, added);
+    dbg!(&raw2, &added);
+
+    let ns = added.cast_precision(Precision::Nanosecond);
+    assert_eq!(ns.precision(), Precision::Nanosecond);
+    let ms = ns.cast_precision(Precision::Millisecond);
+    assert_eq!(ms.precision(), Precision::Millisecond);
+    let ms2 = ms.cast_precision(Precision::Millisecond);
+    assert_eq!(ms2.precision(), Precision::Millisecond);
+    //assert_eq!(ms.as_raw_bytes(), ms2.as_raw_bytes()); // TODO: ensure binary equal when data is the same.
+    let ts_ns = unsafe { ns.columns[0].as_timestamp_view() };
+    let ts_ms = unsafe { ms.columns[0].as_timestamp_view() };
+    assert_eq!(
+        ts_ns
+            .iter()
+            .flatten()
+            .map(|ts| ts.to_string())
+            .collect_vec(),
+        ts_ms
+            .iter()
+            .flatten()
+            .map(|ts| ts.to_string())
+            .collect_vec()
+    );
 }
 
 #[test]
