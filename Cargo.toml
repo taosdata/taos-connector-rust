@@ -14,7 +14,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-version = "0.11.7"
+version = "0.11.8"
 
 authors = ["Linhe Huo <linhe.huo@gmail.com>"]
 categories = ["database", "api-bindings", "asynchronous"]
