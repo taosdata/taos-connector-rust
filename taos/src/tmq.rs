@@ -1387,13 +1387,9 @@ mod async_tests {
             tags(t1 json)",
             // kind 2: create child table with json tag
             "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
-            "create table tb1 using stb1 tags(NULL)",
             "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL)
-            tb1 values(now, true, -2, -3, -4, -5, \
-            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
-            254, 65534, 1, 1)",
+            NULL, NULL, NULL, NULL)",
             // kind 3: create super table with all types except json (especially for tags)
             "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
             c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
@@ -1462,7 +1458,9 @@ mod async_tests {
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
                             log::info!("table_name: {:?}", data.table_name());
+                            assert_eq!(data.table_name(), Some("tb0"));
                             log::info!("data: {}", data.pretty_format());
+                            assert!(data.pretty_format().to_string().contains("table name \"tb0\""));
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
