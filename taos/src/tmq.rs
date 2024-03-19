@@ -1360,9 +1360,9 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_ws_raw_block_table_name() -> taos_query::RawResult<()> {
-        pretty_env_logger::formatted_timed_builder()
-        .filter_level(log::LevelFilter::Info)
-        .init();
+        // pretty_env_logger::formatted_timed_builder()
+        // .filter_level(log::LevelFilter::Info)
+        // .init();
 
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
