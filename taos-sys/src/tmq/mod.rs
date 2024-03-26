@@ -1556,7 +1556,6 @@ mod tests {
                     log::error!("seek offset error: {:?}", res);
                     let a = consumer.assignments().await.unwrap();
                     log::error!("assignments: {:?}", a);
-                    // panic!()
                 }
             }
 
