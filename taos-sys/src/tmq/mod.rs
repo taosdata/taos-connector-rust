@@ -1133,6 +1133,41 @@ mod tests {
             consumer.commit(offset)?;
         }
 
+        let assignments = consumer.assignments().unwrap();
+        log::debug!("assignments: {:?}", assignments);
+
+        // seek offset
+        for topic_vec_assignment in assignments {
+            let topic = &topic_vec_assignment.0;
+            let vec_assignment = topic_vec_assignment.1;
+            for assignment in vec_assignment {
+                let vgroup_id = assignment.vgroup_id();
+                let current = assignment.current_offset();
+                let begin = assignment.begin();
+                let end = assignment.end();
+                log::debug!(
+                    "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
+                    topic,
+                    vgroup_id,
+                    current,
+                    begin,
+                    end
+                );
+                let res = consumer.offset_seek(topic, vgroup_id, end);
+                if res.is_err() {
+                    log::error!("seek offset error: {:?}", res);
+                    let a = consumer.assignments().unwrap();
+                    log::error!("assignments: {:?}", a);
+                }
+            }
+
+        }
+
+        // after seek offset
+        let assignments = consumer.assignments().unwrap();
+        log::debug!("after seek offset assignments: {:?}", assignments);
+        
+
         consumer.unsubscribe();
 
         taos.exec_many([
