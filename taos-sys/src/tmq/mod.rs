@@ -770,9 +770,8 @@ mod tests {
         taos.query(format!("create database {db}2 wal_retention_period 3600"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -1041,7 +1040,9 @@ mod tests {
             "use sys_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::from_dsn(
+            "taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["sys_tmq_meta_sync"])?;
 
@@ -1133,6 +1134,39 @@ mod tests {
             consumer.commit(offset)?;
         }
 
+        let assignments = consumer.assignments().unwrap();
+        log::debug!("assignments: {:?}", assignments);
+
+        // seek offset
+        for topic_vec_assignment in assignments {
+            let topic = &topic_vec_assignment.0;
+            let vec_assignment = topic_vec_assignment.1;
+            for assignment in vec_assignment {
+                let vgroup_id = assignment.vgroup_id();
+                let current = assignment.current_offset();
+                let begin = assignment.begin();
+                let end = assignment.end();
+                log::debug!(
+                    "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
+                    topic,
+                    vgroup_id,
+                    current,
+                    begin,
+                    end
+                );
+                let res = consumer.offset_seek(topic, vgroup_id, end);
+                if res.is_err() {
+                    log::error!("seek offset error: {:?}", res);
+                    let a = consumer.assignments().unwrap();
+                    log::error!("assignments: {:?}", a);
+                }
+            }
+        }
+
+        // after seek offset
+        let assignments = consumer.assignments().unwrap();
+        log::debug!("after seek offset assignments: {:?}", assignments);
+
         consumer.unsubscribe();
 
         taos.exec_many([
@@ -1182,9 +1216,8 @@ mod tests {
             ])
             .await?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_ts2035"]).await?;
 
@@ -1279,9 +1312,8 @@ mod tests {
             ])
             .await?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_delete_meta"]).await?;
 
@@ -1434,7 +1466,8 @@ mod tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
+        let builder =
+            TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_tmq_meta"]).await?;
 
@@ -1497,6 +1530,42 @@ mod tests {
                 Ok(())
             })
             .await?;
+
+        let assignments = consumer.assignments().await.unwrap();
+        log::debug!("assignments: {:?}", assignments);
+
+        // seek offset
+        for topic_vec_assignment in assignments {
+            let topic = &topic_vec_assignment.0;
+            let vec_assignment = topic_vec_assignment.1;
+            for assignment in vec_assignment {
+                let vgroup_id = assignment.vgroup_id();
+                let current = assignment.current_offset();
+                let begin = assignment.begin();
+                let end = assignment.end();
+                log::debug!(
+                    "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
+                    topic,
+                    vgroup_id,
+                    current,
+                    begin,
+                    end
+                );
+                let res = consumer.offset_seek(topic, vgroup_id, end).await;
+                if res.is_err() {
+                    log::error!("seek offset error: {:?}", res);
+                    let a = consumer.assignments().await.unwrap();
+                    log::error!("assignments: {:?}", a);
+                }
+            }
+
+            let topic_assignment = consumer.topic_assignment(topic).await;
+            log::debug!("topic assignment: {:?}", topic_assignment);
+        }
+
+        // after seek offset
+        let assignments = consumer.assignments().await.unwrap();
+        log::debug!("after seek offset assignments: {:?}", assignments);
 
         consumer.unsubscribe().await;
 
