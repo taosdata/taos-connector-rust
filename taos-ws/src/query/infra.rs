@@ -223,8 +223,6 @@ impl ToMessage for WsSend {}
 #[cfg(test)]
 mod tests {
 
-    // use websocket::ClientBuilder;
-
     use crate::*;
 
     #[test]
