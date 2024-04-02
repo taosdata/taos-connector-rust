@@ -10,7 +10,7 @@ const RAW_PTR_OFFSET: usize = std::mem::size_of::<u32>() + std::mem::size_of::<u
 ///
 /// It can be copy/cloned, but should not use it outbound away a offset lifetime.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct raw_data_t {
     pub raw: *const c_void,
     pub raw_len: u32,
@@ -42,77 +42,23 @@ impl raw_data_t {
         }
         Bytes::from(data)
     }
-
-    pub fn free(&mut self) {
-        unsafe {
-            Vec::from_raw_parts(
-                self.raw as *mut u8,
-                self.raw_len as usize,
-                self.raw_len as usize,
-            );
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
-enum RawDataInner {
-    Raw(raw_data_t),
-    Data(Bytes),
-}
-
-impl RawDataInner {
-    fn raw_len(&self) -> u32 {
-        match self {
-            RawDataInner::Raw(raw) => raw.raw_len,
-            RawDataInner::Data(bytes) => unsafe { *(bytes.as_ptr() as *const u32) },
-        }
-    }
-    fn raw_type(&self) -> u16 {
-        match self {
-            RawDataInner::Raw(raw) => raw.raw_type,
-            RawDataInner::Data(bytes) => unsafe {
-                *(bytes.as_ptr().add(std::mem::size_of::<u32>()) as *const u16)
-            },
-        }
-    }
-    fn raw(&self) -> *const c_void {
-        match self {
-            RawDataInner::Raw(raw) => raw.raw,
-            RawDataInner::Data(bytes) => unsafe { bytes.as_ptr().add(RAW_PTR_OFFSET) as _ },
-        }
-    }
-
-    fn as_bytes(&self) -> Cow<Bytes> {
-        match self {
-            Self::Raw(raw) => Cow::Owned(raw.to_bytes()),
-            Self::Data(bytes) => Cow::Borrowed(bytes),
-        }
-    }
-}
-
-impl Drop for RawDataInner {
-    fn drop(&mut self) {
-        if let RawDataInner::Raw(raw) = self {
-            raw.free()
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct RawData(RawDataInner);
+pub struct RawData(Bytes);
 
 unsafe impl Send for RawData {}
 unsafe impl Sync for RawData {}
 
-impl From<raw_data_t> for RawData {
-    fn from(raw: raw_data_t) -> Self {
-        RawData(RawDataInner::Raw(raw))
+impl From<&raw_data_t> for RawData {
+    fn from(raw: &raw_data_t) -> Self {
+        RawData(raw.to_bytes())
     }
 }
 
 impl<T: Into<Bytes>> From<T> for RawData {
     fn from(bytes: T) -> Self {
-        RawData(RawDataInner::Data(bytes.into()))
+        RawData(bytes.into())
     }
 }
 
@@ -121,13 +67,13 @@ impl RawData {
         raw.into()
     }
     pub fn raw(&self) -> *const c_void {
-        self.0.raw()
+        unsafe { self.0.as_ptr().add(RAW_PTR_OFFSET) as _ }
     }
     pub fn raw_len(&self) -> u32 {
-        self.0.raw_len()
+        unsafe { *(self.0.as_ptr() as *const u32) }
     }
     pub fn raw_type(&self) -> u16 {
-        self.0.raw_type()
+        unsafe { *(self.0.as_ptr().add(std::mem::size_of::<u32>()) as *const u16) }
     }
 
     pub fn as_raw_data_t(&self) -> raw_data_t {
@@ -139,7 +85,7 @@ impl RawData {
     }
 
     pub fn as_bytes(&self) -> Cow<Bytes> {
-        self.0.as_bytes()
+        Cow::Borrowed(&self.0)
     }
 }
 
@@ -162,7 +108,7 @@ impl Inlinable for RawData {
     }
 
     fn write_inlined<W: std::io::Write>(&self, wtr: &mut W) -> std::io::Result<usize> {
-        let bytes = self.0.as_bytes();
+        let bytes = self.as_bytes();
         wtr.write_all(&bytes)?;
         Ok(bytes.len())
     }
@@ -195,7 +141,7 @@ impl crate::util::AsyncInlinable for RawData {
         wtr: &mut W,
     ) -> std::io::Result<usize> {
         use tokio::io::*;
-        let bytes = self.0.as_bytes();
+        let bytes = self.as_bytes();
         wtr.write_all(&bytes).await?;
         Ok(bytes.len())
     }
