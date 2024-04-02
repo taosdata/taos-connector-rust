@@ -12,7 +12,7 @@ use std::{
 };
 
 use taos_query::{
-    common::{c_field_t, raw_data_t, SmlData},
+    common::{c_field_t, raw_data_t, RawData, SmlData},
     prelude::{Code, Field, Precision, RawError},
     tmq::Assignment,
     RawBlock,
@@ -313,9 +313,11 @@ pub(crate) struct TmqApi {
     tmq_get_table_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
     tmq_get_db_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
     tmq_get_json_meta: unsafe extern "C" fn(res: *mut TAOS_RES) -> *mut c_char,
+    tmq_free_json_meta: unsafe extern "C" fn(json: *mut c_char),
     tmq_get_topic_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
     tmq_get_vgroup_id: unsafe extern "C" fn(res: *mut TAOS_RES) -> i32,
     tmq_get_raw: unsafe extern "C" fn(res: *mut TAOS_RES, raw: *mut raw_data_t) -> i32,
+    tmq_free_raw: unsafe extern "C" fn(raw: raw_data_t) -> i32,
 
     pub(crate) tmq_subscribe:
         unsafe extern "C" fn(tmq: *mut tmq_t, topics: *mut tmq_list_t) -> tmq_resp_err_t,
@@ -604,9 +606,11 @@ impl ApiEntry {
                     tmq_get_table_name,
                     tmq_get_db_name,
                     tmq_get_json_meta,
+                    tmq_free_json_meta,
                     tmq_get_topic_name,
                     tmq_get_vgroup_id,
                     tmq_get_raw,
+                    tmq_free_raw,
                     tmq_conf_new,
                     tmq_conf_destroy,
                     tmq_conf_set,
@@ -655,9 +659,11 @@ impl ApiEntry {
                     tmq_get_table_name,
                     tmq_get_db_name,
                     tmq_get_json_meta,
+                    tmq_free_json_meta,
                     tmq_get_topic_name,
                     tmq_get_vgroup_id,
                     tmq_get_raw,
+                    tmq_free_raw,
                     tmq_subscribe,
                     tmq_unsubscribe,
                     tmq_subscription,
@@ -852,10 +858,9 @@ impl RawTaos {
         let sql = sql.into_c_str();
         tracing::trace!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
         if let Some(taos_query_with_req_id) = self.c.taos_query_with_reqid {
-            RawRes::from_ptr(
-                self.c.clone(),
-                unsafe { (taos_query_with_req_id)(self.as_ptr(), sql.as_ptr(), req_id) }
-            )
+            RawRes::from_ptr(self.c.clone(), unsafe {
+                (taos_query_with_req_id)(self.as_ptr(), sql.as_ptr(), req_id)
+            })
         } else {
             unimplemented!("2.x does not support req_id")
         }
@@ -913,7 +918,7 @@ impl RawTaos {
         let taos_errstr = self.c.taos_errstr;
         let mut retries = 2;
         loop {
-            let code = unsafe { tmq_write_raw(self.as_ptr(), meta) };
+            let code = unsafe { tmq_write_raw(self.as_ptr(), meta.clone()) };
             let code = Code::from(code);
             if code.success() {
                 return Ok(());
@@ -1554,15 +1559,17 @@ impl RawRes {
         }
     }
     #[inline]
-    pub(crate) fn tmq_get_json_meta(&self) -> CString {
+    pub(crate) fn tmq_get_json_meta(&self) -> String {
         unsafe {
             let meta = (self.c.tmq.as_ref().unwrap().tmq_get_json_meta)(self.as_ptr());
-            CString::from_raw(meta)
+            let meta_cstr = CStr::from_ptr(meta).to_string_lossy().into_owned();
+            (self.c.tmq.as_ref().unwrap().tmq_free_json_meta)(meta);
+            meta_cstr
         }
     }
 
     #[inline]
-    pub(crate) fn tmq_get_raw(&self) -> raw_data_t {
+    pub(crate) fn tmq_get_raw(&self) -> RawData {
         let mut meta = raw_data_t {
             raw: std::ptr::null_mut(),
             raw_len: 0,
@@ -1570,8 +1577,10 @@ impl RawRes {
         };
         unsafe {
             let _code = (self.c.tmq.as_ref().unwrap().tmq_get_raw)(self.as_ptr(), &mut meta as _);
+            let raw = RawData::from(&meta);
+            (self.c.tmq.as_ref().unwrap().tmq_free_raw)(meta);
+            raw
         }
-        meta
     }
 }
 
