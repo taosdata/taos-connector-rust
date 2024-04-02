@@ -7,7 +7,7 @@ use std::{fmt::Debug, str::FromStr, sync::Arc, time::Duration};
 use anyhow::Context;
 use itertools::Itertools;
 use taos_query::{
-    common::{raw_data_t, RawMeta},
+    common::{raw_data_t, RawData, RawMeta},
     prelude::{tokio::time, RawError, RawResult},
     tmq::{
         AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
@@ -305,44 +305,35 @@ impl Iterator for Messages {
 
 #[derive(Debug)]
 pub struct Meta {
-    raw: RawRes,
+    res: RawRes,
+    raw: RawData,
 }
 
 impl AsyncOnSync for Meta {}
 
 impl IsMeta for Meta {
     fn as_raw_meta(&self) -> RawResult<RawMeta> {
-        let raw = self.raw.tmq_get_raw();
-
-        let mut data = Vec::new();
-
-        data.extend(raw.raw_len.to_le_bytes());
-
-        data.extend(raw.raw_type.to_le_bytes());
-
-        data.extend(unsafe {
-            std::slice::from_raw_parts(raw.raw as *const u8, raw.raw_len as usize)
-        });
-        Ok(RawMeta::new(data.into()))
+        Ok(unsafe { std::mem::transmute(self.raw.clone()) })
     }
 
     fn as_json_meta(&self) -> RawResult<taos_query::common::JsonMeta> {
-        let meta = serde_json::from_slice(self.raw.tmq_get_json_meta().as_bytes())
+        let meta = serde_json::from_slice(self.res.tmq_get_json_meta().as_bytes())
             .map_err(|err| RawError::from_string(err.to_string()))?;
         Ok(meta)
     }
 }
 impl Meta {
-    fn new(raw: RawRes) -> Self {
-        Self { raw }
+    fn new(res: RawRes) -> Self {
+        let raw = res.tmq_get_raw();
+        Self { res, raw }
     }
 
     pub fn to_raw(&self) -> raw_data_t {
-        self.raw.tmq_get_raw()
+        self.raw.as_raw_data_t()
     }
 
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::from_slice(self.raw.tmq_get_json_meta().as_bytes())
+        serde_json::from_slice(self.res.tmq_get_json_meta().as_bytes())
             .expect("meta json should always be valid json format")
     }
 
@@ -709,9 +700,8 @@ mod tests {
         taos.query(format!("create database {db}2"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -812,9 +802,8 @@ mod tests {
         taos.query(format!("create database {db}2"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -1078,7 +1067,9 @@ mod tests {
             "use sys_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::from_dsn(
+            "taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["sys_tmq_meta_sync"])?;
 
@@ -1270,7 +1261,9 @@ mod tests {
             format!("use {target}").as_str(),
         ])?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::from_dsn(
+            "taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build()?;
 
         let topics = consumer.list_topics()?;
@@ -1435,9 +1428,8 @@ mod async_tests {
 
         ]).await?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
 
         consumer.subscribe([db]).await?;
@@ -1595,7 +1587,8 @@ mod async_tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
+        let builder =
+            TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_tmq_meta"]).await?;
 
