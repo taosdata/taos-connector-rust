@@ -156,7 +156,7 @@ impl RawTaos {
         // try 5 times if write_raw_meta fails with 0x2603 error.
         let mut retries = 2;
         loop {
-            let code = unsafe { tmq_write_raw(self.as_ptr(), meta) };
+            let code = unsafe { tmq_write_raw(self.as_ptr(), meta.clone()) };
             let code = Code::from(code);
             if code.success() {
                 return Ok(());
