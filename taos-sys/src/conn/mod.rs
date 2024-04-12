@@ -291,8 +291,9 @@ impl RawTaos {
 
         log::trace!("sml total rows: {}", total_rows);
         match res {
-            Ok(_) => {
+            Ok(raw) => {
                 log::trace!("sml insert success");
+                unsafe { taos_free_result(raw.as_ptr()) }
                 Ok(())
             }
             Err(e) => {
