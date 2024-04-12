@@ -413,9 +413,8 @@ impl Stmt {
                                         StmtOk::StmtPrepare(stmt_id, res) => {
                                             if let Some(sender) = prepare_result_fetches_sender.get(&stmt_id) {
                                                 log::trace!("send data to fetches with id {}", stmt_id);
-                                                // let res = res.clone();
+
                                                 sender.send(res).await.unwrap();
-                                            // }) {
 
                                             } else {
                                                 log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
