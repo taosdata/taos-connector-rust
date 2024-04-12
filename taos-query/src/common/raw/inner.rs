@@ -567,6 +567,7 @@ impl RawBlock {
                 Ty::Decimal => todo!(),
                 Ty::Blob => todo!(),
                 Ty::MediumBlob => todo!(),
+                Ty::Geometry => todo!(),
             }
         }
 

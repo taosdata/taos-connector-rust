@@ -2,7 +2,7 @@ use std::{borrow::Cow, fmt::Display, str::Utf8Error};
 
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-
+use bytes::Bytes;
 use super::{Timestamp, Ty};
 
 #[derive(Debug, Clone)]
@@ -23,10 +23,11 @@ pub enum BorrowedValue<'b> {
     UInt(u32),
     UBigInt(u64), // 14
     Json(Cow<'b, [u8]>),
-    VarBinary(&'b [u8]),
+    VarBinary(Cow<'b, Bytes>),
     Decimal(Decimal),
     Blob(&'b [u8]),
     MediumBlob(&'b [u8]),
+    Geometry(Cow<'b, Bytes>),
 }
 
 macro_rules! borrowed_value_to_native {
@@ -48,10 +49,11 @@ macro_rules! borrowed_value_to_native {
             BorrowedValue::UInt(v) => Some(*v as _),
             BorrowedValue::UBigInt(v) => Some(*v as _),
             BorrowedValue::Json(v) => serde_json::from_slice(&v).ok(),
-            BorrowedValue::VarBinary(_) => todo!(),
+            BorrowedValue::VarBinary(s) => todo!(),
             BorrowedValue::Decimal(_) => todo!(),
             BorrowedValue::Blob(_) => todo!(),
             BorrowedValue::MediumBlob(_) => todo!(),
+            BorrowedValue::Geometry(s) => todo!(),
         }
     };
 }
@@ -79,6 +81,7 @@ macro_rules! borrowed_value_to_float {
             BorrowedValue::Decimal(_) => todo!(),
             BorrowedValue::Blob(_) => todo!(),
             BorrowedValue::MediumBlob(_) => todo!(),
+            BorrowedValue::Geometry(_) => todo!(),
         }
     };
 }
@@ -108,6 +111,7 @@ impl<'b> BorrowedValue<'b> {
             Decimal(_) => Ty::Decimal,
             Blob(_) => Ty::Blob,
             MediumBlob(_) => Ty::MediumBlob,
+            Geometry(_) => Ty::Geometry,
         }
     }
 
@@ -130,10 +134,11 @@ impl<'b> BorrowedValue<'b> {
             UInt(v) => format!("{v}"),
             UBigInt(v) => format!("{v}"),
             Json(v) => format!("\"{}\"", unsafe { std::str::from_utf8_unchecked(v) }),
-            VarBinary(_) => todo!(),
+            VarBinary(v) => todo!(),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(v) => todo!(),
         }
     }
 
@@ -196,10 +201,11 @@ impl<'b> BorrowedValue<'b> {
                 Value::Json(serde_json::from_slice(v).expect("json should always be deserialized"))
             }
             NChar(str) => Value::NChar(str.to_string()),
-            VarBinary(_) => todo!(),
+            VarBinary(v) => Value::VarBinary(v.into_owned()),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(v) => Value::Geometry(v.into_owned()),
         }
     }
 
@@ -251,10 +257,11 @@ impl<'b> BorrowedValue<'b> {
                 Value::Json(serde_json::from_slice(&v).expect("json should always be deserialized"))
             }
             NChar(str) => Value::NChar(str.to_string()),
-            VarBinary(_) => todo!(),
+            VarBinary(v) => Value::VarBinary(v.into_owned()),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(v) => Value::Geometry(v.into_owned()),
         }
     }
 
@@ -380,10 +387,11 @@ impl<'b> Display for BorrowedValue<'b> {
             UInt(v) => f.write_fmt(format_args!("{v}")),
             UBigInt(v) => f.write_fmt(format_args!("{v}")),
             Json(v) => f.write_fmt(format_args!("{}", v.as_ref().escape_ascii())),
-            VarBinary(_) => todo!(),
+            VarBinary(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
         }
     }
 }
@@ -409,10 +417,11 @@ pub enum Value {
     UInt(u32),
     UBigInt(u64), // 14
     Json(serde_json::Value),
-    VarBinary(Vec<u8>),
+    VarBinary(Bytes),
     Decimal(Decimal),
     Blob(Vec<u8>),
     MediumBlob(Vec<u8>),
+    Geometry(Bytes),
 }
 
 impl Display for Value {
@@ -435,10 +444,11 @@ impl Display for Value {
             UInt(v) => f.write_fmt(format_args!("{v}")),
             UBigInt(v) => f.write_fmt(format_args!("{v}")),
             Json(v) => f.write_fmt(format_args!("{v}")),
-            VarBinary(_) => todo!(),
+            VarBinary(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
         }
     }
 }
@@ -468,6 +478,7 @@ impl Value {
             Decimal(_) => Ty::Decimal,
             Blob(_) => Ty::Blob,
             MediumBlob(_) => Ty::MediumBlob,
+            Geometry(_) => Ty::Geometry,
         }
     }
 
@@ -494,6 +505,7 @@ impl Value {
             Decimal(v) => BorrowedValue::Decimal(*v),
             Blob(v) => BorrowedValue::Blob(v),
             MediumBlob(v) => BorrowedValue::MediumBlob(v),
+            Geometry(v) => BorrowedValue::Geometry(v),
         }
     }
 
@@ -533,10 +545,11 @@ impl Value {
             UInt(v) => format!("{v}"),
             UBigInt(v) => format!("{v}"),
             Json(v) => format!("\"{}\"", v),
-            VarBinary(_) => todo!(),
+            VarBinary(v) => format!("\"{}\"", v.escape_debug()),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(v) => format!("\"{}\"", v.escape_debug()),
         }
     }
 
@@ -559,7 +572,7 @@ impl Value {
             Float(v) => Ok(format!("{v}")),
             Double(v) => Ok(format!("{v}")),
             Timestamp(v) => Ok(v.to_datetime_with_tz().to_rfc3339()),
-            _ => unreachable!("un supported type to string"),
+            _ => unreachable!("unsupported type to string"),
         }
     }
 
@@ -582,10 +595,10 @@ impl Value {
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => v.clone(),
             NChar(str) => serde_json::Value::String(str.to_string()),
-            VarBinary(_) => todo!(),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            _ => unreachable!("unsupported type to json value"),
         }
     }
 }
@@ -619,6 +632,7 @@ impl<'b> PartialEq<Value> for BorrowedValue<'b> {
             (Self::Decimal(l0), Value::Decimal(r0)) => l0 == r0,
             (Self::Blob(l0), Value::Blob(r0)) => l0 == r0,
             (Self::MediumBlob(l0), Value::MediumBlob(r0)) => l0 == r0,
+            (Self::Geometry(l0), Value::Geometry(r0)) => l0 == r0,
             _ => false,
         }
     }
@@ -649,6 +663,7 @@ impl<'b> PartialEq<BorrowedValue<'b>> for Value {
             (BorrowedValue::Decimal(l0), Value::Decimal(r0)) => l0 == r0,
             (BorrowedValue::Blob(l0), Value::Blob(r0)) => l0 == r0,
             (BorrowedValue::MediumBlob(l0), Value::MediumBlob(r0)) => l0 == r0,
+            (BorrowedValue::Geometry(l0), Value::Geometry(r0)) => l0 == r0,
             _ => false,
         }
     }

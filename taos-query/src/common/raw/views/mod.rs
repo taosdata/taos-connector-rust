@@ -72,6 +72,9 @@ use std::{
     iter::FusedIterator,
 };
 
+type VarbinaryView = VarCharView;
+type GeometryView = VarCharView;
+
 pub(crate) trait IsColumnView: Sized {
     /// View item data type.
     fn ty(&self) -> Ty;
@@ -91,6 +94,7 @@ pub(crate) enum Version {
 }
 
 #[derive(Clone)]
+
 pub enum ColumnView {
     Bool(BoolView),           // 1
     TinyInt(TinyIntView),     // 2
@@ -107,6 +111,8 @@ pub enum ColumnView {
     UInt(UIntView),           // 13
     UBigInt(UBigIntView),     // 14
     Json(JsonView),           // 15
+    Varbinary(VarbinaryView), // 16
+    Geometry(GeometryView),   // 20
 }
 unsafe impl Send for ColumnView {}
 unsafe impl Sync for ColumnView {}
@@ -129,6 +135,8 @@ impl Debug for ColumnView {
             Self::UInt(view) => f.debug_tuple("UInt").field(&view.to_vec()).finish(),
             Self::UBigInt(view) => f.debug_tuple("UBigInt").field(&view.to_vec()).finish(),
             Self::Json(view) => f.debug_tuple("Json").field(&view.to_vec()).finish(),
+            Self::Varbinary(view) => f.debug_tuple("Varbinary").field(&view.to_vec()).finish(),
+            Self::Geometry(view) => f.debug_tuple("Geometry").field(&view.to_vec()).finish(),
         }
     }
 }
@@ -340,10 +348,15 @@ impl ColumnView {
             Ty::Json => ColumnView::Json(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::VarBinary => todo!(),
+            Ty::VarBinary => ColumnView::Varbinary(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
             Ty::Decimal => todo!(),
             Ty::Blob => todo!(),
             Ty::MediumBlob => todo!(),
+            Ty::Geometry => ColumnView::Geometry(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),            
         }
     }
 
@@ -380,6 +393,8 @@ impl ColumnView {
             (ColumnView::VarChar(a), ColumnView::VarChar(b)) => ColumnView::VarChar(a.concat(b)),
             (ColumnView::NChar(a), ColumnView::NChar(b)) => ColumnView::NChar(a.concat(b)),
             (ColumnView::Json(a), ColumnView::Json(b)) => ColumnView::Json(a.concat(b)),
+            (ColumnView::Varbinary(a), ColumnView::Varbinary(b)) => ColumnView::Varbinary(a.concat(b)),
+            (ColumnView::Geometry(a), ColumnView::Geometry(b)) => ColumnView::Geometry(a.concat(b)),
             _ => panic!("strict concat needs same schema: {self:?}, {rhs:?}"),
         }
     }
@@ -413,6 +428,7 @@ impl ColumnView {
             Ty::Decimal => todo!(),
             Ty::Blob => todo!(),
             Ty::MediumBlob => todo!(),
+            Ty::Geometry => todo!(),
         }
     }
 
@@ -434,6 +450,8 @@ impl ColumnView {
             ColumnView::UInt(view) => view.len(),
             ColumnView::UBigInt(view) => view.len(),
             ColumnView::Json(view) => view.len(),
+            ColumnView::Varbinary(view) => view.len(),
+            ColumnView::Geometry(view) => view.len(),
         }
     }
 
@@ -454,6 +472,8 @@ impl ColumnView {
             ColumnView::UInt(_) => 4,
             ColumnView::UBigInt(_) => 8,
             ColumnView::Json(view) => view.max_length(),
+            ColumnView::Varbinary(view) => view.max_length(),
+            ColumnView::Geometry(view) => view.max_length(),
         }
     }
 
@@ -476,6 +496,8 @@ impl ColumnView {
             ColumnView::UInt(view) => view.is_null_unchecked(row),
             ColumnView::UBigInt(view) => view.is_null_unchecked(row),
             ColumnView::Json(view) => view.is_null_unchecked(row),
+            ColumnView::Varbinary(view) => view.is_null_unchecked(row),
+            ColumnView::Geometry(view) => view.is_null_unchecked(row),
         }
     }
 
@@ -506,6 +528,8 @@ impl ColumnView {
             ColumnView::UInt(view) => view.get_value_unchecked(row),
             ColumnView::UBigInt(view) => view.get_value_unchecked(row),
             ColumnView::Json(view) => view.get_value_unchecked(row),
+            ColumnView::Varbinary(view) => view.get_value_unchecked(row),
+            ColumnView::Geometry(view) => view.get_value_unchecked(row),
         }
     }
 
@@ -528,6 +552,8 @@ impl ColumnView {
             ColumnView::UInt(view) => view.get_raw_value_unchecked(row),
             ColumnView::UBigInt(view) => view.get_raw_value_unchecked(row),
             ColumnView::Json(view) => view.get_raw_value_unchecked(row),
+            ColumnView::Varbinary(view) => view.get_raw_value_unchecked(row),
+            ColumnView::Geometry(view) => view.get_raw_value_unchecked(row),
         }
     }
 
@@ -552,6 +578,8 @@ impl ColumnView {
             ColumnView::UInt(view) => view.slice(range).map(ColumnView::UInt),
             ColumnView::UBigInt(view) => view.slice(range).map(ColumnView::UBigInt),
             ColumnView::Json(view) => view.slice(range).map(ColumnView::Json),
+            ColumnView::Varbinary(view) => view.slice(range).map(ColumnView::Varbinary),
+            ColumnView::Geometry(view) => view.slice(range).map(ColumnView::Geometry),
         }
     }
 
@@ -572,6 +600,8 @@ impl ColumnView {
             ColumnView::UInt(view) => view.write_raw_into(wtr),
             ColumnView::UBigInt(view) => view.write_raw_into(wtr),
             ColumnView::Json(view) => view.write_raw_into(wtr),
+            ColumnView::Varbinary(view) => view.write_raw_into(wtr),
+            ColumnView::Geometry(view) => view.write_raw_into(wtr),
         }
     }
 
@@ -592,6 +622,8 @@ impl ColumnView {
             ColumnView::UInt(_) => Ty::UInt,
             ColumnView::UBigInt(_) => Ty::UBigInt,
             ColumnView::Json(_) => Ty::Json,
+            ColumnView::Varbinary(_) => Ty::VarBinary,
+            ColumnView::Geometry(_) => Ty::Geometry,
         }
     }
 

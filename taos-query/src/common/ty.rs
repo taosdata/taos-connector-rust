@@ -73,9 +73,8 @@ pub enum Ty {
     /// 15: Json, `json` tag in sql, will be represented as [serde_json::value::Value] in Rust.
     Json = 15, // 15
 
-    /// 16, VarBinary, `varbinary` in sql, [`Vec<u8>`] in Rust, which will be supported since TDengine 3.1.
-    #[doc(hidden)]
-    VarBinary, // 16
+    /// 16, VarBinary, `varbinary` in sql, [`Vec<u8>`] in Rust.
+    VarBinary = 16, // 16
     /// 17, Not supported now.
     #[doc(hidden)]
     Decimal, // 17
@@ -85,6 +84,9 @@ pub enum Ty {
     /// 19, Not supported now.
     #[doc(hidden)]
     MediumBlob, // 19
+
+    /// 20, Geometry, `geometry` in sql, [`Vec<u8>`] in Rust.
+    Geometry, // 20
 }
 
 impl<'de> serde::Deserialize<'de> for Ty {
@@ -177,6 +179,7 @@ impl FromStr for Ty {
             "decimal" => Ok(Ty::Decimal),
             "blob" => Ok(Ty::Blob),
             "mediumblob" => Ok(Ty::MediumBlob),
+            "geometry" => Ok(Ty::Geometry),
             _ => Err("not a valid data type string"),
         }
     }
@@ -188,10 +191,10 @@ impl Ty {
         matches!(self, Ty::Null)
     }
 
-    /// Var type is one of [Ty::VarChar], [Ty::VarBinary], [Ty::NChar].
+    /// Var type is one of [Ty::VarChar], [Ty::VarBinary], [Ty::NChar], [Ty::Geometry].
     pub const fn is_var_type(&self) -> bool {
         use Ty::*;
-        matches!(self, VarChar | VarBinary | NChar)
+        matches!(self, VarChar | VarBinary | NChar | Geometry)
     }
 
     // /// Check if the data type need quotes, means one of [Ty::VarChar], [Ty::NChar], [Ty::Json].
@@ -269,6 +272,7 @@ impl Ty {
             Decimal => "DECIMAL",
             Blob => "BLOB",
             MediumBlob => "MEDIUMBLOB",
+            Geometry => "GEOMETRY",
         }
     }
 
@@ -295,6 +299,7 @@ impl Ty {
             Decimal => "decimal",
             Blob => "blob",
             MediumBlob => "mediumblob",
+            Geometry => "geometry",
         }
     }
 
@@ -311,7 +316,7 @@ impl Ty {
         }
         _var_str!(
             Null Bool TinyInt SmallInt Int BigInt UTinyInt USmallInt UInt UBigInt
-            Float Double VarChar NChar Timestamp Json VarBinary Decimal Blob MediumBlob
+            Float Double VarChar NChar Timestamp Json VarBinary Decimal Blob MediumBlob Geometry
         )
     }
 
@@ -339,6 +344,7 @@ impl Ty {
             17 => Decimal,
             18 => Blob,
             19 => MediumBlob,
+            20 => Geometry,
             _ => panic!("unknown data type"),
         }
     }
