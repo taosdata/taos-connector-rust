@@ -8,6 +8,8 @@ use taos_query::prelude::RawError as Error;
 
 use crate::stmt::{StmtField, StmtParam, StmtUseResult};
 
+use super::StmtPrepareResult;
+
 pub type ReqId = u64;
 
 /// Type for result ID.
@@ -138,6 +140,7 @@ pub enum StmtRecvData {
     Prepare {
         #[serde(default)]
         stmt_id: StmtId,
+        is_insert: bool,
     },
     SetTableName {
         #[serde(default)]
@@ -223,6 +226,7 @@ pub enum StmtOk {
     Conn(Result<(), Error>),
     Init(ReqId, Result<StmtId, Error>),
     Stmt(StmtId, Result<Option<usize>, Error>),
+    StmtPrepare(StmtId, Result<StmtPrepareResult, Error>),
     StmtFields(StmtId, Result<Vec<StmtField>, Error>),
     StmtParam(StmtId, Result<StmtParam, Error>),
     StmtUseResult(StmtId, Result<StmtUseResult, Error>),
@@ -253,8 +257,14 @@ impl StmtRecv {
                     _e!()
                 }
             }),
-            StmtRecvData::Prepare { stmt_id }
-            | StmtRecvData::SetTableName { stmt_id }
+            StmtRecvData::Prepare { stmt_id, is_insert } => StmtOk::StmtPrepare(stmt_id, {
+                if self.code == 0 {
+                    Ok(StmtPrepareResult { stmt_id, is_insert })
+                } else {
+                    _e!()
+                }
+            }),
+            StmtRecvData::SetTableName { stmt_id }
             | StmtRecvData::SetTags { stmt_id }
             | StmtRecvData::Bind { stmt_id }
             | StmtRecvData::AddBatch { stmt_id } => StmtOk::Stmt(stmt_id, {
