@@ -47,6 +47,10 @@ type StmtUseResultResult = RawResult<StmtUseResult>;
 type StmtUseSender = tokio::sync::mpsc::Sender<StmtUseResultResult>;
 type StmtUseReceiver = tokio::sync::mpsc::Receiver<StmtUseResultResult>;
 
+type StmtPrepareResultResult = RawResult<StmtPrepareResult>;
+type StmtPrepareResultSender = tokio::sync::mpsc::Sender<StmtPrepareResultResult>;
+type StmtPrepareResultReceiver = tokio::sync::mpsc::Receiver<StmtPrepareResultResult>;
+
 type WsSender = tokio::sync::mpsc::Sender<WsMessage<bytes::Bytes>>;
 
 trait ToJsonValue {
@@ -242,6 +246,9 @@ pub struct Stmt {
     param_receiver: Option<StmtParamReceiver>,
     use_result_fetches: Arc<HashMap<StmtId, StmtUseSender>>,
     use_result_receiver: Option<StmtUseReceiver>,
+    prepare_result_fetches: Arc<HashMap<StmtId, StmtPrepareResultSender>>,
+    prepare_result_receiver: Option<StmtPrepareResultReceiver>,
+    is_insert: Option<bool>,
 }
 
 #[repr(C)]
@@ -261,6 +268,12 @@ pub struct StmtUseResult {
     pub fields_types: Option<Vec<Ty>>,
     pub fields_lengths: Option<Vec<u32>>,
     pub precision: Precision,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct StmtPrepareResult {
+    pub stmt_id: StmtId,
+    pub is_insert: bool,
 }
 
 #[repr(C)]
@@ -324,6 +337,9 @@ impl Stmt {
 
         let fields_fetches = Arc::new(HashMap::<StmtId, StmtFieldSender>::new());
         let fields_fetches_sender = fields_fetches.clone();
+
+        let prepare_result_fetches = Arc::new(HashMap::<StmtId, StmtPrepareResultSender>::new());
+        let prepare_result_fetches_sender = prepare_result_fetches.clone();
 
         let param_fetches = Arc::new(HashMap::<StmtId, StmtParamSender>::new());
         let param_fetches_sender = param_fetches.clone();
@@ -389,6 +405,16 @@ impl Stmt {
                                                 // let res = res.clone();
                                                 sender.send(res).await.unwrap();
                                             // }) {
+
+                                            } else {
+                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                            }
+                                        }
+                                        StmtOk::StmtPrepare(stmt_id, res) => {
+                                            if let Some(sender) = prepare_result_fetches_sender.get(&stmt_id) {
+                                                log::trace!("send data to fetches with id {}", stmt_id);
+
+                                                sender.send(res).await.unwrap();
 
                                             } else {
                                                 log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
@@ -473,6 +499,9 @@ impl Stmt {
             param_receiver: None,
             use_result_fetches,
             use_result_receiver: None,
+            prepare_result_fetches,
+            prepare_result_receiver: None,
+            is_insert: None,
         })
     }
 
@@ -513,6 +542,9 @@ impl Stmt {
 
         let fields_fetches = Arc::new(HashMap::<StmtId, StmtFieldSender>::new());
         let fields_fetches_sender = fields_fetches.clone();
+
+        let prepare_result_fetches = Arc::new(HashMap::<StmtId, StmtPrepareResultSender>::new());
+        let prepare_result_fetches_sender = prepare_result_fetches.clone();
 
         let param_fetches = Arc::new(HashMap::<StmtId, StmtParamSender>::new());
         let param_fetches_sender = param_fetches.clone();
@@ -577,6 +609,14 @@ impl Stmt {
 
                                             sender.send(res).await.unwrap();
 
+                                        } else {
+                                            log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                        }
+                                    }
+                                    StmtOk::StmtPrepare(stmt_id, res) => {
+                                        if let Some(sender) = prepare_result_fetches_sender.get(&stmt_id) {
+                                            log::trace!("send data to fetches with id {}", stmt_id);
+                                            sender.send(res).await.unwrap();
                                         } else {
                                             log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                         }
@@ -662,6 +702,9 @@ impl Stmt {
             param_receiver: None,
             use_result_fetches,
             use_result_receiver: None,
+            prepare_result_fetches,
+            prepare_result_receiver: None,
+            is_insert: None,
         })
     }
     /// Build TDengine websocket client from dsn.
@@ -714,6 +757,12 @@ impl Stmt {
         let _ = self.use_result_fetches.insert(stmt_id, use_result_sender);
         self.use_result_receiver = Some(use_result_receiver);
 
+        let (prepare_result_sender, prepare_result_receiver) = tokio::sync::mpsc::channel(2);
+        let _ = self
+            .prepare_result_fetches
+            .insert(stmt_id, prepare_result_sender);
+        self.prepare_result_receiver = Some(prepare_result_receiver);
+
         Ok(self)
     }
 
@@ -733,9 +782,16 @@ impl Stmt {
             sql: sql.to_string(),
         };
         self.ws.send(prepare.to_msg()).await.map_err(Error::from)?;
-        let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
-            taos_query::RawError::from_string("Can't receive stmt prepare response"),
-        )??;
+        let res = self
+            .prepare_result_receiver
+            .as_mut()
+            .unwrap()
+            .recv()
+            .await
+            .ok_or(taos_query::RawError::from_string(
+                "Can't receive stmt prepare result response",
+            ))??;
+        self.is_insert = Some(res.is_insert);
         Ok(())
     }
     pub async fn stmt_add_batch(&mut self) -> RawResult<()> {
@@ -898,6 +954,11 @@ impl Stmt {
     }
 
     pub async fn use_result(&mut self) -> RawResult<StmtUseResult> {
+        if self.is_insert.unwrap() {
+            return Err(taos_query::RawError::from_string(
+                "Can't use result for insert stmt",
+            ));
+        }
         let message = StmtSend::UseResult(self.args.unwrap());
         log::trace!("use result message: {:#?}", &message);
         self.ws
@@ -969,7 +1030,8 @@ mod tests {
         let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
-        taos.exec(format!("create table {db}.ctb (ts timestamp, v int)")).await?;
+        taos.exec(format!("create table {db}.ctb (ts timestamp, v int)"))
+            .await?;
 
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
@@ -1003,8 +1065,10 @@ mod tests {
         let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
-        taos.exec(format!("create table {db}.stb (ts timestamp, v int) tags(tj json)"))
-            .await?;
+        taos.exec(format!(
+            "create table {db}.stb (ts timestamp, v int) tags(tj json)"
+        ))
+        .await?;
 
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
@@ -1191,6 +1255,11 @@ mod tests {
         log::debug!("use result: {:?}", res);
 
         assert!(res.is_err());
+
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains("Can't use result for insert stmt"));
 
         taos.exec(format!("drop database {db}")).await?;
         Ok(())
