@@ -73,9 +73,11 @@ use std::{
 };
 
 pub(crate) trait IsColumnView: Sized {
+    #[allow(dead_code)]
     /// View item data type.
     fn ty(&self) -> Ty;
 
+    #[allow(dead_code)]
     fn from_value_iter<'a>(iter: impl Iterator<Item = &'a Value>) -> Self {
         Self::from_borrowed_value_iter::<'a>(iter.map(|v| v.to_borrowed_value()))
     }

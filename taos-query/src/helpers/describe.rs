@@ -1,7 +1,6 @@
 use std::{
     fmt,
     ops::{Deref, DerefMut},
-    path::Display,
     str::FromStr,
 };
 

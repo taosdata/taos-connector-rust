@@ -18,63 +18,6 @@ use taos_query::{
 
 const MAX_CONNECT_RETRIES: u8 = 2;
 
-mod version {
-    use std::fmt::Display;
-
-    #[derive(Debug, PartialEq, PartialOrd)]
-    struct Version {
-        mainline: u8,
-        major: u8,
-        minor: u8,
-        patch: u8,
-    }
-
-    impl Display for Version {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let Version {
-                mainline,
-                major,
-                minor,
-                patch,
-            } = self;
-            f.write_fmt(format_args!("{mainline}.{major}.{minor}.{patch}"))
-        }
-    }
-
-    impl Version {
-        // pub(crate) const fn new(mainline: u8, major: u8, minor: u8, patch: u8) -> Self {
-        //     Self {
-        //         mainline,
-        //         major,
-        //         minor,
-        //         patch,
-        //     }
-        // }
-        // fn parse(version: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        //     let version_items: Vec<_> = version.split('.').collect();
-        //     let items = version_items.len();
-        //     if items == 0 || items > 4 {
-        //         Err("parse version error: {version}")?
-        //     }
-
-        //     let mainline = version_items[0].parse()?;
-        //     let major = version_items
-        //         .get(1)
-        //         .and_then(|s| s.parse().ok())
-        //         .unwrap_or_default();
-        //     let minor = version_items
-        //         .get(2)
-        //         .and_then(|s| s.parse().ok())
-        //         .unwrap_or_default();
-        //     let patch = version_items
-        //         .get(3)
-        //         .and_then(|s| s.parse().ok())
-        //         .unwrap_or_default();
-
-        //     Ok(Self::new(mainline, major, minor, patch))
-        // }
-    }
-}
 mod into_c_str;
 mod raw;
 mod stmt;

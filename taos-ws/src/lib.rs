@@ -19,16 +19,16 @@ pub mod query;
 pub use query::ResultSet;
 pub use query::Taos;
 
-use query::WsConnReq;
 use query::Error as QueryError;
+use query::WsConnReq;
 
 pub mod schemaless;
 
 pub(crate) use taos_query::block_in_place_or_global;
-use tokio_tungstenite::{WebSocketStream, connect_async_with_config};
+use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::MaybeTlsStream;
-use tokio::net::TcpStream;
+use tokio_tungstenite::{connect_async_with_config, WebSocketStream};
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
@@ -44,7 +44,7 @@ pub struct TaosBuilder {
     database: Option<String>,
     server_version: OnceCell<String>,
     // timeout: Duration,
-    conn_mode: Option<u32>
+    conn_mode: Option<u32>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -335,12 +335,12 @@ impl TaosBuilder {
             _ => Err(DsnError::InvalidDriver(dsn.to_string()))?,
         };
 
-        let conn_mode =  match dsn.params.get("conn_mode") {
+        let conn_mode = match dsn.params.get("conn_mode") {
             Some(s) => match s.parse::<u32>() {
                 Ok(num) => Some(num),
                 Err(_) => Err(DsnError::InvalidDriver(dsn.to_string()))?,
-            }
-            None => None
+            },
+            None => None,
         };
 
         let token = dsn.params.remove("token");
@@ -370,7 +370,7 @@ impl TaosBuilder {
                 database: dsn.subject,
                 server_version: OnceCell::new(),
                 // timeout,
-                conn_mode
+                conn_mode,
             })
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
@@ -382,7 +382,7 @@ impl TaosBuilder {
                 database: dsn.subject,
                 server_version: OnceCell::new(),
                 // timeout,
-                conn_mode
+                conn_mode,
             })
         }
     }
@@ -392,7 +392,7 @@ impl TaosBuilder {
                 format!("{}://{}/rest/ws?token={}", self.scheme, self.addr, token)
             }
             WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme, self.addr),
-        }    
+        }
     }
 
     pub(crate) fn to_stmt_url(&self) -> String {
@@ -435,7 +435,7 @@ impl TaosBuilder {
     }
 
     pub(crate) fn to_conn_request(&self) -> WsConnReq {
-        let mode = match self.conn_mode{
+        let mode = match self.conn_mode {
             Some(1) => Some(0), //for adapter, 0 is bi mode
             _ => None,
         };
@@ -445,18 +445,21 @@ impl TaosBuilder {
                 user: Some("root".to_string()),
                 password: Some("taosdata".to_string()),
                 db: self.database.as_ref().map(Clone::clone),
-                mode
+                mode,
             },
             WsAuth::Plain(user, pass) => WsConnReq {
                 user: Some(user.to_string()),
                 password: Some(pass.to_string()),
                 db: self.database.as_ref().map(Clone::clone),
-                mode
+                mode,
             },
         }
     }
 
-    pub(crate) async fn build_stream(&self, url: String) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+    pub(crate) async fn build_stream(
+        &self,
+        url: String,
+    ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = Some(1024 * 1024 * 256);
         config.max_message_size = Some(1024 * 1024 * 256);
@@ -471,7 +474,7 @@ impl TaosBuilder {
                     err.into()
                 }
             });
-            
+
         let (ws, _) = match res {
             Ok(res) => res,
             Err(err) => {

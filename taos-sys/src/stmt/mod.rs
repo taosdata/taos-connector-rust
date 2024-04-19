@@ -5,7 +5,7 @@ use std::ffi::CStr;
 use itertools::Itertools;
 use taos_query::prelude::{Code, RawError};
 use taos_query::stmt::AsyncBindable;
-use taos_query::{common::Ty, stmt::Bindable, Queryable, RawResult};
+use taos_query::{stmt::Bindable, Queryable, RawResult};
 
 use crate::types::*;
 

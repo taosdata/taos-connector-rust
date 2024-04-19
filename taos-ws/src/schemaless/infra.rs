@@ -18,7 +18,7 @@ pub struct WsConnReq {
     #[serde_as(as = "NoneAsEmptyString")]
     pub(crate) db: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) mode: Option<i32>,    
+    pub(crate) mode: Option<i32>,
 }
 
 impl WsConnReq {
@@ -32,7 +32,7 @@ impl WsConnReq {
             user: Some(user.into()),
             password: Some(password.into()),
             db: Some(db.into()),
-            mode: None
+            mode: None,
         }
     }
     // pub fn with_database(mut self, db: impl Into<String>) -> Self {
@@ -111,6 +111,7 @@ pub struct InsertResp {
 #[serde_as]
 #[serde(tag = "action")]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 pub enum WsRecvData {
     Conn,
     Version {

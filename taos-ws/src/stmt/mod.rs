@@ -11,7 +11,6 @@ use taos_query::prelude::{InlinableWrite, RawResult};
 use taos_query::stmt::{AsyncBindable, Bindable};
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 
-use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
 
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -47,6 +46,7 @@ type StmtUseReceiver = tokio::sync::mpsc::Receiver<StmtUseResultResult>;
 
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 
+#[allow(dead_code)]
 trait ToJsonValue {
     fn to_json_value(&self) -> serde_json::Value;
 }
@@ -753,8 +753,6 @@ mod tests {
 
     use crate::{stmt::Stmt, TaosBuilder};
 
-    use taos_query::prelude::tokio;
-
     #[tokio::test()]
     async fn test_client() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
@@ -959,8 +957,7 @@ mod tests {
 
         stmt.stmt_set_tbname("tb1").await?;
 
-        stmt.stmt_set_tags(vec![json!(1)])
-            .await?;
+        stmt.stmt_set_tags(vec![json!(1)]).await?;
 
         stmt.bind_all(vec![
             json!([

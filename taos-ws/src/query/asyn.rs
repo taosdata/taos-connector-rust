@@ -12,15 +12,12 @@ use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
 use thiserror::Error;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
-use taos_query::prelude::tokio;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 
 use tokio::time;
 use tokio_tungstenite::tungstenite::Error as WsError;
-use tokio_tungstenite::{
-    tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
-};
+use tokio_tungstenite::{tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream};
 
 use super::{infra::*, TaosBuilder};
 
@@ -533,7 +530,6 @@ impl WsTaos {
         Self::from_wsinfo(&info).await
     }
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-
         let ws = info.build_stream(info.to_query_url()).await?;
 
         let req_id = 0;
@@ -1297,7 +1293,7 @@ async fn ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
             "create table if not exists tb1(ts timestamp, v bool)",
         ])
         .await?;
-    
+
     let req_id = 10003;
     client.write_raw_block_with_req_id(&raw, req_id).await?;
 
@@ -1314,6 +1310,11 @@ async fn ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
 
     dbg!(values);
 
-    assert_eq!(client.exec("drop database test_ws_write_raw_block_with_req_id").await?, 0);
+    assert_eq!(
+        client
+            .exec("drop database test_ws_write_raw_block_with_req_id")
+            .await?,
+        0
+    );
     Ok(())
 }

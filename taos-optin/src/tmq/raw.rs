@@ -328,7 +328,6 @@ pub(super) mod conf {
     // use taos_error::*;
 
     use crate::*;
-    use std::iter::Iterator;
     use taos_query::Dsn;
 
     /* tmq conf */

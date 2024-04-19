@@ -1,15 +1,21 @@
 pub(crate) mod ffi;
 
 use std::{
-    ffi::{CStr, CString}, fmt::Debug, mem::transmute, str::FromStr, time::Duration
+    ffi::{CStr, CString},
+    fmt::Debug,
+    mem::transmute,
+    str::FromStr,
+    time::Duration,
 };
 
 pub(crate) use ffi::*;
 
 use itertools::Itertools;
+#[warn(unused_imports)]
+use taos_query::prelude::tokio::{pin, select, time::sleep};
+
 use taos_query::{
     common::{raw_data_t, Precision, RawData, RawMeta},
-    prelude::tokio,
     tmq::{
         AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
         IsOffset, MessageSet, Timeout, VGroupId,
@@ -612,9 +618,9 @@ impl AsAsyncConsumer for Consumer {
         let res = match timeout {
             Timeout::Never | Timeout::None => {
                 let timeout = Duration::MAX;
-                let sleep = tokio::time::sleep(timeout);
-                tokio::pin!(sleep);
-                tokio::select! {
+                let sleep = sleep(timeout);
+                pin!(sleep);
+                select! {
                     _ = &mut sleep, if !sleep.is_elapsed() => {
                        Ok(None)
                     }
@@ -635,9 +641,9 @@ impl AsAsyncConsumer for Consumer {
                 }
             }
             Timeout::Duration(timeout) => {
-                let sleep = tokio::time::sleep(timeout);
-                tokio::pin!(sleep);
-                tokio::select! {
+                let sleep = sleep(timeout);
+                pin!(sleep);
+                select! {
                     _ = &mut sleep, if !sleep.is_elapsed() => {
                        Ok(None)
                     }
@@ -760,9 +766,8 @@ mod tests {
         taos.query(format!("create database {db}2 wal_retention_period 3600"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -1031,7 +1036,9 @@ mod tests {
             "use sys_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::from_dsn(
+            "taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["sys_tmq_meta_sync"])?;
 
@@ -1172,9 +1179,8 @@ mod tests {
             ])
             .await?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_ts2035"]).await?;
 
@@ -1269,9 +1275,8 @@ mod tests {
             ])
             .await?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_delete_meta"]).await?;
 
@@ -1424,7 +1429,8 @@ mod tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
+        let builder =
+            TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_tmq_meta"]).await?;
 

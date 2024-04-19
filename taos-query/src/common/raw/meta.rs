@@ -180,7 +180,7 @@ impl From<Field> for FieldMore {
 }
 
 impl FieldMore {
-    fn is_primary_key(&self) -> bool {
+    pub fn is_primary_key(&self) -> bool {
         self.is_primary_key
     }
 

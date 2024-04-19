@@ -48,7 +48,7 @@ pub struct OffsetSeekArgs {
 #[derive(Debug, Serialize, Default, Clone)]
 pub struct OffsetArgs {
     pub(crate) req_id: ReqId,
-    pub(crate) topic_vgroup_ids: Vec<OffsetInnerArgs>
+    pub(crate) topic_vgroup_ids: Vec<OffsetInnerArgs>,
 }
 
 #[derive(Debug, Serialize, Default, Clone)]
@@ -222,12 +222,15 @@ pub enum TmqRecvData {
     Bytes(Bytes),
     FetchRaw {
         #[serde(skip)]
+        #[allow(dead_code)]
         meta: Bytes,
     },
     FetchBlock {
         #[serde(skip)]
+        #[allow(dead_code)]
         data: Bytes,
     },
+    #[allow(dead_code)]
     Block(Vec<u32>),
     Commit,
     Close,

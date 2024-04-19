@@ -5,7 +5,6 @@ pub(crate) mod infra;
 
 use crate::TaosBuilder;
 
-use derive_more::Deref;
 use futures::stream::SplitStream;
 use futures::{SinkExt, StreamExt};
 // use scc::HashMap;
@@ -13,14 +12,12 @@ use dashmap::DashMap as HashMap;
 
 use taos_query::prelude::{Code, RawError};
 
-use taos_query::prelude::{tokio, RawResult};
+use taos_query::prelude::RawResult;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 
 use tokio::time;
-use tokio_tungstenite::{
-    tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
-};
+use tokio_tungstenite::{tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream};
 
 use infra::*;
 
@@ -40,8 +37,8 @@ type QueryInner = HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = HashMap<ResId, ReqId>;
 
-#[derive(Debug, Clone, Deref)]
-struct Version(String);
+// #[derive(Debug, Clone, Deref)]
+// struct Version(String);
 
 #[derive(Debug, Clone)]
 struct WsQuerySender {
@@ -281,9 +278,8 @@ impl WsTaos {
     ///
 
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        
         let ws = info.build_stream(info.to_schemaless_url()).await?;
-        
+
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 

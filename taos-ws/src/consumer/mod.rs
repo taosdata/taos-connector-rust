@@ -18,14 +18,13 @@ use taos_query::RawResult;
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
 
-use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
 
 use tokio::time;
 use tokio_tungstenite::connect_async_with_config;
+use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Error as WsError;
-use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::query::asyn::WS_ERROR_NO;
 use crate::query::infra::{ToMessage, WsConnReq};
@@ -879,7 +878,9 @@ impl TmqBuilder {
         config.max_message_size = Some(1024 * 1024 * 256);
 
         let url = self.info.to_tmq_url();
-        let (ws, _) = connect_async_with_config(&url, Some(config), false).await.map_err(WsTmqError::from)?;
+        let (ws, _) = connect_async_with_config(&url, Some(config), false)
+            .await
+            .map_err(WsTmqError::from)?;
         let (mut sender, mut reader) = ws.split();
 
         let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new());
@@ -1282,7 +1283,6 @@ mod tests {
     use std::time::Duration;
 
     use super::{TaosBuilder, TmqBuilder};
-    use taos_query::prelude::tokio;
 
     #[tokio::test]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
@@ -1369,7 +1369,9 @@ mod tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=5s&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new(
+            "taos://localhost:6041?group.id=10&timeout=5s&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build_consumer().await?;
         consumer.subscribe(["ws_tmq_meta"]).await?;
 
@@ -1519,7 +1521,9 @@ mod tests {
             "use ws_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new(
+            "taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync"])?;
 
@@ -1706,7 +1710,9 @@ mod tests {
             "use ws_tmq_meta_sync32",
         ])?;
 
-        let builder = TmqBuilder::new("taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new(
+            "taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync3"])?;
 

@@ -280,7 +280,6 @@ pub mod sync {
 }
 
 mod r#async {
-    use itertools::Itertools;
     use serde::de::DeserializeOwned;
     use std::borrow::Cow;
     use std::marker::PhantomData;

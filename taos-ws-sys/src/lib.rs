@@ -1557,7 +1557,8 @@ mod tests {
     fn test_bi_mode() {
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"http://localhost:6041?conn_mode=1\0" as *const u8 as _);
+            let taos =
+                ws_connect_with_dsn(b"http://localhost:6041?conn_mode=1\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1583,8 +1584,7 @@ mod tests {
             execute!(b"CREATE TABLE d1001 USING meters TAGS ('California.SanFrancisco', 2)\0");
             execute!(b"INSERT INTO d1001 USING meters TAGS ('California.SanFrancisco', 2) VALUES (NOW, 10.2, 219, 0.32)\0");
 
-            let sql = b"select * from meters\0"
-            as *const u8 as _;
+            let sql = b"select * from meters\0" as *const u8 as _;
 
             let rs = ws_query(taos, sql);
 
@@ -1611,8 +1611,8 @@ mod tests {
 
             // bi mode will show tbname
             assert!(fields.len() >= 6);
-         
+
             execute!(b"drop database if exists ws_bi_mode\0");
         }
-    }    
+    }
 }
