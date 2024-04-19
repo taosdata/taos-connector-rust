@@ -76,18 +76,18 @@ impl NCharView {
     pub unsafe fn nchar_to_utf8(&self) {
         if self.version == Version::V3 && *self.is_chars.get() {
             let mut ptr: *const u8 = std::ptr::null();
-            for offset in &self.offsets {
-                if *offset >= 0 {
+            for offset in self.offsets.iter() {
+                if offset >= 0 {
                     if ptr.is_null() {
-                        ptr = self.data.as_ptr().offset(*offset as isize);
-                        InlineNChar::<u16>::from_ptr(self.data.as_ptr().offset(*offset as isize))
+                        ptr = self.data.as_ptr().offset(offset as isize);
+                        InlineNChar::<u16>::from_ptr(self.data.as_ptr().offset(offset as isize))
                             .into_inline_str();
                     } else {
-                        let next = self.data.as_ptr().offset(*offset as isize);
+                        let next = self.data.as_ptr().offset(offset as isize);
                         if ptr != next {
                             ptr = next;
                             InlineNChar::<u16>::from_ptr(
-                                self.data.as_ptr().offset(*offset as isize),
+                                self.data.as_ptr().offset(offset as isize),
                             )
                             .into_inline_str();
                         }

@@ -11,6 +11,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use crate::{
     common::{Field, Ty},
+    helpers::CompressOptions,
     util::Inlinable,
 };
 
@@ -156,6 +157,44 @@ impl crate::util::AsyncInlinable for RawMeta {
 //     }
 // }
 
+/// TMQ json meta isPrimaryKey/encode/compress/level support since 3.3.0.0
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldMore {
+    #[serde(flatten)]
+    field: Field,
+    #[serde(default)]
+    is_primary_key: bool,
+    #[serde(default, flatten)]
+    compression: Option<CompressOptions>,
+}
+
+impl From<Field> for FieldMore {
+    fn from(f: Field) -> Self {
+        Self {
+            field: f,
+            is_primary_key: false,
+            compression: None,
+        }
+    }
+}
+
+impl FieldMore {
+    fn is_primary_key(&self) -> bool {
+        self.is_primary_key
+    }
+
+    fn sql_repr(&self) -> String {
+        let mut sql = self.field.to_string();
+        if let Some(compression) = &self.compression {
+            sql.push_str(&format!("{}", compression));
+        }
+        if self.is_primary_key {
+            sql.push_str(" PRIMARY KEY");
+        }
+        sql
+    }
+}
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TagWithValue {
     #[serde(flatten)]
@@ -170,7 +209,7 @@ pub enum MetaCreate {
     #[serde(rename_all = "camelCase")]
     Super {
         table_name: String,
-        columns: Vec<Field>,
+        columns: Vec<FieldMore>,
         tags: Vec<Field>,
     },
     #[serde(rename_all = "camelCase")]
@@ -183,7 +222,7 @@ pub enum MetaCreate {
     #[serde(rename_all = "camelCase")]
     Normal {
         table_name: String,
-        columns: Vec<Field>,
+        columns: Vec<FieldMore>,
     },
 }
 
@@ -286,10 +325,12 @@ pub enum AlterType {
     SetTagValue = 4,
     AddColumn = 5,
     DropColumn = 6,
-    ModifyColumnLength,
-    ModifyTagLength,
-    ModifyTableOption,
-    RenameColumn,
+    ModifyColumnLength = 7,
+    ModifyTagLength = 8,
+    ModifyTableOption = 9,
+    RenameColumn = 10,
+    // TODO: TDengine 3.3.0 encode/compress/level support.
+    // ModifyColumnCompression = 13,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -365,6 +406,11 @@ impl Display for MetaAlter {
                 self.field.name(),
                 self.col_new_name.as_ref().unwrap()
             )),
+            // ModifyColumnCompression => f.write_fmt(format_args!(
+            //     "ALTER TABLE `{}` MODIFY COLUMN {}",
+            //     self.table_name,
+            //     self.field.sql_repr(),
+            // )),
         }
     }
 }

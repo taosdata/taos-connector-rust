@@ -48,7 +48,7 @@ pub struct tmq_list_t {
     _unused: [u8; 0],
 }
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub struct tmq_message_t {
     _unused: [u8; 0],
 }

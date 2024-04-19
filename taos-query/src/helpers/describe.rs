@@ -1,6 +1,7 @@
 use std::{
     fmt,
     ops::{Deref, DerefMut},
+    path::Display,
     str::FromStr,
 };
 
@@ -11,12 +12,65 @@ use serde::{
 
 use crate::common::Ty;
 
+/// Compress options for column, supported since TDengine 3.3.0.0 .
+///
+/// The `encode` field is the encoding method for the column, it can be one of the following values:
+/// - `disabled`
+/// - `delta-i`
+/// - `delta-d`
+/// - `simple8b`
+///
+/// The `compress` field is the compression method for the column, it can be one of the following values:
+/// - `none`
+/// - `lz4`
+/// - `gzip`
+/// - `zstd`
+///
+/// The `level` field is the compression level for the column, it can be one of the following values:
+/// - `low`
+/// - `medium`
+/// - `high`
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+pub struct CompressOptions {
+    pub encode: String,
+    pub compress: String,
+    pub level: String,
+}
+
+impl CompressOptions {
+    pub fn new(
+        encode: impl Into<String>,
+        compress: impl Into<String>,
+        level: impl Into<String>,
+    ) -> Self {
+        Self {
+            encode: encode.into(),
+            compress: compress.into(),
+            level: level.into(),
+        }
+    }
+}
+
+impl fmt::Display for CompressOptions {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "ENCODE '{}' COMPRESS '{}' LEVEL '{}'",
+            self.encode, self.compress, self.level
+        )
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct Described {
     pub field: String,
     #[serde(rename = "type")]
     pub ty: Ty,
     pub length: usize,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(flatten, default)]
+    pub compression: Option<CompressOptions>,
 }
 
 impl Described {
@@ -25,12 +79,28 @@ impl Described {
     /// For example: "INT", "VARCHAR(100)".
     pub fn sql_repr(&self) -> String {
         let ty = self.ty;
-        if ty.is_var_type() {
-            format!("`{}` {}({})", self.field, ty, self.length)
-        } else {
-            format!("`{}` {}", self.field, self.ty)
+        match (self.is_primary_key(), ty.is_var_type(), &self.compression) {
+            (true, true, None) => format!("`{}` {}({}) PRIMARY KEY", self.field, ty, self.length),
+            (true, false, None) => format!("`{}` {} PRIMARY KEY", self.field, self.ty),
+            (true, true, Some(t)) => {
+                format!("`{}` {}({}) {} PRIMARY KEY", self.field, ty, self.length, t)
+            }
+            (true, false, Some(t)) => {
+                format!("`{}` {} {} PRIMARY KEY", self.field, ty, t)
+            }
+
+            (false, true, None) => format!("`{}` {}({})", self.field, ty, self.length),
+            (false, false, None) => format!("`{}` {}", self.field, self.ty),
+            (false, true, Some(t)) => {
+                format!("`{}` {}({}) {}", self.field, ty, self.length, t)
+            }
+            (false, false, Some(t)) => {
+                format!("`{}` {} {}", self.field, ty, t)
+            }
         }
     }
+
+    /// Create a new column description without primary-key/compression feature.
     pub fn new(field: impl Into<String>, ty: Ty, length: impl Into<Option<usize>>) -> Self {
         let field = field.into();
         let length = length.into();
@@ -41,11 +111,27 @@ impl Described {
                 ty.fixed_length()
             }
         });
-        Self { field, ty, length }
+        Self {
+            field,
+            ty,
+            length,
+            note: None,
+            compression: None,
+        }
+    }
+
+    /// Return true if the field is primary key.
+    pub fn is_primary_key(&self) -> bool {
+        self.note.as_deref() == Some("PRIMARY KEY")
+    }
+
+    /// Return true if the field is tag.
+    pub fn is_tag(&self) -> bool {
+        self.note.as_deref() == Some("TAG")
     }
 }
 #[derive(Debug, Serialize, PartialEq, Eq, Clone)]
-#[serde(tag = "note")]
+#[serde(untagged)]
 pub enum ColumnMeta {
     Column(Described),
     Tag(Described),
@@ -70,6 +156,15 @@ impl DerefMut for ColumnMeta {
         }
     }
 }
+
+#[inline(always)]
+fn empty_as_none(s: &str) -> Option<String> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
 unsafe impl Send for ColumnMeta {}
 impl<'de> Deserialize<'de> for ColumnMeta {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -81,6 +176,9 @@ impl<'de> Deserialize<'de> for ColumnMeta {
             Type,
             Length,
             Note,
+            Encode,
+            Compress,
+            Level,
         }
 
         impl<'de> Deserialize<'de> for Meta {
@@ -94,7 +192,9 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                     type Value = Meta;
 
                     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                        formatter.write_str("`field`, `type`, `length` or `note`")
+                        formatter.write_str(
+                            "one of `field`, `type`, `length`, `note`, `encode`, `compress`, `level`",
+                        )
                     }
 
                     fn visit_str<E>(self, value: &str) -> Result<Meta, E>
@@ -106,6 +206,9 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                             "type" => Ok(Meta::Type),
                             "length" => Ok(Meta::Length),
                             "note" => Ok(Meta::Note),
+                            "encode" => Ok(Meta::Encode),
+                            "compress" => Ok(Meta::Compress),
+                            "level" => Ok(Meta::Level),
                             _ => Err(de::Error::unknown_field(value, FIELDS)),
                         }
                     }
@@ -128,9 +231,9 @@ impl<'de> Deserialize<'de> for ColumnMeta {
             where
                 V: SeqAccess<'de>,
             {
-                let field = dbg!(seq
+                let field = seq
                     .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(0, &self))?);
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
                 let ty = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(1, &self))
@@ -138,11 +241,41 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let length = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(2, &self))?;
-                let note: String = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(3, &self))?;
-                let desc = Described { field, ty, length };
-                if note.is_empty() {
+                let note: Option<String> = seq
+                    .next_element::<Option<&str>>()?
+                    .and_then(|opt| opt)
+                    .and_then(empty_as_none);
+
+                // let is_primary_key = &note == "PRIMARY KEY";
+
+                let encode: Option<String> = seq
+                    .next_element::<Option<&str>>()?
+                    .and_then(|opt| opt)
+                    .and_then(empty_as_none);
+                let compress: Option<String> = seq
+                    .next_element::<Option<&str>>()?
+                    .and_then(|opt| opt)
+                    .and_then(empty_as_none);
+                let level: Option<String> = seq
+                    .next_element::<Option<&str>>()?
+                    .and_then(|opt| opt)
+                    .and_then(empty_as_none);
+
+                let compression = if let (Some(encode), Some(compress), Some(level)) =
+                    (encode, compress, level)
+                {
+                    Some(CompressOptions::new(encode, compress, level))
+                } else {
+                    None
+                };
+                let desc = Described {
+                    field,
+                    ty,
+                    length,
+                    note,
+                    compression,
+                };
+                if !desc.is_tag() {
                     Ok(ColumnMeta::Column(desc))
                 } else {
                     Ok(ColumnMeta::Tag(desc))
@@ -157,6 +290,9 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let mut ty = None;
                 let mut length = None;
                 let mut note = None;
+                let mut encode = None;
+                let mut compress = None;
+                let mut level = None;
                 while let Some(key) = map.next_key()? {
                     match key {
                         Meta::Field => {
@@ -182,17 +318,47 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                             if note.is_some() {
                                 return Err(de::Error::duplicate_field("note"));
                             }
-                            let t: String = map.next_value()?;
-                            note = Some(t.is_empty() || t == "Column")
+                            note = map.next_value::<Option<&str>>()?.and_then(empty_as_none);
+                        }
+                        Meta::Encode => {
+                            if encode.is_some() {
+                                return Err(de::Error::duplicate_field("encode"));
+                            }
+                            encode = map.next_value::<Option<&str>>()?.and_then(empty_as_none);
+                        }
+                        Meta::Compress => {
+                            if compress.is_some() {
+                                return Err(de::Error::duplicate_field("compress"));
+                            }
+                            compress = map.next_value::<Option<&str>>()?.and_then(empty_as_none);
+                        }
+                        Meta::Level => {
+                            if level.is_some() {
+                                return Err(de::Error::duplicate_field("level"));
+                            }
+                            level = map.next_value::<Option<&str>>()?.and_then(empty_as_none);
                         }
                     }
                 }
                 let field = field.ok_or_else(|| de::Error::missing_field("field"))?;
                 let ty = ty.ok_or_else(|| de::Error::missing_field("type"))?;
                 let length = length.ok_or_else(|| de::Error::missing_field("length"))?;
-                let desc = Described { field, ty, length };
-                let note = note.ok_or_else(|| de::Error::missing_field("note"))?;
-                if note {
+                let note = note.map(|s| s.to_string());
+                let compression = if let (Some(encode), Some(compress), Some(level)) =
+                    (encode, compress, level)
+                {
+                    Some(CompressOptions::new(encode, compress, level))
+                } else {
+                    None
+                };
+                let desc = Described {
+                    field,
+                    ty,
+                    length,
+                    note,
+                    compression,
+                };
+                if !desc.is_tag() {
                     Ok(ColumnMeta::Column(desc))
                 } else {
                     Ok(ColumnMeta::Tag(desc))
@@ -200,7 +366,9 @@ impl<'de> Deserialize<'de> for ColumnMeta {
             }
         }
 
-        const FIELDS: &[&str] = &["field", "type", "length", "note"];
+        const FIELDS: &[&str] = &[
+            "field", "type", "length", "note", "encode", "compress", "level",
+        ];
         deserializer.deserialize_struct("ColumnMeta", FIELDS, MetaVisitor)
     }
 }
@@ -233,344 +401,96 @@ impl ColumnMeta {
 
 #[test]
 fn serde_meta() {
+    // ordinary column
     let meta = ColumnMeta::Column(Described {
         field: "name".to_string(),
         ty: Ty::BigInt,
         length: 8,
+        note: None,
+        compression: None,
     });
+
+    let sql = meta.deref().sql_repr();
+
+    assert_eq!(sql, "`name` BIGINT");
 
     let a = serde_json::to_string(&meta).unwrap();
 
     let d: ColumnMeta = serde_json::from_str(&a).unwrap();
 
     assert_eq!(meta, d);
+
+    // primary key column
+    let meta = ColumnMeta::Column(Described {
+        field: "name".to_string(),
+        ty: Ty::BigInt,
+        length: 8,
+        note: Some("PRIMARY KEY".to_string()),
+        compression: None,
+    });
+    let sql = meta.deref().sql_repr();
+
+    assert_eq!(sql, "`name` BIGINT PRIMARY KEY");
+
+    let a = serde_json::to_string(&meta).unwrap();
+
+    let d: ColumnMeta = serde_json::from_str(&a).unwrap();
+
+    assert_eq!(meta, d);
+
+    // with compression
+    let meta = ColumnMeta::Column(Described {
+        field: "name".to_string(),
+        ty: Ty::BigInt,
+        length: 8,
+        note: None,
+        compression: Some(CompressOptions::new("delta-i", "lz4", "medium")),
+    });
+    let sql = meta.deref().sql_repr();
+
+    assert_eq!(
+        sql,
+        "`name` BIGINT ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium'"
+    );
+
+    let a = serde_json::to_string(&meta).unwrap();
+
+    let d: ColumnMeta = serde_json::from_str(&a).unwrap();
+
+    assert_eq!(meta, d);
+
+    // primary key with compression
+    let meta = ColumnMeta::Column(Described {
+        field: "name".to_string(),
+        ty: Ty::BigInt,
+        length: 8,
+        note: Some("PRIMARY KEY".to_string()),
+        compression: Some(CompressOptions::new("delta-i", "lz4", "medium")),
+    });
+    let sql = meta.deref().sql_repr();
+
+    assert_eq!(
+        sql,
+        "`name` BIGINT ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium' PRIMARY KEY"
+    );
+
+    let a = serde_json::to_string(&meta).unwrap();
+
+    let d: ColumnMeta = serde_json::from_str(&a).unwrap();
+
+    assert_eq!(meta, d);
+
+    // deserialize from sequence.
+    let a = r#"["name", "BIGINT", 8, null, null, null, null]"#;
+    let d: ColumnMeta = serde_json::from_str(a).unwrap();
+    assert_eq!(
+        d,
+        ColumnMeta::Column(Described {
+            field: "name".to_string(),
+            ty: Ty::BigInt,
+            length: 8,
+            note: None,
+            compression: None,
+        })
+    );
 }
-//erive(Debug, Clone, Deserialize)]
-// pub struct ColumnMeta {
-//     pub name: String,
-//     pub type_: Ty,
-//     pub bytes: i16,
-// }
-// #[derive(Debug)]
-// pub struct TaosQueryData {
-//     pub column_meta: Vec<ColumnMeta>,
-//     pub rows: Vec<Vec<Field>>,
-// }
-
-// #[derive(Debug)]
-// pub struct TaosDescribe {
-//     pub cols: Vec<ColumnMeta>,
-//     pub tags: Vec<ColumnMeta>,
-// }
-
-// impl TaosDescribe {
-//     pub fn names(&self) -> Vec<&String> {
-//         self.cols
-//             .iter()
-//             .chain(self.tags.iter())
-//             .map(|t| &t.name)
-//             .collect_vec()
-//     }
-
-//     pub fn col_names(&self) -> Vec<&String> {
-//         self.cols.iter().map(|t| &t.name).collect_vec()
-//     }
-//     pub fn tag_names(&self) -> Vec<&String> {
-//         self.tags.iter().map(|t| &t.name).collect_vec()
-//     }
-// }
-// impl FromStr for Ty {
-//     type Err = &'static str;
-//     fn from_str(s: &str) -> Result<Self, Self::Err> {
-//         match s.to_lowercase().as_str() {
-//             "timestamp" => Ok(Ty::Timestamp),
-//             "bool" => Ok(Ty::Bool),
-//             "tinyint" => Ok(Ty::TinyInt),
-//             "smallint" => Ok(Ty::SmallInt),
-//             "int" => Ok(Ty::Int),
-//             "bigint" => Ok(Ty::BigInt),
-//             "tinyint unsigned" => Ok(Ty::UTinyInt),
-//             "smallint unsigned" => Ok(Ty::USmallInt),
-//             "int unsigned" => Ok(Ty::UInt),
-//             "bigint unsigned" => Ok(Ty::UBigInt),
-//             "float" => Ok(Ty::Float),
-//             "double" => Ok(Ty::Double),
-//             "binary" => Ok(Ty::Binary),
-//             "nchar" => Ok(Ty::NChar),
-//             _ => Err("not a valid data type string"),
-//         }
-//     }
-// }
-// impl From<TaosQueryData> for TaosDescribe {
-//     fn from(rhs: TaosQueryData) -> Self {
-//         let (cols, tags): (Vec<_>, Vec<_>) = rhs
-//             .rows
-//             .iter()
-//             .partition(|row| row[3] != Field::Binary("TAG".into()));
-//         Self {
-//             cols: cols
-//                 .into_iter()
-//                 .map(|row| ColumnMeta {
-//                     name: row[0].to_string(),
-//                     type_: Ty::from_str(&row[1].to_string()).expect("from describe"),
-//                     bytes: *row[2].as_int().unwrap() as _,
-//                 })
-//                 .collect_vec(),
-//             tags: tags
-//                 .into_iter()
-//                 .map(|row| ColumnMeta {
-//                     name: row[0].to_string(),
-//                     type_: Ty::from_str(&row[1].to_string()).expect("from describe"),
-//                     bytes: *row[2].as_int().unwrap() as _,
-//                 })
-//                 .collect_vec(),
-//         }
-//     }
-// }
-// impl TaosQueryData {
-//     /// Total rows count of query result
-//     pub fn rows(&self) -> usize {
-//         self.rows.len()
-//     }
-// }
-
-// #[derive(Debug, PartialEq, Clone)]
-// pub enum Field {
-//     Null,        // 0
-//     Bool(bool),  // 1
-//     TinyInt(i8), // 2
-//     SmallInt(i16),
-//     Int(i32),
-//     BigInt(i64),
-//     Float(f32),
-//     Double(f64),
-//     Binary(BString),
-//     Timestamp(Timestamp),
-//     NChar(String),
-//     UTinyInt(u8),
-//     USmallInt(u16),
-//     UInt(u32),
-//     UBigInt(u64), // 14
-//     Json(serde_json::Value),
-// }
-
-// impl fmt::Display for Field {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         match self {
-//             Field::Null => write!(f, "NULL"),
-//             Field::Bool(v) => write!(f, "{}", v),
-//             Field::TinyInt(v) => write!(f, "{}", v),
-//             Field::SmallInt(v) => write!(f, "{}", v),
-//             Field::Int(v) => write!(f, "{}", v),
-//             Field::BigInt(v) => write!(f, "{}", v),
-//             Field::Float(v) => write!(f, "{}", v),
-//             Field::Double(v) => write!(f, "{}", v),
-//             Field::Binary(v) => write!(f, "{}", v),
-//             Field::NChar(v) => write!(f, "{}", v),
-//             Field::Timestamp(v) => write!(f, "{}", v),
-//             Field::UTinyInt(v) => write!(f, "{}", v),
-//             Field::USmallInt(v) => write!(f, "{}", v),
-//             Field::UInt(v) => write!(f, "{}", v),
-//             Field::UBigInt(v) => write!(f, "{}", v),
-//             Field::Json(v) => write!(f, "{}", v),
-//         }
-//     }
-// }
-
-// impl Field {
-//     pub fn as_bool(&self) -> Option<&bool> {
-//         match self {
-//             Field::Bool(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_tiny_int(&self) -> Option<&i8> {
-//         match self {
-//             Field::TinyInt(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_small_int(&self) -> Option<&i16> {
-//         match self {
-//             Field::SmallInt(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_int(&self) -> Option<&i32> {
-//         match self {
-//             Field::Int(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_big_int(&self) -> Option<&i64> {
-//         match self {
-//             Field::BigInt(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_float(&self) -> Option<&f32> {
-//         match self {
-//             Field::Float(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_double(&self) -> Option<&f64> {
-//         match self {
-//             Field::Double(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_binary(&self) -> Option<&BStr> {
-//         match self {
-//             Field::Binary(v) => Some(v.as_ref()),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_nchar(&self) -> Option<&str> {
-//         match self {
-//             Field::NChar(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-
-//     /// BINARY or NCHAR typed string reference
-//     pub fn as_string(&self) -> Option<String> {
-//         match self {
-//             Field::Binary(v) => Some(v.to_string()),
-//             Field::NChar(v) => Some(v.to_string()),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_timestamp(&self) -> Option<&Timestamp> {
-//         match self {
-//             Field::Timestamp(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_raw_timestamp(&self) -> Option<i64> {
-//         match self {
-//             Field::Timestamp(v) => Some(v.as_raw_timestamp()),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_unsigned_tiny_int(&self) -> Option<&u8> {
-//         match self {
-//             Field::UTinyInt(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_unsigned_samll_int(&self) -> Option<&u16> {
-//         match self {
-//             Field::USmallInt(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_unsigned_int(&self) -> Option<&u32> {
-//         match self {
-//             Field::UInt(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-//     pub fn as_unsigned_big_int(&self) -> Option<&u64> {
-//         match self {
-//             Field::UBigInt(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-
-//     pub fn as_json(&self) -> Option<&serde_json::Value> {
-//         match self {
-//             Field::Json(v) => Some(v),
-//             _ => None,
-//         }
-//     }
-
-//     pub fn data_type(&self) -> Ty {
-//         match self {
-//             Field::Null => Ty::Null,
-//             Field::Bool(_v) => Ty::Bool,
-//             Field::TinyInt(_v) => Ty::TinyInt,
-//             Field::SmallInt(_v) => Ty::SmallInt,
-//             Field::Int(_v) => Ty::Int,
-//             Field::BigInt(_v) => Ty::BigInt,
-//             Field::Float(_v) => Ty::Float,
-//             Field::Double(_v) => Ty::Double,
-//             Field::Binary(_v) => Ty::Binary,
-//             Field::NChar(_v) => Ty::NChar,
-//             Field::Timestamp(_v) => Ty::Timestamp,
-//             Field::UTinyInt(_v) => Ty::UTinyInt,
-//             Field::USmallInt(_v) => Ty::USmallInt,
-//             Field::UInt(_v) => Ty::UInt,
-//             Field::UBigInt(_v) => Ty::UBigInt,
-//             Field::Json(_v) => Ty::Json,
-//         }
-//     }
-// }
-
-// pub trait IntoField {
-//     fn into_field(self) -> Field;
-// }
-
-// macro_rules! _impl_primitive_type {
-//     ($ty:ty, $target:ident, $v:expr) => {
-//         impl IntoField for $ty {
-//             fn into_field(self) -> Field {
-//                 Field::$target(self)
-//             }
-//         }
-//         paste! {
-//             #[test]
-//             fn [<test_ $ty:snake>]() {
-//                 let v: $ty = $v;
-//                 assert_eq!(v.clone().into_field(), Field::$target(v));
-//             }
-//         }
-//     };
-// }
-
-// _impl_primitive_type!(bool, Bool, true);
-// _impl_primitive_type!(i8, TinyInt, 0);
-// _impl_primitive_type!(i16, SmallInt, 0);
-// _impl_primitive_type!(i32, Int, 0);
-// _impl_primitive_type!(i64, BigInt, 0);
-// _impl_primitive_type!(u8, UTinyInt, 0);
-// _impl_primitive_type!(u16, USmallInt, 0);
-// _impl_primitive_type!(u32, UInt, 0);
-// _impl_primitive_type!(u64, UBigInt, 0);
-// _impl_primitive_type!(f32, Float, 0.);
-// _impl_primitive_type!(f64, Double, 0.);
-// _impl_primitive_type!(BString, Binary, "A".into());
-// _impl_primitive_type!(String, NChar, "A".into());
-// // _impl_primitive_type!(serde_json::Value, Json, );
-
-// impl IntoField for &BStr {
-//     fn into_field(self) -> Field {
-//         self.to_owned().into_field()
-//     }
-// }
-// impl IntoField for &str {
-//     fn into_field(self) -> Field {
-//         self.to_owned().into_field()
-//     }
-// }
-
-// #[cfg(test)]
-// mod test {
-//     use crate::test::taos;
-//     use crate::*;
-
-//     #[tokio::test]
-//     #[proc_test_catalog::test_catalogue]
-//     /// Test describe sql
-//     async fn test_describe() -> Result<(), Error> {
-//         let db = stdext::function_name!()
-//             .replace("::{{closure}}", "")
-//             .replace("::", "_");
-//         println!("{}", db);
-//         let taos = taos()?;
-//         let desc = taos.describe("log.dn").await?;
-//         assert_eq!(desc.cols.len(), 15);
-//         assert_eq!(desc.tags.len(), 2);
-//         Ok(())
-//     }
-// }

@@ -790,7 +790,7 @@ impl RawBlock {
     pub fn to_create(&self) -> Option<MetaCreate> {
         self.table_name().map(|table_name| MetaCreate::Normal {
             table_name: table_name.to_string(),
-            columns: self.fields(),
+            columns: self.fields().into_iter().map(Into::into).collect(),
         })
     }
 

@@ -1564,6 +1564,7 @@ impl RawRes {
             let meta = (self.c.tmq.as_ref().unwrap().tmq_get_json_meta)(self.as_ptr());
             let meta_cstr = CStr::from_ptr(meta).to_string_lossy().into_owned();
             (self.c.tmq.as_ref().unwrap().tmq_free_json_meta)(meta);
+            tracing::debug!(json = meta_cstr, "Received TMQ json meta");
             meta_cstr
         }
     }

@@ -1,17 +1,17 @@
 use crate::RawResult;
 use std::fmt::Debug;
 
-pub trait Insertable: Debug {
-    fn insert(&self, sql: &str) -> RawResult<usize>;
+// pub trait Insertable: Debug {
+//     fn insert(&self, sql: &str) -> RawResult<usize>;
 
-    fn insert_raw(&self, table: &str, raw: &[u8]) -> RawResult<usize>;
+//     fn insert_raw(&self, table: &str, raw: &[u8]) -> RawResult<usize>;
 
-    fn insert_named(&self, table: &str, fields: [&dyn IntoNamedField<'_>]);
+//     fn insert_named(&self, table: &str, fields: [&dyn IntoNamedField<'_>]);
 
-    // fn insert_many<T: Any>(&self, table: &str, records: &[dyn Any]) -> Result<usize>;
+//     // fn insert_many<T: Any>(&self, table: &str, records: &[dyn Any]) -> Result<usize>;
 
-    // fn insert_progressive(&self, stable: &str, ) -> Inserter;
-}
+//     // fn insert_progressive(&self, stable: &str, ) -> Inserter;
+// }
 
 pub trait IntoField: Debug {}
 
