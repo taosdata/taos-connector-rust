@@ -178,7 +178,7 @@ impl BindFrom for TaosBindV3 {
             buffer_length: 0,
             buffer: std::ptr::null_mut(),
             length: std::ptr::null_mut(),
-            is_null: std::ptr::null_mut(),
+            is_null: box_into_raw(1) as _,
             num: 1 as _,
         })
     }
