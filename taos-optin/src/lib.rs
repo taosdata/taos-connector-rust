@@ -118,6 +118,15 @@ impl taos_query::Queryable for Taos {
     fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
         self.raw.put(data)
     }
+
+
+    fn table_vgroup_id(&self, db: &str, table: &str) -> Option<i32> {
+        self.raw.get_table_vgroup_id(db, table).ok()
+    }
+
+    fn tables_vgroup_ids<T: AsRef<str>>(&self, db: &str, tables: &[T]) -> Option<Vec<i32>> {
+        self.raw.get_tables_vgroup_ids(db, tables).ok()
+    }
 }
 
 #[async_trait::async_trait]
@@ -160,6 +169,15 @@ impl taos_query::AsyncQueryable for Taos {
 
     async fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
         self.raw.put(data)
+    }
+
+
+    async fn table_vgroup_id(&self, db: &str, table: &str) -> Option<i32> {
+        self.raw.get_table_vgroup_id(db, table).ok()
+    }
+
+    async fn tables_vgroup_ids<T: AsRef<str> + Sync>(&self, db: &str, tables: &[T]) -> Option<Vec<i32>> {
+        self.raw.get_tables_vgroup_ids(db, tables).ok()
     }
 }
 

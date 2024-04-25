@@ -427,6 +427,20 @@ impl AsyncQueryable for Taos {
             TaosInner::Ws(taos) => taos.put(data).await.map_err(Into::into),
         }
     }
+
+    async fn table_vgroup_id(&self, db: &str, table: &str) -> Option<i32> {
+        match &self.0 {
+            TaosInner::Native(taos) => taos.table_vgroup_id(db, table).await,
+            TaosInner::Ws(taos) => taos.table_vgroup_id(db, table).await,
+        }
+    }
+
+    async fn tables_vgroup_ids<T: AsRef<str> + Sync>(&self, db: &str, tables: &[T]) -> Option<Vec<i32>> {
+        match &self.0 {
+            TaosInner::Native(taos) => taos.tables_vgroup_ids(db, tables).await,
+            TaosInner::Ws(taos) => taos.tables_vgroup_ids(db, tables).await,
+        }
+    }
 }
 
 impl taos_query::Queryable for Taos {

@@ -38,7 +38,7 @@ lazy_static::lazy_static! {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
+#[allow(dead_code, non_snake_case)]
 pub struct ApiEntry {
     lib: Arc<Library>,
     version: String,
@@ -136,6 +136,28 @@ pub struct ApiEntry {
         unsafe extern "C" fn(res: *mut TAOS_RES, num: *mut i32, data: *mut *mut c_void) -> c_int,
     >,
 
+    // int taos_get_table_vgId(TAOS *taos, const char *db, const char *table, int *vgId)
+    #[allow(non_snake_case)]
+    taos_get_table_vgId: Option<
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            db: *const c_char,
+            table: *const c_char,
+            vgId: *mut i32,
+        ) -> c_int,
+    >,
+
+    // int taos_get_tables_vgId(TAOS *taos, const char *db, const char *table[], int tableNum, int *vgId);
+    #[allow(non_snake_case)]
+    taos_get_tables_vgId: Option<
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            db: *const c_char,
+            table: *const *const c_char,
+            tableNum: c_int,
+            vgId: *mut i32,
+        ) -> c_int,
+    >,
     // stmt
     pub(crate) stmt: StmtApi,
     //  tmq
@@ -480,6 +502,7 @@ impl ApiEntry {
         Self::dlopen(path)
     }
 
+    #[allow(non_snake_case)]
     pub fn dlopen<S>(path: S) -> Result<Self, dlopen2::Error>
     where
         S: AsRef<Path>,
@@ -553,7 +576,9 @@ impl ApiEntry {
                 taos_write_raw_block_with_fields,
                 taos_write_raw_block_with_fields_with_reqid,
                 taos_get_raw_block,
-                taos_result_block
+                taos_result_block,
+                taos_get_table_vgId,
+                taos_get_tables_vgId
             );
 
             // stmt
@@ -721,6 +746,9 @@ impl ApiEntry {
                 taos_fetch_raw_block_a,
                 taos_get_raw_block,
 
+                taos_get_table_vgId,
+                taos_get_tables_vgId,
+
                 stmt,
                 tmq,
 
@@ -830,6 +858,63 @@ impl RawTaos {
     #[inline]
     pub fn as_ptr(&self) -> *mut TAOS {
         self.ptr
+    }
+
+    pub fn get_table_vgroup_id(&self, db: &str, table: &str) -> Result<i32, RawError> {
+        if self.c.taos_get_table_vgId.is_none() {
+            return Err(RawError::from_string(
+                "Current version does not support get table vgId",
+            ));
+        }
+        let db = CString::new(db).unwrap();
+        let table = CString::new(table).unwrap();
+        let mut vg_id = 0;
+        let code = unsafe {
+            (self.c.taos_get_table_vgId.unwrap())(
+                self.as_ptr(),
+                db.as_ptr(),
+                table.as_ptr(),
+                &mut vg_id,
+            )
+        };
+        if code == 0 {
+            Ok(vg_id)
+        } else {
+            Err(self.c.check(std::ptr::null_mut()).unwrap_err())
+        }
+    }
+
+    pub fn get_tables_vgroup_ids<T: AsRef<str>>(
+        &self,
+        db: &str,
+        tables: &[T],
+    ) -> Result<Vec<i32>, RawError> {
+        if self.c.taos_get_tables_vgId.is_none() {
+            return Err(RawError::from_string(
+                "Current version does not support get tables vgId",
+            ));
+        }
+        let db = CString::new(db).unwrap();
+        let tables: Vec<_> = tables
+            .iter()
+            .map(|t| CString::new(t.as_ref()).unwrap())
+            .collect();
+        let tables: Vec<_> = tables.iter().map(|t| t.as_ptr()).collect();
+        let mut vg_ids = vec![0; tables.len()];
+        let code = unsafe {
+            (self.c.taos_get_tables_vgId.unwrap())(
+                self.as_ptr(),
+                db.as_ptr(),
+                tables.as_ptr(),
+                tables.len() as i32,
+                vg_ids.as_mut_ptr(),
+            )
+        };
+        if code == 0 {
+            Ok(vg_ids)
+        } else {
+            Err(self.c.check(std::ptr::null_mut()).unwrap_err())
+        }
     }
 
     #[inline]
