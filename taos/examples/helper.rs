@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
         .try_collect()
         .await?;
     dbg!(&records);
-    for record in records {
+    for record in &records {
         let vgid = taos
             .table_vgroup_id(&record.db_name, &record.table_name)
             .await
@@ -33,5 +33,16 @@ async fn main() -> anyhow::Result<()> {
         dbg!(&vgid);
         assert_eq!(vgid, record.vgroup_id);
     }
+
+    let groups = records.iter().into_group_map_by(|r| r.db_name.clone());
+
+    for (db, records) in groups {
+        println!("db_name: {}", db);
+        let tables = records.iter().map(|r| r.table_name.clone()).collect::<Vec<_>>();
+
+        let ids = taos.tables_vgroup_ids(&db, &tables).await.unwrap();
+        dbg!(&ids);
+    }
+
     Ok(())
 }
