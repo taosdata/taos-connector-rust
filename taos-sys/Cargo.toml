@@ -31,7 +31,7 @@ serde_json = "1.0"
 serde_repr = { version = "0.1.7", optional = true }
 # taos-error = { path = "../taos-error", version = "0.2.9" }
 taos-macros = { path = "../taos-macros", version = "0.*" }
-taos-query = { path = "../taos-query", version = "0.11.12" }
+taos-query = { path = "../taos-query", version = "0.11.13" }
 
 [build-dependencies]
 dotenv = "0.15.0"
