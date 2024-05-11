@@ -1015,6 +1015,9 @@ impl RawTaos {
             if code != Code::from(0x2603) {
                 let err = unsafe { tmq_err2str(tmq_resp_err_t(raw_code)) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
                 return Err(taos_query::prelude::RawError::new(code, err));
             }
             tracing::trace!("received error code 0x2603, try once");
@@ -1022,6 +1025,9 @@ impl RawTaos {
             if retries == 0 {
                 let err = unsafe { tmq_err2str(tmq_resp_err_t(raw_code)) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
                 return Err(taos_query::prelude::RawError::new(code, err));
             }
         }
@@ -1056,6 +1062,9 @@ impl RawTaos {
             } else {
                 let err = unsafe { tmq_err2str(tmq_resp_err_t(code)) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
                 Err(taos_query::prelude::RawError::new(Code::from(code), err))
             }
         } else if let Some(f) = self.c.taos_write_raw_block {
@@ -1105,6 +1114,9 @@ impl RawTaos {
                     .tmq_err2str;
                 let err = unsafe { tmq_err2str(tmq_resp_err_t(code)) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
                 Err(taos_query::prelude::RawError::new(Code::from(code), err))
             }
         } else if let Some(f) = self.c.taos_write_raw_block_with_reqid {
