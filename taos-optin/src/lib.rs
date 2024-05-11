@@ -119,7 +119,6 @@ impl taos_query::Queryable for Taos {
         self.raw.put(data)
     }
 
-
     fn table_vgroup_id(&self, db: &str, table: &str) -> Option<i32> {
         self.raw.get_table_vgroup_id(db, table).ok()
     }
@@ -171,12 +170,15 @@ impl taos_query::AsyncQueryable for Taos {
         self.raw.put(data)
     }
 
-
     async fn table_vgroup_id(&self, db: &str, table: &str) -> Option<i32> {
         self.raw.get_table_vgroup_id(db, table).ok()
     }
 
-    async fn tables_vgroup_ids<T: AsRef<str> + Sync>(&self, db: &str, tables: &[T]) -> Option<Vec<i32>> {
+    async fn tables_vgroup_ids<T: AsRef<str> + Sync>(
+        &self,
+        db: &str,
+        tables: &[T],
+    ) -> Option<Vec<i32>> {
         self.raw.get_tables_vgroup_ids(db, tables).ok()
     }
 }
@@ -1166,6 +1168,42 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         client.exec(format!("drop database if exists {db}"))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_error_details() -> anyhow::Result<()> {
+        // std::env::set_var("RUST_LOG", "taos=trace");
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
+        use taos_query::prelude::sync::*;
+
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        tracing::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?.build()?;
+
+        let db = "test_tmq_err_details";
+
+        client.exec(format!("drop database if exists {db}"))?;
+
+        client.exec(format!("create database if not exists {db}"))?;
+
+        // should specify database before insert
+        client.exec(format!("use {db}"))?;
+
+        client.exec("create table t1 (ts timestamp, val int)")?;
+
+        let views = vec![
+            ColumnView::from_millis_timestamp(vec![164000000000]),
+            ColumnView::from_bools(vec![true]),
+        ];
+        let mut block = RawBlock::from_views(&views, Precision::Millisecond);
+        block.with_table_name("t1");
+
+        let err = client.write_raw_block(&block).unwrap_err();
+        dbg!(&err);
 
         Ok(())
     }
