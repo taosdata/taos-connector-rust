@@ -302,10 +302,10 @@ impl ColumnView {
     }
 
     pub fn from_bytes<
-    S: AsRef<[u8]>,
-    T: Into<Option<S>>,
-    I: ExactSizeIterator<Item = T>,
-    V: IntoIterator<Item = T, IntoIter = I>,
+        S: AsRef<[u8]>,
+        T: Into<Option<S>>,
+        I: ExactSizeIterator<Item = T>,
+        V: IntoIterator<Item = T, IntoIter = I>,
     >(
         iter: V,
     ) -> Self {
@@ -313,17 +313,15 @@ impl ColumnView {
     }
 
     pub fn from_geobytes<
-    S: AsRef<[u8]>,
-    T: Into<Option<S>>,
-    I: ExactSizeIterator<Item = T>,
-    V: IntoIterator<Item = T, IntoIter = I>,
+        S: AsRef<[u8]>,
+        T: Into<Option<S>>,
+        I: ExactSizeIterator<Item = T>,
+        V: IntoIterator<Item = T, IntoIter = I>,
     >(
         iter: V,
     ) -> Self {
         ColumnView::Geometry(GeometryView::from_iter(iter))
     }
-
-
 
     #[inline]
     pub fn concat_iter<'b, 'a: 'b>(
@@ -386,7 +384,7 @@ impl ColumnView {
             Ty::MediumBlob => todo!(),
             Ty::Geometry => ColumnView::Geometry(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
-            )),            
+            )),
         }
     }
 
@@ -609,7 +607,7 @@ impl ColumnView {
             ColumnView::UBigInt(view) => view.slice(range).map(ColumnView::UBigInt),
             ColumnView::Json(view) => view.slice(range).map(ColumnView::Json),
             ColumnView::VarBinary(_view) => todo!(), //view.slice(range).map(ColumnView::VarBinary),
-            ColumnView::Geometry(_view) => todo!(), //view.slice(range).map(ColumnView::Geometry),
+            ColumnView::Geometry(_view) => todo!(),  //view.slice(range).map(ColumnView::Geometry),
         }
     }
 

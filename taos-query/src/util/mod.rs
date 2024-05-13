@@ -3,9 +3,9 @@ mod inline_json;
 mod inline_nchar;
 mod inline_str;
 
+pub mod hex;
 mod inline_read;
 mod inline_write;
-pub mod hex;
 
 use std::{
     collections::BTreeMap,

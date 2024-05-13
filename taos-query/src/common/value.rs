@@ -1,9 +1,9 @@
 use std::{borrow::Cow, fmt::Display, str::Utf8Error};
 
-use rust_decimal::prelude::*;
-use serde::{Deserialize, Serialize};
 use super::{Timestamp, Ty};
 use bytes::Bytes;
+use rust_decimal::prelude::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub enum BorrowedValue<'b> {
@@ -49,11 +49,11 @@ macro_rules! borrowed_value_to_native {
             BorrowedValue::UInt(v) => Some(*v as _),
             BorrowedValue::UBigInt(v) => Some(*v as _),
             BorrowedValue::Json(v) => serde_json::from_slice(&v).ok(),
-            BorrowedValue::VarBinary(_v) =>  todo!(),
+            BorrowedValue::VarBinary(_v) => todo!(),
             BorrowedValue::Decimal(_) => todo!(),
             BorrowedValue::Blob(_) => todo!(),
             BorrowedValue::MediumBlob(_) => todo!(),
-            BorrowedValue::Geometry(_) =>  todo!(),
+            BorrowedValue::Geometry(_) => todo!(),
         }
     };
 }

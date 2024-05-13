@@ -179,27 +179,30 @@ impl Debug for ResultSet {
 
 impl Drop for ResultSet {
     fn drop(&mut self) {
-        if let Some((_, req_id)) = self.sender.results.remove(&self.args.id) {
-            self.sender.queries.remove(&req_id);
+        let (sender, closer, args, completed) = (
+            self.sender.clone(),
+            self.closer.take(),
+            self.args.clone(),
+            self.completed,
+        );
+        let clean = move || {
+            if let Some((_, req_id)) = sender.results.remove(&args.id) {
+                sender.queries.remove(&req_id);
+            }
+
+            if !completed {
+                let _ = sender.send_blocking(WsSend::FreeResult(args));
+            }
+
+            if let Some(closer) = closer {
+                let _ = closer.send(());
+            }
+        };
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::spawn_blocking(clean);
+        } else {
+            std::thread::spawn(clean);
         }
-
-        if !self.completed {
-            std::thread::scope(|s| {
-                s.spawn(|| {
-                    self.free_result();
-                });
-            });
-        }
-
-        let _ = self.closer.take().unwrap().send(());
-        // let _ = self
-        //     .sender
-        //     .blocking_send_only(WsSend::FreeResult(self.args));
-
-        // tokio::spawn(async move { sender.send_only(WsSend::FreeResult(self.args)).await });
-        // taos_query::block_in_place_or_global(async move {
-        //     let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
-        // });
     }
 }
 
@@ -1186,10 +1189,6 @@ impl ResultSet {
         }
 
         let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
-    }
-
-    fn free_result(&self) {
-        let _ = self.sender.send_blocking(WsSend::FreeResult(self.args));
     }
 
     pub fn affected_rows64(&self) -> i64 {
