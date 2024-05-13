@@ -1268,10 +1268,10 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
     }
     unsafe {
         (*(bytes.as_mut_ptr() as *mut super::Header)).length = bytes.len() as _;
-        std::ptr::copy(
-            lengths.as_ptr(),
-            bytes.as_mut_ptr().add(length_offset) as *mut u32,
-            lengths.len(),
+        std::ptr::copy_nonoverlapping(
+            lengths.as_ptr() as *mut u8,
+            bytes.as_mut_ptr().add(length_offset) as *mut u8,
+            lengths.len() * std::mem::size_of::<u32>(),
         );
     }
     bytes
