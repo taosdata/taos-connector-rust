@@ -1740,7 +1740,7 @@ mod tests {
         dbg!(&err);
         assert_eq!(
             err.to_string(),
-            "[0x0118] Internal error: `Invalid parameters,detail:taos:0x1 or data:(nil) is NULL`"
+            "[0x0118] Internal error: `Invalid parameters,detail:taos:0x1 or data:0x0 is NULL`"
         );
     }
 }
