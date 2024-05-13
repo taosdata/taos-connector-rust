@@ -116,6 +116,7 @@ pub struct InsertResp {
 #[serde_as]
 #[serde(tag = "action")]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 pub enum WsRecvData {
     Conn,
     Version {

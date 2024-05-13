@@ -210,6 +210,7 @@ impl TmqFetch {
 #[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "action")]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 pub enum TmqRecvData {
     Subscribe,
     Unsubscribe,

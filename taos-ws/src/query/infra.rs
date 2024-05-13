@@ -186,7 +186,11 @@ impl WsRecv {
             if self.code == 0 {
                 Ok(())
             } else {
-                Err(RawError::new(self.code, self.message.unwrap_or_default()))
+                if self.message.as_deref() == Some("success") {
+                    Err(RawError::from_code(self.code))
+                } else {
+                    Err(RawError::new(self.code, self.message.unwrap_or_default()))
+                }
             },
         )
     }

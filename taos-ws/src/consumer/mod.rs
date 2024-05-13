@@ -18,7 +18,6 @@ use taos_query::RawResult;
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
 
-use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
 
 use tokio::time;

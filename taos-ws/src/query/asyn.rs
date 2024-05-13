@@ -11,7 +11,6 @@ use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
 use thiserror::Error;
 use tokio_tungstenite::tungstenite::Message;
 
-use taos_query::prelude::tokio;
 use tokio::io::BufStream;
 use tokio::io::ReadHalf;
 use tokio::sync::watch;

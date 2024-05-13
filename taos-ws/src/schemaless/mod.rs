@@ -5,14 +5,13 @@ pub(crate) mod infra;
 
 use crate::TaosBuilder;
 
-use derive_more::Deref;
 use futures::{SinkExt, StreamExt};
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
 
 use taos_query::prelude::{Code, RawError};
 
-use taos_query::prelude::{tokio, RawResult};
+use taos_query::prelude::RawResult;
 use tokio::sync::watch;
 
 use tokio::io::BufStream;
@@ -39,9 +38,6 @@ type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
 type QueryInner = HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = HashMap<ResId, ReqId>;
-
-#[derive(Debug, Clone, Deref)]
-struct Version(String);
 
 #[derive(Debug, Clone)]
 struct WsQuerySender {
