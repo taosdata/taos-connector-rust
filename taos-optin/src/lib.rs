@@ -895,7 +895,10 @@ mod tests {
         // let _ = pretty_env_logger::try_init();
         let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build().await?;
-        let err = taos.query("select * from test.meters").await.unwrap_err();
+        let err = taos
+            .query("select * from testxxxx.meters")
+            .await
+            .unwrap_err();
 
         tracing::trace!("{:?}", err);
 

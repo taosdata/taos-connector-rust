@@ -1687,7 +1687,7 @@ mod async_tests {
         match taos.exec_with_req_id(&sql, 0).await {
             Err(e) => {
                 dbg!(&e);
-                assert_eq!(e.code(), 0x2605);
+                assert_eq!(e.code(), 0x2653);
             }
             Ok(_) => {
                 // Actually, the sql should return error 0x2605, but it success.

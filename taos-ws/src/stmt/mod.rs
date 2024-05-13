@@ -987,8 +987,6 @@ mod tests {
 
     use crate::{stmt::Stmt, TaosBuilder};
 
-    use taos_query::prelude::tokio;
-
     #[tokio::test()]
     async fn test_client() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;

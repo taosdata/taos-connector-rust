@@ -103,7 +103,8 @@ mod tests {
             let ts = Timestamp::new(0, prec);
             assert!(ts.as_raw_i64() == 0);
             assert!(
-                ts.to_naive_datetime() == chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
+                ts.to_naive_datetime()
+                    == chrono::DateTime::from_timestamp(0, 0).unwrap().naive_utc()
             );
             dbg!(ts.to_datetime_with_tz());
         }

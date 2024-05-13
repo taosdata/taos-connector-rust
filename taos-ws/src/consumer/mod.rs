@@ -1562,7 +1562,6 @@ mod tests {
     use std::time::Duration;
 
     use super::{TaosBuilder, TmqBuilder};
-    use taos_query::prelude::tokio;
 
     #[tokio::test]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {
