@@ -1360,10 +1360,7 @@ mod tests {
         );
 
         let double_value = BorrowedValue::Double(2.71828);
-        assert_eq!(
-            double_value.to_json_value(),
-            serde_json::json!(2.71828)
-        );
+        assert_eq!(double_value.to_json_value(), serde_json::json!(2.71828));
 
         let varchar_value = BorrowedValue::VarChar("hello");
         assert_eq!(
@@ -1390,6 +1387,5 @@ mod tests {
             b_nchar_value.to_json_value(),
             serde_json::Value::String("hello".to_string())
         );
-
     }
 }

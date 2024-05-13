@@ -1,7 +1,11 @@
 pub(crate) mod ffi;
 
 use std::{
-    ffi::{CStr, CString}, fmt::Debug, mem::transmute, str::FromStr, time::Duration
+    ffi::{CStr, CString},
+    fmt::Debug,
+    mem::transmute,
+    str::FromStr,
+    time::Duration,
 };
 
 pub(crate) use ffi::*;

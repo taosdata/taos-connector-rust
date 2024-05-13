@@ -48,7 +48,7 @@ pub struct OffsetSeekArgs {
 #[derive(Debug, Serialize, Default, Clone)]
 pub struct OffsetArgs {
     pub(crate) req_id: ReqId,
-    pub(crate) topic_vgroup_ids: Vec<OffsetInnerArgs>
+    pub(crate) topic_vgroup_ids: Vec<OffsetInnerArgs>,
 }
 
 #[derive(Debug, Serialize, Default, Clone)]

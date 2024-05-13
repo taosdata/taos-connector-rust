@@ -536,7 +536,10 @@ impl WsTaos {
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
-        sender.send(version.to_tungstenite_msg()).await.map_err(Error::from)?;
+        sender
+            .send(version.to_tungstenite_msg())
+            .await
+            .map_err(Error::from)?;
 
         let duration = Duration::from_secs(2);
         let version = match tokio::time::timeout(duration, reader.next()).await {
@@ -562,7 +565,10 @@ impl WsTaos {
             req_id,
             req: info.to_conn_request(),
         };
-        sender.send(login.to_tungstenite_msg()).await.map_err(Error::from)?;
+        sender
+            .send(login.to_tungstenite_msg())
+            .await
+            .map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {
             match message {
                 Message::Text(text) => {

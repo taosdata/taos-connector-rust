@@ -83,7 +83,7 @@ unsafe impl Sync for WsSend {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_serde_send() {
         let s = WsSend::Conn {
@@ -172,7 +172,7 @@ pub(crate) trait ToMessage: Serialize {
         tokio_tungstenite::tungstenite::Message::Text(serde_json::to_string(self).unwrap())
     }
     fn to_msg(&self) -> ws_tool::Message<bytes::Bytes> {
-        ws_tool::Message{
+        ws_tool::Message {
             code: ws_tool::frame::OpCode::Text,
             data: serde_json::to_vec(self).unwrap().into(),
             close_code: None,
