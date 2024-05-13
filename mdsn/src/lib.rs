@@ -1152,7 +1152,6 @@ mod tests {
         assert_eq!(dsn.path.unwrap(), "./a b.csv");
     }
 
-
     #[test]
     fn with_space() {
         let dsn = Dsn::from_str("pi:///Met1 ABC").unwrap();

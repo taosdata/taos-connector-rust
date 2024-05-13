@@ -435,7 +435,11 @@ impl AsyncQueryable for Taos {
         }
     }
 
-    async fn tables_vgroup_ids<T: AsRef<str> + Sync>(&self, db: &str, tables: &[T]) -> Option<Vec<i32>> {
+    async fn tables_vgroup_ids<T: AsRef<str> + Sync>(
+        &self,
+        db: &str,
+        tables: &[T],
+    ) -> Option<Vec<i32>> {
         match &self.0 {
             TaosInner::Native(taos) => taos.tables_vgroup_ids(db, tables).await,
             TaosInner::Ws(taos) => taos.tables_vgroup_ids(db, tables).await,

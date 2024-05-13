@@ -38,7 +38,10 @@ async fn main() -> anyhow::Result<()> {
 
     for (db, records) in groups {
         println!("db_name: {}", db);
-        let tables = records.iter().map(|r| r.table_name.clone()).collect::<Vec<_>>();
+        let tables = records
+            .iter()
+            .map(|r| r.table_name.clone())
+            .collect::<Vec<_>>();
 
         let ids = taos.tables_vgroup_ids(&db, &tables).await.unwrap();
         dbg!(&ids);
