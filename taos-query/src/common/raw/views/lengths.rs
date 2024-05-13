@@ -13,7 +13,7 @@ impl<T: Into<Bytes>> From<T> for Lengths {
 
 impl Debug for Lengths {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(self.deref(), f)
+        Debug::fmt(&self.0, f)
     }
 }
 
