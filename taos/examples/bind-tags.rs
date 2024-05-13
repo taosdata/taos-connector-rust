@@ -11,12 +11,12 @@ async fn main() -> Result<()> {
         "use test",
         "create table tb1 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
             c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
-            c10 float, c11 double, c12 varchar(100), c13 nchar(100)) tags(t1 varchar(100))",
+            c10 float, c11 double, c12 varchar(100), c13 nchar(100), c14 varbinary(50), c15 geometry(50)) tags(t1 varchar(100))",
     ])
     .await?;
     let mut stmt = Stmt::init(&taos).await?;
     stmt.prepare(
-        "insert into ? using tb1 tags(?) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "insert into ? using tb1 tags(?) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .await?;
     stmt.set_tbname("d0").await?;
@@ -36,6 +36,8 @@ async fn main() -> Result<()> {
         ColumnView::from_floats(vec![f32::MAX]),
         ColumnView::from_doubles(vec![f64::MAX]),
         ColumnView::from_varchar(vec!["ABC"]),
+        ColumnView::from_nchar(vec!["涛思数据"]),
+        ColumnView::from_nchar(vec!["涛思数据"]),
         ColumnView::from_nchar(vec!["涛思数据"]),
     ];
     let rows = stmt

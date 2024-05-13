@@ -177,7 +177,8 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
                 .deserialize_any(visitor)
                 .map_err(<Self::Error as de::Error>::custom),
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
-            VarBinary(v) | Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
+            Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
+            VarBinary(v) | Geometry(v) => visitor.visit_borrowed_bytes(v),
             _ => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
@@ -273,9 +274,10 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
                 .visit_newtype_struct(v.clone().into_deserializer())
                 .map_err(<Self::Error as de::Error>::custom),
             Timestamp(v) => _v_!(v.as_raw_i64()),
-            VarBinary(v) | Blob(v) | MediumBlob(v) => {
+            Blob(v) | MediumBlob(v) => {
                 visitor.visit_newtype_struct(v.as_slice().into_deserializer())
-            }
+            },
+            VarBinary(v) | Geometry(v) => visitor.visit_bytes(v),
             _ => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
@@ -308,9 +310,10 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
                 .to_vec()
                 .into_deserializer()
                 .deserialize_seq(visitor),
-            VarBinary(v) | Blob(v) | MediumBlob(v) => {
+            Blob(v) | MediumBlob(v) => {
                 v.clone().into_deserializer().deserialize_any(visitor)
-            }
+            },
+            VarBinary(_v) | Geometry(_v) => todo!(),
             _ => self.deserialize_any(visitor),
         }
     }
@@ -390,7 +393,7 @@ mod tests {
             Bool(true) TinyInt(0xf) SmallInt(0xfff) Int(0xffff) BigInt(-1) Float(1.0) Double(1.0)
             UTinyInt(0xf) USmallInt(0xfff) UInt(0xffff) UBigInt(0xffffffff)
             Timestamp(crate::common::timestamp::Timestamp::Milliseconds(0)) VarChar("anything".to_string())
-            NChar("你好，世界".to_string()) VarBinary(vec![1,2,3]) Blob(vec![1,2, 3]) MediumBlob(vec![1,2,3])
+            NChar("你好，世界".to_string()) VarBinary(Bytes::from(vec![1,2,3])) Blob(vec![1,2, 3]) MediumBlob(vec![1,2,3])
             Json(serde_json::json!({"name": "ABC"}))
         );
     }
@@ -425,7 +428,7 @@ mod tests {
             VarChar("".to_string()), String, "".to_string()
             NChar("".to_string()), String, "".to_string()
             Timestamp(crate::Timestamp::Milliseconds(1)), crate::Timestamp, crate::Timestamp::Milliseconds(1)
-            VarBinary(vec![0, 1,2]), Vec<u8>, vec![0, 1, 2]
+            VarBinary(Bytes::from(vec![0, 1,2])), Vec<u8>, vec![0, 1, 2]
             Blob(vec![0, 1,2]), Vec<u8>, vec![0, 1, 2]
             MediumBlob(vec![0, 1,2]), Vec<u8>, vec![0, 1, 2]
         );

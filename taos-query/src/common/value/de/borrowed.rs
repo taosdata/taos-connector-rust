@@ -145,7 +145,11 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                     .map_err(<Self::Error as de::Error>::custom),
             },
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
-            VarBinary(v) | Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
+            Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
+            VarBinary(v) | Geometry(v) =>  match v {
+                Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
+                Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
+            },
             _ => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
@@ -257,7 +261,11 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                     .map_err(<Self::Error as de::Error>::custom),
             },
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
-            VarBinary(v) | Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
+            Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
+            VarBinary(v) | Geometry(v) => match v {
+                Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
+                Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
+            },
             _ => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
@@ -292,7 +300,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 .to_vec()
                 .into_deserializer()
                 .deserialize_seq(visitor),
-            VarBinary(v) | Blob(v) | MediumBlob(v) => {
+            Blob(v) | MediumBlob(v) => {
                 v.to_vec().into_deserializer().deserialize_seq(visitor)
             }
             _ => todo!(),
@@ -462,7 +470,6 @@ mod tests {
             VarChar(""), String, "".to_string()
             NChar("".into()), String, "".to_string()
             Timestamp(crate::Timestamp::Milliseconds(1)), crate::Timestamp, crate::Timestamp::Milliseconds(1)
-            VarBinary(&[0, 1,2]), Vec<u8>, vec![0, 1, 2]
             Blob(&[0, 1,2]), Vec<u8>, vec![0, 1, 2]
             MediumBlob(&[0, 1,2]), Vec<u8>, vec![0, 1, 2]
         );

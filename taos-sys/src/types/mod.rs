@@ -590,6 +590,14 @@ impl<'b> From<&'b ColumnView> for DropMultiBind {
                 DropMultiBind::new(TaosMultiBind::from_primitives_ptr(nulls, view.as_raw_ptr()))
             }
             Json(view) => DropMultiBind::new(TaosMultiBind::from_json(&view.to_vec())),
+            VarBinary(_view) => {
+                // Handle VarBinary type here
+                unimplemented!("Handle VarBinary type")
+            }
+            Geometry(_view) => {
+                // Handle Geometry type here
+                unimplemented!("Handle Geometry type")
+            }
         }
     }
 }

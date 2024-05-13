@@ -25,6 +25,8 @@ use serde::de::Visitor;
 /// | UInt       | 13  | INT UNSIGNED     | u32               |
 /// | UBigInt    | 14  | BIGINT UNSIGNED  | u64               |
 /// | Json       | 15  | JSON             | serde_json::Value |
+/// | VarBinary  | 16  | VARBINARY        | Vec<u8>           |
+/// | Geometry   | 20  | GEOMETRY         | Vec<u8>           |
 ///
 /// Note:
 /// - VarChar sql name is BINARY in v2, and VARCHAR in v3.

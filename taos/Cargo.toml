@@ -19,6 +19,7 @@ no-default-features = true
 [dependencies]
 async-trait = "0.1"
 log = "0.4.17"
+bytes = "1.1.0"
 taos-optin = { path = "../taos-optin", version = "0.12.1", optional = true }
 taos-query = { path = "../taos-query", version = "0.12.1", default-features = false }
 taos-sys = { path = "../taos-sys", version = "0.12.1", optional = true }

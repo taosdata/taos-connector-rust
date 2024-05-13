@@ -74,6 +74,8 @@ impl ToJsonValue for ColumnView {
             ColumnView::UInt(view) => serde_json::json!(view.to_vec()),
             ColumnView::UBigInt(view) => serde_json::json!(view.to_vec()),
             ColumnView::Json(view) => serde_json::json!(view.to_vec()),
+            ColumnView::VarBinary(_) => unimplemented!("Handle VarBinary variant"),
+            ColumnView::Geometry(_) => unimplemented!("Handle Geometry variant"),
         }
     }
 }

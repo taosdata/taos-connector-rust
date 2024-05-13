@@ -57,6 +57,7 @@ impl AsRef<[u8]> for INChar {
 
 #[derive(Debug, Deref, DerefMut, Clone, From, Deserialize, Serialize)]
 pub struct IVarBinary(Vec<u8>);
+#[allow(dead_code)]
 pub struct IGeometry(Vec<u8>);
 
 #[derive(Debug, Deref, DerefMut, Clone, From, Deserialize, Serialize)]

@@ -117,7 +117,7 @@ mod tests {
         ];
         for (i, prec) in precisions.iter().enumerate() {
             let ts = Timestamp::new(1_000_000 * (i as i64), *prec);
-            for (j, new_prec) in precisions.iter().enumerate() {
+            for (_j, new_prec) in precisions.iter().enumerate() {
                 let new_ts = ts.cast_precision(*new_prec);
                 assert_eq!(
                     new_ts.precision(),
