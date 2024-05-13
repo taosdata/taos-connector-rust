@@ -313,7 +313,10 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
             Blob(v) | MediumBlob(v) => {
                 v.clone().into_deserializer().deserialize_any(visitor)
             },
-            VarBinary(_v) | Geometry(_v) => todo!(),
+            VarBinary(v) | Geometry(v) =>  v
+            .as_ref()
+            .into_deserializer()
+            .deserialize_seq(visitor),
             _ => self.deserialize_any(visitor),
         }
     }
@@ -428,7 +431,7 @@ mod tests {
             VarChar("".to_string()), String, "".to_string()
             NChar("".to_string()), String, "".to_string()
             Timestamp(crate::Timestamp::Milliseconds(1)), crate::Timestamp, crate::Timestamp::Milliseconds(1)
-            VarBinary(Bytes::from(vec![0, 1,2])), Vec<u8>, vec![0, 1, 2]
+            VarBinary(Bytes::from(vec![0, 1,2])), Bytes, Bytes::from(vec![0, 1,2])
             Blob(vec![0, 1,2]), Vec<u8>, vec![0, 1, 2]
             MediumBlob(vec![0, 1,2]), Vec<u8>, vec![0, 1, 2]
         );
