@@ -624,7 +624,8 @@ mod async_tests {
         .await?;
         let req_id = 1000;
         let mut stmt = Stmt::init_with_req_id(&taos, req_id).await?;
-        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").await?;
+        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .await?;
         let params = vec![
             ColumnView::from_millis_timestamp(vec![0]),
             ColumnView::from_bools(vec![true]),
@@ -641,7 +642,13 @@ mod async_tests {
             ColumnView::from_varchar(vec!["ABC"]),
             ColumnView::from_nchar(vec!["涛思数据"]),
         ];
-        let rows = stmt.bind(&params).await?.add_batch().await?.execute().await?;
+        let rows = stmt
+            .bind(&params)
+            .await?
+            .add_batch()
+            .await?
+            .execute()
+            .await?;
         assert_eq!(rows, 1);
 
         let rows: Vec<(

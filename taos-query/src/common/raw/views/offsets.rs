@@ -29,6 +29,13 @@ impl Offsets {
         unsafe { std::slice::from_raw_parts(self.0.as_ptr() as *const i32, self.len()) }
     }
 
+    pub fn iter(&self) -> OffsetsIter {
+        OffsetsIter {
+            offsets: self,
+            index: 0,
+        }
+    }
+
     /// As a [u8] slice.
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_ref()
@@ -93,21 +100,35 @@ impl Offsets {
     }
 }
 
-impl<'a> IntoIterator for &'a Offsets {
-    type Item = &'a i32;
+pub struct OffsetsIter<'a> {
+    offsets: &'a Offsets,
+    index: usize,
+}
 
-    type IntoIter = std::slice::Iter<'a, i32>;
+impl<'a> Iterator for OffsetsIter<'a> {
+    type Item = i32;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.deref().iter()
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.offsets.len() {
+            let offset = unsafe { self.offsets.get_unchecked(self.index) };
+            self.index += 1;
+            Some(offset)
+        } else {
+            None
+        }
     }
 }
 
-impl Deref for Offsets {
-    type Target = [i32];
+impl<'a> IntoIterator for &'a Offsets {
+    type Item = i32;
 
-    fn deref(&self) -> &Self::Target {
-        self.as_slice()
+    type IntoIter = OffsetsIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        OffsetsIter {
+            offsets: self,
+            index: 0,
+        }
     }
 }
 

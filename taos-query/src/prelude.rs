@@ -22,6 +22,16 @@ pub use futures::stream::{Stream, StreamExt, TryStreamExt};
 pub use r#async::*;
 pub use tokio;
 
+pub trait Helpers {
+    fn table_vgroup_id(&self, _db: &str, _table: &str) -> Option<i32> {
+        None
+    }
+
+    fn tables_vgroup_ids<T: AsRef<str>>(&self, _db: &str, _tables: &[T]) -> Option<Vec<i32>> {
+        None
+    }
+}
+
 pub mod sync {
     pub use crate::RawResult;
     pub use crate::TBuilder;
@@ -276,11 +286,18 @@ pub mod sync {
         }
 
         fn put(&self, data: &SmlData) -> RawResult<()>;
+
+        fn table_vgroup_id(&self, _db: &str, _table: &str) -> Option<i32> {
+            None
+        }
+
+        fn tables_vgroup_ids<T: AsRef<str>>(&self, _db: &str, _tables: &[T]) -> Option<Vec<i32>> {
+            None
+        }
     }
 }
 
 mod r#async {
-    use itertools::Itertools;
     use serde::de::DeserializeOwned;
     use std::borrow::Cow;
     use std::marker::PhantomData;
@@ -650,6 +667,18 @@ mod r#async {
             sql: T,
         ) -> RawResult<Self::AsyncResultSet> {
             crate::block_in_place_or_global(self.query(sql))
+        }
+
+        async fn table_vgroup_id(&self, _db: &str, _table: &str) -> Option<i32> {
+            None
+        }
+
+        async fn tables_vgroup_ids<T: AsRef<str> + Sync>(
+            &self,
+            _db: &str,
+            _tables: &[T],
+        ) -> Option<Vec<i32>> {
+            None
         }
     }
 

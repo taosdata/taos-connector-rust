@@ -18,7 +18,6 @@ use taos_query::RawResult;
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
 
-use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
 
 use tokio::time;
@@ -1563,7 +1562,6 @@ mod tests {
     use std::time::Duration;
 
     use super::{TaosBuilder, TmqBuilder};
-    use taos_query::prelude::tokio;
 
     #[tokio::test]
     async fn test_ws_tmq_meta() -> anyhow::Result<()> {

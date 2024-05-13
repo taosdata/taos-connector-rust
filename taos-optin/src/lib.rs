@@ -18,63 +18,6 @@ use taos_query::{
 
 const MAX_CONNECT_RETRIES: u8 = 2;
 
-mod version {
-    use std::fmt::Display;
-
-    #[derive(Debug, PartialEq, PartialOrd)]
-    struct Version {
-        mainline: u8,
-        major: u8,
-        minor: u8,
-        patch: u8,
-    }
-
-    impl Display for Version {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let Version {
-                mainline,
-                major,
-                minor,
-                patch,
-            } = self;
-            f.write_fmt(format_args!("{mainline}.{major}.{minor}.{patch}"))
-        }
-    }
-
-    impl Version {
-        // pub(crate) const fn new(mainline: u8, major: u8, minor: u8, patch: u8) -> Self {
-        //     Self {
-        //         mainline,
-        //         major,
-        //         minor,
-        //         patch,
-        //     }
-        // }
-        // fn parse(version: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        //     let version_items: Vec<_> = version.split('.').collect();
-        //     let items = version_items.len();
-        //     if items == 0 || items > 4 {
-        //         Err("parse version error: {version}")?
-        //     }
-
-        //     let mainline = version_items[0].parse()?;
-        //     let major = version_items
-        //         .get(1)
-        //         .and_then(|s| s.parse().ok())
-        //         .unwrap_or_default();
-        //     let minor = version_items
-        //         .get(2)
-        //         .and_then(|s| s.parse().ok())
-        //         .unwrap_or_default();
-        //     let patch = version_items
-        //         .get(3)
-        //         .and_then(|s| s.parse().ok())
-        //         .unwrap_or_default();
-
-        //     Ok(Self::new(mainline, major, minor, patch))
-        // }
-    }
-}
 mod into_c_str;
 mod raw;
 mod stmt;
@@ -175,6 +118,14 @@ impl taos_query::Queryable for Taos {
     fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
         self.raw.put(data)
     }
+
+    fn table_vgroup_id(&self, db: &str, table: &str) -> Option<i32> {
+        self.raw.get_table_vgroup_id(db, table).ok()
+    }
+
+    fn tables_vgroup_ids<T: AsRef<str>>(&self, db: &str, tables: &[T]) -> Option<Vec<i32>> {
+        self.raw.get_tables_vgroup_ids(db, tables).ok()
+    }
 }
 
 #[async_trait::async_trait]
@@ -217,6 +168,18 @@ impl taos_query::AsyncQueryable for Taos {
 
     async fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
         self.raw.put(data)
+    }
+
+    async fn table_vgroup_id(&self, db: &str, table: &str) -> Option<i32> {
+        self.raw.get_table_vgroup_id(db, table).ok()
+    }
+
+    async fn tables_vgroup_ids<T: AsRef<str> + Sync>(
+        &self,
+        db: &str,
+        tables: &[T],
+    ) -> Option<Vec<i32>> {
+        self.raw.get_tables_vgroup_ids(db, tables).ok()
     }
 }
 
@@ -932,7 +895,10 @@ mod tests {
         // let _ = pretty_env_logger::try_init();
         let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build().await?;
-        let err = taos.query("select * from test.meters").await.unwrap_err();
+        let err = taos
+            .query("select * from testxxxx.meters")
+            .await
+            .unwrap_err();
 
         tracing::trace!("{:?}", err);
 
@@ -1205,6 +1171,42 @@ mod tests {
         assert_eq!(client.put(&sml_data)?, ());
 
         client.exec(format!("drop database if exists {db}"))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_error_details() -> anyhow::Result<()> {
+        // std::env::set_var("RUST_LOG", "taos=trace");
+        std::env::set_var("RUST_LOG", "taos=debug");
+        // pretty_env_logger::init();
+        use taos_query::prelude::sync::*;
+
+        let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        tracing::debug!("dsn: {:?}", &dsn);
+
+        let client = TaosBuilder::from_dsn(dsn)?.build()?;
+
+        let db = "test_tmq_err_details";
+
+        client.exec(format!("drop database if exists {db}"))?;
+
+        client.exec(format!("create database if not exists {db}"))?;
+
+        // should specify database before insert
+        client.exec(format!("use {db}"))?;
+
+        client.exec("create table t1 (ts timestamp, val int)")?;
+
+        let views = vec![
+            ColumnView::from_millis_timestamp(vec![164000000000]),
+            ColumnView::from_bools(vec![true]),
+        ];
+        let mut block = RawBlock::from_views(&views, Precision::Millisecond);
+        block.with_table_name("t1");
+
+        let err = client.write_raw_block(&block).unwrap_err();
+        dbg!(&err);
 
         Ok(())
     }

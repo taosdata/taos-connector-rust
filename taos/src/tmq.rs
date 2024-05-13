@@ -1429,7 +1429,6 @@ mod async_tests {
             let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
 
             while let Some((offset, message)) = stream.try_next().await? {
-
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
@@ -1460,7 +1459,10 @@ mod async_tests {
                             log::info!("table_name: {:?}", data.table_name());
                             assert_eq!(data.table_name(), Some("tb0"));
                             log::info!("data: {}", data.pretty_format());
-                            assert!(data.pretty_format().to_string().contains("table name \"tb0\""));
+                            assert!(data
+                                .pretty_format()
+                                .to_string()
+                                .contains("table name \"tb0\""));
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
@@ -2586,7 +2588,8 @@ mod tmq_deflate_tests {
         ])
         .await?;
 
-        dsn.params.insert("group.id".to_string(), "ws_tmq_deflate_1".to_string());
+        dsn.params
+            .insert("group.id".to_string(), "ws_tmq_deflate_1".to_string());
 
         dsn.params
             .insert("auto.offset.reset".to_string(), "earliest".to_string());
@@ -2604,7 +2607,6 @@ mod tmq_deflate_tests {
             let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
 
             while let Some((offset, message)) = stream.try_next().await? {
-
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
@@ -2639,7 +2641,6 @@ mod tmq_deflate_tests {
                         log::debug!("MetaData");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
-
 
                         let json = meta.as_json_meta().await?;
                         let sql = json.to_string();

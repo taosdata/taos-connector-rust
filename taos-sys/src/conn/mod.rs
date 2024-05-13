@@ -8,7 +8,7 @@ use taos_query::RawBlock;
 use crate::schemaless::*;
 use crate::tmq::*;
 use crate::{err_or, into_c_str::IntoCStr, query::QueryFuture};
-use crate::{ffi::*, tmq::ffi::tmq_write_raw, RawRes, ResultSet};
+use crate::{ffi::*, RawRes, ResultSet};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]

@@ -38,7 +38,7 @@ lazy_static::lazy_static! {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
+#[allow(dead_code, non_snake_case)]
 pub struct ApiEntry {
     lib: Arc<Library>,
     version: String,
@@ -136,6 +136,28 @@ pub struct ApiEntry {
         unsafe extern "C" fn(res: *mut TAOS_RES, num: *mut i32, data: *mut *mut c_void) -> c_int,
     >,
 
+    // int taos_get_table_vgId(TAOS *taos, const char *db, const char *table, int *vgId)
+    #[allow(non_snake_case)]
+    taos_get_table_vgId: Option<
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            db: *const c_char,
+            table: *const c_char,
+            vgId: *mut i32,
+        ) -> c_int,
+    >,
+
+    // int taos_get_tables_vgId(TAOS *taos, const char *db, const char *table[], int tableNum, int *vgId);
+    #[allow(non_snake_case)]
+    taos_get_tables_vgId: Option<
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            db: *const c_char,
+            table: *const *const c_char,
+            tableNum: c_int,
+            vgId: *mut i32,
+        ) -> c_int,
+    >,
     // stmt
     pub(crate) stmt: StmtApi,
     //  tmq
@@ -480,6 +502,7 @@ impl ApiEntry {
         Self::dlopen(path)
     }
 
+    #[allow(non_snake_case)]
     pub fn dlopen<S>(path: S) -> Result<Self, dlopen2::Error>
     where
         S: AsRef<Path>,
@@ -553,7 +576,9 @@ impl ApiEntry {
                 taos_write_raw_block_with_fields,
                 taos_write_raw_block_with_fields_with_reqid,
                 taos_get_raw_block,
-                taos_result_block
+                taos_result_block,
+                taos_get_table_vgId,
+                taos_get_tables_vgId
             );
 
             // stmt
@@ -721,6 +746,9 @@ impl ApiEntry {
                 taos_fetch_raw_block_a,
                 taos_get_raw_block,
 
+                taos_get_table_vgId,
+                taos_get_tables_vgId,
+
                 stmt,
                 tmq,
 
@@ -832,6 +860,63 @@ impl RawTaos {
         self.ptr
     }
 
+    pub fn get_table_vgroup_id(&self, db: &str, table: &str) -> Result<i32, RawError> {
+        if self.c.taos_get_table_vgId.is_none() {
+            return Err(RawError::from_string(
+                "Current version does not support get table vgId",
+            ));
+        }
+        let db = CString::new(db).unwrap();
+        let table = CString::new(table).unwrap();
+        let mut vg_id = 0;
+        let code = unsafe {
+            (self.c.taos_get_table_vgId.unwrap())(
+                self.as_ptr(),
+                db.as_ptr(),
+                table.as_ptr(),
+                &mut vg_id,
+            )
+        };
+        if code == 0 {
+            Ok(vg_id)
+        } else {
+            Err(self.c.check(std::ptr::null_mut()).unwrap_err())
+        }
+    }
+
+    pub fn get_tables_vgroup_ids<T: AsRef<str>>(
+        &self,
+        db: &str,
+        tables: &[T],
+    ) -> Result<Vec<i32>, RawError> {
+        if self.c.taos_get_tables_vgId.is_none() {
+            return Err(RawError::from_string(
+                "Current version does not support get tables vgId",
+            ));
+        }
+        let db = CString::new(db).unwrap();
+        let tables: Vec<_> = tables
+            .iter()
+            .map(|t| CString::new(t.as_ref()).unwrap())
+            .collect();
+        let tables: Vec<_> = tables.iter().map(|t| t.as_ptr()).collect();
+        let mut vg_ids = vec![0; tables.len()];
+        let code = unsafe {
+            (self.c.taos_get_tables_vgId.unwrap())(
+                self.as_ptr(),
+                db.as_ptr(),
+                tables.as_ptr(),
+                tables.len() as i32,
+                vg_ids.as_mut_ptr(),
+            )
+        };
+        if code == 0 {
+            Ok(vg_ids)
+        } else {
+            Err(self.c.check(std::ptr::null_mut()).unwrap_err())
+        }
+    }
+
     #[inline]
     pub fn query<'a, S: IntoCStr<'a>>(&self, sql: S) -> Result<RawRes, RawError> {
         let sql = sql.into_c_str();
@@ -915,24 +1000,34 @@ impl RawTaos {
             .c
             .tmq_write_raw
             .ok_or_else(|| RawError::from_string("2.x does not support write raw meta"))?;
-        let taos_errstr = self.c.taos_errstr;
+        let tmq_err2str = self
+            .c
+            .tmq
+            .ok_or_else(|| RawError::from_string("tmq api is not available"))?
+            .tmq_err2str;
         let mut retries = 2;
         loop {
-            let code = unsafe { tmq_write_raw(self.as_ptr(), meta.clone()) };
-            let code = Code::from(code);
+            let raw_code = unsafe { tmq_write_raw(self.as_ptr(), meta.clone()) };
+            let code = Code::from(raw_code);
             if code.success() {
                 return Ok(());
             }
             if code != Code::from(0x2603) {
-                let err = unsafe { taos_errstr(std::ptr::null_mut()) };
+                let err = unsafe { tmq_err2str(tmq_resp_err_t(raw_code)) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
                 return Err(taos_query::prelude::RawError::new(code, err));
             }
             tracing::trace!("received error code 0x2603, try once");
             retries -= 1;
             if retries == 0 {
-                let err = unsafe { taos_errstr(std::ptr::null_mut()) };
+                let err = unsafe { tmq_err2str(tmq_resp_err_t(raw_code)) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
                 return Err(taos_query::prelude::RawError::new(code, err));
             }
         }
@@ -946,15 +1041,32 @@ impl RawTaos {
             .ok_or_else(|| RawError::new(Code::FAILED, "raw block should have table name"))?;
         let ptr = block.as_raw_bytes().as_ptr();
         if let Some(f) = self.c.taos_write_raw_block_with_fields {
+            let tmq_err2str = self
+                .c
+                .tmq
+                .ok_or_else(|| RawError::from_string("tmq api is not available"))?
+                .tmq_err2str;
             let fields: Vec<_> = block.fields().into_iter().map(|f| f.to_c_field()).collect();
-            err_or!(f(
-                self.as_ptr(),
-                nrows as _,
-                ptr as _,
-                name.into_c_str().as_ptr(),
-                fields.as_ptr() as _,
-                fields.len() as _,
-            ))
+            let code = unsafe {
+                f(
+                    self.as_ptr(),
+                    nrows as _,
+                    ptr as _,
+                    name.into_c_str().as_ptr(),
+                    fields.as_ptr() as _,
+                    fields.len() as _,
+                )
+            };
+            if code == 0 {
+                Ok(())
+            } else {
+                let err = unsafe { tmq_err2str(tmq_resp_err_t(code)) };
+                let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
+                Err(taos_query::prelude::RawError::new(Code::from(code), err))
+            }
         } else if let Some(f) = self.c.taos_write_raw_block {
             err_or!(f(
                 self.as_ptr(),
@@ -980,15 +1092,33 @@ impl RawTaos {
         let ptr = block.as_raw_bytes().as_ptr();
         if let Some(f) = self.c.taos_write_raw_block_with_fields_with_reqid {
             let fields: Vec<_> = block.fields().into_iter().map(|f| f.to_c_field()).collect();
-            err_or!(f(
-                self.as_ptr(),
-                nrows as _,
-                ptr as _,
-                name.into_c_str().as_ptr(),
-                fields.as_ptr() as _,
-                fields.len() as _,
-                req_id
-            ))
+            let code = unsafe {
+                f(
+                    self.as_ptr(),
+                    nrows as _,
+                    ptr as _,
+                    name.into_c_str().as_ptr(),
+                    fields.as_ptr() as _,
+                    fields.len() as _,
+                    req_id,
+                )
+            };
+
+            if code == 0 {
+                Ok(())
+            } else {
+                let tmq_err2str = self
+                    .c
+                    .tmq
+                    .ok_or_else(|| RawError::from_string("tmq api is not available"))?
+                    .tmq_err2str;
+                let err = unsafe { tmq_err2str(tmq_resp_err_t(code)) };
+                let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
+                Err(taos_query::prelude::RawError::new(Code::from(code), err))
+            }
         } else if let Some(f) = self.c.taos_write_raw_block_with_reqid {
             err_or!(f(
                 self.as_ptr(),
@@ -1090,9 +1220,8 @@ impl RawTaos {
 
         tracing::trace!("sml total rows: {}", total_rows);
         match res {
-            Ok(raw) => {
+            Ok(_) => {
                 tracing::trace!("sml insert success");
-                unsafe { (self.c.as_ref().taos_free_result)(raw.as_ptr()) }
                 Ok(())
             }
             Err(e) => {
@@ -1565,6 +1694,7 @@ impl RawRes {
             let meta = (self.c.tmq.as_ref().unwrap().tmq_get_json_meta)(self.as_ptr());
             let meta_cstr = CStr::from_ptr(meta).to_string_lossy().into_owned();
             (self.c.tmq.as_ref().unwrap().tmq_free_json_meta)(meta);
+            tracing::debug!(json = meta_cstr, "Received TMQ json meta");
             meta_cstr
         }
     }
@@ -1590,4 +1720,27 @@ impl RawRes {
 pub struct BlockState {
     pub result: Option<Result<Option<(*mut c_void, usize)>, RawError>>,
     pub in_use: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_raw_taos() {
+        let c = Arc::new(ApiEntry::open_default().unwrap());
+        let taos = RawTaos::new(c, 1 as _).unwrap();
+        let raw = raw_data_t {
+            raw: std::ptr::null_mut(),
+            raw_len: 0,
+            raw_type: 2,
+        };
+        let err = taos.write_raw_meta(raw).unwrap_err();
+
+        dbg!(&err);
+        assert_eq!(
+            err.to_string(),
+            "[0x0118] Internal error: `Invalid parameters,detail:taos:0x1 or data:0x0 is NULL`"
+        );
+    }
 }

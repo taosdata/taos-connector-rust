@@ -138,10 +138,7 @@ _impl_for_ptr!(*mut c_void);
 
 #[cfg(test)]
 mod test_into_c_str {
-    use std::{
-        borrow::Borrow,
-        ffi::{CStr, CString},
-    };
+    use std::borrow::Borrow;
 
     use super::*;
 

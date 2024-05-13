@@ -330,6 +330,7 @@ pub trait BindFrom: Sized {
     fn from_varchar(v: &str) -> Self;
     fn from_nchar(v: &str) -> Self;
     fn from_json(v: &str) -> Self;
+    #[allow(dead_code)]
     fn from_binary(v: &str) -> Self {
         Self::from_varchar(v)
     }
@@ -412,6 +413,7 @@ impl Drop for TaosBindV2 {
     }
 }
 
+#[allow(dead_code)]
 pub trait ToMultiBind {
     fn to_multi_bind(&self) -> TaosMultiBind;
 }
