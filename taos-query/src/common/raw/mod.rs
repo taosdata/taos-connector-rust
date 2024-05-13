@@ -584,7 +584,7 @@ impl RawBlock {
                     let data = bytes.slice(o2..data_offset);
 
                     ColumnView::Geometry(GeometryView { offsets, data })
-                }                
+                }
 
                 ty => {
                     unreachable!("unsupported type: {ty}")

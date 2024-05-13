@@ -2371,7 +2371,7 @@ mod async_tests {
         ]).await?;
         assert_eq!(inserted, 5);
         Ok(())
-    }    
+    }
 
     // Query options 2, use deserialization with serde.
     #[derive(Debug, serde::Deserialize)]
@@ -2411,34 +2411,35 @@ mod async_tests {
 
         let task = tokio::spawn(prepare(taos));
         task.await??;
-       
+
         dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest");
         let builder = crate::TmqBuilder::from_dsn(&dsn)?;
         // dbg!(&builder.dsn);
         let mut consumer = builder.build().await?;
         consumer.subscribe(["tmq_meters"]).await?;
 
-        
         consumer
-        .stream()
-        .try_for_each(|(offset, message)| async {
-            let topic = offset.topic();
-            // the vgroup id, like partition id in kafka.
-            let vgroup_id = offset.vgroup_id();
-            println!("* in vgroup id {vgroup_id} of topic {topic}\n");
+            .stream()
+            .try_for_each(|(offset, message)| async {
+                let topic = offset.topic();
+                // the vgroup id, like partition id in kafka.
+                let vgroup_id = offset.vgroup_id();
+                println!("* in vgroup id {vgroup_id} of topic {topic}\n");
 
-            if let Some(data) = message.into_data() {
-                while let Some(block) = data.fetch_raw_block().await? {
-                    let records: Vec<Record> = block.deserialize().try_collect()?;
-                    println!("** read {} records: {:#?}\n", records.len(), records);
-                    assert_eq!(records[records.len() - 1].cvb1, Some(Bytes::from(vec![0x12, 0x34, 0x56])));
+                if let Some(data) = message.into_data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        let records: Vec<Record> = block.deserialize().try_collect()?;
+                        println!("** read {} records: {:#?}\n", records.len(), records);
+                        assert_eq!(
+                            records[records.len() - 1].cvb1,
+                            Some(Bytes::from(vec![0x12, 0x34, 0x56]))
+                        );
+                    }
                 }
-            }
-            consumer.commit(offset).await?;
-            Ok(())
-        })
-        .await?;
-
+                consumer.commit(offset).await?;
+                Ok(())
+            })
+            .await?;
 
         consumer.unsubscribe().await;
 

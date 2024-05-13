@@ -7,8 +7,8 @@ use crate::{
     util::InlineStr,
 };
 
-use itertools::Itertools;
 use bytes::Bytes;
+use itertools::Itertools;
 
 #[derive(Debug, Clone)]
 pub struct VarBinaryView {
@@ -22,10 +22,7 @@ impl IsColumnView for VarBinaryView {
         Ty::VarBinary
     }
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter::<Bytes, _, _, _>(
-            iter.map(|v| v.to_bytes())
-                .collect_vec(),
-        )
+        Self::from_iter::<Bytes, _, _, _>(iter.map(|v| v.to_bytes()).collect_vec())
     }
 }
 
@@ -115,7 +112,11 @@ impl VarBinaryView {
 
     pub fn to_vec(&self) -> Vec<Option<Vec<u8>>> {
         (0..self.len())
-            .map(|row| unsafe { self.get_unchecked(row) }.map(|s| s.as_bytes()).map(|s| s.to_vec()))
+            .map(|row| {
+                unsafe { self.get_unchecked(row) }
+                    .map(|s| s.as_bytes())
+                    .map(|s| s.to_vec())
+            })
             .collect()
     }
     // pub fn iter_as_bytes(&self) -> impl Iterator<Item = Option<&[u8]>> {
@@ -192,7 +193,7 @@ impl VarBinaryView {
 
     // pub fn concat(&self, rhs: &Self) -> Self {
     //     Self::from_iter::<&InlineJson, _, _, _>(self.iter().chain(rhs.iter()).collect_vec())
-    // }    
+    // }
 }
 
 pub struct VarBinaryIter<'a> {
