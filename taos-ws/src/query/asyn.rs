@@ -11,7 +11,6 @@ use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
 use thiserror::Error;
 use tokio_tungstenite::tungstenite::Message;
 
-use taos_query::prelude::tokio;
 use tokio::io::BufStream;
 use tokio::io::ReadHalf;
 use tokio::sync::watch;
@@ -536,7 +535,10 @@ impl WsTaos {
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
-        sender.send(version.to_tungstenite_msg()).await.map_err(Error::from)?;
+        sender
+            .send(version.to_tungstenite_msg())
+            .await
+            .map_err(Error::from)?;
 
         let duration = Duration::from_secs(2);
         let version = match tokio::time::timeout(duration, reader.next()).await {
@@ -562,7 +564,10 @@ impl WsTaos {
             req_id,
             req: info.to_conn_request(),
         };
-        sender.send(login.to_tungstenite_msg()).await.map_err(Error::from)?;
+        sender
+            .send(login.to_tungstenite_msg())
+            .await
+            .map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {
             match message {
                 Message::Text(text) => {

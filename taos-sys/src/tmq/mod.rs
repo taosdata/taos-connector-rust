@@ -1,7 +1,11 @@
 pub(crate) mod ffi;
 
 use std::{
-    ffi::{CStr, CString}, fmt::Debug, mem::transmute, str::FromStr, time::Duration
+    ffi::{CStr, CString},
+    fmt::Debug,
+    mem::transmute,
+    str::FromStr,
+    time::Duration,
 };
 
 pub(crate) use ffi::*;
@@ -9,7 +13,7 @@ pub(crate) use ffi::*;
 use itertools::Itertools;
 use taos_query::{
     common::{raw_data_t, Precision, RawData, RawMeta},
-    prelude::tokio,
+    prelude::tokio::{pin, select, time},
     tmq::{
         AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
         IsOffset, MessageSet, Timeout, VGroupId,
@@ -612,9 +616,9 @@ impl AsAsyncConsumer for Consumer {
         let res = match timeout {
             Timeout::Never | Timeout::None => {
                 let timeout = Duration::MAX;
-                let sleep = tokio::time::sleep(timeout);
-                tokio::pin!(sleep);
-                tokio::select! {
+                let sleep = time::sleep(timeout);
+                pin!(sleep);
+                select! {
                     _ = &mut sleep, if !sleep.is_elapsed() => {
                        Ok(None)
                     }
@@ -635,9 +639,9 @@ impl AsAsyncConsumer for Consumer {
                 }
             }
             Timeout::Duration(timeout) => {
-                let sleep = tokio::time::sleep(timeout);
-                tokio::pin!(sleep);
-                tokio::select! {
+                let sleep = time::sleep(timeout);
+                pin!(sleep);
+                select! {
                     _ = &mut sleep, if !sleep.is_elapsed() => {
                        Ok(None)
                     }

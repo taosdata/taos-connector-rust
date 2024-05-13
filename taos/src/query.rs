@@ -1175,9 +1175,8 @@ mod tests {
         taos.query(format!("create database {db}2"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -1688,7 +1687,7 @@ mod async_tests {
         match taos.exec_with_req_id(&sql, 0).await {
             Err(e) => {
                 dbg!(&e);
-                assert_eq!(e.code(), 0x2605);
+                assert_eq!(e.code(), 0x2653);
             }
             Ok(_) => {
                 // Actually, the sql should return error 0x2605, but it success.

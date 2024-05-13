@@ -168,7 +168,7 @@ pub(super) mod tmq {
             loop {
                 // poll with 50ms timeout.
                 // let ptr = UnsafeCell::new(self.0);
-                tracing::trace!("try poll next message with 200ms timeout");
+                // tracing::trace!("try poll next message with 200ms timeout");
                 let raw = self.clone();
                 let res = tokio::task::spawn_blocking(move || {
                     let raw = raw;
@@ -328,7 +328,6 @@ pub(super) mod conf {
     // use taos_error::*;
 
     use crate::*;
-    use std::iter::Iterator;
     use taos_query::Dsn;
 
     /* tmq conf */

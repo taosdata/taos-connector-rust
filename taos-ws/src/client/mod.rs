@@ -347,7 +347,7 @@ impl ClientConfig {
     }
 
     #[cfg(feature = "defalte-async")]
-    pub async fn async_defalte_connect_with<C, F> (
+    pub async fn async_defalte_connect_with<C, F>(
         &mut self,
         uri: impl TryInto<Uri, Error = http::uri::InvalidUri>,
         mut check_fn: F,

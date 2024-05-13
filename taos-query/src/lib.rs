@@ -20,7 +20,6 @@ mod error;
 pub mod common;
 mod de;
 pub mod helpers;
-mod insert;
 
 mod iter;
 pub mod util;
@@ -376,7 +375,7 @@ impl<T: AsyncTBuilder> deadpool::managed::Manager for Manager<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fmt::Display, sync::atomic::AtomicUsize};
+    use std::sync::atomic::AtomicUsize;
 
     use super::*;
     #[derive(Debug)]

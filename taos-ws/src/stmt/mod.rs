@@ -11,7 +11,6 @@ use taos_query::prelude::{InlinableWrite, RawResult};
 use taos_query::stmt::{AsyncBindable, Bindable};
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 
-use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
 
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -52,35 +51,6 @@ type StmtPrepareResultSender = tokio::sync::mpsc::Sender<StmtPrepareResultResult
 type StmtPrepareResultReceiver = tokio::sync::mpsc::Receiver<StmtPrepareResultResult>;
 
 type WsSender = tokio::sync::mpsc::Sender<WsMessage<bytes::Bytes>>;
-
-trait ToJsonValue {
-    fn to_json_value(&self) -> serde_json::Value;
-}
-
-impl ToJsonValue for ColumnView {
-    fn to_json_value(&self) -> serde_json::Value {
-        match self {
-            ColumnView::Bool(view) => serde_json::json!(view.to_vec()),
-            ColumnView::TinyInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::SmallInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::Int(view) => serde_json::json!(view.to_vec()),
-            ColumnView::BigInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::Float(view) => serde_json::json!(view.to_vec()),
-            ColumnView::Double(view) => serde_json::json!(view.to_vec()),
-            ColumnView::VarChar(view) => serde_json::json!(view.to_vec()),
-            ColumnView::Timestamp(view) => serde_json::json!(view
-                .iter()
-                .map(|ts| ts.map(|ts| ts.to_datetime_with_tz()))
-                .collect_vec()),
-            ColumnView::NChar(view) => serde_json::json!(view.to_vec()),
-            ColumnView::UTinyInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::USmallInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::UInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::UBigInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::Json(view) => serde_json::json!(view.to_vec()),
-        }
-    }
-}
 
 impl Bindable<super::Taos> for Stmt {
     fn init(taos: &super::Taos) -> RawResult<Self> {
@@ -1016,8 +986,6 @@ mod tests {
     use taos_query::{common::ColumnView, Dsn, TBuilder};
 
     use crate::{stmt::Stmt, TaosBuilder};
-
-    use taos_query::prelude::tokio;
 
     #[tokio::test()]
     async fn test_client() -> anyhow::Result<()> {

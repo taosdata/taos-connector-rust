@@ -223,6 +223,7 @@ pub struct StmtRecv {
 
 #[derive(Debug)]
 pub enum StmtOk {
+    #[allow(dead_code)]
     Conn(Result<(), Error>),
     Init(ReqId, Result<StmtId, Error>),
     Stmt(StmtId, Result<Option<usize>, Error>),

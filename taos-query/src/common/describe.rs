@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::helpers::ColumnMeta;
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct Describe(pub(crate) Vec<ColumnMeta>);
 
 impl IntoIterator for Describe {
