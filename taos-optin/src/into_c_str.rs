@@ -60,7 +60,6 @@ _impl_for_str!(&str);
 
 #[cfg(test)]
 mod test_into_c_str {
-    use std::ffi::{CStr, CString};
 
     use super::*;
 

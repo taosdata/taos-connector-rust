@@ -7,7 +7,7 @@ pub(super) mod tmq {
     use std::{os::raw::c_void, time::Duration};
 
     use itertools::Itertools;
-    use taos_query::prelude::tokio;
+    use taos_query::prelude::tokio::{task, time};
     use taos_query::tmq::{Assignment, VGroupId};
 
     use crate::{into_c_str::IntoCStr, RawError, RawRes};
@@ -131,7 +131,7 @@ pub(super) mod tmq {
                 // let ptr = UnsafeCell::new(self.0);
                 log::trace!("try poll next message with 200ms timeout");
                 let raw = *self;
-                let res = tokio::task::spawn_blocking(move || {
+                let res = task::spawn_blocking(move || {
                     let raw = raw;
                     let res = unsafe { tmq_consumer_poll(raw.0, 200) };
                     if res.is_null() {
@@ -147,7 +147,7 @@ pub(super) mod tmq {
                     log::trace!("received tmq message in {:?}", elapsed.elapsed());
                     break res;
                 } else {
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    time::sleep(Duration::from_millis(1)).await;
                 }
             }
         }
@@ -218,7 +218,7 @@ pub(super) mod tmq {
 
 pub(super) mod conf {
     use crate::{tmq::ffi::*, IntoCStr};
-    use std::{ffi::c_void, iter::Iterator};
+    use std::ffi::c_void;
     use taos_query::prelude::{Dsn, RawError};
 
     use super::RawTmq;

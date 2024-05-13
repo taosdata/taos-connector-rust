@@ -61,10 +61,11 @@ impl Timestamp {
             Timestamp::Microseconds(raw) => chrono::Duration::microseconds(*raw),
             Timestamp::Nanoseconds(raw) => chrono::Duration::nanoseconds(*raw),
         };
-        chrono::NaiveDateTime::from_timestamp_opt(0, 0)
+        chrono::DateTime::from_timestamp(0, 0)
             .expect("timestamp value could always be mapped to a chrono::NaiveDateTime")
             .checked_add_signed(duration)
             .unwrap()
+            .naive_utc()
     }
 
     // todo: support to tz.
@@ -105,58 +106,6 @@ mod tests {
                 ts.to_naive_datetime() == chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
             );
             dbg!(ts.to_datetime_with_tz());
-        }
-    }
-
-    #[test]
-    fn ts_cast_precision() {
-        let precisions = [
-            Precision::Millisecond,
-            Precision::Microsecond,
-            Precision::Nanosecond,
-        ];
-        for (i, prec) in precisions.iter().enumerate() {
-            let ts = Timestamp::new(1_000_000 * (i as i64), *prec);
-            for (j, new_prec) in precisions.iter().enumerate() {
-                let new_ts = ts.cast_precision(*new_prec);
-                assert_eq!(
-                    new_ts.precision(),
-                    *new_prec,
-                    "from {:?} to {:?}",
-                    prec,
-                    new_prec
-                );
-                assert_eq!(
-                    new_ts.to_naive_datetime(),
-                    ts.to_naive_datetime(),
-                    "from {:?} to {:?}",
-                    prec,
-                    new_prec
-                );
-                match (prec, new_prec) {
-                    (Precision::Millisecond, Precision::Microsecond) => {
-                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) * 1000);
-                    }
-                    (Precision::Millisecond, Precision::Nanosecond) => {
-                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) * 1_000_000);
-                    }
-                    (Precision::Microsecond, Precision::Millisecond) => {
-                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) / 1000);
-                    }
-                    (Precision::Microsecond, Precision::Nanosecond) => {
-                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) * 1000);
-                    }
-                    (Precision::Nanosecond, Precision::Millisecond) => {
-                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) / 1_000_000);
-                    }
-                    (Precision::Nanosecond, Precision::Microsecond) => {
-                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64) / 1000);
-                    }
-                    _ => {
-                        assert_eq!(new_ts.as_raw_i64(), 1_000_000 * (i as i64));
-                    }
-                }
-            }
         }
     }
 

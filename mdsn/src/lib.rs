@@ -87,11 +87,11 @@ impl Dsn {
                 (?P<driver>[\w.-]+)(\+(?P<protocol>[^@/?\#]+))?: # abc
                 (
                     # url-like dsn
-                    //((?P<username>[\w\-_%.]+)?(:(?P<password>[^@/?\#]+))?@)? # for authorization
-                        (((?P<protocol2>[\w.-]+)\()?
+                    //((?P<username>[\w\s\-_%.]+)?(:(?P<password>[^@/?\#]+))?@)? # for authorization
+                        (((?P<protocol2>[\w\s.-]+)\()?
                             (?P<addr>[\w\-_%.:]*(:\d{0,5})?(,[\w\-:_.]*(:\d{0,5})?)*)?  # for addresses
                         \)?)?
-                        (/(?P<subject>[\w %$@.,/-]+)?)?                             # for subject
+                        (/(?P<subject>[\w\s%$@.,/-]+)?)?                             # for subject
                     | # or
                     # path-like dsn
                     (?P<path>([\\/.~]$|/\s*\w+[\w\s %$@*:.\\\-/]*|[\.~\w\s]?[\w\s %$@*:.\\\-/]+))
@@ -1150,5 +1150,17 @@ mod tests {
         let dsn = Dsn::from_str(&format!("csv:./a b.csv?param=1")).unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.path.unwrap(), "./a b.csv");
+    }
+
+    #[test]
+    fn with_space() {
+        let dsn = Dsn::from_str("pi:///Met1 ABC").unwrap();
+        assert_eq!(dsn.subject, Some("Met1 ABC".to_string()));
+
+        let dsn = Dsn::from_str("pi://u ser:pa ss@host:80/Met1 ABC").unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.subject, Some("Met1 ABC".to_string()));
+        assert_eq!(dsn.username, Some("u ser".to_string()));
+        assert_eq!(dsn.password, Some("pa ss".to_string()));
     }
 }

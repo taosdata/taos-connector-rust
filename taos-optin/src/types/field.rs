@@ -75,14 +75,12 @@ impl From<&CFieldV3> for Field {
 
 pub(crate) fn from_raw_fields(version: &str, ptr: *const c_void, len: usize) -> Vec<Field> {
     if version.starts_with('3') {
-        unsafe { std::slice::from_raw_parts(ptr as *const CFieldV3, len) }
-            .iter()
-            .map(Into::into)
+        (0..len)
+            .map(|i| unsafe { (ptr as *const CFieldV3).add(i).as_ref().unwrap() }.into())
             .collect()
     } else {
-        unsafe { std::slice::from_raw_parts(ptr as *const CFieldV2, len) }
-            .iter()
-            .map(Into::into)
+        (0..len)
+            .map(|i| unsafe { (ptr as *const CFieldV2).add(i).as_ref().unwrap() }.into())
             .collect()
     }
 }
