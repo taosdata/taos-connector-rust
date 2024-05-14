@@ -24,7 +24,7 @@ int main()
   const char *client_version = ws_get_client_info();
   printf("client version = %s \n", client_version);
 
-  WS_RES *rs = ws_query(taos, "select ts, groupid, current, location  from test.meters limit 10;");
+  WS_RES *rs = ws_query(taos, "select ts, groupid, current, location  from test.meters limit 10000;");
 
   int code = ws_errno(rs);
   if (code != 0)
@@ -61,8 +61,7 @@ int main()
 
   while (true)
   {
-    WS_ROW row_data = NULL;
-    code = ws_fetch_row(rs, &row_data);
+    WS_ROW row_data = ws_fetch_row(rs);
     if (row_data == NULL)
       break;
     uint8_t ty;
