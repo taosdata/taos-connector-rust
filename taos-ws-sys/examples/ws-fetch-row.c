@@ -24,7 +24,7 @@ int main()
   const char *client_version = ws_get_client_info();
   printf("client version = %s \n", client_version);
 
-  WS_RES *rs = ws_query(taos, "select ts, groupid, current, location  from test.meters limit 10000;");
+  WS_RES *rs = ws_query(taos, "select ts, groupid, current, location  from test.meters limit 10;");
 
   int code = ws_errno(rs);
   if (code != 0)
@@ -146,5 +146,15 @@ int main()
       }
     }
     printf("\n");
+  }
+
+  code = ws_errno(rs);
+  if (code != 0)
+  {
+    const char *errstr = ws_errstr(rs);
+    dprintf(2, "Error [%6x]: %s \n", code, errstr);
+    ws_free_result(rs);
+    ws_close(taos);
+    return 0;
   }
 }

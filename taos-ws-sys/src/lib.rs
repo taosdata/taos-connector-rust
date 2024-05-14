@@ -436,8 +436,11 @@ impl WsResultSet {
             }
 
             self.row.current_row = self.row.current_row + 1;
+            Ok(self.row.data.as_ptr() as _)
         }
-        Ok(self.row.data.as_ptr() as _)
+        else {
+            Ok(std::ptr::null())
+        }
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
@@ -868,7 +871,7 @@ pub unsafe extern "C" fn ws_fetch_row(rs: *mut WS_RES) -> WS_ROW {
     match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
         Some(rs) => match rs.safe_deref_mut() {
             Some(s) => match s.fetch_row() {
-                Ok(p_row) => p_row,
+                Ok(p_row) => { C_ERRNO = Code::SUCCESS; p_row },
                 Err(err) => {
                     // let code = err.errno();
                     // rs.error = Some(err.into());
@@ -1026,6 +1029,7 @@ pub fn init_env() {
 
 #[cfg(test)]
 mod tests {
+   
     use super::*;
 
     #[test]
@@ -1403,6 +1407,13 @@ mod tests {
 
                 println!("line num = {}", line_num);
                 line_num = line_num + 1;
+            }
+
+            if C_ERRNO == Code::SUCCESS {
+                println!("fetch row done");
+            } else {
+                let error = ws_errstr(rs);
+                dbg!(CStr::from_ptr(error));
             }
         }
     }
