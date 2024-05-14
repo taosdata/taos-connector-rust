@@ -1,11 +1,15 @@
 use std::str::FromStr;
 use taos_optin::TaosBuilder;
+use bytes::Bytes;
+use taos_query::util::hex::*;
+
 
 #[test]
 fn ws_sync_json() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     // pretty_env_logger::init();
     use taos_query::prelude::sync::*;
+
     let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
     let dsn = Dsn::from_str(&dsn)?;
     let client = TaosBuilder::from_dsn(dsn)?.build()?;
@@ -17,30 +21,30 @@ fn ws_sync_json() -> anyhow::Result<()> {
             format!("create table {db}.stb1(ts timestamp,\
                 b1 bool, c8i1 tinyint, c16i1 smallint, c32i1 int, c64i1 bigint,\
                 c8u1 tinyint unsigned, c16u1 smallint unsigned, c32u1 int unsigned, c64u1 bigint unsigned,\
-                cb1 binary(100), cn1 nchar(10),\
+                cb1 binary(100), cn1 nchar(10), cvb1 varbinary(16), cg1 geometry(50), \
                 b2 bool, c8i2 tinyint, c16i2 smallint, c32i2 int, c64i2 bigint,\
                 c8u2 tinyint unsigned, c16u2 smallint unsigned, c32u2 int unsigned, c64u2 bigint unsigned,\
-                cb2 binary(10), cn2 nchar(16)) tags (jt json)")
+                cb2 binary(10), cn2 nchar(16), cvb2 varbinary(16), cg2 geometry(50)) tags (jt json)")
         )?,
         0
     );
     assert_eq!(
         client.exec(format!(
-            "insert into {db}.tb1 using {db}.stb1 tags('{{\"key\":\"数据\"}}') \
-             values(0,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思', \
-                          false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据') \
-                   (65535,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL, \
-                          NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"
+            r#"insert into {db}.tb1 using {db}.stb1 tags('{{"key":"数据"}}')
+             values(0,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思', '\x123456', 'POINT(1 2)',
+                          false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据', '\x654321', 'POINT(3 4)')
+                   (65535,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL, NULL,  NULL,
+                          NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL, NULL,  NULL)"#
         ))?,
         2
     );
     assert_eq!(
         client.exec(format!(
             r#"insert into {db}.tb2 using {db}.stb1 tags(NULL)
-                   values(1,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
-                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
-                         (65536,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
-                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
+                   values(1,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思', '\x123456', 'POINT(1 2)',
+                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据', '\x654321', 'POINT(3 4)')
+                         (65536,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL, NULL,  NULL,
+                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL, NULL,  NULL)"#
         ))?,
         2
     );
@@ -75,6 +79,10 @@ fn ws_sync_json() -> anyhow::Result<()> {
         cb2: String,
         cn1: String,
         cn2: String,
+        cvb1: Bytes,
+        cvb2: Bytes,
+        cg1: Bytes,
+        cg2: Bytes,
     }
 
     use itertools::Itertools;
@@ -107,6 +115,11 @@ fn ws_sync_json() -> anyhow::Result<()> {
             cb2: "def".to_string(),
             cn1: "涛思".to_string(),
             cn2: "数据".to_string(),
+            cvb1: Bytes::from(vec![0x12, 0x34, 0x56]),
+            cvb2: Bytes::from(vec![0x65, 0x43, 0x21]),
+            cg1: hex_string_to_bytes("0101000000000000000000F03F0000000000000040"),
+            cg2: hex_string_to_bytes("010100000000000000000008400000000000001040"),
+
         }
     );
 

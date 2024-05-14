@@ -288,7 +288,6 @@ impl RawTaos {
                 )
             });
         }
-
         log::trace!("sml total rows: {}", total_rows);
         match res {
             Ok(raw) => {

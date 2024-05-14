@@ -32,7 +32,7 @@ impl Taos {
 
     /// The connection uses websocket protocol.
     pub fn is_ws(&self) -> bool {
-        matches!(&self.0, TaosInner::Native(_))
+        matches!(&self.0, TaosInner::Ws(_))
     }
 }
 pub struct ResultSet(ResultSetInner);

@@ -5,6 +5,7 @@ mod inline_str;
 
 mod inline_read;
 mod inline_write;
+pub mod hex;
 
 use std::{
     collections::BTreeMap,

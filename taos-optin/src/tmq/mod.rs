@@ -1408,6 +1408,8 @@ mod async_tests {
 
     use super::TmqBuilder;
 
+    use bytes::Bytes;
+
     #[tokio::test]
     async fn test_write_raw_block_with_req_id() -> anyhow::Result<()> {
         use taos_query::prelude::*;
@@ -2349,6 +2351,97 @@ mod async_tests {
             "drop database ws_abc1",
         ])
         .await?;
+        Ok(())
+    }
+
+    async fn prepare(taos: crate::Taos) -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let inserted = taos.exec_many([
+            // create child table
+            "CREATE TABLE `d0` USING `meters` TAGS(0, 'California.LosAngles')",
+            // insert into child table
+            "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32, '\\x123456')",
+            // insert with NULL values
+            //"INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL, NULL)",
+            // insert and automatically create table with tags if not exists
+            "INSERT INTO `d1` USING `meters` TAGS(1, 'California.SanFrancisco') values(now - 9s, 10.1, 119, 0.33, '\\x123456')",
+            // insert many records in a single sql
+            "INSERT INTO `d1` values (now-8s, 10, 120, 0.33, '\\x123456') (now - 6s, 10, 119, 0.34, '\\x123456') (now - 4s, 11.2, 118, 0.322, '\\x123456')",
+        ]).await?;
+        assert_eq!(inserted, 5);
+        Ok(())
+    }    
+
+    // Query options 2, use deserialization with serde.
+    #[derive(Debug, serde::Deserialize)]
+    #[allow(dead_code)]
+    struct Record {
+        // deserialize timestamp to String
+        ts: String,
+        // float to f32
+        current: Option<f32>,
+        // int to i32
+        voltage: Option<i32>,
+        phase: Option<f32>,
+        cvb1: Option<Bytes>,
+    }
+
+    #[tokio::test]
+    async fn test_tmq_records() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let mut dsn = "tmq://localhost:6030?offset=10:20,11:40".to_string();
+        tracing::info!("dsn: {}", dsn);
+        let db = "test_tmq_records";
+
+        let taos = crate::TaosBuilder::from_dsn(&dsn)?.build().await?;
+        taos.exec_many([
+            format!("DROP TOPIC IF EXISTS tmq_meters"),
+            format!("DROP DATABASE IF EXISTS `{db}`"),
+            format!("CREATE DATABASE `{db}` WAL_RETENTION_PERIOD 3600"),
+            format!("USE `{db}`"),
+            // create super table
+            format!("CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT, cvb1 varbinary(50)) TAGS (`groupid` INT, `location` BINARY(24))"),
+            // create topic for subscription
+            format!("CREATE TOPIC tmq_meters AS SELECT * FROM `meters`")
+        ])
+        .await?;
+
+        let task = tokio::spawn(prepare(taos));
+        task.await??;
+       
+        dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest");
+        let builder = crate::TmqBuilder::from_dsn(&dsn)?;
+        // dbg!(&builder.dsn);
+        let mut consumer = builder.build().await?;
+        consumer.subscribe(["tmq_meters"]).await?;
+
+        
+        consumer
+        .stream()
+        .try_for_each(|(offset, message)| async {
+            let topic = offset.topic();
+            // the vgroup id, like partition id in kafka.
+            let vgroup_id = offset.vgroup_id();
+            println!("* in vgroup id {vgroup_id} of topic {topic}\n");
+
+            if let Some(data) = message.into_data() {
+                while let Some(block) = data.fetch_raw_block().await? {
+                    let records: Vec<Record> = block.deserialize().try_collect()?;
+                    println!("** read {} records: {:#?}\n", records.len(), records);
+                    assert_eq!(records[records.len() - 1].cvb1, Some(Bytes::from(vec![0x12, 0x34, 0x56])));
+                }
+            }
+            consumer.commit(offset).await?;
+            Ok(())
+        })
+        .await?;
+
+
+        consumer.unsubscribe().await;
+
         Ok(())
     }
 }

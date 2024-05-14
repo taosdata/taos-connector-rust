@@ -363,6 +363,8 @@ impl RawStmt {
 mod tests {
 
     use crate::{Stmt, TaosBuilder};
+    use taos_query::util::hex::*;
+    use bytes::Bytes;
 
     #[test]
     fn test_tbname_tags() -> anyhow::Result<()> {
@@ -486,10 +488,10 @@ mod tests {
             "use test_bindable",
             "create table tb1 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
             c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
-            c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
+            c10 float, c11 double, c12 varchar(100), c13 nchar(100), c14 varbinary(50), c15 geometry(50))",
         ])?;
         let mut stmt = Stmt::init(&taos)?;
-        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
+        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
         let params = vec![
             ColumnView::from_millis_timestamp(vec![0]),
             ColumnView::from_bools(vec![true]),
@@ -505,6 +507,8 @@ mod tests {
             ColumnView::from_doubles(vec![0.]),
             ColumnView::from_varchar(vec!["ABC"]),
             ColumnView::from_nchar(vec!["涛思数据"]),
+            ColumnView::from_bytes(vec![hex_string_to_bytes("123456").to_vec()]),
+            ColumnView::from_geobytes(vec![hex_string_to_bytes("0101000000000000000000F03F0000000000000040").to_vec()]),
         ];
         let rows = stmt.bind(&params)?.add_batch()?.execute()?;
         assert_eq!(rows, 1);
@@ -524,6 +528,8 @@ mod tests {
             f64,
             String,
             String,
+            Bytes,
+            Bytes,
         )> = taos
             .query("select * from tb1")?
             .deserialize()
@@ -531,6 +537,8 @@ mod tests {
         let row = &rows[0];
         assert_eq!(row.12, "ABC");
         assert_eq!(row.13, "涛思数据");
+        assert_eq!(row.14, hex_string_to_bytes("123456"));
+        assert_eq!(row.15, hex_string_to_bytes("0101000000000000000000F03F0000000000000040"));
         taos.query("drop database test_bindable")?;
 
         Ok(())

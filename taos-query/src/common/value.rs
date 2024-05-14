@@ -2,8 +2,8 @@ use std::{borrow::Cow, fmt::Display, str::Utf8Error};
 
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-
 use super::{Timestamp, Ty};
+use bytes::Bytes;
 
 #[derive(Debug, Clone)]
 pub enum BorrowedValue<'b> {
@@ -23,10 +23,11 @@ pub enum BorrowedValue<'b> {
     UInt(u32),
     UBigInt(u64), // 14
     Json(Cow<'b, [u8]>),
-    VarBinary(&'b [u8]),
+    VarBinary(Cow<'b, [u8]>),
     Decimal(Decimal),
     Blob(&'b [u8]),
     MediumBlob(&'b [u8]),
+    Geometry(Cow<'b, [u8]>),
 }
 
 macro_rules! borrowed_value_to_native {
@@ -48,10 +49,11 @@ macro_rules! borrowed_value_to_native {
             BorrowedValue::UInt(v) => Some(*v as _),
             BorrowedValue::UBigInt(v) => Some(*v as _),
             BorrowedValue::Json(v) => serde_json::from_slice(&v).ok(),
-            BorrowedValue::VarBinary(_) => todo!(),
+            BorrowedValue::VarBinary(_v) =>  todo!(),
             BorrowedValue::Decimal(_) => todo!(),
             BorrowedValue::Blob(_) => todo!(),
             BorrowedValue::MediumBlob(_) => todo!(),
+            BorrowedValue::Geometry(_) =>  todo!(),
         }
     };
 }
@@ -79,6 +81,7 @@ macro_rules! borrowed_value_to_float {
             BorrowedValue::Decimal(_) => todo!(),
             BorrowedValue::Blob(_) => todo!(),
             BorrowedValue::MediumBlob(_) => todo!(),
+            BorrowedValue::Geometry(_) => todo!(),
         }
     };
 }
@@ -108,6 +111,7 @@ impl<'b> BorrowedValue<'b> {
             Decimal(_) => Ty::Decimal,
             Blob(_) => Ty::Blob,
             MediumBlob(_) => Ty::MediumBlob,
+            Geometry(_) => Ty::Geometry,
         }
     }
 
@@ -134,6 +138,7 @@ impl<'b> BorrowedValue<'b> {
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(_) => todo!(),
         }
     }
 
@@ -196,10 +201,11 @@ impl<'b> BorrowedValue<'b> {
                 Value::Json(serde_json::from_slice(v).expect("json should always be deserialized"))
             }
             NChar(str) => Value::NChar(str.to_string()),
-            VarBinary(_) => todo!(),
+            VarBinary(v) => Value::VarBinary(Bytes::copy_from_slice(v.as_ref())),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(v) => Value::Geometry(Bytes::copy_from_slice(v.as_ref())),
         }
     }
 
@@ -226,6 +232,7 @@ impl<'b> BorrowedValue<'b> {
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(_) => todo!(),
         }
     }
 
@@ -251,10 +258,11 @@ impl<'b> BorrowedValue<'b> {
                 Value::Json(serde_json::from_slice(&v).expect("json should always be deserialized"))
             }
             NChar(str) => Value::NChar(str.to_string()),
-            VarBinary(_) => todo!(),
+            VarBinary(v) => Value::VarBinary(Bytes::from(v.into_owned())),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(v) => Value::Geometry(Bytes::from(v.into_owned())),
         }
     }
 
@@ -290,6 +298,7 @@ impl<'b> BorrowedValue<'b> {
             BorrowedValue::Decimal(_) => todo!(),
             BorrowedValue::Blob(_) => todo!(),
             BorrowedValue::MediumBlob(_) => todo!(),
+            BorrowedValue::Geometry(_) => todo!(),
         }
     }
 
@@ -349,8 +358,18 @@ impl<'b> BorrowedValue<'b> {
             BorrowedValue::Decimal(_) => todo!(),
             BorrowedValue::Blob(_) => todo!(),
             BorrowedValue::MediumBlob(_) => todo!(),
+            BorrowedValue::Geometry(_) => todo!(),
         }
     }
+    #[allow(dead_code)]
+    pub(crate) fn to_bytes(&self) -> Option<Bytes> {
+        match self {
+            BorrowedValue::VarBinary(v) => Some(Bytes::from(v.to_vec())),
+            BorrowedValue::Geometry(v) => Some(Bytes::from(v.to_vec())),
+            _ => None,
+        }
+    }
+
     pub(crate) fn to_timestamp(&self) -> Option<Timestamp> {
         match self {
             BorrowedValue::Null(_) => None,
@@ -380,10 +399,11 @@ impl<'b> Display for BorrowedValue<'b> {
             UInt(v) => f.write_fmt(format_args!("{v}")),
             UBigInt(v) => f.write_fmt(format_args!("{v}")),
             Json(v) => f.write_fmt(format_args!("{}", v.as_ref().escape_ascii())),
-            VarBinary(_) => todo!(),
+            VarBinary(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
         }
     }
 }
@@ -409,10 +429,11 @@ pub enum Value {
     UInt(u32),
     UBigInt(u64), // 14
     Json(serde_json::Value),
-    VarBinary(Vec<u8>),
+    VarBinary(Bytes),
     Decimal(Decimal),
     Blob(Vec<u8>),
     MediumBlob(Vec<u8>),
+    Geometry(Bytes),
 }
 
 impl Display for Value {
@@ -435,10 +456,11 @@ impl Display for Value {
             UInt(v) => f.write_fmt(format_args!("{v}")),
             UBigInt(v) => f.write_fmt(format_args!("{v}")),
             Json(v) => f.write_fmt(format_args!("{v}")),
-            VarBinary(_) => todo!(),
+            VarBinary(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
         }
     }
 }
@@ -468,6 +490,7 @@ impl Value {
             Decimal(_) => Ty::Decimal,
             Blob(_) => Ty::Blob,
             MediumBlob(_) => Ty::MediumBlob,
+            Geometry(_) => Ty::Geometry,
         }
     }
 
@@ -490,10 +513,11 @@ impl Value {
             Timestamp(v) => BorrowedValue::Timestamp(*v),
             Json(j) => BorrowedValue::Json(j.to_string().into_bytes().into()),
             NChar(v) => BorrowedValue::NChar(v.as_str().into()),
-            VarBinary(v) => BorrowedValue::VarBinary(v),
+            VarBinary(v) => BorrowedValue::VarBinary(Cow::Borrowed(v.as_ref())),
             Decimal(v) => BorrowedValue::Decimal(*v),
             Blob(v) => BorrowedValue::Blob(v),
             MediumBlob(v) => BorrowedValue::MediumBlob(v),
+            Geometry(v) => BorrowedValue::Geometry(Cow::Borrowed(v.as_ref())),
         }
     }
 
@@ -537,6 +561,7 @@ impl Value {
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            Geometry(_) => todo!(),
         }
     }
 
@@ -559,7 +584,7 @@ impl Value {
             Float(v) => Ok(format!("{v}")),
             Double(v) => Ok(format!("{v}")),
             Timestamp(v) => Ok(v.to_datetime_with_tz().to_rfc3339()),
-            _ => unreachable!("un supported type to string"),
+            _ => unreachable!("unsupported type to string"),
         }
     }
 
@@ -582,10 +607,10 @@ impl Value {
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => v.clone(),
             NChar(str) => serde_json::Value::String(str.to_string()),
-            VarBinary(_) => todo!(),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
             MediumBlob(_) => todo!(),
+            _ => unreachable!("unsupported type to json value"),
         }
     }
 }
@@ -615,10 +640,11 @@ impl<'b> PartialEq<Value> for BorrowedValue<'b> {
             (Self::UInt(l0), Value::UInt(r0)) => l0 == r0,
             (Self::UBigInt(l0), Value::UBigInt(r0)) => l0 == r0,
             (Self::Json(l0), Value::Json(r0)) => l0.as_ref() == serde_json::to_vec(r0).unwrap(),
-            (Self::VarBinary(l0), Value::VarBinary(r0)) => l0 == r0,
+            (Self::VarBinary(l0), Value::VarBinary(r0)) => l0.as_ref() == r0.as_ref(),
             (Self::Decimal(l0), Value::Decimal(r0)) => l0 == r0,
             (Self::Blob(l0), Value::Blob(r0)) => l0 == r0,
             (Self::MediumBlob(l0), Value::MediumBlob(r0)) => l0 == r0,
+            (Self::Geometry(l0), Value::Geometry(r0)) => l0.as_ref() == r0.as_ref(),
             _ => false,
         }
     }
@@ -645,10 +671,11 @@ impl<'b> PartialEq<BorrowedValue<'b>> for Value {
             (BorrowedValue::Json(l0), Value::Json(r0)) => {
                 l0.as_ref() == serde_json::to_vec(r0).unwrap()
             }
-            (BorrowedValue::VarBinary(l0), Value::VarBinary(r0)) => l0 == r0,
+            (BorrowedValue::VarBinary(l0), Value::VarBinary(r0)) => l0.as_ref() == r0.as_ref(),
             (BorrowedValue::Decimal(l0), Value::Decimal(r0)) => l0 == r0,
             (BorrowedValue::Blob(l0), Value::Blob(r0)) => l0 == r0,
             (BorrowedValue::MediumBlob(l0), Value::MediumBlob(r0)) => l0 == r0,
+            (BorrowedValue::Geometry(l0), Value::Geometry(r0)) => l0.as_ref() == r0.as_ref(),
             _ => false,
         }
     }

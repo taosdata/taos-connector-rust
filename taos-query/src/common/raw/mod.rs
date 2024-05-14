@@ -32,6 +32,7 @@ use layout::Layout;
 pub mod views;
 
 pub use views::ColumnView;
+
 use views::*;
 
 pub use data::*;
@@ -438,6 +439,7 @@ impl RawBlock {
                 Ty::Decimal => todo!(),
                 Ty::Blob => todo!(),
                 Ty::MediumBlob => todo!(),
+                Ty::Geometry => todo!(),
             }
         }
 
@@ -563,6 +565,27 @@ impl RawBlock {
 
                     ColumnView::Json(JsonView { offsets, data })
                 }
+                Ty::VarBinary => {
+                    let o1 = data_offset;
+                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
+                    data_offset = o2 + length;
+
+                    let offsets = Offsets::from(bytes.slice(o1..o2));
+                    let data: Bytes = bytes.slice(o2..data_offset);
+
+                    ColumnView::VarBinary(VarBinaryView { offsets, data })
+                }
+                Ty::Geometry => {
+                    let o1 = data_offset;
+                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
+                    data_offset = o2 + length;
+
+                    let offsets = Offsets::from(bytes.slice(o1..o2));
+                    let data = bytes.slice(o2..data_offset);
+
+                    ColumnView::Geometry(GeometryView { offsets, data })
+                }                
+
                 ty => {
                     unreachable!("unsupported type: {ty}")
                 }
