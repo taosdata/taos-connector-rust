@@ -577,15 +577,26 @@ impl WsTaos {
             req: info.to_conn_request(),
         };
         sender.send(login.to_msg()).await.map_err(Error::from)?;
-        if let Some(Ok(message)) = reader.next().await {
+        while let Some(Ok(message)) = reader.next().await {
             match message {
                 Message::Text(text) => {
                     let v: WsRecv = serde_json::from_str(&text).unwrap();
                     let (_req_id, data, ok) = v.ok();
                     match data {
                         WsRecvData::Conn => ok?,
-                        _ => unreachable!(),
+                        data => {
+                            return Err(RawError::from_string(format!(
+                                "Unexpected login result: {data:?}"
+                            )))
+                        }
                     }
+                    break;
+                }
+                Message::Ping(bytes) => {
+                    sender
+                        .send(Message::Pong(bytes.clone()))
+                        .await
+                        .map_err(|err| RawError::from_any(err))?;
                 }
                 _ => {
                     return Err(RawError::from_string(format!(
@@ -1012,10 +1023,6 @@ impl ResultSet {
         }
 
         let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
-    }
-
-    fn free_result(&self) {
-        let _ = self.sender.send_blocking(WsSend::FreeResult(self.args));
     }
 
     pub fn affected_rows64(&self) -> i64 {
