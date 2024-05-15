@@ -345,7 +345,7 @@ async fn read_queries(
                                     // dbg!(&queries_sender);
                                     if let Some((_, sender)) = queries_sender.remove(&req_id)
                                     {
-                                        sender.send(ok.map(|_| data)).unwrap();
+                                        let _ = sender.send(ok.map(|_| data));
                                     } else {
                                         log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
@@ -354,7 +354,7 @@ async fn read_queries(
                                     assert!(ok.is_err());
                                     if let Some((_, sender)) = queries_sender.remove(&req_id)
                                     {
-                                        sender.send(ok.map(|_| data)).unwrap();
+                                        let _ = sender.send(ok.map(|_| data));
                                     } else {
                                         log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
@@ -362,7 +362,7 @@ async fn read_queries(
                                 WsRecvData::WriteMeta => {
                                     if let Some((_, sender)) = queries_sender.remove(&req_id)
                                     {
-                                        sender.send(ok.map(|_| data)).unwrap();
+                                        let _ = sender.send(ok.map(|_| data));
                                     } else {
                                         log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
@@ -370,7 +370,7 @@ async fn read_queries(
                                 WsRecvData::WriteRaw => {
                                     if let Some((_, sender)) = queries_sender.remove(&req_id)
                                     {
-                                        sender.send(ok.map(|_| data)).unwrap();
+                                        let _ = sender.send(ok.map(|_| data));
                                     } else {
                                         log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
@@ -378,7 +378,7 @@ async fn read_queries(
                                 WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => {
                                     if let Some((_, sender)) = queries_sender.remove(&req_id)
                                     {
-                                        sender.send(ok.map(|_| data)).unwrap();
+                                        let _ = sender.send(ok.map(|_| data));
                                     } else {
                                         log::warn!("req_id {req_id} not detected, message might be lost");
                                     }
@@ -406,7 +406,7 @@ async fn read_queries(
                                     // v3
                                     if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                         log::trace!("send data to fetches with id {}", res_id);
-                                        sender.send(Ok(WsRecvData::Block { timing, raw: block[offset..].to_vec() })).unwrap();
+                                        let _ = sender.send(Ok(WsRecvData::Block { timing, raw: block[offset..].to_vec() }));
                                     } else {
                                         log::warn!("req_id {res_id} not detected, message might be lost");
                                     }
@@ -414,7 +414,7 @@ async fn read_queries(
                                     // v2
                                     if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                         log::trace!("send data to fetches with id {}", res_id);
-                                        sender.send(Ok(WsRecvData::BlockV2 { timing, raw: block[offset..].to_vec() })).unwrap();
+                                        let _ = sender.send(Ok(WsRecvData::BlockV2 { timing, raw: block[offset..].to_vec() }));
                                     } else {
                                         log::warn!("req_id {res_id} not detected, message might be lost");
                                     }
