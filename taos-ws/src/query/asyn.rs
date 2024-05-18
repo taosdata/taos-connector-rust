@@ -1040,7 +1040,8 @@ impl AsyncFetchable for ResultSet {
     }
 
     fn fields(&self) -> &[Field] {
-        self.fields.as_ref().unwrap()
+        static EMPTY_FIELDS: Vec<Field> = Vec::new();
+        self.fields.as_ref().unwrap_or(&EMPTY_FIELDS)
     }
 
     fn summary(&self) -> (usize, usize) {
