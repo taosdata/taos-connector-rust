@@ -1,3 +1,4 @@
+use anyhow::{bail, Context};
 use derive_more::Deref;
 use futures::stream::SplitStream;
 use futures::{FutureExt, SinkExt, StreamExt};
@@ -553,22 +554,47 @@ impl WsTaos {
         sender.send(version.to_msg()).await.map_err(Error::from)?;
 
         let duration = Duration::from_secs(2);
-        let version = match tokio::time::timeout(duration, reader.next()).await {
-            Ok(Some(Ok(message))) => match message {
-                Message::Text(text) => {
-                    let v: WsRecv = serde_json::from_str(&text).unwrap();
-                    let (_, data, ok) = v.ok();
-                    match data {
-                        WsRecvData::Version { version } => {
-                            ok?;
-                            version
+        let version_future = async {
+            let max_non_version = 5;
+            let mut count = 0;
+            loop {
+                count += 1;
+                if let Some(message) = reader.next().await {
+                    match message {
+                        Ok(Message::Text(text)) => {
+                            let v: WsRecv = serde_json::from_str(&text).unwrap();
+                            let (_req_id, data, ok) = v.ok();
+                            match data {
+                                WsRecvData::Version { version } => {
+                                    ok?;
+                                    return Ok(version);
+                                }
+                                _ => return Ok("2.x".to_string()),
+                            }
                         }
-                        _ => "2.x".to_string(),
+                        Ok(Message::Ping(bytes)) => {
+                            sender
+                                .send(Message::Pong(bytes))
+                                .await
+                                .context("Send pong message error")?;
+                            if count >= max_non_version {
+                                return Ok("2.x".to_string());
+                            }
+                            count += 1;
+                        }
+                        _ => return Ok("2.x".to_string()),
                     }
+                } else {
+                    bail!("Expect version message, but got nothing");
                 }
-                _ => "2.x".to_string(),
-            },
-            _ => "2.x".to_string(),
+            }
+        };
+        let version = match tokio::time::timeout(duration, version_future).await {
+            Ok(Ok(version)) => version,
+            Ok(Err(err)) => {
+                return Err(RawError::from_any(err).context("Version fetching error"));
+            }
+            Err(_) => "2.x".to_string(),
         };
         let is_v3 = !version.starts_with('2');
 
@@ -583,14 +609,19 @@ impl WsTaos {
                     let v: WsRecv = serde_json::from_str(&text).unwrap();
                     let (_req_id, data, ok) = v.ok();
                     match data {
-                        WsRecvData::Conn => ok?,
+                        WsRecvData::Conn => {
+                            ok?;
+                            break;
+                        }
+                        WsRecvData::Version { version: _ } => {
+                            continue;
+                        }
                         data => {
                             return Err(RawError::from_string(format!(
                                 "Unexpected login result: {data:?}"
                             )))
                         }
                     }
-                    break;
                 }
                 Message::Ping(bytes) => {
                     sender
