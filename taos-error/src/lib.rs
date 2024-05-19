@@ -254,6 +254,12 @@ impl Error {
     pub fn success(&self) -> bool {
         self.code == 0
     }
+
+    #[inline]
+    pub fn with_code(mut self, code: impl Into<Code>) -> Self {
+        self.code = code.into();
+        self
+    }
 }
 
 /// Format error with `code`, `raw`, and `context` messages.

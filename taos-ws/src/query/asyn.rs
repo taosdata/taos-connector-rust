@@ -1,4 +1,4 @@
-use anyhow::{bail, Context};
+use anyhow::bail;
 use derive_more::Deref;
 use futures::stream::SplitStream;
 use futures::{FutureExt, SinkExt, StreamExt};
@@ -551,7 +551,11 @@ impl WsTaos {
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
-        sender.send(version.to_msg()).await.map_err(Error::from)?;
+        sender.send(version.to_msg()).await.map_err(|err| {
+            RawError::any(err)
+                .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                .context("Send version request message error")
+        })?;
 
         let duration = Duration::from_secs(8);
         let version_future = async {
@@ -562,7 +566,11 @@ impl WsTaos {
                 if let Some(message) = reader.next().await {
                     match message {
                         Ok(Message::Text(text)) => {
-                            let v: WsRecv = serde_json::from_str(&text).unwrap();
+                            let v: WsRecv = serde_json::from_str(&text).map_err(|err| {
+                                RawError::any(err)
+                                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                    .context("Parser text as json error")
+                            })?;
                             let (_req_id, data, ok) = v.ok();
                             match data {
                                 WsRecvData::Version { version } => {
@@ -573,10 +581,11 @@ impl WsTaos {
                             }
                         }
                         Ok(Message::Ping(bytes)) => {
-                            sender
-                                .send(Message::Pong(bytes))
-                                .await
-                                .context("Send pong message error")?;
+                            sender.send(Message::Pong(bytes)).await.map_err(|err| {
+                                RawError::any(err)
+                                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                    .context("Send pong message error")
+                            })?;
                             if count >= max_non_version {
                                 return Ok("2.x".to_string());
                             }
@@ -592,7 +601,7 @@ impl WsTaos {
         let version = match tokio::time::timeout(duration, version_future).await {
             Ok(Ok(version)) => version,
             Ok(Err(err)) => {
-                return Err(RawError::from_any(err).context("Version fetching error"));
+                return Err(RawError::any(err).context("Version fetching error"));
             }
             Err(_) => "2.x".to_string(),
         };
@@ -625,7 +634,7 @@ impl WsTaos {
                 }
                 Message::Ping(bytes) => {
                     sender
-                        .send(Message::Pong(bytes.clone()))
+                        .send(Message::Pong(bytes))
                         .await
                         .map_err(|err| RawError::from_any(err))?;
                 }
