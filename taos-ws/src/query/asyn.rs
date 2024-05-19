@@ -553,7 +553,7 @@ impl WsTaos {
         let version = WsSend::Version;
         sender.send(version.to_msg()).await.map_err(Error::from)?;
 
-        let duration = Duration::from_secs(2);
+        let duration = Duration::from_secs(8);
         let version_future = async {
             let max_non_version = 5;
             let mut count = 0;
