@@ -1000,11 +1000,8 @@ impl WsTaos {
             req_vec.write_u64_le(6).map_err(Error::from)?; //ActionID, 6 for query
             req_vec.write_u16_le(1).map_err(Error::from)?; //Version
             req_vec.write_u32_le(sql.len().try_into().unwrap()).map_err(Error::from)?; //SQL length
-           
             req_vec.write_all(sql.as_bytes()).map_err(Error::from)?;
 
-            println!("==========================> binary sql ");
-         
             req = self.sender.send_recv(WsSend::Binary(req_vec)).await?;            
         } else{
             let action = WsSend::Query {
