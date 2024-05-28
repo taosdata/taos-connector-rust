@@ -1,4 +1,3 @@
-use derive_more::Deref;
 use futures::{FutureExt, SinkExt, StreamExt};
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
@@ -45,8 +44,11 @@ type QueryInner = HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = HashMap<ResId, ReqId>;
 
-#[derive(Debug, Clone, Deref)]
-struct Version(String);
+#[derive(Debug, Clone)]
+struct Version{
+    version: String,
+    is_support_binary_sql: bool,
+}
 
 // impl Version {
 //     pub fn is_v3(&self) -> bool {
@@ -331,6 +333,7 @@ async fn read_queries(
 
                         log::trace!("received json response: {payload}", payload = String::from_utf8_lossy(&payload));
                         let v: WsRecv = serde_json::from_slice(&payload).unwrap();
+                        
                         let (req_id, data, ok) = v.ok();
                         match &data {
                             WsRecvData::Query(_) => {
@@ -409,12 +412,51 @@ async fn read_queries(
                         use taos_query::util::InlinableRead;
                         let offset = if is_v3 { 16 } else { 8 };
 
+                        let mut is_block_new : bool = false;
+
                         let timing = if is_v3 {
                             let timing = slice.read_u64().unwrap();
-                            Duration::from_nanos(timing as _)
+                            if timing == std::u64::MAX {
+                                is_block_new = true;
+                                Duration::ZERO
+                            } else {
+                                Duration::from_nanos(timing as _)
+                            }
                         } else {
                             Duration::ZERO
                         };
+
+                        if is_block_new {
+                            let _action = slice.read_u64().unwrap();
+                            let block_version = slice.read_u16().unwrap();
+                            let timing = Duration::from_nanos(slice.read_u64().unwrap());
+                            let block_req_id = slice.read_u64().unwrap();
+                            let block_code = slice.read_u32().unwrap();
+                            let block_message = slice.read_inlined_str::<4>().unwrap();
+                            let _result_id = slice.read_u64().unwrap();
+                            let finished = slice.read_u8().unwrap() == 1;
+                            let result_block : Vec<u8>;
+                            if finished {
+                                result_block = Vec::<u8>::new();
+                            } else {
+                                result_block = slice.read_inlined_bytes::<4>().unwrap();
+                            }
+              
+                            if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
+                                sender.send(Ok(WsRecvData::BlockNew {
+                                    block_version,
+                                    timing,
+                                    block_req_id,
+                                    block_code,
+                                    block_message,
+                                    finished,
+                                    raw: result_block.to_vec(),
+                                })).unwrap();
+                            } else {
+                                log::warn!("req_id {block_req_id} not detected, message might be lost");
+                            }
+                            continue;
+                        }
 
                         let res_id = slice.read_u64().unwrap();
                         if let Some((_, req_id)) =  fetches_sender.remove(&res_id) {
@@ -515,6 +557,26 @@ async fn read_queries(
     }
 }
 
+pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
+    let nums1: Vec<u32> = v1.split('.').map(|s| s.parse().unwrap()).collect();
+    let nums2: Vec<u32> = v2.split('.').map(|s| s.parse().unwrap()).collect();
+
+    nums1.cmp(&nums2)
+}
+
+pub fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
+    match compare_versions(v1, v2) {
+        std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => true,
+        std::cmp::Ordering::Greater => true,
+    }
+}
+
+pub fn is_support_binary_sql(v1: &str) -> bool {
+    //is_greater_than_or_equal_to(v1, "3.3.0.0");
+    true
+}
+
 impl WsTaos {
     /// Build TDengine websocket client from dsn.
     ///
@@ -559,6 +621,7 @@ impl WsTaos {
             _ => "2.x".to_string(),
         };
         let _is_v3 = !version.starts_with('2');
+        let is_support_binary_sql = is_support_binary_sql(&version);
 
         let login = WsSend::Conn {
             req_id,
@@ -646,7 +709,8 @@ impl WsTaos {
         Ok(Self {
             close_signal: tx,
             sender: WsQuerySender {
-                version: Version(version),
+                version: Version{version : version,
+                        is_support_binary_sql : is_support_binary_sql},
                 req_id: Default::default(),
                 sender: ws_cloned,
                 queries: queries2_cloned,
@@ -689,6 +753,7 @@ impl WsTaos {
             }
             _ => "2.x".to_string(),
         };
+        let is_support_binary_sql = is_support_binary_sql(&version);
         let is_v3 = !version.starts_with('2');
 
         let login = WsSend::Conn {
@@ -779,7 +844,8 @@ impl WsTaos {
         Ok(Self {
             close_signal: tx,
             sender: WsQuerySender {
-                version: Version(version),
+                version: Version{version : version,
+                    is_support_binary_sql : is_support_binary_sql},
                 req_id: Default::default(),
                 sender: ws_cloned,
                 queries: queries2_cloned,
@@ -922,82 +988,29 @@ impl WsTaos {
 
     pub async fn s_query(&self, sql: &str) -> RawResult<ResultSet> {
         let req_id = self.sender.req_id();
-        let action = WsSend::Query {
-            req_id,
-            sql: sql.to_string(),
-        };
-
-        let req = self.sender.send_recv(action).await?;
-
-        let resp = match req {
-            WsRecvData::Query(resp) => resp,
-            _ => unreachable!(),
-        };
-        log::trace!("resp: {resp:?}");
-
-        let result_id = resp.id;
-        //  for drop task.
-        let (closer, rx) = oneshot::channel();
-        tokio::task::spawn(async move {
-            let t = Instant::now();
-            let _ = rx.await;
-            log::trace!("result {result_id} lives {:?}", t.elapsed());
-        });
-
-        if resp.fields_count > 0 {
-            let names = resp.fields_names.unwrap();
-            let types = resp.fields_types.unwrap();
-            let bytes = resp.fields_lengths.unwrap();
-            let fields: Vec<_> = names
-                .into_iter()
-                .zip(types)
-                .zip(bytes)
-                .map(|((name, ty), bytes)| Field::new(name, ty, bytes))
-                .collect();
-            // log::info!("resp: {resp:?}");
-            Ok(ResultSet {
-                fields: Some(fields),
-                fields_count: resp.fields_count,
-                precision: resp.precision,
-                affected_rows: resp.affected_rows,
-                args: WsResArgs {
-                    req_id,
-                    id: resp.id,
-                },
-                summary: (0, 0),
-                sender: self.sender.clone(),
-                timing: resp.timing,
-                block_future: None,
-                closer: Some(closer),
-                completed: false,
-            })
-        } else {
-            Ok(ResultSet {
-                affected_rows: resp.affected_rows,
-                args: WsResArgs {
-                    req_id,
-                    id: resp.id,
-                },
-                fields: None,
-                fields_count: 0,
-                precision: resp.precision,
-                summary: (0, 0),
-                sender: self.sender.clone(),
-                timing: resp.timing,
-                block_future: None,
-                closer: Some(closer),
-                completed: false,
-            })
-        }
+        return self.s_query_with_req_id(sql, req_id).await
     }
 
     pub async fn s_query_with_req_id(&self, sql: &str, req_id: u64) -> RawResult<ResultSet> {
-        let action = WsSend::Query {
-            req_id,
-            sql: sql.to_string(),
-        };
-
-        let req = self.sender.send_recv(action).await?;
+        let req;
+        if self.is_support_binary_sql() {
+            let mut req_vec = Vec::with_capacity(sql.len() + 30);
+            req_vec.write_u64_le(req_id).map_err(Error::from)?;
+            req_vec.write_u64_le(0).map_err(Error::from)?; //ResultID, uesless here
+            req_vec.write_u64_le(6).map_err(Error::from)?; //ActionID, 6 for query
+            req_vec.write_u16_le(1).map_err(Error::from)?; //Version
+            req_vec.write_u32_le(sql.len().try_into().unwrap()).map_err(Error::from)?; //SQL length
+           
+            req_vec.write_all(sql.as_bytes()).map_err(Error::from)?;
+         
+            req = self.sender.send_recv(WsSend::Binary(req_vec)).await?;            
+        } else{
+            let action = WsSend::Query {
+                req_id,
+                sql: sql.to_string(),
+            };
+            req = self.sender.send_recv(action).await?;            
+        }
 
         let resp = match req {
             WsRecvData::Query(resp) => resp,
@@ -1072,12 +1085,50 @@ impl WsTaos {
     }
 
     pub fn version(&self) -> &str {
-        &self.sender.version.0
+        &self.sender.version.version
+    }
+
+    pub fn is_support_binary_sql(&self) -> bool {
+        self.sender.version.is_support_binary_sql
     }
 }
 
 impl ResultSet {
     async fn fetch(&mut self) -> RawResult<Option<RawBlock>> {
+        if self.sender.version.is_support_binary_sql {
+            self.fetch_new().await
+        } else {
+            self.fetch_old().await
+        }        
+    }
+    async fn fetch_new(&mut self) -> RawResult<Option<RawBlock>> {
+
+        let mut req_vec = Vec::with_capacity(26);
+        req_vec.write_u64_le(self.sender.req_id()).map_err(Error::from)?;
+        req_vec.write_u64_le(self.args.id).map_err(Error::from)?; //ResultID
+        req_vec.write_u64_le(7).map_err(Error::from)?; //ActionID, 7 for fetch
+        req_vec.write_u16_le(1).map_err(Error::from)?; //Version
+      
+        match self.sender.send_recv(WsSend::Binary(req_vec)).await? {
+            WsRecvData::BlockNew { block_code, block_message, timing, finished, raw, .. } => {
+                if block_code != 0 {
+                    return Err(RawError::new(block_code, block_message))
+                }
+        
+                if finished {
+                    self.timing = timing;
+                    self.completed = true;
+                    return Ok(None);
+                }        
+                let mut raw = RawBlock::parse_from_raw_block(raw, self.precision);        
+                raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
+                Ok(Some(raw))
+            }           
+            _ => unreachable!(),
+        }
+    }
+
+    async fn fetch_old(&mut self) -> RawResult<Option<RawBlock>> {
         let args = WsResArgs {
             req_id: self.sender.req_id(),
             id: self.args.id,
@@ -1127,6 +1178,7 @@ impl ResultSet {
             _ => unreachable!(),
         }
     }
+
     pub fn take_timing(&self) -> Duration {
         self.timing
     }
@@ -1267,6 +1319,22 @@ mod tests {
     use futures::TryStreamExt;
 
     use super::*;
+
+    #[test]
+    fn test_is_support_binary_sql() -> anyhow::Result<()> {
+        std::env::set_var("RUST_LOG", "debug");
+
+        let version_a: &str    = "3.3.0.0";
+        let version_b: &str    = "3.3.1.0";
+        let version_c: &str = "2.6.0";
+        
+        assert_eq!(is_support_binary_sql(version_a), false);
+        assert_eq!(is_support_binary_sql(version_b), true);
+        assert_eq!(is_support_binary_sql(version_c), false);
+        
+        Ok(())
+    }
+
 
     #[tokio::test]
     async fn test_client() -> anyhow::Result<()> {
@@ -1536,9 +1604,9 @@ mod tests {
 
     #[tokio::test]
     async fn ws_async_data_flow() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "debug");
-        // pretty_env_logger::init();
-        let client = WsTaos::from_dsn("taosws://localhost:6041/").await?;
+        std::env::set_var("RUST_LOG", "trace");
+        pretty_env_logger::init();
+        let client = WsTaos::from_dsn("taosws://vm98:36041/").await?;
         let db = "ws_async_data_flow";
         assert_eq!(
             client.exec(format!("drop database if exists {db}")).await?,
