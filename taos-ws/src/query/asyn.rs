@@ -407,8 +407,8 @@ async fn read_queries(
                         }
                     }
                     OpCode::Binary => {
-                        let block = payload.to_vec();
-                        let mut slice = block.as_slice();
+                        let block = payload;
+                        let mut slice = block;
                         use taos_query::util::InlinableRead;
                         let offset = if is_v3 { 16 } else { 8 };
 
@@ -516,7 +516,6 @@ async fn read_queries(
                         log::warn!("received (unexpected) frame message, do nothing");
                         log::trace!("* frame data: {frame:?}");
                     }
-
                 }
             }
             _ = close_listener.changed() => {
@@ -572,7 +571,7 @@ pub fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
     }
 }
 
-pub fn is_support_binary_sql(v1: &str) -> bool {
+pub fn is_support_binary_sql(_v1: &str) -> bool {
     //is_greater_than_or_equal_to(v1, "3.3.0.0");
     true
 }
@@ -1605,7 +1604,7 @@ mod tests {
     async fn ws_async_data_flow() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "trace");
         pretty_env_logger::init();
-        let client = WsTaos::from_dsn("taosws://vm98:36041/").await?;
+        let client = WsTaos::from_dsn("taosws://vm98:6041/").await?;
         let db = "ws_async_data_flow";
         assert_eq!(
             client.exec(format!("drop database if exists {db}")).await?,
