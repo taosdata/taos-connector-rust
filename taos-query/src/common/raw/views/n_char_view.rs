@@ -94,7 +94,7 @@ impl NCharView {
                     }
                 }
             }
-            *self.is_chars.get() = true;
+            *self.is_chars.get() = false;
             self.layout.borrow_mut().with_nchar_decoded();
         }
     }

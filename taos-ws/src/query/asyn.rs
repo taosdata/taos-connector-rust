@@ -1655,7 +1655,7 @@ mod tests {
         );
 
         let mut rs = client
-            .query(format!("select * from {db}.tb1 order by ts limit 1"))
+            .query(format!("select * from {db}.tb1 order by ts limit 100"))
             .await?;
 
         #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
