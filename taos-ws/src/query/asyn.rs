@@ -1601,9 +1601,9 @@ mod tests {
 
     #[tokio::test]
     async fn ws_async_data_flow() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "trace");
-        pretty_env_logger::init();
-        let client = WsTaos::from_dsn("taosws://vm98:6041/").await?;
+        std::env::set_var("RUST_LOG", "debug");
+        // pretty_env_logger::init();
+        let client = WsTaos::from_dsn("taosws://localhost:6041/").await?;
         let db = "ws_async_data_flow";
         assert_eq!(
             client.exec(format!("drop database if exists {db}")).await?,
