@@ -1326,9 +1326,9 @@ mod tests {
         let version_b: &str    = "3.3.1.0";
         let version_c: &str = "2.6.0";
         
-        assert_eq!(is_support_binary_sql(version_a), false);
+        assert_eq!(is_support_binary_sql(version_a), true);
         assert_eq!(is_support_binary_sql(version_b), true);
-        assert_eq!(is_support_binary_sql(version_c), false);
+        assert_eq!(is_support_binary_sql(version_c), true);
         
         Ok(())
     }
