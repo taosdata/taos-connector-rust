@@ -572,8 +572,7 @@ pub fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
 }
 
 pub fn is_support_binary_sql(_v1: &str) -> bool {
-    //is_greater_than_or_equal_to(v1, "3.3.0.0");
-    true
+    is_greater_than_or_equal_to(v1, "3.3.0.8")
 }
 
 impl WsTaos {
