@@ -120,14 +120,14 @@ macro_rules! _impl_inline_str {
                     // let ptr = self.data.as_ptr() as *mut u8;
                     let ptr = v.as_mut_ptr();
                     let mut len = 0usize;
-                    // for i in 0..chars_len {
-                    //     let c = std::ptr::read_unaligned(ptr.add(i * std::mem::size_of::<char>()) as *mut char);
-                    //     let mut b = [0; 4];
-                    //     let s = c.encode_utf8(&mut b);
-                    //     debug_assert!(s.len() <= 4);
-                    //     v.replace_utf8(&s, len);
-                    //     len += s.len();
-                    // }
+                    for i in 0..chars_len {
+                        let c = std::ptr::read_unaligned(ptr.add(i * std::mem::size_of::<char>()) as *mut char);
+                        let mut b = [0; 4];
+                        let s = c.encode_utf8(&mut b);
+                        debug_assert!(s.len() <= 4);
+                        v.replace_utf8(&s, len);
+                        len += s.len();
+                    }
                     v.set_len(len);
                     v
                 }
