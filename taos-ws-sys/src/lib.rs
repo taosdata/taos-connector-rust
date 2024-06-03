@@ -350,13 +350,19 @@ struct WsResultSet {
 
 impl WsResultSet {
     fn new(rs: ResultSet) -> Self {
+        let num_of_fields = rs.num_of_fields();
+        let mut data_vec = Vec::with_capacity(num_of_fields);
+        for _col in 0..num_of_fields {
+            data_vec.push(std::ptr::null());
+        }
+
         Self {
             rs,
             block: None,
             fields: Vec::new(),
             fields_v2: Vec::new(),
             row: ROW {
-                data: Vec::new(),
+                data: data_vec,
                 current_row: 0,
             },
         }
@@ -412,11 +418,8 @@ impl WsResultSet {
         Ok(())
     }
 
-    unsafe fn fetch_row(&mut self, ptr: *mut *const *const c_void) -> Result<(), Error> {
-        log::trace!("fetch row with ptr {ptr:p}");
-
-        *ptr = std::ptr::null();
-
+    unsafe fn fetch_row(&mut self) -> Result<WS_ROW, Error> {
+        
         if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
             self.block = self.rs.fetch_raw_block()?;
             self.row.current_row = 0;
@@ -424,21 +427,20 @@ impl WsResultSet {
 
         if let Some(block) = self.block.as_ref() {
             if block.nrows() == 0 {
-                return Ok(());
+                return Ok(std::ptr::null());
             }
 
-            let mut c_void_vec: Vec<*const c_void> = vec![];
             for col in 0..block.ncols() {
                 let tuple = block.get_raw_value_unchecked(self.row.current_row, col);
-                c_void_vec.push(tuple.2);
+                self.row.data[col] = tuple.2;
             }
 
-            self.row.data = c_void_vec;
-            *ptr = self.row.data.as_ptr() as _;
             self.row.current_row = self.row.current_row + 1;
+            Ok(self.row.data.as_ptr() as _)
         }
-        log::trace!("fetch row with ptr {ptr:p}");
-        Ok(())
+        else {
+            Ok(std::ptr::null())
+        }
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
@@ -858,28 +860,28 @@ pub unsafe extern "C" fn ws_is_null(rs: *const WS_RES, row: usize, col: usize) -
 
 #[no_mangle]
 /// Works like taos_fetch_row
-pub unsafe extern "C" fn ws_fetch_row(rs: *mut WS_RES, row: *mut WS_ROW) -> i32 {
-    unsafe fn handle_error(error_message: &str) -> i32 {
-        C_ERRNO = Code::FAILED;
+pub unsafe extern "C" fn ws_fetch_row(rs: *mut WS_RES) -> WS_ROW {
+    unsafe fn handle_error(error_message: &str, err_no: Code) -> i32 {
+        C_ERRNO = err_no;
         let dst = C_ERROR_CONTAINER.as_mut_ptr();
         std::ptr::copy_nonoverlapping(error_message.as_ptr(), dst, error_message.len());
         Code::FAILED.into()
     }
 
-    *row = std::ptr::null();
     match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
         Some(rs) => match rs.safe_deref_mut() {
-            Some(s) => match s.fetch_row(row) {
-                Ok(()) => 0,
+            Some(s) => match s.fetch_row() {
+                Ok(p_row) => { C_ERRNO = Code::SUCCESS; p_row },
                 Err(err) => {
-                    let code = err.errno();
-                    rs.error = Some(err.into());
-                    code.into()
+                    // let code = err.errno();
+                    // rs.error = Some(err.into());
+                    handle_error(&err.errstr(), err.errno());
+                    std::ptr::null()
                 }
             },
-            None => handle_error("WS_RES data is null"),
+            None => { handle_error("WS_RES data is null", Code::FAILED); std::ptr::null()}
         },
-        _ => handle_error("WS_RES is null"),
+        _ => { handle_error("WS_RES is null", Code::FAILED); std::ptr::null()}
     }
 }
 
@@ -1027,6 +1029,7 @@ pub fn init_env() {
 
 #[cfg(test)]
 mod tests {
+   
     use super::*;
 
     #[test]
@@ -1329,13 +1332,17 @@ mod tests {
                 dbg!(field);
             }
 
-            let mut row_data: WS_ROW = std::ptr::null();
-
             let mut line_num = 1;
 
             loop {
-                let code = ws_fetch_row(rs, &mut row_data as *mut WS_ROW);
-                assert_eq!(code, 0);
+                let row_data = ws_fetch_row(rs);
+                let errno = ws_errno(rs);
+                if errno != 0 {
+                    let errstr = ws_errstr(rs);
+                    dbg!(CStr::from_ptr(errstr));
+                    break;
+                }
+
                 if row_data == std::ptr::null() {
                     break;
                 }
@@ -1400,6 +1407,13 @@ mod tests {
 
                 println!("line num = {}", line_num);
                 line_num = line_num + 1;
+            }
+
+            if C_ERRNO == Code::SUCCESS {
+                println!("fetch row done");
+            } else {
+                let error = ws_errstr(rs);
+                dbg!(CStr::from_ptr(error));
             }
         }
     }

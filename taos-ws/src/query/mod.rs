@@ -303,7 +303,6 @@ mod tests {
                     c8i1 tinyint, c16i1 smallint, c32i1 int, c64i1 bigint,\
                     c8u1 tinyint unsigned, c16u1 smallint unsigned, c32u1 int unsigned, c64u1 bigint unsigned,\
                     cb1 binary(100), cn1 nchar(10), cvb1 varbinary(50), cg1 geometry(50),\
-
                     c8i2 tinyint, c16i2 smallint, c32i2 int, c64i2 bigint,\
                     c8u2 tinyint unsigned, c16u2 smallint unsigned, c32u2 int unsigned, c64u2 bigint unsigned,\
                     cb2 binary(10), cn2 nchar(16), cvb2 varbinary(50), cg2 geometry(50))"

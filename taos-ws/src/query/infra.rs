@@ -144,6 +144,7 @@ pub enum WsRecvData {
     Version {
         version: String,
     },
+    #[serde(alias = "binary_query")]
     Query(WsQueryResp),
     Fetch(WsFetchResp),
     /// Will only produced by error
@@ -152,6 +153,17 @@ pub enum WsRecvData {
         #[serde(default)]
         #[serde_as(as = "serde_with::DurationNanoSeconds")]
         timing: Duration,
+        raw: Vec<u8>,
+    },
+    BlockNew {
+        block_version: u16,
+        #[serde(default)]
+        #[serde_as(as = "serde_with::DurationNanoSeconds")]
+        timing: Duration,
+        block_req_id: ReqId,
+        block_code: u32,
+        block_message: String,
+        finished: bool,
         raw: Vec<u8>,
     },
     BlockV2 {
