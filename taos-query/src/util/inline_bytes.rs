@@ -40,6 +40,16 @@ macro_rules! _impl_inline_lines {
                 pub unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
                     &*ptr.cast::<InlineBytes<$ty>>()
                 }
+
+                #[inline]
+                pub const fn as_ptr(&self) -> *const u8 {
+                    self.data.as_ptr()
+                }
+                #[inline]
+                pub fn as_mut_ptr(&mut self) -> *mut u8 {
+                    self.data.as_mut_ptr()
+                }
+
                 #[inline]
                 #[rustversion::attr(nightly, const)]
                 pub fn as_bytes(&self) -> &[u8] {
