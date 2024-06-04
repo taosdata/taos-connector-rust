@@ -607,9 +607,11 @@ impl Value {
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => v.clone(),
             NChar(str) => serde_json::Value::String(str.to_string()),
-            Decimal(_) => todo!(),
-            Blob(_) => todo!(),
-            MediumBlob(_) => todo!(),
+            Decimal(v) => serde_json::Value::String(format!("{:?}", v)),
+            Blob(v) => serde_json::Value::String(format!("{:?}", v)),
+            MediumBlob(v) => serde_json::Value::String(format!("{:?}", v)),
+            VarBinary(v) => serde_json::Value::String(format!("{:?}", v.to_vec())),
+            Geometry(v) => serde_json::Value::String(format!("{:?}", v.to_vec())),
             _ => unreachable!("unsupported type to json value"),
         }
     }
