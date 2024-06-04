@@ -4,7 +4,7 @@ use super::{IsColumnView, Offsets};
 use crate::{
     common::{BorrowedValue, Ty},
     prelude::InlinableWrite,
-    util::InlineStr,
+    util::InlineBytes,
 };
 
 use bytes::Bytes;
@@ -57,10 +57,10 @@ impl VarBinaryView {
         self.offsets.get_unchecked(row) < 0
     }
 
-    pub(crate) unsafe fn get_unchecked(&self, row: usize) -> Option<&InlineStr> {
+    pub(crate) unsafe fn get_unchecked(&self, row: usize) -> Option<&InlineBytes> {
         let offset = self.offsets.get_unchecked(row);
         if offset >= 0 {
-            Some(InlineStr::<u16>::from_ptr(
+            Some(InlineBytes::<u16>::from_ptr(
                 self.data.as_ptr().offset(offset as isize),
             ))
         } else {
@@ -85,7 +85,7 @@ impl VarBinaryView {
     pub unsafe fn get_length_unchecked(&self, row: usize) -> Option<usize> {
         let offset = self.offsets.get_unchecked(row);
         if offset >= 0 {
-            Some(InlineStr::<u16>::from_ptr(self.data.as_ptr().offset(offset as isize)).len())
+            Some(InlineBytes::<u16>::from_ptr(self.data.as_ptr().offset(offset as isize)).len())
         } else {
             None
         }
@@ -134,7 +134,7 @@ impl VarBinaryView {
         for v in self.iter() {
             if let Some(v) = v {
                 offsets.push(bytes.len() as i32);
-                bytes.write_inlined_str::<2>(v.as_str()).unwrap();
+                bytes.write_inlined_bytes::<2>(v.as_bytes()).unwrap();
             } else {
                 offsets.push(-1);
             }
@@ -202,7 +202,7 @@ pub struct VarBinaryIter<'a> {
 }
 
 impl<'a> Iterator for VarBinaryIter<'a> {
-    type Item = Option<&'a InlineStr>;
+    type Item = Option<&'a InlineBytes>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.row < self.view.len() {
