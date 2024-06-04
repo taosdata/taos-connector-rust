@@ -1,6 +1,7 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 #![allow(unused_variables)]
+#![allow(unexpected_cfgs)]
 
 //! TDengine database connector use native C library.
 //!

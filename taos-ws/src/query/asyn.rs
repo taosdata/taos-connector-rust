@@ -561,8 +561,8 @@ async fn read_queries(
 }
 
 pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
-    let nums1: Vec<u32> = v1.split('.').map(|s| s.parse().unwrap()).collect();
-    let nums2: Vec<u32> = v2.split('.').map(|s| s.parse().unwrap()).collect();
+    let nums1: Vec<u32> = v1.split('.').take(4).map(|s| s.parse().unwrap()).collect();
+    let nums2: Vec<u32> = v2.split('.').take(4).map(|s| s.parse().unwrap()).collect();
 
     nums1.cmp(&nums2)
 }

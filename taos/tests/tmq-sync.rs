@@ -115,7 +115,7 @@ fn _test_tmq_meta_sync() -> anyhow::Result<()> {
 
                 // meta data can be write to an database seamlessly by raw or json (to sql).
                 let json = meta.as_json_meta()?;
-                let sql = json.to_string();
+                let sql = json.iter().next().unwrap().to_string();
                 if let Err(err) = taos.exec(sql) {
                     println!("maybe error: {}", err);
                 }
@@ -134,7 +134,7 @@ fn _test_tmq_meta_sync() -> anyhow::Result<()> {
 
                 // meta data can be write to an database seamlessly by raw or json (to sql).
                 let json = meta.as_json_meta()?;
-                let sql = json.to_string();
+                let sql = json.iter().next().unwrap().to_string();
                 if let Err(err) = taos.exec(sql) {
                     println!("maybe error: {}", err);
                 }
