@@ -18,7 +18,7 @@ anyhow = "1"
 bytes = { version = "1.1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 derive_more = "0.99"
-itertools = "0.11.0"
+itertools = "0.13.0"
 log = "0.4"
 mdsn = { path = "../mdsn", version = "0.2.24" }
 num_enum = "0.7.0"
@@ -30,6 +30,8 @@ rustversion = "1.0.6"
 taos-error = { path = "../taos-error", version = "0.12.2" }
 thiserror = "1.0.47"
 url = "2.2.2"
+faststr = { version = "0.2.19", features = ["serde"] }
+either ={ version = "1.12.0", features = ["serde"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

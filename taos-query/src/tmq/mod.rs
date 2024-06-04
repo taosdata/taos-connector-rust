@@ -4,8 +4,8 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    common::{JsonMeta, RawData, RawMeta},
-    RawBlock, RawResult,
+    common::{RawData, RawMeta},
+    JsonMeta, RawBlock, RawResult,
 };
 
 #[derive(Debug, Clone, Copy)]

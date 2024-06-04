@@ -1060,57 +1060,61 @@ mod tests {
                     taos.write_raw_meta(&raw)?;
 
                     let json = meta.as_json_meta()?;
-                    match &json {
-                        taos_query::common::JsonMeta::Create(m) => match m {
-                            taos_query::common::MetaCreate::Super {
-                                table_name,
-                                columns,
-                                tags,
-                            } => {
-                                let _desc = taos.describe(table_name.as_str())?;
-                                // dbg!(desc);
-                            }
-                            taos_query::common::MetaCreate::Child {
-                                table_name,
-                                using,
-                                tags,
-                                tag_num,
-                            } => {
-                                let _desc = taos.describe(table_name.as_str())?;
-                                // dbg!(desc);
-                            }
-                            taos_query::common::MetaCreate::Normal {
-                                table_name,
-                                columns,
-                            } => {
-                                let _desc = taos.describe(table_name.as_str())?;
-                                // dbg!(desc);
-                            }
-                        },
-                        taos_query::common::JsonMeta::Alter(_) => (),
-                        taos_query::common::JsonMeta::Drop(_) => (),
-                        taos_query::common::JsonMeta::Delete(_) => (),
-                    }
+                    for json in &json {
+                        match &json {
+                            taos_query::common::MetaUnit::Create(m) => match m {
+                                taos_query::common::MetaCreate::Super {
+                                    table_name,
+                                    columns,
+                                    tags,
+                                } => {
+                                    let _desc = taos.describe(table_name.as_str())?;
+                                    // dbg!(desc);
+                                }
+                                taos_query::common::MetaCreate::Child {
+                                    table_name,
+                                    using,
+                                    tags,
+                                    tag_num,
+                                } => {
+                                    let _desc = taos.describe(table_name.as_str())?;
+                                    // dbg!(desc);
+                                }
+                                taos_query::common::MetaCreate::Normal {
+                                    table_name,
+                                    columns,
+                                } => {
+                                    let _desc = taos.describe(table_name.as_str())?;
+                                    // dbg!(desc);
+                                }
+                            },
+                            taos_query::common::MetaUnit::Alter(_) => (),
+                            taos_query::common::MetaUnit::Drop(_) => (),
+                            taos_query::common::MetaUnit::Delete(_) => (),
+                        }
 
-                    // meta data can be write to an database seamlessly by raw or json (to sql).
-                    let sql = dbg!(json.to_string());
-                    if let Err(err) = taos.exec(sql) {
-                        match err.code() {
-                            Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
-                            Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
-                            Code::COLUMN_EXISTS => log::trace!("column already exists"),
-                            Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
-                            Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
-                            Code::MODIFIED_ALREADY => log::trace!("modified already done"),
-                            Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
-                            Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
-                            Code::INVALID_ROW_BYTES => log::trace!("invalid row bytes"),
-                            Code::DUPLICATED_COLUMN_NAMES => log::trace!("duplicated column names"),
-                            Code::NO_COLUMN_CAN_BE_DROPPED => {
-                                log::trace!("no column can be dropped")
-                            }
-                            _ => {
-                                log::error!("{:?}", err);
+                        // meta data can be write to an database seamlessly by raw or json (to sql).
+                        let sql = dbg!(json.to_string());
+                        if let Err(err) = taos.exec(sql) {
+                            match err.code() {
+                                Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
+                                Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
+                                Code::COLUMN_EXISTS => log::trace!("column already exists"),
+                                Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
+                                Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
+                                Code::MODIFIED_ALREADY => log::trace!("modified already done"),
+                                Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
+                                Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
+                                Code::INVALID_ROW_BYTES => log::trace!("invalid row bytes"),
+                                Code::DUPLICATED_COLUMN_NAMES => {
+                                    log::trace!("duplicated column names")
+                                }
+                                Code::NO_COLUMN_CAN_BE_DROPPED => {
+                                    log::trace!("no column can be dropped")
+                                }
+                                _ => {
+                                    log::error!("{:?}", err);
+                                }
                             }
                         }
                     }
@@ -1486,7 +1490,7 @@ mod tests {
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
                         // dbg!(json);
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         log::debug!("{}", sql);
                         if let Err(err) = taos.exec(sql).await {
                             match err.code() {
@@ -1697,7 +1701,7 @@ mod tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -1717,7 +1721,7 @@ mod tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }

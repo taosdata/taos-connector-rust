@@ -700,7 +700,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -718,7 +718,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -871,7 +871,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -891,7 +891,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -1085,7 +1085,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -1105,7 +1105,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -1270,7 +1270,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
                             log::error!("meta error: {}", err);
@@ -1291,7 +1291,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("metadata error: {}", err);
                         }
@@ -1446,7 +1446,7 @@ mod async_tests {
                         taos.write_raw_meta(&raw).await?;
 
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
                             log::error!("meta error: {}", err);
@@ -1472,7 +1472,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("metadata error: {}", err);
                         }
@@ -1640,7 +1640,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
                             log::error!("maybe error: {}", err);
@@ -1661,7 +1661,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -1860,7 +1860,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
                             log::debug!("maybe error: {}", err);
@@ -1881,7 +1881,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -2085,7 +2085,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -2105,7 +2105,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -2313,7 +2313,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             log::trace!("maybe error: {}", err);
                         }
@@ -2333,7 +2333,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }

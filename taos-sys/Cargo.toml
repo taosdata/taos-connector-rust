@@ -48,3 +48,6 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 default = ["backport"]
 backport = []
 serde1 = ["serde", "serde_repr"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(taos_v3)'] }
