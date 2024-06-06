@@ -587,7 +587,8 @@ impl Value {
             _ => unreachable!("unsupported type to string"),
         }
     }
-
+    
+    #[warn(unreachable_patterns)]
     pub fn to_json_value(&self) -> serde_json::Value {
         use Value::*;
         match self {
@@ -612,7 +613,6 @@ impl Value {
             MediumBlob(v) => serde_json::Value::String(format!("{:?}", v)),
             VarBinary(v) => serde_json::Value::String(format!("{:?}", v.to_vec())),
             Geometry(v) => serde_json::Value::String(format!("{:?}", v.to_vec())),
-            _ => unreachable!("unsupported type to json value"),
         }
     }
 }
