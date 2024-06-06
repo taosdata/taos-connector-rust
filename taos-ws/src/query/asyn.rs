@@ -332,6 +332,7 @@ async fn read_queries(
                     OpCode::Text => {
 
                         log::trace!("received json response: {payload}", payload = String::from_utf8_lossy(&payload));
+                        
                         let v: WsRecv = serde_json::from_slice(&payload).unwrap();
                         
                         let (req_id, data, ok) = v.ok();
@@ -557,8 +558,8 @@ async fn read_queries(
 }
 
 pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
-    let nums1: Vec<u32> = v1.split('.').map(|s| s.parse().unwrap()).collect();
-    let nums2: Vec<u32> = v2.split('.').map(|s| s.parse().unwrap()).collect();
+    let nums1: Vec<u32> = v1.split('.').map(|s| s.parse().unwrap_or(0)).collect();
+    let nums2: Vec<u32> = v2.split('.').map(|s| s.parse().unwrap_or(0)).collect();
 
     nums1.cmp(&nums2)
 }
