@@ -1,6 +1,5 @@
 //! This is the common query traits/types for TDengine connectors.
 //!
-#![cfg_attr(nightly, feature(const_slice_index))]
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::type_complexity)]
 

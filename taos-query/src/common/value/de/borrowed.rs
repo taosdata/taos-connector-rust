@@ -146,7 +146,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
             },
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
             Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
-            VarBinary(v) | Geometry(v) =>  match v {
+            VarBinary(v) | Geometry(v) => match v {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
@@ -300,9 +300,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 .to_vec()
                 .into_deserializer()
                 .deserialize_seq(visitor),
-            Blob(v) | MediumBlob(v) => {
-                v.to_vec().into_deserializer().deserialize_seq(visitor)
-            }
+            Blob(v) | MediumBlob(v) => v.to_vec().into_deserializer().deserialize_seq(visitor),
             _ => todo!(),
         }
     }

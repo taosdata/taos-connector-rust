@@ -20,10 +20,9 @@ no-default-features = true
 async-trait = "0.1"
 log = "0.4.17"
 bytes = "1.1.0"
-taos-optin = { path = "../taos-optin", version = "0.12.2", optional = true }
-taos-query = { path = "../taos-query", version = "0.12.2", default-features = false }
-taos-sys = { path = "../taos-sys", version = "0.12.2", optional = true }
-taos-ws = { path = "../taos-ws", version = "0.12.2", optional = true }
+taos-optin = { path = "../taos-optin", version = "0.12.3", optional = true }
+taos-query = { path = "../taos-query", version = "0.12.3", default-features = false }
+taos-ws = { path = "../taos-ws", version = "0.12.3", optional = true }
 futures = { version = "0.3", features = ["executor"] }
 
 [dev-dependencies]
@@ -31,7 +30,7 @@ anyhow = "1"
 async-trait = "0.1.68"
 chrono = "0.4"
 criterion = { version = "0.5", features = ["html_reports", "stable"] }
-itertools = "0.11.0"
+itertools = "0.13.0"
 log = "0.4"
 pretty_env_logger = "0.5.0"
 serde = { version = "1", features = ["derive"] }
@@ -49,7 +48,6 @@ name = "query"
 [features]
 deadpool = ["taos-query/deadpool"]
 default = ["ws-rustls", "optin", "deadpool"]
-native = ["taos-sys"]
 optin = ["taos-optin"]
 r2d2 = ["taos-query/r2d2"]
 ws = ["taos-ws"]

@@ -176,12 +176,8 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
                 .deserialize_any(visitor)
                 .map_err(<Self::Error as de::Error>::custom),
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
-            Blob(v) | MediumBlob(v) => {
-                v.into_deserializer().deserialize_any(visitor)
-            },
-            VarBinary(v) | Geometry(v) => {
-                v.into_deserializer().deserialize_any(visitor)
-            },
+            Blob(v) | MediumBlob(v) => v.into_deserializer().deserialize_any(visitor),
+            VarBinary(v) | Geometry(v) => v.into_deserializer().deserialize_any(visitor),
             _ => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
@@ -278,10 +274,10 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
             Timestamp(v) => _v_!(v.as_raw_i64()),
             Blob(v) | MediumBlob(v) => {
                 visitor.visit_newtype_struct(v.as_slice().into_deserializer())
-            },
+            }
             VarBinary(_v) | Geometry(_v) => {
                 todo!()
-            },
+            }
             _ => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
@@ -313,12 +309,8 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
                 .to_vec()
                 .into_deserializer()
                 .deserialize_seq(visitor),
-            Blob(v) | MediumBlob(v) => {
-                v.into_deserializer().deserialize_seq(visitor)
-            }
-            VarBinary(v) | Geometry(v)=> {
-                v.into_deserializer().deserialize_seq(visitor)
-            }
+            Blob(v) | MediumBlob(v) => v.into_deserializer().deserialize_seq(visitor),
+            VarBinary(v) | Geometry(v) => v.into_deserializer().deserialize_seq(visitor),
             _ => todo!(),
         }
     }

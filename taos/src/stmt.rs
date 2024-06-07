@@ -225,11 +225,11 @@ impl taos_query::prelude::AsyncBindable<super::Taos> for Stmt {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
     use serde::Deserialize;
     use std::str::FromStr;
-    use taos_query::RawResult;
     use taos_query::util::hex::*;
-    use bytes::Bytes;
+    use taos_query::RawResult;
 
     #[test]
     fn test_bindable_sync() -> RawResult<()> {
@@ -518,8 +518,10 @@ mod tests {
             ColumnView::from_varchar(vec!["ABC"]),
             ColumnView::from_nchar(vec!["涛思数据"]),
             ColumnView::from_bytes(vec![hex_string_to_bytes("123456").to_vec()]),
-            ColumnView::from_geobytes(vec![hex_string_to_bytes("0101000000000000000000F03F0000000000000040").to_vec()]),
-    
+            ColumnView::from_geobytes(vec![hex_string_to_bytes(
+                "0101000000000000000000F03F0000000000000040",
+            )
+            .to_vec()]),
         ];
         let rows = stmt
             .bind(&params)
@@ -567,7 +569,10 @@ mod tests {
         assert_eq!(row.c12, "ABC");
         assert_eq!(row.c13, "涛思数据");
         assert_eq!(row.c14, hex_string_to_bytes("123456"));
-        assert_eq!(row.c15, hex_string_to_bytes("0101000000000000000000F03F0000000000000040"));
+        assert_eq!(
+            row.c15,
+            hex_string_to_bytes("0101000000000000000000F03F0000000000000040")
+        );
 
         taos.exec(format!("drop database {db}").as_str())
             .await

@@ -419,7 +419,6 @@ impl WsResultSet {
     }
 
     unsafe fn fetch_row(&mut self) -> Result<WS_ROW, Error> {
-        
         if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
             self.block = self.rs.fetch_raw_block()?;
             self.row.current_row = 0;
@@ -437,8 +436,7 @@ impl WsResultSet {
 
             self.row.current_row = self.row.current_row + 1;
             Ok(self.row.data.as_ptr() as _)
-        }
-        else {
+        } else {
             Ok(std::ptr::null())
         }
     }
@@ -871,7 +869,10 @@ pub unsafe extern "C" fn ws_fetch_row(rs: *mut WS_RES) -> WS_ROW {
     match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
         Some(rs) => match rs.safe_deref_mut() {
             Some(s) => match s.fetch_row() {
-                Ok(p_row) => { C_ERRNO = Code::SUCCESS; p_row },
+                Ok(p_row) => {
+                    C_ERRNO = Code::SUCCESS;
+                    p_row
+                }
                 Err(err) => {
                     // let code = err.errno();
                     // rs.error = Some(err.into());
@@ -879,9 +880,15 @@ pub unsafe extern "C" fn ws_fetch_row(rs: *mut WS_RES) -> WS_ROW {
                     std::ptr::null()
                 }
             },
-            None => { handle_error("WS_RES data is null", Code::FAILED); std::ptr::null()}
+            None => {
+                handle_error("WS_RES data is null", Code::FAILED);
+                std::ptr::null()
+            }
         },
-        _ => { handle_error("WS_RES is null", Code::FAILED); std::ptr::null()}
+        _ => {
+            handle_error("WS_RES is null", Code::FAILED);
+            std::ptr::null()
+        }
     }
 }
 
@@ -1029,7 +1036,6 @@ pub fn init_env() {
 
 #[cfg(test)]
 mod tests {
-   
     use super::*;
 
     #[test]

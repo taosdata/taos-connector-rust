@@ -1,3 +1,4 @@
+use anyhow::bail;
 use futures::{FutureExt, SinkExt, StreamExt};
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
@@ -45,7 +46,7 @@ type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = HashMap<ResId, ReqId>;
 
 #[derive(Debug, Clone)]
-struct Version{
+struct Version {
     version: String,
     is_support_binary_sql: bool,
 }
@@ -179,27 +180,30 @@ impl Debug for ResultSet {
 
 impl Drop for ResultSet {
     fn drop(&mut self) {
-        if let Some((_, req_id)) = self.sender.results.remove(&self.args.id) {
-            self.sender.queries.remove(&req_id);
+        let (sender, closer, args, completed) = (
+            self.sender.clone(),
+            self.closer.take(),
+            self.args.clone(),
+            self.completed,
+        );
+        let clean = move || {
+            if let Some((_, req_id)) = sender.results.remove(&args.id) {
+                sender.queries.remove(&req_id);
+            }
+
+            if !completed {
+                let _ = sender.send_blocking(WsSend::FreeResult(args));
+            }
+
+            if let Some(closer) = closer {
+                let _ = closer.send(());
+            }
+        };
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::spawn_blocking(clean);
+        } else {
+            std::thread::spawn(clean);
         }
-
-        if !self.completed {
-            std::thread::scope(|s| {
-                s.spawn(|| {
-                    self.free_result();
-                });
-            });
-        }
-
-        let _ = self.closer.take().unwrap().send(());
-        // let _ = self
-        //     .sender
-        //     .blocking_send_only(WsSend::FreeResult(self.args));
-
-        // tokio::spawn(async move { sender.send_only(WsSend::FreeResult(self.args)).await });
-        // taos_query::block_in_place_or_global(async move {
-        //     let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
-        // });
     }
 }
 
@@ -334,7 +338,6 @@ async fn read_queries(
                         log::trace!("received json response: {payload}", payload = String::from_utf8_lossy(&payload));
                         
                         let v: WsRecv = serde_json::from_slice(&payload).unwrap();
-                        
                         let (req_id, data, ok) = v.ok();
                         match &data {
                             WsRecvData::Query(_) => {
@@ -364,7 +367,7 @@ async fn read_queries(
                                 // dbg!(&queries_sender);
                                 if let Some((_, sender)) = queries_sender.remove(&req_id)
                                 {
-                                    sender.send(ok.map(|_| data)).unwrap();
+                                    let _ = sender.send(ok.map(|_| data));
                                 } else {
                                     log::warn!("req_id {req_id} not detected, message might be lost");
                                 }
@@ -373,7 +376,7 @@ async fn read_queries(
                                 assert!(ok.is_err());
                                 if let Some((_, sender)) = queries_sender.remove(&req_id)
                                 {
-                                    sender.send(ok.map(|_| data)).unwrap();
+                                    let _ = sender.send(ok.map(|_| data));
                                 } else {
                                     log::warn!("req_id {req_id} not detected, message might be lost");
                                 }
@@ -381,7 +384,7 @@ async fn read_queries(
                             WsRecvData::WriteMeta => {
                                 if let Some((_, sender)) = queries_sender.remove(&req_id)
                                 {
-                                    sender.send(ok.map(|_| data)).unwrap();
+                                    let _ = sender.send(ok.map(|_| data));
                                 } else {
                                     log::warn!("req_id {req_id} not detected, message might be lost");
                                 }
@@ -389,7 +392,7 @@ async fn read_queries(
                             WsRecvData::WriteRaw => {
                                 if let Some((_, sender)) = queries_sender.remove(&req_id)
                                 {
-                                    sender.send(ok.map(|_| data)).unwrap();
+                                    let _ = sender.send(ok.map(|_| data));
                                 } else {
                                     log::warn!("req_id {req_id} not detected, message might be lost");
                                 }
@@ -397,7 +400,7 @@ async fn read_queries(
                             WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => {
                                 if let Some((_, sender)) = queries_sender.remove(&req_id)
                                 {
-                                    sender.send(ok.map(|_| data)).unwrap();
+                                    let _ = sender.send(ok.map(|_| data));
                                 } else {
                                     log::warn!("req_id {req_id} not detected, message might be lost");
                                 }
@@ -442,7 +445,6 @@ async fn read_queries(
                             } else {
                                 result_block = slice.read_inlined_bytes::<4>().unwrap();
                             }
-              
                             if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
                                 sender.send(Ok(WsRecvData::BlockNew {
                                     block_version,
@@ -558,8 +560,8 @@ async fn read_queries(
 }
 
 pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
-    let nums1: Vec<u32> = v1.split('.').map(|s| s.parse().unwrap_or(0)).collect();
-    let nums2: Vec<u32> = v2.split('.').map(|s| s.parse().unwrap_or(0)).collect();
+    let nums1: Vec<u32> = v1.split('.').take(4).map(|s| s.parse().unwrap_or(0)).collect();
+    let nums2: Vec<u32> = v2.split('.').take(4).map(|s| s.parse().unwrap_or(0)).collect();
 
     nums1.cmp(&nums2)
 }
@@ -599,25 +601,58 @@ impl WsTaos {
         sender
             .send(version.to_tungstenite_msg())
             .await
-            .map_err(Error::from)?;
-
-        let duration = Duration::from_secs(2);
-        let version = match tokio::time::timeout(duration, reader.next()).await {
-            Ok(Some(Ok(message))) => match message {
-                Message::Text(text) => {
-                    let v: WsRecv = serde_json::from_str(&text).unwrap();
-                    let (_, data, ok) = v.ok();
-                    match data {
-                        WsRecvData::Version { version } => {
-                            ok?;
-                            version
+            .map_err(|err| {
+                RawError::any(err)
+                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                    .context("Send version request message error")
+            })?;
+        let duration = Duration::from_secs(8);
+        let version_future = async {
+            let max_non_version = 5;
+            let mut count = 0;
+            loop {
+                count += 1;
+                if let Some(message) = reader.next().await {
+                    match message {
+                        Ok(Message::Text(text)) => {
+                            let v: WsRecv = serde_json::from_str(&text).map_err(|err| {
+                                RawError::any(err)
+                                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                    .context("Parser text as json error")
+                            })?;
+                            let (_req_id, data, ok) = v.ok();
+                            match data {
+                                WsRecvData::Version { version } => {
+                                    ok?;
+                                    return Ok(version);
+                                }
+                                _ => return Ok("2.x".to_string()),
+                            }
                         }
-                        _ => "2.x".to_string(),
+                        Ok(Message::Ping(bytes)) => {
+                            sender.send(Message::Pong(bytes)).await.map_err(|err| {
+                                RawError::any(err)
+                                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                    .context("Send pong message error")
+                            })?;
+                            if count >= max_non_version {
+                                return Ok("2.x".to_string());
+                            }
+                            count += 1;
+                        }
+                        _ => return Ok("2.x".to_string()),
                     }
+                } else {
+                    bail!("Expect version message, but got nothing");
                 }
-                _ => "2.x".to_string(),
-            },
-            _ => "2.x".to_string(),
+            }
+        };
+        let version = match tokio::time::timeout(duration, version_future).await {
+            Ok(Ok(version)) => version,
+            Ok(Err(err)) => {
+                return Err(RawError::any(err).context("Version fetching error"));
+            }
+            Err(_) => "2.x".to_string(),
         };
         let _is_v3 = !version.starts_with('2');
         let is_support_binary_sql = is_support_binary_sql(&version);
@@ -630,15 +665,31 @@ impl WsTaos {
             .send(login.to_tungstenite_msg())
             .await
             .map_err(Error::from)?;
-        if let Some(Ok(message)) = reader.next().await {
+        while let Some(Ok(message)) = reader.next().await {
             match message {
                 Message::Text(text) => {
                     let v: WsRecv = serde_json::from_str(&text).unwrap();
                     let (_req_id, data, ok) = v.ok();
                     match data {
-                        WsRecvData::Conn => ok?,
-                        _ => unreachable!(),
+                        WsRecvData::Conn => {
+                            ok?;
+                            break;
+                        }
+                        WsRecvData::Version { .. } => {
+                            continue;
+                        }
+                        data => {
+                            return Err(RawError::from_string(format!(
+                                "Unexpected login result: {data:?}"
+                            )))
+                        }
                     }
+                }
+                Message::Ping(bytes) => {
+                    sender
+                        .send(Message::Pong(bytes))
+                        .await
+                        .map_err(|err| RawError::from_any(err))?;
                 }
                 _ => {
                     return Err(RawError::from_string(format!(
@@ -708,8 +759,10 @@ impl WsTaos {
         Ok(Self {
             close_signal: tx,
             sender: WsQuerySender {
-                version: Version{version : version,
-                        is_support_binary_sql : is_support_binary_sql},
+                version: Version {
+                    version: version,
+                    is_support_binary_sql: is_support_binary_sql,
+                },
                 req_id: Default::default(),
                 sender: ws_cloned,
                 queries: queries2_cloned,
@@ -843,8 +896,10 @@ impl WsTaos {
         Ok(Self {
             close_signal: tx,
             sender: WsQuerySender {
-                version: Version{version : version,
-                    is_support_binary_sql : is_support_binary_sql},
+                version: Version {
+                    version: version,
+                    is_support_binary_sql: is_support_binary_sql,
+                },
                 req_id: Default::default(),
                 sender: ws_cloned,
                 queries: queries2_cloned,
@@ -987,7 +1042,7 @@ impl WsTaos {
 
     pub async fn s_query(&self, sql: &str) -> RawResult<ResultSet> {
         let req_id = self.sender.req_id();
-        return self.s_query_with_req_id(sql, req_id).await
+        return self.s_query_with_req_id(sql, req_id).await;
     }
 
     pub async fn s_query_with_req_id(&self, sql: &str, req_id: u64) -> RawResult<ResultSet> {
@@ -998,16 +1053,18 @@ impl WsTaos {
             req_vec.write_u64_le(0).map_err(Error::from)?; //ResultID, uesless here
             req_vec.write_u64_le(6).map_err(Error::from)?; //ActionID, 6 for query
             req_vec.write_u16_le(1).map_err(Error::from)?; //Version
-            req_vec.write_u32_le(sql.len().try_into().unwrap()).map_err(Error::from)?; //SQL length
+            req_vec
+                .write_u32_le(sql.len().try_into().unwrap())
+                .map_err(Error::from)?; //SQL length
             req_vec.write_all(sql.as_bytes()).map_err(Error::from)?;
 
-            req = self.sender.send_recv(WsSend::Binary(req_vec)).await?;            
-        } else{
+            req = self.sender.send_recv(WsSend::Binary(req_vec)).await?;
+        } else {
             let action = WsSend::Query {
                 req_id,
                 sql: sql.to_string(),
             };
-            req = self.sender.send_recv(action).await?;            
+            req = self.sender.send_recv(action).await?;
         }
 
         let resp = match req {
@@ -1097,31 +1154,39 @@ impl ResultSet {
             self.fetch_new().await
         } else {
             self.fetch_old().await
-        }        
+        }
     }
     async fn fetch_new(&mut self) -> RawResult<Option<RawBlock>> {
-
         let mut req_vec = Vec::with_capacity(26);
-        req_vec.write_u64_le(self.sender.req_id()).map_err(Error::from)?;
+        req_vec
+            .write_u64_le(self.sender.req_id())
+            .map_err(Error::from)?;
         req_vec.write_u64_le(self.args.id).map_err(Error::from)?; //ResultID
         req_vec.write_u64_le(7).map_err(Error::from)?; //ActionID, 7 for fetch
         req_vec.write_u16_le(1).map_err(Error::from)?; //Version
-      
+
         match self.sender.send_recv(WsSend::Binary(req_vec)).await? {
-            WsRecvData::BlockNew { block_code, block_message, timing, finished, raw, .. } => {
+            WsRecvData::BlockNew {
+                block_code,
+                block_message,
+                timing,
+                finished,
+                raw,
+                ..
+            } => {
                 if block_code != 0 {
-                    return Err(RawError::new(block_code, block_message))
+                    return Err(RawError::new(block_code, block_message));
                 }
-        
+
                 if finished {
                     self.timing = timing;
                     self.completed = true;
                     return Ok(None);
-                }        
-                let mut raw = RawBlock::parse_from_raw_block(raw, self.precision);        
+                }
+                let mut raw = RawBlock::parse_from_raw_block(raw, self.precision);
                 raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
                 Ok(Some(raw))
-            }           
+            }
             _ => unreachable!(),
         }
     }
@@ -1189,10 +1254,6 @@ impl ResultSet {
         let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
     }
 
-    fn free_result(&self) {
-        let _ = self.sender.send_blocking(WsSend::FreeResult(self.args));
-    }
-
     pub fn affected_rows64(&self) -> i64 {
         self.affected_rows as _
     }
@@ -1208,7 +1269,8 @@ impl AsyncFetchable for ResultSet {
     }
 
     fn fields(&self) -> &[Field] {
-        self.fields.as_ref().unwrap()
+        static EMPTY_FIELDS: Vec<Field> = Vec::new();
+        self.fields.as_ref().unwrap_or(&EMPTY_FIELDS)
     }
 
     fn summary(&self) -> (usize, usize) {
@@ -1322,17 +1384,16 @@ mod tests {
     fn test_is_support_binary_sql() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
 
-        let version_a: &str    = "3.3.0.0";
-        let version_b: &str    = "3.3.1.0";
-        let version_c: &str    = "2.6.0";
-        
+        let version_a: &str = "3.3.0.0";
+        let version_b: &str = "3.3.1.0";
+        let version_c: &str = "2.6.0";
+
         assert_eq!(is_support_binary_sql(version_a), false);
         assert_eq!(is_support_binary_sql(version_b), true);
         assert_eq!(is_support_binary_sql(version_c), false);
-        
+
         Ok(())
     }
-
 
     #[tokio::test]
     async fn test_client() -> anyhow::Result<()> {

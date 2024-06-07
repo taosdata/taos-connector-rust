@@ -363,8 +363,8 @@ impl RawStmt {
 mod tests {
 
     use crate::{Stmt, TaosBuilder};
-    use taos_query::util::hex::*;
     use bytes::Bytes;
+    use taos_query::util::hex::*;
 
     #[test]
     fn test_tbname_tags() -> anyhow::Result<()> {
@@ -508,7 +508,10 @@ mod tests {
             ColumnView::from_varchar(vec!["ABC"]),
             ColumnView::from_nchar(vec!["涛思数据"]),
             ColumnView::from_bytes(vec![hex_string_to_bytes("123456").to_vec()]),
-            ColumnView::from_geobytes(vec![hex_string_to_bytes("0101000000000000000000F03F0000000000000040").to_vec()]),
+            ColumnView::from_geobytes(vec![hex_string_to_bytes(
+                "0101000000000000000000F03F0000000000000040",
+            )
+            .to_vec()]),
         ];
         let rows = stmt.bind(&params)?.add_batch()?.execute()?;
         assert_eq!(rows, 1);
@@ -538,7 +541,10 @@ mod tests {
         assert_eq!(row.12, "ABC");
         assert_eq!(row.13, "涛思数据");
         assert_eq!(row.14, hex_string_to_bytes("123456"));
-        assert_eq!(row.15, hex_string_to_bytes("0101000000000000000000F03F0000000000000040"));
+        assert_eq!(
+            row.15,
+            hex_string_to_bytes("0101000000000000000000F03F0000000000000040")
+        );
         taos.query("drop database test_bindable")?;
 
         Ok(())

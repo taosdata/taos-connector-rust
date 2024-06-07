@@ -156,10 +156,12 @@ pub enum WsRecvData {
         raw: Vec<u8>,
     },
     BlockNew {
+        #[allow(dead_code)]
         block_version: u16,
         #[serde(default)]
         #[serde_as(as = "serde_with::DurationNanoSeconds")]
         timing: Duration,
+        #[allow(dead_code)]
         block_req_id: ReqId,
         block_code: u32,
         block_message: String,

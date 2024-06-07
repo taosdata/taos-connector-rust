@@ -37,6 +37,13 @@ macro_rules! _impl_inline_str {
                 }
             }
 
+            impl AsRef<[u8]> for InlineStr<$ty> {
+                #[inline]
+                fn as_ref(&self) -> &[u8] {
+                    self.as_bytes()
+                }
+            }
+
             impl super::Inlinable for InlineStr<$ty> {
                 #[inline]
                 fn write_inlined<W: std::io::Write>(&self, wtr: &mut W) -> std::io::Result<usize> {
@@ -127,7 +134,7 @@ macro_rules! _impl_test_inline_str {
         let inline = unsafe { InlineStr::<$ty>::from_ptr(bytes.as_ptr()) };
         dbg!(inline);
         assert_eq!(inline.len(), 4);
-        assert_eq!(inline.as_ref(), "abcd");
+        assert_eq!(inline.as_str(), "abcd");
         assert_eq!(format!("{}", inline), "abcd");
         assert_eq!(inline.inlined(), bytes);
         assert_eq!(inline.printable_inlined(), $print);

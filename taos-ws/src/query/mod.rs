@@ -3,7 +3,6 @@ use taos_query::common::SmlData;
 use taos_query::prelude::RawResult;
 use taos_query::{common::RawMeta, AsyncQueryable};
 
-
 pub mod asyn;
 pub(crate) mod infra;
 // pub mod sync;
@@ -164,8 +163,8 @@ impl taos_query::Queryable for Taos {
 #[cfg(test)]
 mod tests {
     use crate::TaosBuilder;
-    use taos_query::util::hex::*;
     use bytes::Bytes;
+    use taos_query::util::hex::*;
 
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {
@@ -244,7 +243,7 @@ mod tests {
             cvb1: Bytes,
             cvb2: Bytes,
             cg1: Bytes,
-            cg2: Bytes,            
+            cg2: Bytes,
         }
 
         use itertools::Itertools;
@@ -290,8 +289,8 @@ mod tests {
 
     #[test]
     fn ws_sync() -> anyhow::Result<()> {
-        use taos_query::prelude::sync::*;
         use bytes::Bytes;
+        use taos_query::prelude::sync::*;
         use taos_query::util::hex::*;
 
         let client = TaosBuilder::from_dsn("ws://localhost:6041/")?.build()?;

@@ -4,11 +4,11 @@ use super::{IsColumnView, Offsets};
 use crate::{
     common::{BorrowedValue, Ty},
     prelude::InlinableWrite,
-    util::InlineStr,
+    util::InlineBytes,
 };
 
-use itertools::Itertools;
 use bytes::Bytes;
+use itertools::Itertools;
 
 #[derive(Debug, Clone)]
 pub struct VarBinaryView {
@@ -22,10 +22,7 @@ impl IsColumnView for VarBinaryView {
         Ty::VarBinary
     }
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter::<Bytes, _, _, _>(
-            iter.map(|v| v.to_bytes())
-                .collect_vec(),
-        )
+        Self::from_iter::<Bytes, _, _, _>(iter.map(|v| v.to_bytes()).collect_vec())
     }
 }
 
@@ -60,10 +57,10 @@ impl VarBinaryView {
         self.offsets.get_unchecked(row) < 0
     }
 
-    pub(crate) unsafe fn get_unchecked(&self, row: usize) -> Option<&InlineStr> {
+    pub(crate) unsafe fn get_unchecked(&self, row: usize) -> Option<&InlineBytes> {
         let offset = self.offsets.get_unchecked(row);
         if offset >= 0 {
-            Some(InlineStr::<u16>::from_ptr(
+            Some(InlineBytes::<u16>::from_ptr(
                 self.data.as_ptr().offset(offset as isize),
             ))
         } else {
@@ -88,7 +85,7 @@ impl VarBinaryView {
     pub unsafe fn get_length_unchecked(&self, row: usize) -> Option<usize> {
         let offset = self.offsets.get_unchecked(row);
         if offset >= 0 {
-            Some(InlineStr::<u16>::from_ptr(self.data.as_ptr().offset(offset as isize)).len())
+            Some(InlineBytes::<u16>::from_ptr(self.data.as_ptr().offset(offset as isize)).len())
         } else {
             None
         }
@@ -115,7 +112,11 @@ impl VarBinaryView {
 
     pub fn to_vec(&self) -> Vec<Option<Vec<u8>>> {
         (0..self.len())
-            .map(|row| unsafe { self.get_unchecked(row) }.map(|s| s.as_bytes()).map(|s| s.to_vec()))
+            .map(|row| {
+                unsafe { self.get_unchecked(row) }
+                    .map(|s| s.as_bytes())
+                    .map(|s| s.to_vec())
+            })
             .collect()
     }
     // pub fn iter_as_bytes(&self) -> impl Iterator<Item = Option<&[u8]>> {
@@ -133,7 +134,7 @@ impl VarBinaryView {
         for v in self.iter() {
             if let Some(v) = v {
                 offsets.push(bytes.len() as i32);
-                bytes.write_inlined_str::<2>(v.as_str()).unwrap();
+                bytes.write_inlined_bytes::<2>(v.as_bytes()).unwrap();
             } else {
                 offsets.push(-1);
             }
@@ -192,7 +193,7 @@ impl VarBinaryView {
 
     // pub fn concat(&self, rhs: &Self) -> Self {
     //     Self::from_iter::<&InlineJson, _, _, _>(self.iter().chain(rhs.iter()).collect_vec())
-    // }    
+    // }
 }
 
 pub struct VarBinaryIter<'a> {
@@ -201,7 +202,7 @@ pub struct VarBinaryIter<'a> {
 }
 
 impl<'a> Iterator for VarBinaryIter<'a> {
-    type Item = Option<&'a InlineStr>;
+    type Item = Option<&'a InlineBytes>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.row < self.view.len() {

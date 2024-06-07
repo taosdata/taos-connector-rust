@@ -1,8 +1,7 @@
+use bytes::Bytes;
 use std::str::FromStr;
 use taos_optin::TaosBuilder;
-use bytes::Bytes;
 use taos_query::util::hex::*;
-
 
 #[test]
 fn ws_sync_json() -> anyhow::Result<()> {
@@ -119,7 +118,6 @@ fn ws_sync_json() -> anyhow::Result<()> {
             cvb2: Bytes::from(vec![0x65, 0x43, 0x21]),
             cg1: hex_string_to_bytes("0101000000000000000000F03F0000000000000040"),
             cg2: hex_string_to_bytes("010100000000000000000008400000000000001040"),
-
         }
     );
 

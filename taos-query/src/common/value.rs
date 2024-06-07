@@ -1,9 +1,9 @@
 use std::{borrow::Cow, fmt::Display, str::Utf8Error};
 
-use rust_decimal::prelude::*;
-use serde::{Deserialize, Serialize};
 use super::{Timestamp, Ty};
 use bytes::Bytes;
+use rust_decimal::prelude::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub enum BorrowedValue<'b> {
@@ -49,11 +49,11 @@ macro_rules! borrowed_value_to_native {
             BorrowedValue::UInt(v) => Some(*v as _),
             BorrowedValue::UBigInt(v) => Some(*v as _),
             BorrowedValue::Json(v) => serde_json::from_slice(&v).ok(),
-            BorrowedValue::VarBinary(_v) =>  todo!(),
+            BorrowedValue::VarBinary(_v) => todo!(),
             BorrowedValue::Decimal(_) => todo!(),
             BorrowedValue::Blob(_) => todo!(),
             BorrowedValue::MediumBlob(_) => todo!(),
-            BorrowedValue::Geometry(_) =>  todo!(),
+            BorrowedValue::Geometry(_) => todo!(),
         }
     };
 }
@@ -587,7 +587,8 @@ impl Value {
             _ => unreachable!("unsupported type to string"),
         }
     }
-
+    
+    #[warn(unreachable_patterns)]
     pub fn to_json_value(&self) -> serde_json::Value {
         use Value::*;
         match self {
@@ -607,10 +608,11 @@ impl Value {
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => v.clone(),
             NChar(str) => serde_json::Value::String(str.to_string()),
-            Decimal(_) => todo!(),
-            Blob(_) => todo!(),
-            MediumBlob(_) => todo!(),
-            _ => unreachable!("unsupported type to json value"),
+            Decimal(v) => serde_json::Value::String(format!("{:?}", v)),
+            Blob(v) => serde_json::Value::String(format!("{:?}", v)),
+            MediumBlob(v) => serde_json::Value::String(format!("{:?}", v)),
+            VarBinary(v) => serde_json::Value::String(format!("{:?}", v.to_vec())),
+            Geometry(v) => serde_json::Value::String(format!("{:?}", v.to_vec())),
         }
     }
 }

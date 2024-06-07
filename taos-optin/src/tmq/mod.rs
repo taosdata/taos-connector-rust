@@ -1093,58 +1093,60 @@ mod tests {
                     taos.write_raw_meta(&raw)?;
 
                     let json = meta.as_json_meta()?;
-                    match &json {
-                        taos_query::common::JsonMeta::Create(m) => match m {
-                            taos_query::common::MetaCreate::Super {
-                                table_name,
-                                columns: _,
-                                tags: _,
-                            } => {
-                                let _desc = taos.describe(table_name.as_str())?;
-                                // dbg!(_desc);
-                            }
-                            taos_query::common::MetaCreate::Child {
-                                table_name,
-                                using: _,
-                                tags: _,
-                                tag_num: _,
-                            } => {
-                                let _desc = taos.describe(table_name.as_str())?;
-                                // dbg!(_desc);
-                            }
-                            taos_query::common::MetaCreate::Normal {
-                                table_name,
-                                columns: _,
-                            } => {
-                                let _desc = taos.describe(table_name.as_str())?;
-                                // dbg!(_desc);
-                            }
-                        },
-                        _ => (),
-                    }
+                    for json in json {
+                        match &json {
+                            taos_query::common::MetaUnit::Create(m) => match m {
+                                taos_query::common::MetaCreate::Super {
+                                    table_name,
+                                    columns: _,
+                                    tags: _,
+                                } => {
+                                    let _desc = taos.describe(table_name.as_str())?;
+                                    // dbg!(_desc);
+                                }
+                                taos_query::common::MetaCreate::Child {
+                                    table_name,
+                                    using: _,
+                                    tags: _,
+                                    tag_num: _,
+                                } => {
+                                    let _desc = taos.describe(table_name.as_str())?;
+                                    // dbg!(_desc);
+                                }
+                                taos_query::common::MetaCreate::Normal {
+                                    table_name,
+                                    columns: _,
+                                } => {
+                                    let _desc = taos.describe(table_name.as_str())?;
+                                    // dbg!(_desc);
+                                }
+                            },
+                            _ => (),
+                        }
 
-                    // meta data can be write to an database seamlessly by raw or json (to sql).
-                    let sql = json.to_string();
-                    tracing::debug!("sql: {}", sql);
-                    if let Err(err) = taos.exec(sql) {
-                        match err.code() {
-                            Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
-                            Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
-                            Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
-                            Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
-                            Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
-                            Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
-                            Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
-                            Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
-                            Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
-                            Code::DUPLICATED_COLUMN_NAMES => {
-                                tracing::trace!("duplicated column names")
-                            }
-                            Code::NO_COLUMN_CAN_BE_DROPPED => {
-                                tracing::trace!("no column can be dropped")
-                            }
-                            _ => {
-                                tracing::error!("{}", err);
+                        // meta data can be write to an database seamlessly by raw or json (to sql).
+                        let sql = json.to_string();
+                        tracing::debug!("sql: {}", sql);
+                        if let Err(err) = taos.exec(sql) {
+                            match err.code() {
+                                Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                                Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                                Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                                Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
+                                Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
+                                Code::DUPLICATED_COLUMN_NAMES => {
+                                    tracing::trace!("duplicated column names")
+                                }
+                                Code::NO_COLUMN_CAN_BE_DROPPED => {
+                                    tracing::trace!("no column can be dropped")
+                                }
+                                _ => {
+                                    tracing::error!("{}", err);
+                                }
                             }
                         }
                     }
@@ -1293,58 +1295,60 @@ mod tests {
                     let raw = meta.as_raw_meta()?;
                     taos.write_raw_meta(&raw)?;
 
-                    let json = meta.as_json_meta()?;
-                    match &json {
-                        taos_query::common::JsonMeta::Create(m) => match m {
-                            taos_query::common::MetaCreate::Super {
-                                table_name,
-                                columns: _,
-                                tags: _,
-                            } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                tracing::trace!("{:?}", desc);
-                            }
-                            taos_query::common::MetaCreate::Child {
-                                table_name,
-                                using: _,
-                                tags: _,
-                                tag_num: _,
-                            } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                tracing::trace!("{:?}", desc);
-                            }
-                            taos_query::common::MetaCreate::Normal {
-                                table_name,
-                                columns: _,
-                            } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                tracing::trace!("{:?}", desc);
-                            }
-                        },
-                        _ => (),
-                    }
+                    let metas = meta.as_json_meta()?;
+                    for json in metas {
+                        match &json {
+                            taos_query::common::MetaUnit::Create(m) => match m {
+                                taos_query::common::MetaCreate::Super {
+                                    table_name,
+                                    columns: _,
+                                    tags: _,
+                                } => {
+                                    let desc = taos.describe(table_name.as_str())?;
+                                    tracing::trace!("{:?}", desc);
+                                }
+                                taos_query::common::MetaCreate::Child {
+                                    table_name,
+                                    using: _,
+                                    tags: _,
+                                    tag_num: _,
+                                } => {
+                                    let desc = taos.describe(table_name.as_str())?;
+                                    tracing::trace!("{:?}", desc);
+                                }
+                                taos_query::common::MetaCreate::Normal {
+                                    table_name,
+                                    columns: _,
+                                } => {
+                                    let desc = taos.describe(table_name.as_str())?;
+                                    tracing::trace!("{:?}", desc);
+                                }
+                            },
+                            _ => (),
+                        }
 
-                    // meta data can be write to an database seamlessly by raw or json (to sql).
-                    let sql = json.to_string();
-                    if let Err(err) = taos.exec(sql) {
-                        match err.code() {
-                            Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
-                            Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
-                            Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
-                            Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
-                            Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
-                            Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
-                            Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
-                            Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
-                            Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
-                            Code::DUPLICATED_COLUMN_NAMES => {
-                                tracing::trace!("duplicated column names")
-                            }
-                            Code::NO_COLUMN_CAN_BE_DROPPED => {
-                                tracing::trace!("no column can be dropped")
-                            }
-                            _ => {
-                                tracing::debug!("{}", err);
+                        // meta data can be write to an database seamlessly by raw or json (to sql).
+                        let sql = json.to_string();
+                        if let Err(err) = taos.exec(sql) {
+                            match err.code() {
+                                Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                                Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                                Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                                Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
+                                Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
+                                Code::DUPLICATED_COLUMN_NAMES => {
+                                    tracing::trace!("duplicated column names")
+                                }
+                                Code::NO_COLUMN_CAN_BE_DROPPED => {
+                                    tracing::trace!("no column can be dropped")
+                                }
+                                _ => {
+                                    tracing::debug!("{}", err);
+                                }
                             }
                         }
                     }
@@ -1615,27 +1619,39 @@ mod async_tests {
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
                         // dbg!(json);
-                        let sql = json.to_string();
-                        tracing::debug!("sql: {}", &sql);
-                        if let Err(err) = taos.exec(sql).await {
-                            match err.code() {
-                                Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
-                                Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
-                                Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
-                                Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
-                                Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
-                                Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
-                                Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
-                                Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
-                                Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
-                                Code::DUPLICATED_COLUMN_NAMES => {
-                                    tracing::trace!("duplicated column names")
-                                }
-                                Code::NO_COLUMN_CAN_BE_DROPPED => {
-                                    tracing::trace!("no column can be dropped")
-                                }
-                                _ => {
-                                    tracing::error!("{}", err);
+                        for meta in json {
+                            let sql = meta.to_string();
+                            tracing::debug!("sql: {}", &sql);
+                            if let Err(err) = taos.exec(sql).await {
+                                match err.code() {
+                                    Code::TAG_ALREADY_EXIST => {
+                                        tracing::trace!("tag already exists")
+                                    }
+                                    Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                    Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                    Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                    Code::INVALID_COLUMN_NAME => {
+                                        tracing::trace!("invalid column name")
+                                    }
+                                    Code::MODIFIED_ALREADY => {
+                                        tracing::trace!("modified already done")
+                                    }
+                                    Code::TABLE_NOT_EXIST => {
+                                        tracing::trace!("table does not exists")
+                                    }
+                                    Code::STABLE_NOT_EXIST => {
+                                        tracing::trace!("stable does not exists")
+                                    }
+                                    Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
+                                    Code::DUPLICATED_COLUMN_NAMES => {
+                                        tracing::trace!("duplicated column names")
+                                    }
+                                    Code::NO_COLUMN_CAN_BE_DROPPED => {
+                                        tracing::trace!("no column can be dropped")
+                                    }
+                                    _ => {
+                                        tracing::error!("{}", err);
+                                    }
                                 }
                             }
                         }
@@ -1788,9 +1804,11 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
-                        if let Err(err) = taos.exec(sql).await {
-                            println!("maybe error: {}", err);
+                        for meta in json {
+                            let sql = meta.to_string();
+                            if let Err(err) = taos.exec(sql).await {
+                                println!("maybe error: {}", err);
+                            }
                         }
                     }
                     MessageSet::Data(data) => {
@@ -1808,7 +1826,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -2004,9 +2022,11 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
-                        if let Err(err) = taos.exec(sql).await {
-                            println!("maybe error: {}", err);
+                        for meta in &json {
+                            let sql = meta.to_string();
+                            if let Err(err) = taos.exec(sql).await {
+                                println!("maybe error: {}", err);
+                            }
                         }
                     }
                     MessageSet::Data(data) => {
@@ -2024,7 +2044,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -2269,9 +2289,11 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
-                        if let Err(err) = taos.exec(sql).await {
-                            println!("maybe error: {}", err);
+                        for meta in json {
+                            let sql = meta.to_string();
+                            if let Err(err) = taos.exec(sql).await {
+                                println!("maybe error: {}", err);
+                            }
                         }
                     }
                     MessageSet::Data(data) => {
@@ -2289,9 +2311,11 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
-                        if let Err(err) = taos.exec(sql).await {
-                            println!("maybe error: {}", err);
+                        for meta in json {
+                            let sql = meta.to_string();
+                            if let Err(err) = taos.exec(sql).await {
+                                println!("maybe error: {}", err);
+                            }
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
@@ -2371,7 +2395,7 @@ mod async_tests {
         ]).await?;
         assert_eq!(inserted, 5);
         Ok(())
-    }    
+    }
 
     // Query options 2, use deserialization with serde.
     #[derive(Debug, serde::Deserialize)]
@@ -2411,34 +2435,35 @@ mod async_tests {
 
         let task = tokio::spawn(prepare(taos));
         task.await??;
-       
+
         dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest");
         let builder = crate::TmqBuilder::from_dsn(&dsn)?;
         // dbg!(&builder.dsn);
         let mut consumer = builder.build().await?;
         consumer.subscribe(["tmq_meters"]).await?;
 
-        
         consumer
-        .stream()
-        .try_for_each(|(offset, message)| async {
-            let topic = offset.topic();
-            // the vgroup id, like partition id in kafka.
-            let vgroup_id = offset.vgroup_id();
-            println!("* in vgroup id {vgroup_id} of topic {topic}\n");
+            .stream()
+            .try_for_each(|(offset, message)| async {
+                let topic = offset.topic();
+                // the vgroup id, like partition id in kafka.
+                let vgroup_id = offset.vgroup_id();
+                println!("* in vgroup id {vgroup_id} of topic {topic}\n");
 
-            if let Some(data) = message.into_data() {
-                while let Some(block) = data.fetch_raw_block().await? {
-                    let records: Vec<Record> = block.deserialize().try_collect()?;
-                    println!("** read {} records: {:#?}\n", records.len(), records);
-                    assert_eq!(records[records.len() - 1].cvb1, Some(Bytes::from(vec![0x12, 0x34, 0x56])));
+                if let Some(data) = message.into_data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        let records: Vec<Record> = block.deserialize().try_collect()?;
+                        println!("** read {} records: {:#?}\n", records.len(), records);
+                        assert_eq!(
+                            records[records.len() - 1].cvb1,
+                            Some(Bytes::from(vec![0x12, 0x34, 0x56]))
+                        );
+                    }
                 }
-            }
-            consumer.commit(offset).await?;
-            Ok(())
-        })
-        .await?;
-
+                consumer.commit(offset).await?;
+                Ok(())
+            })
+            .await?;
 
         consumer.unsubscribe().await;
 
