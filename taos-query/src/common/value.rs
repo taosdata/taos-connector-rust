@@ -587,7 +587,7 @@ impl Value {
             _ => unreachable!("unsupported type to string"),
         }
     }
-    
+
     #[warn(unreachable_patterns)]
     pub fn to_json_value(&self) -> serde_json::Value {
         use Value::*;

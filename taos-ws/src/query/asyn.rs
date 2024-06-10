@@ -1,7 +1,5 @@
 use anyhow::bail;
 use futures::{FutureExt, SinkExt, StreamExt};
-// use scc::HashMap;
-use dashmap::DashMap as HashMap;
 use itertools::Itertools;
 use std::future::Future;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
@@ -41,9 +39,9 @@ use oneshot::channel as query_channel;
 type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
 // use tokio::sync::mpsc::unbounded_channel as query_channel;
 // type QueryChannelSender = tokio::sync::mpsc::UnboundedSender<Result<WsRecvData, RawError>>;
-type QueryInner = HashMap<ReqId, QueryChannelSender>;
+type QueryInner = scc::HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
-type QueryResMapper = HashMap<ResId, ReqId>;
+type QueryResMapper = scc::HashMap<ResId, ReqId>;
 
 #[derive(Debug, Clone)]
 struct Version {
@@ -70,23 +68,26 @@ impl WsQuerySender {
         self.req_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
+    fn req_id_ref(&self) -> &Arc<AtomicU64> {
+        &self.req_id
+    }
     async fn send_recv(&self, msg: WsSend) -> RawResult<WsRecvData> {
         let send_timeout = Duration::from_millis(1000);
         let req_id = msg.req_id();
         let (tx, rx) = query_channel();
 
-        self.queries.insert(req_id, tx);
+        let _ = self.queries.insert_async(req_id, tx).await;
 
         match msg {
             WsSend::FetchBlock(args) => {
                 log::trace!("[req id: {req_id}] prepare message {msg:?}");
-                if self.results.contains_key(&args.id) {
+                if self.results.contains_async(&args.id).await {
                     Err(RawError::from_string(format!(
                         "there's a result with id {}",
                         args.id
                     )))?;
                 }
-                self.results.insert(args.id, args.req_id);
+                let _ = self.results.insert_async(args.id, args.req_id).await;
 
                 self.sender
                     .send_timeout(msg.to_msg(), send_timeout)
@@ -149,6 +150,12 @@ impl Drop for WsTaos {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct QueryMetrics {
+    time_cost_in_fetch: Duration,
+    time_cost_in_block_parse: Duration,
+    time_cost_in_flume: Duration,
+}
 pub struct ResultSet {
     sender: WsQuerySender,
     args: WsResArgs,
@@ -161,6 +168,8 @@ pub struct ResultSet {
     block_future: Option<Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>>,
     closer: Option<oneshot::Sender<()>>,
     completed: bool,
+    metrics: QueryMetrics,
+    blocks_buffer: Option<flume::Receiver<RawResult<(RawBlock, Duration)>>>,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -180,6 +189,7 @@ impl Debug for ResultSet {
 
 impl Drop for ResultSet {
     fn drop(&mut self) {
+        println!("dropping, metrics: {:?}", self.metrics);
         let (sender, closer, args, completed) = (
             self.sender.clone(),
             self.closer.take(),
@@ -336,7 +346,7 @@ async fn read_queries(
                     OpCode::Text => {
 
                         log::trace!("received json response: {payload}", payload = String::from_utf8_lossy(&payload));
-                        let v: WsRecv = serde_json::from_slice(&payload).unwrap();
+                        let v: WsRecv = sonic_rs::from_slice(&payload).unwrap();
 
                         let (req_id, data, ok) = v.ok();
                         match &data {
@@ -347,7 +357,7 @@ async fn read_queries(
                                         log::error!("send data with error: {err:?}");
                                     }
                                 } else {
-                                    debug_assert!(!queries_sender.contains_key(&req_id));
+                                    debug_assert!(!queries_sender.contains(&req_id));
                                     log::warn!("req_id {req_id} not detected, message might be lost");
                                 }
                             }
@@ -491,9 +501,9 @@ async fn read_queries(
 
                         log::warn!("websocket connection is closed normally");
                         let mut keys = Vec::new();
-                        for e in queries_sender.iter() {
-                            keys.push(*e.key());
-                        }
+                        queries_sender.scan(|k, _| {
+                            keys.push(*k);
+                        });
                         for k in keys {
                             if let Some((_, sender)) = queries_sender.remove(&k) {
                                 let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "received close message")));
@@ -524,10 +534,10 @@ async fn read_queries(
             }
             _ = close_listener.changed() => {
                 log::trace!("close reader task");
-                let mut keys = Vec::new();
-                for e in queries_sender.iter() {
-                                    keys.push(*e.key());
-                                }
+                let mut keys = Vec::with_capacity(queries_sender.len());
+                queries_sender.scan(|k, _| {
+                    keys.push(*k);
+                });
                 // queries_sender.for_each_async(|k, _| {
                 //     keys.push(*k);
                 // }).await;
@@ -544,10 +554,10 @@ async fn read_queries(
         return;
     }
 
-    let mut keys = Vec::new();
-    for e in queries_sender.iter() {
-        keys.push(*e.key());
-    }
+    let mut keys = Vec::with_capacity(queries_sender.len());
+    queries_sender.scan(|k, _| {
+        keys.push(*k);
+    });
     // queries_sender
     //     .for_each_async(|k, _| {
     //         keys.push(*k);
@@ -576,7 +586,7 @@ pub fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
 }
 
 pub fn is_support_binary_sql(v1: &str) -> bool {
-    is_greater_than_or_equal_to(v1, "3.3.0.8")
+    is_greater_than_or_equal_to(v1, "3.3.0.0")
 }
 
 impl WsTaos {
@@ -656,7 +666,7 @@ impl WsTaos {
             Err(_) => "2.x".to_string(),
         };
         let _is_v3 = !version.starts_with('2');
-        let is_support_binary_sql = is_support_binary_sql(&version);
+        let is_support_binary_sql = dbg!(is_support_binary_sql(&version));
 
         let login = WsSend::Conn {
             req_id,
@@ -730,7 +740,7 @@ impl WsTaos {
                         if let Err(err) = sender.send(msg).await {
                             log::error!("Write websocket error: {}", err);
                                 let mut keys = Vec::new();
-                                queries3.iter().for_each(|r| keys.push(*r.key()));
+                                queries3.scan(|k, v| keys.push(*k));
                                 // queries3.for_each_async(|k, _| {
                                 //     keys.push(*k);
                                 // }).await;
@@ -762,7 +772,7 @@ impl WsTaos {
             sender: WsQuerySender {
                 version: Version {
                     version: version,
-                    is_support_binary_sql: is_support_binary_sql,
+                    is_support_binary_sql,
                 },
                 req_id: Default::default(),
                 sender: ws_cloned,
@@ -870,7 +880,7 @@ impl WsTaos {
                         if let Err(err) = sender.send(opcode, &msg).await {
                             log::error!("Write websocket error: {}", err);
                                 let mut keys = Vec::new();
-                                queries3.iter().for_each(|r| keys.push(*r.key()));
+                                queries3.scan(|k, _| keys.push(*k));
 
                                 for k in keys {
                                     if let Some((_, sender)) = queries3.remove(&k) {
@@ -1107,6 +1117,8 @@ impl WsTaos {
                 block_future: None,
                 closer: Some(closer),
                 completed: false,
+                metrics: Default::default(),
+                blocks_buffer: None,
             })
         } else {
             Ok(ResultSet {
@@ -1124,6 +1136,8 @@ impl WsTaos {
                 block_future: None,
                 closer: Some(closer),
                 completed: false,
+                metrics: Default::default(),
+                blocks_buffer: None,
             })
         }
     }
@@ -1158,88 +1172,174 @@ impl ResultSet {
         }
     }
     async fn fetch_new(&mut self) -> RawResult<Option<RawBlock>> {
-        let mut req_vec = Vec::with_capacity(26);
-        req_vec
-            .write_u64_le(self.sender.req_id())
-            .map_err(Error::from)?;
-        req_vec.write_u64_le(self.args.id).map_err(Error::from)?; //ResultID
-        req_vec.write_u64_le(7).map_err(Error::from)?; //ActionID, 7 for fetch
-        req_vec.write_u16_le(1).map_err(Error::from)?; //Version
+        if self.blocks_buffer.is_none() {
+            // Start query.
+            let req_id = self.sender.req_id_ref().clone();
+            let (tx, rx) = flume::bounded(20);
+            let sender = self.sender.clone();
+            let fields = self.fields.clone();
+            let query_id = self.args.id;
+            let precision = self.precision;
+            tokio::spawn(async move {
+                let mut metrics = QueryMetrics::default();
+                let fields = fields
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .map(Field::name)
+                    .collect_vec();
+                loop {
+                    let now = Instant::now();
+                    let id = req_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-        match self.sender.send_recv(WsSend::Binary(req_vec)).await? {
-            WsRecvData::BlockNew {
-                block_code,
-                block_message,
-                timing,
-                finished,
-                raw,
-                ..
-            } => {
-                if block_code != 0 {
-                    return Err(RawError::new(block_code, block_message));
-                }
+                    let mut req_vec = Vec::with_capacity(26);
+                    req_vec.write_u64_le(id).map_err(Error::from).unwrap();
+                    req_vec.write_u64_le(query_id).map_err(Error::from).unwrap(); //ResultID
+                    req_vec.write_u64_le(7).map_err(Error::from).unwrap(); //ActionID, 7 for fetch
+                    req_vec.write_u16_le(1).map_err(Error::from).unwrap(); //Version
+                    match sender.send_recv(WsSend::Binary(req_vec)).await {
+                        Ok(WsRecvData::BlockNew {
+                            block_code,
+                            block_message,
+                            timing,
+                            finished,
+                            raw,
+                            ..
+                        }) => {
+                            metrics.time_cost_in_fetch += now.elapsed();
+                            if block_code != 0 {
+                                return Err(RawError::new(block_code, block_message));
+                            }
 
-                if finished {
-                    self.timing = timing;
-                    self.completed = true;
-                    return Ok(None);
+                            if finished {
+                                drop(tx);
+                                break;
+                            }
+                            let now = Instant::now();
+                            let mut raw = RawBlock::parse_from_raw_block(raw, precision);
+                            metrics.time_cost_in_block_parse += now.elapsed();
+                            raw.with_field_names(&fields);
+                            if let Err(_) = tx.send_async(Ok((raw, timing))).await {
+                                break;
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            if let Err(_) = tx.send_async(Err(err)).await {
+                                break;
+                            }
+                        }
+                    }
                 }
-                let mut raw = RawBlock::parse_from_raw_block(raw, self.precision);
-                raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
-                Ok(Some(raw))
+                println!("Spawn metrics: {:?}", metrics);
+                Ok(())
+            });
+            self.blocks_buffer.replace(rx);
+        }
+        let now = Instant::now();
+        match self.blocks_buffer.as_mut().unwrap().recv_async().await {
+            Ok(Ok((raw, timing))) => {
+                self.timing += timing;
+                self.metrics.time_cost_in_flume += now.elapsed();
+                return Ok(Some(raw));
             }
-            _ => unreachable!(),
+            Ok(Err(err)) => return Err(err),
+            Err(_) => {
+                return Ok(None);
+            }
         }
     }
 
     async fn fetch_old(&mut self) -> RawResult<Option<RawBlock>> {
-        let args = WsResArgs {
-            req_id: self.sender.req_id(),
-            id: self.args.id,
-        };
-        let fetch = WsSend::Fetch(args);
-        let fetch = self.sender.send_recv(fetch).await?;
+        if self.blocks_buffer.is_none() {
+            // Start query.
+            let req_id = self.sender.req_id_ref().clone();
+            let (tx, rx) = flume::bounded(20);
+            let sender = self.sender.clone();
+            let fields = self.fields.clone();
+            let query_id = self.args.id;
+            let precision = self.precision;
+            tokio::spawn(async move {
+                let mut metrics = QueryMetrics::default();
+                let field_names = fields
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .map(Field::name)
+                    .collect_vec();
+                loop {
+                    let now = Instant::now();
+                    let args = WsResArgs {
+                        req_id: req_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                        id: query_id,
+                    };
+                    let fetch = WsSend::Fetch(args);
+                    let fetch_resp = match sender.send_recv(fetch).await {
+                        Ok(WsRecvData::Fetch(fetch)) => fetch,
+                        Err(err) => {
+                            let _ = tx.send_async(Err(err)).await;
+                            break;
+                        }
+                        _ => unreachable!("fetch action result error"),
+                    };
+                    if fetch_resp.completed {
+                        drop(tx);
+                        break;
+                    }
+                    let args = WsResArgs {
+                        req_id: req_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                        id: query_id,
+                    };
 
-        let fetch_resp = match fetch {
-            WsRecvData::Fetch(fetch) => fetch,
-            data => panic!("unexpected result {data:?}"),
-        };
+                    let fetch_block = WsSend::FetchBlock(args);
+                    match sender.send_recv(fetch_block).await {
+                        Ok(WsRecvData::Block { timing, raw }) => {
+                            metrics.time_cost_in_fetch += now.elapsed();
+                            let mut raw = RawBlock::parse_from_raw_block(raw, precision);
+                            raw.with_field_names(&field_names);
+                            if let Err(_) = tx.send_async(Ok((raw, timing))).await {
+                                break;
+                            }
+                        }
+                        Ok(WsRecvData::BlockV2 { timing, raw }) => {
+                            metrics.time_cost_in_fetch += now.elapsed();
+                            let mut raw = RawBlock::parse_from_raw_block_v2(
+                                raw,
+                                fields.as_ref().unwrap(),
+                                fetch_resp.lengths.as_ref().unwrap(),
+                                fetch_resp.rows,
+                                precision,
+                            );
 
-        if fetch_resp.completed {
-            self.timing = fetch_resp.timing;
-            self.completed = true;
-            return Ok(None);
+                            raw.with_field_names(&field_names);
+                            if let Err(_) = tx.send_async(Ok((raw, timing))).await {
+                                break;
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            metrics.time_cost_in_fetch += now.elapsed();
+                            if let Err(_) = tx.send_async(Err(err)).await {
+                                break;
+                            }
+                        }
+                    }
+                }
+                println!("Spawn metrics: {:?}", metrics);
+            });
+            self.blocks_buffer.replace(rx);
         }
-
-        let args = WsResArgs {
-            req_id: self.sender.req_id(),
-            id: self.args.id,
-        };
-
-        let fetch_block = WsSend::FetchBlock(args);
-
-        match self.sender.send_recv(fetch_block).await? {
-            WsRecvData::Block { timing, raw } => {
-                let mut raw = RawBlock::parse_from_raw_block(raw, self.precision);
-
-                raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
-                self.timing = timing + fetch_resp.timing;
-                Ok(Some(raw))
+        let now = Instant::now();
+        match self.blocks_buffer.as_mut().unwrap().recv_async().await {
+            Ok(Ok((raw, timing))) => {
+                self.timing += timing;
+                self.metrics.time_cost_in_flume += now.elapsed();
+                return Ok(Some(raw));
             }
-            WsRecvData::BlockV2 { timing, raw } => {
-                let mut raw = RawBlock::parse_from_raw_block_v2(
-                    raw,
-                    self.fields.as_ref().unwrap(),
-                    fetch_resp.lengths.as_ref().unwrap(),
-                    fetch_resp.rows,
-                    self.precision,
-                );
-
-                raw.with_field_names(self.fields.as_ref().unwrap().iter().map(Field::name));
-                self.timing = timing + fetch_resp.timing;
-                Ok(Some(raw))
+            Ok(Err(err)) => return Err(err),
+            Err(_) => {
+                return Ok(None);
             }
-            _ => unreachable!(),
         }
     }
 
@@ -1248,8 +1348,8 @@ impl ResultSet {
     }
 
     pub async fn stop(&self) {
-        if let Some((_, req_id)) = self.sender.results.remove(&self.args.id) {
-            self.sender.queries.remove(&req_id);
+        if let Some((_, req_id)) = self.sender.results.remove_async(&self.args.id).await {
+            self.sender.queries.remove_async(&req_id).await;
         }
 
         let _ = self.sender.send_only(WsSend::FreeResult(self.args)).await;
