@@ -468,6 +468,7 @@ impl WsResultSet {
 }
 
 unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
+    ws_enable_log();
     let dsn = if dsn.is_null() {
         CStr::from_bytes_with_nul(b"taos://localhost:6041\0").unwrap()
     } else {
@@ -505,7 +506,6 @@ pub unsafe extern "C" fn ws_enable_log() {
         }
         builder.init();
     });
-    log::trace!("enable logger to stdout");
 }
 
 /// Connect via dsn string, returns NULL if failed.
