@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::NoneAsEmptyString;
@@ -61,7 +62,7 @@ pub enum WsSend {
     },
     Fetch(WsResArgs),
     FetchBlock(WsResArgs),
-    Binary(Vec<u8>),
+    Binary(Bytes),
     FreeResult(WsResArgs),
 }
 
@@ -230,7 +231,7 @@ pub(crate) trait ToMessage: Serialize {
     fn to_msg(&self) -> ws_tool::Message<bytes::Bytes> {
         ws_tool::Message {
             code: ws_tool::frame::OpCode::Text,
-            data: serde_json::to_vec(self).unwrap().into(),
+            data: sonic_rs::to_vec(self).unwrap().into(),
             close_code: None,
         }
     }

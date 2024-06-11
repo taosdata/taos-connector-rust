@@ -508,6 +508,8 @@ impl TaosBuilder {
         url: String,
     ) -> RawResult<AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>> {
         let mut config = ClientConfig::default();
+        config.read_buf = 1024 * 1024 * 4;
+        // config.write_buf = 1024 * 1024;
 
         #[cfg(feature = "deflate")]
         {
