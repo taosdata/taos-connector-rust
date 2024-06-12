@@ -1,4 +1,6 @@
-use futures::FutureExt;
+use anyhow::bail;
+use futures::stream::SplitStream;
+use futures::{FutureExt, SinkExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use std::future::Future;
 use std::ops::ControlFlow;
@@ -7,19 +9,15 @@ use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::InlinableWrite;
 use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
 use thiserror::Error;
-use tracing::{instrument, warn};
-use ws_tool::frame::SimplifiedHeader;
-
-use tokio::io::BufStream;
-use tokio::io::ReadHalf;
+use tokio::net::TcpStream;
 use tokio::sync::watch;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use tracing::{instrument, trace, Instrument};
 
 use tokio::time::{self, timeout};
 
-use ws_tool::{
-    codec::AsyncDeflateRecv, errors::WsError as WsErrorWst, frame::OpCode, stream::AsyncStream,
-    Message as WsMessage,
-};
+use ws_tool::{errors::WsError as WsErrorWst, Message as WsMessage};
 
 use super::{infra::*, TaosBuilder};
 
@@ -33,7 +31,8 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
-type WsSender = flume::Sender<WsMessage<bytes::Bytes>>;
+// type WsSender = flume::Sender<WsMessage<bytes::Bytes>>;
+type WsSender = flume::Sender<Message>;
 
 use futures::channel::oneshot;
 use oneshot::channel as query_channel;
@@ -43,6 +42,8 @@ type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
 type QueryInner = scc::HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = scc::HashMap<ResId, ReqId>;
+
+type WebSocketStreamReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
 #[derive(Debug, Clone)]
 struct Version {
@@ -63,6 +64,7 @@ struct WsQuerySender {
     sender: WsSender,
     queries: QueryAgent,
 }
+const SEND_TIMEOUT: Duration = Duration::from_millis(1000);
 
 impl WsQuerySender {
     fn req_id(&self) -> ReqId {
@@ -73,7 +75,6 @@ impl WsQuerySender {
         &self.req_id
     }
     async fn send_recv(&self, msg: WsSend) -> RawResult<WsRecvData> {
-        const SEND_TIMEOUT: Duration = Duration::from_millis(1000);
         let req_id = msg.req_id();
         let (tx, rx) = query_channel();
 
@@ -90,31 +91,30 @@ impl WsQuerySender {
                 }
                 let _ = self.results.insert_async(args.id, args.req_id).await;
 
-                timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
-                    .await
-                    .map_err(Error::from)?
-                    .map_err(Error::from)?;
-                //
-            }
-            WsSend::Binary(bytes) => {
                 timeout(
                     SEND_TIMEOUT,
-                    self.sender.send_async(WsMessage {
-                        code: OpCode::Binary,
-                        data: bytes,
-                        close_code: None,
-                    }),
+                    self.sender.send_async(msg.to_tungstenite_msg()),
                 )
                 .await
                 .map_err(Error::from)?
                 .map_err(Error::from)?;
+                //
             }
-            _ => {
-                log::trace!("[req id: {req_id}] prepare message: {msg:?}");
-                timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
+            WsSend::Binary(bytes) => {
+                timeout(SEND_TIMEOUT, self.sender.send_async(Message::Binary(bytes)))
                     .await
                     .map_err(Error::from)?
                     .map_err(Error::from)?;
+            }
+            _ => {
+                log::trace!("[req id: {req_id}] prepare message: {msg:?}");
+                timeout(
+                    SEND_TIMEOUT,
+                    self.sender.send_async(msg.to_tungstenite_msg()),
+                )
+                .await
+                .map_err(Error::from)?
+                .map_err(Error::from)?;
             }
         }
         // handle the error
@@ -124,16 +124,19 @@ impl WsQuerySender {
         Ok(res)
     }
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
-        let send_timeout = Duration::from_millis(1000);
-        self.sender
-            .send_timeout(msg.to_msg(), send_timeout)
-            // .await
-            .map_err(Error::from)?;
+        timeout(
+            SEND_TIMEOUT,
+            self.sender.send_async(msg.to_tungstenite_msg()),
+        )
+        .await
+        .map_err(Error::from)?
+        // .await
+        .map_err(Error::from)?;
         Ok(())
     }
 
     fn send_blocking(&self, msg: WsSend) -> RawResult<()> {
-        let _ = self.sender.send(msg.to_msg());
+        let _ = self.sender.send(msg.to_tungstenite_msg());
         Ok(())
     }
 }
@@ -191,7 +194,7 @@ impl Debug for ResultSet {
 
 impl Drop for ResultSet {
     fn drop(&mut self) {
-        println!("dropping, metrics: {:?}", self.metrics);
+        trace!("dropping, metrics: {:?}", self.metrics);
         let (sender, closer, args, completed) = (
             self.sender.clone(),
             self.closer.take(),
@@ -233,6 +236,8 @@ pub enum Error {
     SendTimeoutError(#[from] tokio::sync::mpsc::error::SendTimeoutError<WsMessage<bytes::Bytes>>),
     #[error(transparent)]
     FlumeSendError(#[from] flume::SendError<WsMessage<bytes::Bytes>>),
+    #[error(transparent)]
+    FlumeSend2Error(#[from] flume::SendError<Message>),
     #[error(transparent)]
     FlumeSendTimeoutError(#[from] flume::SendTimeoutError<WsMessage<bytes::Bytes>>),
     #[error("Send data via websocket timeout")]
@@ -318,96 +323,91 @@ impl From<Error> for RawError {
         }
     }
 }
-
 async fn read_queries(
-    mut reader: AsyncDeflateRecv<ReadHalf<BufStream<AsyncStream>>>,
+    mut reader: WebSocketStreamReader,
     queries_sender: QueryAgent,
     fetches_sender: Arc<QueryResMapper>,
     ws2: WsSender,
     is_v3: bool,
     mut close_listener: watch::Receiver<bool>,
 ) {
-    let parse_frame = |frame: (SimplifiedHeader, &[u8])| {
-        let (header, payload) = frame;
-        let code = header.code;
-        // let payload = payload.to_vec();
-        match code {
-            OpCode::Text => {
-                log::trace!(
-                    "received json response: {payload}",
-                    payload = String::from_utf8_lossy(&payload)
-                );
-                let v: WsRecv = sonic_rs::from_slice(&payload).unwrap();
+    let parse_frame = |frame: Message| {
+        match frame {
+            Message::Text(text) => {
+                log::trace!("received json response: {text}",);
+                let v: WsRecv = sonic_rs::from_str(&text).unwrap();
                 let queries_sender = queries_sender.clone();
                 let ws2 = ws2.clone();
-                tokio::spawn(async move {
-                    let (req_id, data, ok) = v.ok();
-                    match &data {
-                        WsRecvData::Query(_) => {
-                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                if let Err(err) = sender.send(ok.map(|_| data)) {
-                                    log::error!("send data with error: {err:?}");
-                                }
-                            } else {
-                                debug_assert!(!queries_sender.contains(&req_id));
-                                log::warn!("req_id {req_id} not detected, message might be lost");
+                let (req_id, data, ok) = v.ok();
+                match &data {
+                    WsRecvData::Query(_) => {
+                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                            if let Err(err) = sender.send(ok.map(|_| data)) {
+                                log::error!("send data with error: {err:?}");
                             }
+                        } else {
+                            debug_assert!(!queries_sender.contains(&req_id));
+                            log::warn!("req_id {req_id} not detected, message might be lost");
                         }
-                        WsRecvData::Fetch(fetch) => {
-                            let id = fetch.id;
-                            if fetch.completed {
-                                ws2.send_async(
-                                    WsSend::FreeResult(WsResArgs { req_id, id }).to_msg(),
-                                )
-                                .await
-                                .unwrap();
-                            }
-                            // dbg!(&queries_sender);
-                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                let _ = sender.send(ok.map(|_| data));
-                            } else {
-                                log::warn!("req_id {req_id} not detected, message might be lost");
-                            }
-                        }
-                        WsRecvData::FetchBlock => {
-                            assert!(ok.is_err());
-                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                let _ = sender.send(ok.map(|_| data));
-                            } else {
-                                log::warn!("req_id {req_id} not detected, message might be lost");
-                            }
-                        }
-                        WsRecvData::WriteMeta => {
-                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                let _ = sender.send(ok.map(|_| data));
-                            } else {
-                                log::warn!("req_id {req_id} not detected, message might be lost");
-                            }
-                        }
-                        WsRecvData::WriteRaw => {
-                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                let _ = sender.send(ok.map(|_| data));
-                            } else {
-                                log::warn!("req_id {req_id} not detected, message might be lost");
-                            }
-                        }
-                        WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => {
-                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                let _ = sender.send(ok.map(|_| data));
-                            } else {
-                                log::warn!("req_id {req_id} not detected, message might be lost");
-                            }
-                        }
-
-                        // Block type is for binary.
-                        _ => unreachable!(),
                     }
-                });
+                    WsRecvData::Fetch(fetch) => {
+                        let id = fetch.id;
+                        if fetch.completed {
+                            let ws2 = ws2.clone();
+                            tokio::spawn(async move {
+                                let _ = ws2
+                                    .send_async(
+                                        WsSend::FreeResult(WsResArgs { req_id, id })
+                                            .to_tungstenite_msg(),
+                                    )
+                                    .await;
+                            });
+                        }
+                        // dbg!(&queries_sender);
+                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                            let _ = sender.send(ok.map(|_| data));
+                        } else {
+                            log::warn!("req_id {req_id} not detected, message might be lost");
+                        }
+                    }
+                    WsRecvData::FetchBlock => {
+                        assert!(ok.is_err());
+                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                            let _ = sender.send(ok.map(|_| data));
+                        } else {
+                            log::warn!("req_id {req_id} not detected, message might be lost");
+                        }
+                    }
+                    WsRecvData::WriteMeta => {
+                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                            let _ = sender.send(ok.map(|_| data));
+                        } else {
+                            log::warn!("req_id {req_id} not detected, message might be lost");
+                        }
+                    }
+                    WsRecvData::WriteRaw => {
+                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                            let _ = sender.send(ok.map(|_| data));
+                        } else {
+                            log::warn!("req_id {req_id} not detected, message might be lost");
+                        }
+                    }
+                    WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => {
+                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                            let _ = sender.send(ok.map(|_| data));
+                        } else {
+                            log::warn!("req_id {req_id} not detected, message might be lost");
+                        }
+                    }
+
+                    // Block type is for binary.
+                    _ => unreachable!(),
+                }
             }
-            OpCode::Binary => {
+            Message::Binary(payload) => {
                 let queries_sender = queries_sender.clone();
                 let fetches_sender = fetches_sender.clone();
-                let block = payload.to_vec();
+                let block = payload;
                 tokio::spawn(async move {
                     use taos_query::util::InlinableRead;
                     let offset = if is_v3 { 16 } else { 8 };
@@ -498,7 +498,7 @@ async fn read_queries(
                     }
                 });
             }
-            OpCode::Close => {
+            Message::Close(_) => {
                 // taosAdapter should never send close frame to client.
                 // So all close frames should be treated as error.
 
@@ -518,25 +518,17 @@ async fn read_queries(
 
                 return ControlFlow::Break(());
             }
-            OpCode::Ping => {
-                let bytes = payload.to_vec();
+            Message::Ping(data) => {
                 let ws2 = ws2.clone();
                 tokio::spawn(async move {
-                    let _ = ws2
-                        .send_async(WsMessage {
-                            code: OpCode::Pong,
-                            data: bytes.into(),
-                            close_code: None,
-                        })
-                        .await;
+                    let _ = ws2.send_async(Message::Pong(data)).await;
                 });
             }
-            OpCode::Pong => {
+            Message::Pong(_) => {
                 // do nothing
                 log::trace!("received pong message, do nothing");
             }
             _ => {
-                let frame = payload;
                 // do nothing
                 log::warn!("received (unexpected) frame message, do nothing");
                 log::trace!("* frame data: {frame:?}");
@@ -547,13 +539,14 @@ async fn read_queries(
     };
     loop {
         tokio::select! {
-            Ok(frame) = reader.receive() => {
+            Ok(frame) = reader.try_next() => {
+                if let Some(frame) = frame {
                 match parse_frame(frame) {
                     ControlFlow::Break(()) => {
                         break;
                     }
                     _ => {}
-                }
+                }}
             }
             _ = close_listener.changed() => {
                 log::trace!("close reader task");
@@ -617,7 +610,7 @@ pub fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
 }
 
 pub fn is_support_binary_sql(v1: &str) -> bool {
-    is_greater_than_or_equal_to(v1, "3.3.0.0")
+    is_greater_than_or_equal_to(v1, "3.3.0.8")
 }
 
 impl WsTaos {
@@ -632,63 +625,69 @@ impl WsTaos {
         let info = TaosBuilder::from_dsn(dsn)?;
         Self::from_wsinfo(&info).await
     }
-
-    #[instrument]
+    #[allow(dead_code)]
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        let ws = info.ws_tool_build_stream(info.to_query_url()).await?;
+        let ws = info.build_stream(info.to_query_url()).await?;
 
         let req_id = 0;
-        let (mut reader, mut sender) = ws.split();
+        let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
         sender
-            .send(OpCode::Text, &sonic_rs::to_vec(&version).unwrap())
+            .send(version.to_tungstenite_msg())
             .await
-            .map_err(Error::from)?;
-        sender.flush().await.map_err(Error::from)?;
-
-        let duration = Duration::from_secs(15);
-
-        let version = loop {
-            match tokio::time::timeout(duration, reader.receive()).await {
-                Ok(Ok(frame)) => {
-                    let (header, payload) = frame;
-                    let code = header.code;
-                    match code {
-                        OpCode::Text => {
-                            let v: WsRecv = sonic_rs::from_slice(&payload).unwrap();
-                            let (_, data, ok) = v.ok();
+            .map_err(|err| {
+                RawError::any(err)
+                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                    .context("Send version request message error")
+            })?;
+        let duration = Duration::from_secs(8);
+        let version_future = async {
+            let max_non_version = 5;
+            let mut count = 0;
+            loop {
+                count += 1;
+                if let Some(message) = reader.next().await {
+                    match message {
+                        Ok(Message::Text(text)) => {
+                            let v: WsRecv = serde_json::from_str(&text).map_err(|err| {
+                                RawError::any(err)
+                                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                    .context("Parser text as json error")
+                            })?;
+                            let (_req_id, data, ok) = v.ok();
                             match data {
                                 WsRecvData::Version { version } => {
                                     ok?;
-                                    break version;
+                                    return Ok(version);
                                 }
-                                _ => break "2.x".to_string(),
+                                _ => return Ok("2.x".to_string()),
                             }
                         }
-                        OpCode::Ping => {
-                            println!("received ping message");
-                            sender
-                                .send(OpCode::Pong, &payload)
-                                .await
-                                .map_err(Error::from)?;
-                            sender.flush().await.map_err(Error::from)?;
-                            continue;
+                        Ok(Message::Ping(bytes)) => {
+                            sender.send(Message::Pong(bytes)).await.map_err(|err| {
+                                RawError::any(err)
+                                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                    .context("Send pong message error")
+                            })?;
+                            if count >= max_non_version {
+                                return Ok("2.x".to_string());
+                            }
+                            count += 1;
                         }
-                        _ => {
-                            continue;
-                        }
+                        _ => return Ok("2.x".to_string()),
                     }
-                }
-                Ok(Err(err)) => {
-                    warn!("Version fetching error: {:?}", err);
-                    break "2.x".to_string();
-                }
-                Err(err) => {
-                    tracing::warn!("Version fetching timeout: {:?}", err);
-                    break "2.x".to_string();
+                } else {
+                    bail!("Expect version message, but got nothing");
                 }
             }
+        };
+        let version = match tokio::time::timeout(duration, version_future).await {
+            Ok(Ok(version)) => version,
+            Ok(Err(err)) => {
+                return Err(RawError::any(err).context("Version fetching error"));
+            }
+            Err(_) => "2.x".to_string(),
         };
         let is_v3 = !version.starts_with('2');
         let is_support_binary_sql = is_v3 && is_support_binary_sql(&version);
@@ -698,42 +697,40 @@ impl WsTaos {
             req: info.to_conn_request(),
         };
         sender
-            .send(OpCode::Text, &sonic_rs::to_vec(&login).unwrap())
+            .send(login.to_tungstenite_msg())
             .await
             .map_err(Error::from)?;
-        sender.flush().await.map_err(Error::from)?;
-        loop {
-            if let Ok(frame) = reader.receive().await {
-                let (header, payload) = frame;
-                let code = header.code;
-                match code {
-                    OpCode::Text => {
-                        let v: WsRecv = serde_json::from_slice(&payload).unwrap();
-                        let (_req_id, data, ok) = v.ok();
-                        match data {
-                            WsRecvData::Conn => {
-                                tracing::trace!("received ping message");
-                                ok?;
-                                break;
-                            }
-                            _ => unreachable!(),
+        while let Some(Ok(message)) = reader.next().await {
+            match message {
+                Message::Text(text) => {
+                    let v: WsRecv = serde_json::from_str(&text).unwrap();
+                    let (_req_id, data, ok) = v.ok();
+                    match data {
+                        WsRecvData::Conn => {
+                            ok?;
+                            break;
+                        }
+                        WsRecvData::Version { .. } => {
+                            continue;
+                        }
+                        data => {
+                            return Err(RawError::from_string(format!(
+                                "Unexpected login result: {data:?}"
+                            )))
                         }
                     }
-                    OpCode::Ping => {
-                        tracing::debug!("received ping message");
-                        sender
-                            .send(OpCode::Pong, &payload)
-                            .await
-                            .map_err(Error::from)?;
-                        sender.flush().await.map_err(Error::from)?;
-                    }
-                    _ => {
-                        println!("unexpected frame on login: {:?}", frame);
-                        return Err(RawError::from_string(format!(
-                            "unexpected frame on login: {:?}",
-                            frame
-                        )));
-                    }
+                }
+                Message::Ping(bytes) => {
+                    sender
+                        .send(Message::Pong(bytes))
+                        .await
+                        .map_err(|err| RawError::from_any(err))?;
+                }
+                _ => {
+                    return Err(RawError::from_string(format!(
+                        "unexpected message on login: {:?}",
+                        message
+                    )));
                 }
             }
         }
@@ -746,53 +743,50 @@ impl WsTaos {
         let queries2_cloned = queries2.clone();
         let queries3 = queries2.clone();
 
-        let (ws, msg_recv) = flume::bounded(1024);
-        let ws2: flume::Sender<WsMessage<bytes::Bytes>> = ws.clone();
+        let (ws, msg_recv) = flume::bounded(64);
+        let ws2 = ws.clone();
 
         // Connection watcher
         let (tx, mut rx) = watch::channel(false);
         let close_listener = rx.clone();
 
         tokio::spawn(async move {
-            let mut interval = time::interval(Duration::from_secs(29));
+            let mut interval = time::interval(Duration::from_secs(53));
+
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        if let Err(err) = sender.send(OpCode::Ping, b"TAOS").await {
+                        if let Err(err) = sender.send(Message::Ping(b"TAOS".to_vec())).await {
                             log::error!("Write websocket error: {}", err);
                             break;
                         }
                         let _ = sender.flush();
                     }
                     _ = rx.changed() => {
-                        let _ = sender.send(OpCode::Close, b"").await;
+                        let _ = sender.close().await;
                         log::trace!("close sender task");
                         break;
                     }
                     msg = msg_recv.recv_async() => {
                         match msg {
                             Ok(msg) => {
-                                let opcode = msg.code;
-                                let msg = msg.data;
-                                if let Err(err) = sender.send(opcode, &msg).await {
-                                    log::error!("Write websocket error: {}", err);
+                                if let Err(err) = sender.send(msg).await {
+                                log::error!("Write websocket error: {}", err);
                                     let mut keys = Vec::new();
                                     queries3.scan(|k, _| keys.push(*k));
-
                                     for k in keys {
-                                        if let Some((_, sender)) = queries3.remove(&k) {
+                                        if let Some((_, sender)) = queries3.remove_async(&k).await {
                                             let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
                                         }
                                     }
                                     break;
                                 }
-                                let _ = sender.flush();
-                            },
+                            }
                             Err(_) => {
-                                // sender closed.
                                 break;
                             }
                         }
+                        // dbg!(&msg);
                     }
                 }
             }
@@ -952,9 +946,13 @@ impl WsTaos {
 
     pub async fn s_query(&self, sql: &str) -> RawResult<ResultSet> {
         let req_id = self.sender.req_id();
-        return self.s_query_with_req_id(sql, req_id).await;
+        return self
+            .s_query_with_req_id(sql, req_id)
+            .in_current_span()
+            .await;
     }
 
+    #[instrument(skip(self))]
     pub async fn s_query_with_req_id(&self, sql: &str, req_id: u64) -> RawResult<ResultSet> {
         let req;
         if self.is_support_binary_sql() {
@@ -1026,12 +1024,7 @@ impl WsTaos {
                         req_vec.write_u64_le(7).map_err(Error::from).unwrap(); //ActionID, 7 for fetch
                         req_vec.write_u16_le(1).map_err(Error::from).unwrap(); //Version
                         let now = Instant::now();
-                        match sender
-                            .send_recv(WsSend::Binary(bytes::Bytes::copy_from_slice(
-                                req_vec.as_slice(),
-                            )))
-                            .await
-                        {
+                        match sender.send_recv(WsSend::Binary(req_vec.clone())).await {
                             Ok(WsRecvData::BlockNew {
                                 block_code,
                                 block_message,
@@ -1066,7 +1059,7 @@ impl WsTaos {
                             }
                         }
                     }
-                    println!("Spawn metrics: {:?}", metrics);
+                    trace!("Spawn metrics: {:?}", metrics);
                     Ok(())
                 });
             } else {
@@ -1132,7 +1125,7 @@ impl WsTaos {
                             }
                         }
                     }
-                    println!("Spawn metrics: {:?}", metrics);
+                    trace!("Spawn metrics: {:?}", metrics);
                 });
             }
             let blocks_buffer = Some(rx);
@@ -1319,10 +1312,12 @@ impl taos_query::Fetchable for ResultSet {
 impl AsyncQueryable for WsTaos {
     type AsyncResultSet = ResultSet;
 
+    #[instrument(skip_all)]
     async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
-        self.s_query(sql.as_ref()).await
+        self.s_query(sql.as_ref()).in_current_span().await
     }
 
+    #[instrument(skip_all)]
     async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
         &self,
         sql: T,

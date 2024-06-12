@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::NoneAsEmptyString;
@@ -62,7 +61,7 @@ pub enum WsSend {
     },
     Fetch(WsResArgs),
     FetchBlock(WsResArgs),
-    Binary(Bytes),
+    Binary(Vec<u8>),
     FreeResult(WsResArgs),
 }
 
