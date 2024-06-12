@@ -52,6 +52,7 @@ pub struct TaosBuilder {
     server_version: OnceCell<String>,
     // timeout: Duration,
     conn_mode: Option<u32>,
+    compression: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -363,6 +364,12 @@ impl TaosBuilder {
             None => "localhost:6041".to_string(),
         };
 
+        let compression = dsn
+            .params
+            .remove("compression")
+            .and_then(|s| s.parse::<bool>().ok())
+            .unwrap_or(false);
+
         // let timeout = dsn
         //     .params
         //     .remove("timeout")
@@ -378,6 +385,7 @@ impl TaosBuilder {
                 server_version: OnceCell::new(),
                 // timeout,
                 conn_mode,
+                compression,
             })
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
@@ -390,6 +398,7 @@ impl TaosBuilder {
                 server_version: OnceCell::new(),
                 // timeout,
                 conn_mode,
+                compression,
             })
         }
     }
@@ -469,6 +478,13 @@ impl TaosBuilder {
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = None;
+        config.max_message_size = None;
+        #[cfg(feature = "deflate")]
+        {
+            if self.compression {
+                config.compression = Some(Default::default());
+            }
+        }
 
         let res = connect_async_with_config(self.to_ws_url(), Some(config), false)
             .await
