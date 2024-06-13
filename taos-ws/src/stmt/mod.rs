@@ -14,8 +14,6 @@ use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 use tokio::sync::{oneshot, watch};
 
 use tokio_tungstenite::tungstenite::protocol::Message;
-use ws_tool::frame::OpCode;
-use ws_tool::Message as WsMessage;
 
 use crate::query::infra::ToMessage;
 use crate::{Taos, TaosBuilder};
@@ -50,7 +48,7 @@ type StmtPrepareResultResult = RawResult<StmtPrepareResult>;
 type StmtPrepareResultSender = tokio::sync::mpsc::Sender<StmtPrepareResultResult>;
 type StmtPrepareResultReceiver = tokio::sync::mpsc::Receiver<StmtPrepareResultResult>;
 
-type WsSender = tokio::sync::mpsc::Sender<WsMessage<bytes::Bytes>>;
+type WsSender = tokio::sync::mpsc::Sender<Message>;
 
 impl Bindable<super::Taos> for Stmt {
     fn init(taos: &super::Taos) -> RawResult<Self> {
@@ -272,7 +270,7 @@ impl Drop for Stmt {
 
 impl Stmt {
     #[allow(dead_code)]
-    pub(crate) async fn tung_from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
+    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
         let ws = info.build_stream(info.to_stmt_url()).await?;
 
         let req_id = 0;
@@ -318,11 +316,6 @@ impl Stmt {
         let use_result_fetches_sender = use_result_fetches.clone();
 
         let (ws, mut msg_recv) = tokio::sync::mpsc::channel(100);
-        let _ws2 = ws.clone();
-
-        let (ws_integration, mut _msg_recv_integration) = tokio::sync::mpsc::channel(100);
-        let ws2_integration: tokio::sync::mpsc::Sender<WsMessage<bytes::Bytes>> =
-            ws_integration.clone();
 
         // Connection watcher
         let (tx, mut rx) = watch::channel(false);
@@ -457,209 +450,6 @@ impl Stmt {
             queries,
             timeout: Duration::from_secs(5),
             fetches,
-            ws: ws2_integration,
-            close_signal: tx,
-            receiver: None,
-            args: None,
-            affected_rows: 0,
-            affected_rows_once: 0,
-            fields_fetches,
-            fields_receiver: None,
-            param_fetches,
-            param_receiver: None,
-            use_result_fetches,
-            use_result_receiver: None,
-            prepare_result_fetches,
-            prepare_result_receiver: None,
-            is_insert: None,
-        })
-    }
-
-    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        let ws = info.ws_tool_build_stream(info.to_stmt_url()).await?;
-
-        let req_id = 0;
-        let (mut sink, mut source) = ws.split();
-
-        let login = StmtSend::Conn {
-            req_id,
-            req: info.to_conn_request(),
-        };
-        source
-            .send(OpCode::Text, &serde_json::to_vec(&login).unwrap())
-            .await
-            .map_err(Error::from)?;
-        if let Ok(frame) = sink.receive().await {
-            let (header, payload) = frame;
-            let code = header.code;
-            match code {
-                OpCode::Text => {
-                    let v: StmtRecv = serde_json::from_slice(&payload).unwrap();
-                    match v.data {
-                        StmtRecvData::Conn => (),
-                        _ => unreachable!(),
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-
-        let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new());
-        let fetches = Arc::new(HashMap::<StmtId, StmtSender>::new());
-
-        let queries_sender = queries.clone();
-        let fetches_sender = fetches.clone();
-
-        let fields_fetches = Arc::new(HashMap::<StmtId, StmtFieldSender>::new());
-        let fields_fetches_sender = fields_fetches.clone();
-
-        let prepare_result_fetches = Arc::new(HashMap::<StmtId, StmtPrepareResultSender>::new());
-        let prepare_result_fetches_sender = prepare_result_fetches.clone();
-
-        let param_fetches = Arc::new(HashMap::<StmtId, StmtParamSender>::new());
-        let param_fetches_sender = param_fetches.clone();
-
-        let use_result_fetches = Arc::new(HashMap::<StmtId, StmtUseSender>::new());
-        let use_result_fetches_sender = use_result_fetches.clone();
-
-        let (ws, mut msg_recv) = tokio::sync::mpsc::channel(100);
-        let ws2: tokio::sync::mpsc::Sender<WsMessage<bytes::Bytes>> = ws.clone();
-
-        // Connection watcher
-        let (tx, mut rx) = watch::channel(false);
-        let mut close_listener = rx.clone();
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    Some(msg) = msg_recv.recv() => {
-                        let opcode = msg.code;
-                        let msg = msg.data;
-                        if let Err(err) = source.send(opcode, &msg).await {
-                            // ws send error
-                            log::warn!("Sender error: {err:#}");
-                            break;
-                        }
-                    }
-                    _ = rx.changed() => {
-                        log::trace!("close sender task");
-                        break;
-                    }
-                }
-            }
-        });
-
-        // message handler for query/fetch/fetch_block
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    Ok(frame) = sink.receive() => {
-                        let (header, payload) = frame;
-                        let code = header.code;
-                        match code {
-                            OpCode::Text => {
-                                log::trace!("received json response: {payload}", payload = String::from_utf8_lossy(&payload));
-                                let v: StmtRecv = serde_json::from_slice(&payload).unwrap();
-                                match v.ok() {
-                                    StmtOk::Conn(_) => {
-                                        log::warn!("[{req_id}] received connected response in message loop");
-                                    },
-                                    StmtOk::Init(req_id, stmt_id) => {
-                                        log::trace!("stmt init done: {{ req_id: {}, stmt_id: {:?}}}", req_id, stmt_id);
-                                        if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                        {
-                                            sender.send(stmt_id).unwrap();
-                                        }  else {
-                                            log::trace!("Stmt init failed because req id {req_id} not exist");
-                                        }
-                                    }
-                                    StmtOk::Stmt(stmt_id, res) => {
-                                        if let Some(sender) = fetches_sender.get(&stmt_id) {
-                                            log::trace!("send data to fetches with id {}", stmt_id);
-
-                                            sender.send(res).await.unwrap();
-
-                                        } else {
-                                            log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
-                                        }
-                                    }
-                                    StmtOk::StmtPrepare(stmt_id, res) => {
-                                        if let Some(sender) = prepare_result_fetches_sender.get(&stmt_id) {
-                                            log::trace!("send data to fetches with id {}", stmt_id);
-                                            sender.send(res).await.unwrap();
-                                        } else {
-                                            log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
-                                        }
-                                    }
-                                    StmtOk::StmtFields(stmt_id, res) => {
-                                        if let Some(sender) = fields_fetches_sender.get(&stmt_id) {
-                                            log::trace!("send data to fetches with id {}", stmt_id);
-
-                                            sender.send(res).await.unwrap();
-
-                                        } else {
-                                            log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
-                                        }
-                                    }
-                                    StmtOk::StmtParam(stmt_id, res) => {
-                                        if let Some(sender) = param_fetches_sender.get(&stmt_id) {
-                                            log::trace!("send data to fetches with id {}", stmt_id);
-                                            sender.send(res).await.unwrap();
-                                        } else {
-                                            log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
-                                        }
-                                    }
-                                    StmtOk::StmtUseResult(stmt_id, res) => {
-                                        if let Some(sender) = use_result_fetches_sender.get(&stmt_id) {
-                                            log::trace!("send data to fetches with id {}", stmt_id);
-                                            sender.send(res).await.unwrap();
-                                        } else {
-                                            log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
-                                        }
-                                    }
-                                }
-                            }
-                            OpCode::Binary => {
-                                log::warn!("received (unexpected) binary message, do nothing");
-                            }
-                            OpCode::Close => {
-                                log::warn!("websocket connection is closed (unexpected?)");
-                                break;
-                            }
-                            OpCode::Ping => {
-                                let bytes = payload.to_vec();
-                                ws2.send(WsMessage{
-                                    code: OpCode::Pong,
-                                    data: bytes.into(),
-                                    close_code: None
-                                }).await.unwrap();
-                            }
-                            OpCode::Pong => {
-                                // do nothing
-                                log::warn!("received (unexpected) pong message, do nothing");
-                            }
-                            _ => {
-                                let frame = payload;
-                                // do nothing
-                                log::warn!("received (unexpected) frame message, do nothing");
-                                log::trace!("* frame data: {frame:?}");
-                            }
-                        }
-
-                    }
-                    _ = close_listener.changed() => {
-                        log::trace!("close reader task");
-                        break
-                    }
-                }
-            }
-        });
-
-        Ok(Self {
-            req_id: Arc::new(AtomicU64::new(req_id + 1)),
-            queries,
-            timeout: Duration::from_secs(5),
-            fetches,
             ws,
             close_signal: tx,
             receiver: None,
@@ -677,6 +467,7 @@ impl Stmt {
             is_insert: None,
         })
     }
+
     /// Build TDengine websocket client from dsn.
     ///
     /// ```text
@@ -751,7 +542,10 @@ impl Stmt {
             args: self.args.unwrap(),
             sql: sql.to_string(),
         };
-        self.ws.send(prepare.to_msg()).await.map_err(Error::from)?;
+        self.ws
+            .send(prepare.to_tungstenite_msg())
+            .await
+            .map_err(Error::from)?;
         let res = self
             .prepare_result_receiver
             .as_mut()
@@ -813,11 +607,7 @@ impl Stmt {
         );
 
         self.ws
-            .send(ws_tool::Message {
-                code: ws_tool::frame::OpCode::Binary,
-                data: bytes.into(),
-                close_code: None,
-            })
+            .send(Message::binary(bytes))
             .await
             .map_err(Error::from)?;
         let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
@@ -970,7 +760,7 @@ impl Stmt {
             index,
         };
         self.ws
-            .send_timeout(message.to_msg(), self.timeout)
+            .send_timeout(message.to_tungstenite_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
         let param = self.param_receiver.as_mut().unwrap().recv().await.ok_or(

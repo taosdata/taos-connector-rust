@@ -17,12 +17,8 @@ use taos_query::prelude::{Code, RawError};
 use taos_query::prelude::RawResult;
 use tokio::sync::watch;
 
-use tokio::io::BufStream;
-use tokio::io::ReadHalf;
 use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
-
-use ws_tool::{codec::AsyncDeflateRecv, frame::OpCode, stream::AsyncStream, Message as WsMessage};
 
 use infra::*;
 
@@ -118,22 +114,20 @@ async fn read_queries(
                 log::trace!("received json response: {text}",);
                 let v: WsRecv = sonic_rs::from_str(&text).unwrap();
                 let queries_sender = queries_sender.clone();
-                let ws2 = ws2.clone();
-                let (req_id, data, ok) = v.ok();
-                match &data {
-                    WsRecvData::Insert(_) => {
-                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            sender.send(ok.map(|_| data)).unwrap();
-                        } else {
-                            debug_assert!(!queries_sender.contains_key(&req_id));
-                            log::warn!("req_id {req_id} not detected, message might be lost");
+                tokio::task::spawn_blocking(move || {
+                    let (req_id, data, ok) = v.ok();
+                    match &data {
+                        WsRecvData::Insert(_) => {
+                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                sender.send(ok.map(|_| data)).unwrap();
+                            } else {
+                                debug_assert!(!queries_sender.contains_key(&req_id));
+                                log::warn!("req_id {req_id} not detected, message might be lost");
+                            }
                         }
+                        _ => unreachable!(),
                     }
-
-                    _ => unreachable!(),
-                    // Block type is for binary.
-                    _ => unreachable!(),
-                }
+                });
             }
             Message::Binary(payload) => {
                 let block = payload;

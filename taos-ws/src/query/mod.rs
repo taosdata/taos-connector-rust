@@ -427,15 +427,15 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "async")]
     #[tokio::test]
     async fn test_client() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
         use futures::TryStreamExt;
-        use taos_query::{AsyncFetchable, AsyncQueryable};
+        use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};
 
-        let client = TaosBuilder::from_dsn("ws://localhost:6041/")?.build()?;
+        let client = TaosBuilder::from_dsn("ws://localhost:6041/")?;
+        let client = client.build().await?;
         assert_eq!(
             client
                 .exec("create database if not exists ws_test_client")
@@ -465,7 +465,7 @@ mod tests {
             v: i32,
         }
 
-        let values: Vec<A> = rs.deserialize_stream().try_collect().await?;
+        let values: Vec<A> = rs.deserialize().try_collect().await?;
 
         dbg!(values);
 

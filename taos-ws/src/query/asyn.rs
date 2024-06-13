@@ -17,8 +17,6 @@ use tracing::{instrument, trace, Instrument};
 
 use tokio::time::{self, timeout};
 
-use ws_tool::{errors::WsError as WsErrorWst, Message as WsMessage};
-
 use super::{infra::*, TaosBuilder};
 
 use std::fmt::Debug;
@@ -230,26 +228,16 @@ pub enum Error {
     Unauthorized(String),
     #[error("{0}")]
     FetchError(#[from] tokio::sync::oneshot::error::RecvError),
-    #[error("{0}")]
-    SendError(#[from] tokio::sync::mpsc::error::SendError<WsMessage<bytes::Bytes>>),
     #[error(transparent)]
-    SendTimeoutError(#[from] tokio::sync::mpsc::error::SendTimeoutError<WsMessage<bytes::Bytes>>),
-    #[error(transparent)]
-    FlumeSendError(#[from] flume::SendError<WsMessage<bytes::Bytes>>),
-    #[error(transparent)]
-    FlumeSend2Error(#[from] flume::SendError<Message>),
-    #[error(transparent)]
-    FlumeSendTimeoutError(#[from] flume::SendTimeoutError<WsMessage<bytes::Bytes>>),
+    FlumeSendError(#[from] flume::SendError<Message>),
     #[error("Send data via websocket timeout")]
-    SendTimeout(#[from] tokio::time::error::Elapsed),
+    SendTimeoutError(#[from] tokio::time::error::Elapsed),
     #[error("Query timed out with sql: {0}")]
     QueryTimeout(String),
     #[error("{0}")]
     TaosError(#[from] RawError),
     #[error("{0}")]
     DeError(#[from] DeError),
-    #[error("WebSocket internal[ws-tool] error: {0}")]
-    WsErrorWst(#[from] WsErrorWst),
     #[error("WebSocket internal error: {0}")]
     TungsteniteError(#[from] tokio_tungstenite::tungstenite::Error),
     #[error(transparent)]
@@ -294,7 +282,7 @@ impl Error {
             Error::Unauthorized(_) => Code::new(WS_ERROR_NO::UNAUTHORIZED as _),
             Error::Dsn(_) => Code::new(WS_ERROR_NO::DSN_ERROR as _),
             Error::IoError(_) => Code::new(WS_ERROR_NO::IO_ERROR as _),
-            Error::WsErrorWst(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
+            Error::TungsteniteError(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
             // Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
             _ => Code::FAILED,
