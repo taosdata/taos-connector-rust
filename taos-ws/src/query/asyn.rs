@@ -91,7 +91,7 @@ impl WsQuerySender {
 
                 timeout(
                     SEND_TIMEOUT,
-                    self.sender.send_async(msg.to_tungstenite_msg()),
+                    self.sender.send_async(msg.to_msg()),
                 )
                 .await
                 .map_err(Error::from)?
@@ -108,7 +108,7 @@ impl WsQuerySender {
                 log::trace!("[req id: {req_id}] prepare message: {msg:?}");
                 timeout(
                     SEND_TIMEOUT,
-                    self.sender.send_async(msg.to_tungstenite_msg()),
+                    self.sender.send_async(msg.to_msg()),
                 )
                 .await
                 .map_err(Error::from)?
@@ -124,7 +124,7 @@ impl WsQuerySender {
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
         timeout(
             SEND_TIMEOUT,
-            self.sender.send_async(msg.to_tungstenite_msg()),
+            self.sender.send_async(msg.to_msg()),
         )
         .await
         .map_err(Error::from)?
@@ -134,7 +134,7 @@ impl WsQuerySender {
     }
 
     fn send_blocking(&self, msg: WsSend) -> RawResult<()> {
-        let _ = self.sender.send(msg.to_tungstenite_msg());
+        let _ = self.sender.send(msg.to_msg());
         Ok(())
     }
 }
@@ -346,7 +346,7 @@ async fn read_queries(
                                 let _ = ws2
                                     .send_async(
                                         WsSend::FreeResult(WsResArgs { req_id, id })
-                                            .to_tungstenite_msg(),
+                                            .to_msg(),
                                     )
                                     .await;
                             });
@@ -622,7 +622,7 @@ impl WsTaos {
 
         let version = WsSend::Version;
         sender
-            .send(version.to_tungstenite_msg())
+            .send(version.to_msg())
             .await
             .map_err(|err| {
                 RawError::any(err)
@@ -685,7 +685,7 @@ impl WsTaos {
             req: info.to_conn_request(),
         };
         sender
-            .send(login.to_tungstenite_msg())
+            .send(login.to_msg())
             .await
             .map_err(Error::from)?;
         while let Some(Ok(message)) = reader.next().await {

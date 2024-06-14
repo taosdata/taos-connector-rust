@@ -169,7 +169,7 @@ impl WsRecv {
 
 pub(crate) trait ToMessage: Serialize {
     // #[cfg(feature = "async")]
-    fn to_tungstenite_msg(&self) -> tokio_tungstenite::tungstenite::Message {
+    fn to_msg(&self) -> tokio_tungstenite::tungstenite::Message {
         tokio_tungstenite::tungstenite::Message::Text(serde_json::to_string(self).unwrap())
     }
 }
