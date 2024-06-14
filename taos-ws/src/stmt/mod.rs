@@ -281,7 +281,7 @@ impl Stmt {
             req: info.to_conn_request(),
         };
         sender
-            .send(login.to_tungstenite_msg())
+            .send(login.to_msg())
             .await
             .map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {
@@ -543,7 +543,7 @@ impl Stmt {
             sql: sql.to_string(),
         };
         self.ws
-            .send(prepare.to_tungstenite_msg())
+            .send(prepare.to_msg())
             .await
             .map_err(Error::from)?;
         let res = self
@@ -574,7 +574,7 @@ impl Stmt {
         };
         {
             log::trace!("bind with: {message:?}");
-            log::trace!("bind string: {}", message.to_tungstenite_msg());
+            log::trace!("bind string: {}", message.to_msg());
             self.ws.send(message.to_msg()).await.map_err(Error::from)?;
         }
         log::trace!("begin receive");
@@ -760,7 +760,7 @@ impl Stmt {
             index,
         };
         self.ws
-            .send_timeout(message.to_tungstenite_msg(), self.timeout)
+            .send_timeout(message.to_msg(), self.timeout)
             .await
             .map_err(Error::from)?;
         let param = self.param_receiver.as_mut().unwrap().recv().await.ok_or(

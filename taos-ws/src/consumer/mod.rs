@@ -65,7 +65,7 @@ impl WsTmqSender {
         self.queries.insert(req_id, tx);
 
         self.sender
-            .send_timeout(msg.to_tungstenite_msg(), send_timeout)
+            .send_timeout(msg.to_msg(), send_timeout)
             .await
             .map_err(WsTmqError::from)?;
 
