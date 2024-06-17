@@ -36,6 +36,14 @@ pub enum WsAuth {
     Plain(String, String),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Retries(u32);
+
+impl Default for Retries {
+    fn default() -> Self {
+        Self(5)
+    }
+}
 #[derive(Debug, Clone)]
 pub struct TaosBuilder {
     scheme: &'static str, // ws or wss
@@ -46,6 +54,7 @@ pub struct TaosBuilder {
     // timeout: Duration,
     conn_mode: Option<u32>,
     compression: bool,
+    conn_retries: Retries,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -109,11 +118,7 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn build(&self) -> RawResult<Self::Target> {
-        Ok(Taos {
-            dsn: self.clone(),
-            async_client: OnceCell::new(),
-            async_sml: OnceCell::new(),
-        })
+        block_in_place_or_global(Taos::from_builder(self.clone()))
     }
 
     fn server_version(&self) -> RawResult<&str> {
@@ -221,11 +226,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     }
 
     async fn build(&self) -> RawResult<Self::Target> {
-        Ok(Taos {
-            dsn: self.clone(),
-            async_client: OnceCell::new(),
-            async_sml: OnceCell::new(),
-        })
+        Taos::from_builder(self.clone()).await
     }
 
     async fn server_version(&self) -> RawResult<&str> {
@@ -363,6 +364,11 @@ impl TaosBuilder {
             .and_then(|s| s.parse::<bool>().ok())
             .unwrap_or(false);
 
+        let conn_retries = dsn.remove("conn_retries").map_or_else(
+            || Retries::default(),
+            |s| Retries(s.parse::<u32>().unwrap_or(5)),
+        );
+
         // let timeout = dsn
         //     .params
         //     .remove("timeout")
@@ -379,6 +385,7 @@ impl TaosBuilder {
                 // timeout,
                 conn_mode,
                 compression,
+                conn_retries,
             })
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
@@ -392,6 +399,7 @@ impl TaosBuilder {
                 // timeout,
                 conn_mode,
                 compression,
+                conn_retries,
             })
         }
     }
@@ -472,44 +480,52 @@ impl TaosBuilder {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = None;
         config.max_message_size = None;
-        #[cfg(feature = "deflate")]
-        {
-            if self.compression {
-                config.compression = Some(Default::default());
+        if self.compression {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "deflate")] {
+                    config.compression = Some(Default::default());
+                } else {
+                    tracing::warn!("WebSocket compression is not supported unless with `deflate` feature");
+                }
             }
         }
 
-        let res = connect_async_with_config(self.to_ws_url(), Some(config), false)
-            .await
-            .map_err(|err| {
-                let err_string = err.to_string();
-                if err_string.contains("401 Unauthorized") {
-                    QueryError::Unauthorized(self.to_ws_url())
-                } else {
-                    err.into()
+        let mut retries = 0;
+        loop {
+            match connect_async_with_config(self.to_ws_url(), Some(config), false).await {
+                Ok((ws, _)) => {
+                    return Ok(ws);
                 }
-            });
-
-        let (ws, _) = match res {
-            Ok(res) => res,
-            Err(err) => {
-                if err.to_string().contains("404 Not Found") || err.to_string().contains("400") {
-                    connect_async_with_config(&url, Some(config), false)
-                        .await
-                        .map_err(|err| {
-                            let err_string = err.to_string();
-                            if err_string.contains("401 Unauthorized") {
-                                QueryError::Unauthorized(url)
-                            } else {
-                                err.into()
+                Err(err) => {
+                    let err_string = err.to_string();
+                    if err_string.contains("401 Unauthorized") {
+                        return Err(QueryError::Unauthorized(self.to_ws_url()).into());
+                    } else if err.to_string().contains("404 Not Found")
+                        || err.to_string().contains("400")
+                    {
+                        match connect_async_with_config(&url, Some(config), false).await {
+                            Ok((ws, _)) => return Ok(ws),
+                            Err(err) => {
+                                let err_string = err.to_string();
+                                if err_string.contains("401 Unauthorized") {
+                                    return Err(QueryError::Unauthorized(url).into());
+                                }
                             }
-                        })?
-                } else {
-                    return Err(err.into());
+                        }
+                    }
+
+                    if retries >= self.conn_retries.0 {
+                        return Err(QueryError::from(err).into());
+                    }
+                    retries += 1;
+                    tracing::warn!(
+                        "Failed to connect to {}, retrying...({})",
+                        self.to_ws_url(),
+                        retries
+                    );
                 }
             }
-        };
-        Ok(ws)
+        }
     }
 
     // pub(crate) async fn build_tmq_stream(

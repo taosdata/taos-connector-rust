@@ -280,10 +280,7 @@ impl Stmt {
             req_id,
             req: info.to_conn_request(),
         };
-        sender
-            .send(login.to_msg())
-            .await
-            .map_err(Error::from)?;
+        sender.send(login.to_msg()).await.map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {
             match message {
                 Message::Text(text) => {
@@ -542,10 +539,7 @@ impl Stmt {
             args: self.args.unwrap(),
             sql: sql.to_string(),
         };
-        self.ws
-            .send(prepare.to_msg())
-            .await
-            .map_err(Error::from)?;
+        self.ws.send(prepare.to_msg()).await.map_err(Error::from)?;
         let res = self
             .prepare_result_receiver
             .as_mut()
@@ -773,7 +767,7 @@ impl Stmt {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use taos_query::{common::ColumnView, Dsn, TBuilder};
+    use taos_query::{common::ColumnView, AsyncTBuilder, Dsn};
 
     use crate::{stmt::Stmt, TaosBuilder};
 
@@ -785,7 +779,7 @@ mod tests {
         let db = "stmt";
         let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or(default_dsn.to_string());
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!("create table {db}.ctb (ts timestamp, v int)"))
@@ -820,7 +814,7 @@ mod tests {
         let db = "stmt_sj";
         let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or(default_dsn.to_string());
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!(
@@ -866,7 +860,7 @@ mod tests {
         let dsn = Dsn::try_from("taos://localhost:6041")?;
         dbg!(&dsn);
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
+        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build().await?;
         taos.exec("drop database if exists ws_stmt_sj2").await?;
         taos.exec("create database ws_stmt_sj2").await?;
         taos.exec("create table ws_stmt_sj2.stb (ts timestamp, v int) tags(tj json)")
@@ -928,7 +922,7 @@ mod tests {
 
         let db = "ws_stmt_use_result";
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!(
@@ -964,13 +958,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_stmt_use_result_usage_error() -> anyhow::Result<()> {
-        use taos_query::AsyncQueryable;
+        use taos_query::{AsyncQueryable, AsyncTBuilder};
 
         let dsn = Dsn::try_from("taos://localhost:6041")?;
 
         let db = "ws_stmt_use_result_usage_error";
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!(
@@ -1031,7 +1025,7 @@ mod tests {
 
         let db = "ws_stmt_num_params";
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!(
@@ -1089,7 +1083,7 @@ mod tests {
         let dsn = Dsn::try_from("taos://localhost:6041")?;
         dbg!(&dsn);
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
+        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build().await?;
         taos.exec("drop database if exists stmt_s").await?;
         taos.exec("create database stmt_s").await?;
         taos.exec("create table stmt_s.stb (ts timestamp, v int) tags(t1 int)")
