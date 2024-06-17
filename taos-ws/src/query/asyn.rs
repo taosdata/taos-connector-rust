@@ -89,13 +89,10 @@ impl WsQuerySender {
                 }
                 let _ = self.results.insert_async(args.id, args.req_id).await;
 
-                timeout(
-                    SEND_TIMEOUT,
-                    self.sender.send_async(msg.to_msg()),
-                )
-                .await
-                .map_err(Error::from)?
-                .map_err(Error::from)?;
+                timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
+                    .await
+                    .map_err(Error::from)?
+                    .map_err(Error::from)?;
                 //
             }
             WsSend::Binary(bytes) => {
@@ -106,13 +103,10 @@ impl WsQuerySender {
             }
             _ => {
                 log::trace!("[req id: {req_id}] prepare message: {msg:?}");
-                timeout(
-                    SEND_TIMEOUT,
-                    self.sender.send_async(msg.to_msg()),
-                )
-                .await
-                .map_err(Error::from)?
-                .map_err(Error::from)?;
+                timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
+                    .await
+                    .map_err(Error::from)?
+                    .map_err(Error::from)?;
             }
         }
         // handle the error
@@ -122,14 +116,11 @@ impl WsQuerySender {
         Ok(res)
     }
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
-        timeout(
-            SEND_TIMEOUT,
-            self.sender.send_async(msg.to_msg()),
-        )
-        .await
-        .map_err(Error::from)?
-        // .await
-        .map_err(Error::from)?;
+        timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
+            .await
+            .map_err(Error::from)?
+            // .await
+            .map_err(Error::from)?;
         Ok(())
     }
 
@@ -345,8 +336,7 @@ async fn read_queries(
                             tokio::spawn(async move {
                                 let _ = ws2
                                     .send_async(
-                                        WsSend::FreeResult(WsResArgs { req_id, id })
-                                            .to_msg(),
+                                        WsSend::FreeResult(WsResArgs { req_id, id }).to_msg(),
                                     )
                                     .await;
                             });
@@ -621,14 +611,11 @@ impl WsTaos {
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
-        sender
-            .send(version.to_msg())
-            .await
-            .map_err(|err| {
-                RawError::any(err)
-                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
-                    .context("Send version request message error")
-            })?;
+        sender.send(version.to_msg()).await.map_err(|err| {
+            RawError::any(err)
+                .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                .context("Send version request message error")
+        })?;
         let duration = Duration::from_secs(8);
         let version_future = async {
             let max_non_version = 5;
@@ -684,10 +671,7 @@ impl WsTaos {
             req_id,
             req: info.to_conn_request(),
         };
-        sender
-            .send(login.to_msg())
-            .await
-            .map_err(Error::from)?;
+        sender.send(login.to_msg()).await.map_err(Error::from)?;
         while let Some(Ok(message)) = reader.next().await {
             match message {
                 Message::Text(text) => {
