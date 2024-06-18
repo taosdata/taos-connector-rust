@@ -860,7 +860,9 @@ mod tests {
         let dsn = Dsn::try_from("taos://localhost:6041")?;
         dbg!(&dsn);
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build().await?;
+        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
+            .build()
+            .await?;
         taos.exec("drop database if exists ws_stmt_sj2").await?;
         taos.exec("create database ws_stmt_sj2").await?;
         taos.exec("create table ws_stmt_sj2.stb (ts timestamp, v int) tags(tj json)")
@@ -1083,7 +1085,9 @@ mod tests {
         let dsn = Dsn::try_from("taos://localhost:6041")?;
         dbg!(&dsn);
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build().await?;
+        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
+            .build()
+            .await?;
         taos.exec("drop database if exists stmt_s").await?;
         taos.exec("create database stmt_s").await?;
         taos.exec("create table stmt_s.stb (ts timestamp, v int) tags(t1 int)")

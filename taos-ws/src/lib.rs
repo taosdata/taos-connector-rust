@@ -361,7 +361,13 @@ impl TaosBuilder {
         let compression = dsn
             .params
             .remove("compression")
-            .and_then(|s| s.parse::<bool>().ok())
+            .and_then(|s| {
+                if s.trim().is_empty() {
+                    Some(true)
+                } else {
+                    s.trim().parse::<bool>().ok()
+                }
+            })
             .unwrap_or(false);
 
         let conn_retries = dsn.remove("conn_retries").map_or_else(
@@ -483,6 +489,7 @@ impl TaosBuilder {
         if self.compression {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "deflate")] {
+                    tracing::debug!(url, "Eanble compression");
                     config.compression = Some(Default::default());
                 } else {
                     tracing::warn!("WebSocket compression is not supported unless with `deflate` feature");

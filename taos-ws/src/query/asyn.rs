@@ -111,7 +111,10 @@ impl WsQuerySender {
         }
         // handle the error
         log::trace!("[req id: {req_id}] message sent, wait for receiving");
-        let res = rx.await.unwrap().map_err(Error::from)?;
+        let res = rx
+            .await
+            .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
+            .map_err(Error::from)?;
         log::trace!("[req id: {req_id}] message received: {res:?}");
         Ok(res)
     }
