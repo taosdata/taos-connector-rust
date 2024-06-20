@@ -44,6 +44,7 @@ flume = "0.11"
 cfg-if = "1"
 
 [dependencies.tokio-tungstenite]
+version = "0.23"
 git = "https://github.com/taosdata/tokio-tungstenite.git"
 branch = "feat/taosdata/permessage-deflate"
 
