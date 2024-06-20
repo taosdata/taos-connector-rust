@@ -175,6 +175,15 @@ impl VarCharView {
         // Ok(offsets.len() + self.data.len())
     }
 
+    pub fn reserved_raw_bytes(&self) -> u32 {
+        (dbg!(self.offsets.as_bytes().len())
+            + dbg!(self
+                .iter()
+                .flatten()
+                .map(|v| v.as_bytes().len() + 2)
+                .sum::<usize>())) as _
+    }
+
     pub fn from_iter<
         S: AsRef<str>,
         T: Into<Option<S>>,
