@@ -49,6 +49,7 @@ name = "query"
 deadpool = ["taos-query/deadpool"]
 default = ["ws-rustls", "optin", "deadpool"]
 optin = ["taos-optin"]
+native = ["optin"]
 r2d2 = ["taos-query/r2d2"]
 ws = ["taos-ws"]
 ws-native-tls = ["ws", "taos-ws/native-tls-vendored"]
