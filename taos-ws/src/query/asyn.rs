@@ -1329,7 +1329,7 @@ mod tests {
         std::env::set_var("RUST_LOG", "debug");
 
         let version_a: &str = "3.3.0.0";
-        let version_b: &str = "3.3.1.0";
+        let version_b: &str = "3.3.3.0";
         let version_c: &str = "2.6.0";
 
         assert_eq!(is_support_binary_sql(version_a), false);
