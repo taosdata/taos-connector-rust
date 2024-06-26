@@ -430,17 +430,18 @@ pub(crate) struct StmtApi {
     pub(crate) taos_stmt_prepare:
         unsafe extern "C" fn(stmt: *mut TAOS_STMT, sql: *const c_char, length: c_ulong) -> c_int,
 
-    pub(crate) taos_stmt_set_tbname_tags:
+    pub(crate) taos_stmt_set_tbname_tags: Option<
         unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char, tags: *mut c_void) -> c_int,
+    >,
 
     pub(crate) taos_stmt_set_tbname:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int,
+        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int>,
 
     pub(crate) taos_stmt_set_tags:
         Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT, tags: *mut c_void) -> c_int>,
 
     pub(crate) taos_stmt_set_sub_tbname:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int,
+        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int>,
 
     pub(crate) taos_stmt_is_insert:
         unsafe extern "C" fn(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int,
@@ -459,25 +460,28 @@ pub(crate) struct StmtApi {
         unsafe extern "C" fn(stmt: *mut TAOS_STMT, bind: *const c_void) -> c_int,
 
     pub(crate) taos_stmt_bind_param_batch:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, bind: *const TaosMultiBind) -> c_int,
+        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT, bind: *const TaosMultiBind) -> c_int>,
 
-    pub(crate) taos_stmt_bind_single_param_batch: unsafe extern "C" fn(
-        stmt: *mut TAOS_STMT,
-        bind: *const TaosMultiBind,
-        colIdx: c_int,
-    ) -> c_int,
+    pub(crate) taos_stmt_bind_single_param_batch: Option<
+        unsafe extern "C" fn(
+            stmt: *mut TAOS_STMT,
+            bind: *const TaosMultiBind,
+            colIdx: c_int,
+        ) -> c_int,
+    >,
 
     pub(crate) taos_stmt_add_batch: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
 
     pub(crate) taos_stmt_execute: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
 
-    pub(crate) taos_stmt_affected_rows: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
+    pub(crate) taos_stmt_affected_rows: Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int>,
 
     pub(crate) taos_stmt_use_result: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> *mut TAOS_RES,
 
     pub(crate) taos_stmt_close: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
 
-    pub(crate) taos_stmt_errstr: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> *const c_char,
+    pub(crate) taos_stmt_errstr:
+        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> *const c_char>,
 }
 const fn default_lib_name() -> &'static str {
     if cfg!(target_os = "windows") {
@@ -581,27 +585,30 @@ impl ApiEntry {
                 taos_get_tables_vgId
             );
 
-            // stmt
+            // stmt 2.0.22.3
             symbol!(
                 taos_stmt_init,
                 taos_stmt_prepare,
-                taos_stmt_set_tbname_tags,
-                taos_stmt_set_tbname,
-                taos_stmt_set_sub_tbname,
                 taos_stmt_is_insert,
                 taos_stmt_num_params,
                 taos_stmt_get_param,
                 taos_stmt_bind_param,
-                taos_stmt_bind_param_batch,
-                taos_stmt_bind_single_param_batch,
                 taos_stmt_add_batch,
                 taos_stmt_execute,
-                taos_stmt_affected_rows,
                 taos_stmt_use_result,
-                taos_stmt_close,
-                taos_stmt_errstr
+                taos_stmt_close
             );
-            optional_symbol!(taos_stmt_set_tags, taos_stmt_init_with_reqid);
+            optional_symbol!(
+                taos_stmt_set_tags,
+                taos_stmt_init_with_reqid,
+                taos_stmt_set_tbname_tags,         // 2.6.0.65
+                taos_stmt_set_tbname,              // 2.6.0.65
+                taos_stmt_set_sub_tbname,          // 2.6.0.65
+                taos_stmt_bind_param_batch,        // 2.6.0.65
+                taos_stmt_bind_single_param_batch, // 2.6.0.65
+                taos_stmt_affected_rows,           // 2.6.0.65
+                taos_stmt_errstr                   // 2.6.0.65
+            );
 
             let stmt = StmtApi {
                 taos_stmt_init,
@@ -761,6 +768,10 @@ impl ApiEntry {
     }
     pub fn version(&self) -> &str {
         &self.version
+    }
+
+    pub fn is_v20(&self) -> bool {
+        self.version.starts_with("2.0")
     }
 
     pub fn is_v3(&self) -> bool {
@@ -953,7 +964,19 @@ impl RawTaos {
 
     #[inline]
     pub fn query_async<'a, S: IntoCStr<'a>>(&self, sql: S) -> QueryFuture<'a> {
-        QueryFuture::new(self.clone(), sql)
+        let sql = if self.c.is_v20() {
+            // remove all backquotes
+            sql.into_c_str()
+                .to_str()
+                .unwrap()
+                .chars()
+                .filter(|c| *c != '`')
+                .collect::<String>()
+                .into_c_str()
+        } else {
+            sql.into_c_str()
+        };
+        QueryFuture::new(self.clone(), sql.into_owned())
     }
 
     #[inline]
@@ -1455,8 +1478,36 @@ impl RawRes {
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         if self.c.is_v3() {
             self.fetch_raw_block_async_v3(fields, precision, state, cx)
+        } else if self.c.is_v20() {
+            self.fetch_raw_block_async_v20(fields, precision, state, cx)
         } else {
             self.fetch_raw_block_async_v2(fields, precision, state, cx)
+        }
+    }
+
+    pub fn fetch_raw_block_async_v20(
+        &self,
+        fields: &[Field],
+        precision: Precision,
+        _state: &Arc<UnsafeCell<BlockState>>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<RawBlock>, RawError>> {
+        let block = Box::into_raw(Box::new(std::ptr::null_mut()));
+        let res = unsafe { (self.c.taos_fetch_block)(self.as_ptr(), block) };
+        if res > 0 {
+            let block = unsafe { *block };
+            let raw = unsafe {
+                RawBlock::parse_from_ptr_v2(
+                    block as _,
+                    fields,
+                    self.fetch_lengths(),
+                    res as usize,
+                    precision,
+                )
+            };
+            Poll::Ready(Ok(Some(raw)))
+        } else {
+            Poll::Ready(Ok(None))
         }
     }
 
@@ -1521,7 +1572,10 @@ impl RawRes {
                     // success
                     if num_of_rows > 0 {
                         // has a block
-                        let block = (param.1.taos_result_block.unwrap())(res).read() as _;
+                        let block = match param.1.taos_result_block {
+                            Some(f) => (f)(res).read() as _,
+                            None => todo!(),
+                        };
                         state
                             .result
                             .replace(Ok(Some((block, num_of_rows as usize))));

@@ -2,7 +2,6 @@
 use std::fmt::{Debug, Display};
 
 use log::warn;
-use maplit::hashmap;
 use once_cell::sync::OnceCell;
 
 use taos_query::prelude::Code;
@@ -31,18 +30,20 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::{connect_async_with_config, WebSocketStream};
 
-#[allow(unused_imports)]
-use ws_tool::codec::{AsyncDeflateCodec, WindowBit};
-
-pub mod client;
-pub use client::ClientConfig;
-
 #[derive(Debug, Clone)]
 pub enum WsAuth {
     Token(String),
     Plain(String, String),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Retries(u32);
+
+impl Default for Retries {
+    fn default() -> Self {
+        Self(5)
+    }
+}
 #[derive(Debug, Clone)]
 pub struct TaosBuilder {
     scheme: &'static str, // ws or wss
@@ -52,6 +53,8 @@ pub struct TaosBuilder {
     server_version: OnceCell<String>,
     // timeout: Duration,
     conn_mode: Option<u32>,
+    compression: bool,
+    conn_retries: Retries,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -115,11 +118,7 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn build(&self) -> RawResult<Self::Target> {
-        Ok(Taos {
-            dsn: self.clone(),
-            async_client: OnceCell::new(),
-            async_sml: OnceCell::new(),
-        })
+        block_in_place_or_global(Taos::from_builder(self.clone()))
     }
 
     fn server_version(&self) -> RawResult<&str> {
@@ -227,11 +226,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     }
 
     async fn build(&self) -> RawResult<Self::Target> {
-        Ok(Taos {
-            dsn: self.clone(),
-            async_client: OnceCell::new(),
-            async_sml: OnceCell::new(),
-        })
+        Taos::from_builder(self.clone()).await
     }
 
     async fn server_version(&self) -> RawResult<&str> {
@@ -363,6 +358,23 @@ impl TaosBuilder {
             None => "localhost:6041".to_string(),
         };
 
+        let compression = dsn
+            .params
+            .remove("compression")
+            .and_then(|s| {
+                if s.trim().is_empty() {
+                    Some(true)
+                } else {
+                    s.trim().parse::<bool>().ok()
+                }
+            })
+            .unwrap_or(false);
+
+        let conn_retries = dsn.remove("conn_retries").map_or_else(
+            || Retries::default(),
+            |s| Retries(s.parse::<u32>().unwrap_or(5)),
+        );
+
         // let timeout = dsn
         //     .params
         //     .remove("timeout")
@@ -378,6 +390,8 @@ impl TaosBuilder {
                 server_version: OnceCell::new(),
                 // timeout,
                 conn_mode,
+                compression,
+                conn_retries,
             })
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
@@ -390,6 +404,8 @@ impl TaosBuilder {
                 server_version: OnceCell::new(),
                 // timeout,
                 conn_mode,
+                compression,
+                conn_retries,
             })
         }
     }
@@ -469,151 +485,100 @@ impl TaosBuilder {
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = None;
-
-        let res = connect_async_with_config(self.to_ws_url(), Some(config), false)
-            .await
-            .map_err(|err| {
-                let err_string = err.to_string();
-                if err_string.contains("401 Unauthorized") {
-                    QueryError::Unauthorized(self.to_ws_url())
+        config.max_message_size = None;
+        if self.compression {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "deflate")] {
+                    tracing::debug!(url, "Eanble compression");
+                    config.compression = Some(Default::default());
                 } else {
-                    err.into()
-                }
-            });
-
-        let (ws, _) = match res {
-            Ok(res) => res,
-            Err(err) => {
-                if err.to_string().contains("404 Not Found") || err.to_string().contains("400") {
-                    connect_async_with_config(&url, Some(config), false)
-                        .await
-                        .map_err(|err| {
-                            let err_string = err.to_string();
-                            if err_string.contains("401 Unauthorized") {
-                                QueryError::Unauthorized(url)
-                            } else {
-                                err.into()
-                            }
-                        })?
-                } else {
-                    return Err(err.into());
+                    tracing::warn!("WebSocket compression is not supported unless with `deflate` feature");
                 }
             }
-        };
-        Ok(ws)
-    }
-
-    pub(crate) async fn ws_tool_build_stream(
-        &self,
-        url: String,
-    ) -> RawResult<AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>> {
-        let mut config = ClientConfig::default();
-
-        #[cfg(feature = "deflate")]
-        {
-            config.window = Some(WindowBit::Fifteen);
-            config.extra_headers = hashmap! {
-                "Accept-Encoding".to_string() => "gzip, deflate".to_string(),
-            };
-        }
-        #[cfg(not(feature = "deflate"))]
-        {
-            config.window = None;
-            config.extra_headers = hashmap! {
-                "Accept-Encoding".to_string() => "gzip".to_string(),
-            };
         }
 
-        log::trace!(
-            "ws_tool config window: {:?}, headers: {:?}",
-            &config.window,
-            &config.extra_headers
-        );
-
-        let res: Result<
-            AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>,
-            QueryError,
-        > = config
-            .async_connect_with(self.to_ws_url(), AsyncDeflateCodec::check_fn)
-            .await
-            .map_err(|err| {
-                let err_string = err.to_string();
-                if err_string.contains("401 Unauthorized") {
-                    QueryError::Unauthorized(self.to_ws_url())
-                } else {
-                    err.into()
+        let mut retries = 0;
+        loop {
+            match connect_async_with_config(self.to_ws_url(), Some(config), false).await {
+                Ok((ws, _)) => {
+                    return Ok(ws);
                 }
-            });
-
-        let ws: AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>> = match res {
-            Ok(res) => res,
-            Err(err) => {
-                let uri = url.clone();
-                if err.to_string().contains("404 Not Found") || err.to_string().contains("400") {
-                    config
-                        .async_connect_with(uri, AsyncDeflateCodec::check_fn)
-                        .await
-                        .map_err(|err| {
-                            let err_string = err.to_string();
-                            if err_string.contains("401 Unauthorized") {
-                                QueryError::Unauthorized(url)
-                            } else {
-                                err.into()
+                Err(err) => {
+                    let err_string = err.to_string();
+                    if err_string.contains("401 Unauthorized") {
+                        return Err(QueryError::Unauthorized(self.to_ws_url()).into());
+                    } else if err.to_string().contains("404 Not Found")
+                        || err.to_string().contains("400")
+                    {
+                        match connect_async_with_config(&url, Some(config), false).await {
+                            Ok((ws, _)) => return Ok(ws),
+                            Err(err) => {
+                                let err_string = err.to_string();
+                                if err_string.contains("401 Unauthorized") {
+                                    return Err(QueryError::Unauthorized(url).into());
+                                }
                             }
-                        })?
-                } else {
-                    return Err(err.into());
+                        }
+                    }
+
+                    if retries >= self.conn_retries.0 {
+                        return Err(QueryError::from(err).into());
+                    }
+                    retries += 1;
+                    tracing::warn!(
+                        "Failed to connect to {}, retrying...({})",
+                        self.to_ws_url(),
+                        retries
+                    );
                 }
             }
-        };
-
-        Ok(ws)
+        }
     }
 
-    pub(crate) async fn build_tmq_stream(
-        &self,
-        url: String,
-    ) -> RawResult<AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>> {
-        let mut config = ClientConfig::default();
+    // pub(crate) async fn build_tmq_stream(
+    //     &self,
+    //     url: String,
+    // ) -> RawResult<AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>> {
+    //     let mut config = ClientConfig::default();
 
-        #[cfg(feature = "deflate")]
-        {
-            config.window = Some(WindowBit::Fifteen);
-            config.extra_headers = hashmap! {
-                "Accept-Encoding".to_string() => "gzip, deflate".to_string(),
-            };
-        }
-        #[cfg(not(feature = "deflate"))]
-        {
-            config.window = None;
-            config.extra_headers = hashmap! {
-                "Accept-Encoding".to_string() => "gzip".to_string(),
-            };
-        }
+    //     #[cfg(feature = "deflate")]
+    //     {
+    //         config.window = Some(WindowBit::Fifteen);
+    //         config.extra_headers = hashmap! {
+    //             "Accept-Encoding".to_string() => "gzip, deflate".to_string(),
+    //         };
+    //     }
+    //     #[cfg(not(feature = "deflate"))]
+    //     {
+    //         config.window = None;
+    //         config.extra_headers = hashmap! {
+    //             "Accept-Encoding".to_string() => "gzip".to_string(),
+    //         };
+    //     }
 
-        log::trace!(
-            "ws_tool config window: {:?}, headers: {:?}",
-            &config.window,
-            &config.extra_headers
-        );
+    //     log::trace!(
+    //         "ws_tool config window: {:?}, headers: {:?}",
+    //         &config.window,
+    //         &config.extra_headers
+    //     );
 
-        let ws: Result<
-            AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>,
-            QueryError,
-        > = config
-            .async_connect_with(url.clone(), AsyncDeflateCodec::check_fn)
-            .await
-            .map_err(|err| {
-                let err_string = err.to_string();
-                if err_string.contains("401 Unauthorized") {
-                    QueryError::Unauthorized(url)
-                } else {
-                    err.into()
-                }
-            });
+    //     let ws: Result<
+    //         AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>,
+    //         QueryError,
+    //     > = config
+    //         .async_connect_with(url.clone(), AsyncDeflateCodec::check_fn)
+    //         .await
+    //         .map_err(|err| {
+    //             let err_string = err.to_string();
+    //             if err_string.contains("401 Unauthorized") {
+    //                 QueryError::Unauthorized(url)
+    //             } else {
+    //                 err.into()
+    //             }
+    //         });
 
-        Ok(ws?)
-    }
+    //     Ok(ws?)
+    // }
 }
 
 #[cfg(feature = "rustls")]
@@ -628,7 +593,6 @@ mod lib_tests {
     use std::time::Duration;
     use tracing::*;
     use tracing_subscriber::util::SubscriberInitExt;
-    use ws_tool::frame::OpCode;
 
     #[cfg(feature = "rustls")]
     #[tokio::test]
@@ -650,7 +614,7 @@ mod lib_tests {
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
-        sender.send(version.to_tungstenite_msg()).await?;
+        sender.send(version.to_msg()).await?;
 
         let _handle = tokio::spawn(async move {
             loop {
@@ -659,121 +623,6 @@ mod lib_tests {
                     let recv: WsRecv = serde_json::from_str(text).unwrap();
                     info!("recv: {:?}", recv);
                     assert_eq!(recv.code, 0);
-                }
-            }
-        });
-
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-
-        Ok(())
-    }
-
-    #[cfg(feature = "rustls")]
-    #[tokio::test]
-    async fn test_ws_tool_build_stream() -> Result<(), anyhow::Error> {
-        let _subscriber = tracing_subscriber::fmt::fmt()
-            .with_max_level(Level::DEBUG)
-            .with_file(true)
-            .with_line_number(true)
-            .finish();
-        let _ = _subscriber.try_init();
-
-        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-
-        let builder = TaosBuilder::from_dsn(dsn).unwrap();
-        let url = builder.to_query_url();
-        let ws = builder.ws_tool_build_stream(url).await.unwrap();
-
-        let (mut sink, mut source) = ws.split();
-
-        let version = WsSend::Version;
-        source
-            .send(OpCode::Text, &serde_json::to_vec(&version)?)
-            .await?;
-
-        let _handle = tokio::spawn(async move {
-            loop {
-                let frame = sink.receive().await.unwrap();
-                let (header, payload) = frame;
-                trace!("header.code: {:?}, payload: {:?}", &header.code, &payload);
-                let code = header.code;
-
-                match code {
-                    OpCode::Binary => {
-                        println!("{:?}", payload);
-                    }
-                    OpCode::Text => {
-                        let recv: crate::query::infra::WsRecv =
-                            serde_json::from_slice(&payload).unwrap();
-                        info!("recv: {:?}", recv);
-                        assert_eq!(recv.code, 0);
-                    }
-                    _ => (),
-                }
-            }
-        });
-
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-
-        Ok(())
-    }
-}
-
-#[cfg(feature = "deflate")]
-#[cfg(test)]
-mod lib_deflate_tests {
-
-    use crate::{
-        query::infra::{ToMessage, WsRecv, WsSend},
-        *,
-    };
-    use futures::{SinkExt, StreamExt};
-    use std::time::Duration;
-    use tracing::*;
-    use tracing_subscriber::util::SubscriberInitExt;
-    use ws_tool::frame::OpCode;
-
-    #[cfg(feature = "deflate")]
-    #[tokio::test]
-    async fn test_ws_tool_build_stream_with_deflate() -> Result<(), anyhow::Error> {
-        let _subscriber = tracing_subscriber::fmt::fmt()
-            .with_max_level(Level::DEBUG)
-            .with_file(true)
-            .with_line_number(true)
-            .finish();
-        let _ = _subscriber.try_init();
-
-        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-
-        let builder = TaosBuilder::from_dsn(dsn).unwrap();
-        let url = builder.to_query_url();
-        let ws = builder.ws_tool_build_stream(url).await.unwrap();
-
-        let (mut sink, mut source) = ws.split();
-
-        let version = WsSend::Version;
-        source
-            .send(OpCode::Text, &serde_json::to_vec(&version)?)
-            .await?;
-
-        let _handle = tokio::spawn(async move {
-            loop {
-                let frame = sink.receive().await.unwrap();
-                let (header, payload) = frame;
-                trace!("header.code: {:?}, payload: {:?}", &header.code, &payload);
-                let code = header.code;
-
-                match code {
-                    OpCode::Binary => {
-                        println!("{:?}", payload);
-                    }
-                    OpCode::Text => {
-                        let recv: crate::query::infra::WsRecv =
-                            serde_json::from_slice(&payload).unwrap();
-                        info!("recv: {:?}", recv);
-                        assert_eq!(recv.code, 0);
-                    }
-                    _ => (),
                 }
             }
         });
