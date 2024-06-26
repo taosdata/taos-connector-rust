@@ -21,8 +21,8 @@ use thiserror::Error;
 use tokio::sync::{oneshot, watch};
 
 use tokio::time;
+use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::tungstenite::Error as WsError;
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 use crate::query::asyn::WS_ERROR_NO;
 use crate::query::infra::{ToMessage, WsConnReq};
@@ -870,11 +870,15 @@ impl TmqBuilder {
         })
     }
 
-    #[allow(dead_code)]
     async fn build_consumer(&self) -> RawResult<Consumer> {
         let url = self.info.to_tmq_url();
+
+        let ws = self
+            .info
+            .build_stream_opt(self.info.to_tmq_url(), false)
+            .await?;
         // let (ws, _) = taos_query::block_in_place_or_global(connect_async(url))?;
-        let (ws, _) = connect_async(&url).await.map_err(WsTmqError::from)?;
+        // let (ws, _) = connect_async(&url).await.map_err(WsTmqError::from)?;
         let (mut sender, mut reader) = ws.split();
 
         let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new());

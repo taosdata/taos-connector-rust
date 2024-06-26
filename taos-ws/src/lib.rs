@@ -483,13 +483,20 @@ impl TaosBuilder {
         &self,
         url: String,
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+        self.build_stream_opt(url, true).await
+    }
+    pub(crate) async fn build_stream_opt(
+        &self,
+        url: String,
+        use_global_endpoint: bool,
+    ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = None;
         config.max_message_size = None;
         if self.compression {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "deflate")] {
-                    tracing::debug!(url, "Eanble compression");
+                    tracing::debug!(url, "Enable compression");
                     config.compression = Some(Default::default());
                 } else {
                     tracing::warn!("WebSocket compression is not supported unless with `deflate` feature");
@@ -498,8 +505,13 @@ impl TaosBuilder {
         }
 
         let mut retries = 0;
+        let url = if use_global_endpoint {
+            self.to_ws_url()
+        } else {
+            url
+        };
         loop {
-            match connect_async_with_config(self.to_ws_url(), Some(config), false).await {
+            match connect_async_with_config(&url, Some(config), false).await {
                 Ok((ws, _)) => {
                     return Ok(ws);
                 }
@@ -510,6 +522,9 @@ impl TaosBuilder {
                     } else if err.to_string().contains("404 Not Found")
                         || err.to_string().contains("400")
                     {
+                        if !use_global_endpoint {
+                            return Err(QueryError::from(err).into());
+                        }
                         match connect_async_with_config(&url, Some(config), false).await {
                             Ok((ws, _)) => return Ok(ws),
                             Err(err) => {
@@ -534,51 +549,6 @@ impl TaosBuilder {
             }
         }
     }
-
-    // pub(crate) async fn build_tmq_stream(
-    //     &self,
-    //     url: String,
-    // ) -> RawResult<AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>> {
-    //     let mut config = ClientConfig::default();
-
-    //     #[cfg(feature = "deflate")]
-    //     {
-    //         config.window = Some(WindowBit::Fifteen);
-    //         config.extra_headers = hashmap! {
-    //             "Accept-Encoding".to_string() => "gzip, deflate".to_string(),
-    //         };
-    //     }
-    //     #[cfg(not(feature = "deflate"))]
-    //     {
-    //         config.window = None;
-    //         config.extra_headers = hashmap! {
-    //             "Accept-Encoding".to_string() => "gzip".to_string(),
-    //         };
-    //     }
-
-    //     log::trace!(
-    //         "ws_tool config window: {:?}, headers: {:?}",
-    //         &config.window,
-    //         &config.extra_headers
-    //     );
-
-    //     let ws: Result<
-    //         AsyncDeflateCodec<tokio::io::BufStream<ws_tool::stream::AsyncStream>>,
-    //         QueryError,
-    //     > = config
-    //         .async_connect_with(url.clone(), AsyncDeflateCodec::check_fn)
-    //         .await
-    //         .map_err(|err| {
-    //             let err_string = err.to_string();
-    //             if err_string.contains("401 Unauthorized") {
-    //                 QueryError::Unauthorized(url)
-    //             } else {
-    //                 err.into()
-    //             }
-    //         });
-
-    //     Ok(ws?)
-    // }
 }
 
 #[cfg(feature = "rustls")]
