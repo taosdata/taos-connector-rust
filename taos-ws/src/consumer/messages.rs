@@ -97,7 +97,6 @@ pub struct TmqArgs {
 #[serde(tag = "action", content = "args")]
 #[serde(rename_all = "snake_case")]
 pub enum TmqSend {
-    Version,
     Subscribe {
         req_id: ReqId,
         #[serde(flatten)]
@@ -154,7 +153,6 @@ impl TmqSend {
             TmqSend::Committed(args) => args.req_id,
             TmqSend::Position(args) => args.req_id,
             TmqSend::CommitOffset(args) => args.req_id,
-            TmqSend::Version => 0,
         }
     }
 }

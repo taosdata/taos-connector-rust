@@ -27,7 +27,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 serde_repr = "0.1.8"
 serde_with = "3.0.0"
-taos-query = { path = "../taos-query", version = "0.12.3" }
+taos-query = { path = "../taos-query", version = "0.12.4" }
 thiserror = "1.0.47"
 tokio = { version = "1", features = [
     "sync",
@@ -36,16 +36,17 @@ tokio = { version = "1", features = [
     "io-util",
     "time",
 ] }
-tokio-tungstenite = { version = "0.23.0" }
-ws-tool = { version = "0.11", features = [
-    "async",
-    "deflate",
-    "async_tls_rustls",
-] }
-maplit = "1.0"
-tracing = "0.1"
-http = "1.0.0"
-tokio-rustls = "0.23.4"
+
+tracing = { version = "0.1", features = ["log"] }
+sonic-rs = "0.3.6"
+scc = "2.1.1"
+flume = "0.11"
+cfg-if = "1"
+
+[dependencies.tokio-tungstenite]
+version = "0.23"
+git = "https://github.com/taosdata/tokio-tungstenite.git"
+branch = "feat/taosdata/permessage-deflate"
 
 [dev-dependencies]
 pretty_env_logger = "0.5.0"
@@ -56,13 +57,14 @@ tracing-subscriber = { version = "0.3.18", features = ["fmt"] }
 features = ["rustls"]
 
 [features]
-default = ["tmq"]
+default = ["tmq", "deflate"]
 
-rustls = ["tokio-tungstenite/rustls-tls-native-roots"]
+rustls = [
+    "tokio-tungstenite/rustls-tls-native-roots",
+    "tokio-tungstenite/rustls-dangerous"
+]
 native-tls = [
     "tokio-tungstenite/native-tls",
-    "ws-tool/async_tls_native",
-    "ws-tool/native-tls",
 ]
 native-tls-vendored = [
     "tokio-tungstenite/native-tls-vendored",
@@ -70,4 +72,6 @@ native-tls-vendored = [
 ]
 sync = []
 tmq = []
-deflate = []
+deflate = [
+    "tokio-tungstenite/deflate",
+]

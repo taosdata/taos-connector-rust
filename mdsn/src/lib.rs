@@ -94,7 +94,7 @@ impl Dsn {
                         (/(?P<subject>[\w\s%$@.,/-]+)?)?                             # for subject
                     | # or
                     # path-like dsn
-                    (?P<path>([\\/.~]$|/\s*\w+[\w\s %$@*:.\\\-/]*|[\.~\w\s]?[\w\s %$@*:.\\\-/]+))
+                    (?P<path>([\\/.~]$|/\s*\w+[\w\s %$@*:.\\\-/ _\(\)\[\]{}（）【】｛｝]*|[\.~\w\s]?[\w\s %$@*:.\\\-/ _\(\)\[\]{}（）【】｛｝]+))
                 ) # abc
                 (\?(?P<params>(?s:.)*))?").unwrap();
         }
@@ -1034,6 +1034,37 @@ mod tests {
             }
         );
         assert_eq!(dsn.to_string(), s);
+    }
+
+    #[test]
+    fn path_special_chars() {
+        // support `Chinese characters`, `uppercase and lowercase letters`, `digits`, `spaces`, `%`, `$`, `@`, `.`, `-`, `_`, `(`, `)`, `[`, `]`, `{`, `}`, `（`, `）`, `【`, `】`, `｛`, `｝`
+        let s = "csv:./files/1718243049903/文件Aa1 %$@.-_()[]{}（）【】｛｝.csv";
+        let dsn = Dsn::from_str(s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "csv".to_string(),
+                path: Some(
+                    "./files/1718243049903/文件Aa1 %$@.-_()[]{}（）【】｛｝.csv".to_string()
+                ),
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+
+        // do not support other characters which are not in the list above(such as `&` .etc)
+        let s = "csv:./files/1718243049903/文件Aa1 %$@.-_()[]{}（）【】｛｝&.csv";
+        let dsn = Dsn::from_str(s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "csv".to_string(),
+                path: Some("./files/1718243049903/文件Aa1 %$@.-_()[]{}（）【】｛｝".to_string()),
+                ..Default::default()
+            }
+        );
+        assert_ne!(dsn.to_string(), s);
     }
 
     #[test]

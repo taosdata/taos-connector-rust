@@ -505,7 +505,6 @@ pub unsafe extern "C" fn ws_enable_log() {
         }
         builder.init();
     });
-    log::trace!("enable logger to stdout");
 }
 
 /// Connect via dsn string, returns NULL if failed.

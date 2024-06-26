@@ -193,9 +193,12 @@ impl RawStmt {
     #[inline]
     pub fn err_as_str(&self) -> String {
         unsafe {
-            CStr::from_ptr((self.api.taos_stmt_errstr)(self.as_ptr()))
-                .to_string_lossy()
-                .to_string()
+            match self.api.taos_stmt_errstr {
+                Some(f) => CStr::from_ptr(f(self.as_ptr()))
+                    .to_string_lossy()
+                    .to_string(),
+                None => todo!(),
+            }
         }
     }
 
@@ -250,7 +253,10 @@ impl RawStmt {
     pub fn set_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> RawResult<()> {
         let name = name.into_c_str();
         let res = self.ok(unsafe {
-            (self.api.taos_stmt_set_tbname)(self.as_ptr(), name.into_c_str().as_ptr())
+            match self.api.taos_stmt_set_tbname {
+                Some(f) => f(self.as_ptr(), name.into_c_str().as_ptr()),
+                None => todo!(),
+            }
         });
         if !self.is_v3() {
             self.tbname = Some(name.into_owned());
@@ -271,11 +277,14 @@ impl RawStmt {
             self.ok(unsafe { (self.api.taos_stmt_set_tags.unwrap())(self.as_ptr(), tags as _) })
         } else {
             self.ok(unsafe {
-                (self.api.taos_stmt_set_tbname_tags)(
-                    self.as_ptr(),
-                    self.tbname.as_deref().unwrap().as_ptr(),
-                    tags as _,
-                )
+                match self.api.taos_stmt_set_tbname_tags {
+                    Some(f) => f(
+                        self.as_ptr(),
+                        self.tbname.as_deref().unwrap().as_ptr(),
+                        tags as _,
+                    ),
+                    None => todo!(),
+                }
             })
         }
     }
@@ -293,7 +302,12 @@ impl RawStmt {
 
     #[inline]
     pub fn affected_rows(&self) -> i32 {
-        unsafe { (self.api.taos_stmt_affected_rows)(self.as_ptr()) }
+        unsafe {
+            match self.api.taos_stmt_affected_rows {
+                Some(f) => f(self.as_ptr()),
+                None => todo!(),
+            }
+        }
     }
 
     #[inline]
@@ -345,10 +359,10 @@ impl RawStmt {
 
     #[inline]
     pub fn bind_param_batch(&mut self, bind: &[TaosMultiBind]) -> RawResult<()> {
-        err_or!(
-            self,
-            (self.api.taos_stmt_bind_param_batch)(self.as_ptr(), bind.as_ptr())
-        )
+        match self.api.taos_stmt_bind_param_batch {
+            Some(f) => err_or!(self, f(self.as_ptr(), bind.as_ptr())),
+            None => todo!(),
+        }
     }
 
     // #[inline]

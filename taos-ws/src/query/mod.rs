@@ -17,22 +17,38 @@ use crate::TaosBuilder;
 #[derive(Debug)]
 pub struct Taos {
     pub(crate) dsn: TaosBuilder,
-    pub(crate) async_client: OnceCell<WsTaos>,
+    pub(crate) async_client: WsTaos,
     pub(crate) async_sml: OnceCell<crate::schemaless::WsTaos>,
 }
 
 impl Taos {
+    pub(super) async fn from_builder(dsn: TaosBuilder) -> RawResult<Self> {
+        let mut retries = 0;
+        loop {
+            match WsTaos::from_wsinfo(&dsn).await {
+                Ok(client) => {
+                    return Ok(Self {
+                        dsn,
+                        async_client: client,
+                        async_sml: OnceCell::default(),
+                    })
+                }
+                Err(err) => {
+                    if retries >= dsn.conn_retries.0 {
+                        return Err(err);
+                    }
+                    tracing::warn!(remote = dsn.addr, retries, "retrying connection: {}", err);
+                    retries += 1;
+                }
+            }
+        }
+    }
     pub fn version(&self) -> &str {
-        crate::block_in_place_or_global(self.client()).version()
+        self.client().version()
     }
 
-    async fn client(&self) -> &WsTaos {
-        if let Some(ws) = self.async_client.get() {
-            ws
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await.unwrap();
-            self.async_client.get_or_init(|| async_client)
-        }
+    fn client(&self) -> &WsTaos {
+        &self.async_client
     }
 }
 
@@ -45,15 +61,7 @@ impl taos_query::AsyncQueryable for Taos {
     type AsyncResultSet = asyn::ResultSet;
 
     async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
-        if let Some(ws) = self.async_client.get() {
-            ws.s_query(sql.as_ref()).await
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_client
-                .get_or_init(|| async_client)
-                .s_query(sql.as_ref())
-                .await
-        }
+        self.client().s_query(sql.as_ref()).await
     }
 
     async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
@@ -61,39 +69,17 @@ impl taos_query::AsyncQueryable for Taos {
         sql: T,
         req_id: u64,
     ) -> RawResult<Self::AsyncResultSet> {
-        if let Some(ws) = self.async_client.get() {
-            ws.s_query_with_req_id(sql.as_ref(), req_id).await
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_client
-                .get_or_init(|| async_client)
-                .s_query_with_req_id(sql.as_ref(), req_id)
-                .await
-        }
+        self.client()
+            .s_query_with_req_id(sql.as_ref(), req_id)
+            .await
     }
 
     async fn write_raw_meta(&self, raw: &RawMeta) -> RawResult<()> {
-        if let Some(ws) = self.async_client.get() {
-            ws.write_meta(raw).await
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_client
-                .get_or_init(|| async_client)
-                .write_meta(raw)
-                .await
-        }
+        self.client().write_meta(raw).await
     }
 
     async fn write_raw_block(&self, block: &taos_query::RawBlock) -> RawResult<()> {
-        if let Some(ws) = self.async_client.get() {
-            ws.write_raw_block(block).await
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_client
-                .get_or_init(|| async_client)
-                .write_raw_block(block)
-                .await
-        }
+        self.client().write_raw_block(block).await
     }
 
     async fn write_raw_block_with_req_id(
@@ -101,15 +87,9 @@ impl taos_query::AsyncQueryable for Taos {
         block: &taos_query::RawBlock,
         req_id: u64,
     ) -> RawResult<()> {
-        if let Some(ws) = self.async_client.get() {
-            ws.write_raw_block_with_req_id(block, req_id).await
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_client
-                .get_or_init(|| async_client)
-                .write_raw_block_with_req_id(block, req_id)
-                .await
-        }
+        self.client()
+            .write_raw_block_with_req_id(block, req_id)
+            .await
     }
 
     async fn put(&self, data: &SmlData) -> RawResult<()> {
@@ -427,15 +407,15 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "async")]
     #[tokio::test]
     async fn test_client() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
         use futures::TryStreamExt;
-        use taos_query::{AsyncFetchable, AsyncQueryable};
+        use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};
 
-        let client = TaosBuilder::from_dsn("ws://localhost:6041/")?.build()?;
+        let client = TaosBuilder::from_dsn("ws://localhost:6041/")?;
+        let client = client.build().await?;
         assert_eq!(
             client
                 .exec("create database if not exists ws_test_client")
@@ -465,7 +445,7 @@ mod tests {
             v: i32,
         }
 
-        let values: Vec<A> = rs.deserialize_stream().try_collect().await?;
+        let values: Vec<A> = rs.deserialize().try_collect().await?;
 
         dbg!(values);
 
