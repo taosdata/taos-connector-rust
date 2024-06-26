@@ -1559,11 +1559,13 @@ mod tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::TRACE)
+            .with_max_level(tracing::Level::DEBUG)
             .compact()
             .try_init();
 
-        let taos = TaosBuilder::from_dsn("taos://vm98:6041")?.build().await?;
+        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
+            .build()
+            .await?;
         taos.exec_many([
             "drop topic if exists ws_tmq_meta",
             "drop database if exists ws_tmq_meta",
@@ -1639,8 +1641,9 @@ mod tests {
         ])
         .await?;
 
-        let builder =
-            TmqBuilder::new("taos://vm98:6041?group.id=10&timeout=5s&auto.offset.reset=earliest")?;
+        let builder = TmqBuilder::new(
+            "taos://localhost:6041?group.id=10&timeout=5s&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build_consumer().await?;
         consumer.subscribe(["ws_tmq_meta"]).await?;
 
@@ -1690,9 +1693,9 @@ mod tests {
                     }
                     MessageSet::Data(data) => {
                         // data message may have more than one data block for various tables.
-                        while let Some(data) = data.fetch_block().await? {
+                        while let Some(_data) = data.fetch_block().await? {
                             // dbg!(data.table_name());
-                            dbg!(data);
+                            // dbg!(data);
                         }
                     }
                     _ => unreachable!(),
