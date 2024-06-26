@@ -1,6 +1,7 @@
 //! TMQ consumer.
 //!
 use bytes::Bytes;
+use futures::lock::Mutex;
 use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
 // use scc::HashMap;
@@ -31,6 +32,7 @@ use messages::*;
 
 use ws_tool::{errors::WsError as WsErrorWst, frame::OpCode, Message as WsMessage};
 
+use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
@@ -260,12 +262,51 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 }
 #[derive(Debug)]
 struct WsMessageBase {
+    is_support_fetch_raw: bool,
     sender: WsTmqSender,
     message_id: MessageId,
+    raw_blocks: Arc<Mutex<Option<VecDeque<RawBlock>>>>,
 }
 
 impl WsMessageBase {
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
+        if self.is_support_fetch_raw {
+            self.fetch_raw_block_new().await
+        } else {
+            self.fetch_raw_block_old().await
+        }
+    }
+    async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
+        let mut raw_blocks_ref_mut = self.raw_blocks.lock().await;
+        let raw_blocks_option = &mut *raw_blocks_ref_mut;
+
+        if let Some(raw_blocks) = raw_blocks_option {
+            if !raw_blocks.is_empty() {
+                return Ok(raw_blocks.pop_front());
+            } else {
+                return Ok(None);
+            }
+        }
+
+        let req_id = self.sender.req_id();
+
+        let msg = TmqSend::FetchRawData(MessageArgs {
+            req_id,
+            message_id: self.message_id,
+        });
+        let data = self.sender.send_recv(msg).await?;
+
+        if let TmqRecvData::Bytes(bytes) = data {
+            let raw = RawBlock::parse_from_multi_raw_block(bytes)
+                .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
+            if raw.len() > 0 {
+                raw_blocks_option.replace(raw);
+                return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
+            }
+        }
+        return Ok(None);
+    }
+    async fn fetch_raw_block_old(&self) -> RawResult<Option<RawBlock>> {
         let req_id = self.sender.req_id();
 
         let msg = TmqSend::Fetch(MessageArgs {
@@ -441,7 +482,10 @@ impl Consumer {
     //     Ok(())
     // }
     async fn poll_wait(&self) -> RawResult<(Offset, MessageSet<Meta, Data>)> {
+        // use crate::query::asyn::is_support_binary_sql;
+
         let elapsed = tokio::time::Instant::now();
+
         loop {
             let req_id = self.sender.req_id();
             let action = TmqSend::Poll {
@@ -469,8 +513,10 @@ impl Consumer {
                             vgroup_id,
                         };
                         let message = WsMessageBase {
+                            is_support_fetch_raw: self.support_fetch_raw,
                             sender: self.sender.clone(),
                             message_id,
+                            raw_blocks: Arc::new(Mutex::new(None)),
                         };
                         log::trace!("Got message in {}ms", dur.as_millis());
                         break match message_type {
@@ -481,8 +527,10 @@ impl Consumer {
                                 MessageSet::MetaData(
                                     Meta(message),
                                     Data(WsMessageBase {
+                                        is_support_fetch_raw: self.support_fetch_raw,
                                         sender: self.sender.clone(),
                                         message_id,
+                                        raw_blocks: Arc::new(Mutex::new(None)),
                                     }),
                                 ),
                             )),
@@ -1176,12 +1224,16 @@ impl TmqBuilder {
             close_signal: tx,
             timeout: self.timeout,
             topics: vec![],
+            support_fetch_raw: false,
         };
 
         Ok(consumer)
     }
 
     async fn build_consumer(&self) -> RawResult<Consumer> {
+        use crate::query::asyn::is_support_binary_sql;
+        use crate::query::asyn::Error;
+
         let url = self.info.to_tmq_url();
         let sending_url = url.clone();
 
@@ -1199,6 +1251,35 @@ impl TmqBuilder {
         // Connection watcher
         let (tx, mut rx) = watch::channel(false);
         let mut close_listener = rx.clone();
+
+        let version = TmqSend::Version;
+        sender
+            .send(OpCode::Text, &serde_json::to_vec(&version).unwrap())
+            .await
+            .map_err(Error::from)?;
+
+        let duration = Duration::from_secs(2);
+        let version = match tokio::time::timeout(duration, reader.receive()).await {
+            Ok(Ok(frame)) => {
+                let (header, payload) = frame;
+                let code = header.code;
+                match code {
+                    OpCode::Text => {
+                        let v: TmqRecv = serde_json::from_slice(&payload).unwrap();
+                        let (_, data, ok) = v.ok();
+                        match data {
+                            TmqRecvData::Version { version } => {
+                                ok?;
+                                version
+                            }
+                            _ => "3.0.0.0".to_string(),
+                        }
+                    }
+                    _ => "3.0.0.0".to_string(),
+                }
+            }
+            _ => "3.0.0.0".to_string(),
+        };
 
         static PING_INTERVAL: u64 = 29;
         const PING: &[u8] = b"TAOS";
@@ -1384,15 +1465,25 @@ impl TmqBuilder {
                                 let block = payload.to_vec();
                                 let mut slice = block.as_slice();
                                 use taos_query::util::InlinableRead;
-                                let offset = 24;
-                                let part = slice[offset..].to_vec();
 
-                                let _timing = {
-                                    let timing = slice.read_u64().unwrap();
-                                    Duration::from_nanos(timing as _)
-                                };
-
-                                let req_id = slice.read_u64().unwrap();
+                                let timing = slice.read_u64().unwrap();
+                                let req_id: u64;
+                                let part: Vec<u8>;
+                                if timing != std::u64::MAX{
+                                    let offset = 16;
+                                    part = slice[offset..].to_vec();
+                                    req_id = slice.read_u64().unwrap();
+                                    log::trace!("parse old data {}", req_id);
+                                } else {
+                                    // new version
+                                    let offset = 26;
+                                    part = slice[offset..].to_vec();
+                                    let _action = slice.read_u64().unwrap();
+                                    let _version = slice.read_u16().unwrap();
+                                    let _time = slice.read_u64().unwrap();
+                                    req_id = slice.read_u64().unwrap();
+                                    log::trace!("parse new data {}", req_id);
+                                }
 
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                     log::trace!("send data to fetches with id {}", req_id);
@@ -1442,6 +1533,7 @@ impl TmqBuilder {
             }
             log::trace!("Consuming done in {:?}", instant.elapsed());
         });
+
         let consumer = Consumer {
             conn: self.info.to_conn_request(),
             tmq_conf: self.conf.clone(),
@@ -1455,8 +1547,8 @@ impl TmqBuilder {
             close_signal: tx,
             timeout: self.timeout,
             topics: vec![],
+            support_fetch_raw: is_support_binary_sql(&version),
         };
-
         Ok(consumer)
     }
 }
@@ -1469,6 +1561,7 @@ pub struct Consumer {
     close_signal: watch::Sender<bool>,
     timeout: Timeout,
     topics: Vec<String>,
+    support_fetch_raw: bool,
 }
 
 impl Drop for Consumer {
