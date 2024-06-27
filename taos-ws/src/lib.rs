@@ -505,13 +505,19 @@ impl TaosBuilder {
         }
 
         let mut retries = 0;
-        let url = if use_global_endpoint {
-            self.to_ws_url()
-        } else {
-            url
-        };
+        let ws_url = self.to_ws_url();
         loop {
-            match connect_async_with_config(&url, Some(config), false).await {
+            match connect_async_with_config(
+                if use_global_endpoint {
+                    ws_url.as_str()
+                } else {
+                    url.as_str()
+                },
+                Some(config),
+                false,
+            )
+            .await
+            {
                 Ok((ws, _)) => {
                     return Ok(ws);
                 }
