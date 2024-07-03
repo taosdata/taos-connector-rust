@@ -1343,7 +1343,8 @@ impl MultiBlockCursor {
 
     fn get_type_skip(t: u8) -> i32 {
         match t {
-            1 | 2 | 3 => 16,
+            1 => 8,
+            2 | 3 => 16,
             _ => panic!("getTypeSkip error, type: {}", t),
         }
     }
