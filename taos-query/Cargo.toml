@@ -47,6 +47,7 @@ futures = { version = "0.3.21", optional = true, features = [
 	"thread-pool",
 ] }
 
+byteorder = "1.4.3"
 # column
 bitflags = "2.2.1"
 bitvec = "1.0.0"

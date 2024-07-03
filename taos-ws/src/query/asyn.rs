@@ -591,7 +591,7 @@ pub fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
 }
 
 pub fn is_support_binary_sql(v1: &str) -> bool {
-    is_greater_than_or_equal_to(v1, "3.3.0.8")
+    is_greater_than_or_equal_to(v1, "3.3.2.0")
 }
 
 impl WsTaos {
@@ -1329,7 +1329,7 @@ mod tests {
         std::env::set_var("RUST_LOG", "debug");
 
         let version_a: &str = "3.3.0.0";
-        let version_b: &str = "3.3.1.0";
+        let version_b: &str = "3.3.3.0";
         let version_c: &str = "2.6.0";
 
         assert_eq!(is_support_binary_sql(version_a), false);

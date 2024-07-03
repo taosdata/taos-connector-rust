@@ -116,6 +116,7 @@ pub enum TmqSend {
     FetchRaw(MessageArgs),
     Fetch(MessageArgs),
     FetchBlock(MessageArgs),
+    FetchRawData(MessageArgs),
     Commit(MessageArgs),
     Assignment(TopicAssignmentArgs),
     Seek(OffsetSeekArgs),
@@ -143,6 +144,7 @@ impl TmqSend {
             } => *req_id,
             TmqSend::FetchJsonMeta(args) => args.req_id,
             TmqSend::FetchRaw(args) => args.req_id,
+            TmqSend::FetchRawData(args) => args.req_id,
             TmqSend::Fetch(args) => args.req_id,
             TmqSend::FetchBlock(args) => args.req_id,
             TmqSend::Commit(args) => args.req_id,
@@ -225,6 +227,10 @@ pub enum TmqRecvData {
         #[serde(skip)]
         meta: Bytes,
     },
+    FetchRawData {
+        #[serde(skip)]
+        data: Bytes,
+    },
     FetchBlock {
         #[serde(skip)]
         data: Bytes,
@@ -245,6 +251,9 @@ pub enum TmqRecvData {
     CommitOffset {
         timing: i64,
     },
+    Version {
+        version: String,
+    },
 }
 
 #[serde_as]
@@ -253,6 +262,7 @@ pub struct TmqRecv {
     pub code: i32,
     #[serde_as(as = "NoneAsEmptyString")]
     pub message: Option<String>,
+    #[serde(default)]
     pub req_id: ReqId,
     // #[serde(flatten)]
     // pub args: TmqArgs,

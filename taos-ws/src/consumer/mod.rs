@@ -1,6 +1,7 @@
 //! TMQ consumer.
 //!
-use bytes::Bytes;
+use anyhow::bail;
+use futures::lock::Mutex;
 use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
 // use scc::HashMap;
@@ -24,11 +25,14 @@ use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::tungstenite::Error as WsError;
 
+use crate::query::asyn::is_support_binary_sql;
 use crate::query::asyn::WS_ERROR_NO;
-use crate::query::infra::{ToMessage, WsConnReq};
+use crate::query::infra::{ToMessage, WsConnReq, WsRecv, WsRecvData, WsSend};
+
 use crate::TaosBuilder;
 use messages::*;
 
+use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
@@ -258,12 +262,51 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 }
 #[derive(Debug)]
 struct WsMessageBase {
+    is_support_fetch_raw: bool,
     sender: WsTmqSender,
     message_id: MessageId,
+    raw_blocks: Arc<Mutex<Option<VecDeque<RawBlock>>>>,
 }
 
 impl WsMessageBase {
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
+        if self.is_support_fetch_raw {
+            self.fetch_raw_block_new().await
+        } else {
+            self.fetch_raw_block_old().await
+        }
+    }
+    async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
+        let mut raw_blocks_ref_mut = self.raw_blocks.lock().await;
+        let raw_blocks_option = &mut *raw_blocks_ref_mut;
+
+        if let Some(raw_blocks) = raw_blocks_option {
+            if !raw_blocks.is_empty() {
+                return Ok(raw_blocks.pop_front());
+            } else {
+                return Ok(None);
+            }
+        }
+
+        let req_id = self.sender.req_id();
+
+        let msg = TmqSend::FetchRawData(MessageArgs {
+            req_id,
+            message_id: self.message_id,
+        });
+        let data = self.sender.send_recv(msg).await?;
+
+        if let TmqRecvData::Bytes(bytes) = data {
+            let raw = RawBlock::parse_from_multi_raw_block(bytes)
+                .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
+            if raw.len() > 0 {
+                raw_blocks_option.replace(raw);
+                return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
+            }
+        }
+        return Ok(None);
+    }
+    async fn fetch_raw_block_old(&self) -> RawResult<Option<RawBlock>> {
         let req_id = self.sender.req_id();
 
         let msg = TmqSend::Fetch(MessageArgs {
@@ -439,7 +482,10 @@ impl Consumer {
     //     Ok(())
     // }
     async fn poll_wait(&self) -> RawResult<(Offset, MessageSet<Meta, Data>)> {
+        // use crate::query::asyn::is_support_binary_sql;
+
         let elapsed = tokio::time::Instant::now();
+
         loop {
             let req_id = self.sender.req_id();
             let action = TmqSend::Poll {
@@ -467,8 +513,10 @@ impl Consumer {
                             vgroup_id,
                         };
                         let message = WsMessageBase {
+                            is_support_fetch_raw: self.support_fetch_raw,
                             sender: self.sender.clone(),
                             message_id,
+                            raw_blocks: Arc::new(Mutex::new(None)),
                         };
                         log::trace!("Got message in {}ms", dur.as_millis());
                         break match message_type {
@@ -479,8 +527,10 @@ impl Consumer {
                                 MessageSet::MetaData(
                                     Meta(message),
                                     Data(WsMessageBase {
+                                        is_support_fetch_raw: self.support_fetch_raw,
                                         sender: self.sender.clone(),
                                         message_id,
+                                        raw_blocks: Arc::new(Mutex::new(None)),
                                     }),
                                 ),
                             )),
@@ -881,6 +931,61 @@ impl TmqBuilder {
         // let (ws, _) = connect_async(&url).await.map_err(WsTmqError::from)?;
         let (mut sender, mut reader) = ws.split();
 
+        let version = WsSend::Version;
+        sender.send(version.to_msg()).await.map_err(|err| {
+            RawError::any(err)
+                .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                .context("Send version request message error")
+        })?;
+        let duration = Duration::from_secs(8);
+        let version_future = async {
+            let max_non_version = 5;
+            let mut count = 0;
+            loop {
+                count += 1;
+                if let Some(message) = reader.next().await {
+                    match message {
+                        Ok(Message::Text(text)) => {
+                            let v: WsRecv = serde_json::from_str(&text).map_err(|err| {
+                                RawError::any(err)
+                                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                    .context("Parser text as json error")
+                            })?;
+                            let (_req_id, data, ok) = v.ok();
+                            match data {
+                                WsRecvData::Version { version } => {
+                                    ok?;
+                                    return Ok(version);
+                                }
+                                _ => return Ok("2.x".to_string()),
+                            }
+                        }
+                        Ok(Message::Ping(bytes)) => {
+                            sender.send(Message::Pong(bytes)).await.map_err(|err| {
+                                RawError::any(err)
+                                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                    .context("Send pong message error")
+                            })?;
+                            if count >= max_non_version {
+                                return Ok("2.x".to_string());
+                            }
+                            count += 1;
+                        }
+                        _ => return Ok("2.x".to_string()),
+                    }
+                } else {
+                    bail!("Expect version message, but got nothing");
+                }
+            }
+        };
+        let version = match tokio::time::timeout(duration, version_future).await {
+            Ok(Ok(version)) => version,
+            Ok(Err(err)) => {
+                return Err(RawError::any(err).context("Version fetching error"));
+            }
+            Err(_) => "2.x".to_string(),
+        };
+
         let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new());
 
         let queries_sender = queries.clone();
@@ -1081,32 +1186,33 @@ impl TmqBuilder {
                                     }
                                 }
                                 Message::Binary(data) => {
-                                    // writeUint64(message.buffer, req.ReqID)
-                                    // writeUint64(message.buffer, req.MessageID)
-                                    // writeUint64(message.buffer, TMQRawMetaMessage)
-                                    // writeUint32(message.buffer, length)
-                                    // writeUint16(message.buffer, metaType)
-                                    let mut bytes = Bytes::from(data);
-                                    let part = bytes.slice(24..);
-                                    // dbg!(&bytes);
-                                    use bytes::Buf;
-                                    let timing = bytes.get_u64_le();
-                                    let req_id = bytes.get_u64_le();
-                                    let message_id = bytes.get_u64_le();
+                                    let block = data;
+                                    let mut slice = block.as_slice();
+                                    use taos_query::util::InlinableRead;
 
-
-                                    log::trace!("[{:.2}ms] receive binary message with req_id {} message_id {}",
-                                        Duration::from_nanos(timing).as_secs_f64() / 1000.,
-                                        req_id, message_id);
-
-                                    if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                    {
-                                        sender.send(Ok(TmqRecvData::Bytes(part))).unwrap();
-                                    }  else {
-                                        log::warn!("poll message received but no receiver alive");
+                                    let timing = slice.read_u64().unwrap();
+                                    let req_id: u64;
+                                    let part: Vec<u8>;
+                                    if timing != std::u64::MAX{
+                                        let offset = 16;
+                                        part = slice[offset..].to_vec();
+                                        req_id = slice.read_u64().unwrap();
+                                    } else {
+                                        // new version
+                                        let offset = 26;
+                                        part = slice[offset..].to_vec();
+                                        let _action = slice.read_u64().unwrap();
+                                        let _version = slice.read_u16().unwrap();
+                                        let _time = slice.read_u64().unwrap();
+                                        req_id = slice.read_u64().unwrap();
                                     }
 
-
+                                    if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                        log::trace!("send data to fetches with id {}", req_id);
+                                        sender.send(Ok(TmqRecvData::Bytes(part.into()))).unwrap();
+                                    } else {
+                                        log::warn!("req_id {req_id} not detected, message might be lost");
+                                    }
                                 }
                                 Message::Close(close) => {
                                     log::warn!("websocket connection is closed (unexpected?)");
@@ -1178,6 +1284,7 @@ impl TmqBuilder {
             close_signal: tx,
             timeout: self.timeout,
             topics: vec![],
+            support_fetch_raw: is_support_binary_sql(&version),
         };
 
         Ok(consumer)
@@ -1192,6 +1299,7 @@ pub struct Consumer {
     close_signal: watch::Sender<bool>,
     timeout: Timeout,
     topics: Vec<String>,
+    support_fetch_raw: bool,
 }
 
 impl Drop for Consumer {

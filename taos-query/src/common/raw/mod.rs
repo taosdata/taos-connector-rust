@@ -12,6 +12,7 @@ use taos_error::Error;
 
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
+    collections::VecDeque,
     ffi::c_void,
     fmt::Debug,
     fmt::Display,
@@ -19,6 +20,8 @@ use std::{
     ptr::NonNull,
     rc::Rc,
 };
+
+use std::io::Cursor;
 
 pub mod layout;
 pub mod meta;
@@ -608,6 +611,66 @@ impl RawBlock {
             fields: Vec::new(),
             columns,
         }
+    }
+
+    pub fn parse_from_multi_raw_block(
+        bytes: impl Into<Bytes>,
+    ) -> Result<VecDeque<Self>, std::io::Error> {
+        use byteorder::ReadBytesExt;
+
+        let mut cursor = MultiBlockCursor::new(Cursor::new(bytes.into()));
+        let code = cursor.read_i32::<byteorder::LittleEndian>()?;
+        let message = cursor.get_str()?;
+        if code != 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, message));
+        }
+
+        cursor.read_u64::<byteorder::LittleEndian>()?; //skip msg id
+        cursor.read_u16::<byteorder::LittleEndian>()?; //skip meta type
+        cursor.read_u32::<byteorder::LittleEndian>()?; //skip raw block length
+
+        // skip header
+        cursor.skip_head()?;
+
+        let block_num = cursor.read_i32::<byteorder::LittleEndian>()?;
+        let with_table_name: bool = cursor.read_u8()? != 0; // withTableName
+        cursor.read_u8()?; // skip withSchema, always true
+
+        let mut raw_block_queue = VecDeque::with_capacity(block_num as usize);
+        for _ in 0..block_num {
+            let block_total_len = cursor.parse_variable_byte_integer()?;
+            let cur_position = cursor.position() + 17;
+            cursor.set_position(cur_position);
+            let precision = cursor.read_u8()?;
+
+            // parse block data
+            let block_start_pos = cursor.position() as usize;
+            let block_end_pos = cursor.position() + block_total_len as u64 - 18;
+
+            let slice = &cursor.get_ref()[block_start_pos..block_end_pos as usize];
+            let bytes = bytes::Bytes::copy_from_slice(slice);
+            let mut raw_block = RawBlock::parse_from_raw_block(bytes, precision.into());
+
+            //cursor.read_u8()?;// skip useless byte
+            cursor.set_position(block_end_pos);
+
+            // parse block schema
+            let cols = cursor.parse_zigzag_variable_byte_integer()?;
+            cursor.parse_zigzag_variable_byte_integer()?; // skip version
+
+            let mut fields = Vec::new();
+            for _ in 0..cols {
+                let field = cursor.parse_schema()?;
+                fields.push(field);
+                // self.column_names.push(field.clone());
+            }
+            if with_table_name {
+                raw_block.with_table_name(cursor.parse_name()?);
+            }
+            raw_block.with_field_names(fields.iter());
+            raw_block_queue.push_back(raw_block);
+        }
+        Ok(raw_block_queue)
     }
 
     /// Set table name of the block
@@ -1252,6 +1315,130 @@ impl crate::prelude::AsyncInlinable for RawBlock {
         }
 
         Ok(l)
+    }
+}
+
+pub struct MultiBlockCursor {
+    cursor: Cursor<Bytes>,
+}
+
+impl Deref for MultiBlockCursor {
+    type Target = Cursor<Bytes>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.cursor
+    }
+}
+use std::ops::DerefMut;
+impl DerefMut for MultiBlockCursor {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.cursor
+    }
+}
+
+impl MultiBlockCursor {
+    pub fn new(data: Cursor<Bytes>) -> Self {
+        Self { cursor: data }
+    }
+
+    fn get_type_skip(t: u8) -> i32 {
+        match t {
+            1 => 8,
+            2 | 3 => 16,
+            _ => panic!("getTypeSkip error, type: {}", t),
+        }
+    }
+
+    fn skip_head(&mut self) -> Result<(), std::io::Error> {
+        use byteorder::ReadBytesExt;
+
+        let version: u8 = self.cursor.read_u8()?;
+        if version >= 100 {
+            let skip: u32 = self.cursor.read_u32::<byteorder::LittleEndian>()?;
+            self.cursor
+                .set_position(self.cursor.position() + skip as u64);
+        } else {
+            let skip = MultiBlockCursor::get_type_skip(version);
+            self.cursor
+                .set_position(self.cursor.position() + skip as u64);
+
+            let version = self.cursor.read_u8()?;
+            let skip = MultiBlockCursor::get_type_skip(version);
+            self.cursor
+                .set_position(self.cursor.position() + skip as u64);
+        }
+
+        Ok(())
+    }
+
+    fn zigzag_decode(n: i32) -> i32 {
+        (n >> 1) ^ -(n & 1)
+    }
+
+    fn parse_zigzag_variable_byte_integer(&mut self) -> Result<i32, std::io::Error> {
+        let i = self.parse_variable_byte_integer()?;
+        Ok(MultiBlockCursor::zigzag_decode(i))
+    }
+
+    fn parse_variable_byte_integer(&mut self) -> Result<i32, std::io::Error> {
+        use byteorder::ReadBytesExt;
+
+        let mut multiplier = 1;
+        let mut value = 0;
+        loop {
+            let encoded_byte = self.cursor.read_u8()?;
+            value += (encoded_byte & 127) as i32 * multiplier;
+            if (encoded_byte & 128) == 0 {
+                break;
+            }
+            multiplier *= 128;
+        }
+        Ok(value)
+    }
+
+    fn convert_error(err: std::string::FromUtf8Error) -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, err)
+    }
+
+    fn parse_name(&mut self) -> Result<String, std::io::Error> {
+        use std::io::Read;
+
+        let name_len = self.parse_variable_byte_integer()? as usize;
+        let mut name = vec![0; name_len - 1];
+
+        self.cursor.read_exact(&mut name).unwrap();
+        self.cursor.set_position(self.cursor.position() + 1);
+        let result = String::from_utf8(name).map_err(MultiBlockCursor::convert_error)?;
+        Ok(result)
+    }
+
+    fn get_str(&mut self) -> Result<String, std::io::Error> {
+        use byteorder::ReadBytesExt;
+        use std::io::Read;
+
+        let len = self.cursor.read_u32::<byteorder::LittleEndian>()?;
+        let mut str = vec![0; len as usize];
+
+        self.cursor.read_exact(&mut str).unwrap();
+        let result = String::from_utf8(str).map_err(MultiBlockCursor::convert_error)?;
+        Ok(result)
+    }
+
+    fn parse_schema(&mut self) -> Result<String, std::io::Error> {
+        use byteorder::ReadBytesExt;
+        use std::io::Read;
+        let _taos_type = self.cursor.read_u8()?;
+        self.cursor.read_u8()?; // skip flag
+        self.parse_zigzag_variable_byte_integer()?; // skip field len
+        self.parse_zigzag_variable_byte_integer()?; // skip colid
+
+        let name_len = self.parse_variable_byte_integer()? as usize;
+        let mut name = vec![0; name_len - 1];
+        self.cursor.read_exact(&mut name).unwrap();
+        self.cursor.set_position(self.cursor.position() + 1);
+
+        let field_name = String::from_utf8(name).map_err(MultiBlockCursor::convert_error)?;
+        Ok(field_name)
     }
 }
 

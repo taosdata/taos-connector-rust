@@ -1035,7 +1035,6 @@ pub fn init_env() {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
