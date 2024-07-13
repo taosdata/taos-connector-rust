@@ -1,9 +1,10 @@
 use std::{
+    cmp::min,
     ffi::{c_void, CStr, CString},
     fmt::{Debug, Display},
-    os::raw::c_char,
-    os::raw::c_int,
+    os::raw::{c_char, c_int},
     str::Utf8Error,
+    string::FromUtf8Error,
     time::Duration,
 };
 
@@ -13,6 +14,7 @@ use taos_query::{
     block_in_place_or_global,
     common::{Field, RawBlock as Block, Timestamp},
     common::{Precision, Ty},
+    common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder, SmlDataBuilderError},
     prelude::RawError,
     DsnError, Fetchable, Queryable, TBuilder,
 };
@@ -180,6 +182,26 @@ impl std::error::Error for WsError {
 
 impl From<Utf8Error> for WsError {
     fn from(e: Utf8Error) -> Self {
+        Self {
+            code: Code::FAILED,
+            message: CString::new(format!("{}", e)).unwrap(),
+            source: Some(Box::new(e)),
+        }
+    }
+}
+
+impl From<FromUtf8Error> for WsError {
+    fn from(e: FromUtf8Error) -> Self {
+        Self {
+            code: Code::FAILED,
+            message: CString::new(format!("{}", e)).unwrap(),
+            source: Some(Box::new(e)),
+        }
+    }
+}
+
+impl From<SmlDataBuilderError> for WsError {
+    fn from(e: SmlDataBuilderError) -> Self {
         Self {
             code: Code::FAILED,
             message: CString::new(format!("{}", e)).unwrap(),
@@ -808,6 +830,7 @@ pub unsafe extern "C" fn ws_fetch_fields_v2(rs: *mut WS_RES) -> *const WS_FIELD_
         _ => std::ptr::null(),
     }
 }
+
 #[no_mangle]
 /// Works like taos_fetch_raw_block, it will always return block with format v3.
 pub unsafe extern "C" fn ws_fetch_block(
@@ -841,7 +864,7 @@ pub unsafe extern "C" fn ws_fetch_block(
 }
 
 #[no_mangle]
-/// If the query is update query or not
+/// If the element in (row, column) is null or not
 pub unsafe extern "C" fn ws_is_null(rs: *const WS_RES, row: usize, col: usize) -> bool {
     match (rs as *mut WsMaybeError<WsResultSet>)
         .as_ref()
@@ -1025,6 +1048,72 @@ pub unsafe extern "C" fn ws_get_current_db(
     }
 
     code
+}
+
+/*  --------------------------schemaless INTERFACE------------------------------- */
+#[no_mangle]
+/// Same to taos_get_current_db.
+///
+/// TAOS_RES   *taos_schemaless_insert_raw_ttl_with_reqid(TAOS *taos, char *lines, int len,   int32_t *totalRows,  int protocol, int precision, int32_t ttl,   int64_t reqid);
+pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl_with_reqid(
+    taos: *mut WS_TAOS,
+    lines: *const c_char,
+    len: c_int,
+    #[allow(non_snake_case)] totalRows: *mut i32,
+    protocal: c_int,
+    precision: c_int,
+    ttl: c_int,
+    reqid: i64,
+) -> i32 {
+    match ws_schemaless_insert_raw(taos, lines, len, totalRows, protocal, precision, ttl, reqid) {
+        Ok(_) => 0,
+        Err(e) => {
+            let error_message = format!("schemaless insert failed: {}", e.to_string());
+            let code = set_error_info(Code::FAILED, &error_message);
+            code.into()
+        }
+    }
+}
+
+unsafe fn set_error_info(code: Code, error_message: &String) -> Code {
+    C_ERRNO = code;
+    let dst = C_ERROR_CONTAINER.as_mut_ptr();
+    std::ptr::copy_nonoverlapping(
+        error_message.as_ptr(),
+        dst,
+        min(error_message.len(), C_ERROR_CONTAINER.len()),
+    );
+    code
+}
+
+unsafe fn ws_schemaless_insert_raw(
+    taos: *mut WS_TAOS,
+    lines: *const c_char,
+    len: c_int,
+    _total_rows: *mut i32,
+    protocal: c_int,
+    precision: c_int,
+    ttl: c_int,
+    reqid: i64,
+) -> WsResult<()> {
+    let client = (taos as *mut Taos)
+        .as_mut()
+        .ok_or(WsError::new(Code::FAILED, "client pointer it null"))?;
+
+    let slice = std::slice::from_raw_parts(lines as *const u8, len as usize);
+
+    let data = String::from_utf8(slice.to_vec())?;
+
+    let sml_data = SmlDataBuilder::default()
+        .protocol(SchemalessProtocol::from(protocal as i32))
+        .precision(SchemalessPrecision::from(precision as i32))
+        .data(vec![data])
+        .ttl(ttl as i32)
+        .req_id(reqid as u64)
+        .build()?;
+
+    client.put(&sml_data)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1632,6 +1721,60 @@ mod tests {
             assert!(fields.len() >= 6);
 
             execute!(b"drop database if exists ws_bi_mode\0");
+        }
+    }
+    #[test]
+    fn test_schemaless() {
+        init_env();
+        unsafe {
+            let taos =
+                ws_connect_with_dsn(b"http://localhost:6041/schemaless_test\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            // macro_rules! execute {
+            //     ($sql:expr) => {
+            //         let sql = $sql as *const u8 as _;
+            //         let rs = ws_query(taos, sql);
+            //         let code = ws_errno(rs);
+            //         assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+            //         ws_free_result(rs);
+            //     };
+            // }
+
+            // execute!(b"drop database if exists schemaless_test\0");
+            // execute!(b"create database schemaless_test keep 36500\0");
+            // execute!(b"use schemaless_test\0");
+
+            // 准备要插入的数据
+            let data = "meters,groupid=2,location=California.SanFrancisco current=10.3000002f64,voltage=219i32,phase=0.31f64 1626006833639000000";
+            let c_data = CString::new(data).expect("CString::new failed");
+            let lines = c_data.as_ptr() as *const c_char;
+            let len = data.len() as c_int;
+
+            // 准备其他参数
+            let _total_rows: *mut i32 = &mut 0;
+            let protocal = 1; // 示例值
+            let precision = 4; // 示例值
+            let ttl = 0; // 示例值
+            let reqid = 0i64; // 示例值
+            let rs = ws_schemaless_insert_raw(
+                taos,
+                lines as *const c_char,
+                data.len() as i32,
+                _total_rows,
+                protocal,
+                precision,
+                ttl,
+                reqid,
+            );
+
+            rs.unwrap();
         }
     }
 }

@@ -1174,6 +1174,17 @@ pub enum SchemalessProtocol {
     Json,
 }
 
+impl From<i32> for SchemalessProtocol {
+    fn from(value: i32) -> Self {
+        match value {
+            1 => SchemalessProtocol::Line,
+            2 => SchemalessProtocol::Telnet,
+            3 => SchemalessProtocol::Json,
+            _ => SchemalessProtocol::Unknown, // 或者其他默认值
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Default, Debug, Copy, Clone)]
 pub enum SchemalessPrecision {
@@ -1194,6 +1205,21 @@ impl From<SchemalessPrecision> for String {
             SchemalessPrecision::Microsecond => "us".to_string(),
             SchemalessPrecision::Nanosecond => "ns".to_string(),
             _ => todo!(),
+        }
+    }
+}
+
+impl From<i32> for SchemalessPrecision {
+    fn from(value: i32) -> Self {
+        match value {
+            0 => SchemalessPrecision::NonConfigured,
+            1 => SchemalessPrecision::Hours,
+            2 => SchemalessPrecision::Minutes,
+            3 => SchemalessPrecision::Seconds,
+            4 => SchemalessPrecision::Millisecond,
+            5 => SchemalessPrecision::Microsecond,
+            6 => SchemalessPrecision::Nanosecond,
+            _ => SchemalessPrecision::Millisecond, // 默认值
         }
     }
 }

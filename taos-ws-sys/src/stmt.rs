@@ -227,12 +227,8 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
             .and_then(|s| s.get_col_fields())
         {
             Ok(fields_vec) => {
-                let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
-
                 *fieldNum = fields_vec.len() as _;
-
                 *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
-
                 0
             }
 
@@ -249,9 +245,10 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
 
 /// Free memory of fields that was allocated by `ws_stmt_get_tag_fields` or `ws_stmt_get_col_fields`.
 #[allow(non_snake_case)]
+#[allow(unused_variables)]
 #[no_mangle]
-pub unsafe extern "C" fn ws_stmt_reclaim_fields(fields: *mut *mut StmtField, fieldNum: c_int) {
-    let _ = Vec::from_raw_parts(*fields, fieldNum as usize, fieldNum as usize);
+pub unsafe extern "C" fn ws_stmt_reclaim_fields(stmt: *mut WS_STMT, fields: *mut *mut StmtField) {
+    let _ = Box::from_raw(fields);
 }
 
 /// Currently only insert sql is supported.
