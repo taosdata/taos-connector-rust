@@ -180,8 +180,8 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_get_tag_fields(
     stmt: *mut WS_STMT,
-    fields: *mut *mut StmtField,
     fieldNum: *mut c_int,
+    fields: *mut *mut StmtField,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => match stmt
@@ -217,8 +217,8 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_get_col_fields(
     stmt: *mut WS_STMT,
-    fields: *mut *mut StmtField,
     fieldNum: *mut c_int,
+    fields: *mut *mut StmtField,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => match stmt
@@ -250,8 +250,8 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
 /// Free memory of fields that was allocated by `ws_stmt_get_tag_fields` or `ws_stmt_get_col_fields`.
 #[allow(non_snake_case)]
 #[no_mangle]
-pub unsafe extern "C" fn ws_stmt_reclaim_fields(fields: *mut *mut StmtField, fieldNum: c_int) {
-    let _ = Vec::from_raw_parts(*fields, fieldNum as usize, fieldNum as usize);
+pub unsafe extern "C" fn ws_stmt_reclaim_fields(stmt: *mut WS_STMT, fields: *mut *mut StmtField) {
+    //let _ = Vec::from_raw_parts(*fields, fieldNum as usize, fieldNum as usize);
 }
 
 /// Currently only insert sql is supported.
@@ -806,7 +806,7 @@ pub unsafe extern "C" fn ws_stmt_errstr(stmt: *mut WS_STMT) -> *const c_char {
 
 /// Same to taos_stmt_close
 #[no_mangle]
-pub unsafe extern "C" fn ws_stmt_close(stmt: *mut WS_STMT) {
+pub unsafe extern "C" fn ws_stmt_close(stmt: *mut WS_STMT) -> i32 {
     let _ = Box::from_raw(stmt as *mut WsMaybeError<Stmt>);
 }
 

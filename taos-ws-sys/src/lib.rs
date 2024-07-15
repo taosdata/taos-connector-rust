@@ -26,6 +26,7 @@ use cargo_metadata::MetadataCommand;
 pub use taos_ws::query::asyn::WS_ERROR_NO;
 
 pub mod stmt;
+pub mod tmq;
 
 const EMPTY: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") };
 static mut C_ERROR_CONTAINER: [u8; 4096] = [0; 4096];
@@ -481,30 +482,45 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     Ok(taos)
 }
 
-/// Enable inner log to stdout with environment RUST_LOG.
+/// Enable inner log to stdout with environment LIBTAOSWS_LOG_LEVEL.
 ///
 /// # Example
 ///
 /// ```c
-/// ws_enable_log();
+/// ws_enable_log("debug");
 /// ```
 ///
 /// To show debug logs:
 ///
 /// ```bash
-/// RUST_LOG=debug ./a.out
+/// LIBTAOSWS_LOG_LEVEL=debug ./a.out
 /// ```
 #[no_mangle]
-pub unsafe extern "C" fn ws_enable_log() {
+pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
     static ONCE_INIT: std::sync::Once = std::sync::Once::new();
+
+    let logLevel = match log_level.is_null() {
+        true => "info",
+        false => {
+            if let Ok(log_level_str) = CStr::from_ptr(log_level).to_str() {
+                log_level_str
+            } else {
+                return -1;
+            }
+        }
+    };
+
     ONCE_INIT.call_once(|| {
         let mut builder = pretty_env_logger::formatted_timed_builder();
         builder.format_timestamp_nanos();
-        if let Ok(s) = ::std::env::var("RUST_LOG") {
+        if let Ok(s) = ::std::env::var("LIBTAOSWS_LOG_LEVEL") {
             builder.parse_filters(&s);
+        } else {
+            builder.parse_filters(logLevel);
         }
         builder.init();
     });
+    0
 }
 
 /// Connect via dsn string, returns NULL if failed.
@@ -558,13 +574,15 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
 
 #[no_mangle]
 /// Same to taos_close. This should always be called after everything done with the connection.
-pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) {
+pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) -> i32 {
     if !taos.is_null() {
         log::trace!("close connection {taos:p}");
         let client = Box::from_raw(taos as *mut Taos);
         // client.close();
         drop(client);
+        0
     }
+    -1
 }
 
 unsafe fn query_with_sql(taos: *mut WS_TAOS, sql: *const c_char) -> WsResult<WsResultSet> {
@@ -604,7 +622,7 @@ pub unsafe extern "C" fn ws_query(taos: *mut WS_TAOS, sql: *const c_char) -> *mu
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) {
+pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) -> i32 {
     match (rs as *mut WsMaybeError<WsResultSet>)
         .as_mut()
         .and_then(|s| s.safe_deref_mut())
@@ -614,6 +632,7 @@ pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) {
         }
         _ => {}
     }
+    0
 }
 
 #[no_mangle]
@@ -810,10 +829,10 @@ pub unsafe extern "C" fn ws_fetch_fields_v2(rs: *mut WS_RES) -> *const WS_FIELD_
 }
 #[no_mangle]
 /// Works like taos_fetch_raw_block, it will always return block with format v3.
-pub unsafe extern "C" fn ws_fetch_block(
+pub unsafe extern "C" fn ws_fetch_raw_block(
     rs: *mut WS_RES,
-    ptr: *mut *const c_void,
-    rows: *mut i32,
+    pData: *mut *const c_void,
+    numOfRows: *mut i32,
 ) -> i32 {
     unsafe fn handle_error(error_message: &str, rows: *mut i32) -> i32 {
         *rows = 0;
@@ -905,10 +924,11 @@ pub unsafe extern "C" fn ws_num_fields(rs: *const WS_RES) -> i32 {
 
 #[no_mangle]
 /// Same to taos_free_result. Every websocket result-set object should be freed with this method.
-pub unsafe extern "C" fn ws_free_result(rs: *mut WS_RES) {
+pub unsafe extern "C" fn ws_free_result(rs: *mut WS_RES) -> i32 {
     if !rs.is_null() {
         let _ = Box::from_raw(rs as *mut WsMaybeError<WsResultSet>);
     }
+    0
 }
 
 #[no_mangle]
