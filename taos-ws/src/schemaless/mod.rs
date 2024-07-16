@@ -112,7 +112,7 @@ async fn read_queries(
         match frame {
             Message::Text(text) => {
                 log::trace!("received json response: {text}",);
-                let v: WsRecv = sonic_rs::from_str(&text).unwrap();
+                let v: WsRecv = serde_json::from_str(&text).unwrap();
                 let queries_sender = queries_sender.clone();
                 tokio::task::spawn_blocking(move || {
                     let (req_id, data, ok) = v.ok();
