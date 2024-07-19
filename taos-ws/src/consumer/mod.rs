@@ -871,6 +871,7 @@ impl TmqBuilder {
         let snapshot_enable = dsn
             .params
             .get("experimental.snapshot.enable")
+            .or_else(|| dsn.params.get("snapshot"))
             .and_then(|s| {
                 if s.is_empty() {
                     None
@@ -902,6 +903,30 @@ impl TmqBuilder {
                 Some(s.to_string())
             }
         });
+        let enable_batch_meta = dsn
+            .get("msg.enable.batchmeta")
+            .or_else(|| dsn.params.get("batchmeta"))
+            .or_else(|| dsn.params.get("enable.batch.meta"))
+            .map(|s| {
+                let s = s.trim();
+                if s.is_empty() {
+                    "1".to_string()
+                } else {
+                    s.to_string()
+                }
+            })
+            .unwrap_or_else(|| "1".to_string());
+        let msg_consume_excluded = dsn
+            .get("msg.consume.excluded")
+            .or_else(|| dsn.params.get("replica"))
+            .map(|s| {
+                let s = s.trim();
+                if s.is_empty() {
+                    "1".to_string()
+                } else {
+                    s.to_string()
+                }
+            });
         let conf = TmqInit {
             group_id,
             client_id,
@@ -911,6 +936,8 @@ impl TmqBuilder {
             snapshot_enable,
             with_table_name,
             offset_seek,
+            enable_batch_meta,
+            msg_consume_excluded,
         };
 
         Ok(Self {

@@ -349,6 +349,7 @@ pub(super) mod conf {
             .disable_auto_commit()
             .enable_heartbeat_background()
             .disable_snapshot()
+            .enable_batch_meta()
             .with_table_name()
         }
 
@@ -416,6 +417,13 @@ pub(super) mod conf {
                 .expect("set group.id should always be ok");
             self
         }
+
+        pub fn enable_batch_meta(mut self) -> Self {
+            // Safety: set enable.batch.meta as true, ignore error when not supported.
+            let _ = self.set("msg.enable.batchmeta", "1");
+            self
+        }
+
         // pub fn without_table_name(mut self) -> Self {
         //     self.set("msg.with.table.name", "false")
         //         .expect("set group.id should always be ok");
