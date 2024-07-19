@@ -63,7 +63,20 @@ impl tmq_conf_res_t {
             Self::Invalid => Err(RawError::from_string(format!(
                 "Invalid key value pair ({k}, {v})"
             ))),
-            Self::Unknown => Err(RawError::from_string(format!("Unknown key {k}"))),
+            Self::Unknown => {
+                if k == "msg.enable.batchmeta" {
+                    tracing::warn!(
+                        "Ignore unsupported `msg.enable.batchmeta` setting, fallback to builtin settings"
+                    );
+                    return Ok(());
+                }
+                tracing::warn!(
+                    consumer.conf.key = k,
+                    consumer.conf.value = v,
+                    "Unknown key {k}"
+                );
+                Err(RawError::from_string(format!("Unknown key {k}")))
+            }
         }
     }
 }
