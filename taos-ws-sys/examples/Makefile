@@ -5,7 +5,7 @@ all:
 	gcc -g show-databases.c ${WS_FLAGS} -o show-databases
 	gcc -g ws-run-sql.c ${WS_FLAGS} -o ws-run-sql
 
-.phony: all
+.PHONY: all
 
 basic:
 	gcc -g ws-basic.c ${WS_FLAGS} -o ./target/ws-basic && ./target/ws-basic
@@ -26,3 +26,6 @@ get-err:
 	gcc -g ws-get-err.c ${WS_FLAGS} -o ./target/ws-get-err && ./target/ws-get-err
 fetch-row:
 	gcc -g ws-fetch-row.c ${WS_FLAGS} -o ./target/ws-fetch-row && ./target/ws-fetch-row
+
+tmq-basic:
+	gcc -g ws-tmq-basic.c ${WS_FLAGS} -o ./target/ws-tmq-basic && ./target/ws-tmq-basic

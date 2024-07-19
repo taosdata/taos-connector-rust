@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     cmp::min,
     ffi::{c_void, CStr, CString},
     fmt::{Debug, Display},
@@ -28,10 +29,55 @@ use cargo_metadata::MetadataCommand;
 pub use taos_ws::query::asyn::WS_ERROR_NO;
 
 pub mod stmt;
+pub mod tmq;
 
+const MAX_ERROR_MSG_LEN: usize = 4096;
 const EMPTY: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") };
-static mut C_ERROR_CONTAINER: [u8; 4096] = [0; 4096];
-static mut C_ERRNO: Code = Code::SUCCESS;
+thread_local! {
+    static C_ERROR_CONTAINER: RefCell<[u8; MAX_ERROR_MSG_LEN]> = RefCell::new([0; MAX_ERROR_MSG_LEN]);
+    static C_ERRNO: RefCell<Code> = RefCell::new(Code::SUCCESS);
+}
+unsafe fn set_error_info(ws_err: WsError) -> Code {
+    C_ERRNO.with(|c_errno| {
+        *c_errno.borrow_mut() = ws_err.code;
+    });
+    C_ERROR_CONTAINER.with(|container| {
+        let bytes = ws_err.message.as_bytes();
+        let length = bytes.len().min(MAX_ERROR_MSG_LEN - 1); // make sure the size max, and keep last byte for '\0'
+        container.borrow_mut()[..length].copy_from_slice(&bytes[..length]);
+        container.borrow_mut()[length] = 0; // add c str last '\0'
+    });
+    ws_err.code
+}
+fn set_c_errno(code: Code) {
+    C_ERRNO.with(|c_errno| {
+        *c_errno.borrow_mut() = code;
+    });
+}
+
+fn get_c_errno() -> Code {
+    C_ERRNO.with(|c_errno| *c_errno.borrow())
+}
+
+fn get_c_error_str() -> *const c_char {
+    C_ERROR_CONTAINER.with(|container| {
+        let container = container.borrow();
+        let slice = &container[..container.len()];
+        slice.as_ptr() as *const c_char
+    })
+}
+
+unsafe fn clear_error_info() {
+    C_ERRNO.with(|c_errno| {
+        *c_errno.borrow_mut() = Code::SUCCESS;
+    });
+    C_ERROR_CONTAINER.with(|container| {
+        let bytes = "".as_bytes();
+        let length = bytes.len().min(MAX_ERROR_MSG_LEN - 1); // make sure the size max, and keep last byte for '\0'
+        container.borrow_mut()[..length].copy_from_slice(&bytes[..length]);
+        container.borrow_mut()[length] = 0; // add c str last '\0'
+    });
+}
 
 /// Opaque type definition for websocket connection.
 #[allow(non_camel_case_types)]
@@ -355,9 +401,16 @@ pub struct ROW {
     /// current row to get
     current_row: usize,
 }
+#[derive(Debug)]
+enum ResultSetType {
+    SQL,
+    SCHEMALESS,
+    TMQ,
+}
 
 #[derive(Debug)]
 struct WsResultSet {
+    rs_type: ResultSetType,
     rs: ResultSet,
     block: Option<Block>,
     fields: Vec<WS_FIELD>,
@@ -371,7 +424,7 @@ struct WsResultSet {
 // }
 
 impl WsResultSet {
-    fn new(rs: ResultSet) -> Self {
+    fn new(rs: ResultSet, rs_type: ResultSetType) -> Self {
         let num_of_fields = rs.num_of_fields();
         let mut data_vec = Vec::with_capacity(num_of_fields);
         for _col in 0..num_of_fields {
@@ -379,6 +432,7 @@ impl WsResultSet {
         }
 
         Self {
+            rs_type,
             rs,
             block: None,
             fields: Vec::new(),
@@ -503,30 +557,45 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     Ok(taos)
 }
 
-/// Enable inner log to stdout with environment RUST_LOG.
+/// Enable inner log to stdout with environment LIBTAOSWS_LOG_LEVEL.
 ///
 /// # Example
 ///
 /// ```c
-/// ws_enable_log();
+/// ws_enable_log("debug");
 /// ```
 ///
 /// To show debug logs:
 ///
 /// ```bash
-/// RUST_LOG=debug ./a.out
+/// LIBTAOSWS_LOG_LEVEL=debug ./a.out
 /// ```
 #[no_mangle]
-pub unsafe extern "C" fn ws_enable_log() {
+pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
     static ONCE_INIT: std::sync::Once = std::sync::Once::new();
+
+    let log_level = match log_level.is_null() {
+        true => "info",
+        false => {
+            if let Ok(log_level_str) = CStr::from_ptr(log_level).to_str() {
+                log_level_str
+            } else {
+                return -1;
+            }
+        }
+    };
+
     ONCE_INIT.call_once(|| {
         let mut builder = pretty_env_logger::formatted_timed_builder();
         builder.format_timestamp_nanos();
-        if let Ok(s) = ::std::env::var("RUST_LOG") {
+        if let Ok(s) = ::std::env::var("LIBTAOSWS_LOG_LEVEL") {
             builder.parse_filters(&s);
+        } else {
+            builder.parse_filters(log_level);
         }
         builder.init();
     });
+    0
 }
 
 /// Connect via dsn string, returns NULL if failed.
@@ -547,14 +616,10 @@ pub unsafe extern "C" fn ws_enable_log() {
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn ws_connect_with_dsn(dsn: *const c_char) -> *mut WS_TAOS {
-    C_ERRNO = Code::SUCCESS;
     match connect_with_dsn(dsn) {
         Ok(client) => Box::into_raw(Box::new(client)) as _,
         Err(err) => {
-            C_ERRNO = err.code;
-            let dst = C_ERROR_CONTAINER.as_mut_ptr();
-            let errstr = err.message.as_bytes_with_nul();
-            std::ptr::copy_nonoverlapping(errstr.as_ptr(), dst, errstr.len());
+            set_error_info(err);
             std::ptr::null_mut()
         }
     }
@@ -580,23 +645,29 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
 
 #[no_mangle]
 /// Same to taos_close. This should always be called after everything done with the connection.
-pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) {
+pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) -> i32 {
     if !taos.is_null() {
         log::trace!("close connection {taos:p}");
         let client = Box::from_raw(taos as *mut Taos);
         // client.close();
         drop(client);
+        return 0;
     }
+    -1
 }
 
-unsafe fn query_with_sql(taos: *mut WS_TAOS, sql: *const c_char) -> WsResult<WsResultSet> {
+unsafe fn query_with_sql(
+    taos: *mut WS_TAOS,
+    sql: *const c_char,
+    req_id: u64,
+) -> WsResult<WsResultSet> {
     let client = (taos as *mut Taos)
         .as_mut()
         .ok_or(WsError::new(Code::FAILED, "client pointer it null"))?;
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
-    let rs = client.query(sql)?;
-    Ok(WsResultSet::new(rs))
+    let rs = client.query_with_req_id(sql, req_id)?;
+    Ok(WsResultSet::new(rs, ResultSetType::SQL))
 }
 
 unsafe fn query_with_sql_timeout(
@@ -611,7 +682,7 @@ unsafe fn query_with_sql_timeout(
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
     let rs = client.query(sql)?;
-    Ok(WsResultSet::new(rs))
+    Ok(WsResultSet::new(rs, ResultSetType::SQL))
 }
 
 #[no_mangle]
@@ -619,14 +690,23 @@ unsafe fn query_with_sql_timeout(
 ///
 /// Please always use `ws_errno` to check it work and `ws_free_result` to free memory.
 pub unsafe extern "C" fn ws_query(taos: *mut WS_TAOS, sql: *const c_char) -> *mut WS_RES {
-    log::trace!("query {:?}", CStr::from_ptr(sql));
-    let res: WsMaybeError<WsResultSet> = query_with_sql(taos, sql).into();
+    ws_query_with_reqid(taos, sql, 0)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ws_query_with_reqid(
+    taos: *mut WS_TAOS,
+    sql: *const c_char,
+    req_id: u64,
+) -> *mut WS_RES {
+    log::trace!("query {:?}, req_id {:?}", CStr::from_ptr(sql), req_id);
+    let res: WsMaybeError<WsResultSet> = query_with_sql(taos, sql, req_id).into();
     log::trace!("query done: {:?}", res);
     Box::into_raw(Box::new(res)) as _
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) {
+pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) -> i32 {
     match (rs as *mut WsMaybeError<WsResultSet>)
         .as_mut()
         .and_then(|s| s.safe_deref_mut())
@@ -636,6 +716,7 @@ pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) {
         }
         _ => {}
     }
+    0
 }
 
 #[no_mangle]
@@ -661,10 +742,7 @@ pub unsafe extern "C" fn ws_take_timing(rs: *mut WS_RES) -> i64 {
     {
         Some(rs) => rs.take_timing().as_nanos() as _,
         _ => {
-            C_ERRNO = Code::FAILED;
-            let dst = C_ERROR_CONTAINER.as_mut_ptr();
-            const NULL_PTR_RES: &str = "WS_RES is null";
-            std::ptr::copy_nonoverlapping(NULL_PTR_RES.as_ptr(), dst, NULL_PTR_RES.len());
+            set_error_info(WsError::new(Code::FAILED, "WS_RES is null"));
             Code::FAILED.into()
         }
     }
@@ -674,14 +752,14 @@ pub unsafe extern "C" fn ws_take_timing(rs: *mut WS_RES) -> i64 {
 /// Always use this to ensure that the query is executed correctly.
 pub unsafe extern "C" fn ws_errno(rs: *mut WS_RES) -> i32 {
     if rs.is_null() {
-        return C_ERRNO.into();
+        return get_c_errno().into();
     }
     match (rs as *mut WsMaybeError<()>)
         .as_ref()
         .and_then(|s| s.errno())
     {
         Some(c) => c,
-        _ => C_ERRNO.into(),
+        _ => get_c_errno().into(),
     }
 }
 
@@ -689,10 +767,10 @@ pub unsafe extern "C" fn ws_errno(rs: *mut WS_RES) -> i32 {
 /// Use this method to get a formatted error string when query errno is not 0.
 pub unsafe extern "C" fn ws_errstr(rs: *mut WS_RES) -> *const c_char {
     if rs.is_null() {
-        if C_ERRNO.success() {
+        if get_c_errno().success() {
             return EMPTY.as_ptr();
         } else {
-            return C_ERROR_CONTAINER.as_ptr() as _;
+            return get_c_error_str() as _;
         }
     }
     match (rs as *mut WsMaybeError<()>)
@@ -701,10 +779,10 @@ pub unsafe extern "C" fn ws_errstr(rs: *mut WS_RES) -> *const c_char {
     {
         Some(e) => e,
         _ => {
-            if C_ERRNO.success() {
+            if get_c_errno().success() {
                 EMPTY.as_ptr()
             } else {
-                C_ERROR_CONTAINER.as_ptr() as _
+                get_c_error_str() as _
             }
         }
     }
@@ -832,24 +910,22 @@ pub unsafe extern "C" fn ws_fetch_fields_v2(rs: *mut WS_RES) -> *const WS_FIELD_
 }
 
 #[no_mangle]
+#[allow(non_snake_case)]
 /// Works like taos_fetch_raw_block, it will always return block with format v3.
-pub unsafe extern "C" fn ws_fetch_block(
+pub unsafe extern "C" fn ws_fetch_raw_block(
     rs: *mut WS_RES,
-    ptr: *mut *const c_void,
-    rows: *mut i32,
+    pData: *mut *const c_void,
+    numOfRows: *mut i32,
 ) -> i32 {
     unsafe fn handle_error(error_message: &str, rows: *mut i32) -> i32 {
         *rows = 0;
-
-        C_ERRNO = Code::FAILED;
-        let dst = C_ERROR_CONTAINER.as_mut_ptr();
-        std::ptr::copy_nonoverlapping(error_message.as_ptr(), dst, error_message.len());
+        set_error_info(WsError::new(Code::FAILED, error_message));
         Code::FAILED.into()
     }
 
     match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
         Some(rs) => match rs.safe_deref_mut() {
-            Some(s) => match s.fetch_block(ptr, rows) {
+            Some(s) => match s.fetch_block(pData, numOfRows) {
                 Ok(()) => 0,
                 Err(err) => {
                     let code = err.errno();
@@ -857,9 +933,9 @@ pub unsafe extern "C" fn ws_fetch_block(
                     code.into()
                 }
             },
-            None => handle_error("WS_RES data is null", rows),
+            None => handle_error("WS_RES data is null", numOfRows),
         },
-        _ => handle_error("WS_RES is null", rows),
+        _ => handle_error("WS_RES is null", numOfRows),
     }
 }
 
@@ -881,34 +957,32 @@ pub unsafe extern "C" fn ws_is_null(rs: *const WS_RES, row: usize, col: usize) -
 #[no_mangle]
 /// Works like taos_fetch_row
 pub unsafe extern "C" fn ws_fetch_row(rs: *mut WS_RES) -> WS_ROW {
-    unsafe fn handle_error(error_message: &str, err_no: Code) -> i32 {
-        C_ERRNO = err_no;
-        let dst = C_ERROR_CONTAINER.as_mut_ptr();
-        std::ptr::copy_nonoverlapping(error_message.as_ptr(), dst, error_message.len());
-        Code::FAILED.into()
-    }
+    // unsafe fn handle_error(error_message: &str, err_no: Code) -> i32 {
+    //     C_ERRNO = err_no;
+    //     let dst = C_ERROR_CONTAINER.as_mut_ptr();
+    //     std::ptr::copy_nonoverlapping(error_message.as_ptr(), dst, error_message.len());
+    //     Code::FAILED.into()
+    // }
 
     match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
         Some(rs) => match rs.safe_deref_mut() {
             Some(s) => match s.fetch_row() {
                 Ok(p_row) => {
-                    C_ERRNO = Code::SUCCESS;
+                    clear_error_info();
                     p_row
                 }
                 Err(err) => {
-                    // let code = err.errno();
-                    // rs.error = Some(err.into());
-                    handle_error(&err.errstr(), err.errno());
+                    set_error_info(WsError::new(err.errno(), &err.errstr()));
                     std::ptr::null()
                 }
             },
             None => {
-                handle_error("WS_RES data is null", Code::FAILED);
+                set_error_info(WsError::new(Code::FAILED, "WS_RES data is null"));
                 std::ptr::null()
             }
         },
         _ => {
-            handle_error("WS_RES is null", Code::FAILED);
+            set_error_info(WsError::new(Code::FAILED, "WS_RES data is null"));
             std::ptr::null()
         }
     }
@@ -928,10 +1002,11 @@ pub unsafe extern "C" fn ws_num_fields(rs: *const WS_RES) -> i32 {
 
 #[no_mangle]
 /// Same to taos_free_result. Every websocket result-set object should be freed with this method.
-pub unsafe extern "C" fn ws_free_result(rs: *mut WS_RES) {
+pub unsafe extern "C" fn ws_free_result(rs: *mut WS_RES) -> i32 {
     if !rs.is_null() {
         let _ = Box::from_raw(rs as *mut WsMaybeError<WsResultSet>);
     }
+    0
 }
 
 #[no_mangle]
@@ -1033,7 +1108,7 @@ pub unsafe extern "C" fn ws_get_current_db(
     let rs = ws_query(taos, b"SELECT DATABASE()\0" as *const u8 as _);
     let mut block: *const c_void = std::ptr::null();
     let mut rows = 0;
-    let mut code = ws_fetch_block(rs, &mut block, &mut rows);
+    let mut code = ws_fetch_raw_block(rs, &mut block, &mut rows);
 
     let mut ty: Ty = Ty::Null;
     let mut len_actual = 0u32;
@@ -1069,21 +1144,11 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl_with_reqid(
         Ok(_) => 0,
         Err(e) => {
             let error_message = format!("schemaless insert failed: {}", e.to_string());
-            let code = set_error_info(Code::FAILED, &error_message);
-            code.into()
+            set_error_info(WsError::new(Code::FAILED, &error_message));
+
+            Code::FAILED.into()
         }
     }
-}
-
-unsafe fn set_error_info(code: Code, error_message: &String) -> Code {
-    C_ERRNO = code;
-    let dst = C_ERROR_CONTAINER.as_mut_ptr();
-    std::ptr::copy_nonoverlapping(
-        error_message.as_ptr(),
-        dst,
-        min(error_message.len(), C_ERROR_CONTAINER.len()),
-    );
-    code
 }
 
 unsafe fn ws_schemaless_insert_raw(
@@ -1118,8 +1183,8 @@ unsafe fn ws_schemaless_insert_raw(
 
 #[cfg(test)]
 pub fn init_env() {
-    std::env::set_var("RUST_LOG", "debug");
-    unsafe { ws_enable_log() };
+    std::env::set_var("LIBTAOSWS_LOG_LEVEL", "debug");
+    unsafe { ws_enable_log("debug\0".as_ptr() as *const c_char) };
 }
 
 #[cfg(test)]
@@ -1312,7 +1377,7 @@ mod tests {
 
             let mut block: *const c_void = std::ptr::null();
             let mut rows = 0;
-            let code = ws_fetch_block(rs, &mut block as *mut *const c_void, &mut rows as _);
+            let code = ws_fetch_raw_block(rs, &mut block as *mut *const c_void, &mut rows as _);
             assert_eq!(code, 0);
 
             let is_null = ws_is_null(rs, 0, 0);
@@ -1503,7 +1568,7 @@ mod tests {
                 line_num = line_num + 1;
             }
 
-            if C_ERRNO == Code::SUCCESS {
+            if get_c_errno() == Code::SUCCESS {
                 println!("fetch row done");
             } else {
                 let error = ws_errstr(rs);
@@ -1752,7 +1817,7 @@ mod tests {
             // execute!(b"use schemaless_test\0");
 
             // 准备要插入的数据
-            let data = "meters,groupid=2,location=California.SanFrancisco current=10.3000002f64,voltage=219i32,phase=0.31f64 1626006833639000000";
+            let data = "meters,groupid=2,location=California.SanFrancisco current=10.3000002f64,voltage=219i32,phase=0.31f64 1626006833639";
             let c_data = CString::new(data).expect("CString::new failed");
             let lines = c_data.as_ptr() as *const c_char;
             let len = data.len() as c_int;

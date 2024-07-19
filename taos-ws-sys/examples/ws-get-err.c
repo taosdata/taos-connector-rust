@@ -61,10 +61,10 @@ void insert_data(WS_TAOS *taos)
     StmtField *fields = NULL;
     int num_fields = 0;
     int code;
-    
-    code = ws_stmt_get_col_fields(stmt, &fields, &num_fields);
+
+    code = ws_stmt_get_col_fields(stmt, &num_fields, &fields);
     check_error_code(stmt, code, "failed to execute ws_stmt_get_col_fields");
-    ws_stmt_reclaim_fields(&fields, num_fields);
+    ws_stmt_reclaim_fields(stmt, &fields, num_fields);
 
     // prepare
     const char *sql = "INSERT INTO ? USING meters TAGS(?, ?) VALUES(?, ?, ?, ?)";
@@ -94,9 +94,11 @@ void insert_data(WS_TAOS *taos)
     check_error_code(stmt, code, "failed to execute ws_stmt_set_tbname_tags");
 
     num_fields = 0;
-    code = ws_stmt_get_col_fields(stmt, &fields, &num_fields);
+    code = ws_stmt_get_col_fields(stmt, &num_fields, &fields);
     check_error_code(stmt, code, "failed to execute ws_stmt_get_col_fields");
     printf("num_fields: %d\n", num_fields);
+    ws_stmt_reclaim_fields(stmt, &fields, num_fields);
+
     for (int i = 0; i < num_fields; ++i)
     {
         printf("field[%d]: %s\n", i, fields[i].name);
@@ -162,7 +164,7 @@ void insert_data(WS_TAOS *taos)
 
 int main()
 {
-    ws_enable_log();
+    ws_enable_log("trace");
     WS_TAOS *taos = ws_connect_with_dsn("ws://localhost:6041");
     if (taos == NULL)
     {

@@ -12,7 +12,7 @@ int main()
   {
     dsn = "ws://localhost:6041";
   }
-  ws_enable_log();
+  ws_enable_log("trace");
   WS_TAOS *taos = ws_connect_with_dsn(dsn);
   if (taos == NULL)
   {
@@ -70,7 +70,7 @@ int main()
   {
     int rows = 0;
     const void *data = NULL;
-    code = ws_fetch_block(rs, &data, &rows);
+    code = ws_fetch_raw_block(rs, &data, &rows);
     int64_t timing = ws_take_timing(rs);
     dprintf(2, "Fetch block timing: %ldns\n", timing);
 

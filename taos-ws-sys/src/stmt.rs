@@ -43,18 +43,27 @@ impl From<WsStmtField> for StmtField {
 #[allow(non_camel_case_types)]
 pub type WS_STMT = c_void;
 
-unsafe fn stmt_init(taos: *const WS_TAOS) -> WsResult<Stmt> {
+unsafe fn stmt_init(taos: *const WS_TAOS, req_id: u64) -> WsResult<Stmt> {
     let client = (taos as *mut Taos)
         .as_mut()
         .ok_or(WsError::new(Code::FAILED, "client pointer it null"))?;
-    Ok(taos_ws::Stmt::init(client)?)
+    Ok(taos_ws::Stmt::init_with_req_id(client, req_id)?)
     // Ok(client.stmt_init()?)
 }
 
 /// Create new stmt object.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_init(taos: *const WS_TAOS) -> *mut WS_STMT {
-    let stmt: WsMaybeError<Stmt> = stmt_init(taos).into();
+    ws_stmt_init_with_reqid(taos, 0)
+}
+
+/// Create new stmt object with req_id.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_init_with_reqid(
+    taos: *const WS_TAOS,
+    req_id: u64,
+) -> *mut WS_STMT {
+    let stmt: WsMaybeError<Stmt> = stmt_init(taos, req_id).into();
     Box::into_raw(Box::new(stmt)) as _
 }
 
@@ -180,8 +189,8 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_get_tag_fields(
     stmt: *mut WS_STMT,
-    fields: *mut *mut StmtField,
     fieldNum: *mut c_int,
+    fields: *mut *mut StmtField,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => match stmt
@@ -217,8 +226,8 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_get_col_fields(
     stmt: *mut WS_STMT,
-    fields: *mut *mut StmtField,
     fieldNum: *mut c_int,
+    fields: *mut *mut StmtField,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => match stmt
@@ -247,8 +256,13 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
 #[no_mangle]
-pub unsafe extern "C" fn ws_stmt_reclaim_fields(stmt: *mut WS_STMT, fields: *mut *mut StmtField) {
-    let _ = Box::from_raw(fields);
+pub unsafe extern "C" fn ws_stmt_reclaim_fields(
+    stmt: *mut WS_STMT,
+    fields: *mut *mut StmtField,
+    fieldNum: c_int,
+) -> c_int {
+    let _ = Vec::from_raw_parts(*fields, fieldNum as usize, fieldNum as usize);
+    0
 }
 
 /// Currently only insert sql is supported.
@@ -803,8 +817,9 @@ pub unsafe extern "C" fn ws_stmt_errstr(stmt: *mut WS_STMT) -> *const c_char {
 
 /// Same to taos_stmt_close
 #[no_mangle]
-pub unsafe extern "C" fn ws_stmt_close(stmt: *mut WS_STMT) {
+pub unsafe extern "C" fn ws_stmt_close(stmt: *mut WS_STMT) -> i32 {
     let _ = Box::from_raw(stmt as *mut WsMaybeError<Stmt>);
+    0
 }
 
 #[cfg(test)]
@@ -1016,7 +1031,7 @@ mod tests {
                 loop {
                     let mut ptr = std::ptr::null();
                     let mut rows = 0;
-                    ws_fetch_block(rs, &mut ptr, &mut rows);
+                    ws_fetch_raw_block(rs, &mut ptr, &mut rows);
                     if rows == 0 {
                         break;
                     }
@@ -1114,7 +1129,7 @@ mod tests {
 
             execute!(b"drop database if exists ws_stmt_with_tags\0");
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
 
@@ -1243,7 +1258,7 @@ mod tests {
 
             // execute!(format!("drop database if exists {db}"));
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
 
@@ -1309,7 +1324,7 @@ mod tests {
 
             execute!(b"drop database if exists ws_stmt_with_sub_table\0");
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
 
@@ -1354,7 +1369,7 @@ mod tests {
             let mut tag_fields_before = std::ptr::null_mut();
             let mut tag_fields_len_before = 0;
             let code =
-                ws_stmt_get_tag_fields(stmt, &mut tag_fields_before, &mut tag_fields_len_before);
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_before, &mut tag_fields_before);
             log::debug!("tag_fields_before code: {}", code);
             if code != 0 {
                 log::debug!(
@@ -1365,7 +1380,7 @@ mod tests {
                 let tag_fields_before_rs =
                     std::slice::from_raw_parts(tag_fields_before, tag_fields_len_before as _);
                 log::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields_before, tag_fields_len_before);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields_before, tag_fields_len_before);
                 log::trace!(
                     "tag_fields_before after reclaim: {:?}",
                     tag_fields_before_rs
@@ -1376,7 +1391,7 @@ mod tests {
             let mut col_fields_before = std::ptr::null_mut();
             let mut col_fields_len_before = 0;
             let code =
-                ws_stmt_get_col_fields(stmt, &mut col_fields_before, &mut col_fields_len_before);
+                ws_stmt_get_col_fields(stmt, &mut col_fields_len_before, &mut col_fields_before);
             log::debug!("col_fields_before code: {}", code);
             if code != 0 {
                 log::debug!(
@@ -1387,7 +1402,7 @@ mod tests {
                 let col_fields_before_rs =
                     std::slice::from_raw_parts(col_fields_before, col_fields_len_before as _);
                 log::trace!("col_fields_before: {:?}", col_fields_before_rs);
-                ws_stmt_reclaim_fields(&mut col_fields_before, col_fields_len_before);
+                ws_stmt_reclaim_fields(stmt, &mut col_fields_before, col_fields_len_before);
                 log::trace!(
                     "col_fields_before after reclaim: {:?}",
                     col_fields_before_rs
@@ -1400,7 +1415,7 @@ mod tests {
             let mut tag_fields_after = std::ptr::null_mut();
             let mut tag_fields_len_after = 0;
             let code =
-                ws_stmt_get_tag_fields(stmt, &mut tag_fields_after, &mut tag_fields_len_after);
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_after, &mut tag_fields_after);
             log::debug!("tag_fields_after code: {}", code);
             if code != 0 {
                 log::error!(
@@ -1411,7 +1426,7 @@ mod tests {
                 let tag_fields_after_rs =
                     std::slice::from_raw_parts(tag_fields_after, tag_fields_len_after as _);
                 log::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields_after, tag_fields_len_after);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields_after, tag_fields_len_after);
                 log::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
             }
 
@@ -1440,7 +1455,7 @@ mod tests {
             // get stmt tag fields
             let mut tag_fields = std::ptr::null_mut();
             let mut tag_fields_len = 0;
-            let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields, &mut tag_fields_len);
+            let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields_len, &mut tag_fields);
             if code != 0 {
                 log::debug!(
                     "tag_fields errstr: {}",
@@ -1449,14 +1464,14 @@ mod tests {
             } else {
                 let tag_fields_rs = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
                 log::debug!("tag_fields: {:?}", tag_fields_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields, tag_fields_len);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields, tag_fields_len);
                 log::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
             }
 
             // get stmt column fields
             let mut col_fields = std::ptr::null_mut();
             let mut col_fields_len = 0;
-            let code = ws_stmt_get_col_fields(stmt, &mut col_fields, &mut col_fields_len);
+            let code = ws_stmt_get_col_fields(stmt, &mut col_fields_len, &mut col_fields);
             if code != 0 {
                 log::debug!(
                     "col_fields errstr: {}",
@@ -1465,13 +1480,13 @@ mod tests {
             } else {
                 let col_fields_rs = std::slice::from_raw_parts(col_fields, col_fields_len as _);
                 log::debug!("col_fields: {:?}", col_fields_rs);
-                ws_stmt_reclaim_fields(&mut col_fields, col_fields_len);
+                ws_stmt_reclaim_fields(stmt, &mut col_fields, col_fields_len);
                 log::debug!("col_fields after reclaim: {:?}", col_fields_rs);
             }
 
             ws_stmt_close(stmt);
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
     #[test]
@@ -1576,7 +1591,7 @@ mod tests {
 
             ws_stmt_close(stmt);
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
 
@@ -1620,7 +1635,7 @@ mod tests {
             let mut tag_fields_before = std::ptr::null_mut();
             let mut tag_fields_len_before = 0;
             let code =
-                ws_stmt_get_tag_fields(stmt, &mut tag_fields_before, &mut tag_fields_len_before);
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_before, &mut tag_fields_before);
             log::debug!("tag_fields_before code: {}", code);
             if code != 0 {
                 log::error!(
@@ -1631,7 +1646,7 @@ mod tests {
                 let tag_fields_before_rs =
                     std::slice::from_raw_parts(tag_fields_before, tag_fields_len_before as _);
                 log::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields_before, tag_fields_len_before);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields_before, tag_fields_len_before);
                 log::trace!(
                     "tag_fields_before after reclaim: {:?}",
                     tag_fields_before_rs
@@ -1642,7 +1657,7 @@ mod tests {
             let mut col_fields_before = std::ptr::null_mut();
             let mut col_fields_len_before = 0;
             let code =
-                ws_stmt_get_col_fields(stmt, &mut col_fields_before, &mut col_fields_len_before);
+                ws_stmt_get_col_fields(stmt, &mut col_fields_len_before, &mut col_fields_before);
             log::debug!("col_fields_before code: {}", code);
             if code != 0 {
                 log::error!(
@@ -1653,7 +1668,7 @@ mod tests {
                 let col_fields_before_rs =
                     std::slice::from_raw_parts(col_fields_before, col_fields_len_before as _);
                 log::trace!("col_fields_before: {:?}", col_fields_before_rs);
-                ws_stmt_reclaim_fields(&mut col_fields_before, col_fields_len_before);
+                ws_stmt_reclaim_fields(stmt, &mut col_fields_before, col_fields_len_before);
                 log::trace!(
                     "col_fields_before after reclaim: {:?}",
                     col_fields_before_rs
@@ -1666,7 +1681,7 @@ mod tests {
             let mut tag_fields_after = std::ptr::null_mut();
             let mut tag_fields_len_after = 0;
             let code =
-                ws_stmt_get_tag_fields(stmt, &mut tag_fields_after, &mut tag_fields_len_after);
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_after, &mut tag_fields_after);
             log::debug!("tag_fields_after code: {}", code);
             if code != 0 {
                 log::error!(
@@ -1677,7 +1692,7 @@ mod tests {
                 let tag_fields_after_rs =
                     std::slice::from_raw_parts(tag_fields_after, tag_fields_len_after as _);
                 log::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields_after, tag_fields_len_after);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields_after, tag_fields_len_after);
                 log::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
             }
 
@@ -1706,7 +1721,7 @@ mod tests {
             // get stmt tag fields
             let mut tag_fields = std::ptr::null_mut();
             let mut tag_fields_len = 0;
-            let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields, &mut tag_fields_len);
+            let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields_len, &mut tag_fields);
             if code != 0 {
                 log::debug!(
                     "tag_fields errstr: {}",
@@ -1715,14 +1730,14 @@ mod tests {
             } else {
                 let tag_fields_rs = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
                 log::debug!("tag_fields: {:?}", tag_fields_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields, tag_fields_len);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields, tag_fields_len);
                 log::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
             }
 
             // get stmt column fields
             let mut col_fields = std::ptr::null_mut();
             let mut col_fields_len = 0;
-            let code = ws_stmt_get_col_fields(stmt, &mut col_fields, &mut col_fields_len);
+            let code = ws_stmt_get_col_fields(stmt, &mut col_fields_len, &mut col_fields);
             if code != 0 {
                 log::debug!(
                     "col_fields errstr: {}",
@@ -1731,13 +1746,13 @@ mod tests {
             } else {
                 let col_fields_rs = std::slice::from_raw_parts(col_fields, col_fields_len as _);
                 log::debug!("col_fields: {:?}", col_fields_rs);
-                ws_stmt_reclaim_fields(&mut col_fields, col_fields_len);
+                ws_stmt_reclaim_fields(stmt, &mut col_fields, col_fields_len);
                 log::trace!("col_fields after reclaim: {:?}", col_fields_rs);
             }
 
             ws_stmt_close(stmt);
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
 }

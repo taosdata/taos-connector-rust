@@ -126,7 +126,7 @@ void insert_data(WS_TAOS *taos)
         values[1].buffer = &rows[i].current;
         values[2].buffer = &rows[i].voltage;
         values[3].buffer = &rows[i].phase;
-        
+
         code = ws_stmt_bind_param_batch(stmt, &values[0], 4); // bind param
         check_error_code(stmt, code, "failed to execute ws_stmt_bind_param_batch");
         code = ws_stmt_add_batch(stmt); // add batch
@@ -136,7 +136,7 @@ void insert_data(WS_TAOS *taos)
     int32_t affected_rows = 0;
     code = ws_stmt_execute(stmt, &affected_rows);
     check_error_code(stmt, code, "failed to execute ws_stmt_execute");
-    
+
     printf("successfully inserted %d rows\n", affected_rows);
     // close
     ws_stmt_close(stmt);
@@ -144,7 +144,7 @@ void insert_data(WS_TAOS *taos)
 
 int main()
 {
-    ws_enable_log();
+    ws_enable_log("trace");
     WS_TAOS *taos = ws_connect_with_dsn("ws://localhost:6041");
     if (taos == NULL)
     {

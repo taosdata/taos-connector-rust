@@ -12,7 +12,7 @@ int main()
     {
         dsn = "ws://localhost:6041";
     }
-    ws_enable_log();
+    ws_enable_log("trace");
     WS_TAOS *taos = ws_connect_with_dsn(dsn);
 
     const char *version = ws_get_server_info(taos);

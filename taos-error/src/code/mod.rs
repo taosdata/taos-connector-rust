@@ -65,6 +65,10 @@ impl Code {
     pub const INVALID_ROW_BYTES: Code = Code(0x036F);
     pub const DUPLICATED_COLUMN_NAMES: Code = Code(0x263C);
     pub const NO_COLUMN_CAN_BE_DROPPED: Code = Code(0x2651);
+
+    pub const OBJECT_IS_NULL: Code = Code(0x100);
+    pub const TMQ_TOPIC_APPEND_ERR: Code = Code(0x101);
+    pub const INVALID_PARA: Code = Code(0x102);
 }
 
 macro_rules! _impl_fmt {
