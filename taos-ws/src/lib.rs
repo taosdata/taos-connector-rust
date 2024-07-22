@@ -551,6 +551,7 @@ impl TaosBuilder {
                         self.to_ws_url(),
                         retries
                     );
+                    tokio::time::sleep(std::time::Duration::from_secs(retries * 500)).await;
                 }
             }
         }
