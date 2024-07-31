@@ -279,6 +279,7 @@ impl Error {
             Error::TungsteniteError(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
             // Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
+            Error::FlumeSendError(_) => Code::new(WS_ERROR_NO::CONN_CLOSED as _),
             _ => Code::FAILED,
         }
     }
@@ -1320,9 +1321,20 @@ impl AsyncQueryable for WsTaos {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use flume::{unbounded, SendError};
     use futures::TryStreamExt;
 
-    use super::*;
+    #[test]
+    fn test_errno() {
+        let (tx, rx) = unbounded();
+        drop(rx);
+
+        let send_err = tx.send(Message::Text("oh, no!".to_string())).unwrap_err();
+        let err = Error::FlumeSendError(send_err);
+        let errno: i32 = err.errno().into();
+        assert_eq!(WS_ERROR_NO::CONN_CLOSED as i32, errno);
+    }
 
     #[test]
     fn test_is_support_binary_sql() -> anyhow::Result<()> {
