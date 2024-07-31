@@ -9,7 +9,7 @@ use std::{
     ops::{Deref, DerefMut},
     rc::Rc,
 };
-
+use std::time::Duration;
 use async_trait::async_trait;
 pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
 pub use serde::de::value::Error as DeError;
@@ -259,7 +259,11 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
     fn default_pool_config(&self) -> deadpool::managed::PoolConfig {
         deadpool::managed::PoolConfig {
             max_size: 500,
-            timeouts: deadpool::managed::Timeouts::default(),
+            timeouts: deadpool::managed::Timeouts {
+                wait: Some(Duration::from_millis(100)),
+                create: Some(Duration::from_millis(1000)),
+                recycle: None,
+            },
             queue_mode: deadpool::managed::QueueMode::Fifo,
         }
     }
