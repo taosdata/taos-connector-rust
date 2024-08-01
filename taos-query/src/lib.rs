@@ -260,8 +260,8 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
         deadpool::managed::PoolConfig {
             max_size: 500,
             timeouts: deadpool::managed::Timeouts {
-                wait: Some(Duration::from_millis(100)),
-                create: Some(Duration::from_millis(1000)),
+                wait: Some(Duration::from_secs(30)),
+                create: Some(Duration::from_secs(30)),
                 recycle: None,
             },
             queue_mode: deadpool::managed::QueueMode::Fifo,
