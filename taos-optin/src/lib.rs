@@ -11,7 +11,7 @@ use raw::{ApiEntry, BlockState, RawRes, RawTaos};
 use tracing::warn;
 
 use taos_query::{
-    prelude::tokio::time,
+    prelude::tokio::{sync::oneshot, task, time},
     prelude::{Field, Precision, RawBlock, RawMeta, RawResult},
     util::Edition,
 };
@@ -242,9 +242,43 @@ impl TaosBuilder {
             self.inner_conn.get_or_try_init(|| taos)
         }
     }
+
+    async fn async_inner_connection(&self) -> RawResult<&Taos> {
+        if let Some(taos) = self.inner_conn.get() {
+            Ok(taos)
+        } else {
+            let taos = self.async_connect().await;
+            self.inner_conn.get_or_try_init(|| taos)
+        }
+    }
+
+    async fn async_connect(&self) -> RawResult<Taos> {
+        let api = self.lib.clone();
+        let auth = self.auth.clone();
+
+        let (_, tx) = oneshot::channel::<()>();
+        let join = task::spawn_blocking(move || {
+            tracing::trace!("Async connecting to the server");
+            let ptr = api.connect_with_retries(&auth, auth.max_retries())?;
+
+            RawTaos::new(api.clone(), ptr).map(|raw| Taos { raw })
+        });
+        let abort = join.abort_handle();
+        task::spawn(async move {
+            let _ = tx.await;
+            if abort.is_finished() {
+                return;
+            }
+            tracing::trace!("Abort the connecting");
+            abort.abort();
+        });
+        join.await.map_err(|_| {
+            taos_query::RawError::from_string("Failed to connect to the server").with_code(0x000B)
+        })?
+    }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Auth {
     host: Option<CString>,
     user: Option<CString>,
@@ -329,7 +363,7 @@ impl taos_query::TBuilder for TaosBuilder {
             lib.options(types::TSDB_OPTION::ConfigDir, dir);
         }
 
-        lib.options(types::TSDB_OPTION::ShellActivityTimer, "3600");
+        lib.options(types::TSDB_OPTION::ShellActivityTimer, "120");
 
         if let Some(max_retries) = params.get("maxRetries") {
             auth.max_retries = max_retries.parse().unwrap_or(MAX_CONNECT_RETRIES);
@@ -507,19 +541,14 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     }
 
     async fn build(&self) -> RawResult<Self::Target> {
-        let ptr = self
-            .lib
-            .connect_with_retries(&self.auth, self.auth.max_retries())?;
-
-        let raw = RawTaos::new(self.lib.clone(), ptr)?;
-        Ok(Taos { raw })
+        self.async_connect().await
     }
 
     async fn server_version(&self) -> RawResult<&str> {
         if let Some(v) = self.server_version.get() {
             Ok(v.as_str())
         } else {
-            let conn = self.inner_connection()?;
+            let conn = self.async_inner_connection().await?;
             use taos_query::prelude::AsyncQueryable;
             let v: String = AsyncQueryable::query_one(conn, "select server_version()")
                 .await?
@@ -532,7 +561,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     }
 
     async fn is_enterprise_edition(&self) -> RawResult<bool> {
-        let taos = self.inner_connection()?;
+        let taos = self.async_inner_connection().await?;
         use taos_query::prelude::AsyncQueryable;
 
         // the latest version of 3.x should work

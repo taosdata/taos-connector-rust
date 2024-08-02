@@ -10,6 +10,7 @@ use std::{
     sync::{Arc, Mutex, Weak},
     task::{Context, Poll, Waker},
 };
+use tracing::instrument;
 
 use taos_query::{
     common::{c_field_t, raw_data_t, RawData, SmlData},
@@ -798,6 +799,7 @@ impl ApiEntry {
         }
     }
 
+    #[instrument("connect_with_retries", skip(self, auth), fields(host = auth.host().and_then(|s| s.to_str().ok()), user = ?auth.user().and_then(|s| s.to_str().ok())))]
     pub(super) fn connect_with_retries(
         &self,
         auth: &Auth,
@@ -807,8 +809,11 @@ impl ApiEntry {
             retries = 1;
         }
         loop {
+            let now = std::time::Instant::now();
             let ptr = self.connect(auth);
+            let elapsed = now.elapsed();
             if ptr.is_null() {
+                tracing::trace!(cost = ?elapsed, "connect failed");
                 retries -= 1;
                 let err = self.check(ptr).unwrap_err();
                 if retries <= 0 {
@@ -820,6 +825,7 @@ impl ApiEntry {
                     break Err(err);
                 }
             } else {
+                tracing::trace!(cost = ?elapsed, "connected");
                 break Ok(ptr);
             }
         }

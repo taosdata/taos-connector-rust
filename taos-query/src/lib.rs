@@ -3,16 +3,16 @@
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::type_complexity)]
 
+use async_trait::async_trait;
+pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
+pub use serde::de::value::Error as DeError;
+use std::time::Duration;
 use std::{
     collections::BTreeMap,
     fmt::{Debug, Display},
     ops::{Deref, DerefMut},
     rc::Rc,
 };
-use std::time::Duration;
-use async_trait::async_trait;
-pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
-pub use serde::de::value::Error as DeError;
 
 mod error;
 
