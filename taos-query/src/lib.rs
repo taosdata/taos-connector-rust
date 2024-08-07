@@ -258,9 +258,9 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
     #[inline]
     fn default_pool_config(&self) -> deadpool::managed::PoolConfig {
         deadpool::managed::PoolConfig {
-            max_size: 500,
+            max_size: 5000,
             timeouts: deadpool::managed::Timeouts {
-                wait: Some(Duration::from_secs(30)),
+                wait: None,
                 create: Some(Duration::from_secs(30)),
                 recycle: None,
             },
