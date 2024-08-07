@@ -256,7 +256,7 @@ impl TaosBuilder {
         let api = self.lib.clone();
         let auth = self.auth.clone();
 
-        let (_, tx) = oneshot::channel::<()>();
+        let (tx, rx) = oneshot::channel::<()>();
         let join = task::spawn_blocking(move || {
             tracing::trace!("Async connecting to the server");
             let ptr = api.connect_with_retries(&auth, auth.max_retries())?;
@@ -265,16 +265,19 @@ impl TaosBuilder {
         });
         let abort = join.abort_handle();
         task::spawn(async move {
-            let _ = tx.await;
+            let _ = rx.await;
             if abort.is_finished() {
                 return;
             }
             tracing::trace!("Abort the connecting");
             abort.abort();
         });
-        join.await.map_err(|_| {
+        let res = join.await.map_err(|err| {
+            tracing::error!("Failed to join threads {err:#}: {:?}", err);
             taos_query::RawError::from_string("Failed to connect to the server").with_code(0x000B)
-        })?
+        })?;
+        drop(tx);
+        res
     }
 }
 
