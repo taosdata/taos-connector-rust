@@ -803,7 +803,21 @@ impl WsTaos {
 
         log::trace!("write meta with req_id: {req_id}, raw data length: {len}",);
 
-        match self.sender.send_recv(WsSend::Binary(meta.into())).await? {
+        match time::timeout(
+            Duration::from_secs(60),
+            self.sender
+                .send_recv(WsSend::Binary(meta.into()))
+                .in_current_span(),
+        )
+        .in_current_span()
+        .await
+        .map_err(|_| {
+            tracing::warn!("Write raw data timeout, maybe the connection has been lost");
+            RawError::new(
+                0xE002, // Connection closed
+                "Write raw data timeout, maybe the connection has been lost",
+            )
+        })?? {
             WsRecvData::WriteMeta => Ok(()),
             WsRecvData::WriteRaw => Ok(()),
             _ => unreachable!(),
@@ -811,59 +825,9 @@ impl WsTaos {
     }
     async fn s_write_raw_block(&self, raw: &RawBlock) -> RawResult<()> {
         let req_id = self.sender.req_id();
-        let message_id = req_id;
-        // if self.version().starts_with('2') {
-        //     panic!("TDengine v2.x does not support to write_raw_block");
-        // }
-        if self.version().starts_with("3.0.1.") {
-            let raw_block_message = 4; // action number from `taosAdapter/controller/rest/const.go:L56`.
-
-            let mut meta = Vec::new();
-            meta.write_u64_le(req_id).map_err(Error::from)?;
-            meta.write_u64_le(message_id).map_err(Error::from)?;
-            meta.write_u64_le(raw_block_message as u64)
-                .map_err(Error::from)?;
-            meta.write_u32_le(raw.nrows() as u32).map_err(Error::from)?;
-            meta.write_inlined_str::<2>(raw.table_name().unwrap())
-                .map_err(Error::from)?;
-            meta.write_all(raw.as_raw_bytes()).map_err(Error::from)?;
-
-            let len = meta.len();
-            log::trace!("write block with req_id: {req_id}, raw data len: {len}",);
-
-            match self.sender.send_recv(WsSend::Binary(meta.into())).await? {
-                WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
-                _ => Err(RawError::from_string("write raw block error"))?,
-            }
-        } else {
-            let raw_block_message = 5; // action number from `taosAdapter/controller/rest/const.go:L56`.
-
-            let mut meta = Vec::new();
-            meta.write_u64_le(req_id).map_err(Error::from)?;
-            meta.write_u64_le(message_id).map_err(Error::from)?;
-            meta.write_u64_le(raw_block_message as u64)
-                .map_err(Error::from)?;
-            meta.write_u32_le(raw.nrows() as u32).map_err(Error::from)?;
-            meta.write_inlined_str::<2>(raw.table_name().unwrap())
-                .map_err(Error::from)?;
-            meta.write_all(raw.as_raw_bytes()).map_err(Error::from)?;
-            let fields = raw
-                .fields()
-                .into_iter()
-                .map(|f| f.to_c_field())
-                .collect_vec();
-
-            let fields =
-                unsafe { std::slice::from_raw_parts(fields.as_ptr() as _, fields.len() * 72) };
-            meta.write_all(fields).map_err(Error::from)?;
-            let len = meta.len();
-            log::trace!("write block with req_id: {req_id}, raw data len: {len}",);
-
-            match self.sender.send_recv(WsSend::Binary(meta.into())).await? {
-                WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
-                _ => Err(RawError::from_string("write raw block error"))?,
-            }
-        }
+        self.s_write_raw_block_with_req_id(raw, req_id)
+            .in_current_span()
+            .await
     }
 
     async fn s_write_raw_block_with_req_id(&self, raw: &RawBlock, req_id: u64) -> RawResult<()> {
@@ -913,7 +877,19 @@ impl WsTaos {
             let len = meta.len();
             log::trace!("write block with req_id: {req_id}, raw data len: {len}",);
 
-            match self.sender.send_recv(WsSend::Binary(meta.into())).await? {
+            match time::timeout(
+                Duration::from_secs(60),
+                self.sender.send_recv(WsSend::Binary(meta.into())),
+            )
+            .in_current_span()
+            .await
+            .map_err(|_| {
+                tracing::warn!("Write raw data timeout, maybe the connection has been lost");
+                RawError::new(
+                    0xE002, // Connection closed
+                    "Write raw data timeout, maybe the connection has been lost",
+                )
+            })?? {
                 WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
                 _ => Err(RawError::from_string("write raw block error"))?,
             }
@@ -1302,16 +1278,21 @@ impl AsyncQueryable for WsTaos {
         self.s_query_with_req_id(sql.as_ref(), req_id).await
     }
 
+    #[instrument(skip_all)]
     async fn write_raw_meta(&self, raw: &RawMeta) -> RawResult<()> {
-        self.write_meta(raw).await
+        self.write_meta(raw).in_current_span().await
     }
 
+    #[instrument(skip_all)]
     async fn write_raw_block(&self, block: &RawBlock) -> RawResult<()> {
         self.s_write_raw_block(block).await
     }
 
+    #[instrument(skip_all)]
     async fn write_raw_block_with_req_id(&self, block: &RawBlock, req_id: u64) -> RawResult<()> {
-        self.s_write_raw_block_with_req_id(block, req_id).await
+        self.s_write_raw_block_with_req_id(block, req_id)
+            .in_current_span()
+            .await
     }
 
     async fn put(&self, _data: &SmlData) -> RawResult<()> {
