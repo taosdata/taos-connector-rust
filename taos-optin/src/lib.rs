@@ -1,6 +1,7 @@
 use std::{
     cell::UnsafeCell,
     ffi::{c_char, CStr, CString},
+    mem::ManuallyDrop,
     sync::Arc,
     time::Duration,
 };
@@ -8,12 +9,15 @@ use std::{
 use anyhow::Context;
 use once_cell::sync::OnceCell;
 use raw::{ApiEntry, BlockState, RawRes, RawTaos};
-use tracing::warn;
+use tracing::{warn, Instrument};
 
 use taos_query::{
-    prelude::tokio::{sync::oneshot, task, time},
-    prelude::{Field, Precision, RawBlock, RawMeta, RawResult},
+    prelude::{
+        tokio::{sync::oneshot, task, time},
+        Field, Precision, RawBlock, RawMeta, RawResult,
+    },
     util::Edition,
+    RawError,
 };
 
 const MAX_CONNECT_RETRIES: u8 = 2;
@@ -132,6 +136,7 @@ impl taos_query::Queryable for Taos {
 impl taos_query::AsyncQueryable for Taos {
     type AsyncResultSet = ResultSet;
 
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
         tracing::trace!("Async query with SQL: {}", sql.as_ref());
 
@@ -144,6 +149,7 @@ impl taos_query::AsyncQueryable for Taos {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
         &self,
         _sql: T,
@@ -154,16 +160,53 @@ impl taos_query::AsyncQueryable for Taos {
             .map(ResultSet::new)
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn write_raw_meta(&self, meta: &taos_query::common::RawMeta) -> RawResult<()> {
-        self.raw.write_raw_meta(meta.as_raw_data_t())
+        let raw = meta.as_raw_data_t();
+        let slf = self.raw.clone();
+        time::timeout(
+            Duration::from_secs(60),
+            task::spawn_blocking(move || slf.write_raw_meta(raw)).in_current_span(),
+        )
+        .in_current_span()
+        .await
+        .map_err(|_| {
+            tracing::warn!("Write raw data timeout, maybe the connection has been lost");
+            RawError::new(
+                0xE002, // Connection closed
+                "Write raw data timeout, maybe the connection has been lost",
+            )
+        })?
+        .map_err(|err| RawError::from_string(format!("Write raw data join error: {err}")))?
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn write_raw_block(&self, block: &RawBlock) -> RawResult<()> {
         self.raw.write_raw_block(block)
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn write_raw_block_with_req_id(&self, block: &RawBlock, req_id: u64) -> RawResult<()> {
-        self.raw.write_raw_block_with_req_id(block, req_id)
+        let slf = self.raw.clone();
+        let block_ptr =
+            unsafe { ManuallyDrop::new(Box::from_raw(block as *const RawBlock as *mut RawBlock)) };
+        time::timeout(
+            Duration::from_secs(60),
+            task::spawn_blocking(move || {
+                slf.write_raw_block_with_req_id(block_ptr.as_ref(), req_id)
+            })
+            .in_current_span(),
+        )
+        .in_current_span()
+        .await
+        .map_err(|_| {
+            tracing::warn!("Write raw data timeout, maybe the connection has been lost");
+            RawError::new(
+                0xE002, // Connection closed
+                "Write raw data timeout, maybe the connection has been lost",
+            )
+        })?
+        .map_err(|err| RawError::from_string(format!("Write raw data join error: {err}")))?
     }
 
     async fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {

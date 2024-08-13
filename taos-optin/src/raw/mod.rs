@@ -1035,15 +1035,19 @@ impl RawTaos {
             .ok_or_else(|| RawError::from_string("tmq api is not available"))?
             .tmq_err2str;
         let mut retries = 2;
+        let now = std::time::Instant::now();
         loop {
+            tracing::trace!("write raw");
             let raw_code = unsafe { tmq_write_raw(self.as_ptr(), meta.clone()) };
             let code = Code::from(raw_code);
             if code.success() {
+                tracing::trace!(tmq.write_raw.cost = ?now.elapsed(), "write raw success");
                 return Ok(());
             }
             if code != Code::from(0x2603) {
                 let err = unsafe { tmq_err2str(tmq_resp_err_t(raw_code)) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                tracing::trace!(error.code = %code, error.message = err, tmq.write_raw.cost = ?now.elapsed(), "write raw failed");
                 if err == "success" {
                     return Err(RawError::from_code(code));
                 }
