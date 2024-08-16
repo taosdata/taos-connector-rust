@@ -213,7 +213,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 
         let taos = taos_query::AsyncTBuilder::build(&self.info).await?;
         // Ensure server is ready.
-        taos.exec("select server_status()").await?;
+        taos.exec("select server_version()").await?;
 
         match self
             .info
