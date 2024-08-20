@@ -2,7 +2,10 @@ use std::{
     collections::HashMap,
     ffi::{c_void, CStr, CString},
     fmt::{Debug, Display},
-    os::raw::{c_char, c_int},
+    os::{
+        macos::raw,
+        raw::{c_char, c_int},
+    },
     ptr,
     str::{FromStr, Utf8Error},
     time::Duration,
@@ -14,13 +17,13 @@ use taos_error::Code;
 use taos_query::{
     block_in_place_or_global,
     common::{Field, Precision, RawBlock as Block, Timestamp, Ty},
-    prelude::RawError,
-    tmq,
-    tmq::AsConsumer,
+    prelude::{Itertools, RawError},
+    tmq::{self, AsConsumer, IsData, IsOffset},
     Dsn, DsnError, Fetchable, Queryable, TBuilder,
 };
 
 use taos_ws::{
+    consumer::{Data, Offset},
     query::{asyn::WS_ERROR_NO, Error, ResultSet, Taos},
     Consumer, TaosBuilder, TmqBuilder,
 };
@@ -31,15 +34,24 @@ use cargo_metadata::MetadataCommand;
 #[repr(C)]
 #[allow(non_camel_case_types)]
 pub enum ws_tmq_conf_res_t {
-    Unknown = -2,
-    Invalid = -1,
-    Ok = 0,
+    WS_TMQ_CONF_UNKNOWN = -2,
+    WS_TMQ_CONF_INVALID = -1,
+    WS_TMQ_CONF_OK = 0,
 }
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub enum ws_tmq_res_t {
+    TMQ_RES_INVALID = -1,   // invalid
+    TMQ_RES_DATA = 1,       // 数据
+    TMQ_RES_TABLE_META = 2, // 元数据
+    TMQ_RES_METADATA = 3,   // 既有元数据又有数据，即自动建表
+}
+
 impl From<Code> for ws_tmq_conf_res_t {
     fn from(value: Code) -> Self {
         match value {
-            Code::SUCCESS => ws_tmq_conf_res_t::Ok,
-            _ => ws_tmq_conf_res_t::Invalid,
+            Code::SUCCESS => ws_tmq_conf_res_t::WS_TMQ_CONF_OK,
+            _ => ws_tmq_conf_res_t::WS_TMQ_CONF_INVALID,
         }
     }
 }
@@ -50,6 +62,177 @@ struct TmqConf {
 
 struct WsTmqList {
     topics: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct WsTmqResultSet {
+    block: Option<Block>,
+    fields: Vec<WS_FIELD>,
+    num_of_fields: i32,
+    precision: Precision,
+    offset: Offset,
+    row: ROW,
+    data: Data,
+    table_name: Option<CString>,
+    topic_name: Option<CString>,
+    db_name: Option<CString>,
+}
+
+impl WsTmqResultSet {
+    fn new(block: Block, offset: Offset, data: Data) -> Self {
+        let num_of_fields = block.ncols();
+        let mut data_vec = Vec::with_capacity(num_of_fields);
+        for _col in 0..num_of_fields {
+            data_vec.push(std::ptr::null());
+        }
+
+        let mut fields = Vec::new();
+        fields.extend(block.fields().iter().map(WS_FIELD::from));
+        let precision = block.precision().clone();
+        let table_name = match block.table_name() {
+            Some(name) => match CString::new(name) {
+                Ok(name) => Some(name),
+                Err(_) => None,
+            },
+            None => None,
+        };
+
+        let topic_name = match CString::new(offset.topic()) {
+            Ok(name) => Some(name),
+            Err(_) => None,
+        };
+        let db_name = match CString::new(offset.database()) {
+            Ok(name) => Some(name),
+            Err(_) => None,
+        };
+
+        Self {
+            block: Some(block),
+            fields,
+            num_of_fields: num_of_fields as i32,
+            precision,
+            offset,
+            row: ROW {
+                data: data_vec,
+                current_row: 0,
+            },
+            data,
+            table_name,
+            topic_name,
+            db_name,
+        }
+    }
+}
+
+impl WsResultSetTrait for WsTmqResultSet {
+    fn tmq_get_topic_name(&self) -> *const c_char {
+        match self.topic_name {
+            Some(ref name) => name.as_ptr() as _,
+            None => std::ptr::null(),
+        }
+    }
+    fn tmq_get_db_name(&self) -> *const c_char {
+        match self.db_name {
+            Some(ref name) => name.as_ptr() as _,
+            None => std::ptr::null(),
+        }
+    }
+    fn tmq_get_table_name(&self) -> *const c_char {
+        match self.table_name {
+            Some(ref name) => name.as_ptr() as _,
+            None => std::ptr::null(),
+        }
+    }
+    fn tmq_get_vgroup_offset(&self) -> i64 {
+        self.offset.offset()
+    }
+    fn tmq_get_vgroup_id(&self) -> i32 {
+        self.offset.vgroup_id()
+    }
+
+    fn precision(&self) -> Precision {
+        self.precision
+    }
+
+    fn affected_rows(&self) -> i32 {
+        0
+    }
+
+    fn affected_rows64(&self) -> i64 {
+        0
+    }
+
+    fn num_of_fields(&self) -> i32 {
+        self.num_of_fields
+    }
+
+    fn get_fields(&mut self) -> *const WS_FIELD {
+        self.fields.as_ptr()
+    }
+    fn get_fields_v2(&mut self) -> *const WS_FIELD_V2 {
+        std::ptr::null()
+    }
+
+    unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
+        log::trace!("fetch block with ptr {ptr:p}");
+        self.block = self.data.fetch_raw_block()?;
+        if let Some(block) = self.block.as_ref() {
+            *ptr = block.as_raw_bytes().as_ptr() as _;
+            *rows = block.nrows() as _;
+        } else {
+            *rows = 0;
+        }
+        log::trace!("fetch block with ptr {ptr:p} with rows {}", *rows);
+        Ok(())
+    }
+
+    unsafe fn fetch_row(&mut self) -> Result<WS_ROW, Error> {
+        if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
+            self.block = self.data.fetch_raw_block()?;
+            self.row.current_row = 0;
+        }
+
+        if let Some(block) = self.block.as_ref() {
+            if block.nrows() == 0 {
+                return Ok(std::ptr::null());
+            }
+
+            for col in 0..block.ncols() {
+                let tuple = block.get_raw_value_unchecked(self.row.current_row, col);
+                self.row.data[col] = tuple.2;
+            }
+
+            self.row.current_row = self.row.current_row + 1;
+            Ok(self.row.data.as_ptr() as _)
+        } else {
+            Ok(std::ptr::null())
+        }
+    }
+
+    unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
+        log::trace!("try to get raw value at ({row}, {col})");
+        match self.block.as_ref() {
+            Some(block) => {
+                if row < block.nrows() && col < block.ncols() {
+                    let res = block.get_raw_value_unchecked(row, col);
+                    log::trace!("got raw value at ({row}, {col}): {:?}", res);
+                    res
+                } else {
+                    log::trace!("out of range at ({row}, {col}), return null");
+                    (Ty::Null, 0, std::ptr::null())
+                }
+            }
+            None => (Ty::Null, 0, std::ptr::null()),
+        }
+    }
+
+    fn take_timing(&mut self) -> Duration {
+        Duration::from_millis(self.offset.timing() as u64)
+    }
+
+    fn stop_query(&mut self) {
+        // do nothing
+    }
 }
 
 #[allow(non_camel_case_types)]
@@ -81,13 +264,6 @@ unsafe fn tmq_conf_set(
         Some(tmq_conf) => {
             match key.to_lowercase().as_str() {
                 "group.id" | "client.id" | "td.connect.db" => {}
-                // "td.connect.protocol" => match value.to_lowercase().as_str() {
-                //     "ws" | "wss" | "http" | "https" => {}
-                //     _ => {
-                //         log::trace!("set tmq conf failed, key: {}, value: {}", &key, &value);
-                //         return Err(WsError::new(Code::FAILED, "invalid value"));
-                //     }
-                // },
                 "enable.auto.commit" | "msg.with.table.name" => match value.to_lowercase().as_str()
                 {
                     "true" | "false" => {}
@@ -130,11 +306,11 @@ pub unsafe extern "C" fn ws_tmq_conf_set(
     value: *const c_char,
 ) -> ws_tmq_conf_res_t {
     if conf.is_null() || key.is_null() || value.is_null() {
-        return ws_tmq_conf_res_t::Invalid;
+        return ws_tmq_conf_res_t::WS_TMQ_CONF_INVALID;
     }
 
     match tmq_conf_set(conf, key, value) {
-        Ok(_) => ws_tmq_conf_res_t::Ok,
+        Ok(_) => ws_tmq_conf_res_t::WS_TMQ_CONF_OK,
         Err(e) => e.code.into(),
     }
 }
@@ -256,7 +432,7 @@ pub unsafe extern "C" fn ws_tmq_list_free_c_array(
 pub type ws_tmq_t = c_void;
 
 struct WsTmq {
-    consumer: Consumer,
+    consumer: Option<Consumer>,
 }
 
 unsafe fn tmq_consumer_new(conf: *mut ws_tmq_conf_t, dsn: *const c_char) -> WsResult<WsTmq> {
@@ -288,7 +464,9 @@ unsafe fn tmq_consumer_new(conf: *mut ws_tmq_conf_t, dsn: *const c_char) -> WsRe
 
     let builder = TmqBuilder::from_dsn(&dsn)?;
     let consumer = builder.build()?;
-    let ws_tmq = WsTmq { consumer };
+    let ws_tmq = WsTmq {
+        consumer: Some(consumer),
+    };
     return Ok(ws_tmq);
 }
 
@@ -319,6 +497,25 @@ pub unsafe extern "C" fn ws_tmq_consumer_new(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn ws_tmq_consumer_close(tmq: *mut ws_tmq_t) -> i32 {
+    if tmq.is_null() {
+        return Code::INVALID_PARA.into();
+    }
+
+    match (tmq as *mut WsMaybeError<WsTmq>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
+        Some(ws_tmq) => {
+            let tmq = Box::from_raw(ws_tmq);
+            drop(tmq);
+            return Code::SUCCESS.into();
+        }
+        _ => return set_error_info(WsError::new(Code::INVALID_PARA, "invalid tmq Object")),
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn ws_tmq_subscribe(
     tmq: *mut ws_tmq_t,
     topic_list: *const ws_tmq_list_t,
@@ -339,22 +536,228 @@ pub unsafe extern "C" fn ws_tmq_subscribe(
         .as_mut()
         .and_then(|s| s.safe_deref_mut())
     {
-        Some(ws_tmq) => match ws_tmq.consumer.subscribe(topic_list.topics.as_slice()) {
-            Ok(_) => return Code::SUCCESS.into(),
-            Err(_e) => {
-                // set_error_info(e);
-                return Code::FAILED.into();
+        Some(ws_tmq) => {
+            if let Some(consumer) = &mut ws_tmq.consumer {
+                match consumer.subscribe(topic_list.topics.as_slice()) {
+                    Ok(_) => return Code::SUCCESS.into(),
+                    Err(e) => {
+                        return set_error_info(WsError::new(Code::FAILED, e.message().as_str()))
+                    }
+                }
+            } else {
+                return set_error_info(WsError::new(Code::FAILED, "invalid consumer"));
             }
-        },
-        _ => {
-            set_error_info(WsError::new(Code::INVALID_PARA, "invalid tmq Object"));
-            return Code::INVALID_PARA.into();
         }
+        _ => return set_error_info(WsError::new(Code::INVALID_PARA, "invalid tmq Object")),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ws_tmq_unsubscribe(tmq: *mut ws_tmq_t) -> i32 {
+    if tmq.is_null() {
+        return Code::INVALID_PARA.into();
+    }
+
+    match (tmq as *mut WsMaybeError<WsTmq>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
+        Some(ws_tmq) => {
+            if let Some(to_drop) = ws_tmq.consumer.take() {
+                to_drop.unsubscribe();
+            }
+            return Code::SUCCESS.into();
+        }
+        _ => return set_error_info(WsError::new(Code::INVALID_PARA, "invalid tmq Object")),
+    }
+}
+
+unsafe fn tmq_consumer_poll(tmq: *mut ws_tmq_t, timeout: i64) -> WsResult<Option<WsResultSet>> {
+    let timeout = match timeout {
+        0 => tmq::Timeout::Never,
+        n if n < 0 => tmq::Timeout::from_millis(1000),
+        _ => tmq::Timeout::from_millis(timeout as u64),
+    };
+
+    match (tmq as *mut WsMaybeError<WsTmq>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
+        Some(ws_tmq) => {
+            if let Some(consumer) = &ws_tmq.consumer {
+                let r = consumer.recv_timeout(timeout)?;
+                match r {
+                    Some((offset, message_set)) => {
+                        if message_set.has_meta() {
+                            return Err(WsError::new(
+                                Code::FAILED,
+                                "message has meta, only support topic created with select sql",
+                            ));
+                        }
+                        let data = message_set.into_data().unwrap();
+                        match data.fetch_raw_block()? {
+                            Some(block) => {
+                                let rs = WsResultSet::TmqResultSet(WsTmqResultSet::new(
+                                    block, offset, data,
+                                ));
+                                return Ok(Some(rs));
+                            }
+                            None => {
+                                return Ok(None);
+                            }
+                        }
+                    }
+                    None => {
+                        return Ok(None);
+                    }
+                }
+            } else {
+                return Err(WsError::new(Code::FAILED, "invalid consumer"));
+            }
+        }
+        _ => {
+            return Err(WsError::new(Code::INVALID_PARA, "invalid tmq Object"));
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ws_tmq_consumer_poll(tmq: *mut ws_tmq_t, timeout: i64) -> *mut WS_RES {
+    if tmq.is_null() {
+        set_error_info(WsError::new(Code::INVALID_PARA, "invalid tmq Object"));
+        return std::ptr::null_mut();
+    }
+    match tmq_consumer_poll(tmq, timeout) {
+        Ok(Some(rs)) => {
+            let rs: WsMaybeError<WsResultSet> = rs.into();
+            return Box::into_raw(Box::new(rs)) as _;
+        }
+        Ok(None) => {
+            return std::ptr::null_mut();
+        }
+        Err(e) => {
+            set_error_info(e);
+            return std::ptr::null_mut();
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ws_tmq_get_topic_name(rs: *const WS_RES) -> *const c_char {
+    if rs.is_null() {
+        return std::ptr::null();
+    }
+
+    match (rs as *const WsMaybeError<WsResultSet>)
+        .as_ref()
+        .and_then(|s| s.safe_deref())
+    {
+        Some(rs) => rs.tmq_get_topic_name(),
+        None => std::ptr::null(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ws_tmq_get_db_name(rs: *const WS_RES) -> *const c_char {
+    if rs.is_null() {
+        return std::ptr::null();
+    }
+
+    match (rs as *const WsMaybeError<WsResultSet>)
+        .as_ref()
+        .and_then(|s| s.safe_deref())
+    {
+        Some(rs) => rs.tmq_get_db_name(),
+        None => std::ptr::null(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ws_tmq_get_vgroup_id(rs: *const WS_RES) -> i32 {
+    if rs.is_null() {
+        return -1;
+    }
+
+    match (rs as *const WsMaybeError<WsResultSet>)
+        .as_ref()
+        .and_then(|s| s.safe_deref())
+    {
+        Some(rs) => rs.tmq_get_vgroup_id(),
+        None => -1,
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn ws_tmq_get_vgroup_offset(rs: *const WS_RES) -> i64 {
+    if rs.is_null() {
+        return Code::INVALID_PARA.into();
+    }
+
+    match (rs as *const WsMaybeError<WsResultSet>)
+        .as_ref()
+        .and_then(|s| s.safe_deref())
+    {
+        Some(rs) => rs.tmq_get_vgroup_offset(),
+        None => return Code::INVALID_PARA.into(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ws_tmq_get_res_type(rs: *const WS_RES) -> ws_tmq_res_t {
+    if rs.is_null() {
+        return ws_tmq_res_t::TMQ_RES_INVALID;
+    }
+    return ws_tmq_res_t::TMQ_RES_DATA;
+}
+
+unsafe fn tmq_commit_sync(tmq: *mut ws_tmq_t, rs: *const WS_RES) -> WsResult<()> {
+    let (topic_name, vgroup_id, offset) = match (rs as *const WsMaybeError<WsResultSet>)
+        .as_ref()
+        .and_then(|s| s.safe_deref())
+    {
+        Some(rs) => (
+            rs.tmq_get_topic_name(),
+            rs.tmq_get_vgroup_id(),
+            rs.tmq_get_vgroup_offset(),
+        ),
+        None => return Err(WsError::new(Code::INVALID_PARA, "invalid rs Object")),
+    };
+
+    match (tmq as *mut WsMaybeError<WsTmq>)
+        .as_mut()
+        .and_then(|s| s.safe_deref_mut())
+    {
+        Some(ws_tmq) => {
+            if let Some(consumer) = &ws_tmq.consumer {
+                //let r = consumer.commit_offset(topic_name, vgroup_id, offset)?;
+                return Ok(());
+            } else {
+                return Err(WsError::new(Code::FAILED, "invalid consumer"));
+            }
+        }
+        _ => {
+            return Err(WsError::new(Code::INVALID_PARA, "invalid tmq Object"));
+        }
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn ws_tmq_commit_sync(tmq: *mut ws_tmq_t, rs: *const WS_RES) -> i32 {
+    if tmq.is_null() {
+        return set_error_info(WsError::new(Code::INVALID_PARA, "invalid tmq Object"));
+    } else {
+        return match tmq_commit_sync(tmq, rs) {
+            Ok(_) => Code::SUCCESS.into(),
+            Err(e) => {
+                set_error_info(e);
+                Code::FAILED.into()
+            }
+        };
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Deref;
+
     use super::*;
 
     #[test]
@@ -368,10 +771,24 @@ mod tests {
                 b"group.id\0" as *const u8 as _,
                 b"abc\0" as *const u8 as _,
             );
-            assert_eq!(r as i32, ws_tmq_conf_res_t::Ok as i32);
+            assert_eq!(r as i32, ws_tmq_conf_res_t::WS_TMQ_CONF_OK as i32);
+
+            let r = ws_tmq_conf_set(
+                conf,
+                b"client.id\0" as *const u8 as _,
+                b"abc\0" as *const u8 as _,
+            );
+            assert_eq!(r as i32, ws_tmq_conf_res_t::WS_TMQ_CONF_OK as i32);
+
+            let r = ws_tmq_conf_set(
+                conf,
+                b"auto.offset.reset\0" as *const u8 as _,
+                b"earliest\0" as *const u8 as _,
+            );
+            assert_eq!(r as i32, ws_tmq_conf_res_t::WS_TMQ_CONF_OK as i32);
 
             let list = ws_tmq_list_new();
-            let r = ws_tmq_list_append(list, b"topic\0" as *const u8 as *const c_char);
+            let r = ws_tmq_list_append(list, b"topic_ws_map\0" as *const u8 as *const c_char);
             assert_eq!(r, 0);
 
             let mut topic_num = 0;
@@ -381,9 +798,6 @@ mod tests {
             let r = ws_tmq_list_free_c_array(c_str_arry, topic_num);
             assert_eq!(r, 0);
 
-            let r = ws_tmq_list_destroy(list);
-            assert_eq!(r, 0);
-
             let consumer = ws_tmq_consumer_new(
                 conf,
                 b"taos://localhost:6041\0" as *const u8 as *const c_char,
@@ -391,6 +805,82 @@ mod tests {
                 0,
             );
             assert!(!consumer.is_null());
+
+            let r = ws_tmq_subscribe(consumer, list);
+            assert_eq!(r, 0);
+
+            let mut row_count = 0;
+            for _i in 0..10 {
+                let r = ws_tmq_consumer_poll(consumer, 100);
+                if r.is_null() {
+                    continue;
+                }
+
+                assert_ne!(r, std::ptr::null_mut());
+
+                let rs = Box::from_raw(r as *mut WsMaybeError<WsResultSet>);
+                let rs = rs.safe_deref_mut().unwrap();
+
+                if !rs.tmq_get_table_name().is_null() {
+                    let table_name = CStr::from_ptr(rs.tmq_get_table_name()).to_str().unwrap();
+                    println!("table_name: {}", table_name);
+                }
+
+                if !rs.tmq_get_db_name().is_null() {
+                    let db_name = CStr::from_ptr(rs.tmq_get_db_name()).to_str().unwrap();
+                    println!("db_name: {}", db_name);
+                }
+
+                if !rs.tmq_get_topic_name().is_null() {
+                    let topic_name = CStr::from_ptr(rs.tmq_get_topic_name()).to_str().unwrap();
+                    println!("topic_name: {}", topic_name);
+                }
+
+                let offset = rs.tmq_get_vgroup_offset();
+                println!("offset: {}", offset);
+                let vgroup_id = rs.tmq_get_vgroup_id();
+                println!("vgroup_id: {}", vgroup_id);
+                let num_of_fields = rs.num_of_fields();
+                println!("num_of_fields: {}", num_of_fields);
+                let precision = rs.precision();
+                println!("precision: {:?}", precision);
+
+                let fields = rs.get_fields();
+
+                // 从get_fields返回的指针构造切片
+                let fields_slice = std::slice::from_raw_parts(fields, num_of_fields as usize);
+
+                // 遍历并打印切片内容
+                for field in fields_slice {
+                    println!("{:?}", field);
+                }
+
+                let mut buffer = Vec::with_capacity(4096);
+                // 由于Vec可能会重新分配内存，预先填充到其容量以固定其内存位置
+                buffer.resize(4096, 0);
+                // 获取缓冲区的原始指针
+                let buffer_ptr = buffer.as_mut_ptr();
+
+                loop {
+                    let row = ws_fetch_row(r);
+                    if row.is_null() {
+                        break;
+                    }
+
+                    row_count += 1;
+                    let rlen =
+                        ws_print_row(buffer_ptr, buffer.len() as i32, row, fields, num_of_fields);
+                    if rlen > 0 {
+                        let row_str = CStr::from_ptr(buffer_ptr).to_str().unwrap();
+                        println!("{}", row_str);
+                    }
+                }
+            }
+
+            println!("row_count == {}", row_count);
+
+            let r = ws_tmq_list_destroy(list);
+            assert_eq!(r, 0);
 
             let r = ws_tmq_conf_destroy(conf);
             assert_eq!(r, 0);

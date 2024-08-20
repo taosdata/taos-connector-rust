@@ -229,6 +229,28 @@ impl taos_query::tmq::IsOffset for Offset {
             }
         }
     }
+
+    fn offset(&self) -> taos_query::tmq::Offset {
+        match &self.0 {
+            OffsetInner::Native(offset) => {
+                <crate::sys::tmq::Offset as taos_query::tmq::IsOffset>::offset(offset)
+            }
+            OffsetInner::Ws(offset) => {
+                <taos_ws::consumer::Offset as taos_query::tmq::IsOffset>::offset(offset)
+            }
+        }
+    }
+
+    fn timing(&self) -> taos_query::tmq::Timing {
+        match &self.0 {
+            OffsetInner::Native(offset) => {
+                <crate::sys::tmq::Offset as taos_query::tmq::IsOffset>::timing(offset)
+            }
+            OffsetInner::Ws(offset) => {
+                <taos_ws::consumer::Offset as taos_query::tmq::IsOffset>::timing(offset)
+            }
+        }
+    }
 }
 
 #[async_trait::async_trait]

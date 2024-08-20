@@ -1,6 +1,6 @@
+use bytes::Bytes;
 use std::{
     cell::RefCell,
-    cmp::min,
     ffi::{c_void, CStr, CString},
     fmt::{Debug, Display},
     os::raw::{c_char, c_int},
@@ -8,7 +8,6 @@ use std::{
     string::FromUtf8Error,
     time::Duration,
 };
-
 use taos_error::Code;
 
 use taos_query::{
@@ -17,6 +16,7 @@ use taos_query::{
     common::{Precision, Ty},
     common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder, SmlDataBuilderError},
     prelude::RawError,
+    util::{hex, InlineBytes, InlineNChar, InlineStr},
     DsnError, Fetchable, Queryable, TBuilder,
 };
 use taos_ws::{
@@ -31,15 +31,27 @@ pub use taos_ws::query::asyn::WS_ERROR_NO;
 pub mod stmt;
 pub mod tmq;
 
+use tmq::WsTmqResultSet;
+
 const MAX_ERROR_MSG_LEN: usize = 4096;
 const EMPTY: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") };
 thread_local! {
     static C_ERROR_CONTAINER: RefCell<[u8; MAX_ERROR_MSG_LEN]> = RefCell::new([0; MAX_ERROR_MSG_LEN]);
-    static C_ERRNO: RefCell<Code> = RefCell::new(Code::SUCCESS);
+    static C_ERRNO: RefCell<i32> = RefCell::new(0);
+    static REQ_ID: RefCell<u64> = RefCell::new(0);
 }
-unsafe fn set_error_info(ws_err: WsError) -> Code {
+
+fn get_err_code_fromated(err_code: i32) -> i32 {
+    if err_code >= 0 {
+        let uerror_code: u32 = err_code as _;
+        return (uerror_code | 0x80000000) as i32;
+    }
+    return err_code;
+}
+unsafe fn set_error_info(ws_err: WsError) -> i32 {
     C_ERRNO.with(|c_errno| {
-        *c_errno.borrow_mut() = ws_err.code;
+        let err_num: u32 = ws_err.code.into();
+        *c_errno.borrow_mut() = (err_num | 0x80000000) as i32;
     });
     C_ERROR_CONTAINER.with(|container| {
         let bytes = ws_err.message.as_bytes();
@@ -47,15 +59,10 @@ unsafe fn set_error_info(ws_err: WsError) -> Code {
         container.borrow_mut()[..length].copy_from_slice(&bytes[..length]);
         container.borrow_mut()[length] = 0; // add c str last '\0'
     });
-    ws_err.code
-}
-fn set_c_errno(code: Code) {
-    C_ERRNO.with(|c_errno| {
-        *c_errno.borrow_mut() = code;
-    });
+    ws_err.code.into()
 }
 
-fn get_c_errno() -> Code {
+fn get_c_errno() -> i32 {
     C_ERRNO.with(|c_errno| *c_errno.borrow())
 }
 
@@ -63,13 +70,17 @@ fn get_c_error_str() -> *const c_char {
     C_ERROR_CONTAINER.with(|container| {
         let container = container.borrow();
         let slice = &container[..container.len()];
-        slice.as_ptr() as *const c_char
+        let ptr = slice.as_ptr() as *const c_char;
+
+        // println!("Pointer address: {:?}", ptr);
+        // println!("C_ERROR_CONTAINER contents: {:?}", &container[..]);
+        ptr
     })
 }
 
 unsafe fn clear_error_info() {
     C_ERRNO.with(|c_errno| {
-        *c_errno.borrow_mut() = Code::SUCCESS;
+        *c_errno.borrow_mut() = 0;
     });
     C_ERROR_CONTAINER.with(|container| {
         let bytes = "".as_bytes();
@@ -77,6 +88,15 @@ unsafe fn clear_error_info() {
         container.borrow_mut()[..length].copy_from_slice(&bytes[..length]);
         container.borrow_mut()[length] = 0; // add c str last '\0'
     });
+}
+
+// 获取当前线程局部变量的值
+fn get_thread_local_reqid() -> u64 {
+    REQ_ID.with(|val| {
+        let current_value = *val.borrow();
+        *val.borrow_mut() = current_value + 1;
+        current_value // 返回增加前的值
+    })
 }
 
 /// Opaque type definition for websocket connection.
@@ -313,6 +333,7 @@ type WsTaos = Result<Taos, WsError>;
 /// in taos.h of TDengine 2.x
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
+#[allow(non_camel_case_types)]
 pub struct WS_FIELD_V2 {
     pub name: [c_char; 65usize],
     pub r#type: u8,
@@ -350,6 +371,7 @@ impl From<&Field> for WS_FIELD_V2 {
 /// Field struct that has v3-compatible memory layout, which is recommended.
 #[repr(C)]
 #[derive(Copy, Clone)]
+#[allow(non_camel_case_types)]
 pub struct WS_FIELD {
     pub name: [c_char; 65usize],
     pub r#type: u8,
@@ -401,16 +423,26 @@ pub struct ROW {
     /// current row to get
     current_row: usize,
 }
+
 #[derive(Debug)]
-enum ResultSetType {
-    SQL,
-    SCHEMALESS,
-    TMQ,
+pub struct WsSchemalessResultSet {
+    affected_rows: i64,
+    precision: Precision,
+    timing: Duration,
+}
+
+impl WsSchemalessResultSet {
+    fn new(affected_rows: i64, precision: Precision, timing: Duration) -> Self {
+        Self {
+            affected_rows,
+            precision,
+            timing,
+        }
+    }
 }
 
 #[derive(Debug)]
-struct WsResultSet {
-    rs_type: ResultSetType,
+struct WsSqlResultSet {
     rs: ResultSet,
     block: Option<Block>,
     fields: Vec<WS_FIELD>,
@@ -418,13 +450,236 @@ struct WsResultSet {
     row: ROW,
 }
 
-// impl Deref for WsResultSet {
-//     type Target = ResultSet;
+#[derive(Debug)]
+enum WsResultSet {
+    SqlResultSet(WsSqlResultSet),
+    SchemalessResultSet(WsSchemalessResultSet),
+    TmqResultSet(WsTmqResultSet),
+}
 
-// }
+trait WsResultSetTrait {
+    fn tmq_get_topic_name(&self) -> *const c_char;
+    fn tmq_get_db_name(&self) -> *const c_char;
+    fn tmq_get_table_name(&self) -> *const c_char;
+    fn tmq_get_vgroup_offset(&self) -> i64;
+    fn tmq_get_vgroup_id(&self) -> i32;
 
-impl WsResultSet {
-    fn new(rs: ResultSet, rs_type: ResultSetType) -> Self {
+    fn precision(&self) -> Precision;
+
+    fn affected_rows(&self) -> i32;
+
+    fn affected_rows64(&self) -> i64;
+
+    fn num_of_fields(&self) -> i32;
+
+    fn get_fields(&mut self) -> *const WS_FIELD;
+    fn get_fields_v2(&mut self) -> *const WS_FIELD_V2;
+
+    unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error>;
+
+    unsafe fn fetch_row(&mut self) -> Result<WS_ROW, Error>;
+
+    unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void);
+
+    fn take_timing(&mut self) -> Duration;
+
+    fn stop_query(&mut self);
+}
+
+impl WsResultSetTrait for WsSchemalessResultSet {
+    fn tmq_get_topic_name(&self) -> *const c_char {
+        std::ptr::null()
+    }
+    fn tmq_get_db_name(&self) -> *const c_char {
+        std::ptr::null()
+    }
+    fn tmq_get_table_name(&self) -> *const c_char {
+        std::ptr::null()
+    }
+    fn tmq_get_vgroup_offset(&self) -> i64 {
+        0
+    }
+    fn tmq_get_vgroup_id(&self) -> i32 {
+        0
+    }
+
+    fn precision(&self) -> Precision {
+        self.precision
+    }
+
+    fn affected_rows(&self) -> i32 {
+        self.affected_rows as _
+    }
+
+    fn affected_rows64(&self) -> i64 {
+        self.affected_rows
+    }
+
+    fn num_of_fields(&self) -> i32 {
+        0
+    }
+
+    fn get_fields(&mut self) -> *const WS_FIELD {
+        std::ptr::null()
+    }
+    fn get_fields_v2(&mut self) -> *const WS_FIELD_V2 {
+        std::ptr::null()
+    }
+
+    unsafe fn fetch_block(
+        &mut self,
+        _ptr: *mut *const c_void,
+        _rows: *mut i32,
+    ) -> Result<(), Error> {
+        Err(Error::CommonError(
+            "schemaless result set does not support fetch block".to_string(),
+        ))
+    }
+
+    unsafe fn fetch_row(&mut self) -> Result<WS_ROW, Error> {
+        Err(Error::CommonError(
+            "schemaless result set does not support fetch row".to_string(),
+        ))
+    }
+
+    unsafe fn get_raw_value(&mut self, _row: usize, _col: usize) -> (Ty, u32, *const c_void) {
+        (Ty::Null, 0, std::ptr::null())
+    }
+
+    fn take_timing(&mut self) -> Duration {
+        self.timing
+    }
+
+    fn stop_query(&mut self) {}
+}
+
+impl WsResultSetTrait for WsResultSet {
+    fn tmq_get_topic_name(&self) -> *const c_char {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.tmq_get_topic_name(),
+            WsResultSet::TmqResultSet(rs) => rs.tmq_get_topic_name(),
+            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_topic_name(),
+        }
+    }
+    fn tmq_get_db_name(&self) -> *const c_char {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.tmq_get_db_name(),
+            WsResultSet::TmqResultSet(rs) => rs.tmq_get_db_name(),
+            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_db_name(),
+        }
+    }
+    fn tmq_get_table_name(&self) -> *const c_char {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.tmq_get_table_name(),
+            WsResultSet::TmqResultSet(rs) => rs.tmq_get_table_name(),
+            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_table_name(),
+        }
+    }
+    fn tmq_get_vgroup_offset(&self) -> i64 {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.tmq_get_vgroup_offset(),
+            WsResultSet::TmqResultSet(rs) => rs.tmq_get_vgroup_offset(),
+            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_vgroup_offset(),
+        }
+    }
+    fn tmq_get_vgroup_id(&self) -> i32 {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.tmq_get_vgroup_id(),
+            WsResultSet::TmqResultSet(rs) => rs.tmq_get_vgroup_id(),
+            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_vgroup_id(),
+        }
+    }
+
+    fn precision(&self) -> Precision {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.precision(),
+            WsResultSet::TmqResultSet(rs) => rs.precision(),
+            WsResultSet::SchemalessResultSet(rs) => rs.precision(),
+        }
+    }
+
+    fn affected_rows(&self) -> i32 {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.affected_rows(),
+            WsResultSet::TmqResultSet(rs) => rs.affected_rows(),
+            WsResultSet::SchemalessResultSet(rs) => rs.affected_rows(),
+        }
+    }
+
+    fn affected_rows64(&self) -> i64 {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.affected_rows64(),
+            WsResultSet::TmqResultSet(rs) => rs.affected_rows64(),
+            WsResultSet::SchemalessResultSet(rs) => rs.affected_rows64(),
+        }
+    }
+
+    fn num_of_fields(&self) -> i32 {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.num_of_fields(),
+            WsResultSet::TmqResultSet(rs) => rs.num_of_fields(),
+            WsResultSet::SchemalessResultSet(rs) => rs.num_of_fields(),
+        }
+    }
+
+    fn get_fields(&mut self) -> *const WS_FIELD {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.get_fields(),
+            WsResultSet::TmqResultSet(rs) => rs.get_fields(),
+            WsResultSet::SchemalessResultSet(rs) => rs.get_fields(),
+        }
+    }
+    fn get_fields_v2(&mut self) -> *const WS_FIELD_V2 {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.get_fields_v2(),
+            WsResultSet::TmqResultSet(rs) => rs.get_fields_v2(),
+            WsResultSet::SchemalessResultSet(rs) => rs.get_fields_v2(),
+        }
+    }
+
+    unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.fetch_block(ptr, rows),
+            WsResultSet::TmqResultSet(rs) => rs.fetch_block(ptr, rows),
+            WsResultSet::SchemalessResultSet(rs) => rs.fetch_block(ptr, rows),
+        }
+    }
+
+    unsafe fn fetch_row(&mut self) -> Result<WS_ROW, Error> {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.fetch_row(),
+            WsResultSet::TmqResultSet(rs) => rs.fetch_row(),
+            WsResultSet::SchemalessResultSet(rs) => rs.fetch_row(),
+        }
+    }
+
+    unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.get_raw_value(row, col),
+            WsResultSet::TmqResultSet(rs) => rs.get_raw_value(row, col),
+            WsResultSet::SchemalessResultSet(rs) => rs.get_raw_value(row, col),
+        }
+    }
+
+    fn take_timing(&mut self) -> Duration {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.take_timing(),
+            WsResultSet::TmqResultSet(rs) => rs.take_timing(),
+            WsResultSet::SchemalessResultSet(rs) => rs.take_timing(),
+        }
+    }
+
+    fn stop_query(&mut self) {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.stop_query(),
+            WsResultSet::TmqResultSet(rs) => rs.stop_query(),
+            WsResultSet::SchemalessResultSet(rs) => rs.stop_query(),
+        }
+    }
+}
+
+impl WsSqlResultSet {
+    fn new(rs: ResultSet) -> Self {
         let num_of_fields = rs.num_of_fields();
         let mut data_vec = Vec::with_capacity(num_of_fields);
         for _col in 0..num_of_fields {
@@ -432,7 +687,6 @@ impl WsResultSet {
         }
 
         Self {
-            rs_type,
             rs,
             block: None,
             fields: Vec::new(),
@@ -442,6 +696,24 @@ impl WsResultSet {
                 current_row: 0,
             },
         }
+    }
+}
+
+impl WsResultSetTrait for WsSqlResultSet {
+    fn tmq_get_topic_name(&self) -> *const c_char {
+        std::ptr::null()
+    }
+    fn tmq_get_db_name(&self) -> *const c_char {
+        std::ptr::null()
+    }
+    fn tmq_get_table_name(&self) -> *const c_char {
+        std::ptr::null()
+    }
+    fn tmq_get_vgroup_offset(&self) -> i64 {
+        0
+    }
+    fn tmq_get_vgroup_id(&self) -> i32 {
+        0
     }
 
     fn precision(&self) -> Precision {
@@ -557,18 +829,12 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     Ok(taos)
 }
 
-/// Enable inner log to stdout with environment LIBTAOSWS_LOG_LEVEL.
+/// Enable inner log to stdout with para log_level.
 ///
 /// # Example
 ///
 /// ```c
 /// ws_enable_log("debug");
-/// ```
-///
-/// To show debug logs:
-///
-/// ```bash
-/// LIBTAOSWS_LOG_LEVEL=debug ./a.out
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
@@ -580,7 +846,10 @@ pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
             if let Ok(log_level_str) = CStr::from_ptr(log_level).to_str() {
                 log_level_str
             } else {
-                return -1;
+                return set_error_info(WsError::new(
+                    Code::INVALID_PARA,
+                    "log_level is not a valid string",
+                ));
             }
         }
     };
@@ -588,14 +857,11 @@ pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
     ONCE_INIT.call_once(|| {
         let mut builder = pretty_env_logger::formatted_timed_builder();
         builder.format_timestamp_nanos();
-        if let Ok(s) = ::std::env::var("LIBTAOSWS_LOG_LEVEL") {
-            builder.parse_filters(&s);
-        } else {
-            builder.parse_filters(log_level);
-        }
+        builder.parse_filters(log_level);
         builder.init();
     });
-    0
+
+    Code::SUCCESS.into()
 }
 
 /// Connect via dsn string, returns NULL if failed.
@@ -630,8 +896,10 @@ pub unsafe extern "C" fn ws_connect_with_dsn(dsn: *const c_char) -> *mut WS_TAOS
 pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char {
     static mut VERSION_INFO: [u8; 128] = [0; 128];
     if taos.is_null() {
-        return VERSION_INFO.as_ptr() as *const c_char;
+        set_error_info(WsError::new(Code::INVALID_PARA, "taos is null"));
+        return std::ptr::null();
     }
+
     if VERSION_INFO[0] == 0 {
         if let Some(taos) = (taos as *mut Taos).as_mut() {
             let v = taos.version();
@@ -651,9 +919,9 @@ pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) -> i32 {
         let client = Box::from_raw(taos as *mut Taos);
         // client.close();
         drop(client);
-        return 0;
+        return Code::SUCCESS.into();
     }
-    -1
+    set_error_info(WsError::new(Code::INVALID_PARA, "taos is null"))
 }
 
 unsafe fn query_with_sql(
@@ -663,11 +931,11 @@ unsafe fn query_with_sql(
 ) -> WsResult<WsResultSet> {
     let client = (taos as *mut Taos)
         .as_mut()
-        .ok_or(WsError::new(Code::FAILED, "client pointer it null"))?;
+        .ok_or(WsError::new(Code::INVALID_PARA, "client pointer it null"))?;
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
     let rs = client.query_with_req_id(sql, req_id)?;
-    Ok(WsResultSet::new(rs, ResultSetType::SQL))
+    Ok(WsResultSet::SqlResultSet(WsSqlResultSet::new(rs)))
 }
 
 unsafe fn query_with_sql_timeout(
@@ -678,11 +946,11 @@ unsafe fn query_with_sql_timeout(
     let _ = timeout;
     let client = (taos as *mut Taos)
         .as_mut()
-        .ok_or(WsError::new(Code::FAILED, "client pointer it null"))?;
+        .ok_or(WsError::new(Code::INVALID_PARA, "client pointer it null"))?;
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
     let rs = client.query(sql)?;
-    Ok(WsResultSet::new(rs, ResultSetType::SQL))
+    Ok(WsResultSet::SqlResultSet(WsSqlResultSet::new(rs)))
 }
 
 #[no_mangle]
@@ -690,7 +958,7 @@ unsafe fn query_with_sql_timeout(
 ///
 /// Please always use `ws_errno` to check it work and `ws_free_result` to free memory.
 pub unsafe extern "C" fn ws_query(taos: *mut WS_TAOS, sql: *const c_char) -> *mut WS_RES {
-    ws_query_with_reqid(taos, sql, 0)
+    ws_query_with_reqid(taos, sql, get_thread_local_reqid())
 }
 
 #[no_mangle]
@@ -716,7 +984,7 @@ pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) -> i32 {
         }
         _ => {}
     }
-    0
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
@@ -741,10 +1009,7 @@ pub unsafe extern "C" fn ws_take_timing(rs: *mut WS_RES) -> i64 {
         .and_then(|s| s.safe_deref_mut())
     {
         Some(rs) => rs.take_timing().as_nanos() as _,
-        _ => {
-            set_error_info(WsError::new(Code::FAILED, "WS_RES is null"));
-            Code::FAILED.into()
-        }
+        _ => set_error_info(WsError::new(Code::INVALID_PARA, "WS_RES is null")) as _,
     }
 }
 
@@ -758,7 +1023,7 @@ pub unsafe extern "C" fn ws_errno(rs: *mut WS_RES) -> i32 {
         .as_ref()
         .and_then(|s| s.errno())
     {
-        Some(c) => c,
+        Some(c) => get_err_code_fromated(c),
         _ => get_c_errno().into(),
     }
 }
@@ -767,7 +1032,7 @@ pub unsafe extern "C" fn ws_errno(rs: *mut WS_RES) -> i32 {
 /// Use this method to get a formatted error string when query errno is not 0.
 pub unsafe extern "C" fn ws_errstr(rs: *mut WS_RES) -> *const c_char {
     if rs.is_null() {
-        if get_c_errno().success() {
+        if get_c_errno() == 0 {
             return EMPTY.as_ptr();
         } else {
             return get_c_error_str() as _;
@@ -779,7 +1044,7 @@ pub unsafe extern "C" fn ws_errstr(rs: *mut WS_RES) -> *const c_char {
     {
         Some(e) => e,
         _ => {
-            if get_c_errno().success() {
+            if get_c_errno() == 0 {
                 EMPTY.as_ptr()
             } else {
                 get_c_error_str() as _
@@ -796,7 +1061,7 @@ pub unsafe extern "C" fn ws_affected_rows(rs: *const WS_RES) -> i32 {
         .and_then(|s| s.safe_deref())
     {
         Some(rs) => rs.affected_rows() as _,
-        _ => 0,
+        _ => set_error_info(WsError::new(Code::INVALID_PARA, "rs is invallid")),
     }
 }
 
@@ -808,7 +1073,7 @@ pub unsafe extern "C" fn ws_affected_rows64(rs: *const WS_RES) -> i64 {
         .and_then(|s| s.safe_deref())
     {
         Some(rs) => rs.affected_rows64() as _,
-        _ => 0,
+        _ => set_error_info(WsError::new(Code::INVALID_PARA, "rs is invallid")) as _,
     }
 }
 
@@ -820,21 +1085,21 @@ pub unsafe extern "C" fn ws_select_db(taos: *mut WS_TAOS, db: *const c_char) -> 
     let client = (taos as *mut Taos).as_mut();
     let client = match client {
         Some(t) => t,
-        None => return Code::FAILED.into(),
+        None => return set_error_info(WsError::new(Code::INVALID_PARA, "taos is invallid")),
     };
 
     let db = CStr::from_ptr(db as _).to_str();
     let db = match db {
         Ok(t) => t,
-        Err(_) => return Code::FAILED.into(),
+        Err(_) => return set_error_info(WsError::new(Code::INVALID_PARA, "db is invallid")),
     };
 
     let sql = format!("use {db}");
     let rs = client.query(sql);
 
     match rs {
-        Err(e) => e.code().into(),
-        _ => 0,
+        Err(e) => set_error_info(WsError::from(e)),
+        _ => Code::SUCCESS.into(),
     }
 }
 
@@ -845,7 +1110,10 @@ pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
 
     let metadata = match MetadataCommand::new().no_deps().exec().ok() {
         Some(m) => m,
-        _ => return std::ptr::null(),
+        _ => {
+            set_error_info(WsError::new(Code::FAILED, "Metadata Command error"));
+            return std::ptr::null();
+        }
     };
     let package = match metadata
         .packages
@@ -853,7 +1121,10 @@ pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
         .find(|p| p.name == "taos-ws-sys")
     {
         Some(x) => x,
-        _ => return std::ptr::null(),
+        _ => {
+            set_error_info(WsError::new(Code::FAILED, "find package error"));
+            return std::ptr::null();
+        }
     };
 
     let version = package.version.to_string();
@@ -869,7 +1140,7 @@ pub unsafe extern "C" fn ws_field_count(rs: *const WS_RES) -> i32 {
         .and_then(|s| s.safe_deref())
     {
         Some(rs) => rs.num_of_fields(),
-        _ => 0,
+        _ => set_error_info(WsError::new(Code::INVALID_PARA, "rs is invalid")),
     }
 }
 
@@ -893,7 +1164,10 @@ pub unsafe extern "C" fn ws_fetch_fields(rs: *mut WS_RES) -> *const WS_FIELD {
         .and_then(|s| s.safe_deref_mut())
     {
         Some(rs) => rs.get_fields(),
-        _ => std::ptr::null(),
+        _ => {
+            set_error_info(WsError::new(Code::INVALID_PARA, "rs is invalid"));
+            std::ptr::null()
+        }
     }
 }
 
@@ -905,7 +1179,10 @@ pub unsafe extern "C" fn ws_fetch_fields_v2(rs: *mut WS_RES) -> *const WS_FIELD_
         .and_then(|s| s.safe_deref_mut())
     {
         Some(rs) => rs.get_fields_v2(),
-        _ => std::ptr::null(),
+        _ => {
+            set_error_info(WsError::new(Code::INVALID_PARA, "rs is invalid"));
+            std::ptr::null()
+        }
     }
 }
 
@@ -946,7 +1223,7 @@ pub unsafe extern "C" fn ws_is_null(rs: *const WS_RES, row: usize, col: usize) -
         .as_ref()
         .and_then(|s| s.safe_deref())
     {
-        Some(rs) => match &(rs.block) {
+        Some(WsResultSet::SqlResultSet(rs)) => match &(rs.block) {
             Some(block) => block.is_null(row, col),
             _ => true,
         },
@@ -957,13 +1234,6 @@ pub unsafe extern "C" fn ws_is_null(rs: *const WS_RES, row: usize, col: usize) -
 #[no_mangle]
 /// Works like taos_fetch_row
 pub unsafe extern "C" fn ws_fetch_row(rs: *mut WS_RES) -> WS_ROW {
-    // unsafe fn handle_error(error_message: &str, err_no: Code) -> i32 {
-    //     C_ERRNO = err_no;
-    //     let dst = C_ERROR_CONTAINER.as_mut_ptr();
-    //     std::ptr::copy_nonoverlapping(error_message.as_ptr(), dst, error_message.len());
-    //     Code::FAILED.into()
-    // }
-
     match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
         Some(rs) => match rs.safe_deref_mut() {
             Some(s) => match s.fetch_row() {
@@ -977,12 +1247,12 @@ pub unsafe extern "C" fn ws_fetch_row(rs: *mut WS_RES) -> WS_ROW {
                 }
             },
             None => {
-                set_error_info(WsError::new(Code::FAILED, "WS_RES data is null"));
+                set_error_info(WsError::new(Code::INVALID_PARA, "WS_RES data is null"));
                 std::ptr::null()
             }
         },
         _ => {
-            set_error_info(WsError::new(Code::FAILED, "WS_RES data is null"));
+            set_error_info(WsError::new(Code::INVALID_PARA, "WS_RES is null"));
             std::ptr::null()
         }
     }
@@ -996,7 +1266,7 @@ pub unsafe extern "C" fn ws_num_fields(rs: *const WS_RES) -> i32 {
         .and_then(|s| s.safe_deref())
     {
         Some(rs) => rs.num_of_fields(),
-        _ => 0,
+        _ => set_error_info(WsError::new(Code::INVALID_PARA, "rs is null")),
     }
 }
 
@@ -1006,7 +1276,7 @@ pub unsafe extern "C" fn ws_free_result(rs: *mut WS_RES) -> i32 {
     if !rs.is_null() {
         let _ = Box::from_raw(rs as *mut WsMaybeError<WsResultSet>);
     }
-    0
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
@@ -1017,7 +1287,7 @@ pub unsafe extern "C" fn ws_result_precision(rs: *const WS_RES) -> i32 {
         .and_then(|s| s.safe_deref_mut())
     {
         Some(rs) => rs.precision() as i32,
-        _ => 0,
+        _ => set_error_info(WsError::new(Code::INVALID_PARA, "rs is null")),
     }
 }
 
@@ -1084,17 +1354,178 @@ pub unsafe extern "C" fn ws_timestamp_to_rfc3339(
 }
 
 #[no_mangle]
-/// Unimplemented currently.
-pub unsafe fn ws_print_row(rs: *mut WS_RES, row: i32) {
-    let (_, _) = (rs, row);
-    todo!()
-    // match (rs as *mut WsResultSet).as_mut() {
-    //     Some(rs) => rs.fetch_block(ptr, rows),
-    //     None => {
-    //         *rows = 0;
-    //         0
-    //     },
-    // }
+pub unsafe extern "C" fn ws_print_row(
+    str: *mut c_char,
+    str_len: i32,
+    row: WS_ROW,
+    fields: *const WS_FIELD,
+    num_fields: i32,
+) -> i32 {
+    // rust string to cstr
+    unsafe fn write_to_cstr(remain_space: &mut usize, str: *mut c_char, content: &str) -> i32 {
+        if content.len() > *remain_space {
+            return 0;
+        }
+        let cstr = CString::new(content).unwrap();
+        std::ptr::copy_nonoverlapping(cstr.as_ptr(), str, content.len());
+        *remain_space -= content.len();
+        content.len() as i32
+    }
+
+    let mut len = 0;
+    let mut remain_space = (str_len - 1) as usize;
+    if remain_space <= 0
+        || str_len <= 0
+        || str.is_null()
+        || row.is_null()
+        || fields.is_null()
+        || num_fields <= 0
+    {
+        return Code::SUCCESS.into();
+    }
+
+    let row_slice = std::slice::from_raw_parts(row as *const *const c_void, num_fields as usize);
+    let fields_slice = std::slice::from_raw_parts(fields, num_fields as usize);
+
+    for i in 0..num_fields as usize {
+        if i > 0 && remain_space > 0 {
+            *str.add(len as usize) = ' ' as c_char;
+            len += 1;
+            remain_space -= 1;
+        }
+
+        let field_ptr = row_slice[i];
+        if field_ptr.is_null() {
+            len += write_to_cstr(&mut remain_space, str.add(len as usize), "NULL");
+            continue;
+        }
+
+        match Ty::from(fields_slice[i].r#type) {
+            Ty::TinyInt => {
+                let value = std::ptr::read_unaligned(field_ptr as *const i8);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value).as_str(),
+                );
+            }
+            Ty::UTinyInt => {
+                let value = std::ptr::read_unaligned(field_ptr as *const u8);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value).as_str(),
+                );
+            }
+            Ty::SmallInt => {
+                let value = std::ptr::read_unaligned(field_ptr as *const i16);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value).as_str(),
+                );
+            }
+            Ty::USmallInt => {
+                let value = std::ptr::read_unaligned(field_ptr as *const u16);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value).as_str(),
+                );
+            }
+            Ty::Int => {
+                let value = std::ptr::read_unaligned(field_ptr as *const i32);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value).as_str(),
+                );
+            }
+            Ty::UInt => {
+                let value = std::ptr::read_unaligned(field_ptr as *const u32);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value).as_str(),
+                );
+            }
+            Ty::BigInt => {
+                let value = std::ptr::read_unaligned(field_ptr as *const i64);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value).as_str(),
+                );
+            }
+            Ty::UBigInt => {
+                let value = std::ptr::read_unaligned(field_ptr as *const u64);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value).as_str(),
+                );
+            }
+            Ty::Float => {
+                let value = std::ptr::read_unaligned(field_ptr as *const f32);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value).as_str(),
+                );
+            }
+            Ty::Double => {
+                let value = std::ptr::read_unaligned(field_ptr as *const f64);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value).as_str(),
+                );
+            }
+            Ty::Timestamp => {
+                let value = std::ptr::read_unaligned(field_ptr as *const i64);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value).as_str(),
+                );
+            }
+            Ty::Bool => {
+                let value = std::ptr::read_unaligned(field_ptr as *const bool);
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    format!("{}", value as i32).as_str(),
+                );
+            }
+            Ty::VarBinary | Ty::Geometry => {
+                let data = field_ptr.offset(-2) as *const InlineBytes;
+                let data = &*data;
+                let data = Bytes::from(data.as_bytes());
+
+                len += write_to_cstr(
+                    &mut remain_space,
+                    str.add(len as usize),
+                    &hex::bytes_to_hex_string(data),
+                );
+            }
+            Ty::VarChar => {
+                let data = field_ptr.offset(-2) as *const InlineStr;
+                let data = &*data;
+
+                len += write_to_cstr(&mut remain_space, str.add(len as usize), data.as_str());
+            }
+            Ty::NChar => {
+                let data = field_ptr.offset(-2) as *const InlineNChar;
+                let data = &*data;
+
+                len += write_to_cstr(&mut remain_space, str.add(len as usize), &data.to_string());
+            }
+            _ => {}
+        }
+    }
+
+    *str.add(len as usize) = 0; // add the null terminator
+    len
 }
 
 #[no_mangle]
@@ -1105,14 +1536,31 @@ pub unsafe extern "C" fn ws_get_current_db(
     len: c_int,
     required: *mut c_int,
 ) -> i32 {
+    if taos.is_null() {
+        return set_error_info(WsError::new(Code::INVALID_PARA, "taos is null"));
+    }
+
     let rs = ws_query(taos, b"SELECT DATABASE()\0" as *const u8 as _);
+
+    if rs.is_null() {
+        return set_error_info(WsError::new(Code::FAILED, "query failed"));
+    }
+
     let mut block: *const c_void = std::ptr::null();
     let mut rows = 0;
     let mut code = ws_fetch_raw_block(rs, &mut block, &mut rows);
 
+    if code != 0 {
+        return code;
+    }
+
     let mut ty: Ty = Ty::Null;
     let mut len_actual = 0u32;
     let res = ws_get_value_in_block(rs, 0, 0, &mut ty as *mut Ty as _, &mut len_actual);
+
+    if res.is_null() {
+        return set_error_info(WsError::new(Code::FAILED, "get value failed"));
+    }
 
     if len_actual < len as u32 {
         std::ptr::copy_nonoverlapping(res as _, database, len_actual as usize);
@@ -1126,10 +1574,66 @@ pub unsafe extern "C" fn ws_get_current_db(
 }
 
 /*  --------------------------schemaless INTERFACE------------------------------- */
+
 #[no_mangle]
-/// Same to taos_get_current_db.
-///
-/// TAOS_RES   *taos_schemaless_insert_raw_ttl_with_reqid(TAOS *taos, char *lines, int len,   int32_t *totalRows,  int protocol, int precision, int32_t ttl,   int64_t reqid);
+pub unsafe extern "C" fn ws_schemaless_insert_raw(
+    taos: *mut WS_TAOS,
+    lines: *const c_char,
+    len: c_int,
+    #[allow(non_snake_case)] totalRows: *mut i32,
+    protocal: c_int,
+    precision: c_int,
+) -> *mut WS_RES {
+    return ws_schemaless_insert_raw_ttl_with_reqid(
+        taos,
+        lines,
+        len,
+        totalRows,
+        protocal,
+        precision,
+        0,
+        get_thread_local_reqid(),
+    );
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ws_schemaless_insert_raw_with_reqid(
+    taos: *mut WS_TAOS,
+    lines: *const c_char,
+    len: c_int,
+    #[allow(non_snake_case)] totalRows: *mut i32,
+    protocal: c_int,
+    precision: c_int,
+    reqid: u64,
+) -> *mut WS_RES {
+    return ws_schemaless_insert_raw_ttl_with_reqid(
+        taos, lines, len, totalRows, protocal, precision, 0, reqid,
+    );
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl(
+    taos: *mut WS_TAOS,
+    lines: *const c_char,
+    len: c_int,
+    #[allow(non_snake_case)] totalRows: *mut i32,
+    protocal: c_int,
+    precision: c_int,
+    ttl: c_int,
+) -> *mut WS_RES {
+    return ws_schemaless_insert_raw_ttl_with_reqid(
+        taos,
+        lines,
+        len,
+        totalRows,
+        protocal,
+        precision,
+        ttl,
+        get_thread_local_reqid(),
+    );
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl_with_reqid(
     taos: *mut WS_TAOS,
     lines: *const c_char,
@@ -1138,20 +1642,24 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl_with_reqid(
     protocal: c_int,
     precision: c_int,
     ttl: c_int,
-    reqid: i64,
-) -> i32 {
-    match ws_schemaless_insert_raw(taos, lines, len, totalRows, protocal, precision, ttl, reqid) {
-        Ok(_) => 0,
+    reqid: u64,
+) -> *mut WS_RES {
+    match schemaless_insert_raw(taos, lines, len, totalRows, protocal, precision, ttl, reqid) {
+        Ok(rs) => {
+            log::trace!("schemaless insert done: {:?}", rs);
+            let rs: WsMaybeError<WsResultSet> = rs.into();
+            return Box::into_raw(Box::new(rs)) as _;
+        }
         Err(e) => {
+            log::trace!("schemaless insert failed: {:?}", e);
             let error_message = format!("schemaless insert failed: {}", e.to_string());
-            set_error_info(WsError::new(Code::FAILED, &error_message));
-
-            Code::FAILED.into()
+            set_error_info(WsError::new(e.code, &error_message));
+            return std::ptr::null_mut() as _;
         }
     }
 }
 
-unsafe fn ws_schemaless_insert_raw(
+unsafe fn schemaless_insert_raw(
     taos: *mut WS_TAOS,
     lines: *const c_char,
     len: c_int,
@@ -1159,11 +1667,11 @@ unsafe fn ws_schemaless_insert_raw(
     protocal: c_int,
     precision: c_int,
     ttl: c_int,
-    reqid: i64,
-) -> WsResult<()> {
+    reqid: u64,
+) -> WsResult<WsResultSet> {
     let client = (taos as *mut Taos)
         .as_mut()
-        .ok_or(WsError::new(Code::FAILED, "client pointer it null"))?;
+        .ok_or(WsError::new(Code::INVALID_PARA, "client pointer it null"))?;
 
     let slice = std::slice::from_raw_parts(lines as *const u8, len as usize);
 
@@ -1174,11 +1682,16 @@ unsafe fn ws_schemaless_insert_raw(
         .precision(SchemalessPrecision::from(precision as i32))
         .data(vec![data])
         .ttl(ttl as i32)
-        .req_id(reqid as u64)
+        .req_id(reqid)
         .build()?;
 
     client.put(&sml_data)?;
-    Ok(())
+    let r = WsResultSet::SchemalessResultSet(WsSchemalessResultSet::new(
+        0,
+        Precision::Millisecond,
+        Duration::from_millis(0),
+    ));
+    Ok(r)
 }
 
 #[cfg(test)]
@@ -1385,7 +1898,7 @@ mod tests {
             let is_null = ws_is_null(rs, 0, cols as usize);
             assert_eq!(is_null, true);
             let is_null = ws_is_null(rs, 0, 1);
-            assert_eq!(is_null, true);
+            assert_eq!(is_null, false);
 
             dbg!(rows);
             for row in 0..rows {
@@ -1802,20 +2315,6 @@ mod tests {
             }
             assert!(!taos.is_null());
 
-            // macro_rules! execute {
-            //     ($sql:expr) => {
-            //         let sql = $sql as *const u8 as _;
-            //         let rs = ws_query(taos, sql);
-            //         let code = ws_errno(rs);
-            //         assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
-            //         ws_free_result(rs);
-            //     };
-            // }
-
-            // execute!(b"drop database if exists schemaless_test\0");
-            // execute!(b"create database schemaless_test keep 36500\0");
-            // execute!(b"use schemaless_test\0");
-
             // 准备要插入的数据
             let data = "meters,groupid=2,location=California.SanFrancisco current=10.3000002f64,voltage=219i32,phase=0.31f64 1626006833639";
             let c_data = CString::new(data).expect("CString::new failed");
@@ -1827,8 +2326,8 @@ mod tests {
             let protocal = 1; // 示例值
             let precision = 4; // 示例值
             let ttl = 0; // 示例值
-            let reqid = 0i64; // 示例值
-            let rs = ws_schemaless_insert_raw(
+            let reqid = 123456u64; // 示例值
+            let rs = schemaless_insert_raw(
                 taos,
                 lines as *const c_char,
                 data.len() as i32,

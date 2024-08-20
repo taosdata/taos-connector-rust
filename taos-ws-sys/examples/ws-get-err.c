@@ -62,9 +62,9 @@ void insert_data(WS_TAOS *taos)
     int num_fields = 0;
     int code;
 
-    code = ws_stmt_get_col_fields(stmt, &num_fields, &fields);
-    check_error_code(stmt, code, "failed to execute ws_stmt_get_col_fields");
-    ws_stmt_reclaim_fields(stmt, &fields, num_fields);
+    // code = ws_stmt_get_col_fields(stmt, &num_fields, &fields);
+    // check_error_code(stmt, code, "failed to execute ws_stmt_get_col_fields");
+    // ws_stmt_reclaim_fields(stmt, &fields, num_fields);
 
     // prepare
     const char *sql = "INSERT INTO ? USING meters TAGS(?, ?) VALUES(?, ?, ?, ?)";
@@ -164,7 +164,7 @@ void insert_data(WS_TAOS *taos)
 
 int main()
 {
-    ws_enable_log("trace");
+    ws_enable_log("debug");
     WS_TAOS *taos = ws_connect_with_dsn("ws://localhost:6041");
     if (taos == NULL)
     {

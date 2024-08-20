@@ -202,6 +202,8 @@ pub trait AsyncMessage {
 }
 
 pub type VGroupId = i32;
+pub type Offset = i64;
+pub type Timing = i64;
 
 /// Extract offset information.
 pub trait IsOffset {
@@ -213,6 +215,12 @@ pub trait IsOffset {
 
     /// VGroup id for current message.
     fn vgroup_id(&self) -> VGroupId;
+
+    /// offset of current message.
+    fn offset(&self) -> Offset;
+
+    /// timing cost for current message.
+    fn timing(&self) -> Timing;
 }
 
 #[repr(C)]

@@ -11,7 +11,7 @@ use taos_query::{
     prelude::{tokio::time, RawError, RawResult},
     tmq::{
         AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
-        IsOffset, MessageSet, Timeout, VGroupId,
+        IsOffset, MessageSet, Timeout, Timing, VGroupId,
     },
     util::Edition,
     Dsn, IntoDsn, RawBlock,
@@ -262,6 +262,14 @@ impl IsOffset for Offset {
         self.0
             .tmq_vgroup_id()
             .expect("a message should belong to a vgroup")
+    }
+
+    fn offset(&self) -> taos_query::tmq::Offset {
+        todo!()
+    }
+
+    fn timing(&self) -> Timing {
+        todo!()
     }
 }
 

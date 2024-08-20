@@ -213,7 +213,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 
         let taos = taos_query::AsyncTBuilder::build(&self.info).await?;
         // Ensure server is ready.
-        taos.exec("select server_status()").await?;
+        taos.exec("show cluster alive").await?;
 
         match self
             .info
@@ -503,6 +503,8 @@ impl Consumer {
                     topic,
                     vgroup_id,
                     message_type,
+                    offset,
+                    timing,
                 }) => {
                     if have_message {
                         let dur = elapsed.elapsed();
@@ -511,6 +513,8 @@ impl Consumer {
                             database,
                             topic,
                             vgroup_id,
+                            offset,
+                            timing,
                         };
                         let message = WsMessageBase {
                             is_support_fetch_raw: self.support_fetch_raw,
@@ -632,7 +636,7 @@ impl AsAsyncConsumer for Consumer {
         log::trace!("unsubscribe {} start", req_id);
         let action = TmqSend::Unsubscribe { req_id };
         self.sender.send_recv(action).await.unwrap();
-        drop(self)
+        drop(self);
     }
 
     async fn recv_timeout(
@@ -836,6 +840,10 @@ impl AsConsumer for Consumer {
         taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::position(
             self, topic, vg_id,
         ))
+    }
+
+    fn unsubscribe(self) {
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::unsubscribe(self))
     }
 }
 
@@ -1340,6 +1348,8 @@ pub struct Offset {
     database: String,
     topic: String,
     vgroup_id: i32,
+    offset: i64,
+    timing: i64,
 }
 
 impl IsOffset for Offset {
@@ -1353,6 +1363,14 @@ impl IsOffset for Offset {
 
     fn vgroup_id(&self) -> i32 {
         self.vgroup_id
+    }
+
+    fn offset(&self) -> i64 {
+        self.offset
+    }
+
+    fn timing(&self) -> i64 {
+        self.timing
     }
 }
 

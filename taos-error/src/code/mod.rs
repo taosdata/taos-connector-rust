@@ -54,6 +54,7 @@ impl Code {
     pub const FAILED: Code = Code(0xFFFF);
     pub const SUCCESS: Code = Code(0);
 
+    pub const INVALID_PARA: Code = Code(0x0118);
     pub const COLUMN_EXISTS: Code = Code(0x036B);
     pub const COLUMN_NOT_EXIST: Code = Code(0x036C);
     pub const TAG_ALREADY_EXIST: Code = Code(0x0369);
@@ -66,9 +67,8 @@ impl Code {
     pub const DUPLICATED_COLUMN_NAMES: Code = Code(0x263C);
     pub const NO_COLUMN_CAN_BE_DROPPED: Code = Code(0x2651);
 
-    pub const OBJECT_IS_NULL: Code = Code(0x100);
-    pub const TMQ_TOPIC_APPEND_ERR: Code = Code(0x101);
-    pub const INVALID_PARA: Code = Code(0x102);
+    pub const OBJECT_IS_NULL: Code = Code(0xE100);
+    pub const TMQ_TOPIC_APPEND_ERR: Code = Code(0xE101);
 }
 
 macro_rules! _impl_fmt {

@@ -29,3 +29,8 @@ fetch-row:
 
 tmq-basic:
 	gcc -g ws-tmq-basic.c ${WS_FLAGS} -o ./target/ws-tmq-basic && ./target/ws-tmq-basic
+
+schemaless:
+	gcc -g ws-schemaless.c ${WS_FLAGS} -o ./target/ws-schemaless && ./target/ws-schemaless
+
+run-all: basic interface bind muti table fetch-row tmq-basic schemaless

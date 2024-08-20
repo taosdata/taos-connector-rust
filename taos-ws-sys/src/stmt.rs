@@ -48,13 +48,12 @@ unsafe fn stmt_init(taos: *const WS_TAOS, req_id: u64) -> WsResult<Stmt> {
         .as_mut()
         .ok_or(WsError::new(Code::FAILED, "client pointer it null"))?;
     Ok(taos_ws::Stmt::init_with_req_id(client, req_id)?)
-    // Ok(client.stmt_init()?)
 }
 
 /// Create new stmt object.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_init(taos: *const WS_TAOS) -> *mut WS_STMT {
-    ws_stmt_init_with_reqid(taos, 0)
+    ws_stmt_init_with_reqid(taos, get_thread_local_reqid())
 }
 
 /// Create new stmt object with req_id.
@@ -97,10 +96,10 @@ pub unsafe extern "C" fn ws_stmt_prepare(
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
                 errno.into()
             } else {
-                0
+                Code::SUCCESS.into()
             }
         }
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -123,7 +122,7 @@ pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_c
                 0
             }
         }
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -146,7 +145,7 @@ pub unsafe extern "C" fn ws_stmt_set_sub_tbname(stmt: *mut WS_STMT, name: *const
                 0
             }
         }
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -178,7 +177,7 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
                 0
             }
         }
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -215,7 +214,7 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
             }
         },
 
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -248,7 +247,7 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
             }
         },
 
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -657,7 +656,7 @@ pub unsafe extern "C" fn ws_stmt_set_tags(
                 0
             }
         }
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -686,7 +685,7 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
                 0
             }
         }
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -706,7 +705,7 @@ pub unsafe extern "C" fn ws_stmt_add_batch(stmt: *mut WS_STMT) -> c_int {
                 0
             }
         }
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -729,7 +728,7 @@ pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut
                 errno.into()
             }
         },
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -741,7 +740,7 @@ pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
         .and_then(|s| s.safe_deref_mut())
     {
         Some(stmt) => stmt.affected_rows() as _,
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -753,7 +752,7 @@ pub unsafe extern "C" fn ws_stmt_affected_rows_once(stmt: *mut WS_STMT) -> c_int
         .and_then(|s| s.safe_deref_mut())
     {
         Some(stmt) => stmt.affected_rows_once() as _,
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -776,7 +775,7 @@ pub unsafe extern "C" fn ws_stmt_num_params(stmt: *mut WS_STMT, nums: *mut c_int
                 errno.into()
             }
         },
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -805,7 +804,7 @@ pub unsafe extern "C" fn ws_stmt_get_param(
                 errno.into()
             }
         },
-        _ => 0,
+        _ => Code::INVALID_PARA.into(),
     }
 }
 
@@ -1711,8 +1710,11 @@ mod tests {
             if code != 0 {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
             }
+            assert_eq!(code, 0);
 
-            ws_stmt_add_batch(stmt);
+            let code = ws_stmt_add_batch(stmt);
+            assert_eq!(code, 0);
+
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
 
