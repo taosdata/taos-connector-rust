@@ -273,7 +273,8 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             if let Ok(Some((edition, _, expired))) = grant {
                 Edition::new(
                     edition.trim(),
-                    expired.trim() == "false" || expired.trim() == "unlimited",
+                    // Valid choices: false/unlimited, otherwise expired.
+                    !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
                 warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
@@ -315,7 +316,8 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             if let Ok(Some((edition, _, expired))) = grant {
                 Edition::new(
                     edition.trim(),
-                    expired.trim() == "false" || expired.trim() == "unlimited",
+                    // Valid choices: false/unlimited, otherwise expired.
+                    !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
                 warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
