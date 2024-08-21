@@ -1,6 +1,7 @@
 use std::{
     cell::UnsafeCell,
     ffi::{c_char, CStr, CString},
+    mem::ManuallyDrop,
     sync::Arc,
     time::Duration,
 };
@@ -8,12 +9,15 @@ use std::{
 use anyhow::Context;
 use once_cell::sync::OnceCell;
 use raw::{ApiEntry, BlockState, RawRes, RawTaos};
-use tracing::warn;
+use tracing::{warn, Instrument};
 
 use taos_query::{
-    prelude::tokio::time,
-    prelude::{Field, Precision, RawBlock, RawMeta, RawResult},
+    prelude::{
+        tokio::{sync::oneshot, task, time},
+        Field, Precision, RawBlock, RawMeta, RawResult,
+    },
     util::Edition,
+    RawError,
 };
 
 const MAX_CONNECT_RETRIES: u8 = 2;
@@ -132,6 +136,7 @@ impl taos_query::Queryable for Taos {
 impl taos_query::AsyncQueryable for Taos {
     type AsyncResultSet = ResultSet;
 
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
         tracing::trace!("Async query with SQL: {}", sql.as_ref());
 
@@ -144,6 +149,7 @@ impl taos_query::AsyncQueryable for Taos {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
         &self,
         _sql: T,
@@ -154,16 +160,53 @@ impl taos_query::AsyncQueryable for Taos {
             .map(ResultSet::new)
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn write_raw_meta(&self, meta: &taos_query::common::RawMeta) -> RawResult<()> {
-        self.raw.write_raw_meta(meta.as_raw_data_t())
+        let raw = meta.as_raw_data_t();
+        let slf = self.raw.clone();
+        time::timeout(
+            Duration::from_secs(60),
+            task::spawn_blocking(move || slf.write_raw_meta(raw)).in_current_span(),
+        )
+        .in_current_span()
+        .await
+        .map_err(|_| {
+            tracing::warn!("Write raw data timeout, maybe the connection has been lost");
+            RawError::new(
+                0xE002, // Connection closed
+                "Write raw data timeout, maybe the connection has been lost",
+            )
+        })?
+        .map_err(|err| RawError::from_string(format!("Write raw data join error: {err}")))?
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn write_raw_block(&self, block: &RawBlock) -> RawResult<()> {
         self.raw.write_raw_block(block)
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn write_raw_block_with_req_id(&self, block: &RawBlock, req_id: u64) -> RawResult<()> {
-        self.raw.write_raw_block_with_req_id(block, req_id)
+        let slf = self.raw.clone();
+        let block_ptr =
+            unsafe { ManuallyDrop::new(Box::from_raw(block as *const RawBlock as *mut RawBlock)) };
+        time::timeout(
+            Duration::from_secs(60),
+            task::spawn_blocking(move || {
+                slf.write_raw_block_with_req_id(block_ptr.as_ref(), req_id)
+            })
+            .in_current_span(),
+        )
+        .in_current_span()
+        .await
+        .map_err(|_| {
+            tracing::warn!("Write raw data timeout, maybe the connection has been lost");
+            RawError::new(
+                0xE002, // Connection closed
+                "Write raw data timeout, maybe the connection has been lost",
+            )
+        })?
+        .map_err(|err| RawError::from_string(format!("Write raw data join error: {err}")))?
     }
 
     async fn put(&self, data: &taos_query::common::SmlData) -> RawResult<()> {
@@ -242,9 +285,46 @@ impl TaosBuilder {
             self.inner_conn.get_or_try_init(|| taos)
         }
     }
+
+    async fn async_inner_connection(&self) -> RawResult<&Taos> {
+        if let Some(taos) = self.inner_conn.get() {
+            Ok(taos)
+        } else {
+            let taos = self.async_connect().await;
+            self.inner_conn.get_or_try_init(|| taos)
+        }
+    }
+
+    async fn async_connect(&self) -> RawResult<Taos> {
+        let api = self.lib.clone();
+        let auth = self.auth.clone();
+
+        let (tx, rx) = oneshot::channel::<()>();
+        let join = task::spawn_blocking(move || {
+            tracing::trace!("Async connecting to the server");
+            let ptr = api.connect_with_retries(&auth, auth.max_retries())?;
+
+            RawTaos::new(api.clone(), ptr).map(|raw| Taos { raw })
+        });
+        let abort = join.abort_handle();
+        task::spawn(async move {
+            let _ = rx.await;
+            if abort.is_finished() {
+                return;
+            }
+            tracing::trace!("Abort the connecting");
+            abort.abort();
+        });
+        let res = join.await.map_err(|err| {
+            tracing::error!("Failed to join threads {err:#}: {:?}", err);
+            taos_query::RawError::from_string("Failed to connect to the server").with_code(0x000B)
+        })?;
+        drop(tx);
+        res
+    }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Auth {
     host: Option<CString>,
     user: Option<CString>,
@@ -329,7 +409,7 @@ impl taos_query::TBuilder for TaosBuilder {
             lib.options(types::TSDB_OPTION::ConfigDir, dir);
         }
 
-        lib.options(types::TSDB_OPTION::ShellActivityTimer, "3600");
+        lib.options(types::TSDB_OPTION::ShellActivityTimer, "120");
 
         if let Some(max_retries) = params.get("maxRetries") {
             auth.max_retries = max_retries.parse().unwrap_or(MAX_CONNECT_RETRIES);
@@ -507,19 +587,14 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     }
 
     async fn build(&self) -> RawResult<Self::Target> {
-        let ptr = self
-            .lib
-            .connect_with_retries(&self.auth, self.auth.max_retries())?;
-
-        let raw = RawTaos::new(self.lib.clone(), ptr)?;
-        Ok(Taos { raw })
+        self.async_connect().await
     }
 
     async fn server_version(&self) -> RawResult<&str> {
         if let Some(v) = self.server_version.get() {
             Ok(v.as_str())
         } else {
-            let conn = self.inner_connection()?;
+            let conn = self.async_inner_connection().await?;
             use taos_query::prelude::AsyncQueryable;
             let v: String = AsyncQueryable::query_one(conn, "select server_version()")
                 .await?
@@ -532,7 +607,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     }
 
     async fn is_enterprise_edition(&self) -> RawResult<bool> {
-        let taos = self.inner_connection()?;
+        let taos = self.async_inner_connection().await?;
         use taos_query::prelude::AsyncQueryable;
 
         // the latest version of 3.x should work

@@ -10,6 +10,7 @@ use std::{
     sync::{Arc, Mutex, Weak},
     task::{Context, Poll, Waker},
 };
+use tracing::instrument;
 
 use taos_query::{
     common::{c_field_t, raw_data_t, RawData, SmlData},
@@ -798,6 +799,7 @@ impl ApiEntry {
         }
     }
 
+    #[instrument("connect_with_retries", skip(self, auth), fields(host = auth.host().and_then(|s| s.to_str().ok()), user = ?auth.user().and_then(|s| s.to_str().ok())))]
     pub(super) fn connect_with_retries(
         &self,
         auth: &Auth,
@@ -807,8 +809,11 @@ impl ApiEntry {
             retries = 1;
         }
         loop {
+            let now = std::time::Instant::now();
             let ptr = self.connect(auth);
+            let elapsed = now.elapsed();
             if ptr.is_null() {
+                tracing::trace!(cost = ?elapsed, "connect failed");
                 retries -= 1;
                 let err = self.check(ptr).unwrap_err();
                 if retries <= 0 {
@@ -820,6 +825,7 @@ impl ApiEntry {
                     break Err(err);
                 }
             } else {
+                tracing::trace!(cost = ?elapsed, "connected");
                 break Ok(ptr);
             }
         }
@@ -1029,15 +1035,19 @@ impl RawTaos {
             .ok_or_else(|| RawError::from_string("tmq api is not available"))?
             .tmq_err2str;
         let mut retries = 2;
+        let now = std::time::Instant::now();
         loop {
+            tracing::trace!("write raw");
             let raw_code = unsafe { tmq_write_raw(self.as_ptr(), meta.clone()) };
             let code = Code::from(raw_code);
             if code.success() {
+                tracing::trace!(tmq.write_raw.cost = ?now.elapsed(), "write raw success");
                 return Ok(());
             }
             if code != Code::from(0x2603) {
                 let err = unsafe { tmq_err2str(tmq_resp_err_t(raw_code)) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                tracing::trace!(error.code = %code, error.message = err, tmq.write_raw.cost = ?now.elapsed(), "write raw failed");
                 if err == "success" {
                     return Err(RawError::from_code(code));
                 }

@@ -249,7 +249,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 
         let taos = self.build().await?;
         // Ensue server is ready.
-        taos.exec("show cluster alive").await?;
+        taos.exec("select server_version()").await?;
 
         match self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
@@ -273,7 +273,8 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             if let Ok(Some((edition, _, expired))) = grant {
                 Edition::new(
                     edition.trim(),
-                    expired.trim() == "false" || expired.trim() == "unlimited",
+                    // Valid choices: false/unlimited, otherwise expired.
+                    !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
                 warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
@@ -288,7 +289,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 
         let taos = self.build().await?;
         // Ensure server is ready.
-        taos.exec("show cluster alive").await?;
+        taos.exec("select server_version()").await?;
 
         match self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
@@ -315,7 +316,8 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             if let Ok(Some((edition, _, expired))) = grant {
                 Edition::new(
                     edition.trim(),
-                    expired.trim() == "false" || expired.trim() == "unlimited",
+                    // Valid choices: false/unlimited, otherwise expired.
+                    !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
                 warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
@@ -551,6 +553,7 @@ impl TaosBuilder {
                         self.to_ws_url(),
                         retries
                     );
+                    tokio::time::sleep(std::time::Duration::from_secs(retries as u64 * 500)).await;
                 }
             }
         }

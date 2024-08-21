@@ -3,16 +3,16 @@
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::type_complexity)]
 
+use async_trait::async_trait;
+pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
+pub use serde::de::value::Error as DeError;
+use std::time::Duration;
 use std::{
     collections::BTreeMap,
     fmt::{Debug, Display},
     ops::{Deref, DerefMut},
     rc::Rc,
 };
-
-use async_trait::async_trait;
-pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
-pub use serde::de::value::Error as DeError;
 
 mod error;
 
@@ -258,8 +258,12 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
     #[inline]
     fn default_pool_config(&self) -> deadpool::managed::PoolConfig {
         deadpool::managed::PoolConfig {
-            max_size: 500,
-            timeouts: deadpool::managed::Timeouts::default(),
+            max_size: 5000,
+            timeouts: deadpool::managed::Timeouts {
+                wait: None,
+                create: Some(Duration::from_secs(30)),
+                recycle: None,
+            },
             queue_mode: deadpool::managed::QueueMode::Fifo,
         }
     }
