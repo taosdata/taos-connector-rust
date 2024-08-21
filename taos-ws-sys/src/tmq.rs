@@ -1,35 +1,27 @@
 use std::{
     collections::HashMap,
     ffi::{c_void, CStr, CString},
-    fmt::{Debug, Display},
-    os::{
-        macos::raw,
-        raw::{c_char, c_int},
-    },
-    ptr,
-    str::{FromStr, Utf8Error},
+    fmt::Debug,
+    os::raw::{c_char, c_int},
+    str::FromStr,
     time::Duration,
 };
 
-use futures::poll;
 use taos_error::Code;
 
 use taos_query::{
-    block_in_place_or_global,
-    common::{Field, Precision, RawBlock as Block, Timestamp, Ty},
-    prelude::{Itertools, RawError},
+    common::{Precision, RawBlock as Block, Ty},
     tmq::{self, AsConsumer, IsData, IsOffset},
-    Dsn, DsnError, Fetchable, Queryable, TBuilder,
+    Dsn, TBuilder,
 };
 
 use taos_ws::{
     consumer::{Data, Offset},
-    query::{asyn::WS_ERROR_NO, Error, ResultSet, Taos},
-    Consumer, TaosBuilder, TmqBuilder,
+    query::Error,
+    Consumer, TmqBuilder,
 };
 
 use crate::*;
-use cargo_metadata::MetadataCommand;
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
