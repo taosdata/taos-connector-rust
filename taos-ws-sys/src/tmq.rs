@@ -33,10 +33,10 @@ pub enum ws_tmq_conf_res_t {
 #[repr(C)]
 #[allow(non_camel_case_types)]
 pub enum ws_tmq_res_t {
-    TMQ_RES_INVALID = -1,   // invalid
-    TMQ_RES_DATA = 1,       // 数据
-    TMQ_RES_TABLE_META = 2, // 元数据
-    TMQ_RES_METADATA = 3,   // 既有元数据又有数据，即自动建表
+    WS_TMQ_RES_INVALID = -1,   // invalid
+    WS_TMQ_RES_DATA = 1,       // 数据
+    WS_TMQ_RES_TABLE_META = 2, // 元数据
+    WS_TMQ_RES_METADATA = 3,   // 既有元数据又有数据，即自动建表
 }
 
 impl From<Code> for ws_tmq_conf_res_t {
@@ -696,9 +696,9 @@ pub unsafe extern "C" fn ws_tmq_get_vgroup_offset(rs: *const WS_RES) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn ws_tmq_get_res_type(rs: *const WS_RES) -> ws_tmq_res_t {
     if rs.is_null() {
-        return ws_tmq_res_t::TMQ_RES_INVALID;
+        return ws_tmq_res_t::WS_TMQ_RES_INVALID;
     }
-    return ws_tmq_res_t::TMQ_RES_DATA;
+    return ws_tmq_res_t::WS_TMQ_RES_DATA;
 }
 
 unsafe fn tmq_commit_sync(tmq: *mut ws_tmq_t, rs: *const WS_RES) -> WsResult<()> {
