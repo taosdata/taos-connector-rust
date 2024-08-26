@@ -446,6 +446,17 @@ impl AsAsyncConsumer for Consumer {
         }
     }
 
+    async fn commit_all(&self) -> RawResult<()> {
+        match &self.0 {
+            ConsumerInner::Native(c) => <crate::sys::Consumer as AsAsyncConsumer>::commit_all(c)
+                .await
+                .map_err(Into::into),
+            ConsumerInner::Ws(c) => <taos_ws::consumer::Consumer as AsAsyncConsumer>::commit_all(c)
+                .await
+                .map_err(Into::into),
+        }
+    }
+
     async fn commit_offset(&self, topic: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
         match &self.0 {
             ConsumerInner::Native(c) => <crate::sys::Consumer as AsAsyncConsumer>::commit_offset(

@@ -20,6 +20,7 @@ use taos_query::{
     DsnError, Fetchable, Queryable, TBuilder,
 };
 use taos_ws::{
+    consumer::Offset,
     query::{Error, ResultSet, Taos},
     TaosBuilder,
 };
@@ -38,7 +39,7 @@ const EMPTY: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") };
 thread_local! {
     static C_ERROR_CONTAINER: RefCell<[u8; MAX_ERROR_MSG_LEN]> = RefCell::new([0; MAX_ERROR_MSG_LEN]);
     static C_ERRNO: RefCell<i32> = RefCell::new(0);
-    static REQ_ID: RefCell<u64> = RefCell::new(0);
+    static REQ_ID: RefCell<u64> = RefCell::new(10);
 }
 
 fn get_err_code_fromated(err_code: i32) -> i32 {
@@ -90,12 +91,11 @@ unsafe fn clear_error_info() {
     });
 }
 
-// 获取当前线程局部变量的值
 fn get_thread_local_reqid() -> u64 {
     REQ_ID.with(|val| {
         let current_value = *val.borrow();
         *val.borrow_mut() = current_value + 1;
-        current_value // 返回增加前的值
+        current_value
     })
 }
 
@@ -463,6 +463,7 @@ trait WsResultSetTrait {
     fn tmq_get_table_name(&self) -> *const c_char;
     fn tmq_get_vgroup_offset(&self) -> i64;
     fn tmq_get_vgroup_id(&self) -> i32;
+    fn tmq_get_offset(&self) -> Offset;
 
     fn precision(&self) -> Precision;
 
@@ -501,6 +502,9 @@ impl WsResultSetTrait for WsSchemalessResultSet {
     }
     fn tmq_get_vgroup_id(&self) -> i32 {
         0
+    }
+    fn tmq_get_offset(&self) -> Offset {
+        todo!()
     }
 
     fn precision(&self) -> Precision {
@@ -575,6 +579,15 @@ impl WsResultSetTrait for WsResultSet {
             WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_table_name(),
         }
     }
+
+    fn tmq_get_offset(&self) -> Offset {
+        match self {
+            WsResultSet::SqlResultSet(rs) => rs.tmq_get_offset(),
+            WsResultSet::TmqResultSet(rs) => rs.tmq_get_offset(),
+            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_offset(),
+        }
+    }
+
     fn tmq_get_vgroup_offset(&self) -> i64 {
         match self {
             WsResultSet::SqlResultSet(rs) => rs.tmq_get_vgroup_offset(),
@@ -708,6 +721,9 @@ impl WsResultSetTrait for WsSqlResultSet {
     }
     fn tmq_get_table_name(&self) -> *const c_char {
         std::ptr::null()
+    }
+    fn tmq_get_offset(&self) -> Offset {
+        todo!()
     }
     fn tmq_get_vgroup_offset(&self) -> i64 {
         0
@@ -862,6 +878,14 @@ pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
     });
 
     Code::SUCCESS.into()
+}
+
+#[no_mangle]
+pub extern "C" fn taos_data_type(r#type: i32) -> *const c_char {
+    match Ty::from_u8_option(r#type as _) {
+        Some(ty) => ty.tsdb_name(),
+        None => std::ptr::null(),
+    }
 }
 
 /// Connect via dsn string, returns NULL if failed.
@@ -1024,7 +1048,7 @@ pub unsafe extern "C" fn ws_errno(rs: *mut WS_RES) -> i32 {
         .and_then(|s| s.errno())
     {
         Some(c) => get_err_code_fromated(c),
-        _ => get_c_errno().into(),
+        _ => Code::SUCCESS.into(),
     }
 }
 
@@ -2081,7 +2105,7 @@ mod tests {
                 line_num = line_num + 1;
             }
 
-            if get_c_errno() == Code::SUCCESS {
+            if get_c_errno() == 0 {
                 println!("fetch row done");
             } else {
                 let error = ws_errstr(rs);
@@ -2339,6 +2363,55 @@ mod tests {
             );
 
             rs.unwrap();
+        }
+    }
+
+    #[test]
+    fn test_tsdb_type() {
+        init_env();
+        unsafe {
+            let type_null_str = taos_data_type(0);
+            let type_null_str = CStr::from_ptr(type_null_str);
+            assert_eq!(
+                type_null_str,
+                CStr::from_bytes_with_nul(b"TSDB_DATA_TYPE_NULL\0").unwrap()
+            );
+
+            let type_geo_str = taos_data_type(20);
+            let type_geo_str = CStr::from_ptr(type_geo_str);
+            assert_eq!(
+                type_geo_str,
+                CStr::from_bytes_with_nul(b"TSDB_DATA_TYPE_GEOMETRY\0").unwrap()
+            );
+
+            let type_invalid = taos_data_type(100);
+            assert_eq!(type_invalid, std::ptr::null(),);
+        }
+    }
+
+    #[test]
+    fn test_err_code() {
+        init_env();
+        unsafe {
+            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            assert!(!taos.is_null());
+
+            let sql = b"select * from db_not_exsits.tb1\0" as *const u8 as _;
+            let rs = ws_query(taos, sql);
+            let code = ws_errno(rs);
+            assert!(code != 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+            ws_free_result(rs);
+            ws_close(taos);
+
+            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            assert!(!taos.is_null());
+
+            let sql = b"select to_iso8601(0) as ts\0" as *const u8 as _;
+            let rs = ws_query(taos, sql);
+            let code = ws_errno(rs);
+            assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+            ws_free_result(rs);
+            ws_close(taos);
         }
     }
 }

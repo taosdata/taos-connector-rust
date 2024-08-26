@@ -424,7 +424,6 @@ async fn read_queries(
                         } else {
                             result_block = slice.read_inlined_bytes::<4>().unwrap();
                         }
-
                         if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
                             sender
                                 .send(Ok(WsRecvData::BlockNew {

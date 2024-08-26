@@ -463,6 +463,10 @@ impl AsConsumer for Consumer {
         self.tmq.commit_sync(offset.0.clone()).map(|_| ())
     }
 
+    fn commit_all(&self) -> RawResult<()> {
+        todo!()
+    }
+
     fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
         self.tmq.commit_offset_sync(topic_name, vgroup_id, offset)
     }
@@ -618,6 +622,10 @@ impl AsAsyncConsumer for Consumer {
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         self.tmq.commit(offset.0.clone()).await.map(|_| ())
+    }
+
+    async fn commit_all(&self) -> RawResult<()> {
+        todo!()
     }
 
     async fn commit_offset(

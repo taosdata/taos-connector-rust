@@ -654,6 +654,17 @@ impl AsAsyncConsumer for Consumer {
         }
     }
 
+    async fn commit_all(&self) -> RawResult<()> {
+        let req_id = self.sender.req_id();
+        let action = TmqSend::Commit(MessageArgs {
+            req_id,
+            message_id: 0,
+        });
+
+        let _ = self.sender.send_recv(action).await?;
+        Ok(())
+    }
+
     async fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         let req_id = self.sender.req_id();
         let action = TmqSend::Commit(MessageArgs {
@@ -804,6 +815,10 @@ impl AsConsumer for Consumer {
         taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::recv_timeout(
             self, timeout,
         ))
+    }
+
+    fn commit_all(&self) -> RawResult<()> {
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit_all(self))
     }
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()> {
@@ -1342,7 +1357,7 @@ impl Drop for Consumer {
         let _ = self.close_signal.send(true);
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Offset {
     message_id: MessageId,
     database: String,

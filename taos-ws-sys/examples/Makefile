@@ -33,4 +33,8 @@ tmq-basic:
 schemaless:
 	gcc -g ws-schemaless.c ${WS_FLAGS} -o ./target/ws-schemaless && ./target/ws-schemaless
 
-run-all: basic interface bind muti table fetch-row tmq-basic schemaless
+errno:
+	gcc -g ws-err-code.c ${WS_FLAGS} -o ./target/ws-err-code && ./target/ws-err-code
+
+
+run-all: basic interface bind muti table fetch-row tmq-basic schemaless errno
