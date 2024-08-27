@@ -1067,13 +1067,7 @@ pub unsafe extern "C" fn ws_errstr(rs: *mut WS_RES) -> *const c_char {
         .and_then(|s| s.errstr())
     {
         Some(e) => e,
-        _ => {
-            if get_c_errno() == 0 {
-                EMPTY.as_ptr()
-            } else {
-                get_c_error_str() as _
-            }
-        }
+        _ => EMPTY.as_ptr(),
     }
 }
 
