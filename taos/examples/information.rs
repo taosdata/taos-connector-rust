@@ -3,6 +3,11 @@ use taos::*;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     pretty_env_logger::formatted_timed_builder().init();
+    println!(
+        "start with {version}-{commit}",
+        version = taos::build::PKG_VERSION,
+        commit = taos::build::SHORT_COMMIT,
+    );
     let dsn = "taos+ws://root:taosdata@";
 
     let pool = TaosBuilder::from_dsn(dsn)?.pool()?;

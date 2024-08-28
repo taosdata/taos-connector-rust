@@ -51,3 +51,5 @@ pub(crate) use taos_optin as sys;
 #[cfg(not(feature = "optin"))]
 #[cfg(feature = "native")]
 pub(crate) use taos_sys as sys;
+
+shadow_rs::shadow!(build);

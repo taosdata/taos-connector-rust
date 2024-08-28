@@ -10,6 +10,7 @@ use taos_query::util::InlinableWrite;
 use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
 use thiserror::Error;
 use tokio::net::TcpStream;
+use tokio::select;
 use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -803,24 +804,39 @@ impl WsTaos {
 
         log::trace!("write meta with req_id: {req_id}, raw data length: {len}",);
 
-        match time::timeout(
-            Duration::from_secs(60),
-            self.sender
-                .send_recv(WsSend::Binary(meta.into()))
-                .in_current_span(),
-        )
-        .in_current_span()
-        .await
-        .map_err(|_| {
-            tracing::warn!("Write raw data timeout, maybe the connection has been lost");
-            RawError::new(
-                0xE002, // Connection closed
-                "Write raw data timeout, maybe the connection has been lost",
-            )
-        })?? {
-            WsRecvData::WriteMeta => Ok(()),
-            WsRecvData::WriteRaw => Ok(()),
-            _ => unreachable!(),
+        let h = self
+            .sender
+            .send_recv(WsSend::Binary(meta.into()))
+            .in_current_span();
+        tokio::pin!(h);
+        let mut interval = time::interval(Duration::from_secs(60));
+        const MAX_WAIT_TICKS: usize = 5; // means 5 minutes
+        const TIMEOUT_ERROR: &str = "Write raw meta timeout, maybe the connection has been lost";
+        let mut ticks = 0;
+        loop {
+            select! {
+                _ = interval.tick() => {
+                    ticks += 1;
+                    if ticks >= MAX_WAIT_TICKS {
+                        tracing::warn!("{}", TIMEOUT_ERROR);
+                        return Err(RawError::new(
+                            0xE002, // Connection closed
+                            TIMEOUT_ERROR,
+                        ));
+                    }
+                    if let Err(err) = time::timeout(Duration::from_secs(30), self.exec("select server_version()").in_current_span()).await {
+                        tracing::warn!(error = format!("{err:#}"), TIMEOUT_ERROR);
+                        return Err(RawError::new(
+                            0xE002, // Connection closed
+                            TIMEOUT_ERROR,
+                        ));
+                    }
+                }
+                res = &mut h => {
+                    res.map_err(|err| RawError::from_string(format!("Write raw data join error: {err}")))?;
+                    return Ok(())
+                }
+            }
         }
     }
     async fn s_write_raw_block(&self, raw: &RawBlock) -> RawResult<()> {

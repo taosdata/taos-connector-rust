@@ -24,6 +24,10 @@ taos-optin = { path = "../taos-optin", version = "0.12.4", optional = true }
 taos-query = { path = "../taos-query", version = "0.12.4", default-features = false }
 taos-ws = { path = "../taos-ws", version = "0.12.4", optional = true }
 futures = { version = "0.3", features = ["executor"] }
+shadow-rs = { version = "0.33.0", default-features = false }
+
+[build-dependencies]
+shadow-rs = "0.33.0"
 
 [dev-dependencies]
 anyhow = "1"
