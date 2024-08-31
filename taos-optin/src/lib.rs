@@ -13,7 +13,7 @@ use tracing::{warn, Instrument};
 
 use taos_query::{
     prelude::{
-        tokio::{sync::oneshot, task, time},
+        tokio::{select, sync::oneshot, task, time},
         Field, Precision, RawBlock, RawMeta, RawResult,
     },
     util::Edition,
@@ -164,20 +164,35 @@ impl taos_query::AsyncQueryable for Taos {
     async fn write_raw_meta(&self, meta: &taos_query::common::RawMeta) -> RawResult<()> {
         let raw = meta.as_raw_data_t();
         let slf = self.raw.clone();
-        time::timeout(
-            Duration::from_secs(60),
-            task::spawn_blocking(move || slf.write_raw_meta(raw)).in_current_span(),
-        )
-        .in_current_span()
-        .await
-        .map_err(|_| {
-            tracing::warn!("Write raw data timeout, maybe the connection has been lost");
-            RawError::new(
-                0xE002, // Connection closed
-                "Write raw data timeout, maybe the connection has been lost",
-            )
-        })?
-        .map_err(|err| RawError::from_string(format!("Write raw data join error: {err}")))?
+        let mut h = task::spawn_blocking(move || slf.write_raw_meta(raw));
+        let mut interval = time::interval(Duration::from_secs(60));
+        const MAX_WAIT_TICKS: usize = 5; // means 5 minutes
+        const TIMEOUT_ERROR: &str = "Write raw meta timeout, maybe the connection has been lost";
+        let mut ticks = 0;
+        loop {
+            select! {
+                _ = interval.tick() => {
+                    ticks += 1;
+                    if ticks >= MAX_WAIT_TICKS {
+                        tracing::warn!("{}", TIMEOUT_ERROR);
+                        return Err(RawError::new(
+                            0xE002, // Connection closed
+                            TIMEOUT_ERROR,
+                        ));
+                    }
+                    if let Err(err) = time::timeout(Duration::from_secs(30), self.exec("select server_version()").in_current_span()).await {
+                        tracing::warn!(error = format!("{err:#}"), TIMEOUT_ERROR);
+                        return Err(RawError::new(
+                            0xE002, // Connection closed
+                            TIMEOUT_ERROR,
+                        ));
+                    }
+                }
+                res = &mut h => {
+                    return res.map_err(|err| RawError::from_string(format!("Write raw data join error: {err}")))?;
+                }
+            }
+        }
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
