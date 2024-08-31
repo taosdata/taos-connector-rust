@@ -330,7 +330,7 @@ pub unsafe extern "C" fn ws_tmq_conf_destroy(conf: *mut ws_tmq_conf_t) -> i32 {
         let _boxed_conf = Box::from_raw(conf as *mut WsMaybeError<TmqConf>);
         return Code::SUCCESS.into();
     }
-    return Code::FAILED.into();
+    return get_err_code_fromated(Code::FAILED.into());
 }
 
 #[no_mangle]
@@ -370,7 +370,7 @@ pub unsafe extern "C" fn ws_tmq_list_append(list: *mut ws_tmq_list_t, src: *cons
 
     match tmq_list_append(list, src) {
         Ok(_) => Code::SUCCESS.into(),
-        Err(e) => e.code.into(),
+        Err(e) => get_err_code_fromated(e.code.into()),
     }
 }
 
@@ -380,7 +380,7 @@ pub unsafe extern "C" fn ws_tmq_list_destroy(list: *mut ws_tmq_list_t) -> i32 {
         let _boxed_conf = Box::from_raw(list as *mut WsMaybeError<WsTmqList>);
         return Code::SUCCESS.into();
     }
-    return Code::INVALID_PARA.into();
+    return get_err_code_fromated(Code::INVALID_PARA.into());
 }
 
 #[no_mangle]
@@ -426,7 +426,7 @@ pub unsafe extern "C" fn ws_tmq_list_free_c_array(
     topic_num: u32,
 ) -> i32 {
     if c_str_arry.is_null() {
-        return Code::INVALID_PARA.into();
+        return get_err_code_fromated(Code::INVALID_PARA.into());
     }
 
     for i in 0..topic_num {
@@ -508,7 +508,7 @@ pub unsafe extern "C" fn ws_tmq_consumer_new(
 #[no_mangle]
 pub unsafe extern "C" fn ws_tmq_consumer_close(tmq: *mut ws_tmq_t) -> i32 {
     if tmq.is_null() {
-        return Code::INVALID_PARA.into();
+        return get_err_code_fromated(Code::INVALID_PARA.into());
     }
 
     match (tmq as *mut WsMaybeError<WsTmq>)
@@ -530,7 +530,7 @@ pub unsafe extern "C" fn ws_tmq_subscribe(
     topic_list: *const ws_tmq_list_t,
 ) -> i32 {
     if tmq.is_null() || topic_list.is_null() {
-        return Code::INVALID_PARA.into();
+        return get_err_code_fromated(Code::INVALID_PARA.into());
     }
 
     let topic_list = match (topic_list as *const WsMaybeError<WsTmqList>)
@@ -538,7 +538,7 @@ pub unsafe extern "C" fn ws_tmq_subscribe(
         .and_then(|s| s.safe_deref())
     {
         Some(topic_list) => topic_list,
-        _ => return Code::INVALID_PARA.into(),
+        _ => return get_err_code_fromated(Code::INVALID_PARA.into()),
     };
 
     match (tmq as *mut WsMaybeError<WsTmq>)
@@ -564,7 +564,7 @@ pub unsafe extern "C" fn ws_tmq_subscribe(
 #[no_mangle]
 pub unsafe extern "C" fn ws_tmq_unsubscribe(tmq: *mut ws_tmq_t) -> i32 {
     if tmq.is_null() {
-        return Code::INVALID_PARA.into();
+        return get_err_code_fromated(Code::INVALID_PARA.into());
     }
 
     match (tmq as *mut WsMaybeError<WsTmq>)
@@ -699,7 +699,7 @@ pub unsafe extern "C" fn ws_tmq_get_table_name(rs: *const WS_RES) -> *const c_ch
 #[no_mangle]
 pub unsafe extern "C" fn ws_tmq_get_vgroup_id(rs: *const WS_RES) -> i32 {
     if rs.is_null() {
-        return -1;
+        return get_err_code_fromated(Code::INVALID_PARA.into());
     }
 
     match (rs as *const WsMaybeError<WsResultSet>)
@@ -707,13 +707,13 @@ pub unsafe extern "C" fn ws_tmq_get_vgroup_id(rs: *const WS_RES) -> i32 {
         .and_then(|s| s.safe_deref())
     {
         Some(rs) => rs.tmq_get_vgroup_id(),
-        None => -1,
+        None => get_err_code_fromated(Code::FAILED.into()),
     }
 }
 #[no_mangle]
 pub unsafe extern "C" fn ws_tmq_get_vgroup_offset(rs: *const WS_RES) -> i64 {
     if rs.is_null() {
-        return Code::INVALID_PARA.into();
+        return get_err_code_fromated(Code::INVALID_PARA.into()) as _;
     }
 
     match (rs as *const WsMaybeError<WsResultSet>)
@@ -721,7 +721,7 @@ pub unsafe extern "C" fn ws_tmq_get_vgroup_offset(rs: *const WS_RES) -> i64 {
         .and_then(|s| s.safe_deref())
     {
         Some(rs) => rs.tmq_get_vgroup_offset(),
-        None => return Code::INVALID_PARA.into(),
+        None => return get_err_code_fromated(Code::INVALID_PARA.into()) as _,
     }
 }
 
@@ -836,10 +836,7 @@ pub unsafe extern "C" fn ws_tmq_commit_sync(tmq: *mut ws_tmq_t, rs: *const WS_RE
     } else {
         return match tmq_commit_sync(tmq, rs) {
             Ok(_) => Code::SUCCESS.into(),
-            Err(e) => {
-                set_error_info(e);
-                Code::FAILED.into()
-            }
+            Err(e) => set_error_info(e),
         };
     }
 }

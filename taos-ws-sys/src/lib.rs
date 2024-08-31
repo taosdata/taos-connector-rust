@@ -55,12 +55,13 @@ unsafe fn set_error_info(ws_err: WsError) -> i32 {
         *c_errno.borrow_mut() = (err_num | 0x80000000) as i32;
     });
     C_ERROR_CONTAINER.with(|container| {
+        let mut container_ref = container.borrow_mut();
         let bytes = ws_err.message.as_bytes();
-        let length = bytes.len().min(MAX_ERROR_MSG_LEN - 1); // make sure the size max, and keep last byte for '\0'
-        container.borrow_mut()[..length].copy_from_slice(&bytes[..length]);
-        container.borrow_mut()[length] = 0; // add c str last '\0'
+        let length = bytes.len().min(MAX_ERROR_MSG_LEN - 1);
+        container_ref[..length].copy_from_slice(&bytes[..length]);
+        container_ref[length] = 0;
     });
-    ws_err.code.into()
+    get_c_errno()
 }
 
 fn get_c_errno() -> i32 {
@@ -1214,8 +1215,7 @@ pub unsafe extern "C" fn ws_fetch_raw_block(
 ) -> i32 {
     unsafe fn handle_error(error_message: &str, rows: *mut i32) -> i32 {
         *rows = 0;
-        set_error_info(WsError::new(Code::FAILED, error_message));
-        Code::FAILED.into()
+        set_error_info(WsError::new(Code::FAILED, error_message))
     }
 
     match (rs as *mut WsMaybeError<WsResultSet>).as_mut() {
