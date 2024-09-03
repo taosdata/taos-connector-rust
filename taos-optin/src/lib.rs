@@ -167,7 +167,7 @@ impl taos_query::AsyncQueryable for Taos {
         let mut h = task::spawn_blocking(move || slf.write_raw_meta(raw));
         let mut interval = time::interval(Duration::from_secs(60));
         const MAX_WAIT_TICKS: usize = 5; // means 5 minutes
-        const TIMEOUT_ERROR: &str = "Write raw meta timeout, maybe the connection has been lost";
+        const TIMEOUT_ERROR: &str = "Write raw timeout, maybe the connection has been lost";
         let mut ticks = 0;
         loop {
             select! {

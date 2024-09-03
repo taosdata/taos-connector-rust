@@ -1041,6 +1041,12 @@ impl RawTaos {
             let raw_code = unsafe { tmq_write_raw(self.as_ptr(), meta.clone()) };
             let code = Code::from(raw_code);
             if code.success() {
+                let elapsed = now.elapsed();
+                if elapsed > std::time::Duration::from_secs(30) {
+                    tracing::warn!(tmq.write_raw.cost = ?elapsed, "write raw cost too long");
+                } else {
+                    tracing::trace!(tmq.write_raw.cost = ?elapsed, "write raw success");
+                }
                 tracing::trace!(tmq.write_raw.cost = ?now.elapsed(), "write raw success");
                 return Ok(());
             }
