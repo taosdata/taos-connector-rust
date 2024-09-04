@@ -27,7 +27,7 @@ futures = { version = "0.3", features = ["executor"] }
 shadow-rs = { version = "0.33.0", default-features = false }
 
 [build-dependencies]
-shadow-rs = "0.33.0"
+shadow-rs = { version = "0.33.0", default-features = false }
 
 [dev-dependencies]
 anyhow = "1"
