@@ -278,21 +278,21 @@ unsafe fn tmq_conf_set(
                     "true" | "false" => {}
                     _ => {
                         log::trace!("set tmq conf failed, key: {}, value: {}", &key, &value);
-                        return Err(WsError::new(Code::FAILED, "invalid value"));
+                        return Err(WsError::new(Code::INVALID_PARA, "invalid value"));
                     }
                 },
                 "auto.commit.interval.ms" => match i32::from_str(&value) {
                     Ok(_) => {}
                     Err(_) => {
                         log::trace!("set tmq conf failed, key: {}, value: {}", &key, &value);
-                        return Err(WsError::new(Code::FAILED, "invalid value"));
+                        return Err(WsError::new(Code::INVALID_PARA, "invalid value"));
                     }
                 },
                 "auto.offset.reset" => match value.to_lowercase().as_str() {
                     "none" | "earliest" | "latest" => {}
                     _ => {
                         log::trace!("set tmq conf failed, key: {}, value: {}", &key, &value);
-                        return Err(WsError::new(Code::FAILED, "invalid value"));
+                        return Err(WsError::new(Code::INVALID_PARA, "invalid value"));
                     }
                 },
                 _ => {
@@ -304,7 +304,12 @@ unsafe fn tmq_conf_set(
             tmq_conf.hsmap.insert(key, value);
             Ok(())
         }
-        _ => return Err(WsError::new(Code::FAILED, "invalid tmq conf Object")),
+        _ => {
+            return Err(WsError::new(
+                Code::OBJECT_IS_NULL,
+                "invalid tmq conf Object",
+            ))
+        }
     }
 }
 
@@ -320,7 +325,10 @@ pub unsafe extern "C" fn ws_tmq_conf_set(
 
     match tmq_conf_set(conf, key, value) {
         Ok(_) => ws_tmq_conf_res_t::WS_TMQ_CONF_OK,
-        Err(e) => e.code.into(),
+        Err(e) => match e.code {
+            Code::INVALID_PARA => ws_tmq_conf_res_t::WS_TMQ_CONF_INVALID,
+            _ => ws_tmq_conf_res_t::WS_TMQ_CONF_UNKNOWN,
+        },
     }
 }
 
@@ -365,7 +373,7 @@ unsafe fn tmq_list_append(list: *mut ws_tmq_list_t, src: *const c_char) -> WsRes
 #[no_mangle]
 pub unsafe extern "C" fn ws_tmq_list_append(list: *mut ws_tmq_list_t, src: *const c_char) -> i32 {
     if list.is_null() || src.is_null() {
-        return Code::OBJECT_IS_NULL.into();
+        return get_err_code_fromated(Code::OBJECT_IS_NULL.into());
     }
 
     match tmq_list_append(list, src) {

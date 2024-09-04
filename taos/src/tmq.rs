@@ -2459,308 +2459,252 @@ mod async_tests {
 #[cfg(test)]
 mod tmq_deflate_tests {
 
-    use crate::{
-        query::infra::{ToMessage, WsRecv, WsSend},
-        *,
-    };
-    use futures::{SinkExt, StreamExt};
-    use std::time::Duration;
-    use tracing::*;
-    use tracing_subscriber::util::SubscriberInitExt;
-    use ws_tool::frame::OpCode;
+    // use crate::*;
+    // use std::time::Duration;
 
-    #[cfg(feature = "deflate")]
-    #[tokio::test]
-    async fn test_build_stream_with_deflate() -> Result<(), anyhow::Error> {
-        let _subscriber = tracing_subscriber::fmt::fmt()
-            .with_max_level(Level::DEBUG)
-            .with_file(true)
-            .with_line_number(true)
-            .finish();
-        let _ = _subscriber.try_init();
+    // #[cfg(feature = "deflate")]
+    // #[tokio::test]
+    // async fn test_ws_tmq_deflate() -> taos_query::RawResult<()> {
+    //     // pretty_env_logger::formatted_timed_builder()
+    //     //     .filter_level(log::LevelFilter::Info)
+    //     //     .init();
 
-        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+    //     use std::str::FromStr;
+    //     use taos_query::prelude::*;
 
-        let builder = TaosBuilder::from_dsn(dsn).unwrap();
-        let url = builder.to_query_url();
-        let ws = builder.ws_tool_build_stream(url).await.unwrap();
+    //     let dsn = "tmq+ws://localhost:6041?".to_string();
+    //     log::trace!("dsn: {}", dsn);
+    //     let mut dsn = Dsn::from_str(&dsn)?;
 
-        let (mut sink, mut source) = ws.split();
+    //     let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
 
-        let version = WsSend::Version;
-        source
-            .send(OpCode::Text, &serde_json::to_vec(&version)?)
-            .await?;
+    //     let db = "ws_tmq_deflate";
+    //     let db2 = "ws_tmq_deflate_dest";
 
-        let _handle = tokio::spawn(async move {
-            loop {
-                let frame = sink.receive().await.unwrap();
-                let (header, payload) = frame;
-                trace!("header.code: {:?}, payload: {:?}", &header.code, &payload);
-                let code = header.code;
+    //     taos.exec(format!("drop topic if exists {db}")).await?;
+    //     taos.exec(format!("drop database if exists {db}")).await?;
 
-                match code {
-                    OpCode::Binary => {
-                        println!("{:?}", payload);
-                    }
-                    OpCode::Text => {
-                        let recv: crate::query::infra::WsRecv =
-                            serde_json::from_slice(&payload).unwrap();
-                        info!("recv: {:?}", recv);
-                        assert_eq!(recv.code, 0);
-                    }
-                    _ => (),
-                }
-            }
-        });
+    //     std::thread::sleep(std::time::Duration::from_secs(1));
 
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+    //     taos.exec(format!(
+    //         "create database if not exists {db} wal_retention_period 3600"
+    //     ))
+    //     .await?;
 
-        Ok(())
-    }
+    //     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    #[cfg(feature = "deflate")]
-    #[tokio::test]
-    async fn test_ws_tmq_deflate() -> taos_query::RawResult<()> {
-        // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(log::LevelFilter::Info)
-        //     .init();
+    //     taos.exec_many([
+    //         format!("create topic {db} with meta as database {db}").as_str(),
+    //         format!("use {db}").as_str(),
+    //         // kind 1: create super table using all types
+    //         "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+    //         c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
+    //         c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+    //         tags(t1 json)",
+    //         // kind 2: create child table with json tag
+    //         "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
+    //         "create table tb1 using stb1 tags(NULL)",
+    //         "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+    //         NULL, NULL, NULL, NULL, NULL,
+    //         NULL, NULL, NULL, NULL)
+    //         tb1 values(now, true, -2, -3, -4, -5, \
+    //         '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+    //         254, 65534, 1, 1)",
+    //         // kind 3: create super table with all types except json (especially for tags)
+    //         "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+    //         c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
+    //         c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+    //         tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
+    //         t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
+    //         t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
+    //         // kind 4: create child table with all types except json
+    //         "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
+    //         '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+    //         254, 65534, 1, 1)",
+    //         "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
+    //         NULL, NULL, NULL, NULL, NULL,
+    //         NULL, NULL, NULL, NULL)",
+    //         // kind 5: create common table
+    //         "create table `table` (ts timestamp, v int)",
+    //         // kind 6: column in super table
+    //         "alter table stb1 add column new1 bool",
+    //         "alter table stb1 add column new2 tinyint",
+    //         "alter table stb1 add column new10 nchar(16)",
+    //         "alter table stb1 modify column new10 nchar(32)",
+    //         "alter table stb1 drop column new10",
+    //         "alter table stb1 drop column new2",
+    //         "alter table stb1 drop column new1",
+    //         // kind 7: add tag in super table
+    //         "alter table `stb2` add tag new1 bool",
+    //         "alter table `stb2` rename tag new1 new1_new",
+    //         "alter table `stb2` modify tag t10 nchar(32)",
+    //         "alter table `stb2` drop tag new1_new",
+    //         // kind 8: column in common table
+    //         "alter table `table` add column new1 bool",
+    //         "alter table `table` add column new2 tinyint",
+    //         "alter table `table` add column new10 nchar(16)",
+    //         "alter table `table` modify column new10 nchar(32)",
+    //         "alter table `table` rename column new10 new10_new",
+    //         "alter table `table` drop column new10_new",
+    //         "alter table `table` drop column new2",
+    //         "alter table `table` drop column new1",
+    //         // kind 9: drop normal table
+    //         "drop table `table`",
+    //         // kind 10: drop child table
+    //         "drop table `tb2`, `tb1`",
+    //         // kind 11: drop super table
+    //         "drop table `stb2`",
+    //         "drop table `stb1`",
+    //     ])
+    //     .await?;
 
-        use taos_query::prelude::*;
+    //     taos.exec_many([
+    //         format!("drop database if exists {db2}"),
+    //         format!("create database if not exists {db2} wal_retention_period 3600"),
+    //         format!("use {db2}"),
+    //     ])
+    //     .await?;
 
-        let dsn = "tmq+ws://localhost:6041?".to_string();
-        log::trace!("dsn: {}", dsn);
-        let mut dsn = Dsn::from_str(&dsn)?;
+    //     dsn.params
+    //         .insert("group.id".to_string(), "ws_tmq_deflate_1".to_string());
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+    //     dsn.params
+    //         .insert("auto.offset.reset".to_string(), "earliest".to_string());
+    //     let builder = TmqBuilder::from_dsn(&dsn)?;
+    //     // dbg!(&builder);
+    //     let mut consumer = builder.build().await?;
 
-        let db = "ws_tmq_deflate";
-        let db2 = "ws_tmq_deflate_dest";
+    //     let topics = consumer.list_topics().await?;
+    //     log::info!("topics: {:?}", topics);
+    //     consumer.subscribe([db]).await?;
+    //     let topics = consumer.list_topics().await?;
+    //     log::info!("topics: {:?}", topics);
 
-        taos.exec(format!("drop topic if exists {db}")).await?;
-        taos.exec(format!("drop database if exists {db}")).await?;
+    //     {
+    //         let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
 
-        std::thread::sleep(std::time::Duration::from_secs(1));
+    //         while let Some((offset, message)) = stream.try_next().await? {
+    //             let topic: &str = offset.topic();
+    //             let database = offset.database();
+    //             let vgroup_id = offset.vgroup_id();
+    //             log::debug!(
+    //                 "topic: {}, database: {}, vgroup_id: {}",
+    //                 topic,
+    //                 database,
+    //                 vgroup_id
+    //             );
 
-        taos.exec(format!(
-            "create database if not exists {db} wal_retention_period 3600"
-        ))
-        .await?;
+    //             match message {
+    //                 MessageSet::Meta(meta) => {
+    //                     log::debug!("Meta");
+    //                     let raw = meta.as_raw_meta().await?;
+    //                     taos.write_raw_meta(&raw).await?;
 
-        std::thread::sleep(std::time::Duration::from_secs(1));
+    //                     let json = meta.as_json_meta().await?;
+    //                     let sql = json.to_string();
+    //                     if let Err(err) = taos.exec(sql).await {
+    //                         log::trace!("maybe error: {}", err);
+    //                     }
+    //                 }
+    //                 MessageSet::Data(data) => {
+    //                     log::debug!("Data");
 
-        taos.exec_many([
-            format!("create topic {db} with meta as database {db}").as_str(),
-            format!("use {db}").as_str(),
-            // kind 1: create super table using all types
-            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
-            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
-            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
-            tags(t1 json)",
-            // kind 2: create child table with json tag
-            "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
-            "create table tb1 using stb1 tags(NULL)",
-            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL)
-            tb1 values(now, true, -2, -3, -4, -5, \
-            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
-            254, 65534, 1, 1)",
-            // kind 3: create super table with all types except json (especially for tags)
-            "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
-            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
-            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
-            tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
-            t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
-            t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
-            // kind 4: create child table with all types except json
-            "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
-            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
-            254, 65534, 1, 1)",
-            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL)",
-            // kind 5: create common table
-            "create table `table` (ts timestamp, v int)",
-            // kind 6: column in super table
-            "alter table stb1 add column new1 bool",
-            "alter table stb1 add column new2 tinyint",
-            "alter table stb1 add column new10 nchar(16)",
-            "alter table stb1 modify column new10 nchar(32)",
-            "alter table stb1 drop column new10",
-            "alter table stb1 drop column new2",
-            "alter table stb1 drop column new1",
-            // kind 7: add tag in super table
-            "alter table `stb2` add tag new1 bool",
-            "alter table `stb2` rename tag new1 new1_new",
-            "alter table `stb2` modify tag t10 nchar(32)",
-            "alter table `stb2` drop tag new1_new",
-            // kind 8: column in common table
-            "alter table `table` add column new1 bool",
-            "alter table `table` add column new2 tinyint",
-            "alter table `table` add column new10 nchar(16)",
-            "alter table `table` modify column new10 nchar(32)",
-            "alter table `table` rename column new10 new10_new",
-            "alter table `table` drop column new10_new",
-            "alter table `table` drop column new2",
-            "alter table `table` drop column new1",
-            // kind 9: drop normal table
-            "drop table `table`",
-            // kind 10: drop child table
-            "drop table `tb2`, `tb1`",
-            // kind 11: drop super table
-            "drop table `stb2`",
-            "drop table `stb1`",
-        ])
-        .await?;
+    //                     while let Some(data) = data.fetch_raw_block().await? {
+    //                         log::debug!("table_name: {:?}", data.table_name());
+    //                         log::debug!("data: {:?}", data);
+    //                     }
+    //                 }
+    //                 MessageSet::MetaData(meta, data) => {
+    //                     log::debug!("MetaData");
+    //                     let raw = meta.as_raw_meta().await?;
+    //                     taos.write_raw_meta(&raw).await?;
 
-        taos.exec_many([
-            format!("drop database if exists {db2}"),
-            format!("create database if not exists {db2} wal_retention_period 3600"),
-            format!("use {db2}"),
-        ])
-        .await?;
+    //                     let json = meta.as_json_meta().await?;
+    //                     let sql = json.to_string();
+    //                     if let Err(err) = taos.exec(sql).await {
+    //                         println!("maybe error: {}", err);
+    //                     }
 
-        dsn.params
-            .insert("group.id".to_string(), "ws_tmq_deflate_1".to_string());
+    //                     while let Some(data) = data.fetch_raw_block().await? {
+    //                         log::debug!("table_name: {:?}", data.table_name());
+    //                         log::debug!("data: {:?}", data);
+    //                     }
+    //                 }
+    //             }
+    //             consumer.commit(offset).await?;
+    //         }
+    //     }
 
-        dsn.params
-            .insert("auto.offset.reset".to_string(), "earliest".to_string());
-        let builder = TmqBuilder::from_dsn(&dsn)?;
-        // dbg!(&builder);
-        let mut consumer = builder.build().await?;
+    //     let assignments = consumer.assignments().await.unwrap();
+    //     log::info!("assignments: {:?}", assignments);
 
-        let topics = consumer.list_topics().await?;
-        log::info!("topics: {:?}", topics);
-        consumer.subscribe([db]).await?;
-        let topics = consumer.list_topics().await?;
-        log::info!("topics: {:?}", topics);
+    //     // seek offset
+    //     for topic_vec_assignment in assignments {
+    //         let topic = &topic_vec_assignment.0;
+    //         let vec_assignment = topic_vec_assignment.1;
+    //         for assignment in vec_assignment {
+    //             let vgroup_id = assignment.vgroup_id();
+    //             let current = assignment.current_offset();
+    //             let begin = assignment.begin();
+    //             let end = assignment.end();
+    //             log::info!(
+    //                 "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
+    //                 topic,
+    //                 vgroup_id,
+    //                 current,
+    //                 begin,
+    //                 end
+    //             );
 
-        {
-            let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
+    //             let committed = consumer.committed(topic, vgroup_id).await?;
+    //             log::info!("committed: {:?}", committed);
 
-            while let Some((offset, message)) = stream.try_next().await? {
-                let topic: &str = offset.topic();
-                let database = offset.database();
-                let vgroup_id = offset.vgroup_id();
-                log::debug!(
-                    "topic: {}, database: {}, vgroup_id: {}",
-                    topic,
-                    database,
-                    vgroup_id
-                );
+    //             let position = consumer.position(topic, vgroup_id).await?;
+    //             log::info!("position: {:?}", position);
 
-                match message {
-                    MessageSet::Meta(meta) => {
-                        log::debug!("Meta");
-                        let raw = meta.as_raw_meta().await?;
-                        taos.write_raw_meta(&raw).await?;
+    //             let res = consumer.offset_seek(topic, vgroup_id, end).await;
+    //             if res.is_err() {
+    //                 log::error!("seek offset error: {:?}", res);
+    //                 let a = consumer.assignments().await.unwrap();
+    //                 log::error!("assignments: {:?}", a);
+    //             }
 
-                        let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
-                        if let Err(err) = taos.exec(sql).await {
-                            log::trace!("maybe error: {}", err);
-                        }
-                    }
-                    MessageSet::Data(data) => {
-                        log::debug!("Data");
+    //             let committed = consumer.committed(topic, vgroup_id).await?;
+    //             log::info!("after seek committed: {:?}", committed);
 
-                        while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
-                        }
-                    }
-                    MessageSet::MetaData(meta, data) => {
-                        log::debug!("MetaData");
-                        let raw = meta.as_raw_meta().await?;
-                        taos.write_raw_meta(&raw).await?;
+    //             let position = consumer.position(topic, vgroup_id).await?;
+    //             log::info!("after seek position: {:?}", position);
 
-                        let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
-                        if let Err(err) = taos.exec(sql).await {
-                            println!("maybe error: {}", err);
-                        }
+    //             let res = consumer.commit_offset(topic, vgroup_id, end).await;
+    //             if res.is_err() {
+    //                 log::error!("commit offset response: {:?}", res);
+    //             }
 
-                        while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
-                        }
-                    }
-                }
-                consumer.commit(offset).await?;
-            }
-        }
+    //             let committed = consumer.committed(topic, vgroup_id).await?;
+    //             log::info!("after commit committed: {:?}", committed);
 
-        let assignments = consumer.assignments().await.unwrap();
-        log::info!("assignments: {:?}", assignments);
+    //             let position = consumer.position(topic, vgroup_id).await?;
+    //             log::info!("after commit position: {:?}", position);
+    //         }
 
-        // seek offset
-        for topic_vec_assignment in assignments {
-            let topic = &topic_vec_assignment.0;
-            let vec_assignment = topic_vec_assignment.1;
-            for assignment in vec_assignment {
-                let vgroup_id = assignment.vgroup_id();
-                let current = assignment.current_offset();
-                let begin = assignment.begin();
-                let end = assignment.end();
-                log::info!(
-                    "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
-                    topic,
-                    vgroup_id,
-                    current,
-                    begin,
-                    end
-                );
+    //         let topic_assignment = consumer.topic_assignment(topic).await;
+    //         log::info!("topic assignment: {:?}", topic_assignment);
+    //     }
 
-                let committed = consumer.committed(topic, vgroup_id).await?;
-                log::info!("committed: {:?}", committed);
+    //     // after seek offset
+    //     let assignments = consumer.assignments().await.unwrap();
+    //     log::debug!("after seek offset assignments: {:?}", assignments);
 
-                let position = consumer.position(topic, vgroup_id).await?;
-                log::info!("position: {:?}", position);
+    //     consumer.unsubscribe().await;
 
-                let res = consumer.offset_seek(topic, vgroup_id, end).await;
-                if res.is_err() {
-                    log::error!("seek offset error: {:?}", res);
-                    let a = consumer.assignments().await.unwrap();
-                    log::error!("assignments: {:?}", a);
-                }
+    //     tokio::time::sleep(Duration::from_secs(1)).await;
 
-                let committed = consumer.committed(topic, vgroup_id).await?;
-                log::info!("after seek committed: {:?}", committed);
-
-                let position = consumer.position(topic, vgroup_id).await?;
-                log::info!("after seek position: {:?}", position);
-
-                let res = consumer.commit_offset(topic, vgroup_id, end).await;
-                if res.is_err() {
-                    log::error!("commit offset response: {:?}", res);
-                }
-
-                let committed = consumer.committed(topic, vgroup_id).await?;
-                log::info!("after commit committed: {:?}", committed);
-
-                let position = consumer.position(topic, vgroup_id).await?;
-                log::info!("after commit position: {:?}", position);
-            }
-
-            let topic_assignment = consumer.topic_assignment(topic).await;
-            log::info!("topic assignment: {:?}", topic_assignment);
-        }
-
-        // after seek offset
-        let assignments = consumer.assignments().await.unwrap();
-        log::debug!("after seek offset assignments: {:?}", assignments);
-
-        consumer.unsubscribe().await;
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
-
-        taos.exec_many([
-            format!("drop database {db2}"),
-            format!("drop topic {db}"),
-            format!("drop database {db}"),
-        ])
-        .await?;
-        Ok(())
-    }
+    //     taos.exec_many([
+    //         format!("drop database {db2}"),
+    //         format!("drop topic {db}"),
+    //         format!("drop database {db}"),
+    //     ])
+    //     .await?;
+    //     Ok(())
+    // }
 }
