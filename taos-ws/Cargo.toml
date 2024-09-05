@@ -59,12 +59,9 @@ features = ["rustls"]
 [features]
 default = ["tmq", "deflate"]
 
-rustls = [
-    "tokio-tungstenite/rustls-tls-native-roots",
-    "tokio-tungstenite/rustls-dangerous",
-]
+rustls = ["tokio-tungstenite/rustls-tls-native-roots"]
 native-tls = ["tokio-tungstenite/native-tls"]
 native-tls-vendored = ["tokio-tungstenite/native-tls-vendored", "native-tls"]
 sync = []
 tmq = []
-deflate = ["tokio-tungstenite/deflate"]
+deflate = ["tokio-tungstenite/deflate", "tokio-tungstenite/rustls-dangerous"]
