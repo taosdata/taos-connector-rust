@@ -25,10 +25,3 @@ license = "MIT OR Apache-2.0"
 readme = "./README.md"
 repository = "https://github.com/taosdata/taos-connector-rust.git"
 rust-version = "1.65"
-
-[dependencies]
-taos-ws = { path = "../taos-ws" }
-
-[features]
-default = []
-rustls = ["taos-ws/rustls"]
