@@ -16,8 +16,7 @@ repository.workspace = true
 anyhow = "1"
 async-trait = { version = "0.1.80" }
 bytes = "1.1.0"
-dashmap = "5.4.0"
-derive_more = "0.99"
+dashmap = "6.1.0"
 futures = { version = "0.3" }
 itertools = "0.13.0"
 log = "0.4"
