@@ -17,7 +17,7 @@ description.workspace = true
 anyhow = "1"
 bytes = { version = "1.1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-derive_more = "0.99"
+derive_more = { version = "1", features = ["deref", "deref_mut", "display", "from", "into"] }
 itertools = "0.13.0"
 log = "0.4"
 mdsn = { path = "../mdsn", version = "0.2.25" }
