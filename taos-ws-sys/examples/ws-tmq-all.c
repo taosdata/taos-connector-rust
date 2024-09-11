@@ -335,8 +335,10 @@ int main(int argc, char *argv[])
     return -1;
   }
 
-  while (1)
+  int i = 0;
+  while (i < 10)
   {
+    i++;
     ws_tmq_t *tmq = build_consumer();
     if (NULL == tmq)
     {

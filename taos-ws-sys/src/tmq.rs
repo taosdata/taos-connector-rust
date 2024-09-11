@@ -462,6 +462,14 @@ struct WsTmq {
     consumer: Option<Consumer>,
 }
 
+impl Drop for WsTmq {
+    fn drop(&mut self) {
+        if self.consumer.is_some() {
+            let _ = self.consumer.take();
+        }
+    }
+}
+
 unsafe fn tmq_consumer_new(conf: *mut ws_tmq_conf_t, dsn: *const c_char) -> WsResult<WsTmq> {
     let dsn = if dsn.is_null() {
         CStr::from_bytes_with_nul(b"taos://localhost:6041\0").unwrap()
@@ -529,17 +537,8 @@ pub unsafe extern "C" fn ws_tmq_consumer_close(tmq: *mut ws_tmq_t) -> i32 {
         return get_err_code_fromated(Code::INVALID_PARA.into());
     }
 
-    match (tmq as *mut WsMaybeError<WsTmq>)
-        .as_mut()
-        .and_then(|s| s.safe_deref_mut())
-    {
-        Some(ws_tmq) => {
-            let tmq = Box::from_raw(ws_tmq);
-            drop(tmq);
-            return Code::SUCCESS.into();
-        }
-        _ => return set_error_and_get_code(WsError::new(Code::INVALID_PARA, "invalid tmq Object")),
-    }
+    let _ = Box::from_raw(tmq as *mut WsMaybeError<WsTmq>);
+    0
 }
 
 #[no_mangle]
