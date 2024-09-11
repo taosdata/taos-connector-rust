@@ -94,12 +94,15 @@ pub unsafe extern "C" fn ws_stmt_prepare(
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 Code::SUCCESS.into()
             }
         }
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -117,12 +120,15 @@ pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_c
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 0
             }
         }
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -140,12 +146,15 @@ pub unsafe extern "C" fn ws_stmt_set_sub_tbname(stmt: *mut WS_STMT, name: *const
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 0
             }
         }
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -172,12 +181,15 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 0
             }
         }
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -210,11 +222,14 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
             Err(e) => {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             }
         },
 
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -243,11 +258,14 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
             Err(e) => {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             }
         },
 
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -651,12 +669,15 @@ pub unsafe extern "C" fn ws_stmt_set_tags(
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 0
             }
         }
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -680,12 +701,15 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 0
             }
         }
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -700,12 +724,15 @@ pub unsafe extern "C" fn ws_stmt_add_batch(stmt: *mut WS_STMT) -> c_int {
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 0
             }
         }
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -725,10 +752,13 @@ pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut
             Err(e) => {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             }
         },
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -740,7 +770,7 @@ pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
         .and_then(|s| s.safe_deref_mut())
     {
         Some(stmt) => stmt.affected_rows() as _,
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(Code::INVALID_PARA, "stmt ptr is invalid")),
     }
 }
 
@@ -752,7 +782,7 @@ pub unsafe extern "C" fn ws_stmt_affected_rows_once(stmt: *mut WS_STMT) -> c_int
         .and_then(|s| s.safe_deref_mut())
     {
         Some(stmt) => stmt.affected_rows_once() as _,
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(Code::INVALID_PARA, "stmt ptr is invalid")),
     }
 }
 
@@ -772,10 +802,10 @@ pub unsafe extern "C" fn ws_stmt_num_params(stmt: *mut WS_STMT, nums: *mut c_int
             Err(e) => {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             }
         },
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(Code::INVALID_PARA, "stmt ptr is invalid")),
     }
 }
 
@@ -801,10 +831,10 @@ pub unsafe extern "C" fn ws_stmt_get_param(
             Err(e) => {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                get_err_code_fromated(errno.into())
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             }
         },
-        _ => get_err_code_fromated(Code::INVALID_PARA.into()),
+        _ => set_error_and_get_code(WsError::new(Code::INVALID_PARA, "stmt ptr is invalid")),
     }
 }
 
