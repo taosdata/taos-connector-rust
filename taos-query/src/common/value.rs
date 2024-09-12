@@ -142,6 +142,33 @@ impl<'b> BorrowedValue<'b> {
         }
     }
 
+    pub fn to_sql_value_with_rfc3339(&self) -> String {
+        use BorrowedValue::*;
+        match self {
+            Null(_) => "NULL".to_string(),
+            Bool(v) => format!("{v}"),
+            TinyInt(v) => format!("{v}"),
+            SmallInt(v) => format!("{v}"),
+            Int(v) => format!("{v}"),
+            BigInt(v) => format!("{v}"),
+            Float(v) => format!("{v}"),
+            Double(v) => format!("{v}"),
+            VarChar(v) => format!("\"{}\"", v.escape_debug()),
+            Timestamp(v) => format!("{}", v.to_string()),
+            NChar(v) => format!("\"{}\"", v.escape_debug()),
+            UTinyInt(v) => format!("{v}"),
+            USmallInt(v) => format!("{v}"),
+            UInt(v) => format!("{v}"),
+            UBigInt(v) => format!("{v}"),
+            Json(v) => format!("\"{}\"", unsafe { std::str::from_utf8_unchecked(v) }),
+            VarBinary(_) => todo!(),
+            Decimal(_) => todo!(),
+            Blob(_) => todo!(),
+            MediumBlob(_) => todo!(),
+            Geometry(_) => todo!(),
+        }
+    }
+
     /// Check if the value is null.
     pub const fn is_null(&self) -> bool {
         matches!(self, BorrowedValue::Null(_))
@@ -551,6 +578,33 @@ impl Value {
             Double(v) => format!("{v}"),
             VarChar(v) => format!("\"{}\"", v.escape_debug()),
             Timestamp(v) => format!("{}", v.as_raw_i64()),
+            NChar(v) => format!("\"{}\"", v.escape_debug()),
+            UTinyInt(v) => format!("{v}"),
+            USmallInt(v) => format!("{v}"),
+            UInt(v) => format!("{v}"),
+            UBigInt(v) => format!("{v}"),
+            Json(v) => format!("\"{}\"", v),
+            VarBinary(_) => todo!(),
+            Decimal(_) => todo!(),
+            Blob(_) => todo!(),
+            MediumBlob(_) => todo!(),
+            Geometry(_) => todo!(),
+        }
+    }
+
+    pub fn to_sql_value_with_rfc3339(&self) -> String {
+        use Value::*;
+        match self {
+            Null(_) => "NULL".to_string(),
+            Bool(v) => format!("{v}"),
+            TinyInt(v) => format!("{v}"),
+            SmallInt(v) => format!("{v}"),
+            Int(v) => format!("{v}"),
+            BigInt(v) => format!("{v}"),
+            Float(v) => format!("{v}"),
+            Double(v) => format!("{v}"),
+            VarChar(v) => format!("\"{}\"", v.escape_debug()),
+            Timestamp(v) => format!("\"{}\"", v.to_string()),
             NChar(v) => format!("\"{}\"", v.escape_debug()),
             UTinyInt(v) => format!("{v}"),
             USmallInt(v) => format!("{v}"),
