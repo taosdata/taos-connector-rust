@@ -553,7 +553,10 @@ impl TaosBuilder {
                         self.to_ws_url(),
                         retries
                     );
-                    tokio::time::sleep(std::time::Duration::from_secs(retries as u64 * 500)).await;
+
+                    // every retry, wait more 500ms, max wait time 30s
+                    let wait_millis = std::cmp::min(retries as u64 * 500, 30000);
+                    tokio::time::sleep(std::time::Duration::from_millis(wait_millis)).await;
                 }
             }
         }
