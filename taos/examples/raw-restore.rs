@@ -25,6 +25,7 @@ struct Opts {
     #[clap(short, long, default_value = "1")]
     workers: usize,
 }
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // std::env::set_var("RUST_LOG", "trace");
@@ -57,13 +58,30 @@ async fn main() -> anyhow::Result<()> {
             }
         })
         .sorted_by(|a, b| {
-            a.metadata()
+            let na = a
+                .file_name()
                 .unwrap()
-                .created()
+                .to_string_lossy()
+                .split('_')
+                .nth(1)
                 .unwrap()
-                .cmp(&b.metadata().unwrap().created().unwrap())
+                .parse::<usize>()
+                .unwrap();
+            let nb = b
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .split('_')
+                .nth(1)
+                .unwrap()
+                .parse::<usize>()
+                .unwrap();
+
+            na.cmp(&nb)
         })
         .collect::<Vec<_>>();
+
+    log::debug!("raws: {:?}", raws);
 
     let (meta, data): (Vec<_>, Vec<_>) = raws.into_iter().partition(|path| {
         let name = path.file_name().unwrap();
