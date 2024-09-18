@@ -2,6 +2,7 @@ use futures::stream::SplitStream;
 use taos_query::common::SmlData;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use tracing::instrument;
 
 pub(crate) mod infra;
 // pub mod sync;
@@ -48,6 +49,7 @@ struct WsQuerySender {
 }
 
 impl WsQuerySender {
+    #[instrument(skip_all)]
     async fn send_recv(&self, msg: WsSend) -> RawResult<WsRecvData> {
         let send_timeout = Duration::from_millis(1000);
         let req_id = msg.req_id();
@@ -100,6 +102,7 @@ impl WS_ERROR_NO {
     }
 }
 
+#[instrument(skip_all)]
 async fn read_queries(
     mut reader: WebSocketStreamReader,
     queries_sender: QueryAgent,
@@ -373,9 +376,14 @@ impl WsTaos {
             }
         });
 
-        tokio::spawn(async move {
-            read_queries(reader, queries2, fetches_sender, ws2, is_v3, close_listener).await
-        });
+        tokio::spawn(read_queries(
+            reader,
+            queries2,
+            fetches_sender,
+            ws2,
+            is_v3,
+            close_listener,
+        ));
         Ok(Self {
             close_signal: tx,
             sender: WsQuerySender {
