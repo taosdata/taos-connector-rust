@@ -860,7 +860,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -925,7 +925,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -994,7 +994,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1100,7 +1100,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1167,7 +1167,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1296,7 +1296,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1362,7 +1362,7 @@ mod tests {
         use crate::*;
         // init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1523,7 +1523,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1630,7 +1630,7 @@ mod tests {
         use crate::*;
         // init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);

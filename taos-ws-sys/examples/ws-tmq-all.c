@@ -56,7 +56,7 @@ static int32_t msg_process(WS_RES *msg)
 
 static int32_t init_env()
 {
-  WS_TAOS *pConn = ws_connect_with_dsn("ws://localhost:6041");
+  WS_TAOS *pConn = ws_connect("ws://localhost:6041");
   if (pConn == NULL)
   {
     return -1;
@@ -179,7 +179,7 @@ int32_t create_topic()
 {
   printf("create topic\n");
   WS_RES *pRes;
-  WS_TAOS *pConn = ws_connect_with_dsn("ws://localhost:6041");
+  WS_TAOS *pConn = ws_connect("ws://localhost:6041");
   if (pConn == NULL)
   {
     return -1;
@@ -336,7 +336,7 @@ int main(int argc, char *argv[])
   }
 
   int i = 0;
-  while (i < 10)
+  while (i < 3)
   {
     i++;
     ws_tmq_t *tmq = build_consumer();

@@ -15,7 +15,7 @@ int main()
 
     int errno = 0;
     ws_enable_log("debug");
-    WS_TAOS *taos = ws_connect_with_dsn(dsn);
+    WS_TAOS *taos = ws_connect(dsn);
 
     WS_RES *res1 = ws_query(taos, "select * from db_not_exsits.tb1");
     errno = ws_errno(res1);
@@ -24,7 +24,7 @@ int main()
 
     ws_close(taos);
 
-    WS_TAOS *taos2 = ws_connect_with_dsn(dsn);
+    WS_TAOS *taos2 = ws_connect(dsn);
 
     WS_RES *res2 = ws_query(taos2, "select to_iso8601(0) as ts");
     assert(res2 != NULL);

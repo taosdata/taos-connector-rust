@@ -165,7 +165,7 @@ void insert_data(WS_TAOS *taos)
 int main()
 {
     ws_enable_log("debug");
-    WS_TAOS *taos = ws_connect_with_dsn("ws://localhost:6041");
+    WS_TAOS *taos = ws_connect("ws://localhost:6041");
     if (taos == NULL)
     {
         printf("failed to connect to server\n");

@@ -13,7 +13,7 @@ int main()
     dsn = "ws://localhost:6041";
   }
   ws_enable_log("trace");
-  WS_TAOS *taos = ws_connect_with_dsn(dsn);
+  WS_TAOS *taos = ws_connect(dsn);
   if (taos == NULL)
   {
     int code = ws_errno(NULL);

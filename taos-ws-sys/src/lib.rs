@@ -899,7 +899,7 @@ pub extern "C" fn taos_data_type(r#type: i32) -> *const c_char {
 ///
 /// ```c
 /// char* dsn = "taos://localhost:6041";
-/// WS_TAOS* taos = ws_connect_with_dsn(dsn);
+/// WS_TAOS* taos = ws_connect(dsn);
 /// if (taos == NULL) {
 ///   int errno = ws_errno(NULL);
 ///   char* errstr = ws_errstr(NULL);
@@ -908,7 +908,7 @@ pub extern "C" fn taos_data_type(r#type: i32) -> *const c_char {
 /// }
 /// ```
 #[no_mangle]
-pub unsafe extern "C" fn ws_connect_with_dsn(dsn: *const c_char) -> *mut WS_TAOS {
+pub unsafe extern "C" fn ws_connect(dsn: *const c_char) -> *mut WS_TAOS {
     match connect_with_dsn(dsn) {
         Ok(client) => Box::into_raw(Box::new(client)) as _,
         Err(err) => {
@@ -1746,7 +1746,7 @@ mod tests {
     fn dsn_error() {
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://unknown-host:15237\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://unknown-host:15237\0" as *const u8 as _);
             assert!(taos.is_null(), "connection return NULL when failed");
             // check taos.is_null() when in production use case.
             if taos.is_null() {
@@ -1762,7 +1762,7 @@ mod tests {
     fn query_error() {
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             assert!(!taos.is_null(), "client pointer is not null when success");
 
             let sql = b"show x\0" as *const u8 as _;
@@ -1785,7 +1785,7 @@ mod tests {
     fn is_update_query() {
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             assert!(!taos.is_null(), "client pointer is not null when success");
 
             let sql = b"show databases\0" as *const u8 as _;
@@ -1816,7 +1816,7 @@ mod tests {
     #[test]
     fn connect_with_null() {
         unsafe {
-            let taos = ws_connect_with_dsn(std::ptr::null());
+            let taos = ws_connect(std::ptr::null());
             assert!(!taos.is_null());
         }
     }
@@ -1826,7 +1826,7 @@ mod tests {
         init_env();
 
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1869,7 +1869,7 @@ mod tests {
     fn connect() {
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"http://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1988,7 +1988,7 @@ mod tests {
         init_env();
 
         unsafe {
-            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"http://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -2116,7 +2116,7 @@ mod tests {
     fn test_stop_query() {
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"http://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -2164,7 +2164,7 @@ mod tests {
     fn test_ws_num_fields() {
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"http://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -2205,7 +2205,7 @@ mod tests {
     fn test_get_current_db() {
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"http://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -2265,8 +2265,7 @@ mod tests {
     fn test_bi_mode() {
         init_env();
         unsafe {
-            let taos =
-                ws_connect_with_dsn(b"http://localhost:6041?conn_mode=1\0" as *const u8 as _);
+            let taos = ws_connect(b"http://localhost:6041?conn_mode=1\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -2327,8 +2326,7 @@ mod tests {
     fn test_schemaless() {
         init_env();
         unsafe {
-            let taos =
-                ws_connect_with_dsn(b"http://localhost:6041/schemaless_test\0" as *const u8 as _);
+            let taos = ws_connect(b"http://localhost:6041/schemaless_test\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -2391,7 +2389,7 @@ mod tests {
     fn test_err_code() {
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"http://localhost:6041\0" as *const u8 as _);
             assert!(!taos.is_null());
 
             let sql = b"select * from db_not_exsits.tb1\0" as *const u8 as _;
@@ -2401,7 +2399,7 @@ mod tests {
             ws_free_result(rs);
             ws_close(taos);
 
-            let taos = ws_connect_with_dsn(b"http://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"http://localhost:6041\0" as *const u8 as _);
             assert!(!taos.is_null());
 
             let sql = b"select to_iso8601(0) as ts\0" as *const u8 as _;

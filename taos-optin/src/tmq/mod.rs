@@ -264,10 +264,12 @@ impl IsOffset for Offset {
             .expect("a message should belong to a vgroup")
     }
 
+    #[doc(hidden)]
     fn offset(&self) -> taos_query::tmq::Offset {
         todo!()
     }
 
+    #[doc(hidden)]
     fn timing(&self) -> Timing {
         todo!()
     }
@@ -463,6 +465,7 @@ impl AsConsumer for Consumer {
         self.tmq.commit_sync(offset.0.clone()).map(|_| ())
     }
 
+    #[doc(hidden)]
     fn commit_all(&self) -> RawResult<()> {
         todo!()
     }
@@ -624,6 +627,7 @@ impl AsAsyncConsumer for Consumer {
         self.tmq.commit(offset.0.clone()).await.map(|_| ())
     }
 
+    #[doc(hidden)]
     async fn commit_all(&self) -> RawResult<()> {
         todo!()
     }
