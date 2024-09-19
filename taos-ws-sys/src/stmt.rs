@@ -97,6 +97,7 @@ pub unsafe extern "C" fn ws_stmt_prepare(
                 set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 stmt.error = None;
+                clear_error_info();
                 Code::SUCCESS.into()
             }
         }
@@ -124,6 +125,7 @@ pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_c
                 set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 stmt.error = None;
+                clear_error_info();
                 0
             }
         }
@@ -151,6 +153,7 @@ pub unsafe extern "C" fn ws_stmt_set_sub_tbname(stmt: *mut WS_STMT, name: *const
                 set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 stmt.error = None;
+                clear_error_info();
                 0
             }
         }
@@ -187,6 +190,7 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
                 set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 stmt.error = None;
+                clear_error_info();
                 0
             }
         }
@@ -219,6 +223,7 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
                 *fieldNum = fields_vec.len() as _;
 
                 *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
+                clear_error_info();
                 stmt.error = None;
                 0
             }
@@ -257,6 +262,7 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
                 *fieldNum = fields_vec.len() as _;
                 *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
                 stmt.error = None;
+                clear_error_info();
                 0
             }
 
@@ -803,6 +809,7 @@ pub unsafe extern "C" fn ws_stmt_num_params(stmt: *mut WS_STMT, nums: *mut c_int
             Ok(n) => {
                 *nums = n as _;
                 stmt.error = None;
+                clear_error_info();
                 0
             }
             Err(e) => {
@@ -833,6 +840,7 @@ pub unsafe extern "C" fn ws_stmt_get_param(
                 *r#type = param.data_type as _;
                 *bytes = param.length as _;
                 stmt.error = None;
+                clear_error_info();
                 0
             }
             Err(e) => {
