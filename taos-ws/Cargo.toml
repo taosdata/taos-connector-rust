@@ -16,8 +16,7 @@ repository.workspace = true
 anyhow = "1"
 async-trait = { version = "0.1.80" }
 bytes = "1.1.0"
-dashmap = "5.4.0"
-derive_more = "0.99"
+dashmap = "6.1.0"
 futures = { version = "0.3" }
 itertools = "0.13.0"
 log = "0.4"
@@ -46,7 +45,7 @@ cfg-if = "1"
 [dependencies.tokio-tungstenite]
 version = "0.23"
 git = "https://github.com/taosdata/tokio-tungstenite.git"
-tag = "v1.0.0"
+rev = "19822e0"
 
 [dev-dependencies]
 pretty_env_logger = "0.5.0"
@@ -59,12 +58,9 @@ features = ["rustls"]
 [features]
 default = ["tmq", "deflate"]
 
-rustls = [
-    "tokio-tungstenite/rustls-tls-native-roots",
-    "tokio-tungstenite/rustls-dangerous",
-]
+rustls = ["tokio-tungstenite/rustls-tls-native-roots"]
 native-tls = ["tokio-tungstenite/native-tls"]
 native-tls-vendored = ["tokio-tungstenite/native-tls-vendored", "native-tls"]
 sync = []
 tmq = []
-deflate = ["tokio-tungstenite/deflate"]
+deflate = ["tokio-tungstenite/deflate", "tokio-tungstenite/rustls-dangerous"]

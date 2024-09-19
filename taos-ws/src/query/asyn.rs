@@ -832,7 +832,7 @@ impl WsTaos {
                     }
                 }
                 res = &mut h => {
-                    res.map_err(|err| RawError::from_string(format!("Write raw data join error: {err}")))?;
+                    res?;
                     return Ok(())
                 }
             }

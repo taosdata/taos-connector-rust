@@ -165,28 +165,21 @@ pub(super) mod tmq {
             #[cfg(not(test))]
             use taos_query::prelude::tokio;
 
+            let mut backoff = 0;
+            const MAX_BACKOFF: u64 = 2000;
             loop {
-                // poll with 50ms timeout.
-                // let ptr = UnsafeCell::new(self.0);
-                // tracing::trace!("try poll next message with 200ms timeout");
-                let raw = self.clone();
-                let res = tokio::task::spawn_blocking(move || {
-                    let raw = raw;
-                    let res = unsafe { (raw.tmq.tmq_consumer_poll)(raw.as_ptr(), 200) };
-                    if res.is_null() {
-                        None
-                    } else {
-                        Some(unsafe { RawRes::from_ptr_unchecked(raw.c.clone(), res) })
+                // res is cancellation safe since the memory is handled by the C library.
+                let res = unsafe { (self.tmq.tmq_consumer_poll)(self.as_ptr(), 0) };
+                if res.is_null() {
+                    tokio::time::sleep(Duration::from_millis(backoff)).await;
+                    if backoff < MAX_BACKOFF {
+                        backoff += 50;
                     }
-                    // result
-                })
-                .await
-                .unwrap_or_default();
-                if let Some(res) = res {
-                    tracing::trace!("received tmq message in {:?}", elapsed.elapsed());
-                    break res;
+                    continue;
                 } else {
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    let res = unsafe { RawRes::from_ptr_unchecked(self.c.clone(), res) };
+                    tracing::trace!(elapsed = ?elapsed.elapsed(), "poll next message");
+                    return res;
                 }
             }
         }

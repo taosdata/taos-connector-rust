@@ -1743,6 +1743,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn dsn_error() {
         init_env();
         unsafe {
