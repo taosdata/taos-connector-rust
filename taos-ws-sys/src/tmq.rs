@@ -1082,6 +1082,39 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
+            let taos = ws_connect(b"http://localhost:6041\0" as *const u8 as _);
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"create database if not exists tmq_test\0");
+            execute!(b"use tmq_test\0");
+            execute!(b"CREATE STABLE if not exists meters (ts timestamp, current float, voltage int, phase float) TAGS (location varchar(64), group_id int);\0");
+            execute!(b"CREATE topic if not exists topic_ws_test as select * from meters;\0");
+            execute!(
+                b"INSERT INTO d1001 USING meters TAGS ('California.SanFrancisco', 2) VALUES 
+                        ('2018-10-03 14:38:05', 10.2, 220, 0.23),
+                        ('2018-10-03 14:38:15', 12.6, 218, 0.33),
+                        ('2018-10-03 14:38:25', 12.3, 221, 0.31) 
+                    d1002 USING meters TAGS ('California.SanFrancisco', 3) VALUES 
+                        ('2018-10-03 14:38:04', 10.2, 220, 0.23),
+                        ('2018-10-03 14:38:14', 10.3, 218, 0.25),
+                        ('2018-10-03 14:38:24', 10.1, 220, 0.22)
+                    d1003 USING meters TAGS ('California.LosAngeles', 2) VALUES
+                        ('2018-10-03 14:38:06', 11.5, 221, 0.35),
+                        ('2018-10-03 14:38:16', 10.4, 220, 0.36),
+                        ('2018-10-03 14:38:26', 10.3, 220, 0.33)
+                    ;\0"
+            );
+
             let conf = ws_tmq_conf_new();
             let r = ws_tmq_conf_set(
                 conf,
@@ -1105,7 +1138,7 @@ mod tests {
             assert_eq!(r as i32, ws_tmq_conf_res_t::WS_TMQ_CONF_OK as i32);
 
             let list = ws_tmq_list_new();
-            let r = ws_tmq_list_append(list, b"topic_ws_map\0" as *const u8 as *const c_char);
+            let r = ws_tmq_list_append(list, b"topic_ws_test\0" as *const u8 as *const c_char);
             assert_eq!(r, 0);
 
             let mut topic_num = 0;
@@ -1197,6 +1230,15 @@ mod tests {
 
             let r = ws_tmq_conf_destroy(conf);
             assert_eq!(r, 0);
+
+            let r = ws_tmq_unsubscribe(consumer);
+            assert_eq!(r, 0);
+
+            let r = ws_tmq_consumer_close(consumer);
+            assert_eq!(r, 0);
+
+            execute!(b"drop topic if exists topic_ws_test;\0");
+            execute!(b"drop database if exists tmq_test\0");
         }
     }
 }

@@ -1917,7 +1917,7 @@ mod tests {
 
             let is_null = ws_is_null(rs, 0, 0);
             assert_eq!(is_null, false);
-            let is_null = ws_is_null(rs, 0, cols as usize);
+            let is_null = ws_is_null(rs, 0, cols);
             assert_eq!(is_null, true);
             let is_null = ws_is_null(rs, 0, 1);
             assert_eq!(is_null, false);
@@ -2326,6 +2326,27 @@ mod tests {
     fn test_schemaless() {
         init_env();
         unsafe {
+            let taos = ws_connect(b"http://localhost:6041\0" as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"create database if not exists schemaless_test\0");
+
             let taos = ws_connect(b"http://localhost:6041/schemaless_test\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
@@ -2335,22 +2356,20 @@ mod tests {
             }
             assert!(!taos.is_null());
 
-            // 准备要插入的数据
             let data = "meters,groupid=2,location=California.SanFrancisco current=10.3000002f64,voltage=219i32,phase=0.31f64 1626006833639";
             let c_data = CString::new(data).expect("CString::new failed");
             let lines = c_data.as_ptr() as *const c_char;
             let len = data.len() as c_int;
 
-            // 准备其他参数
             let _total_rows: *mut i32 = &mut 0;
-            let protocal = 1; // 示例值
-            let precision = 4; // 示例值
-            let ttl = 0; // 示例值
-            let reqid = 123456u64; // 示例值
+            let protocal = 1;
+            let precision = 4;
+            let ttl = 0;
+            let reqid = 123456u64;
             let rs = schemaless_insert_raw(
                 taos,
                 lines as *const c_char,
-                data.len() as i32,
+                len as i32,
                 _total_rows,
                 protocal,
                 precision,
