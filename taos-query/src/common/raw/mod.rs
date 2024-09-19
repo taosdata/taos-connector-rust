@@ -1180,7 +1180,7 @@ impl From<i32> for SchemalessProtocol {
             1 => SchemalessProtocol::Line,
             2 => SchemalessProtocol::Telnet,
             3 => SchemalessProtocol::Json,
-            _ => SchemalessProtocol::Unknown, // 或者其他默认值
+            _ => SchemalessProtocol::Unknown, 
         }
     }
 }
@@ -1219,7 +1219,7 @@ impl From<i32> for SchemalessPrecision {
             4 => SchemalessPrecision::Millisecond,
             5 => SchemalessPrecision::Microsecond,
             6 => SchemalessPrecision::Nanosecond,
-            _ => SchemalessPrecision::Millisecond, // 默认值
+            _ => SchemalessPrecision::Millisecond, 
         }
     }
 }
