@@ -101,7 +101,8 @@ void insert_data(WS_TAOS *taos)
 
     for (int i = 0; i < num_fields; ++i)
     {
-        printf("field[%d]: %s\n", i, fields[i].name);
+        printf("field name [%d]: %s\n", i, fields[i].name);
+        printf("field type [%d]: %d\n", i, fields[i].type);
     }
 
     // insert two rows

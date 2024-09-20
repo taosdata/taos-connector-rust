@@ -259,6 +259,7 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
             .and_then(|s| s.get_col_fields())
         {
             Ok(fields_vec) => {
+                let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
                 *fieldNum = fields_vec.len() as _;
                 *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
                 stmt.error = None;
