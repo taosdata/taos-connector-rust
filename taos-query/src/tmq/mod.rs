@@ -8,7 +8,7 @@ use crate::{
     JsonMeta, RawBlock, RawResult,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Timeout {
     /// Wait forever.
     Never,
@@ -51,7 +51,7 @@ impl Timeout {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum TimeoutError {
     #[error("empty timeout value")]
     Empty,
@@ -59,15 +59,33 @@ pub enum TimeoutError {
     Invalid(String, String),
 }
 
+fn is_numeric_or_sign(s: char) -> bool {
+    if s != '+' && s != '-' && !s.is_digit(10) {
+        return false;
+    }
+    return true;
+}
+
 fn validate_duration_string(duration_string: &str) -> Result<(), String> {
-    // Check the exponent of the duration string
-    let parts: Vec<&str> = duration_string.split('e').collect();
-    if parts.len() == 2 {
-        let exponent: i32 = parts[1].parse().map_err(|_| "Invalid exponent")?;
-        if exponent > 10 || exponent < -10 {
-            return Err("Exponent out of range".to_string());
+    if !duration_string.contains('e') && !duration_string.contains('E') {
+        return Ok(());
+    }
+
+    let parts: Vec<&str> = duration_string.split_whitespace().collect();
+    for part in parts {
+        if part.contains('e') || part.contains('E') {
+            // Check if it's an exponent form
+            let parts_vec: Vec<&str> = part.split(|c| c == 'e' || c == 'E').collect();
+            if parts_vec.len() == 2 && !parts_vec[0].is_empty() && !parts_vec[1].is_empty() {
+                let last = parts_vec[0].chars().last().unwrap();
+                let first = parts_vec[1].chars().next().unwrap();
+                if is_numeric_or_sign(first) && is_numeric_or_sign(last) {
+                    return Err("Exponent not allowed".to_string());
+                }
+            }
         }
     }
+
     Ok(())
 }
 
@@ -524,3 +542,70 @@ where
 //         <C as AsConsumer>::commit(self, offset)
 //     }
 // }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_duration_string() {
+        // Valid cases
+        assert_eq!(validate_duration_string("1.23e4"), Ok(()));
+        assert_eq!(validate_duration_string("1.23e-4"), Ok(()));
+        assert_eq!(validate_duration_string("1.23"), Ok(()));
+
+        // Invalid exponent
+        assert_eq!(
+            validate_duration_string("1.23e11"),
+            Err("Exponent out of range".to_string())
+        );
+        assert_eq!(
+            validate_duration_string("1.23e-11"),
+            Err("Exponent out of range".to_string())
+        );
+
+        // Invalid format
+        assert_eq!(
+            validate_duration_string("1.23eabc"),
+            Err("Invalid exponent".to_string())
+        );
+    }
+
+    #[test]
+    fn test_timeout_from_str() {
+        // Valid cases
+        assert_eq!(validate_duration_string("5sec"), Ok(()));
+        assert_eq!(validate_duration_string("5s"), Ok(()));
+        assert_eq!(validate_duration_string("123s"), Ok(()));
+        assert_eq!(validate_duration_string("1.23ms"), Ok(()));
+        assert_eq!(validate_duration_string("1 day"), Ok(()));
+        assert_eq!(validate_duration_string("5econds"), Ok(())); // 'e' in the middle of a word
+
+        // Invalid cases
+        assert_eq!(
+            validate_duration_string("1e10 sec"),
+            Err("Exponent not allowed".to_string())
+        );
+        assert_eq!(
+            validate_duration_string("1E10 ms"),
+            Err("Exponent not allowed".to_string())
+        );
+
+        assert_eq!(
+            validate_duration_string("1E10ms"),
+            Err("Exponent not allowed".to_string())
+        );
+        assert_eq!(
+            validate_duration_string("1e-1"),
+            Err("Exponent not allowed".to_string())
+        );
+        assert_eq!(
+            validate_duration_string("1.84467e19 seconds"),
+            Err("Exponent not allowed".to_string())
+        );
+
+        assert_eq!(
+            validate_duration_string("1E-1"),
+            Err("Exponent not allowed".to_string())
+        );
+    }
+}
