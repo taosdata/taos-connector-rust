@@ -1195,7 +1195,7 @@ impl ResultSet {
         let now = Instant::now();
         match self.blocks_buffer.as_mut().unwrap().recv_async().await {
             Ok(Ok((raw, timing))) => {
-                self.timing += timing;
+                self.timing = timing;
                 self.metrics.time_cost_in_flume += now.elapsed();
                 return Ok(Some(raw));
             }

@@ -2010,6 +2010,46 @@ mod tests {
     }
 
     #[test]
+    fn test_timing() {
+        use std::time::Instant;
+        init_env();
+        unsafe {
+            let taos = ws_connect(b"http://localhost:6041\0".as_ptr() as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            let sql = b"select count(*) from test.meters;\0" as *const u8 as _;
+
+            let start = Instant::now();
+            let rs = ws_query(taos, sql);
+            let timing1 = ws_take_timing(rs);
+
+            let mut block: *const c_void = std::ptr::null();
+            let mut rows = 0;
+            let code = ws_fetch_raw_block(rs, &mut block as *mut *const c_void, &mut rows as _);
+            assert_eq!(code, 0);
+
+            let end = Instant::now();
+
+            let duration = end.duration_since(start);
+            println!("total: {:?}", duration.as_nanos());
+
+            let timing2 = ws_take_timing(rs);
+            ws_free_result(rs);
+            ws_close(taos);
+            dbg!((timing1) as u128);
+            dbg!((timing2) as u128);
+            dbg!((timing2 + timing1) as u128);
+            assert!(((timing1 + timing2) as u64) < duration.as_nanos() as u64);
+        }
+    }
+
+    #[test]
     fn simple_fetch_row_test() {
         init_env();
 
