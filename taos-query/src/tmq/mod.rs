@@ -59,6 +59,18 @@ pub enum TimeoutError {
     Invalid(String, String),
 }
 
+fn validate_duration_string(duration_string: &str) -> Result<(), String> {
+    // Check the exponent of the duration string
+    let parts: Vec<&str> = duration_string.split('e').collect();
+    if parts.len() == 2 {
+        let exponent: i32 = parts[1].parse().map_err(|_| "Invalid exponent")?;
+        if exponent > 10 || exponent < -10 {
+            return Err("Exponent out of range".to_string());
+        }
+    }
+    Ok(())
+}
+
 impl FromStr for Timeout {
     type Err = TimeoutError;
 
@@ -69,9 +81,12 @@ impl FromStr for Timeout {
         match s.to_lowercase().as_str() {
             "never" => Ok(Timeout::Never),
             "none" => Ok(Timeout::None),
-            _ => parse_duration::parse(s)
-                .map(Timeout::Duration)
-                .map_err(|err| TimeoutError::Invalid(s.to_string(), err.to_string())),
+            _ => match validate_duration_string(s) {
+                Ok(_) => parse_duration::parse(s)
+                    .map(Timeout::Duration)
+                    .map_err(|err| TimeoutError::Invalid(s.to_string(), err.to_string())),
+                Err(err) => Err(TimeoutError::Invalid(s.to_string(), err.to_string())),
+            },
         }
     }
 }
@@ -202,6 +217,8 @@ pub trait AsyncMessage {
 }
 
 pub type VGroupId = i32;
+pub type Offset = i64;
+pub type Timing = i64;
 
 /// Extract offset information.
 pub trait IsOffset {
@@ -213,6 +230,12 @@ pub trait IsOffset {
 
     /// VGroup id for current message.
     fn vgroup_id(&self) -> VGroupId;
+
+    /// offset of current message.
+    fn offset(&self) -> Offset;
+
+    /// timing cost for current message.
+    fn timing(&self) -> Timing;
 }
 
 #[repr(C)]
@@ -298,6 +321,7 @@ pub trait AsConsumer: Sized {
     }
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()>;
+    fn commit_all(&self) -> RawResult<()>;
 
     fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()>;
 
@@ -384,6 +408,7 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     }
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()>;
+    async fn commit_all(&self) -> RawResult<()>;
 
     async fn commit_offset(
         &self,
@@ -443,6 +468,10 @@ where
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit(self, offset))
+    }
+
+    fn commit_all(&self) -> RawResult<()> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit_all(self))
     }
 
     fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {

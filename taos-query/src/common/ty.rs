@@ -1,9 +1,9 @@
+use serde::de::Visitor;
+use std::os::raw::c_char;
 use std::{
     fmt::{self, Display},
     str::FromStr,
 };
-
-use serde::de::Visitor;
 
 /// TDengine data type enumeration.
 ///
@@ -302,6 +302,62 @@ impl Ty {
             Blob => "blob",
             MediumBlob => "mediumblob",
             Geometry => "geometry",
+        }
+    }
+
+    pub const fn tsdb_name(&self) -> *const c_char {
+        use Ty::*;
+        match self {
+            Null => "TSDB_DATA_TYPE_NULL\0".as_ptr() as *const c_char,
+            Bool => "TSDB_DATA_TYPE_BOOL\0".as_ptr() as *const c_char,
+            TinyInt => "TSDB_DATA_TYPE_TINYINT\0".as_ptr() as *const c_char,
+            SmallInt => "TSDB_DATA_TYPE_SMALLINT\0".as_ptr() as *const c_char,
+            Int => "TSDB_DATA_TYPE_INT\0".as_ptr() as *const c_char,
+            BigInt => "TSDB_DATA_TYPE_BIGINT\0".as_ptr() as *const c_char,
+            Float => "TSDB_DATA_TYPE_FLOAT\0".as_ptr() as *const c_char,
+            Double => "TSDB_DATA_TYPE_DOUBLE\0".as_ptr() as *const c_char,
+            VarChar => "TSDB_DATA_TYPE_VARCHAR\0".as_ptr() as *const c_char,
+            Timestamp => "TSDB_DATA_TYPE_TIMESTAMP\0".as_ptr() as *const c_char,
+            NChar => "TSDB_DATA_TYPE_NCHAR\0".as_ptr() as *const c_char,
+            UTinyInt => "TSDB_DATA_TYPE_UTINYINT\0".as_ptr() as *const c_char,
+            USmallInt => "TSDB_DATA_TYPE_USMALLINT\0".as_ptr() as *const c_char,
+            UInt => "TSDB_DATA_TYPE_UINT\0".as_ptr() as *const c_char,
+            UBigInt => "TSDB_DATA_TYPE_UBIGINT\0".as_ptr() as *const c_char,
+            Json => "TSDB_DATA_TYPE_JSON\0".as_ptr() as *const c_char,
+            VarBinary => "TSDB_DATA_TYPE_VARBINARY\0".as_ptr() as *const c_char,
+            Decimal => "TSDB_DATA_TYPE_DECIMAL\0".as_ptr() as *const c_char,
+            Blob => "TSDB_DATA_TYPE_BLOB\0".as_ptr() as *const c_char,
+            MediumBlob => "TSDB_DATA_TYPE_MEDIUMBLOB\0".as_ptr() as *const c_char,
+            Geometry => "TSDB_DATA_TYPE_GEOMETRY\0".as_ptr() as *const c_char,
+        }
+    }
+
+    #[inline]
+    pub const fn from_u8_option(v: u8) -> Option<Self> {
+        use Ty::*;
+        match v {
+            0 => Some(Null),
+            1 => Some(Bool),
+            2 => Some(TinyInt),
+            3 => Some(SmallInt),
+            4 => Some(Int),
+            5 => Some(BigInt),
+            6 => Some(Float),
+            7 => Some(Double),
+            8 => Some(VarChar),
+            9 => Some(Timestamp),
+            10 => Some(NChar),
+            11 => Some(UTinyInt),
+            12 => Some(USmallInt),
+            13 => Some(UInt),
+            14 => Some(UBigInt),
+            15 => Some(Json),
+            16 => Some(VarBinary),
+            17 => Some(Decimal),
+            18 => Some(Blob),
+            19 => Some(MediumBlob),
+            20 => Some(Geometry),
+            _ => None,
         }
     }
 

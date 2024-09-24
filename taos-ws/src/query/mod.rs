@@ -1,4 +1,3 @@
-use once_cell::sync::OnceCell;
 use taos_query::common::SmlData;
 use taos_query::prelude::RawResult;
 use taos_query::{common::RawMeta, AsyncQueryable};
@@ -18,7 +17,6 @@ use crate::TaosBuilder;
 pub struct Taos {
     pub(crate) dsn: TaosBuilder,
     pub(crate) async_client: WsTaos,
-    pub(crate) async_sml: OnceCell<crate::schemaless::WsTaos>,
 }
 
 impl Taos {
@@ -30,7 +28,6 @@ impl Taos {
                     return Ok(Self {
                         dsn,
                         async_client: client,
-                        async_sml: OnceCell::default(),
                     })
                 }
                 Err(err) => {
@@ -93,12 +90,14 @@ impl taos_query::AsyncQueryable for Taos {
     }
 
     async fn put(&self, data: &SmlData) -> RawResult<()> {
-        if let Some(ws) = self.async_sml.get() {
-            ws.s_put(data).await
-        } else {
-            let async_sml = crate::schemaless::WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_sml.get_or_init(|| async_sml).s_put(data).await
-        }
+        self.client().s_put(data).await
+
+        // if let Some(ws) = self.async_sml.get() {
+        //     ws.s_put(data).await
+        // } else {
+        //     let async_sml = crate::schemaless::WsTaos::from_wsinfo(&self.dsn).await?;
+        //     self.async_sml.get_or_init(|| async_sml).s_put(data).await
+        // }
     }
 }
 

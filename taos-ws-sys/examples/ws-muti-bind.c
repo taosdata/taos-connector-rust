@@ -98,8 +98,7 @@ void insert_data(WS_TAOS *taos)
         1648432614749,
         1648432615249,
         1648432615749,
-        1648432616249
-    };
+        1648432616249};
     float current[] = {
         10.3,
         12.6,
@@ -110,8 +109,7 @@ void insert_data(WS_TAOS *taos)
         11.5,
         13.7,
         12.0,
-        10.1
-    };
+        10.1};
     int voltage[] = {
         219,
         218,
@@ -122,8 +120,7 @@ void insert_data(WS_TAOS *taos)
         215,
         219,
         220,
-        222
-    };
+        222};
     float phase[] = {
         0.31,
         0.33,
@@ -134,14 +131,14 @@ void insert_data(WS_TAOS *taos)
         0.34,
         0.32,
         0.29,
-        0.30
-    };
+        0.30};
 
-    char loc2[] = {'a', 'b', 0,  'c', 'd', 0, 'e', 'f', 0, 'g', 'h', 0, 'i', 'j', 0, 'a', 'b', 0, 'c', 'd', 0, 'e', 'f', 0, 'g', 'h', 0, 'i', 'j', 0 };
-    char loc3[1000] = {0 };
+    char loc2[] = {'a', 'b', 0, 'c', 'd', 0, 'e', 'f', 0, 'g', 'h', 0, 'i', 'j', 0, 'a', 'b', 0, 'c', 'd', 0, 'e', 'f', 0, 'g', 'h', 0, 'i', 'j', 0};
+    char loc3[1000] = {0};
     int nchar_len = strlen("一二三四五六七八");
-    for (int i = 0; i < data_count; i++) {
-        char * p = loc3 + i * (nchar_len + 10);
+    for (int i = 0; i < data_count; i++)
+    {
+        char *p = loc3 + i * (nchar_len + 10);
         strcpy(p, "一二三四五六七八");
     }
 
@@ -149,16 +146,19 @@ void insert_data(WS_TAOS *taos)
     memset(is_null, 0, sizeof(is_null));
     // length array
     int32_t int64Len[data_count];
-    for (int i = 0; i < data_count; i++) {
+    for (int i = 0; i < data_count; i++)
+    {
         int64Len[i] = sizeof(int64_t);
     }
     int32_t floatLen[data_count];
-    for (int i = 0; i < data_count; i++) {
+    for (int i = 0; i < data_count; i++)
+    {
         floatLen[i] = sizeof(float);
     }
 
     int32_t intLen[data_count];
-    for (int i = 0; i < data_count; i++) {
+    for (int i = 0; i < data_count; i++)
+    {
         int64Len[i] = sizeof(int);
     }
 
@@ -189,9 +189,10 @@ void insert_data(WS_TAOS *taos)
     params[3].length = floatLen;
     params[3].is_null = is_null;
     params[3].num = data_count;
-   
+
     int32_t varcharLen[data_count];
-    for (int i = 0; i < data_count; i++) {
+    for (int i = 0; i < data_count; i++)
+    {
         varcharLen[i] = 2;
     }
 
@@ -200,10 +201,11 @@ void insert_data(WS_TAOS *taos)
     params[4].buffer = loc2;
     params[4].length = varcharLen;
     params[4].is_null = is_null;
-    params[4].num = data_count;    
+    params[4].num = data_count;
 
     int32_t ncharLen[data_count];
-    for (int i = 0; i < data_count; i++) {
+    for (int i = 0; i < data_count; i++)
+    {
         ncharLen[i] = nchar_len;
     }
 
@@ -212,7 +214,7 @@ void insert_data(WS_TAOS *taos)
     params[5].buffer = loc3;
     params[5].length = ncharLen;
     params[5].is_null = is_null;
-    params[5].num = data_count;    
+    params[5].num = data_count;
 
     code = ws_stmt_bind_param_batch(stmt, params, 6); // bind batch
     check_error_code(stmt, code, "failed to execute taos_stmt_bind_param_batch");
@@ -232,7 +234,7 @@ void insert_data(WS_TAOS *taos)
 
 int main()
 {
-    WS_TAOS *taos = ws_connect_with_dsn("ws://localhost:6041");
+    WS_TAOS *taos = ws_connect("ws://localhost:6041");
     if (taos == NULL)
     {
         printf("failed to connect to server\n");

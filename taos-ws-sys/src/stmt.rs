@@ -43,18 +43,26 @@ impl From<WsStmtField> for StmtField {
 #[allow(non_camel_case_types)]
 pub type WS_STMT = c_void;
 
-unsafe fn stmt_init(taos: *const WS_TAOS) -> WsResult<Stmt> {
+unsafe fn stmt_init(taos: *const WS_TAOS, req_id: u64) -> WsResult<Stmt> {
     let client = (taos as *mut Taos)
         .as_mut()
         .ok_or(WsError::new(Code::FAILED, "client pointer it null"))?;
-    Ok(taos_ws::Stmt::init(client)?)
-    // Ok(client.stmt_init()?)
+    Ok(taos_ws::Stmt::init_with_req_id(client, req_id)?)
 }
 
 /// Create new stmt object.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_init(taos: *const WS_TAOS) -> *mut WS_STMT {
-    let stmt: WsMaybeError<Stmt> = stmt_init(taos).into();
+    ws_stmt_init_with_reqid(taos, get_thread_local_reqid())
+}
+
+/// Create new stmt object with req_id.
+#[no_mangle]
+pub unsafe extern "C" fn ws_stmt_init_with_reqid(
+    taos: *const WS_TAOS,
+    req_id: u64,
+) -> *mut WS_STMT {
+    let stmt: WsMaybeError<Stmt> = stmt_init(taos, req_id).into();
     Box::into_raw(Box::new(stmt)) as _
 }
 
@@ -76,7 +84,7 @@ pub unsafe extern "C" fn ws_stmt_prepare(
             };
 
             if let Some(no) = stmt.errno() {
-                return no;
+                return get_err_code_fromated(no);
             }
 
             if let Err(e) = stmt
@@ -86,12 +94,17 @@ pub unsafe extern "C" fn ws_stmt_prepare(
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
-                0
+                stmt.error = None;
+                clear_error_info();
+                Code::SUCCESS.into()
             }
         }
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -109,12 +122,17 @@ pub unsafe extern "C" fn ws_stmt_set_tbname(stmt: *mut WS_STMT, name: *const c_c
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
+                stmt.error = None;
+                clear_error_info();
                 0
             }
         }
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -132,12 +150,17 @@ pub unsafe extern "C" fn ws_stmt_set_sub_tbname(stmt: *mut WS_STMT, name: *const
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
+                stmt.error = None;
+                clear_error_info();
                 0
             }
         }
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -164,12 +187,17 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
+                stmt.error = None;
+                clear_error_info();
                 0
             }
         }
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -180,8 +208,8 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_get_tag_fields(
     stmt: *mut WS_STMT,
-    fields: *mut *mut StmtField,
     fieldNum: *mut c_int,
+    fields: *mut *mut StmtField,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => match stmt
@@ -195,18 +223,22 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
                 *fieldNum = fields_vec.len() as _;
 
                 *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
-
+                clear_error_info();
+                stmt.error = None;
                 0
             }
 
             Err(e) => {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             }
         },
 
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -217,8 +249,8 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_get_col_fields(
     stmt: *mut WS_STMT,
-    fields: *mut *mut StmtField,
     fieldNum: *mut c_int,
+    fields: *mut *mut StmtField,
 ) -> c_int {
     match (stmt as *mut WsMaybeError<Stmt>).as_mut() {
         Some(stmt) => match stmt
@@ -228,30 +260,38 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
         {
             Ok(fields_vec) => {
                 let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
-
                 *fieldNum = fields_vec.len() as _;
-
                 *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
-
+                stmt.error = None;
+                clear_error_info();
                 0
             }
 
             Err(e) => {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             }
         },
 
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
 /// Free memory of fields that was allocated by `ws_stmt_get_tag_fields` or `ws_stmt_get_col_fields`.
 #[allow(non_snake_case)]
+#[allow(unused_variables)]
 #[no_mangle]
-pub unsafe extern "C" fn ws_stmt_reclaim_fields(fields: *mut *mut StmtField, fieldNum: c_int) {
+pub unsafe extern "C" fn ws_stmt_reclaim_fields(
+    stmt: *mut WS_STMT,
+    fields: *mut *mut StmtField,
+    fieldNum: c_int,
+) -> c_int {
     let _ = Vec::from_raw_parts(*fields, fieldNum as usize, fieldNum as usize);
+    0
 }
 
 /// Currently only insert sql is supported.
@@ -641,12 +681,15 @@ pub unsafe extern "C" fn ws_stmt_set_tags(
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 0
             }
         }
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -670,12 +713,15 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 0
             }
         }
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -690,12 +736,15 @@ pub unsafe extern "C" fn ws_stmt_add_batch(stmt: *mut WS_STMT) -> c_int {
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             } else {
                 0
             }
         }
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -715,10 +764,13 @@ pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut
             Err(e) => {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             }
         },
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "stmt ptr should not be null",
+        )),
     }
 }
 
@@ -730,7 +782,7 @@ pub unsafe extern "C" fn ws_stmt_affected_rows(stmt: *mut WS_STMT) -> c_int {
         .and_then(|s| s.safe_deref_mut())
     {
         Some(stmt) => stmt.affected_rows() as _,
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(Code::INVALID_PARA, "stmt ptr is invalid")),
     }
 }
 
@@ -742,7 +794,7 @@ pub unsafe extern "C" fn ws_stmt_affected_rows_once(stmt: *mut WS_STMT) -> c_int
         .and_then(|s| s.safe_deref_mut())
     {
         Some(stmt) => stmt.affected_rows_once() as _,
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(Code::INVALID_PARA, "stmt ptr is invalid")),
     }
 }
 
@@ -757,15 +809,17 @@ pub unsafe extern "C" fn ws_stmt_num_params(stmt: *mut WS_STMT, nums: *mut c_int
         {
             Ok(n) => {
                 *nums = n as _;
+                stmt.error = None;
+                clear_error_info();
                 0
             }
             Err(e) => {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             }
         },
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(Code::INVALID_PARA, "stmt ptr is invalid")),
     }
 }
 
@@ -786,15 +840,17 @@ pub unsafe extern "C" fn ws_stmt_get_param(
             Ok(param) => {
                 *r#type = param.data_type as _;
                 *bytes = param.length as _;
+                stmt.error = None;
+                clear_error_info();
                 0
             }
             Err(e) => {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
-                errno.into()
+                set_error_and_get_code(WsError::new(errno, &e.to_string()))
             }
         },
-        _ => 0,
+        _ => set_error_and_get_code(WsError::new(Code::INVALID_PARA, "stmt ptr is invalid")),
     }
 }
 
@@ -806,8 +862,9 @@ pub unsafe extern "C" fn ws_stmt_errstr(stmt: *mut WS_STMT) -> *const c_char {
 
 /// Same to taos_stmt_close
 #[no_mangle]
-pub unsafe extern "C" fn ws_stmt_close(stmt: *mut WS_STMT) {
+pub unsafe extern "C" fn ws_stmt_close(stmt: *mut WS_STMT) -> i32 {
     let _ = Box::from_raw(stmt as *mut WsMaybeError<Stmt>);
+    0
 }
 
 #[cfg(test)]
@@ -819,7 +876,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -884,7 +941,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -953,7 +1010,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1019,7 +1076,7 @@ mod tests {
                 loop {
                     let mut ptr = std::ptr::null();
                     let mut rows = 0;
-                    ws_fetch_block(rs, &mut ptr, &mut rows);
+                    ws_fetch_raw_block(rs, &mut ptr, &mut rows);
                     if rows == 0 {
                         break;
                     }
@@ -1059,7 +1116,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1117,7 +1174,7 @@ mod tests {
 
             execute!(b"drop database if exists ws_stmt_with_tags\0");
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
 
@@ -1126,7 +1183,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1246,7 +1303,7 @@ mod tests {
 
             // execute!(format!("drop database if exists {db}"));
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
 
@@ -1255,7 +1312,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1312,7 +1369,7 @@ mod tests {
 
             execute!(b"drop database if exists ws_stmt_with_sub_table\0");
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
 
@@ -1321,7 +1378,7 @@ mod tests {
         use crate::*;
         // init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1357,7 +1414,7 @@ mod tests {
             let mut tag_fields_before = std::ptr::null_mut();
             let mut tag_fields_len_before = 0;
             let code =
-                ws_stmt_get_tag_fields(stmt, &mut tag_fields_before, &mut tag_fields_len_before);
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_before, &mut tag_fields_before);
             log::debug!("tag_fields_before code: {}", code);
             if code != 0 {
                 log::debug!(
@@ -1368,7 +1425,7 @@ mod tests {
                 let tag_fields_before_rs =
                     std::slice::from_raw_parts(tag_fields_before, tag_fields_len_before as _);
                 log::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields_before, tag_fields_len_before);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields_before, tag_fields_len_before);
                 log::trace!(
                     "tag_fields_before after reclaim: {:?}",
                     tag_fields_before_rs
@@ -1379,7 +1436,7 @@ mod tests {
             let mut col_fields_before = std::ptr::null_mut();
             let mut col_fields_len_before = 0;
             let code =
-                ws_stmt_get_col_fields(stmt, &mut col_fields_before, &mut col_fields_len_before);
+                ws_stmt_get_col_fields(stmt, &mut col_fields_len_before, &mut col_fields_before);
             log::debug!("col_fields_before code: {}", code);
             if code != 0 {
                 log::debug!(
@@ -1390,7 +1447,7 @@ mod tests {
                 let col_fields_before_rs =
                     std::slice::from_raw_parts(col_fields_before, col_fields_len_before as _);
                 log::trace!("col_fields_before: {:?}", col_fields_before_rs);
-                ws_stmt_reclaim_fields(&mut col_fields_before, col_fields_len_before);
+                ws_stmt_reclaim_fields(stmt, &mut col_fields_before, col_fields_len_before);
                 log::trace!(
                     "col_fields_before after reclaim: {:?}",
                     col_fields_before_rs
@@ -1403,7 +1460,7 @@ mod tests {
             let mut tag_fields_after = std::ptr::null_mut();
             let mut tag_fields_len_after = 0;
             let code =
-                ws_stmt_get_tag_fields(stmt, &mut tag_fields_after, &mut tag_fields_len_after);
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_after, &mut tag_fields_after);
             log::debug!("tag_fields_after code: {}", code);
             if code != 0 {
                 log::error!(
@@ -1414,7 +1471,7 @@ mod tests {
                 let tag_fields_after_rs =
                     std::slice::from_raw_parts(tag_fields_after, tag_fields_len_after as _);
                 log::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields_after, tag_fields_len_after);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields_after, tag_fields_len_after);
                 log::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
             }
 
@@ -1443,7 +1500,7 @@ mod tests {
             // get stmt tag fields
             let mut tag_fields = std::ptr::null_mut();
             let mut tag_fields_len = 0;
-            let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields, &mut tag_fields_len);
+            let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields_len, &mut tag_fields);
             if code != 0 {
                 log::debug!(
                     "tag_fields errstr: {}",
@@ -1452,14 +1509,14 @@ mod tests {
             } else {
                 let tag_fields_rs = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
                 log::debug!("tag_fields: {:?}", tag_fields_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields, tag_fields_len);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields, tag_fields_len);
                 log::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
             }
 
             // get stmt column fields
             let mut col_fields = std::ptr::null_mut();
             let mut col_fields_len = 0;
-            let code = ws_stmt_get_col_fields(stmt, &mut col_fields, &mut col_fields_len);
+            let code = ws_stmt_get_col_fields(stmt, &mut col_fields_len, &mut col_fields);
             if code != 0 {
                 log::debug!(
                     "col_fields errstr: {}",
@@ -1468,13 +1525,13 @@ mod tests {
             } else {
                 let col_fields_rs = std::slice::from_raw_parts(col_fields, col_fields_len as _);
                 log::debug!("col_fields: {:?}", col_fields_rs);
-                ws_stmt_reclaim_fields(&mut col_fields, col_fields_len);
+                ws_stmt_reclaim_fields(stmt, &mut col_fields, col_fields_len);
                 log::debug!("col_fields after reclaim: {:?}", col_fields_rs);
             }
 
             ws_stmt_close(stmt);
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
     #[test]
@@ -1482,7 +1539,7 @@ mod tests {
         use crate::*;
         init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1579,7 +1636,7 @@ mod tests {
 
             ws_stmt_close(stmt);
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
 
@@ -1589,7 +1646,7 @@ mod tests {
         use crate::*;
         // init_env();
         unsafe {
-            let taos = ws_connect_with_dsn(b"ws://localhost:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
                 let code = ws_errno(taos);
                 assert!(code != 0);
@@ -1623,7 +1680,7 @@ mod tests {
             let mut tag_fields_before = std::ptr::null_mut();
             let mut tag_fields_len_before = 0;
             let code =
-                ws_stmt_get_tag_fields(stmt, &mut tag_fields_before, &mut tag_fields_len_before);
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_before, &mut tag_fields_before);
             log::debug!("tag_fields_before code: {}", code);
             if code != 0 {
                 log::error!(
@@ -1634,7 +1691,7 @@ mod tests {
                 let tag_fields_before_rs =
                     std::slice::from_raw_parts(tag_fields_before, tag_fields_len_before as _);
                 log::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields_before, tag_fields_len_before);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields_before, tag_fields_len_before);
                 log::trace!(
                     "tag_fields_before after reclaim: {:?}",
                     tag_fields_before_rs
@@ -1645,7 +1702,7 @@ mod tests {
             let mut col_fields_before = std::ptr::null_mut();
             let mut col_fields_len_before = 0;
             let code =
-                ws_stmt_get_col_fields(stmt, &mut col_fields_before, &mut col_fields_len_before);
+                ws_stmt_get_col_fields(stmt, &mut col_fields_len_before, &mut col_fields_before);
             log::debug!("col_fields_before code: {}", code);
             if code != 0 {
                 log::error!(
@@ -1656,7 +1713,7 @@ mod tests {
                 let col_fields_before_rs =
                     std::slice::from_raw_parts(col_fields_before, col_fields_len_before as _);
                 log::trace!("col_fields_before: {:?}", col_fields_before_rs);
-                ws_stmt_reclaim_fields(&mut col_fields_before, col_fields_len_before);
+                ws_stmt_reclaim_fields(stmt, &mut col_fields_before, col_fields_len_before);
                 log::trace!(
                     "col_fields_before after reclaim: {:?}",
                     col_fields_before_rs
@@ -1669,7 +1726,7 @@ mod tests {
             let mut tag_fields_after = std::ptr::null_mut();
             let mut tag_fields_len_after = 0;
             let code =
-                ws_stmt_get_tag_fields(stmt, &mut tag_fields_after, &mut tag_fields_len_after);
+                ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_after, &mut tag_fields_after);
             log::debug!("tag_fields_after code: {}", code);
             if code != 0 {
                 log::error!(
@@ -1680,7 +1737,7 @@ mod tests {
                 let tag_fields_after_rs =
                     std::slice::from_raw_parts(tag_fields_after, tag_fields_len_after as _);
                 log::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields_after, tag_fields_len_after);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields_after, tag_fields_len_after);
                 log::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
             }
 
@@ -1699,8 +1756,11 @@ mod tests {
             if code != 0 {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
             }
+            assert_eq!(code, 0);
 
-            ws_stmt_add_batch(stmt);
+            let code = ws_stmt_add_batch(stmt);
+            assert_eq!(code, 0);
+
             let mut rows = 0;
             ws_stmt_execute(stmt, &mut rows);
 
@@ -1709,7 +1769,7 @@ mod tests {
             // get stmt tag fields
             let mut tag_fields = std::ptr::null_mut();
             let mut tag_fields_len = 0;
-            let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields, &mut tag_fields_len);
+            let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields_len, &mut tag_fields);
             if code != 0 {
                 log::debug!(
                     "tag_fields errstr: {}",
@@ -1718,14 +1778,14 @@ mod tests {
             } else {
                 let tag_fields_rs = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
                 log::debug!("tag_fields: {:?}", tag_fields_rs);
-                ws_stmt_reclaim_fields(&mut tag_fields, tag_fields_len);
+                ws_stmt_reclaim_fields(stmt, &mut tag_fields, tag_fields_len);
                 log::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
             }
 
             // get stmt column fields
             let mut col_fields = std::ptr::null_mut();
             let mut col_fields_len = 0;
-            let code = ws_stmt_get_col_fields(stmt, &mut col_fields, &mut col_fields_len);
+            let code = ws_stmt_get_col_fields(stmt, &mut col_fields_len, &mut col_fields);
             if code != 0 {
                 log::debug!(
                     "col_fields errstr: {}",
@@ -1734,13 +1794,13 @@ mod tests {
             } else {
                 let col_fields_rs = std::slice::from_raw_parts(col_fields, col_fields_len as _);
                 log::debug!("col_fields: {:?}", col_fields_rs);
-                ws_stmt_reclaim_fields(&mut col_fields, col_fields_len);
+                ws_stmt_reclaim_fields(stmt, &mut col_fields, col_fields_len);
                 log::trace!("col_fields after reclaim: {:?}", col_fields_rs);
             }
 
             ws_stmt_close(stmt);
 
-            ws_close(taos)
+            ws_close(taos);
         }
     }
 }
