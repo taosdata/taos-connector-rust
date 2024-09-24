@@ -9,6 +9,8 @@ all:
 
 basic:
 	gcc -g ws-basic.c ${WS_FLAGS} -o ./target/ws-basic && ./target/ws-basic
+cloud:
+	gcc -g ws-cloud.c ${WS_FLAGS} -o ./target/ws-cloud && ./target/ws-cloud
 
 interface:
 	gcc -g ws-interface.c ${WS_FLAGS} -o ./target/ws-interface && ./target/ws-interface
@@ -33,7 +35,7 @@ tmq-basic:
 tmq-all:
 	gcc -g ws-tmq-all.c ${WS_FLAGS} -o ./target/ws-tmq-all && ./target/ws-tmq-all	
 
-schemaless:
+sml:
 	gcc -g ws-schemaless.c ${WS_FLAGS} -o ./target/ws-schemaless && ./target/ws-schemaless
 
 errno:

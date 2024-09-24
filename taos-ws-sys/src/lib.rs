@@ -39,7 +39,7 @@ const EMPTY: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") };
 thread_local! {
     static C_ERROR_CONTAINER: RefCell<[u8; MAX_ERROR_MSG_LEN]> = RefCell::new([0; MAX_ERROR_MSG_LEN]);
     static C_ERRNO: RefCell<i32> = RefCell::new(0);
-    static REQ_ID: RefCell<u64> = RefCell::new(10);
+    static REQ_ID: RefCell<u64> = RefCell::new(1024);
 }
 
 fn get_err_code_fromated(err_code: i32) -> i32 {
@@ -1983,6 +1983,31 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn connect_cloud() {
+        use std::env;
+
+        let dsn = env::var("TDENGINE_CLOUD_DSN")
+            .expect("TDENGINE_CLOUD_DSN environment variable not set");
+
+        init_env();
+        unsafe {
+            // 将 Rust 的 String 转换为 CString
+            let c_dsn = CString::new(dsn).expect("CString::new failed");
+
+            let taos = ws_connect(c_dsn.as_ptr() as *const u8 as _);
+            if taos.is_null() {
+                let code = ws_errno(taos);
+                assert!(code != 0);
+                let str = ws_errstr(taos);
+                dbg!(CStr::from_ptr(str));
+            }
+            assert!(!taos.is_null());
+
+            let version = ws_get_server_info(taos);
+            dbg!(CStr::from_ptr(version as _));
+        }
+    }
 
     #[test]
     fn simple_fetch_row_test() {
@@ -2345,16 +2370,10 @@ mod tests {
                     ws_free_result(rs);
                 };
             }
-
+            execute!(b"drop database if exists schemaless_test\0");
             execute!(b"create database if not exists schemaless_test\0");
+            execute!(b"use schemaless_test\0");
 
-            let taos = ws_connect(b"http://localhost:6041/schemaless_test\0" as *const u8 as _);
-            if taos.is_null() {
-                let code = ws_errno(taos);
-                assert!(code != 0);
-                let str = ws_errstr(taos);
-                dbg!(CStr::from_ptr(str));
-            }
             assert!(!taos.is_null());
 
             let data = "meters,groupid=2,location=California.SanFrancisco current=10.3000002f64,voltage=219i32,phase=0.31f64 1626006833639";

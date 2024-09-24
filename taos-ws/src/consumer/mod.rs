@@ -2272,13 +2272,16 @@ mod tests {
     }
 
     #[cfg(feature = "rustls")]
+    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
     #[tokio::test]
     async fn test_consumer_cloud_conn() -> anyhow::Result<()> {
+        use std::env;
         use taos_query::prelude::*;
+
         std::env::set_var("RUST_LOG", "trace");
 
-        let dsn =
-            "https://gw.us-east-1.aws.cloud.tdengine.com?token=eee15c174a75bf4b5e1089b3087b1ec7fd7649f1";
+        let dsn = env::var("TDENGINE_CLOUD_DSN")
+            .expect("TDENGINE_CLOUD_DSN environment variable not set");
 
         let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
         let r = taos.server_version().await?;
