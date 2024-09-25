@@ -3,7 +3,11 @@ pub(super) use list::Topics;
 pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
-    use std::{ffi::CStr, sync::Arc, time::Duration};
+    use std::{
+        ffi::CStr,
+        sync::{Arc, OnceLock},
+        time::Duration,
+    };
     use taos_query::{
         tmq::{Assignment, VGroupId},
         RawError,
@@ -166,14 +170,26 @@ pub(super) mod tmq {
             use taos_query::prelude::tokio;
 
             let mut backoff = 0;
-            const MAX_BACKOFF: u64 = 2000;
+            const BACKOFF_STEP: u64 = 100;
+            const BACKOFF_LIMIT: u64 = 1000;
+            const DEFAULT_POLLING_INTERVAL: i64 = 0;
+
+            static TMQ_POLLING_INTERVAL: OnceLock<i64> = OnceLock::new();
+            let interval = TMQ_POLLING_INTERVAL.get_or_init(|| {
+                let interval = std::env::var("TMQ_POLLING_INTERVAL")
+                    .ok()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(DEFAULT_POLLING_INTERVAL);
+                tracing::trace!("tmq polling interval: {}", interval);
+                interval
+            });
             loop {
                 // res is cancellation safe since the memory is handled by the C library.
-                let res = unsafe { (self.tmq.tmq_consumer_poll)(self.as_ptr(), 0) };
+                let res = unsafe { (self.tmq.tmq_consumer_poll)(self.as_ptr(), *interval) };
                 if res.is_null() {
                     tokio::time::sleep(Duration::from_millis(backoff)).await;
-                    if backoff < MAX_BACKOFF {
-                        backoff += 50;
+                    if backoff < BACKOFF_LIMIT {
+                        backoff += BACKOFF_STEP;
                     }
                     continue;
                 } else {
