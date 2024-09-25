@@ -26,7 +26,7 @@ int main()
 
   WS_RES *rs = ws_query(taos, "show databases");
   int64_t timing = ws_take_timing(rs);
-  dprintf(2, "Query timing: %ldns\n", timing);
+  dprintf(2, "Query timing: %lldns\n", timing);
   int code = ws_errno(rs);
   if (code != 0)
   {
@@ -64,9 +64,9 @@ int main()
   {
     int rows = 0;
     const void *data = NULL;
-    code = ws_fetch_block(rs, &data, &rows);
+    code = ws_fetch_raw_block(rs, &data, &rows);
     int64_t timing = ws_take_timing(rs);
-    dprintf(2, "Fetch block timing: %ldns\n", timing);
+    dprintf(2, "Fetch block timing: %lldns\n", timing);
 
     if (rows == 0)
       break;
@@ -113,7 +113,7 @@ int main()
           printf(" %d ", *(int32_t *)value);
           break;
         case TSDB_DATA_TYPE_BIGINT:
-          printf(" %ld ", *(int64_t *)value);
+          printf(" %lld ", *(int64_t *)value);
           break;
         case TSDB_DATA_TYPE_UTINYINT:
           printf(" %d ", *(uint8_t *)value);
@@ -125,7 +125,7 @@ int main()
           printf(" %d ", *(uint32_t *)value);
           break;
         case TSDB_DATA_TYPE_UBIGINT:
-          printf(" %ld ", *(uint64_t *)value);
+          printf(" %lld ", *(uint64_t *)value);
           break;
         case TSDB_DATA_TYPE_FLOAT:
           printf(" %f ", *(float *)value);
@@ -135,7 +135,7 @@ int main()
           break;
         case TSDB_DATA_TYPE_TIMESTAMP:
           memset(tmp, 0, 4096);
-          ws_timestamp_to_rfc3339(tmp, *(int64_t *)value, precision, true);
+          ws_timestamp_to_rfc3339((uint8_t *)tmp, *(int64_t *)value, precision, true);
           printf("\"%s\"", (char *)tmp);
           break;
         case TSDB_DATA_TYPE_VARCHAR:

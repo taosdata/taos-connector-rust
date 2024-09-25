@@ -65,7 +65,7 @@ int main(int argc, char *argv[])
   {
     int rows = 0;
     const void *data = NULL;
-    code = ws_fetch_block(rs, &data, &rows);
+    code = ws_fetch_raw_block(rs, &data, &rows);
 
     if (rows == 0)
       break;
@@ -112,7 +112,7 @@ int main(int argc, char *argv[])
           printf(" %d ", *(int32_t *)value);
           break;
         case TSDB_DATA_TYPE_BIGINT:
-          printf(" %ld ", *(int64_t *)value);
+          printf(" %lld ", *(int64_t *)value);
           break;
         case TSDB_DATA_TYPE_UTINYINT:
           printf(" %d ", *(uint8_t *)value);
@@ -124,7 +124,7 @@ int main(int argc, char *argv[])
           printf(" %d ", *(uint32_t *)value);
           break;
         case TSDB_DATA_TYPE_UBIGINT:
-          printf(" %ld ", *(uint64_t *)value);
+          printf(" %lld ", *(uint64_t *)value);
           break;
         case TSDB_DATA_TYPE_FLOAT:
           printf(" %f ", *(float *)value);
@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
           break;
         case TSDB_DATA_TYPE_TIMESTAMP:
           memset(tmp, 0, 4096);
-          ws_timestamp_to_rfc3339(tmp, *(int64_t *)value, precision, true);
+          ws_timestamp_to_rfc3339((uint8_t *)tmp, *(int64_t *)value, precision, true);
           printf("\"%s\"", (char *)tmp);
           break;
         case TSDB_DATA_TYPE_VARCHAR:

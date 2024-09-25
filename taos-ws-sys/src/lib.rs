@@ -1718,8 +1718,8 @@ unsafe fn schemaless_insert_raw(
 
 #[cfg(test)]
 pub fn init_env() {
-    std::env::set_var("LIBTAOSWS_LOG_LEVEL", "debug");
-    unsafe { ws_enable_log("debug\0".as_ptr() as *const c_char) };
+    std::env::set_var("LIBTAOSWS_LOG_LEVEL", "info");
+    unsafe { ws_enable_log("info\0".as_ptr() as *const c_char) };
 }
 
 #[cfg(test)]
@@ -2023,7 +2023,7 @@ mod tests {
             }
             assert!(!taos.is_null());
 
-            let sql = b"select count(*) from test.meters;\0" as *const u8 as _;
+            let sql = b"show databases;\0" as *const u8 as _;
 
             let start = Instant::now();
             let rs = ws_query(taos, sql);
