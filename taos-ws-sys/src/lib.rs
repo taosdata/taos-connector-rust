@@ -39,7 +39,6 @@ const EMPTY: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") };
 thread_local! {
     static C_ERROR_CONTAINER: RefCell<[u8; MAX_ERROR_MSG_LEN]> = RefCell::new([0; MAX_ERROR_MSG_LEN]);
     static C_ERRNO: RefCell<i32> = RefCell::new(0);
-    static REQ_ID: RefCell<u64> = RefCell::new(1024);
 }
 
 fn get_err_code_fromated(err_code: i32) -> i32 {
@@ -92,14 +91,6 @@ unsafe fn clear_error_info() {
         container.borrow_mut()[..length].copy_from_slice(&bytes[..length]);
         container.borrow_mut()[length] = 0; // add c str last '\0'
     });
-}
-
-fn get_thread_local_reqid() -> u64 {
-    REQ_ID.with(|val| {
-        let current_value = *val.borrow();
-        *val.borrow_mut() = current_value + 1;
-        current_value
-    })
 }
 
 /// Opaque type definition for websocket connection.
@@ -884,7 +875,7 @@ pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_data_type(r#type: i32) -> *const c_char {
+pub extern "C" fn ws_data_type(r#type: i32) -> *const c_char {
     match Ty::from_u8_option(r#type as _) {
         Some(ty) => ty.tsdb_name(),
         None => std::ptr::null(),
@@ -951,6 +942,14 @@ pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) -> i32 {
     set_error_and_get_code(WsError::new(Code::INVALID_PARA, "taos is null"))
 }
 
+unsafe fn get_req_id(taos: *const WS_TAOS) -> u64 {
+    let reqid = match (taos as *const Taos).as_ref() {
+        Some(client) => client.get_req_id(),
+        None => return 0,
+    };
+    reqid
+}
+
 unsafe fn query_with_sql(
     taos: *mut WS_TAOS,
     sql: *const c_char,
@@ -985,7 +984,7 @@ unsafe fn query_with_sql_timeout(
 ///
 /// Please always use `ws_errno` to check it work and `ws_free_result` to free memory.
 pub unsafe extern "C" fn ws_query(taos: *mut WS_TAOS, sql: *const c_char) -> *mut WS_RES {
-    ws_query_with_reqid(taos, sql, get_thread_local_reqid())
+    ws_query_with_reqid(taos, sql, get_req_id(taos))
 }
 
 #[no_mangle]
@@ -1614,7 +1613,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw(
         protocal,
         precision,
         0,
-        get_thread_local_reqid(),
+        get_req_id(taos),
     );
 }
 
@@ -1651,7 +1650,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl(
         protocal,
         precision,
         ttl,
-        get_thread_local_reqid(),
+        get_req_id(taos),
     );
 }
 
@@ -2445,21 +2444,21 @@ mod tests {
     fn test_tsdb_type() {
         init_env();
         unsafe {
-            let type_null_str = taos_data_type(0);
+            let type_null_str = ws_data_type(0);
             let type_null_str = CStr::from_ptr(type_null_str);
             assert_eq!(
                 type_null_str,
                 CStr::from_bytes_with_nul(b"TSDB_DATA_TYPE_NULL\0").unwrap()
             );
 
-            let type_geo_str = taos_data_type(20);
+            let type_geo_str = ws_data_type(20);
             let type_geo_str = CStr::from_ptr(type_geo_str);
             assert_eq!(
                 type_geo_str,
                 CStr::from_bytes_with_nul(b"TSDB_DATA_TYPE_GEOMETRY\0").unwrap()
             );
 
-            let type_invalid = taos_data_type(100);
+            let type_invalid = ws_data_type(100);
             assert_eq!(type_invalid, std::ptr::null(),);
         }
     }
