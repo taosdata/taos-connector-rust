@@ -73,3 +73,11 @@ header = """
 trailer = """
 #endif
 """
+
+[export]
+include = [
+    "ws_tmq_conf_res_t",
+    "ws_tmq_res_t",
+    "WS_TSDB_SML_PROTOCOL_TYPE",
+    "WS_TSDB_SML_TIMESTAMP_TYPE",
+]

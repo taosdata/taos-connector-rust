@@ -93,6 +93,27 @@ unsafe fn clear_error_info() {
     });
 }
 
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub enum WS_TSDB_SML_PROTOCOL_TYPE {
+    WS_TSDB_SML_UNKNOWN_PROTOCOL = 0,
+    WS_TSDB_SML_LINE_PROTOCOL = 1,
+    WS_TSDB_SML_TELNET_PROTOCOL = 2,
+    WS_TSDB_SML_JSON_PROTOCOL = 3,
+}
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub enum WS_TSDB_SML_TIMESTAMP_TYPE {
+    WS_TSDB_SML_TIMESTAMP_NOT_CONFIGURED = 0,
+    WS_TSDB_SML_TIMESTAMP_HOURS,
+    WS_TSDB_SML_TIMESTAMP_MINUTES,
+    WS_TSDB_SML_TIMESTAMP_SECONDS,
+    WS_TSDB_SML_TIMESTAMP_MILLI_SECONDS,
+    WS_TSDB_SML_TIMESTAMP_MICRO_SECONDS,
+    WS_TSDB_SML_TIMESTAMP_NANO_SECONDS,
+}
+
 /// Opaque type definition for websocket connection.
 #[allow(non_camel_case_types)]
 pub type WS_TAOS = c_void;
@@ -2421,8 +2442,8 @@ mod tests {
             let len = data.len() as c_int;
 
             let _total_rows: *mut i32 = &mut 0;
-            let protocal = 1;
-            let precision = 4;
+            let protocal = WS_TSDB_SML_PROTOCOL_TYPE::WS_TSDB_SML_LINE_PROTOCOL as i32;
+            let precision = WS_TSDB_SML_TIMESTAMP_TYPE::WS_TSDB_SML_TIMESTAMP_MILLI_SECONDS as i32;
             let ttl = 0;
             let reqid = 123456u64;
             let rs = schemaless_insert_raw(
