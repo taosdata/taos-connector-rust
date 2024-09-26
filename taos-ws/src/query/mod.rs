@@ -44,6 +44,10 @@ impl Taos {
         self.client().version()
     }
 
+    pub fn get_req_id(&self) -> u64 {
+        self.client().get_req_id()
+    }
+
     fn client(&self) -> &WsTaos {
         &self.async_client
     }

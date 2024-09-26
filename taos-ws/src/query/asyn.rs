@@ -1206,6 +1206,10 @@ impl WsTaos {
     pub fn is_support_binary_sql(&self) -> bool {
         self.sender.version.is_support_binary_sql
     }
+
+    pub fn get_req_id(&self) -> ReqId {
+        self.sender.req_id()
+    }
 }
 
 impl ResultSet {

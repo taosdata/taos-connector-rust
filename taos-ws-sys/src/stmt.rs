@@ -53,7 +53,7 @@ unsafe fn stmt_init(taos: *const WS_TAOS, req_id: u64) -> WsResult<Stmt> {
 /// Create new stmt object.
 #[no_mangle]
 pub unsafe extern "C" fn ws_stmt_init(taos: *const WS_TAOS) -> *mut WS_STMT {
-    ws_stmt_init_with_reqid(taos, get_thread_local_reqid())
+    ws_stmt_init_with_reqid(taos, get_req_id(taos))
 }
 
 /// Create new stmt object with req_id.
