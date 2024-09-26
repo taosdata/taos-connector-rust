@@ -1988,7 +1988,7 @@ mod tests {
         use std::env;
 
         let dsn = env::var("TDENGINE_CLOUD_DSN")
-            .expect("TDENGINE_CLOUD_DSN environment variable not set");
+            .unwrap_or("http://localhost:6041".to_string());
 
         init_env();
         unsafe {
