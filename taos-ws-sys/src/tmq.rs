@@ -249,6 +249,7 @@ pub type ws_tmq_list_t = c_void;
 pub type ws_tmq_conf_t = c_void;
 
 #[no_mangle]
+/// Create a new TMQ configuration object.
 pub unsafe extern "C" fn ws_tmq_conf_new() -> *mut ws_tmq_conf_t {
     let tmq_conf: WsMaybeError<TmqConf> = TmqConf {
         hsmap: HashMap::new(),
@@ -313,6 +314,7 @@ unsafe fn tmq_conf_set(
 }
 
 #[no_mangle]
+/// Set a configuration property for the TMQ configuration object.
 pub unsafe extern "C" fn ws_tmq_conf_set(
     conf: *mut ws_tmq_conf_t,
     key: *const c_char,
@@ -332,6 +334,7 @@ pub unsafe extern "C" fn ws_tmq_conf_set(
 }
 
 #[no_mangle]
+/// Destroy the TMQ configuration object.
 pub unsafe extern "C" fn ws_tmq_conf_destroy(conf: *mut ws_tmq_conf_t) -> i32 {
     if !conf.is_null() {
         let _boxed_conf = Box::from_raw(conf as *mut WsMaybeError<TmqConf>);
@@ -341,6 +344,7 @@ pub unsafe extern "C" fn ws_tmq_conf_destroy(conf: *mut ws_tmq_conf_t) -> i32 {
 }
 
 #[no_mangle]
+/// Create a new TMQ topic list object.
 pub unsafe extern "C" fn ws_tmq_list_new() -> *mut ws_tmq_list_t {
     let tmq_list: WsMaybeError<WsTmqList> = WsTmqList { topics: Vec::new() }.into();
     Box::into_raw(Box::new(tmq_list)) as _
@@ -370,18 +374,20 @@ unsafe fn tmq_list_append(list: *mut ws_tmq_list_t, src: *const c_char) -> WsRes
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ws_tmq_list_append(list: *mut ws_tmq_list_t, src: *const c_char) -> i32 {
-    if list.is_null() || src.is_null() {
+/// Append a topic to the TMQ topic list.
+pub unsafe extern "C" fn ws_tmq_list_append(list: *mut ws_tmq_list_t, topic: *const c_char) -> i32 {
+    if list.is_null() || topic.is_null() {
         return get_err_code_fromated(Code::OBJECT_IS_NULL.into());
     }
 
-    match tmq_list_append(list, src) {
+    match tmq_list_append(list, topic) {
         Ok(_) => Code::SUCCESS.into(),
         Err(e) => set_error_and_get_code(e),
     }
 }
 
 #[no_mangle]
+/// Destroy the TMQ topic list object.
 pub unsafe extern "C" fn ws_tmq_list_destroy(list: *mut ws_tmq_list_t) -> i32 {
     if !list.is_null() {
         let _boxed_conf = Box::from_raw(list as *mut WsMaybeError<WsTmqList>);
@@ -391,6 +397,7 @@ pub unsafe extern "C" fn ws_tmq_list_destroy(list: *mut ws_tmq_list_t) -> i32 {
 }
 
 #[no_mangle]
+///  Get the size of the TMQ topic list.
 pub unsafe extern "C" fn ws_tmq_list_get_size(list: *mut ws_tmq_list_t) -> i32 {
     match (list as *mut WsMaybeError<WsTmqList>)
         .as_mut()
@@ -402,6 +409,7 @@ pub unsafe extern "C" fn ws_tmq_list_get_size(list: *mut ws_tmq_list_t) -> i32 {
 }
 
 #[no_mangle]
+/// Convert the TMQ topic list to a C array.
 pub unsafe extern "C" fn ws_tmq_list_to_c_array(
     list: *const ws_tmq_list_t,
     topic_num: *mut u32,
@@ -439,6 +447,7 @@ pub unsafe extern "C" fn ws_tmq_list_to_c_array(
 }
 
 #[no_mangle]
+/// Free the C array of topic strings.
 pub unsafe extern "C" fn ws_tmq_list_free_c_array(
     c_str_arry: *mut *mut c_char,
     topic_num: u32,
@@ -506,6 +515,7 @@ unsafe fn tmq_consumer_new(conf: *mut ws_tmq_conf_t, dsn: *const c_char) -> WsRe
 }
 
 #[no_mangle]
+/// Create a new TMQ consumer.
 pub unsafe extern "C" fn ws_tmq_consumer_new(
     conf: *mut ws_tmq_conf_t,
     dsn: *const c_char,
@@ -532,6 +542,7 @@ pub unsafe extern "C" fn ws_tmq_consumer_new(
 }
 
 #[no_mangle]
+/// Close the TMQ consumer.
 pub unsafe extern "C" fn ws_tmq_consumer_close(tmq: *mut ws_tmq_t) -> i32 {
     if tmq.is_null() {
         return get_err_code_fromated(Code::INVALID_PARA.into());
@@ -542,6 +553,7 @@ pub unsafe extern "C" fn ws_tmq_consumer_close(tmq: *mut ws_tmq_t) -> i32 {
 }
 
 #[no_mangle]
+/// Subscribe the TMQ consumer to a list of topics.
 pub unsafe extern "C" fn ws_tmq_subscribe(
     tmq: *mut ws_tmq_t,
     topic_list: *const ws_tmq_list_t,
@@ -582,6 +594,7 @@ pub unsafe extern "C" fn ws_tmq_subscribe(
 }
 
 #[no_mangle]
+/// Unsubscribe the TMQ consumer from all topics.
 pub unsafe extern "C" fn ws_tmq_unsubscribe(tmq: *mut ws_tmq_t) -> i32 {
     if tmq.is_null() {
         return get_err_code_fromated(Code::INVALID_PARA.into());
@@ -651,6 +664,7 @@ unsafe fn tmq_consumer_poll(tmq: *mut ws_tmq_t, timeout: i64) -> WsResult<Option
 }
 
 #[no_mangle]
+/// Poll the TMQ consumer for messages.
 pub unsafe extern "C" fn ws_tmq_consumer_poll(tmq: *mut ws_tmq_t, timeout: i64) -> *mut WS_RES {
     if tmq.is_null() {
         set_error_and_get_code(WsError::new(Code::INVALID_PARA, "invalid tmq Object"));
@@ -672,6 +686,7 @@ pub unsafe extern "C" fn ws_tmq_consumer_poll(tmq: *mut ws_tmq_t, timeout: i64) 
 }
 
 #[no_mangle]
+/// Get the topic name from the result object.
 pub unsafe extern "C" fn ws_tmq_get_topic_name(rs: *const WS_RES) -> *const c_char {
     if rs.is_null() {
         return std::ptr::null();
@@ -687,6 +702,7 @@ pub unsafe extern "C" fn ws_tmq_get_topic_name(rs: *const WS_RES) -> *const c_ch
 }
 
 #[no_mangle]
+/// Get the database name from the result object.
 pub unsafe extern "C" fn ws_tmq_get_db_name(rs: *const WS_RES) -> *const c_char {
     if rs.is_null() {
         return std::ptr::null();
@@ -702,6 +718,7 @@ pub unsafe extern "C" fn ws_tmq_get_db_name(rs: *const WS_RES) -> *const c_char 
 }
 
 #[no_mangle]
+/// Get the table name from the result object.
 pub unsafe extern "C" fn ws_tmq_get_table_name(rs: *const WS_RES) -> *const c_char {
     if rs.is_null() {
         return std::ptr::null();
@@ -717,6 +734,7 @@ pub unsafe extern "C" fn ws_tmq_get_table_name(rs: *const WS_RES) -> *const c_ch
 }
 
 #[no_mangle]
+/// Get the vgroup ID from the result object.
 pub unsafe extern "C" fn ws_tmq_get_vgroup_id(rs: *const WS_RES) -> i32 {
     if rs.is_null() {
         return get_err_code_fromated(Code::INVALID_PARA.into());
@@ -731,6 +749,7 @@ pub unsafe extern "C" fn ws_tmq_get_vgroup_id(rs: *const WS_RES) -> i32 {
     }
 }
 #[no_mangle]
+/// Get the vgroup offset from the result object.
 pub unsafe extern "C" fn ws_tmq_get_vgroup_offset(rs: *const WS_RES) -> i64 {
     if rs.is_null() {
         return get_err_code_fromated(Code::INVALID_PARA.into()) as _;
@@ -748,6 +767,7 @@ pub unsafe extern "C" fn ws_tmq_get_vgroup_offset(rs: *const WS_RES) -> i64 {
 }
 
 #[no_mangle]
+/// Get the result type from the result object.
 pub unsafe extern "C" fn ws_tmq_get_res_type(rs: *const WS_RES) -> ws_tmq_res_t {
     if rs.is_null() {
         return ws_tmq_res_t::WS_TMQ_RES_INVALID;
@@ -757,6 +777,7 @@ pub unsafe extern "C" fn ws_tmq_get_res_type(rs: *const WS_RES) -> ws_tmq_res_t 
 
 #[no_mangle]
 #[allow(non_snake_case, unused_variables)]
+/// Get the topic assignment for the TMQ consumer.
 pub unsafe extern "C" fn ws_tmq_get_topic_assignment(
     tmq: *mut ws_tmq_t,
     pTopicName: *const c_char,
@@ -807,12 +828,13 @@ pub unsafe extern "C" fn ws_tmq_get_topic_assignment(
 
 #[no_mangle]
 #[allow(non_snake_case, unused_variables)]
+/// Free the topic assignment.
 pub unsafe extern "C" fn ws_tmq_free_assignment(
-    assignment: *mut ws_tmq_topic_assignment,
+    pAssignment: *mut ws_tmq_topic_assignment,
     numOfAssignment: i32,
 ) -> i32 {
     let _ = Vec::from_raw_parts(
-        assignment,
+        pAssignment,
         numOfAssignment as usize,
         numOfAssignment as usize,
     );
@@ -854,6 +876,7 @@ unsafe fn tmq_commit_sync(tmq: *mut ws_tmq_t, rs: *const WS_RES) -> WsResult<()>
     }
 }
 #[no_mangle]
+/// Commit the current offset synchronously.
 pub unsafe extern "C" fn ws_tmq_commit_sync(tmq: *mut ws_tmq_t, rs: *const WS_RES) -> i32 {
     if tmq.is_null() {
         return set_error_and_get_code(WsError::new(Code::INVALID_PARA, "invalid tmq Object"));
@@ -866,6 +889,7 @@ pub unsafe extern "C" fn ws_tmq_commit_sync(tmq: *mut ws_tmq_t, rs: *const WS_RE
 }
 
 #[no_mangle]
+/// Commit a specific topic and vgroup offset synchronously.
 pub unsafe extern "C" fn ws_tmq_commit_offset_sync(
     tmq: *mut ws_tmq_t,
     #[allow(non_snake_case)] pTopicName: *const c_char,
@@ -916,6 +940,7 @@ pub unsafe extern "C" fn ws_tmq_commit_offset_sync(
 }
 
 #[no_mangle]
+/// Get the committed offset for a specific topic and vgroup.
 pub unsafe extern "C" fn ws_tmq_committed(
     tmq: *mut ws_tmq_t,
     #[allow(non_snake_case)] pTopicName: *const c_char,
@@ -966,6 +991,7 @@ pub unsafe extern "C" fn ws_tmq_committed(
 }
 
 #[no_mangle]
+/// Seek to a specific offset for a specific topic and vgroup.
 pub unsafe extern "C" fn ws_tmq_offset_seek(
     tmq: *mut ws_tmq_t,
     #[allow(non_snake_case)] pTopicName: *const c_char,
@@ -1017,6 +1043,7 @@ pub unsafe extern "C" fn ws_tmq_offset_seek(
 }
 
 #[no_mangle]
+/// Get the current position for a specific topic and vgroup.
 pub unsafe extern "C" fn ws_tmq_position(
     tmq: *mut ws_tmq_t,
     #[allow(non_snake_case)] pTopicName: *const c_char,
@@ -1150,7 +1177,7 @@ mod tests {
 
             let consumer = ws_tmq_consumer_new(
                 conf,
-                b"taos://localhost:6041\0" as *const u8 as *const c_char,
+                b"tmq+ws://root:taosdata@localhost:6041\0" as *const u8 as *const c_char,
                 std::ptr::null_mut(),
                 0,
             );

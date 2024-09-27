@@ -2007,8 +2007,7 @@ mod tests {
     fn connect_cloud() {
         use std::env;
 
-        let dsn = env::var("TDENGINE_CLOUD_DSN")
-            .unwrap_or("http://localhost:6041".to_string());
+        let dsn = env::var("TDENGINE_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
 
         init_env();
         unsafe {
