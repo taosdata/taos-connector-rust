@@ -609,7 +609,7 @@ mod async_tests {
     #[tokio::test]
     async fn test_ws_tmq_meta() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(log::LevelFilter::Debug)
+        //     .filter_level(tracing::LevelFilter::Debug)
         //     .init();
         use taos_query::prelude::*;
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos+ws://localhost:6041".to_string());
@@ -782,13 +782,13 @@ mod async_tests {
     #[ignore]
     async fn test_tmq() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(log::LevelFilter::Info)
+        //     .filter_level(tracing::LevelFilter::Info)
         //     .init();
 
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = "taos://localhost:6030".to_string();
-        log::info!("dsn: {}", dsn);
+        tracing::info!("dsn: {}", dsn);
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
@@ -885,7 +885,7 @@ mod async_tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
                     topic,
                     database,
@@ -898,7 +898,7 @@ mod async_tests {
                 // 2. data
                 match message {
                     MessageSet::Meta(meta) => {
-                        log::debug!("Meta");
+                        tracing::debug!("Meta");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -910,15 +910,15 @@ mod async_tests {
                         }
                     }
                     MessageSet::Data(data) => {
-                        log::debug!("Data");
+                        tracing::debug!("Data");
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
-                        log::debug!("MetaData");
+                        tracing::debug!("MetaData");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -930,8 +930,8 @@ mod async_tests {
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                 }
@@ -940,7 +940,7 @@ mod async_tests {
         }
 
         let assignments = consumer.assignments().await.unwrap();
-        log::debug!("assignments: {:?}", assignments);
+        tracing::debug!("assignments: {:?}", assignments);
 
         // seek offset
         for topic_vec_assignment in assignments {
@@ -951,7 +951,7 @@ mod async_tests {
                 let current = assignment.current_offset();
                 let begin = assignment.begin();
                 let end = assignment.end();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
                     topic,
                     vgroup_id,
@@ -961,20 +961,20 @@ mod async_tests {
                 );
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
                 if res.is_err() {
-                    log::error!("seek offset error: {:?}", res);
+                    tracing::error!("seek offset error: {:?}", res);
                     let a = consumer.assignments().await.unwrap();
-                    log::error!("assignments: {:?}", a);
+                    tracing::error!("assignments: {:?}", a);
                     // panic!()
                 }
             }
 
             let topic_assignment = consumer.topic_assignment(topic).await;
-            log::debug!("topic assignment: {:?}", topic_assignment);
+            tracing::debug!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset
         let assignments = consumer.assignments().await.unwrap();
-        log::debug!("after seek offset assignments: {:?}", assignments);
+        tracing::debug!("after seek offset assignments: {:?}", assignments);
 
         consumer.unsubscribe().await;
 
@@ -993,13 +993,13 @@ mod async_tests {
     #[ignore]
     async fn test_tmq_offset() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(log::LevelFilter::Info)
+        //     .filter_level(tracing::LevelFilter::Info)
         //     .init();
 
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = "tmq://localhost:6030?offset=10:20,11:40".to_string();
-        log::info!("dsn: {}", dsn);
+        tracing::info!("dsn: {}", dsn);
         let mut dsn = Dsn::from_str(&dsn)?;
         // dbg!(&dsn);
 
@@ -1099,7 +1099,7 @@ mod async_tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
                     topic,
                     database,
@@ -1112,7 +1112,7 @@ mod async_tests {
                 // 2. data
                 match message {
                     MessageSet::Meta(meta) => {
-                        log::debug!("Meta");
+                        tracing::debug!("Meta");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1124,15 +1124,15 @@ mod async_tests {
                         }
                     }
                     MessageSet::Data(data) => {
-                        log::debug!("Data");
+                        tracing::debug!("Data");
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
-                        log::debug!("MetaData");
+                        tracing::debug!("MetaData");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1144,8 +1144,8 @@ mod async_tests {
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                 }
@@ -1154,7 +1154,7 @@ mod async_tests {
         }
 
         let assignments = consumer.assignments().await.unwrap();
-        log::debug!("assignments: {:?}", assignments);
+        tracing::debug!("assignments: {:?}", assignments);
 
         // seek offset
         for topic_vec_assignment in assignments {
@@ -1165,7 +1165,7 @@ mod async_tests {
                 let current = assignment.current_offset();
                 let begin = assignment.begin();
                 let end = assignment.end();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
                     topic,
                     vgroup_id,
@@ -1175,20 +1175,20 @@ mod async_tests {
                 );
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
                 if res.is_err() {
-                    log::error!("seek offset error: {:?}", res);
+                    tracing::error!("seek offset error: {:?}", res);
                     let a = consumer.assignments().await.unwrap();
-                    log::error!("assignments: {:?}", a);
+                    tracing::error!("assignments: {:?}", a);
                     // panic!()
                 }
             }
 
             let topic_assignment = consumer.topic_assignment(topic).await;
-            log::debug!("topic assignment: {:?}", topic_assignment);
+            tracing::debug!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset
         let assignments = consumer.assignments().await.unwrap();
-        log::debug!("after seek offset assignments: {:?}", assignments);
+        tracing::debug!("after seek offset assignments: {:?}", assignments);
 
         consumer.unsubscribe().await;
 
@@ -1206,13 +1206,13 @@ mod async_tests {
     #[tokio::test]
     async fn test_ws_tmq() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
-        // .filter_level(log::LevelFilter::Info)
+        // .filter_level(tracing::LevelFilter::Info)
         // .init();
 
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = "taosws://localhost:6041".to_string();
-        log::info!("dsn: {}", dsn);
+        tracing::info!("dsn: {}", dsn);
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
@@ -1284,7 +1284,7 @@ mod async_tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
                     topic,
                     database,
@@ -1297,7 +1297,7 @@ mod async_tests {
                 // 2. data
                 match message {
                     MessageSet::Meta(meta) => {
-                        log::debug!("Meta");
+                        tracing::debug!("Meta");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1306,19 +1306,19 @@ mod async_tests {
                         let sql = json.iter().next().unwrap().to_string();
                         // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
-                            log::error!("meta error: {}", err);
+                            tracing::error!("meta error: {}", err);
                         }
                     }
                     MessageSet::Data(data) => {
-                        log::debug!("Data");
+                        tracing::debug!("Data");
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
-                        log::debug!("MetaData");
+                        tracing::debug!("MetaData");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1330,8 +1330,8 @@ mod async_tests {
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                 }
@@ -1341,7 +1341,7 @@ mod async_tests {
 
         let assignments = consumer.assignments().await.unwrap();
         // dbg!(&assignments);
-        log::info!("assignments: {:?}", assignments);
+        tracing::info!("assignments: {:?}", assignments);
 
         // seek offset
         for topic_vec_assignment in assignments {
@@ -1352,7 +1352,7 @@ mod async_tests {
                 let current = assignment.current_offset();
                 let begin = assignment.begin();
                 let end = assignment.end();
-                log::info!(
+                tracing::info!(
                     "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
                     topic,
                     vgroup_id,
@@ -1362,20 +1362,20 @@ mod async_tests {
                 );
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
                 if res.is_err() {
-                    log::error!("seek offset error: {:?}", res);
+                    tracing::error!("seek offset error: {:?}", res);
                     let a = consumer.assignments().await.unwrap();
-                    log::error!("assignments: {:?}", a);
+                    tracing::error!("assignments: {:?}", a);
                     // panic!()
                 }
             }
 
             let topic_assignment = consumer.topic_assignment(topic).await;
-            log::info!("topic assignment: {:?}", topic_assignment);
+            tracing::info!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset
         let assignments = consumer.assignments().await.unwrap();
-        log::info!("after seek offset assignments: {:?}", assignments);
+        tracing::info!("after seek offset assignments: {:?}", assignments);
 
         consumer.unsubscribe().await;
 
@@ -1393,13 +1393,13 @@ mod async_tests {
     #[tokio::test]
     async fn test_ws_raw_block_table_name() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
-        // .filter_level(log::LevelFilter::Info)
+        // .filter_level(tracing::LevelFilter::Info)
         // .init();
 
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = "taosws://localhost:6041".to_string();
-        log::info!("dsn: {}", dsn);
+        tracing::info!("dsn: {}", dsn);
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
@@ -1465,7 +1465,7 @@ mod async_tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
                     topic,
                     database,
@@ -1474,7 +1474,7 @@ mod async_tests {
 
                 match message {
                     MessageSet::Meta(meta) => {
-                        log::debug!("Meta");
+                        tracing::debug!("Meta");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1482,16 +1482,16 @@ mod async_tests {
                         let sql = json.iter().next().unwrap().to_string();
                         // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
-                            log::error!("meta error: {}", err);
+                            tracing::error!("meta error: {}", err);
                         }
                     }
                     MessageSet::Data(data) => {
-                        log::info!("Data");
+                        tracing::info!("Data");
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::info!("table_name: {:?}", data.table_name());
+                            tracing::info!("table_name: {:?}", data.table_name());
                             assert_eq!(data.table_name(), Some("tb0"));
-                            log::info!("data: {}", data.pretty_format());
+                            tracing::info!("data: {}", data.pretty_format());
                             assert!(data
                                 .pretty_format()
                                 .to_string()
@@ -1499,7 +1499,7 @@ mod async_tests {
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
-                        log::info!("MetaData");
+                        tracing::info!("MetaData");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1511,8 +1511,8 @@ mod async_tests {
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::info!("MetaData table_name: {:?}", data.table_name());
-                            log::info!("MetaData data: {:?}", data);
+                            tracing::info!("MetaData table_name: {:?}", data.table_name());
+                            tracing::info!("MetaData data: {:?}", data);
                         }
                     }
                 }
@@ -1536,13 +1536,13 @@ mod async_tests {
     #[tokio::test]
     async fn test_ws_flush_db() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
-        // .filter_level(log::LevelFilter::Info)
+        // .filter_level(tracing::LevelFilter::Info)
         // .init();
 
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = "taosws://localhost:6041".to_string();
-        log::info!("dsn: {}", dsn);
+        tracing::info!("dsn: {}", dsn);
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
@@ -1654,7 +1654,7 @@ mod async_tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
                     topic,
                     database,
@@ -1667,7 +1667,7 @@ mod async_tests {
                 // 2. data
                 match message {
                     MessageSet::Meta(meta) => {
-                        log::debug!("Meta");
+                        tracing::debug!("Meta");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1676,19 +1676,19 @@ mod async_tests {
                         let sql = json.iter().next().unwrap().to_string();
                         // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
-                            log::error!("maybe error: {}", err);
+                            tracing::error!("maybe error: {}", err);
                         }
                     }
                     MessageSet::Data(data) => {
-                        log::debug!("Data");
+                        tracing::debug!("Data");
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
-                        log::debug!("MetaData");
+                        tracing::debug!("MetaData");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1700,8 +1700,8 @@ mod async_tests {
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                 }
@@ -1711,7 +1711,7 @@ mod async_tests {
 
         let assignments = consumer.assignments().await.unwrap();
         // dbg!(&assignments);
-        log::info!("assignments: {:?}", assignments);
+        tracing::info!("assignments: {:?}", assignments);
 
         // seek offset
         for topic_vec_assignment in assignments {
@@ -1722,7 +1722,7 @@ mod async_tests {
                 let current = assignment.current_offset();
                 let begin = assignment.begin();
                 let end = assignment.end();
-                log::info!(
+                tracing::info!(
                     "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
                     topic,
                     vgroup_id,
@@ -1732,20 +1732,20 @@ mod async_tests {
                 );
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
                 if res.is_err() {
-                    log::error!("seek offset error: {:?}", res);
+                    tracing::error!("seek offset error: {:?}", res);
                     let a = consumer.assignments().await.unwrap();
-                    log::error!("assignments: {:?}", a);
+                    tracing::error!("assignments: {:?}", a);
                     // panic!()
                 }
             }
 
             let topic_assignment = consumer.topic_assignment(topic).await;
-            log::info!("topic assignment: {:?}", topic_assignment);
+            tracing::info!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset
         let assignments = consumer.assignments().await.unwrap();
-        log::info!("after seek offset assignments: {:?}", assignments);
+        tracing::info!("after seek offset assignments: {:?}", assignments);
 
         consumer.unsubscribe().await;
 
@@ -1768,7 +1768,7 @@ mod async_tests {
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = "taosws://localhost:6041".to_string();
-        log::info!("dsn: {}", dsn);
+        tracing::info!("dsn: {}", dsn);
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
@@ -1874,7 +1874,7 @@ mod async_tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
                     topic,
                     database,
@@ -1887,7 +1887,7 @@ mod async_tests {
                 // 2. data
                 match message {
                     MessageSet::Meta(meta) => {
-                        log::debug!("Meta");
+                        tracing::debug!("Meta");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1896,19 +1896,19 @@ mod async_tests {
                         let sql = json.iter().next().unwrap().to_string();
                         // dbg!(&sql);
                         if let Err(err) = taos.exec(sql).await {
-                            log::debug!("maybe error: {}", err);
+                            tracing::debug!("maybe error: {}", err);
                         }
                     }
                     MessageSet::Data(data) => {
-                        log::debug!("Data");
+                        tracing::debug!("Data");
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
-                        log::debug!("MetaData");
+                        tracing::debug!("MetaData");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -1920,8 +1920,8 @@ mod async_tests {
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                 }
@@ -1931,7 +1931,7 @@ mod async_tests {
 
         let assignments = consumer.assignments().await.unwrap();
         dbg!(&assignments);
-        log::info!("assignments: {:?}", assignments);
+        tracing::info!("assignments: {:?}", assignments);
 
         // seek offset
         for topic_vec_assignment in assignments {
@@ -1942,7 +1942,7 @@ mod async_tests {
                 let current = assignment.current_offset();
                 let begin = assignment.begin();
                 let end = assignment.end();
-                log::info!(
+                tracing::info!(
                     "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
                     topic,
                     vgroup_id,
@@ -1952,20 +1952,20 @@ mod async_tests {
                 );
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
                 if res.is_err() {
-                    log::error!("seek offset error: {:?}", res);
+                    tracing::error!("seek offset error: {:?}", res);
                     let a = consumer.assignments().await.unwrap();
-                    log::error!("assignments: {:?}", a);
+                    tracing::error!("assignments: {:?}", a);
                     // panic!()
                 }
             }
 
             let topic_assignment = consumer.topic_assignment(topic).await;
-            log::info!("topic assignment: {:?}", topic_assignment);
+            tracing::info!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset
         let assignments = consumer.assignments().await.unwrap();
-        log::info!("after seek offset assignments: {:?}", assignments);
+        tracing::info!("after seek offset assignments: {:?}", assignments);
 
         consumer.unsubscribe().await;
 
@@ -1982,13 +1982,13 @@ mod async_tests {
     #[tokio::test]
     async fn test_ws_tmq_offset() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(log::LevelFilter::Info)
+        //     .filter_level(tracing::LevelFilter::Info)
         //     .init();
 
         use taos_query::prelude::*;
         // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = "tmq+ws://localhost:6041?offset=10:20,11:40".to_string();
-        log::info!("dsn: {}", dsn);
+        tracing::info!("dsn: {}", dsn);
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
@@ -2099,7 +2099,7 @@ mod async_tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
                     topic,
                     database,
@@ -2112,7 +2112,7 @@ mod async_tests {
                 // 2. data
                 match message {
                     MessageSet::Meta(meta) => {
-                        log::debug!("Meta");
+                        tracing::debug!("Meta");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -2124,15 +2124,15 @@ mod async_tests {
                         }
                     }
                     MessageSet::Data(data) => {
-                        log::debug!("Data");
+                        tracing::debug!("Data");
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
-                        log::debug!("MetaData");
+                        tracing::debug!("MetaData");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -2144,8 +2144,8 @@ mod async_tests {
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                 }
@@ -2154,7 +2154,7 @@ mod async_tests {
         }
 
         let assignments = consumer.assignments().await.unwrap();
-        log::debug!("assignments: {:?}", assignments);
+        tracing::debug!("assignments: {:?}", assignments);
 
         // seek offset
         for topic_vec_assignment in assignments {
@@ -2165,7 +2165,7 @@ mod async_tests {
                 let current = assignment.current_offset();
                 let begin = assignment.begin();
                 let end = assignment.end();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
                     topic,
                     vgroup_id,
@@ -2175,20 +2175,20 @@ mod async_tests {
                 );
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
                 if res.is_err() {
-                    log::error!("seek offset error: {:?}", res);
+                    tracing::error!("seek offset error: {:?}", res);
                     let a = consumer.assignments().await.unwrap();
-                    log::error!("assignments: {:?}", a);
+                    tracing::error!("assignments: {:?}", a);
                     // panic!()
                 }
             }
 
             let topic_assignment = consumer.topic_assignment(topic).await;
-            log::debug!("topic assignment: {:?}", topic_assignment);
+            tracing::debug!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset
         let assignments = consumer.assignments().await.unwrap();
-        log::debug!("after seek offset assignments: {:?}", assignments);
+        tracing::debug!("after seek offset assignments: {:?}", assignments);
 
         consumer.unsubscribe().await;
 
@@ -2206,13 +2206,13 @@ mod async_tests {
     #[tokio::test]
     async fn test_ws_tmq_committed() -> taos_query::RawResult<()> {
         // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(log::LevelFilter::Info)
+        //     .filter_level(tracing::LevelFilter::Info)
         //     .init();
 
         use taos_query::prelude::*;
 
         let dsn = "tmq+ws://localhost:6041?".to_string();
-        log::info!("dsn: {}", dsn);
+        tracing::info!("dsn: {}", dsn);
         let mut dsn = Dsn::from_str(&dsn)?;
 
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
@@ -2313,10 +2313,10 @@ mod async_tests {
         let mut consumer = builder.build().await?;
 
         let topics = consumer.list_topics().await?;
-        log::info!("topics: {:?}", topics);
+        tracing::info!("topics: {:?}", topics);
         consumer.subscribe([db]).await?;
         let topics = consumer.list_topics().await?;
-        log::info!("topics: {:?}", topics);
+        tracing::info!("topics: {:?}", topics);
 
         {
             let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
@@ -2327,7 +2327,7 @@ mod async_tests {
                 let topic: &str = offset.topic();
                 let database = offset.database();
                 let vgroup_id = offset.vgroup_id();
-                log::debug!(
+                tracing::debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
                     topic,
                     database,
@@ -2340,7 +2340,7 @@ mod async_tests {
                 // 2. data
                 match message {
                     MessageSet::Meta(meta) => {
-                        log::debug!("Meta");
+                        tracing::debug!("Meta");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -2348,19 +2348,19 @@ mod async_tests {
                         let json = meta.as_json_meta().await?;
                         let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
-                            log::trace!("maybe error: {}", err);
+                            tracing::trace!("maybe error: {}", err);
                         }
                     }
                     MessageSet::Data(data) => {
-                        log::debug!("Data");
+                        tracing::debug!("Data");
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                     MessageSet::MetaData(meta, data) => {
-                        log::debug!("MetaData");
+                        tracing::debug!("MetaData");
                         let raw = meta.as_raw_meta().await?;
                         taos.write_raw_meta(&raw).await?;
 
@@ -2372,8 +2372,8 @@ mod async_tests {
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
-                            log::debug!("table_name: {:?}", data.table_name());
-                            log::debug!("data: {:?}", data);
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
                         }
                     }
                 }
@@ -2382,7 +2382,7 @@ mod async_tests {
         }
 
         let assignments = consumer.assignments().await.unwrap();
-        log::info!("assignments: {:?}", assignments);
+        tracing::info!("assignments: {:?}", assignments);
 
         // seek offset
         for topic_vec_assignment in assignments {
@@ -2393,7 +2393,7 @@ mod async_tests {
                 let current = assignment.current_offset();
                 let begin = assignment.begin();
                 let end = assignment.end();
-                log::info!(
+                tracing::info!(
                     "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
                     topic,
                     vgroup_id,
@@ -2403,43 +2403,43 @@ mod async_tests {
                 );
 
                 let committed = consumer.committed(topic, vgroup_id).await?;
-                log::info!("committed: {:?}", committed);
+                tracing::info!("committed: {:?}", committed);
 
                 let position = consumer.position(topic, vgroup_id).await?;
-                log::info!("position: {:?}", position);
+                tracing::info!("position: {:?}", position);
 
                 let res = consumer.offset_seek(topic, vgroup_id, end).await;
                 if res.is_err() {
-                    log::error!("seek offset error: {:?}", res);
+                    tracing::error!("seek offset error: {:?}", res);
                     let a = consumer.assignments().await.unwrap();
-                    log::error!("assignments: {:?}", a);
+                    tracing::error!("assignments: {:?}", a);
                 }
 
                 let committed = consumer.committed(topic, vgroup_id).await?;
-                log::info!("after seek committed: {:?}", committed);
+                tracing::info!("after seek committed: {:?}", committed);
 
                 let position = consumer.position(topic, vgroup_id).await?;
-                log::info!("after seek position: {:?}", position);
+                tracing::info!("after seek position: {:?}", position);
 
                 let res = consumer.commit_offset(topic, vgroup_id, end).await;
                 if res.is_err() {
-                    log::error!("commit offset response: {:?}", res);
+                    tracing::error!("commit offset response: {:?}", res);
                 }
 
                 let committed = consumer.committed(topic, vgroup_id).await?;
-                log::info!("after commit committed: {:?}", committed);
+                tracing::info!("after commit committed: {:?}", committed);
 
                 let position = consumer.position(topic, vgroup_id).await?;
-                log::info!("after commit position: {:?}", position);
+                tracing::info!("after commit position: {:?}", position);
             }
 
             let topic_assignment = consumer.topic_assignment(topic).await;
-            log::info!("topic assignment: {:?}", topic_assignment);
+            tracing::info!("topic assignment: {:?}", topic_assignment);
         }
 
         // after seek offset
         let assignments = consumer.assignments().await.unwrap();
-        log::debug!("after seek offset assignments: {:?}", assignments);
+        tracing::debug!("after seek offset assignments: {:?}", assignments);
 
         consumer.unsubscribe().await;
 
@@ -2466,14 +2466,14 @@ mod tmq_deflate_tests {
     // #[tokio::test]
     // async fn test_ws_tmq_deflate() -> taos_query::RawResult<()> {
     //     // pretty_env_logger::formatted_timed_builder()
-    //     //     .filter_level(log::LevelFilter::Info)
+    //     //     .filter_level(tracing::LevelFilter::Info)
     //     //     .init();
 
     //     use std::str::FromStr;
     //     use taos_query::prelude::*;
 
     //     let dsn = "tmq+ws://localhost:6041?".to_string();
-    //     log::trace!("dsn: {}", dsn);
+    //     tracing::trace!("dsn: {}", dsn);
     //     let mut dsn = Dsn::from_str(&dsn)?;
 
     //     let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
@@ -2575,10 +2575,10 @@ mod tmq_deflate_tests {
     //     let mut consumer = builder.build().await?;
 
     //     let topics = consumer.list_topics().await?;
-    //     log::info!("topics: {:?}", topics);
+    //     tracing::info!("topics: {:?}", topics);
     //     consumer.subscribe([db]).await?;
     //     let topics = consumer.list_topics().await?;
-    //     log::info!("topics: {:?}", topics);
+    //     tracing::info!("topics: {:?}", topics);
 
     //     {
     //         let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
@@ -2587,7 +2587,7 @@ mod tmq_deflate_tests {
     //             let topic: &str = offset.topic();
     //             let database = offset.database();
     //             let vgroup_id = offset.vgroup_id();
-    //             log::debug!(
+    //             tracing::debug!(
     //                 "topic: {}, database: {}, vgroup_id: {}",
     //                 topic,
     //                 database,
@@ -2596,26 +2596,26 @@ mod tmq_deflate_tests {
 
     //             match message {
     //                 MessageSet::Meta(meta) => {
-    //                     log::debug!("Meta");
+    //                     tracing::debug!("Meta");
     //                     let raw = meta.as_raw_meta().await?;
     //                     taos.write_raw_meta(&raw).await?;
 
     //                     let json = meta.as_json_meta().await?;
     //                     let sql = json.to_string();
     //                     if let Err(err) = taos.exec(sql).await {
-    //                         log::trace!("maybe error: {}", err);
+    //                         tracing::trace!("maybe error: {}", err);
     //                     }
     //                 }
     //                 MessageSet::Data(data) => {
-    //                     log::debug!("Data");
+    //                     tracing::debug!("Data");
 
     //                     while let Some(data) = data.fetch_raw_block().await? {
-    //                         log::debug!("table_name: {:?}", data.table_name());
-    //                         log::debug!("data: {:?}", data);
+    //                         tracing::debug!("table_name: {:?}", data.table_name());
+    //                         tracing::debug!("data: {:?}", data);
     //                     }
     //                 }
     //                 MessageSet::MetaData(meta, data) => {
-    //                     log::debug!("MetaData");
+    //                     tracing::debug!("MetaData");
     //                     let raw = meta.as_raw_meta().await?;
     //                     taos.write_raw_meta(&raw).await?;
 
@@ -2626,8 +2626,8 @@ mod tmq_deflate_tests {
     //                     }
 
     //                     while let Some(data) = data.fetch_raw_block().await? {
-    //                         log::debug!("table_name: {:?}", data.table_name());
-    //                         log::debug!("data: {:?}", data);
+    //                         tracing::debug!("table_name: {:?}", data.table_name());
+    //                         tracing::debug!("data: {:?}", data);
     //                     }
     //                 }
     //             }
@@ -2636,7 +2636,7 @@ mod tmq_deflate_tests {
     //     }
 
     //     let assignments = consumer.assignments().await.unwrap();
-    //     log::info!("assignments: {:?}", assignments);
+    //     tracing::info!("assignments: {:?}", assignments);
 
     //     // seek offset
     //     for topic_vec_assignment in assignments {
@@ -2647,7 +2647,7 @@ mod tmq_deflate_tests {
     //             let current = assignment.current_offset();
     //             let begin = assignment.begin();
     //             let end = assignment.end();
-    //             log::info!(
+    //             tracing::info!(
     //                 "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
     //                 topic,
     //                 vgroup_id,
@@ -2657,43 +2657,43 @@ mod tmq_deflate_tests {
     //             );
 
     //             let committed = consumer.committed(topic, vgroup_id).await?;
-    //             log::info!("committed: {:?}", committed);
+    //             tracing::info!("committed: {:?}", committed);
 
     //             let position = consumer.position(topic, vgroup_id).await?;
-    //             log::info!("position: {:?}", position);
+    //             tracing::info!("position: {:?}", position);
 
     //             let res = consumer.offset_seek(topic, vgroup_id, end).await;
     //             if res.is_err() {
-    //                 log::error!("seek offset error: {:?}", res);
+    //                 tracing::error!("seek offset error: {:?}", res);
     //                 let a = consumer.assignments().await.unwrap();
-    //                 log::error!("assignments: {:?}", a);
+    //                 tracing::error!("assignments: {:?}", a);
     //             }
 
     //             let committed = consumer.committed(topic, vgroup_id).await?;
-    //             log::info!("after seek committed: {:?}", committed);
+    //             tracing::info!("after seek committed: {:?}", committed);
 
     //             let position = consumer.position(topic, vgroup_id).await?;
-    //             log::info!("after seek position: {:?}", position);
+    //             tracing::info!("after seek position: {:?}", position);
 
     //             let res = consumer.commit_offset(topic, vgroup_id, end).await;
     //             if res.is_err() {
-    //                 log::error!("commit offset response: {:?}", res);
+    //                 tracing::error!("commit offset response: {:?}", res);
     //             }
 
     //             let committed = consumer.committed(topic, vgroup_id).await?;
-    //             log::info!("after commit committed: {:?}", committed);
+    //             tracing::info!("after commit committed: {:?}", committed);
 
     //             let position = consumer.position(topic, vgroup_id).await?;
-    //             log::info!("after commit position: {:?}", position);
+    //             tracing::info!("after commit position: {:?}", position);
     //         }
 
     //         let topic_assignment = consumer.topic_assignment(topic).await;
-    //         log::info!("topic assignment: {:?}", topic_assignment);
+    //         tracing::info!("topic assignment: {:?}", topic_assignment);
     //     }
 
     //     // after seek offset
     //     let assignments = consumer.assignments().await.unwrap();
-    //     log::debug!("after seek offset assignments: {:?}", assignments);
+    //     tracing::debug!("after seek offset assignments: {:?}", assignments);
 
     //     consumer.unsubscribe().await;
 

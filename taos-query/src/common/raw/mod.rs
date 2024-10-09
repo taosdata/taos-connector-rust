@@ -1131,7 +1131,7 @@ impl crate::prelude::sync::Inlinable for RawBlock {
                 .try_collect()?;
             raw.with_field_names(names);
         }
-        log::trace!(
+        tracing::trace!(
             "table name: {}, cols: {}, rows: {}",
             &raw.table_name().unwrap_or("(?)"),
             raw.ncols(),
@@ -1473,7 +1473,7 @@ async fn test_raw_from_v2() {
     use crate::prelude::AsyncInlinable;
     use std::ops::Deref;
     // pretty_env_logger::formatted_builder()
-    //     .filter_level(log::LevelFilter::Trace)
+    //     .filter_level(tracing::LevelFilter::Trace)
     //     .init();
     let bytes = b"\x10\x86\x1aA \xcc)AB\xc2\x14AZ],A\xa2\x8d$A\x87\xb9%A\xf5~\x0fA\x96\xf7,AY\xee\x17A1|\x15As\x00\x00\x00q\x00\x00\x00s\x00\x00\x00t\x00\x00\x00u\x00\x00\x00t\x00\x00\x00n\x00\x00\x00n\x00\x00\x00n\x00\x00\x00r\x00\x00\x00";
 

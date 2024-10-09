@@ -1415,18 +1415,18 @@ mod tests {
             let mut tag_fields_len_before = 0;
             let code =
                 ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_before, &mut tag_fields_before);
-            log::debug!("tag_fields_before code: {}", code);
+            tracing::debug!("tag_fields_before code: {}", code);
             if code != 0 {
-                log::debug!(
+                tracing::debug!(
                     "tag_fields_before errstr: {}",
                     CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                 );
             } else {
                 let tag_fields_before_rs =
                     std::slice::from_raw_parts(tag_fields_before, tag_fields_len_before as _);
-                log::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
+                tracing::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
                 ws_stmt_reclaim_fields(stmt, &mut tag_fields_before, tag_fields_len_before);
-                log::trace!(
+                tracing::trace!(
                     "tag_fields_before after reclaim: {:?}",
                     tag_fields_before_rs
                 );
@@ -1437,18 +1437,18 @@ mod tests {
             let mut col_fields_len_before = 0;
             let code =
                 ws_stmt_get_col_fields(stmt, &mut col_fields_len_before, &mut col_fields_before);
-            log::debug!("col_fields_before code: {}", code);
+            tracing::debug!("col_fields_before code: {}", code);
             if code != 0 {
-                log::debug!(
+                tracing::debug!(
                     "col_fields_before errstr: {}",
                     CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                 );
             } else {
                 let col_fields_before_rs =
                     std::slice::from_raw_parts(col_fields_before, col_fields_len_before as _);
-                log::trace!("col_fields_before: {:?}", col_fields_before_rs);
+                tracing::trace!("col_fields_before: {:?}", col_fields_before_rs);
                 ws_stmt_reclaim_fields(stmt, &mut col_fields_before, col_fields_len_before);
-                log::trace!(
+                tracing::trace!(
                     "col_fields_before after reclaim: {:?}",
                     col_fields_before_rs
                 );
@@ -1461,18 +1461,18 @@ mod tests {
             let mut tag_fields_len_after = 0;
             let code =
                 ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_after, &mut tag_fields_after);
-            log::debug!("tag_fields_after code: {}", code);
+            tracing::debug!("tag_fields_after code: {}", code);
             if code != 0 {
-                log::error!(
+                tracing::error!(
                     "tag_fields_after errstr: {}",
                     CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                 );
             } else {
                 let tag_fields_after_rs =
                     std::slice::from_raw_parts(tag_fields_after, tag_fields_len_after as _);
-                log::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
+                tracing::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
                 ws_stmt_reclaim_fields(stmt, &mut tag_fields_after, tag_fields_len_after);
-                log::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
+                tracing::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
             }
 
             let tags = vec![TaosMultiBind::from_string_vec(&[Some(
@@ -1502,15 +1502,15 @@ mod tests {
             let mut tag_fields_len = 0;
             let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields_len, &mut tag_fields);
             if code != 0 {
-                log::debug!(
+                tracing::debug!(
                     "tag_fields errstr: {}",
                     CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                 );
             } else {
                 let tag_fields_rs = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
-                log::debug!("tag_fields: {:?}", tag_fields_rs);
+                tracing::debug!("tag_fields: {:?}", tag_fields_rs);
                 ws_stmt_reclaim_fields(stmt, &mut tag_fields, tag_fields_len);
-                log::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
+                tracing::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
             }
 
             // get stmt column fields
@@ -1518,15 +1518,15 @@ mod tests {
             let mut col_fields_len = 0;
             let code = ws_stmt_get_col_fields(stmt, &mut col_fields_len, &mut col_fields);
             if code != 0 {
-                log::debug!(
+                tracing::debug!(
                     "col_fields errstr: {}",
                     CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                 );
             } else {
                 let col_fields_rs = std::slice::from_raw_parts(col_fields, col_fields_len as _);
-                log::debug!("col_fields: {:?}", col_fields_rs);
+                tracing::debug!("col_fields: {:?}", col_fields_rs);
                 ws_stmt_reclaim_fields(stmt, &mut col_fields, col_fields_len);
-                log::debug!("col_fields after reclaim: {:?}", col_fields_rs);
+                tracing::debug!("col_fields after reclaim: {:?}", col_fields_rs);
             }
 
             ws_stmt_close(stmt);
@@ -1610,12 +1610,12 @@ mod tests {
             let mut num_params = 0;
             let code = ws_stmt_num_params(stmt, &mut num_params);
             if code != 0 {
-                log::debug!(
+                tracing::debug!(
                     "num_params errstr: {}",
                     CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                 );
             } else {
-                log::debug!("num_params: {}", num_params);
+                tracing::debug!("num_params: {}", num_params);
             }
 
             // for each param
@@ -1625,12 +1625,12 @@ mod tests {
                 let mut bytes = 0;
                 let code = ws_stmt_get_param(stmt, i, &mut r#type, &mut bytes);
                 if code != 0 {
-                    log::debug!(
+                    tracing::debug!(
                         "param errstr: {}",
                         CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                     );
                 } else {
-                    log::debug!("param type: {} bytes: {}", r#type, bytes);
+                    tracing::debug!("param type: {} bytes: {}", r#type, bytes);
                 }
             }
 
@@ -1681,18 +1681,18 @@ mod tests {
             let mut tag_fields_len_before = 0;
             let code =
                 ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_before, &mut tag_fields_before);
-            log::debug!("tag_fields_before code: {}", code);
+            tracing::debug!("tag_fields_before code: {}", code);
             if code != 0 {
-                log::error!(
+                tracing::error!(
                     "tag_fields_before errstr: {}",
                     CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                 );
             } else {
                 let tag_fields_before_rs =
                     std::slice::from_raw_parts(tag_fields_before, tag_fields_len_before as _);
-                log::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
+                tracing::debug!("tag_fields_before: {:?}", tag_fields_before_rs);
                 ws_stmt_reclaim_fields(stmt, &mut tag_fields_before, tag_fields_len_before);
-                log::trace!(
+                tracing::trace!(
                     "tag_fields_before after reclaim: {:?}",
                     tag_fields_before_rs
                 );
@@ -1703,18 +1703,18 @@ mod tests {
             let mut col_fields_len_before = 0;
             let code =
                 ws_stmt_get_col_fields(stmt, &mut col_fields_len_before, &mut col_fields_before);
-            log::debug!("col_fields_before code: {}", code);
+            tracing::debug!("col_fields_before code: {}", code);
             if code != 0 {
-                log::error!(
+                tracing::error!(
                     "col_fields_before errstr: {}",
                     CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                 );
             } else {
                 let col_fields_before_rs =
                     std::slice::from_raw_parts(col_fields_before, col_fields_len_before as _);
-                log::trace!("col_fields_before: {:?}", col_fields_before_rs);
+                tracing::trace!("col_fields_before: {:?}", col_fields_before_rs);
                 ws_stmt_reclaim_fields(stmt, &mut col_fields_before, col_fields_len_before);
-                log::trace!(
+                tracing::trace!(
                     "col_fields_before after reclaim: {:?}",
                     col_fields_before_rs
                 );
@@ -1727,18 +1727,18 @@ mod tests {
             let mut tag_fields_len_after = 0;
             let code =
                 ws_stmt_get_tag_fields(stmt, &mut tag_fields_len_after, &mut tag_fields_after);
-            log::debug!("tag_fields_after code: {}", code);
+            tracing::debug!("tag_fields_after code: {}", code);
             if code != 0 {
-                log::error!(
+                tracing::error!(
                     "tag_fields_after errstr: {}",
                     CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                 );
             } else {
                 let tag_fields_after_rs =
                     std::slice::from_raw_parts(tag_fields_after, tag_fields_len_after as _);
-                log::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
+                tracing::debug!("tag_fields_after: {:?}", tag_fields_after_rs);
                 ws_stmt_reclaim_fields(stmt, &mut tag_fields_after, tag_fields_len_after);
-                log::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
+                tracing::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
             }
 
             let tags = vec![TaosMultiBind::from_string_vec(&[Some(
@@ -1771,15 +1771,15 @@ mod tests {
             let mut tag_fields_len = 0;
             let code = ws_stmt_get_tag_fields(stmt, &mut tag_fields_len, &mut tag_fields);
             if code != 0 {
-                log::debug!(
+                tracing::debug!(
                     "tag_fields errstr: {}",
                     CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                 );
             } else {
                 let tag_fields_rs = std::slice::from_raw_parts(tag_fields, tag_fields_len as _);
-                log::debug!("tag_fields: {:?}", tag_fields_rs);
+                tracing::debug!("tag_fields: {:?}", tag_fields_rs);
                 ws_stmt_reclaim_fields(stmt, &mut tag_fields, tag_fields_len);
-                log::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
+                tracing::trace!("tag_fields after reclaim: {:?}", tag_fields_rs);
             }
 
             // get stmt column fields
@@ -1787,15 +1787,15 @@ mod tests {
             let mut col_fields_len = 0;
             let code = ws_stmt_get_col_fields(stmt, &mut col_fields_len, &mut col_fields);
             if code != 0 {
-                log::debug!(
+                tracing::debug!(
                     "col_fields errstr: {}",
                     CStr::from_ptr(ws_stmt_errstr(stmt)).to_str().unwrap()
                 );
             } else {
                 let col_fields_rs = std::slice::from_raw_parts(col_fields, col_fields_len as _);
-                log::debug!("col_fields: {:?}", col_fields_rs);
+                tracing::debug!("col_fields: {:?}", col_fields_rs);
                 ws_stmt_reclaim_fields(stmt, &mut col_fields, col_fields_len);
-                log::trace!("col_fields after reclaim: {:?}", col_fields_rs);
+                tracing::trace!("col_fields after reclaim: {:?}", col_fields_rs);
             }
 
             ws_stmt_close(stmt);

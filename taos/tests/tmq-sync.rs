@@ -4,7 +4,7 @@ use taos::sync::*;
 // #[test]
 fn _test_tmq_meta_sync() -> anyhow::Result<()> {
     // pretty_env_logger::formatted_timed_builder()
-    //     .filter_level(log::LevelFilter::Debug)
+    //     .filter_level(tracing::LevelFilter::Debug)
     //     .init();
     use taos_query::prelude::sync::*;
     let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
@@ -91,9 +91,9 @@ fn _test_tmq_meta_sync() -> anyhow::Result<()> {
 
     let builder = TmqBuilder::from_dsn(&dsn)?;
     let mut consumer = builder.build()?;
-    log::info!("consumer started");
+    tracing::info!("consumer started");
     consumer.subscribe(["t_tmq_meta_sync"])?;
-    log::info!("start subscribe");
+    tracing::info!("start subscribe");
 
     while let Some((offset, message)) = consumer.recv()? {
         // Offset contains information for topic name, database name and vgroup id,
@@ -101,7 +101,7 @@ fn _test_tmq_meta_sync() -> anyhow::Result<()> {
         let _ = offset.topic();
         let _ = offset.database();
         let _ = offset.vgroup_id();
-        log::info!("");
+        tracing::info!("");
 
         // Different to kafka message, TDengine consumer would consume two kind of messages.
         //

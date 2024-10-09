@@ -345,7 +345,7 @@ impl AsyncQueryable for Taos {
     type AsyncResultSet = ResultSet;
 
     async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
-        log::trace!("Query with SQL: {}", sql.as_ref());
+        tracing::trace!("Query with SQL: {}", sql.as_ref());
         match &self.0 {
             TaosInner::Native(taos) => taos
                 .query(sql)
@@ -367,7 +367,7 @@ impl AsyncQueryable for Taos {
         sql: T,
         req_id: u64,
     ) -> RawResult<Self::AsyncResultSet> {
-        log::trace!("Query with SQL: {}", sql.as_ref());
+        tracing::trace!("Query with SQL: {}", sql.as_ref());
         match &self.0 {
             TaosInner::Native(taos) => taos
                 .query_with_req_id(sql, req_id)
@@ -947,7 +947,7 @@ mod tests {
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
@@ -1017,7 +1017,7 @@ mod tests {
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
@@ -1091,7 +1091,7 @@ mod tests {
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
 
@@ -1183,7 +1183,7 @@ mod tests {
 
         for message in consumer.iter_with_timeout(Timeout::from_secs(1)) {
             let (offset, msg) = message?;
-            log::debug!("offset: {:?}", offset);
+            tracing::debug!("offset: {:?}", offset);
 
             match msg {
                 MessageSet::Meta(meta) => {
@@ -1212,11 +1212,11 @@ mod tests {
                     // data
                     for raw in data {
                         let raw = raw?;
-                        log::debug!("raw: {:?}", raw);
+                        tracing::debug!("raw: {:?}", raw);
                         let (_nrows, _ncols) = (raw.nrows(), raw.ncols());
                         for col in raw.columns() {
                             for value in col {
-                                log::debug!("value in col {}\n", value);
+                                tracing::debug!("value in col {}\n", value);
                             }
                         }
                         println!();
@@ -1234,12 +1234,12 @@ mod tests {
         let mut query = taos.query("describe stb1")?;
         for row in query.rows() {
             let raw = row?;
-            log::debug!("raw: {:?}", raw);
+            tracing::debug!("raw: {:?}", raw);
         }
         let mut query = taos.query("select count(*) from stb1")?;
         for row in query.rows() {
             let raw = row?;
-            log::debug!("raw: {:?}", raw);
+            tracing::debug!("raw: {:?}", raw);
         }
 
         taos.query(format!("drop database {db}2"))?;
@@ -1271,17 +1271,17 @@ mod async_tests {
 
         let max_time = 5;
         for i in 0..max_time {
-            log::debug!("------ loop: {} ------", i);
+            tracing::debug!("------ loop: {} ------", i);
             let taos = pool.get().await.context("taos connection error")?;
             // log taos memory location
-            log::debug!("taos: {:p}", &taos);
+            tracing::debug!("taos: {:p}", &taos);
             let r = taos.exec("select server_version()").await;
             match r {
                 Ok(r) => {
-                    log::debug!("rows: {:?}", r);
+                    tracing::debug!("rows: {:?}", r);
                 }
                 Err(e) => {
-                    log::error!("error: {:?}", e);
+                    tracing::error!("error: {:?}", e);
                 }
             }
             drop(taos);
@@ -1311,7 +1311,7 @@ mod async_tests {
 
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(&dsn)?.build().await?;
 
@@ -1329,7 +1329,7 @@ mod async_tests {
         let dsn_with_db = format!("{dsn}/{db}");
 
         let client = TaosBuilder::from_dsn(dsn_with_db)?.build().await?;
-        log::debug!("client: {:?}", &client);
+        tracing::debug!("client: {:?}", &client);
 
         let data = [
             "measurement,host=host1 field1=2i,field2=2.0 1577837300000",
@@ -1382,7 +1382,7 @@ mod async_tests {
         // pretty_env_logger::init();
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(&dsn)?.build().await?;
 
@@ -1400,7 +1400,7 @@ mod async_tests {
         let dsn_with_db = format!("{dsn}/{db}");
 
         let client = TaosBuilder::from_dsn(dsn_with_db)?.build().await?;
-        log::debug!("client: {:?}", &client);
+        tracing::debug!("client: {:?}", &client);
 
         let data = [
             "meters.current 1648432611249 10.3 location=California.SanFrancisco group=2",
@@ -1456,7 +1456,7 @@ mod async_tests {
         // pretty_env_logger::init();
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(&dsn)?.build().await?;
 
@@ -1474,7 +1474,7 @@ mod async_tests {
         let dsn_with_db = format!("{dsn}/{db}");
 
         let client = TaosBuilder::from_dsn(dsn_with_db)?.build().await?;
-        log::debug!("client: {:?}", &client);
+        tracing::debug!("client: {:?}", &client);
 
         // SchemalessProtocol::Json
         let data = [
@@ -1524,11 +1524,11 @@ mod async_tests {
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
-        log::debug!("client: {:?}", &client);
-        log::debug!("is_enterprise: {:?}", client.is_enterprise_edition().await?);
+        tracing::debug!("client: {:?}", &client);
+        tracing::debug!("is_enterprise: {:?}", client.is_enterprise_edition().await?);
         Ok(())
     }
 
@@ -1539,11 +1539,11 @@ mod async_tests {
 
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
-        log::debug!("client: {:?}", &client);
-        log::debug!("is_enterprise: {:?}", client.is_enterprise_edition().await?);
+        tracing::debug!("client: {:?}", &client);
+        tracing::debug!("is_enterprise: {:?}", client.is_enterprise_edition().await?);
         Ok(())
     }
 
@@ -1553,11 +1553,11 @@ mod async_tests {
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
-        log::debug!("client: {:?}", &client);
-        log::debug!("get enterprise edition: {:?}", client.get_edition().await);
+        tracing::debug!("client: {:?}", &client);
+        tracing::debug!("get enterprise edition: {:?}", client.get_edition().await);
 
         Ok(())
     }
@@ -1568,11 +1568,11 @@ mod async_tests {
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
-        log::debug!("client: {:?}", &client);
-        log::debug!("get enterprise edition: {:?}", client.get_edition().await);
+        tracing::debug!("client: {:?}", &client);
+        tracing::debug!("get enterprise edition: {:?}", client.get_edition().await);
 
         Ok(())
     }
@@ -1584,11 +1584,11 @@ mod async_tests {
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
-        log::debug!("client: {:?}", &client);
-        log::debug!("get enterprise edition: {:?}", client.get_edition().await);
+        tracing::debug!("client: {:?}", &client);
+        tracing::debug!("get enterprise edition: {:?}", client.get_edition().await);
 
         Ok(())
     }
@@ -1599,13 +1599,13 @@ mod async_tests {
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
-        log::debug!("client: {:?}", &client);
+        tracing::debug!("client: {:?}", &client);
 
         let res = client.assert_enterprise_edition().await;
-        log::debug!("assert enterprise edition: {:?}", res);
+        tracing::debug!("assert enterprise edition: {:?}", res);
 
         Ok(())
     }
@@ -1616,13 +1616,13 @@ mod async_tests {
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
-        log::debug!("client: {:?}", &client);
+        tracing::debug!("client: {:?}", &client);
 
         let res = client.assert_enterprise_edition().await;
-        log::debug!("assert enterprise edition: {:?}", res);
+        tracing::debug!("assert enterprise edition: {:?}", res);
 
         Ok(())
     }
@@ -1634,13 +1634,13 @@ mod async_tests {
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        log::debug!("dsn: {:?}", &dsn);
+        tracing::debug!("dsn: {:?}", &dsn);
 
         let client = TaosBuilder::from_dsn(dsn)?;
-        log::debug!("client: {:?}", &client);
+        tracing::debug!("client: {:?}", &client);
 
         let res = client.assert_enterprise_edition().await;
-        log::debug!("assert enterprise edition: {:?}", res);
+        tracing::debug!("assert enterprise edition: {:?}", res);
 
         Ok(())
     }
@@ -1648,7 +1648,7 @@ mod async_tests {
     #[tokio::test]
     async fn test_varchar() -> anyhow::Result<()> {
         // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(log::LevelFilter::Trace)
+        //     .filter_level(tracing::LevelFilter::Trace)
         //     .init();
         let dsn = "taos://";
 

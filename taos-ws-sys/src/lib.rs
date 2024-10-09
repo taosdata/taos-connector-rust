@@ -152,7 +152,7 @@ pub struct WsMaybeError<T> {
 impl<T> Drop for WsMaybeError<T> {
     fn drop(&mut self) {
         if !self.data.is_null() {
-            log::trace!("dropping obj {}", self.type_id);
+            tracing::trace!("dropping obj {}", self.type_id);
             // let _ = unsafe { self.data.read() };
             let _ = unsafe { Box::from_raw(self.data) };
         }
@@ -785,7 +785,7 @@ impl WsResultSetTrait for WsSqlResultSet {
     }
 
     unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
-        log::trace!("fetch block with ptr {ptr:p}");
+        tracing::trace!("fetch block with ptr {ptr:p}");
         self.block = self.rs.fetch_raw_block()?;
         if let Some(block) = self.block.as_ref() {
             *ptr = block.as_raw_bytes().as_ptr() as _;
@@ -793,7 +793,7 @@ impl WsResultSetTrait for WsSqlResultSet {
         } else {
             *rows = 0;
         }
-        log::trace!("fetch block with ptr {ptr:p} with rows {}", *rows);
+        tracing::trace!("fetch block with ptr {ptr:p} with rows {}", *rows);
         Ok(())
     }
 
@@ -821,15 +821,15 @@ impl WsResultSetTrait for WsSqlResultSet {
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
-        log::trace!("try to get raw value at ({row}, {col})");
+        tracing::trace!("try to get raw value at ({row}, {col})");
         match self.block.as_ref() {
             Some(block) => {
                 if row < block.nrows() && col < block.ncols() {
                     let res = block.get_raw_value_unchecked(row, col);
-                    log::trace!("got raw value at ({row}, {col}): {:?}", res);
+                    tracing::trace!("got raw value at ({row}, {col}): {:?}", res);
                     res
                 } else {
-                    log::trace!("out of range at ({row}, {col}), return null");
+                    tracing::trace!("out of range at ({row}, {col}), return null");
                     (Ty::Null, 0, std::ptr::null())
                 }
             }
@@ -954,7 +954,7 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
 /// Same to taos_close. This should always be called after everything done with the connection.
 pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) -> i32 {
     if !taos.is_null() {
-        log::trace!("close connection {taos:p}");
+        tracing::trace!("close connection {taos:p}");
         let client = Box::from_raw(taos as *mut Taos);
         // client.close();
         drop(client);
@@ -1014,9 +1014,9 @@ pub unsafe extern "C" fn ws_query_with_reqid(
     sql: *const c_char,
     req_id: u64,
 ) -> *mut WS_RES {
-    log::trace!("query {:?}, req_id {:?}", CStr::from_ptr(sql), req_id);
+    tracing::trace!("query {:?}, req_id {:?}", CStr::from_ptr(sql), req_id);
     let res: WsMaybeError<WsResultSet> = query_with_sql(taos, sql, req_id).into();
-    log::trace!("query done: {:?}", res);
+    tracing::trace!("query done: {:?}", res);
     Box::into_raw(Box::new(res)) as _
 }
 
@@ -1121,7 +1121,7 @@ pub unsafe extern "C" fn ws_affected_rows64(rs: *const WS_RES) -> i64 {
 #[no_mangle]
 /// use db.
 pub unsafe extern "C" fn ws_select_db(taos: *mut WS_TAOS, db: *const c_char) -> i32 {
-    log::trace!("db {:?}", CStr::from_ptr(db));
+    tracing::trace!("db {:?}", CStr::from_ptr(db));
 
     let client = (taos as *mut Taos).as_mut();
     let client = match client {
@@ -1688,12 +1688,12 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl_with_reqid(
 ) -> *mut WS_RES {
     match schemaless_insert_raw(taos, lines, len, totalRows, protocal, precision, ttl, reqid) {
         Ok(rs) => {
-            log::trace!("schemaless insert done: {:?}", rs);
+            tracing::trace!("schemaless insert done: {:?}", rs);
             let rs: WsMaybeError<WsResultSet> = rs.into();
             return Box::into_raw(Box::new(rs)) as _;
         }
         Err(e) => {
-            log::trace!("schemaless insert failed: {:?}", e);
+            tracing::trace!("schemaless insert failed: {:?}", e);
             let error_message = format!("schemaless insert failed: {}", e.to_string());
             set_error_and_get_code(WsError::new(e.code, &error_message));
             return std::ptr::null_mut() as _;
