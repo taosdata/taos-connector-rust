@@ -500,7 +500,7 @@ mod r#async {
 
         async fn exec<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<usize> {
             let sql = sql.as_ref();
-            // log::trace!("exec sql: {sql}");
+            // tracing::trace!("exec sql: {sql}");
             self.query(sql).await.map(|res| res.affected_rows() as _)
         }
 
@@ -510,7 +510,7 @@ mod r#async {
             req_id: u64,
         ) -> RawResult<usize> {
             let sql = sql.as_ref();
-            // log::trace!("exec sql: {sql}");
+            // tracing::trace!("exec sql: {sql}");
             self.query_with_req_id(sql, req_id)
                 .await
                 .map(|res| res.affected_rows() as _)
@@ -556,7 +556,7 @@ mod r#async {
             sql: T,
         ) -> RawResult<Option<O>> {
             use futures::StreamExt;
-            // log::trace!("query one with sql: {}", sql.as_ref());
+            // tracing::trace!("query one with sql: {}", sql.as_ref());
             self.query(sql)
                 .await?
                 .deserialize::<O>()
@@ -636,7 +636,7 @@ mod r#async {
         /// This is a 3.x-only API.
         async fn topics(&self) -> RawResult<Vec<Topic>> {
             let sql = "SELECT * FROM information_schema.ins_topics";
-            log::trace!("query one with sql: {sql}");
+            tracing::trace!("query one with sql: {sql}");
             Ok(self.query(sql).await?.deserialize().try_collect().await?)
         }
 

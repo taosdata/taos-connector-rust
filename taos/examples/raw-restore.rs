@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
         })
         .collect::<Vec<_>>();
 
-    log::debug!("raws: {:?}", raws);
+    tracing::debug!("raws: {:?}", raws);
 
     let (meta, data): (Vec<_>, Vec<_>) = raws.into_iter().partition(|path| {
         let name = path.file_name().unwrap();

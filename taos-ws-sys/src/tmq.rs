@@ -182,7 +182,7 @@ impl WsResultSetTrait for WsTmqResultSet {
     }
 
     unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
-        log::trace!("fetch block with ptr {ptr:p}");
+        tracing::trace!("fetch block with ptr {ptr:p}");
         self.block = self.data.fetch_raw_block()?;
         if let Some(block) = self.block.as_ref() {
             *ptr = block.as_raw_bytes().as_ptr() as _;
@@ -190,7 +190,7 @@ impl WsResultSetTrait for WsTmqResultSet {
         } else {
             *rows = 0;
         }
-        log::trace!("fetch block with ptr {ptr:p} with rows {}", *rows);
+        tracing::trace!("fetch block with ptr {ptr:p} with rows {}", *rows);
         Ok(())
     }
 
@@ -218,15 +218,15 @@ impl WsResultSetTrait for WsTmqResultSet {
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
-        log::trace!("try to get raw value at ({row}, {col})");
+        tracing::trace!("try to get raw value at ({row}, {col})");
         match self.block.as_ref() {
             Some(block) => {
                 if row < block.nrows() && col < block.ncols() {
                     let res = block.get_raw_value_unchecked(row, col);
-                    log::trace!("got raw value at ({row}, {col}): {:?}", res);
+                    tracing::trace!("got raw value at ({row}, {col}): {:?}", res);
                     res
                 } else {
-                    log::trace!("out of range at ({row}, {col}), return null");
+                    tracing::trace!("out of range at ({row}, {col}), return null");
                     (Ty::Null, 0, std::ptr::null())
                 }
             }
@@ -277,30 +277,30 @@ unsafe fn tmq_conf_set(
                 {
                     "true" | "false" => {}
                     _ => {
-                        log::trace!("set tmq conf failed, key: {}, value: {}", &key, &value);
+                        tracing::trace!("set tmq conf failed, key: {}, value: {}", &key, &value);
                         return Err(WsError::new(Code::INVALID_PARA, "invalid value"));
                     }
                 },
                 "auto.commit.interval.ms" => match i32::from_str(&value) {
                     Ok(_) => {}
                     Err(_) => {
-                        log::trace!("set tmq conf failed, key: {}, value: {}", &key, &value);
+                        tracing::trace!("set tmq conf failed, key: {}, value: {}", &key, &value);
                         return Err(WsError::new(Code::INVALID_PARA, "invalid value"));
                     }
                 },
                 "auto.offset.reset" => match value.to_lowercase().as_str() {
                     "none" | "earliest" | "latest" => {}
                     _ => {
-                        log::trace!("set tmq conf failed, key: {}, value: {}", &key, &value);
+                        tracing::trace!("set tmq conf failed, key: {}, value: {}", &key, &value);
                         return Err(WsError::new(Code::INVALID_PARA, "invalid value"));
                     }
                 },
                 _ => {
-                    log::trace!("set tmq conf failed, unknow key: {}", &key);
+                    tracing::trace!("set tmq conf failed, unknow key: {}", &key);
                     return Err(WsError::new(Code::FAILED, "unknow key"));
                 }
             }
-            log::trace!("set tmq conf sucess, key: {}, value: {}", &key, &value);
+            tracing::trace!("set tmq conf sucess, key: {}, value: {}", &key, &value);
             tmq_conf.hsmap.insert(key, value);
             Ok(())
         }
@@ -359,7 +359,7 @@ unsafe fn tmq_list_append(list: *mut ws_tmq_list_t, src: *const c_char) -> WsRes
     {
         Some(list) => {
             if list.topics.len() >= 1 {
-                log::trace!("only support one topic in this websocket library");
+                tracing::trace!("only support one topic in this websocket library");
                 return Err(WsError::new(
                     Code::TMQ_TOPIC_APPEND_ERR,
                     "only support one topic",
@@ -487,7 +487,7 @@ unsafe fn tmq_consumer_new(conf: *mut ws_tmq_conf_t, dsn: *const c_char) -> WsRe
     };
     let dsn = dsn.to_str()?;
 
-    log::trace!("ws_tmq_consumer_new dsn: {}", &dsn);
+    tracing::trace!("ws_tmq_consumer_new dsn: {}", &dsn);
     let mut dsn = Dsn::from_str(&dsn)?;
 
     if !conf.is_null() {

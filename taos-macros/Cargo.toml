@@ -21,7 +21,6 @@ syn = { version = "1", features = ["full"] }
 
 [dev-dependencies]
 anyhow = "1"
-log = "0.4"
 tokio = "1"
 
 [lints.rust]

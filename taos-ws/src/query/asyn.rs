@@ -83,7 +83,7 @@ impl WsQuerySender {
 
         match msg {
             WsSend::FetchBlock(args) => {
-                log::trace!("[req id: {req_id}] prepare message {msg:?}");
+                tracing::trace!("[req id: {req_id}] prepare message {msg:?}");
                 if self.results.contains_async(&args.id).await {
                     Err(RawError::from_string(format!(
                         "there's a result with id {}",
@@ -105,7 +105,7 @@ impl WsQuerySender {
                     .map_err(Error::from)?;
             }
             _ => {
-                log::trace!("[req id: {req_id}] prepare message: {msg:?}");
+                tracing::trace!("[req id: {req_id}] prepare message: {msg:?}");
                 timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
                     .await
                     .map_err(Error::from)?
@@ -113,12 +113,12 @@ impl WsQuerySender {
             }
         }
         // handle the error
-        log::trace!("[req id: {req_id}] message sent, wait for receiving");
+        tracing::trace!("[req id: {req_id}] message sent, wait for receiving");
         let res = rx
             .await
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
             .map_err(Error::from)?;
-        log::trace!("[req id: {req_id}] message received: {res:?}");
+        tracing::trace!("[req id: {req_id}] message received: {res:?}");
         Ok(res)
     }
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
@@ -143,7 +143,7 @@ pub struct WsTaos {
 }
 impl Drop for WsTaos {
     fn drop(&mut self) {
-        log::trace!("dropping connection");
+        tracing::trace!("dropping connection");
         // send close signal to reader/writer spawned tasks.
         let _ = self.close_signal.send(true);
     }
@@ -322,7 +322,7 @@ async fn read_queries(
     let parse_frame = |frame: Message| {
         match frame {
             Message::Text(text) => {
-                log::trace!("received json response: {text}",);
+                tracing::trace!("received json response: {text}",);
                 let v: WsRecv = serde_json::from_str(&text).unwrap();
                 let queries_sender = queries_sender.clone();
                 let ws2 = ws2.clone();
@@ -333,17 +333,17 @@ async fn read_queries(
                             sender.send(ok.map(|_| data)).unwrap();
                         } else {
                             debug_assert!(!queries_sender.contains(&req_id));
-                            log::warn!("req_id {req_id} not detected, message might be lost");
+                            tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     }
                     WsRecvData::Query(_) => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
                             if let Err(err) = sender.send(ok.map(|_| data)) {
-                                log::error!("send data with error: {err:?}");
+                                tracing::error!("send data with error: {err:?}");
                             }
                         } else {
                             debug_assert!(!queries_sender.contains(&req_id));
-                            log::warn!("req_id {req_id} not detected, message might be lost");
+                            tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     }
                     WsRecvData::Fetch(fetch) => {
@@ -362,7 +362,7 @@ async fn read_queries(
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
                             let _ = sender.send(ok.map(|_| data));
                         } else {
-                            log::warn!("req_id {req_id} not detected, message might be lost");
+                            tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     }
                     WsRecvData::FetchBlock => {
@@ -370,28 +370,28 @@ async fn read_queries(
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
                             let _ = sender.send(ok.map(|_| data));
                         } else {
-                            log::warn!("req_id {req_id} not detected, message might be lost");
+                            tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     }
                     WsRecvData::WriteMeta => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
                             let _ = sender.send(ok.map(|_| data));
                         } else {
-                            log::warn!("req_id {req_id} not detected, message might be lost");
+                            tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     }
                     WsRecvData::WriteRaw => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
                             let _ = sender.send(ok.map(|_| data));
                         } else {
-                            log::warn!("req_id {req_id} not detected, message might be lost");
+                            tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     }
                     WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
                             let _ = sender.send(ok.map(|_| data));
                         } else {
-                            log::warn!("req_id {req_id} not detected, message might be lost");
+                            tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     }
 
@@ -450,7 +450,9 @@ async fn read_queries(
                                 }))
                                 .unwrap();
                         } else {
-                            log::warn!("req_id {block_req_id} not detected, message might be lost");
+                            tracing::warn!(
+                                "req_id {block_req_id} not detected, message might be lost"
+                            );
                         }
                     } else {
                         let res_id = slice.read_u64().unwrap();
@@ -458,7 +460,7 @@ async fn read_queries(
                             if is_v3 {
                                 // v3
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                    log::trace!("send data to fetches with id {}", res_id);
+                                    tracing::trace!("send data to fetches with id {}", res_id);
                                     sender
                                         .send(Ok(WsRecvData::Block {
                                             timing,
@@ -466,14 +468,14 @@ async fn read_queries(
                                         }))
                                         .unwrap();
                                 } else {
-                                    log::warn!(
+                                    tracing::warn!(
                                         "req_id {res_id} not detected, message might be lost"
                                     );
                                 }
                             } else {
                                 // v2
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                    log::trace!("send data to fetches with id {}", res_id);
+                                    tracing::trace!("send data to fetches with id {}", res_id);
                                     sender
                                         .send(Ok(WsRecvData::BlockV2 {
                                             timing,
@@ -481,13 +483,13 @@ async fn read_queries(
                                         }))
                                         .unwrap();
                                 } else {
-                                    log::warn!(
+                                    tracing::warn!(
                                         "req_id {res_id} not detected, message might be lost"
                                     );
                                 }
                             }
                         } else {
-                            log::warn!("result id {res_id} not found");
+                            tracing::warn!("result id {res_id} not found");
                         }
                     }
                 });
@@ -496,7 +498,7 @@ async fn read_queries(
                 // taosAdapter should never send close frame to client.
                 // So all close frames should be treated as error.
 
-                log::warn!("websocket connection is closed normally");
+                tracing::warn!("websocket connection is closed normally");
                 let mut keys = Vec::new();
                 queries_sender.scan(|k, _| {
                     keys.push(*k);
@@ -520,12 +522,12 @@ async fn read_queries(
             }
             Message::Pong(_) => {
                 // do nothing
-                log::trace!("received pong message, do nothing");
+                tracing::trace!("received pong message, do nothing");
             }
             _ => {
                 // do nothing
-                log::warn!("received (unexpected) frame message, do nothing");
-                log::trace!("* frame data: {frame:?}");
+                tracing::warn!("received (unexpected) frame message, do nothing");
+                tracing::trace!("* frame data: {frame:?}");
             }
         }
 
@@ -543,7 +545,7 @@ async fn read_queries(
                 }}
             }
             _ = close_listener.changed() => {
-                log::trace!("close reader task");
+                tracing::trace!("close reader task");
                 let mut keys = Vec::with_capacity(queries_sender.len());
                 queries_sender.scan(|k, _| {
                     keys.push(*k);
@@ -746,21 +748,21 @@ impl WsTaos {
                 tokio::select! {
                     _ = interval.tick() => {
                         if let Err(err) = sender.send(Message::Ping(b"TAOS".to_vec())).await {
-                            log::error!("Write websocket error: {}", err);
+                            tracing::error!("Write websocket error: {}", err);
                             break;
                         }
                         let _ = sender.flush();
                     }
                     _ = rx.changed() => {
                         let _ = sender.close().await;
-                        log::trace!("close sender task");
+                        tracing::trace!("close sender task");
                         break;
                     }
                     msg = msg_recv.recv_async() => {
                         match msg {
                             Ok(msg) => {
                                 if let Err(err) = sender.send(msg).await {
-                                log::error!("Write websocket error: {}", err);
+                                tracing::error!("Write websocket error: {}", err);
                                     let mut keys = Vec::new();
                                     queries3.scan(|k, _| keys.push(*k));
                                     for k in keys {
@@ -819,7 +821,7 @@ impl WsTaos {
         meta.write_all(&raw.as_bytes()).map_err(Error::from)?;
         let len = meta.len();
 
-        log::trace!("write meta with req_id: {req_id}, raw data length: {len}",);
+        tracing::trace!("write meta with req_id: {req_id}, raw data length: {len}",);
 
         let h = self
             .sender
@@ -880,7 +882,7 @@ impl WsTaos {
             meta.write_all(raw.as_raw_bytes()).map_err(Error::from)?;
 
             let len = meta.len();
-            log::trace!("write block with req_id: {req_id}, raw data len: {len}",);
+            tracing::trace!("write block with req_id: {req_id}, raw data len: {len}",);
 
             match self.sender.send_recv(WsSend::Binary(meta.into())).await? {
                 WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
@@ -908,7 +910,7 @@ impl WsTaos {
                 unsafe { std::slice::from_raw_parts(fields.as_ptr() as _, fields.len() * 72) };
             meta.write_all(fields).map_err(Error::from)?;
             let len = meta.len();
-            log::trace!("write block with req_id: {req_id}, raw data len: {len}",);
+            tracing::trace!("write block with req_id: {req_id}, raw data len: {len}",);
 
             match time::timeout(
                 Duration::from_secs(60),
@@ -975,7 +977,7 @@ impl WsTaos {
             async move {
                 let t = Instant::now();
                 let _ = rx.await;
-                log::trace!("result {result_id} lives {:?}", t.elapsed());
+                tracing::trace!("result {result_id} lives {:?}", t.elapsed());
             }
             .in_current_span(),
         );
@@ -1185,12 +1187,12 @@ impl WsTaos {
             ttl: sml.ttl(),
             req_id: sml.req_id(),
         };
-        log::trace!("put send: {:?}", action);
+        tracing::trace!("put send: {:?}", action);
         let req = self.sender.send_recv(action).await?;
 
         match req {
             WsRecvData::Insert(res) => {
-                log::trace!("put resp : {:?}", res);
+                tracing::trace!("put resp : {:?}", res);
                 Ok(())
             }
             _ => {

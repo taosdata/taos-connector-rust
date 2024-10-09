@@ -7,7 +7,7 @@ use itertools::Itertools;
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
 
-use log::warn;
+use tracing::warn;
 use taos_query::common::{JsonMeta, RawMeta};
 use taos_query::prelude::{Code, RawError};
 use taos_query::tmq::{
@@ -77,7 +77,7 @@ impl WsTmqSender {
         tokio::pin!(sleep);
         let data = tokio::select! {
             _ = &mut sleep, if !sleep.is_elapsed() => {
-               log::trace!("poll timed out");
+               tracing::trace!("poll timed out");
                Err(WsTmqError::QueryTimeout("poll".to_string()))?
             }
             message = rx => {
@@ -334,7 +334,7 @@ impl WsMessageBase {
 
             // for row in 0..raw.nrows() {
             //     for col in 0..raw.ncols() {
-            //         log::trace!("at ({}, {})", row, col);
+            //         tracing::trace!("at ({}, {})", row, col);
             //         let v = unsafe { raw.get_ref_unchecked(row, col) };
             //         println!("({}, {}): {:?}", row, col, v);
             //     }
@@ -522,7 +522,7 @@ impl Consumer {
                             message_id,
                             raw_blocks: Arc::new(Mutex::new(None)),
                         };
-                        log::trace!("Got message in {}ms", dur.as_millis());
+                        tracing::trace!("Got message in {}ms", dur.as_millis());
                         break match message_type {
                             MessageType::Meta => Ok((offset, MessageSet::Meta(Meta(message)))),
                             MessageType::Data => Ok((offset, MessageSet::Data(Data(message)))),
@@ -605,7 +605,7 @@ impl AsAsyncConsumer for Consumer {
             for offset in offsets {
                 let vgroup_id = offset[0] as i32;
                 let offset = offset[1];
-                log::trace!(
+                tracing::trace!(
                     "topic {} seeking to offset {} for vgroup {}",
                     &topic_name,
                     offset,
@@ -633,7 +633,7 @@ impl AsAsyncConsumer for Consumer {
 
     async fn unsubscribe(self) {
         let req_id = self.sender.req_id();
-        log::trace!("unsubscribe {} start", req_id);
+        tracing::trace!("unsubscribe {} start", req_id);
         let action = TmqSend::Unsubscribe { req_id };
         self.sender.send_recv(action).await.unwrap();
         drop(self);
@@ -701,7 +701,7 @@ impl AsAsyncConsumer for Consumer {
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.topics.clone();
-        log::trace!("topics: {:?}", topics);
+        tracing::trace!("topics: {:?}", topics);
 
         let mut ret = Vec::new();
         for topic in topics {
@@ -723,8 +723,8 @@ impl AsAsyncConsumer for Consumer {
         match recv {
             Some(TmqRecvData::Assignment(TopicAssignment { assignment, timing })) => {
                 // assert_eq!(topic, topic);
-                log::trace!("timing: {:?}", timing);
-                log::trace!("assignment: {:?}", assignment);
+                tracing::trace!("timing: {:?}", timing);
+                tracing::trace!("assignment: {:?}", assignment);
                 assignment
             }
             _ => {
@@ -1058,9 +1058,9 @@ impl TmqBuilder {
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        log::trace!("Check websocket message sender alive");
+                        tracing::trace!("Check websocket message sender alive");
                         if let Err(err) = sender.send(Message::Ping(PING.to_vec())).await {
-                            log::trace!("sending ping message to {sending_url} error: {err:?}");
+                            tracing::trace!("sending ping message to {sending_url} error: {err:?}");
                             // let mut keys = Vec::new();
                             let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
 
@@ -1081,9 +1081,9 @@ impl TmqBuilder {
                             let _ = sender.close().await;
                             break;
                         }
-                        log::trace!("send message {msg:?}");
+                        tracing::trace!("send message {msg:?}");
                         if let Err(err) = sender.send(msg).await {
-                            log::trace!("sending message to {sending_url} error: {err:?}");
+                            tracing::trace!("sending message to {sending_url} error: {err:?}");
                             let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
@@ -1092,12 +1092,12 @@ impl TmqBuilder {
                                 }
                             }
                         }
-                        log::trace!("send message done");
+                        tracing::trace!("send message done");
                     }
                     _ = rx.changed() => {
                         let _= sender.send(Message::Close(None)).await;
                         let _ = sender.close().await;
-                        log::trace!("close tmq sender");
+                        tracing::trace!("close tmq sender");
                         break;
                     }
                 }
@@ -1112,27 +1112,27 @@ impl TmqBuilder {
                         match message {
                             Ok(message) => match message {
                                 Message::Text(text) => {
-                                    log::trace!("json response: {}", text);
+                                    tracing::trace!("json response: {}", text);
                                     let v: TmqRecv = serde_json::from_str(&text).expect(&text);
                                     let (req_id, recv, ok) = v.ok();
                                     match &recv {
                                         TmqRecvData::Subscribe => {
-                                            log::trace!("subscribe with: {:?}", req_id);
+                                            tracing::trace!("subscribe with: {:?}", req_id);
 
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
-                                                log::warn!("subscribe message received but no receiver alive");
+                                                tracing::warn!("subscribe message received but no receiver alive");
                                             }
                                         },
                                         TmqRecvData::Unsubscribe => {
-                                            log::trace!("unsubscribe with: {:?} successed", req_id);
+                                            tracing::trace!("unsubscribe with: {:?} successed", req_id);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
-                                                log::warn!("unsubscribe message received but no receiver alive");
+                                                tracing::warn!("unsubscribe message received but no receiver alive");
                                             }
                                         },
                                         TmqRecvData::Poll(_) => {
@@ -1140,16 +1140,16 @@ impl TmqBuilder {
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
-                                                log::warn!("poll message received but no receiver alive");
+                                                tracing::warn!("poll message received but no receiver alive");
                                             }
                                         },
                                         TmqRecvData::FetchJsonMeta { data }=> {
-                                            log::trace!("fetch json meta data: {:?}", data);
+                                            tracing::trace!("fetch json meta data: {:?}", data);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
-                                                log::warn!("poll message received but no receiver alive");
+                                                tracing::warn!("poll message received but no receiver alive");
                                             }
                                         }
                                         TmqRecvData::FetchRaw { meta: _ }=> {
@@ -1157,25 +1157,25 @@ impl TmqBuilder {
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
-                                                log::warn!("poll message received but no receiver alive");
+                                                tracing::warn!("poll message received but no receiver alive");
                                             }
                                         }
                                         TmqRecvData::Commit=> {
-                                            log::trace!("commit done: {:?}", recv);
+                                            tracing::trace!("commit done: {:?}", recv);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
-                                                log::warn!("poll message received but no receiver alive");
+                                                tracing::warn!("poll message received but no receiver alive");
                                             }
                                         }
                                         TmqRecvData::Fetch(fetch)=> {
-                                            log::trace!("fetch done: {:?}", fetch);
+                                            tracing::trace!("fetch done: {:?}", fetch);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
-                                                log::warn!("poll message received but no receiver alive");
+                                                tracing::warn!("poll message received but no receiver alive");
                                             }
                                         }
                                         TmqRecvData::FetchBlock{ data: _ }=> {
@@ -1188,47 +1188,47 @@ impl TmqBuilder {
                                             break 'ws;
                                         }
                                         TmqRecvData::Assignment(assignment)=> {
-                                            log::trace!("assignment done: {:?}", assignment);
+                                            tracing::trace!("assignment done: {:?}", assignment);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
-                                                log::warn!("assignment message received but no receiver alive");
+                                                tracing::warn!("assignment message received but no receiver alive");
                                             }
                                         }
                                         TmqRecvData::Seek { timing }=> {
-                                            log::trace!("seek done: req_id {:?} timing {:?}", &req_id, timing);
+                                            tracing::trace!("seek done: req_id {:?} timing {:?}", &req_id, timing);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
-                                                log::warn!("seek message received but no receiver alive");
+                                                tracing::warn!("seek message received but no receiver alive");
                                             }
                                         }
                                         TmqRecvData::Committed { committed }=> {
-                                            log::trace!("committed done: {:?}", committed);
+                                            tracing::trace!("committed done: {:?}", committed);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
-                                                log::warn!("committed message received but no receiver alive");
+                                                tracing::warn!("committed message received but no receiver alive");
                                             }
                                         }
                                         TmqRecvData::Position { position }=> {
-                                            log::trace!("position done: {:?}", position);
+                                            tracing::trace!("position done: {:?}", position);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
-                                                log::warn!("position message received but no receiver alive");
+                                                tracing::warn!("position message received but no receiver alive");
                                             }
                                         }
                                         TmqRecvData::CommitOffset { timing }=> {
-                                            log::trace!("commit offset done: {:?}", timing);
+                                            tracing::trace!("commit offset done: {:?}", timing);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                                 let _ = sender.send(ok.map(|_|recv));
                                             } else {
-                                                log::warn!("commit offset message received but no receiver alive");
+                                                tracing::warn!("commit offset message received but no receiver alive");
                                             }
                                         }
 
@@ -1258,14 +1258,14 @@ impl TmqBuilder {
                                     }
 
                                     if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                        log::trace!("send data to fetches with id {}", req_id);
+                                        tracing::trace!("send data to fetches with id {}", req_id);
                                         sender.send(Ok(TmqRecvData::Bytes(part.into()))).unwrap();
                                     } else {
-                                        log::warn!("req_id {req_id} not detected, message might be lost");
+                                        tracing::warn!("req_id {req_id} not detected, message might be lost");
                                     }
                                 }
                                 Message::Close(close) => {
-                                    log::warn!("websocket connection is closed (unexpected?)");
+                                    tracing::warn!("websocket connection is closed (unexpected?)");
 
                                     let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
                                     let err = if let Some(close) = close {
@@ -1285,16 +1285,16 @@ impl TmqBuilder {
                                 }
                                 Message::Pong(bytes) => {
                                     if bytes == PING {
-                                        log::trace!("ping/pong handshake success");
+                                        tracing::trace!("ping/pong handshake success");
                                     } else {
                                         // do nothing
-                                        log::warn!("received (unexpected) pong message, do nothing");
+                                        tracing::warn!("received (unexpected) pong message, do nothing");
                                     }
                                 }
                                 Message::Frame(frame) => {
                                     // do no`thing
-                                    log::warn!("received (unexpected) frame message, do nothing");
-                                    log::trace!("* frame data: {frame:?}");
+                                    tracing::warn!("received (unexpected) frame message, do nothing");
+                                    tracing::trace!("* frame data: {frame:?}");
                                 }
                             },
                             Err(err) => {
@@ -1312,12 +1312,12 @@ impl TmqBuilder {
                         }
                     }
                     _ = close_listener.changed() => {
-                        log::trace!("close reader task");
+                        tracing::trace!("close reader task");
                         break 'ws;
                     }
                 }
             }
-            log::trace!("Consuming done in {:?}", instant.elapsed());
+            tracing::trace!("Consuming done in {:?}", instant.elapsed());
         });
         // let (ws, mut _msg_recv) = tokio::sync::mpsc::channel(100);
         let ws_cloned = ws.clone();
@@ -1577,14 +1577,14 @@ mod tests {
                             tracing::debug!(count, "sql: {}", sql);
                             if let Err(err) = taos.exec(sql).await {
                                 match err.code() {
-                                    Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
-                                    Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
-                                    Code::COLUMN_EXISTS => log::trace!("column already exists"),
-                                    Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
-                                    Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
-                                    Code::MODIFIED_ALREADY => log::trace!("modified already done"),
-                                    Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
-                                    Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
+                                    Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                    Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                    Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                    Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                    Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                                    Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                                    Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                                    Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
                                     _ => {
                                         tracing::error!(count, "{}", err);
                                     }
@@ -1737,17 +1737,17 @@ mod tests {
                         let json = meta.as_json_meta().await?;
                         for meta in &json {
                             let sql = meta.to_string();
-                            log::debug!("sql: {}", sql);
+                            tracing::debug!("sql: {}", sql);
                             if let Err(err) = taos.exec(sql).await {
                                 match err.code() {
-                                    Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
-                                    Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
-                                    Code::COLUMN_EXISTS => log::trace!("column already exists"),
-                                    Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
-                                    Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
-                                    Code::MODIFIED_ALREADY => log::trace!("modified already done"),
-                                    Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
-                                    Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
+                                    Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                    Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                    Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                    Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                    Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                                    Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                                    Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                                    Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
                                     _ => {
                                         tracing::error!(count, "{}", err);
                                     }
@@ -1784,7 +1784,7 @@ mod tests {
     fn test_ws_tmq_meta_sync() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(log::LevelFilter::Info)
+        //     .filter_level(tracing::LevelFilter::Info)
         //     .init();
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?.build()?;
@@ -1868,7 +1868,7 @@ mod tests {
         consumer.subscribe(["ws_tmq_meta_sync"])?;
 
         let topics = consumer.list_topics();
-        log::debug!("topics: {:?}", topics);
+        tracing::debug!("topics: {:?}", topics);
 
         let iter = consumer.iter_with_timeout(Timeout::from_secs(1));
 
@@ -1893,19 +1893,19 @@ mod tests {
                     let json = meta.as_json_meta()?;
                     for meta in &json {
                         let sql = meta.to_string();
-                        log::debug!("sql: {}", sql);
+                        tracing::debug!("sql: {}", sql);
                         if let Err(err) = taos.exec(sql) {
                             match err.code() {
-                                Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
-                                Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
-                                Code::COLUMN_EXISTS => log::trace!("column already exists"),
-                                Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
-                                Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
-                                Code::MODIFIED_ALREADY => log::trace!("modified already done"),
-                                Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
-                                Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
+                                Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                                Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                                Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                                Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
                                 _ => {
-                                    log::error!("{}", err);
+                                    tracing::error!("{}", err);
                                 }
                             }
                         }
@@ -1926,35 +1926,35 @@ mod tests {
 
         // get assignments
         let assignments = consumer.assignments();
-        log::debug!("assignments all: {:?}", assignments);
+        tracing::debug!("assignments all: {:?}", assignments);
 
         if let Some(assignments) = assignments {
             for (topic, assignment_vec) in assignments {
                 for assignment in assignment_vec {
-                    log::debug!("assignment: {:?} {:?}", topic, assignment);
+                    tracing::debug!("assignment: {:?} {:?}", topic, assignment);
                     let vgroup_id = assignment.vgroup_id();
                     let end = assignment.end();
 
                     let position = consumer.position(&topic, vgroup_id);
-                    log::debug!("position: {:?}", position);
+                    tracing::debug!("position: {:?}", position);
                     let committed = consumer.committed(&topic, vgroup_id);
-                    log::debug!("committed: {:?}", committed);
+                    tracing::debug!("committed: {:?}", committed);
 
                     let res = consumer.offset_seek(&topic, vgroup_id, end);
-                    log::debug!("seek: {:?}", res);
+                    tracing::debug!("seek: {:?}", res);
 
                     let position = consumer.position(&topic, vgroup_id);
-                    log::debug!("after seek position: {:?}", position);
+                    tracing::debug!("after seek position: {:?}", position);
                     let committed = consumer.committed(&topic, vgroup_id);
-                    log::debug!("after seek committed: {:?}", committed);
+                    tracing::debug!("after seek committed: {:?}", committed);
 
                     let res = consumer.commit_offset(&topic, vgroup_id, end);
-                    log::debug!("commit offset: {:?}", res);
+                    tracing::debug!("commit offset: {:?}", res);
 
                     let position = consumer.position(&topic, vgroup_id);
-                    log::debug!("after commit offset position: {:?}", position);
+                    tracing::debug!("after commit offset position: {:?}", position);
                     let committed = consumer.committed(&topic, vgroup_id);
-                    log::debug!("after commit offset committed: {:?}", committed);
+                    tracing::debug!("after commit offset committed: {:?}", committed);
                 }
             }
         }
@@ -1975,7 +1975,7 @@ mod tests {
     fn test_ws_tmq_metadata() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(log::LevelFilter::Debug)
+        //     .filter_level(tracing::LevelFilter::Debug)
         //     .init();
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?.build()?;
@@ -2081,19 +2081,19 @@ mod tests {
                     let json = meta.as_json_meta()?;
                     for json in &json {
                         let sql = json.to_string();
-                        log::debug!("sql: {}", sql);
+                        tracing::debug!("sql: {}", sql);
                         if let Err(err) = taos.exec(sql) {
                             match err.code() {
-                                Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
-                                Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
-                                Code::COLUMN_EXISTS => log::trace!("column already exists"),
-                                Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
-                                Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
-                                Code::MODIFIED_ALREADY => log::trace!("modified already done"),
-                                Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
-                                Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
+                                Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                                Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                                Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                                Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
                                 _ => {
-                                    log::error!("{}", err);
+                                    tracing::error!("{}", err);
                                 }
                             }
                         }
@@ -2129,7 +2129,7 @@ mod tests {
         use taos_query::prelude::*;
         std::env::set_var("RUST_LOG", "debug");
         // let _ = pretty_env_logger::formatted_builder()
-        //     .filter_level(log::LevelFilter::Debug)
+        //     .filter_level(tracing::LevelFilter::Debug)
         //     .try_init();
         let dsn = std::env::var("TDENGINE_ClOUD_DSN");
         if dsn.is_err() {
@@ -2229,19 +2229,19 @@ mod tests {
                         let json = meta.as_json_meta().await?;
                         for meta in &json {
                             let sql = meta.to_string();
-                            log::debug!("sql: {}", sql);
+                            tracing::debug!("sql: {}", sql);
                             if let Err(err) = taos.exec(sql).await {
                                 match err.code() {
-                                    Code::TAG_ALREADY_EXIST => log::trace!("tag already exists"),
-                                    Code::TAG_NOT_EXIST => log::trace!("tag not exist"),
-                                    Code::COLUMN_EXISTS => log::trace!("column already exists"),
-                                    Code::COLUMN_NOT_EXIST => log::trace!("column not exists"),
-                                    Code::INVALID_COLUMN_NAME => log::trace!("invalid column name"),
-                                    Code::MODIFIED_ALREADY => log::trace!("modified already done"),
-                                    Code::TABLE_NOT_EXIST => log::trace!("table does not exists"),
-                                    Code::STABLE_NOT_EXIST => log::trace!("stable does not exists"),
+                                    Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                    Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                    Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                    Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                    Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                                    Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                                    Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                                    Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
                                     _ => {
-                                        log::error!("{}", err);
+                                        tracing::error!("{}", err);
                                     }
                                 }
                             }
@@ -2286,7 +2286,7 @@ mod tests {
         let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
         let r = taos.server_version().await?;
 
-        log::info!("server version: {}", r);
+        tracing::info!("server version: {}", r);
 
         Ok(())
     }

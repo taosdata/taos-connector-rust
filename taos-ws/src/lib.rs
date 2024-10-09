@@ -1,8 +1,8 @@
 #![recursion_limit = "256"]
 use std::fmt::{Debug, Display};
 
-use log::warn;
 use once_cell::sync::OnceCell;
+use tracing::warn;
 
 use taos_query::prelude::Code;
 use taos_query::util::Edition;

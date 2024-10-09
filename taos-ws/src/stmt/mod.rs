@@ -324,12 +324,12 @@ impl Stmt {
                     Some(msg) = msg_recv.recv() => {
                         if let Err(err) = sender.send(msg).await {
                             //
-                            log::warn!("Sender error: {err:#}");
+                            tracing::warn!("Sender error: {err:#}");
                             break;
                         }
                     }
                     _ = rx.changed() => {
-                        log::trace!("close sender task");
+                        tracing::trace!("close sender task");
                         break;
                     }
                 }
@@ -344,98 +344,98 @@ impl Stmt {
                         match message {
                             Ok(message) => match message {
                                 Message::Text(text) => {
-                                    log::trace!("json response: {}", text);
+                                    tracing::trace!("json response: {}", text);
                                     let v: StmtRecv = serde_json::from_str(&text).unwrap();
                                     match v.ok() {
                                         StmtOk::Conn(_) => {
-                                            log::warn!("[{req_id}] received connected response in message loop");
+                                            tracing::warn!("[{req_id}] received connected response in message loop");
                                         },
                                         StmtOk::Init(req_id, stmt_id) => {
-                                            log::trace!("stmt init done: {{ req_id: {}, stmt_id: {:?}}}", req_id, stmt_id);
+                                            tracing::trace!("stmt init done: {{ req_id: {}, stmt_id: {:?}}}", req_id, stmt_id);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 sender.send(stmt_id).unwrap();
                                             }  else {
-                                                log::trace!("Stmt init failed because req id {req_id} not exist");
+                                                tracing::trace!("Stmt init failed because req id {req_id} not exist");
                                             }
                                         }
                                         StmtOk::Stmt(stmt_id, res) => {
                                             if let Some(sender) = fetches_sender.get(&stmt_id) {
-                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                tracing::trace!("send data to fetches with id {}", stmt_id);
                                                 // let res = res.clone();
                                                 sender.send(res).await.unwrap();
                                             // }) {
 
                                             } else {
-                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                                tracing::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
                                         StmtOk::StmtPrepare(stmt_id, res) => {
                                             if let Some(sender) = prepare_result_fetches_sender.get(&stmt_id) {
-                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                tracing::trace!("send data to fetches with id {}", stmt_id);
 
                                                 sender.send(res).await.unwrap();
 
                                             } else {
-                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                                tracing::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
                                         StmtOk::StmtFields(stmt_id, res) => {
                                             if let Some(sender) = fields_fetches_sender.get(&stmt_id) {
-                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                tracing::trace!("send data to fetches with id {}", stmt_id);
                                                 // let res = res.clone();
                                                 sender.send(res).await.unwrap();
 
                                             } else {
-                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                                tracing::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
                                         StmtOk::StmtParam(stmt_id, res) => {
                                             if let Some(sender) = param_fetches_sender.get(&stmt_id) {
-                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                tracing::trace!("send data to fetches with id {}", stmt_id);
                                                 sender.send(res).await.unwrap();
                                             } else {
-                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                                tracing::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
                                         StmtOk::StmtUseResult(stmt_id, res) => {
                                             if let Some(sender) = use_result_fetches_sender.get(&stmt_id) {
-                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                tracing::trace!("send data to fetches with id {}", stmt_id);
                                                 sender.send(res).await.unwrap();
                                             } else {
-                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                                tracing::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
                                     }
                                 }
                                 Message::Binary(_) => {
-                                    log::warn!("received (unexpected) binary message, do nothing");
+                                    tracing::warn!("received (unexpected) binary message, do nothing");
                                 }
                                 Message::Close(_) => {
-                                    log::warn!("websocket connection is closed (unexpected?)");
+                                    tracing::warn!("websocket connection is closed (unexpected?)");
                                     break;
                                 }
                                 Message::Ping(_) => {
-                                    log::warn!("received (unexpected) ping message, do nothing");
+                                    tracing::warn!("received (unexpected) ping message, do nothing");
                                 }
                                 Message::Pong(_) => {
                                     // do nothing
-                                    log::warn!("received (unexpected) pong message, do nothing");
+                                    tracing::warn!("received (unexpected) pong message, do nothing");
                                 }
                                 Message::Frame(frame) => {
                                     // do nothing
-                                    log::warn!("received (unexpected) frame message, do nothing");
-                                    log::trace!("* frame data: {frame:?}");
+                                    tracing::warn!("received (unexpected) frame message, do nothing");
+                                    tracing::trace!("* frame data: {frame:?}");
                                 }
                             },
                             Err(err) => {
-                                log::trace!("receiving cause error: {err:?}");
+                                tracing::trace!("receiving cause error: {err:?}");
                                 break;
                             }
                         }
                     }
                     _ = close_listener.changed() => {
-                        log::trace!("close reader task");
+                        tracing::trace!("close reader task");
                         break
                     }
                 }
@@ -553,7 +553,7 @@ impl Stmt {
         Ok(())
     }
     pub async fn stmt_add_batch(&mut self) -> RawResult<()> {
-        log::trace!("add batch");
+        tracing::trace!("add batch");
         let message = StmtSend::AddBatch(self.args.unwrap());
         self.ws.send(message.to_msg()).await.map_err(Error::from)?;
         let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
@@ -567,11 +567,11 @@ impl Stmt {
             columns,
         };
         {
-            log::trace!("bind with: {message:?}");
-            log::trace!("bind string: {}", message.to_msg());
+            tracing::trace!("bind with: {message:?}");
+            tracing::trace!("bind string: {}", message.to_msg());
             self.ws.send(message.to_msg()).await.map_err(Error::from)?;
         }
-        log::trace!("begin receive");
+        tracing::trace!("begin receive");
         let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
             taos_query::RawError::from_string("Can't receive stmt bind response"),
         )??;
@@ -593,9 +593,9 @@ impl Stmt {
         let block = views_to_raw_block(columns);
 
         bytes.extend(&block);
-        log::trace!("block: {:?}", block);
+        tracing::trace!("block: {:?}", block);
         // dbg!(bytes::Bytes::copy_from_slice(&block));
-        log::trace!(
+        tracing::trace!(
             "{:#?}",
             RawBlock::parse_from_raw_block(block, taos_query::prelude::Precision::Millisecond)
         );
@@ -648,7 +648,7 @@ impl Stmt {
     }
 
     pub async fn stmt_exec(&mut self) -> RawResult<usize> {
-        log::trace!("exec");
+        tracing::trace!("exec");
         let message = StmtSend::Exec(self.args.unwrap());
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
@@ -666,7 +666,7 @@ impl Stmt {
     }
 
     pub async fn stmt_get_tag_fields(&mut self) -> RawResult<Vec<StmtField>> {
-        log::trace!("get tag fields");
+        tracing::trace!("get tag fields");
         let message = StmtSend::GetTagFields(self.args.unwrap());
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
@@ -679,7 +679,7 @@ impl Stmt {
     }
 
     pub async fn stmt_get_col_fields(&mut self) -> RawResult<Vec<StmtField>> {
-        log::trace!("get col fields");
+        tracing::trace!("get col fields");
         let message = StmtSend::GetColFields(self.args.unwrap());
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
@@ -714,7 +714,7 @@ impl Stmt {
             ));
         }
         let message = StmtSend::UseResult(self.args.unwrap());
-        log::trace!("use result message: {:#?}", &message);
+        tracing::trace!("use result message: {:#?}", &message);
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
             .await
@@ -877,9 +877,9 @@ mod tests {
 
         let tag_fields = stmt.stmt_get_tag_fields().await;
         if let Err(err) = tag_fields {
-            log::error!("tag fields error: {:?}", err);
+            tracing::error!("tag fields error: {:?}", err);
         } else {
-            log::debug!("tag fields: {:?}", tag_fields);
+            tracing::debug!("tag fields: {:?}", tag_fields);
         }
 
         stmt.stmt_set_tbname("tb1").await?;
@@ -906,11 +906,11 @@ mod tests {
 
         let tag_fields = stmt.stmt_get_tag_fields().await?;
 
-        log::debug!("tag fields: {:?}", tag_fields);
+        tracing::debug!("tag fields: {:?}", tag_fields);
 
         let col_fields = stmt.stmt_get_col_fields().await?;
 
-        log::debug!("col fields: {:?}", col_fields);
+        tracing::debug!("col fields: {:?}", col_fields);
 
         taos.exec("drop database ws_stmt_sj2").await?;
         Ok(())
@@ -952,7 +952,7 @@ mod tests {
 
         let res = stmt.use_result().await;
 
-        log::debug!("use result: {:?}", res);
+        tracing::debug!("use result: {:?}", res);
 
         taos.exec(format!("drop database {db}")).await?;
         Ok(())
@@ -1006,7 +1006,7 @@ mod tests {
 
         let res = stmt.use_result().await;
 
-        log::debug!("use result: {:?}", res);
+        tracing::debug!("use result: {:?}", res);
 
         assert!(res.is_err());
 
@@ -1067,11 +1067,11 @@ mod tests {
 
         let num_params = stmt.stmt_num_params().await?;
 
-        log::debug!("stmt num params: {:?}", num_params);
+        tracing::debug!("stmt num params: {:?}", num_params);
 
         for i in 0..num_params {
             let param = stmt.stmt_get_param(i as i64).await?;
-            log::debug!("param {}: {:?}", i, param);
+            tracing::debug!("param {}: {:?}", i, param);
         }
 
         taos.exec(format!("drop database {db}")).await?;

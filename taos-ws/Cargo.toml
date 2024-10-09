@@ -19,7 +19,6 @@ bytes = "1.1.0"
 dashmap = "6.1.0"
 futures = { version = "0.3" }
 itertools = "0.13.0"
-log = "0.4"
 once_cell = "1"
 parse_duration = "2.1"
 serde = { version = "1", features = ["derive"] }
@@ -64,5 +63,11 @@ sync = []
 tmq = []
 deflate = ["tokio-tungstenite/deflate", "tokio-tungstenite/rustls-dangerous"]
 
-rustls-aws-lc-crypto-provider = ["rustls", "tokio-tungstenite/rustls-aws-lc-crypto-provider"]
-rustls-ring-crypto-provider = ["rustls", "tokio-tungstenite/rustls-ring-crypto-provider"]
+rustls-aws-lc-crypto-provider = [
+    "rustls",
+    "tokio-tungstenite/rustls-aws-lc-crypto-provider",
+]
+rustls-ring-crypto-provider = [
+    "rustls",
+    "tokio-tungstenite/rustls-ring-crypto-provider",
+]
