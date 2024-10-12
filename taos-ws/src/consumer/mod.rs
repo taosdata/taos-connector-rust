@@ -503,6 +503,8 @@ impl Consumer {
                     topic,
                     vgroup_id,
                     message_type,
+                    offset,
+                    timing,
                 }) => {
                     if have_message {
                         let dur = elapsed.elapsed();
@@ -511,6 +513,8 @@ impl Consumer {
                             database,
                             topic,
                             vgroup_id,
+                            offset,
+                            timing,
                         };
                         let message = WsMessageBase {
                             is_support_fetch_raw: self.support_fetch_raw,
@@ -632,7 +636,7 @@ impl AsAsyncConsumer for Consumer {
         log::trace!("unsubscribe {} start", req_id);
         let action = TmqSend::Unsubscribe { req_id };
         self.sender.send_recv(action).await.unwrap();
-        drop(self)
+        drop(self);
     }
 
     async fn recv_timeout(
@@ -648,6 +652,17 @@ impl AsAsyncConsumer for Consumer {
             Timeout::Never | Timeout::None => self.poll_timeout(Duration::MAX).await,
             Timeout::Duration(timeout) => self.poll_timeout(timeout).await,
         }
+    }
+
+    async fn commit_all(&self) -> RawResult<()> {
+        let req_id = self.sender.req_id();
+        let action = TmqSend::Commit(MessageArgs {
+            req_id,
+            message_id: 0,
+        });
+
+        let _ = self.sender.send_recv(action).await?;
+        Ok(())
     }
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()> {
@@ -802,6 +817,10 @@ impl AsConsumer for Consumer {
         ))
     }
 
+    fn commit_all(&self) -> RawResult<()> {
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit_all(self))
+    }
+
     fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::commit(self, offset))
     }
@@ -836,6 +855,10 @@ impl AsConsumer for Consumer {
         taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::position(
             self, topic, vg_id,
         ))
+    }
+
+    fn unsubscribe(self) {
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::unsubscribe(self))
     }
 }
 
@@ -1334,12 +1357,14 @@ impl Drop for Consumer {
         let _ = self.close_signal.send(true);
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Offset {
     message_id: MessageId,
     database: String,
     topic: String,
     vgroup_id: i32,
+    offset: i64,
+    timing: i64,
 }
 
 impl IsOffset for Offset {
@@ -1353,6 +1378,14 @@ impl IsOffset for Offset {
 
     fn vgroup_id(&self) -> i32 {
         self.vgroup_id
+    }
+
+    fn offset(&self) -> i64 {
+        self.offset
+    }
+
+    fn timing(&self) -> i64 {
+        self.timing
     }
 }
 
@@ -2235,6 +2268,26 @@ mod tests {
             "drop database ws_tmq_meta",
         ])
         .await?;
+        Ok(())
+    }
+
+    #[cfg(feature = "rustls")]
+    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+    #[tokio::test]
+    async fn test_consumer_cloud_conn() -> anyhow::Result<()> {
+        use std::env;
+        use taos_query::prelude::*;
+
+        std::env::set_var("RUST_LOG", "trace");
+
+        let dsn = env::var("TDENGINE_CLOUD_DSN")
+            .expect("TDENGINE_CLOUD_DSN environment variable not set");
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        let r = taos.server_version().await?;
+
+        log::info!("server version: {}", r);
+
         Ok(())
     }
 }

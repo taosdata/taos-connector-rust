@@ -175,6 +175,8 @@ pub struct TmqPoll {
     pub topic: String,
     pub vgroup_id: VGroupId,
     pub message_type: MessageType,
+    pub offset: i64,
+    pub timing: i64,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]

@@ -80,8 +80,7 @@ void insert_data(WS_TAOS *taos)
         1648432614749,
         1648432615249,
         1648432615749,
-        1648432616249
-    };
+        1648432616249};
     float current[] = {
         10.3,
         12.6,
@@ -92,8 +91,7 @@ void insert_data(WS_TAOS *taos)
         11.5,
         13.7,
         12.0,
-        10.1
-    };
+        10.1};
     int voltage[] = {
         219,
         218,
@@ -104,8 +102,7 @@ void insert_data(WS_TAOS *taos)
         215,
         219,
         220,
-        222
-    };
+        222};
     float phase[] = {
         0.31,
         0.33,
@@ -116,9 +113,8 @@ void insert_data(WS_TAOS *taos)
         0.34,
         0.32,
         0.29,
-        0.30
-    };
-    
+        0.30};
+
     char is_null[data_count];
     memset(is_null, 0, sizeof(is_null));
     // length array
@@ -177,7 +173,7 @@ void insert_data(WS_TAOS *taos)
 
 int main()
 {
-    WS_TAOS *taos = ws_connect_with_dsn("ws://localhost:6041");
+    WS_TAOS *taos = ws_connect("ws://localhost:6041");
     if (taos == NULL)
     {
         printf("failed to connect to server\n");

@@ -11,23 +11,33 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 anyhow = "1"
-pretty_env_logger = "0.4.0"
+bytes = "1.1.0"
+pretty_env_logger = "0.5.0"
 log = "0.4"
 serde_json = "1"
-cargo_metadata = "0.17.0"
+cargo_metadata = "0.18.1"
 taos-error = { path = "../taos-error" }
 taos-query = { path = "../taos-query" }
 taos-ws = { path = "../taos-ws" }
 futures = { version = "0.3", features = ["executor"] }
 
 [build-dependencies]
-cbindgen = "0.24.3"
+cbindgen = "0.27.0"
 
 [dev-dependencies]
-pretty_env_logger = "0.4.0"
+pretty_env_logger = "0.5.0"
 
 [features]
-features = ["rustls"]
+default = ["rustls", "rustls-ring-crypto-provider"]
+
 native-tls-vendored = ["taos-ws/native-tls-vendored"]
 native-tls = ["taos-ws/native-tls"]
 rustls = ["taos-ws/rustls"]
+rustls-ring-crypto-provider = [
+    "rustls",
+    "taos-ws/rustls-ring-crypto-provider",
+]
+rustls-aws-lc-crypto-provider = [
+    "rustls",
+    "taos-ws/rustls-aws-lc-crypto-provider",
+]

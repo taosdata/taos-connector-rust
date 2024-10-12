@@ -11,7 +11,7 @@ use taos_query::{
     prelude::{tokio::time, RawError, RawResult},
     tmq::{
         AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
-        IsOffset, MessageSet, Timeout, VGroupId,
+        IsOffset, MessageSet, Timeout, Timing, VGroupId,
     },
     util::Edition,
     Dsn, IntoDsn, RawBlock,
@@ -263,6 +263,16 @@ impl IsOffset for Offset {
             .tmq_vgroup_id()
             .expect("a message should belong to a vgroup")
     }
+
+    #[doc(hidden)]
+    fn offset(&self) -> taos_query::tmq::Offset {
+        todo!()
+    }
+
+    #[doc(hidden)]
+    fn timing(&self) -> Timing {
+        todo!()
+    }
 }
 
 impl Drop for Offset {
@@ -455,6 +465,11 @@ impl AsConsumer for Consumer {
         self.tmq.commit_sync(offset.0.clone()).map(|_| ())
     }
 
+    #[doc(hidden)]
+    fn commit_all(&self) -> RawResult<()> {
+        todo!()
+    }
+
     fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
         self.tmq.commit_offset_sync(topic_name, vgroup_id, offset)
     }
@@ -610,6 +625,11 @@ impl AsAsyncConsumer for Consumer {
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         self.tmq.commit(offset.0.clone()).await.map(|_| ())
+    }
+
+    #[doc(hidden)]
+    async fn commit_all(&self) -> RawResult<()> {
+        todo!()
     }
 
     async fn commit_offset(

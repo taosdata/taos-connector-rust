@@ -235,6 +235,8 @@ pub trait AsyncMessage {
 }
 
 pub type VGroupId = i32;
+pub type Offset = i64;
+pub type Timing = i64;
 
 /// Extract offset information.
 pub trait IsOffset {
@@ -246,6 +248,12 @@ pub trait IsOffset {
 
     /// VGroup id for current message.
     fn vgroup_id(&self) -> VGroupId;
+
+    /// offset of current message.
+    fn offset(&self) -> Offset;
+
+    /// timing cost for current message.
+    fn timing(&self) -> Timing;
 }
 
 #[repr(C)]
@@ -331,6 +339,7 @@ pub trait AsConsumer: Sized {
     }
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()>;
+    fn commit_all(&self) -> RawResult<()>;
 
     fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()>;
 
@@ -417,6 +426,7 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     }
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()>;
+    async fn commit_all(&self) -> RawResult<()>;
 
     async fn commit_offset(
         &self,
@@ -476,6 +486,10 @@ where
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit(self, offset))
+    }
+
+    fn commit_all(&self) -> RawResult<()> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit_all(self))
     }
 
     fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {

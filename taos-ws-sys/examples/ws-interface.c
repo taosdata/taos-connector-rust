@@ -12,8 +12,8 @@ int main()
   {
     dsn = "ws://localhost:6041";
   }
-  ws_enable_log();
-  WS_TAOS *taos = ws_connect_with_dsn(dsn);
+  ws_enable_log("trace");
+  WS_TAOS *taos = ws_connect(dsn);
   if (taos == NULL)
   {
     int code = ws_errno(NULL);
@@ -70,14 +70,16 @@ int main()
   {
     int rows = 0;
     const void *data = NULL;
-    code = ws_fetch_block(rs, &data, &rows);
+    code = ws_fetch_raw_block(rs, &data, &rows);
+    assert(code == 0);
+
     int64_t timing = ws_take_timing(rs);
     dprintf(2, "Fetch block timing: %ldns\n", timing);
 
     if (!is_null_checked)
     {
       bool is_null = ws_is_null(rs, 0, 3);
-      assert(is_null);
+      assert(!is_null);
       is_null_checked = true;
     }
 

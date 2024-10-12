@@ -5,10 +5,12 @@ all:
 	gcc -g show-databases.c ${WS_FLAGS} -o show-databases
 	gcc -g ws-run-sql.c ${WS_FLAGS} -o ws-run-sql
 
-.phony: all
+.PHONY: all
 
 basic:
 	gcc -g ws-basic.c ${WS_FLAGS} -o ./target/ws-basic && ./target/ws-basic
+cloud:
+	gcc -g ws-cloud.c ${WS_FLAGS} -o ./target/ws-cloud && ./target/ws-cloud
 
 interface:
 	gcc -g ws-interface.c ${WS_FLAGS} -o ./target/ws-interface && ./target/ws-interface
@@ -26,3 +28,18 @@ get-err:
 	gcc -g ws-get-err.c ${WS_FLAGS} -o ./target/ws-get-err && ./target/ws-get-err
 fetch-row:
 	gcc -g ws-fetch-row.c ${WS_FLAGS} -o ./target/ws-fetch-row && ./target/ws-fetch-row
+
+tmq-basic:
+	gcc -g ws-tmq-basic.c ${WS_FLAGS} -o ./target/ws-tmq-basic && ./target/ws-tmq-basic
+
+tmq-all:
+	gcc -g ws-tmq-all.c ${WS_FLAGS} -o ./target/ws-tmq-all && ./target/ws-tmq-all	
+
+sml:
+	gcc -g ws-schemaless.c ${WS_FLAGS} -o ./target/ws-schemaless && ./target/ws-schemaless
+
+errno:
+	gcc -g ws-err-code.c ${WS_FLAGS} -o ./target/ws-err-code && ./target/ws-err-code
+
+
+run-all: basic interface bind muti table fetch-row tmq-basic schemaless errno

@@ -328,6 +328,14 @@ async fn read_queries(
                 let ws2 = ws2.clone();
                 let (req_id, data, ok) = v.ok();
                 match &data {
+                    WsRecvData::Insert(_) => {
+                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                            sender.send(ok.map(|_| data)).unwrap();
+                        } else {
+                            debug_assert!(!queries_sender.contains(&req_id));
+                            log::warn!("req_id {req_id} not detected, message might be lost");
+                        }
+                    }
                     WsRecvData::Query(_) => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
                             if let Err(err) = sender.send(ok.map(|_| data)) {
@@ -429,7 +437,6 @@ async fn read_queries(
                         } else {
                             result_block = slice.read_inlined_bytes::<4>().unwrap();
                         }
-
                         if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
                             sender
                                 .send(Ok(WsRecvData::BlockNew {
@@ -1170,12 +1177,38 @@ impl WsTaos {
         }
     }
 
+    pub async fn s_put(&self, sml: &SmlData) -> RawResult<()> {
+        let action = WsSend::Insert {
+            protocol: sml.protocol() as u8,
+            precision: sml.precision().into(),
+            data: sml.data().join("\n").to_string(),
+            ttl: sml.ttl(),
+            req_id: sml.req_id(),
+        };
+        log::trace!("put send: {:?}", action);
+        let req = self.sender.send_recv(action).await?;
+
+        match req {
+            WsRecvData::Insert(res) => {
+                log::trace!("put resp : {:?}", res);
+                Ok(())
+            }
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+
     pub fn version(&self) -> &str {
         &self.sender.version.version
     }
 
     pub fn is_support_binary_sql(&self) -> bool {
         self.sender.version.is_support_binary_sql
+    }
+
+    pub fn get_req_id(&self) -> ReqId {
+        self.sender.req_id()
     }
 }
 
@@ -1187,7 +1220,7 @@ impl ResultSet {
         let now = Instant::now();
         match self.blocks_buffer.as_mut().unwrap().recv_async().await {
             Ok(Ok((raw, timing))) => {
-                self.timing += timing;
+                self.timing = timing;
                 self.metrics.time_cost_in_flume += now.elapsed();
                 return Ok(Some(raw));
             }
@@ -1332,8 +1365,8 @@ impl AsyncQueryable for WsTaos {
             .await
     }
 
-    async fn put(&self, _data: &SmlData) -> RawResult<()> {
-        todo!()
+    async fn put(&self, data: &SmlData) -> RawResult<()> {
+        self.s_put(data).in_current_span().await
     }
 }
 

@@ -4,14 +4,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-int main() {
+int main()
+{
   char *dsn = getenv("TAOS_DSN");
-  if (dsn == NULL) {
+  if (dsn == NULL)
+  {
     dsn = "ws://localhost:6041";
   }
-  ws_enable_log();
-  WS_TAOS *taos = ws_connect_with_dsn(dsn);
-  if (taos == NULL) {
+  ws_enable_log("debug");
+  WS_TAOS *taos = ws_connect(dsn);
+  if (taos == NULL)
+  {
     int code = ws_errno(NULL);
     const char *errstr = ws_errstr(NULL);
     dprintf(2, "Error [%6x]: %s", code, errstr);
@@ -23,9 +26,10 @@ int main() {
 
   WS_RES *rs = ws_query(taos, "show databases");
   int64_t timing = ws_take_timing(rs);
-  dprintf(2, "Query timing: %ldns\n", timing);
+  dprintf(2, "Query timing: %lldns\n", timing);
   int code = ws_errno(rs);
-  if (code != 0) {
+  if (code != 0)
+  {
     const char *errstr = ws_errstr(taos);
     dprintf(2, "Error [%6x]: %s", code, errstr);
     ws_free_result(rs);
@@ -36,27 +40,33 @@ int main() {
   int precision = ws_result_precision(rs);
   int cols = ws_field_count(rs);
   const struct WS_FIELD_V2 *fields = ws_fetch_fields_v2(rs);
-  for (int col = 0; col < cols; col++) {
+  for (int col = 0; col < cols; col++)
+  {
     const struct WS_FIELD_V2 *field = &fields[col];
     dprintf(2, "column %d: name: %s, length: %d, type: %d\n", col, field->name,
             field->bytes, field->type);
   }
 
-  for (int col = 0; col < cols; col++) {
-    if (col == 0) {
+  for (int col = 0; col < cols; col++)
+  {
+    if (col == 0)
+    {
       printf("%s", fields[col].name);
-    } else {
+    }
+    else
+    {
       printf(",%s", fields[col].name);
     }
   }
   printf("\n");
 
-  while (true) {
+  while (true)
+  {
     int rows = 0;
     const void *data = NULL;
-    code = ws_fetch_block(rs, &data, &rows);
+    code = ws_fetch_raw_block(rs, &data, &rows);
     int64_t timing = ws_take_timing(rs);
-    dprintf(2, "Fetch block timing: %ldns\n", timing);
+    dprintf(2, "Fetch block timing: %lldns\n", timing);
 
     if (rows == 0)
       break;
@@ -64,25 +74,32 @@ int main() {
     uint32_t len;
     char tmp[4096];
 
-    for (int row = 0; row < rows; row++) {
+    for (int row = 0; row < rows; row++)
+    {
 
-      for (int col = 0; col < cols; col++) {
+      for (int col = 0; col < cols; col++)
+      {
         if (col != 0)
           printf(",");
         const void *value = ws_get_value_in_block(rs, row, col, &ty, &len);
-        if (value == NULL) {
+        if (value == NULL)
+        {
           printf(" NULL ");
           continue;
         }
         // printf("%d", ty);
-        switch (ty) {
+        switch (ty)
+        {
         case TSDB_DATA_TYPE_NULL:
           printf(" NULL ");
           break;
         case TSDB_DATA_TYPE_BOOL:
-          if (*(bool *)(value)) {
+          if (*(bool *)(value))
+          {
             printf(" true  ");
-          } else {
+          }
+          else
+          {
             printf(" false ");
           }
           break;
@@ -96,7 +113,7 @@ int main() {
           printf(" %d ", *(int32_t *)value);
           break;
         case TSDB_DATA_TYPE_BIGINT:
-          printf(" %ld ", *(int64_t *)value);
+          printf(" %lld ", *(int64_t *)value);
           break;
         case TSDB_DATA_TYPE_UTINYINT:
           printf(" %d ", *(uint8_t *)value);
@@ -108,7 +125,7 @@ int main() {
           printf(" %d ", *(uint32_t *)value);
           break;
         case TSDB_DATA_TYPE_UBIGINT:
-          printf(" %ld ", *(uint64_t *)value);
+          printf(" %lld ", *(uint64_t *)value);
           break;
         case TSDB_DATA_TYPE_FLOAT:
           printf(" %f ", *(float *)value);
@@ -118,7 +135,7 @@ int main() {
           break;
         case TSDB_DATA_TYPE_TIMESTAMP:
           memset(tmp, 0, 4096);
-          ws_timestamp_to_rfc3339(tmp, *(int64_t *)value, precision, true);
+          ws_timestamp_to_rfc3339((uint8_t *)tmp, *(int64_t *)value, precision, true);
           printf("\"%s\"", (char *)tmp);
           break;
         case TSDB_DATA_TYPE_VARCHAR:

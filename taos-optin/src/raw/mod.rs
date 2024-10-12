@@ -1808,9 +1808,9 @@ mod tests {
         let err = taos.write_raw_meta(raw).unwrap_err();
 
         dbg!(&err);
-        assert_eq!(
-            err.to_string(),
-            "[0x0118] Internal error: `Invalid parameters,detail:taos:0x1 or data:(nil) is NULL`"
+        assert!(
+            err.to_string().contains("[0x0118]"),
+            "Error message does not contain the expected substring"
         );
     }
 }

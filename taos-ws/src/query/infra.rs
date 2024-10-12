@@ -55,6 +55,13 @@ pub enum WsSend {
         #[serde(flatten)]
         req: WsConnReq,
     },
+    Insert {
+        protocol: u8,
+        precision: String,
+        data: String,
+        ttl: Option<i32>,
+        req_id: Option<ReqId>,
+    },
     Query {
         req_id: ReqId,
         sql: String,
@@ -69,6 +76,7 @@ impl WsSend {
     pub(crate) fn req_id(&self) -> ReqId {
         match self {
             WsSend::Conn { req_id, req: _ } => *req_id,
+            WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
             WsSend::Query { req_id, sql: _ } => *req_id,
             WsSend::Fetch(args) => args.req_id,
             WsSend::FetchBlock(args) => args.req_id,
@@ -126,6 +134,14 @@ pub struct WsQueryResp {
 #[serde_as]
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(default)]
+pub struct InsertResp {
+    #[serde_as(as = "serde_with::DurationNanoSeconds")]
+    pub timing: Duration,
+}
+
+#[serde_as]
+#[derive(Debug, Default, Deserialize, Clone)]
+#[serde(default)]
 pub struct WsFetchResp {
     pub id: ResId,
     pub completed: bool,
@@ -144,6 +160,8 @@ pub enum WsRecvData {
     Version {
         version: String,
     },
+    Insert(InsertResp),
+
     #[serde(alias = "binary_query")]
     Query(WsQueryResp),
     Fetch(WsFetchResp),

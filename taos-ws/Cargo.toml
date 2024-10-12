@@ -42,9 +42,8 @@ flume = "0.11"
 cfg-if = "1"
 
 [dependencies.tokio-tungstenite]
-version = "0.23"
 git = "https://github.com/taosdata/tokio-tungstenite.git"
-rev = "19822e0"
+rev = "3420353"
 
 [dev-dependencies]
 pretty_env_logger = "0.5.0"
@@ -63,3 +62,6 @@ native-tls-vendored = ["tokio-tungstenite/native-tls-vendored", "native-tls"]
 sync = []
 tmq = []
 deflate = ["tokio-tungstenite/deflate", "tokio-tungstenite/rustls-dangerous"]
+
+rustls-aws-lc-crypto-provider = ["rustls", "tokio-tungstenite/rustls-aws-lc-crypto-provider"]
+rustls-ring-crypto-provider = ["rustls", "tokio-tungstenite/rustls-ring-crypto-provider"]

@@ -22,8 +22,6 @@ pub use query::Taos;
 use query::Error as QueryError;
 use query::WsConnReq;
 
-pub mod schemaless;
-
 pub(crate) use taos_query::block_in_place_or_global;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -435,18 +433,6 @@ impl TaosBuilder {
                 format!("{}://{}/rest/tmq?token={}", self.scheme, self.addr, token)
             }
             WsAuth::Plain(_, _) => format!("{}://{}/rest/tmq", self.scheme, self.addr),
-        }
-    }
-
-    pub(crate) fn to_schemaless_url(&self) -> String {
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!(
-                    "{}://{}/rest/schemaless?token={}",
-                    self.scheme, self.addr, token
-                )
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/schemaless", self.scheme, self.addr),
         }
     }
 
