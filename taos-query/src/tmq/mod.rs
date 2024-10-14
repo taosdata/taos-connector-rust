@@ -70,7 +70,7 @@ fn parse_duration(s: &str) -> Result<Duration, TimeoutError> {
     let duration = match unit.trim() {
         "us" => Duration::from_micros(value),
         "ms" => Duration::from_millis(value),
-        "sec" | "s" => Duration::from_secs(value),
+        "sec" | "s" | "" => Duration::from_secs(value),
         "min" | "m" => Duration::from_secs(value * 60),
         "hr" | "h" => Duration::from_secs(value * 60 * 60),
         "day" | "d" => Duration::from_secs(value * 60 * 60 * 24),
@@ -570,12 +570,13 @@ mod tests {
             parse_duration("10day"),
             Ok(Duration::from_secs(10 * 60 * 60 * 24))
         );
+        assert_eq!(parse_duration("11"), Ok(Duration::from_secs(11)));
 
         // invalid cases
         assert_eq!(
-            parse_duration("100"),
+            parse_duration("5.3"),
             Err(TimeoutError::Invalid(
-                "100".to_string(),
+                "5.3".to_string(),
                 "Invalid unit".to_string()
             ))
         );
