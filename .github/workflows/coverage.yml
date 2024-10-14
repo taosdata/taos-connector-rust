@@ -178,7 +178,7 @@ jobs:
           mkdir -p /tmp/taos/v3/log /tmp/taos/v3/data
 
           taosd &
-          taosadapter &
+          TAOS_ADAPTER_LOG_PATH=/tmp/taos/v3/log taosadapter &
 
           sleep 1
 
