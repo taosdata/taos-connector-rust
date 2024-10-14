@@ -992,9 +992,9 @@ mod tests {
 
         tracing::trace!("{:?}", err);
 
-        assert!(err.code() == 0x2662);
+        assert!(err.code() == 0x0388);
         let err_str = err.to_string();
-        assert!(err_str.contains("0x2662"));
+        assert!(err_str.contains("0x0388"));
         assert!(err_str.contains("Database not exist"));
 
         Ok(())

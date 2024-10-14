@@ -59,34 +59,30 @@ pub enum TimeoutError {
     Invalid(String, String),
 }
 
-fn is_numeric_or_sign(s: char) -> bool {
-    if s != '+' && s != '-' && !s.is_digit(10) {
-        return false;
-    }
-    return true;
-}
+fn parse_duration(s: &str) -> Result<Duration, TimeoutError> {
+    let s = s.trim();
+    let (value, unit) = s.split_at(s.find(|c: char| !c.is_digit(10)).unwrap_or(s.len()));
 
-fn validate_duration_string(duration_string: &str) -> Result<(), String> {
-    if !duration_string.contains('e') && !duration_string.contains('E') {
-        return Ok(());
-    }
+    let value: u64 = value
+        .parse()
+        .map_err(|_| TimeoutError::Invalid(s.to_string(), "Invalid format".to_string()))?;
 
-    let parts: Vec<&str> = duration_string.split_whitespace().collect();
-    for part in parts {
-        if part.contains('e') || part.contains('E') {
-            // Check if it's an exponent form
-            let parts_vec: Vec<&str> = part.split(|c| c == 'e' || c == 'E').collect();
-            if parts_vec.len() == 2 && !parts_vec[0].is_empty() && !parts_vec[1].is_empty() {
-                let last = parts_vec[0].chars().last().unwrap();
-                let first = parts_vec[1].chars().next().unwrap();
-                if is_numeric_or_sign(first) && is_numeric_or_sign(last) {
-                    return Err("Exponent not allowed".to_string());
-                }
-            }
+    let duration = match unit.trim() {
+        "us" => Duration::from_micros(value),
+        "ms" => Duration::from_millis(value),
+        "sec" | "s" => Duration::from_secs(value),
+        "min" | "m" => Duration::from_secs(value * 60),
+        "hr" | "h" => Duration::from_secs(value * 60 * 60),
+        "day" | "d" => Duration::from_secs(value * 60 * 60 * 24),
+        _ => {
+            return Err(TimeoutError::Invalid(
+                s.to_string(),
+                "Invalid unit".to_string(),
+            ))
         }
-    }
+    };
 
-    Ok(())
+    Ok(duration)
 }
 
 impl FromStr for Timeout {
@@ -99,12 +95,7 @@ impl FromStr for Timeout {
         match s.to_lowercase().as_str() {
             "never" => Ok(Timeout::Never),
             "none" => Ok(Timeout::None),
-            _ => match validate_duration_string(s) {
-                Ok(_) => parse_duration::parse(s)
-                    .map(Timeout::Duration)
-                    .map_err(|err| TimeoutError::Invalid(s.to_string(), err.to_string())),
-                Err(err) => Err(TimeoutError::Invalid(s.to_string(), err.to_string())),
-            },
+            _ => parse_duration(s).map(Timeout::Duration).map_err(Into::into),
         }
     }
 }
@@ -561,65 +552,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_validate_duration_string() {
-        // Valid cases
-        assert_eq!(validate_duration_string("1.23e4"), Ok(()));
-        assert_eq!(validate_duration_string("1.23e-4"), Ok(()));
-        assert_eq!(validate_duration_string("1.23"), Ok(()));
-
-        // Invalid exponent
+    fn test_parse_duration() {
+        // valid cases
+        assert_eq!(parse_duration("100us"), Ok(Duration::from_micros(100)));
+        assert_eq!(parse_duration("200ms"), Ok(Duration::from_millis(200)));
+        assert_eq!(parse_duration("3s"), Ok(Duration::from_secs(3)));
+        assert_eq!(parse_duration("4sec"), Ok(Duration::from_secs(4)));
+        assert_eq!(parse_duration("5m"), Ok(Duration::from_secs(5 * 60)));
+        assert_eq!(parse_duration("6min"), Ok(Duration::from_secs(6 * 60)));
+        assert_eq!(parse_duration("7h"), Ok(Duration::from_secs(7 * 60 * 60)));
+        assert_eq!(parse_duration("8hr"), Ok(Duration::from_secs(8 * 60 * 60)));
         assert_eq!(
-            validate_duration_string("1.23e11"),
-            Err("Exponent out of range".to_string())
+            parse_duration("9d"),
+            Ok(Duration::from_secs(9 * 60 * 60 * 24))
         );
         assert_eq!(
-            validate_duration_string("1.23e-11"),
-            Err("Exponent out of range".to_string())
-        );
-
-        // Invalid format
-        assert_eq!(
-            validate_duration_string("1.23eabc"),
-            Err("Invalid exponent".to_string())
-        );
-    }
-
-    #[test]
-    fn test_timeout_from_str() {
-        // Valid cases
-        assert_eq!(validate_duration_string("5sec"), Ok(()));
-        assert_eq!(validate_duration_string("5s"), Ok(()));
-        assert_eq!(validate_duration_string("123s"), Ok(()));
-        assert_eq!(validate_duration_string("1.23ms"), Ok(()));
-        assert_eq!(validate_duration_string("1 day"), Ok(()));
-        assert_eq!(validate_duration_string("5econds"), Ok(())); // 'e' in the middle of a word
-
-        // Invalid cases
-        assert_eq!(
-            validate_duration_string("1e10 sec"),
-            Err("Exponent not allowed".to_string())
-        );
-        assert_eq!(
-            validate_duration_string("1E10 ms"),
-            Err("Exponent not allowed".to_string())
+            parse_duration("10day"),
+            Ok(Duration::from_secs(10 * 60 * 60 * 24))
         );
 
+        // invalid cases
         assert_eq!(
-            validate_duration_string("1E10ms"),
-            Err("Exponent not allowed".to_string())
+            parse_duration("100"),
+            Err(TimeoutError::Invalid(
+                "100".to_string(),
+                "Invalid unit".to_string()
+            ))
         );
         assert_eq!(
-            validate_duration_string("1e-1"),
-            Err("Exponent not allowed".to_string())
+            parse_duration("abc"),
+            Err(TimeoutError::Invalid(
+                "abc".to_string(),
+                "Invalid format".to_string()
+            ))
         );
         assert_eq!(
-            validate_duration_string("1.84467e19 seconds"),
-            Err("Exponent not allowed".to_string())
-        );
-
-        assert_eq!(
-            validate_duration_string("1E-1"),
-            Err("Exponent not allowed".to_string())
+            parse_duration("100xy"),
+            Err(TimeoutError::Invalid(
+                "100xy".to_string(),
+                "Invalid unit".to_string()
+            ))
         );
     }
 }
