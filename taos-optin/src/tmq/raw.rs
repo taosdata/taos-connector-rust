@@ -223,7 +223,13 @@ pub(super) mod tmq {
                 if tmq_resp.is_err() || num == 0 {
                     return vec![];
                 }
-                unsafe { std::slice::from_raw_parts(*pt, num as usize).to_vec() }
+                let vec = unsafe { std::slice::from_raw_parts(*pt, num as usize).to_vec() };
+                unsafe {
+                    self.tmq
+                        .tmq_free_assignment
+                        .expect("tmq_free_assignment not found")(*pt)
+                };
+                vec
             } else {
                 vec![]
             }

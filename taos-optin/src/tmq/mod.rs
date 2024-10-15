@@ -2470,7 +2470,9 @@ mod async_tests {
                 let topic = offset.topic();
                 // the vgroup id, like partition id in kafka.
                 let vgroup_id = offset.vgroup_id();
-                println!("* in vgroup id {vgroup_id} of topic {topic}\n");
+
+                let assignments = consumer.assignments().await;
+                println!("* in vgroup id {vgroup_id} of topic {topic}, assignments: {assignments:?}\n");
 
                 if let Some(data) = message.into_data() {
                     while let Some(block) = data.fetch_raw_block().await? {
