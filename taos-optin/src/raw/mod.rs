@@ -388,6 +388,7 @@ pub(crate) struct TmqApi {
             num_of_assignment: *mut i32,
         ) -> tmq_resp_err_t,
     >,
+    pub(crate) tmq_free_assignment: Option<unsafe extern "C" fn(assignment: *mut Assignment)>,
 
     pub(crate) tmq_offset_seek: Option<
         unsafe extern "C" fn(
@@ -665,6 +666,7 @@ impl ApiEntry {
                 );
                 optional_symbol!(
                     tmq_get_topic_assignment,
+                    tmq_free_assignment,
                     tmq_offset_seek,
                     tmq_commit_offset_sync,
                     tmq_commit_offset_async,
@@ -707,6 +709,7 @@ impl ApiEntry {
                     tmq_commit_offset_sync,
                     tmq_commit_offset_async,
                     tmq_get_topic_assignment,
+                    tmq_free_assignment,
                     tmq_offset_seek,
                     tmq_committed,
                     tmq_position,
