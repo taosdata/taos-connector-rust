@@ -8,7 +8,7 @@ use crate::{
     JsonMeta, RawBlock, RawResult,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Timeout {
     /// Wait forever.
     Never,
@@ -51,7 +51,7 @@ impl Timeout {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum TimeoutError {
     #[error("empty timeout value")]
     Empty,
@@ -59,16 +59,30 @@ pub enum TimeoutError {
     Invalid(String, String),
 }
 
-fn validate_duration_string(duration_string: &str) -> Result<(), String> {
-    // Check the exponent of the duration string
-    let parts: Vec<&str> = duration_string.split('e').collect();
-    if parts.len() == 2 {
-        let exponent: i32 = parts[1].parse().map_err(|_| "Invalid exponent")?;
-        if exponent > 10 || exponent < -10 {
-            return Err("Exponent out of range".to_string());
+fn parse_duration(s: &str) -> Result<Duration, TimeoutError> {
+    let s = s.trim();
+    let (value, unit) = s.split_at(s.find(|c: char| !c.is_digit(10)).unwrap_or(s.len()));
+
+    let value: u64 = value
+        .parse()
+        .map_err(|_| TimeoutError::Invalid(s.to_string(), "Invalid format".to_string()))?;
+
+    let duration = match unit.trim() {
+        "us" => Duration::from_micros(value),
+        "ms" => Duration::from_millis(value),
+        "sec" | "s" | "" => Duration::from_secs(value),
+        "min" | "m" => Duration::from_secs(value * 60),
+        "hr" | "h" => Duration::from_secs(value * 60 * 60),
+        "day" | "d" => Duration::from_secs(value * 60 * 60 * 24),
+        _ => {
+            return Err(TimeoutError::Invalid(
+                s.to_string(),
+                "Invalid unit".to_string(),
+            ))
         }
-    }
-    Ok(())
+    };
+
+    Ok(duration)
 }
 
 impl FromStr for Timeout {
@@ -81,12 +95,7 @@ impl FromStr for Timeout {
         match s.to_lowercase().as_str() {
             "never" => Ok(Timeout::Never),
             "none" => Ok(Timeout::None),
-            _ => match validate_duration_string(s) {
-                Ok(_) => parse_duration::parse(s)
-                    .map(Timeout::Duration)
-                    .map_err(|err| TimeoutError::Invalid(s.to_string(), err.to_string())),
-                Err(err) => Err(TimeoutError::Invalid(s.to_string(), err.to_string())),
-            },
+            _ => parse_duration(s).map(Timeout::Duration).map_err(Into::into),
         }
     }
 }
@@ -538,3 +547,52 @@ where
 //         <C as AsConsumer>::commit(self, offset)
 //     }
 // }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_duration() {
+        // valid cases
+        assert_eq!(parse_duration("100us"), Ok(Duration::from_micros(100)));
+        assert_eq!(parse_duration("200ms"), Ok(Duration::from_millis(200)));
+        assert_eq!(parse_duration("3s"), Ok(Duration::from_secs(3)));
+        assert_eq!(parse_duration("4sec"), Ok(Duration::from_secs(4)));
+        assert_eq!(parse_duration("5m"), Ok(Duration::from_secs(5 * 60)));
+        assert_eq!(parse_duration("6min"), Ok(Duration::from_secs(6 * 60)));
+        assert_eq!(parse_duration("7h"), Ok(Duration::from_secs(7 * 60 * 60)));
+        assert_eq!(parse_duration("8hr"), Ok(Duration::from_secs(8 * 60 * 60)));
+        assert_eq!(
+            parse_duration("9d"),
+            Ok(Duration::from_secs(9 * 60 * 60 * 24))
+        );
+        assert_eq!(
+            parse_duration("10day"),
+            Ok(Duration::from_secs(10 * 60 * 60 * 24))
+        );
+        assert_eq!(parse_duration("11"), Ok(Duration::from_secs(11)));
+
+        // invalid cases
+        assert_eq!(
+            parse_duration("5.3"),
+            Err(TimeoutError::Invalid(
+                "5.3".to_string(),
+                "Invalid unit".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_duration("abc"),
+            Err(TimeoutError::Invalid(
+                "abc".to_string(),
+                "Invalid format".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_duration("100xy"),
+            Err(TimeoutError::Invalid(
+                "100xy".to_string(),
+                "Invalid unit".to_string()
+            ))
+        );
+    }
+}

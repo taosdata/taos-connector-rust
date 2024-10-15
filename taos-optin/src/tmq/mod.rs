@@ -1071,16 +1071,16 @@ mod tests {
             "alter table `table` drop column new10_new",
             "alter table `table` drop column new2",
             "alter table `table` drop column new1",
-            // kind 9: drop normal table
-            "drop table `table`",
-            // kind 10: drop child table
-            "drop table `tb2`, `tb1`",
-            // kind 11: drop super table
-            "drop table `stb2`",
-            "drop table `stb1`",
+            // ***** we can not drop table, for the table will be checked later by desc tablename
+            // // kind 9: drop normal table
+            // "drop table `table`",
+            // // kind 10: drop child table
+            // "drop table `tb2`, `tb1`",
+            // // kind 11: drop super table
+            // "drop table `stb2`",
+            // "drop table `stb1`",
             "create topic if not exists sys_tmq_meta_sync with meta as database sys_tmq_meta_sync",
         ])?;
-
         taos.exec_many([
             "drop database if exists sys_tmq_meta_sync2",
             "create database if not exists sys_tmq_meta_sync2",
@@ -1268,13 +1268,14 @@ mod tests {
             "alter table `table` drop column new10_new",
             "alter table `table` drop column new2",
             "alter table `table` drop column new1",
-            // kind 9: drop normal table
-            "drop table `table`",
-            // kind 10: drop child table
-            "drop table `tb2`, `tb1`",
-            // kind 11: drop super table
-            "drop table `stb2`",
-            "drop table `stb1`",
+            // ***** we can not drop table, for the table will be checked later by desc tablename
+            // // kind 9: drop normal table
+            // "drop table `table`",
+            // // kind 10: drop child table
+            // "drop table `tb2`, `tb1`",
+            // // kind 11: drop super table
+            // "drop table `stb2`",
+            // "drop table `stb1`",
         ])?;
 
         taos.exec_many([
@@ -1984,13 +1985,14 @@ mod async_tests {
             "alter table `table` drop column new10_new",
             "alter table `table` drop column new2",
             "alter table `table` drop column new1",
-            // kind 9: drop normal table
-            "drop table `table`",
-            // kind 10: drop child table
-            "drop table `tb2`, `tb1`",
-            // kind 11: drop super table
-            "drop table `stb2`",
-            "drop table `stb1`",
+            // ***** we can not drop table, for the table will be checked later by desc tablename
+            // // kind 9: drop normal table
+            // "drop table `table`",
+            // // kind 10: drop child table
+            // "drop table `tb2`, `tb1`",
+            // // kind 11: drop super table
+            // "drop table `stb2`",
+            // "drop table `stb1`",
         ])
         .await?;
 
