@@ -471,14 +471,15 @@ impl TaosBuilder {
         &self,
         url: String,
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-        self.build_stream_opt(url, true).await
+        let result = async { self.build_stream_opt(url, true).await }.await;
+        result
     }
     pub(crate) async fn build_stream_opt(
         &self,
         url: String,
         use_global_endpoint: bool,
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-        let mut config = WebSocketConfig::default();
+        let mut config = Box::new(WebSocketConfig::default());
         config.max_frame_size = None;
         config.max_message_size = None;
         if self.compression {
@@ -501,7 +502,7 @@ impl TaosBuilder {
                 } else {
                     url.as_str()
                 },
-                Some(config),
+                Some(*config.clone()),
                 false,
             )
             .await
@@ -519,7 +520,7 @@ impl TaosBuilder {
                         if !use_global_endpoint {
                             return Err(QueryError::from(err).into());
                         }
-                        match connect_async_with_config(&url, Some(config), false).await {
+                        match connect_async_with_config(&url, Some(*config.clone()), false).await {
                             Ok((ws, _)) => return Ok(ws),
                             Err(err) => {
                                 let err_string = err.to_string();
