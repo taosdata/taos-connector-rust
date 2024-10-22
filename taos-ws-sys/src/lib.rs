@@ -869,6 +869,8 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
+    use std::fs::File;
+
     static ONCE_INIT: std::sync::Once = std::sync::Once::new();
 
     let log_level = match log_level.is_null() {
@@ -889,6 +891,15 @@ pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
         let mut builder = pretty_env_logger::formatted_timed_builder();
         builder.format_timestamp_nanos();
         builder.parse_filters(log_level);
+
+        // 写死日志文件路径
+        let log_file_path = "/var/log/taos/log.txt";
+        if let Ok(file) = File::create(log_file_path) {
+            builder.target(pretty_env_logger::env_logger::Target::Pipe(Box::new(file)));
+        } else {
+            eprintln!("Failed to create log file in the specified directory");
+        }
+
         builder.init();
     });
 

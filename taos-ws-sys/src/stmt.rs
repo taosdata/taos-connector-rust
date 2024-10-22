@@ -405,25 +405,56 @@ impl TaosMultiBind {
 
         macro_rules! _impl_primitive {
             ($t:ty) => {{
-                let slice = std::slice::from_raw_parts(self.buffer as *const $t, len);
-                match self.is_null.is_null() {
-                    true => json!(slice),
-                    false => {
+                if std::mem::size_of::<$t>() > 1 {
+                    if self.is_null.is_null() {
+                        let iter = (0..len)
+                            .map(|i| {
+                                (self.buffer as *const $t)
+                                    .offset(i as isize)
+                                    .read_unaligned()
+                            })
+                            .collect_vec();
+                        json!(iter)
+                    } else {
                         let nulls = std::slice::from_raw_parts(self.is_null as *const bool, len);
-                        let column: Vec<_> = slice
-                            .iter()
+                        let column: Vec<_> = (0..len)
                             .zip(nulls)
-                            .map(
-                                |(value, is_null)| {
-                                    if *is_null {
-                                        None
-                                    } else {
-                                        Some(*value)
-                                    }
-                                },
-                            )
+                            .map(|(i, is_null)| {
+                                if *is_null {
+                                    None
+                                } else {
+                                    Some(
+                                        (self.buffer as *const $t)
+                                            .offset(i as isize)
+                                            .read_unaligned(),
+                                    )
+                                }
+                            })
                             .collect();
                         json!(column)
+                    }
+                } else {
+                    let slice = std::slice::from_raw_parts(self.buffer as *const $t, len);
+                    match self.is_null.is_null() {
+                        true => json!(slice),
+                        false => {
+                            let nulls =
+                                std::slice::from_raw_parts(self.is_null as *const bool, len);
+                            let column: Vec<_> = slice
+                                .iter()
+                                .zip(nulls)
+                                .map(
+                                    |(value, is_null)| {
+                                        if *is_null {
+                                            None
+                                        } else {
+                                            Some(*value)
+                                        }
+                                    },
+                                )
+                                .collect();
+                            json!(column)
+                        }
                     }
                 }
             }};
