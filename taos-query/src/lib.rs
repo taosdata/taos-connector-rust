@@ -58,8 +58,14 @@ pub fn block_in_place_or_global<F: std::future::Future>(fut: F) -> F::Output {
     use tokio::task;
 
     match Handle::try_current() {
-        Ok(handle) => task::block_in_place(move || handle.block_on(fut)),
-        Err(_) => global_tokio_runtime().block_on(fut),
+        Ok(handle) => {
+            let boxed_fut = Box::pin(fut);
+            task::block_in_place(move || handle.block_on(boxed_fut))
+        }
+        Err(_) => {
+            let boxed_fut = Box::pin(fut);
+            global_tokio_runtime().block_on(boxed_fut)
+        }
     }
 }
 
