@@ -493,58 +493,43 @@ impl TaosBuilder {
             }
         }
 
-        let mut retries = 0;
         let ws_url = self.to_ws_url();
-        loop {
-            match connect_async_with_config(
-                if use_global_endpoint {
-                    ws_url.as_str()
-                } else {
-                    url.as_str()
-                },
-                Some(*config.clone()),
-                false,
-            )
-            .await
-            {
-                Ok((ws, _)) => {
-                    return Ok(ws);
-                }
-                Err(err) => {
-                    let err_string = err.to_string();
-                    if err_string.contains("401 Unauthorized") {
-                        return Err(QueryError::Unauthorized(self.to_ws_url()).into());
-                    } else if err.to_string().contains("404 Not Found")
-                        || err.to_string().contains("400")
-                    {
-                        if !use_global_endpoint {
-                            return Err(QueryError::from(err).into());
-                        }
-                        match connect_async_with_config(&url, Some(*config.clone()), false).await {
-                            Ok((ws, _)) => return Ok(ws),
-                            Err(err) => {
-                                let err_string = err.to_string();
-                                if err_string.contains("401 Unauthorized") {
-                                    return Err(QueryError::Unauthorized(url).into());
-                                }
+        match connect_async_with_config(
+            if use_global_endpoint {
+                ws_url.as_str()
+            } else {
+                url.as_str()
+            },
+            Some(*config.clone()),
+            false,
+        )
+        .await
+        {
+            Ok((ws, _)) => {
+                return Ok(ws);
+            }
+            Err(err) => {
+                let err_string = err.to_string();
+                if err_string.contains("401 Unauthorized") {
+                    return Err(QueryError::Unauthorized(self.to_ws_url()).into());
+                } else if err.to_string().contains("404 Not Found")
+                    || err.to_string().contains("400")
+                {
+                    if !use_global_endpoint {
+                        return Err(QueryError::from(err).into());
+                    }
+                    match connect_async_with_config(&url, Some(*config.clone()), false).await {
+                        Ok((ws, _)) => return Ok(ws),
+                        Err(err) => {
+                            let err_string = err.to_string();
+                            if err_string.contains("401 Unauthorized") {
+                                return Err(QueryError::Unauthorized(url).into());
                             }
                         }
                     }
-
-                    if retries >= self.conn_retries.0 {
-                        return Err(QueryError::from(err).into());
-                    }
-                    retries += 1;
-                    tracing::warn!(
-                        "Failed to connect to {}, retrying...({})",
-                        self.to_ws_url(),
-                        retries
-                    );
-
-                    // every retry, wait more 500ms, max wait time 30s
-                    let wait_millis = std::cmp::min(retries as u64 * 500, 30000);
-                    tokio::time::sleep(std::time::Duration::from_millis(wait_millis)).await;
                 }
+
+                return Err(QueryError::from(err).into());
             }
         }
     }
