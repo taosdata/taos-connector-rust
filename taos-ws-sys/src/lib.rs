@@ -6,6 +6,7 @@ use std::{
     os::raw::{c_char, c_int},
     str::Utf8Error,
     string::FromUtf8Error,
+    thread::JoinHandle,
     time::Duration,
 };
 use taos_error::Code;
@@ -26,6 +27,7 @@ use taos_ws::{
 };
 
 use cargo_metadata::MetadataCommand;
+use std::thread;
 
 pub use taos_ws::query::asyn::WS_ERROR_NO;
 
@@ -854,10 +856,32 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     };
     let dsn = dsn.to_str()?;
     let builder = TaosBuilder::from_dsn(dsn)?;
-    let mut taos = builder.build()?;
 
-    builder.ping(&mut taos)?;
-    Ok(taos)
+    // 设置线程的栈大小为 4 MB
+    let stack_size = 4 * 1024 * 1024;
+
+    // 创建一个线程，并设置栈大小
+    let handle = thread::Builder::new()
+        .stack_size(stack_size)
+        .spawn(move || {
+            // 在线程中执行的方法，并传递参数
+            let result = builder.build();
+            match result {
+                Ok(mut taos) => {
+                    builder.ping(&mut taos)?;
+                    return Ok(taos);
+                }
+                Err(e) => return Err(e),
+            }
+        })
+        .expect("Failed to spawn thread");
+
+    // 等待线程完成，并获取结果
+    let result = handle.join().expect("Thread panicked");
+    match result {
+        Ok(taos) => return Ok(taos),
+        Err(e) => return Err(WsError::new(Code::FAILED, &format!("{}", e))),
+    }
 }
 
 /// Enable inner log to stdout with para log_level.
