@@ -44,6 +44,10 @@ lazy_static::lazy_static! {
     static ref GLOBAL_RT: tokio::runtime::Runtime = {
         tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
+                    .thread_stack_size(std::env::var("TAOS_THREAD_STACK_SIZE")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(32 * 1024 * 1024))
                     .build()
                     .unwrap()
     };
@@ -59,7 +63,7 @@ pub fn block_in_place_or_global<F: std::future::Future>(fut: F) -> F::Output {
 
     match Handle::try_current() {
         Ok(handle) => task::block_in_place(move || handle.block_on(fut)),
-        Err(_) => global_tokio_runtime().block_on(fut),
+        Err(_) => global_tokio_runtime().block_on(Box::pin(fut)),
     }
 }
 
