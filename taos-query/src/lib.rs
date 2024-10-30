@@ -29,6 +29,8 @@ pub use iter::*;
 pub use common::RawBlock;
 
 pub mod stmt;
+pub mod stmt2;
+
 pub mod tmq;
 
 pub mod prelude;

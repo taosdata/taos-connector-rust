@@ -19,6 +19,11 @@ mod stmt;
 #[cfg(all(feature = "ws", feature = "optin"))]
 pub use stmt::Stmt;
 
+#[cfg(feature = "ws")]
+mod stmt2;
+#[cfg(feature = "ws")]
+pub use stmt2::Stmt2;
+
 #[cfg(all(feature = "ws", feature = "optin"))]
 mod tmq;
 #[cfg(all(feature = "ws", feature = "optin"))]
