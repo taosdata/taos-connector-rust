@@ -7,7 +7,6 @@ use itertools::Itertools;
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
 
-use tracing::warn;
 use taos_query::common::{JsonMeta, RawMeta};
 use taos_query::prelude::{Code, RawError};
 use taos_query::tmq::{
@@ -18,6 +17,7 @@ use taos_query::util::{Edition, InlinableRead};
 use taos_query::RawResult;
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
+use tracing::warn;
 
 use tokio::sync::{oneshot, watch};
 
@@ -1577,14 +1577,24 @@ mod tests {
                             tracing::debug!(count, "sql: {}", sql);
                             if let Err(err) = taos.exec(sql).await {
                                 match err.code() {
-                                    Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                    Code::TAG_ALREADY_EXIST => {
+                                        tracing::trace!("tag already exists")
+                                    }
                                     Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
                                     Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
                                     Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
-                                    Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
-                                    Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
-                                    Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
-                                    Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
+                                    Code::INVALID_COLUMN_NAME => {
+                                        tracing::trace!("invalid column name")
+                                    }
+                                    Code::MODIFIED_ALREADY => {
+                                        tracing::trace!("modified already done")
+                                    }
+                                    Code::TABLE_NOT_EXIST => {
+                                        tracing::trace!("table does not exists")
+                                    }
+                                    Code::STABLE_NOT_EXIST => {
+                                        tracing::trace!("stable does not exists")
+                                    }
                                     _ => {
                                         tracing::error!(count, "{}", err);
                                     }
@@ -1740,14 +1750,24 @@ mod tests {
                             tracing::debug!("sql: {}", sql);
                             if let Err(err) = taos.exec(sql).await {
                                 match err.code() {
-                                    Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                    Code::TAG_ALREADY_EXIST => {
+                                        tracing::trace!("tag already exists")
+                                    }
                                     Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
                                     Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
                                     Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
-                                    Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
-                                    Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
-                                    Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
-                                    Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
+                                    Code::INVALID_COLUMN_NAME => {
+                                        tracing::trace!("invalid column name")
+                                    }
+                                    Code::MODIFIED_ALREADY => {
+                                        tracing::trace!("modified already done")
+                                    }
+                                    Code::TABLE_NOT_EXIST => {
+                                        tracing::trace!("table does not exists")
+                                    }
+                                    Code::STABLE_NOT_EXIST => {
+                                        tracing::trace!("stable does not exists")
+                                    }
                                     _ => {
                                         tracing::error!(count, "{}", err);
                                     }
@@ -2232,14 +2252,24 @@ mod tests {
                             tracing::debug!("sql: {}", sql);
                             if let Err(err) = taos.exec(sql).await {
                                 match err.code() {
-                                    Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                    Code::TAG_ALREADY_EXIST => {
+                                        tracing::trace!("tag already exists")
+                                    }
                                     Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
                                     Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
                                     Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
-                                    Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
-                                    Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
-                                    Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
-                                    Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
+                                    Code::INVALID_COLUMN_NAME => {
+                                        tracing::trace!("invalid column name")
+                                    }
+                                    Code::MODIFIED_ALREADY => {
+                                        tracing::trace!("modified already done")
+                                    }
+                                    Code::TABLE_NOT_EXIST => {
+                                        tracing::trace!("table does not exists")
+                                    }
+                                    Code::STABLE_NOT_EXIST => {
+                                        tracing::trace!("stable does not exists")
+                                    }
                                     _ => {
                                         tracing::error!("{}", err);
                                     }
