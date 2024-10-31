@@ -94,7 +94,7 @@ impl Dsn {
                         (/(?P<subject>[\w\s%$@.,/-]+)?)?                             # for subject
                     | # or
                     # path-like dsn
-                    (?P<path>([\\/.~]$|/\s*\w+[\w\s %$@*:.\\\-/ _\(\)\[\]{}（）【】｛｝]*|[\.~\w\s]?[\w\s %$@*:.\\\-/ _\(\)\[\]{}（）【】｛｝]+))
+                    (?P<path>([\\/.~]$|/\s*\w+[\w\s %$@*:,.\\\-/ _\(\)\[\]{}（）【】｛｝]*|[\.~\w\s]?[\w\s %$@*:,.\\\-/ _\(\)\[\]{}（）【】｛｝]+))
                 ) # abc
                 (\?(?P<params>(?s:.)*))?").unwrap();
         }
@@ -1181,6 +1181,20 @@ mod tests {
         let dsn = Dsn::from_str(&format!("csv:./a b.csv?param=1")).unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.path.unwrap(), "./a b.csv");
+    }
+
+    #[test]
+    fn unix_multiple_path() {
+        let dsn = Dsn::from_str(&format!("csv:./a b.csv,c d .csv?param=1")).unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.path.unwrap(), "./a b.csv,c d .csv");
+    }
+
+    #[test]
+    fn unit_path_with_utf8() {
+        let dsn = Dsn::from_str(&format!("csv:./文件 Aa1.csv?param=1")).unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.path.unwrap(), "./文件 Aa1.csv");
     }
 
     #[test]
