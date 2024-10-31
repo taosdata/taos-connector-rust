@@ -2472,7 +2472,9 @@ mod async_tests {
                 let vgroup_id = offset.vgroup_id();
 
                 let assignments = consumer.assignments().await;
-                println!("* in vgroup id {vgroup_id} of topic {topic}, assignments: {assignments:?}\n");
+                println!(
+                    "* in vgroup id {vgroup_id} of topic {topic}, assignments: {assignments:?}\n"
+                );
 
                 if let Some(data) = message.into_data() {
                     while let Some(block) = data.fetch_raw_block().await? {
