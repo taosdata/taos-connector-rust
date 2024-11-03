@@ -16,6 +16,7 @@ repository.workspace = true
 anyhow = "1"
 async-trait = { version = "0.1.80" }
 bytes = "1.1.0"
+byteorder = "1.5.0"
 dashmap = "6.1.0"
 futures = { version = "0.3" }
 itertools = "0.13.0"
@@ -48,6 +49,7 @@ rev = "3420353"
 pretty_env_logger = "0.5.0"
 criterion = { version = "0.5.1", features = ["stable"] }
 tracing-subscriber = { version = "0.3.18", features = ["fmt"] }
+ctor = "0.2.8"
 
 [package.metadata.docs.rs]
 features = ["rustls"]

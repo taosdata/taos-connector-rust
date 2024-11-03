@@ -1,9 +1,11 @@
+mod bind;
 mod messages;
 
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bind::{bind_datas_as_bytes, Stmt2BindData};
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
 use messages::*;
@@ -84,16 +86,14 @@ impl Stmt2 {
         }
 
         let stmt_id_sender_map = Arc::new(DashMap::<ReqId, StmtIdSender>::new());
-        let stmt_id_sender_map_clone = stmt_id_sender_map.clone();
-
         let stmt_num_res_sender_map = Arc::new(DashMap::<StmtId, StmtNumResultSender>::new());
-        let stmt_num_res_sender_map_clone = stmt_num_res_sender_map.clone();
-
         let stmt_prepare_res_sender_map =
             Arc::new(DashMap::<StmtId, StmtPrepareResultSender>::new());
-        let stmt_prepare_res_sender_map_clone = stmt_prepare_res_sender_map.clone();
-
         let stmt_res_res_sender_map = Arc::new(DashMap::<StmtId, StmtResultResultSender>::new());
+
+        let stmt_id_sender_map_clone = stmt_id_sender_map.clone();
+        let stmt_num_res_sender_map_clone = stmt_num_res_sender_map.clone();
+        let stmt_prepare_res_sender_map_clone = stmt_prepare_res_sender_map.clone();
         let stmt_res_res_sender_map_clone = stmt_res_res_sender_map.clone();
 
         let (msg_sender, mut msg_receiver) = mpsc::channel(100);
@@ -322,9 +322,12 @@ impl Stmt2 {
         Ok(use_result)
     }
 
-    pub async fn stmt2_bind_param(&mut self) -> RawResult<()> {
-        // TODO
-        let bytes = vec![];
+    pub async fn stmt2_bind_param<'a>(
+        &mut self,
+        datas: &[Stmt2BindData<'a>],
+        is_insert: bool,
+    ) -> RawResult<()> {
+        let bytes = bind_datas_as_bytes(datas, is_insert)?;
 
         self.ws
             .send(Message::binary(bytes))
