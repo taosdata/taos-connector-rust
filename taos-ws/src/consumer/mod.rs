@@ -1259,7 +1259,7 @@ impl TmqBuilder {
 
                                     if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                         tracing::trace!("send data to fetches with id {}", req_id);
-                                        sender.send(Ok(TmqRecvData::Bytes(part.into()))).unwrap();
+                                        let _ = sender.send(Ok(TmqRecvData::Bytes(part.into())));
                                     } else {
                                         tracing::warn!("req_id {req_id} not detected, message might be lost");
                                     }
@@ -1281,7 +1281,7 @@ impl TmqBuilder {
                                     break 'ws;
                                 }
                                 Message::Ping(bytes) => {
-                                    ws2.send(Message::Pong(bytes)).await.unwrap();
+                                    let _ = ws2.send(Message::Pong(bytes)).await;
                                 }
                                 Message::Pong(bytes) => {
                                     if bytes == PING {
