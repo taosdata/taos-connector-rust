@@ -612,16 +612,24 @@ mod tests {
             let data1 = Stmt2BindData::new(Some("test1"), None, &[]);
             let data2 = Stmt2BindData::new(Some(""), None, &[]);
             let data3 = Stmt2BindData::new(Some("test2"), None, &[]);
-
             let res = bind_datas_as_bytes(&[data1, data2, data3], true)?;
             let expected = [
-                47, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 28, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 6, 0, 1, 0, 6, 0, 116, 101, 115, 116, 49, 0, 0, 116, 101, 115, 116, 50, 0,
+                0x2f, 0x00, 0x00, 0x00, // total Length
+                0x03, 0x00, 0x00, 0x00, // table count
+                0x00, 0x00, 0x00, 0x00, // tag count
+                0x00, 0x00, 0x00, 0x00, // col count
+                0x1c, 0x00, 0x00, 0x00, // table names offset
+                0x00, 0x00, 0x00, 0x00, // tags offset
+                0x00, 0x00, 0x00, 0x00, // col offset
+                // table names
+                0x06, 0x00, 0x01, 0x00, 0x06, 0x00, // table name length
+                // table name buffer
+                0x74, 0x65, 0x73, 0x74, 0x31, 0x00, // test1
+                0x00, // nil
+                0x74, 0x65, 0x73, 0x74, 0x32, 0x00, // test2
             ];
             assert_eq!(res, expected);
         }
-
-        {}
 
         Ok(())
     }
