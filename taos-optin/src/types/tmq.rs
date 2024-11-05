@@ -42,6 +42,7 @@ pub struct tmq_t {
 pub struct tmq_conf_t {
     _unused: [u8; 0],
 }
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct tmq_list_t {

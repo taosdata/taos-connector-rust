@@ -19,8 +19,6 @@ use taos_query::{
 
 use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t, TaosBuilder};
 
-// use taos_error::Error;
-
 mod raw;
 
 use raw::RawTmq;
@@ -382,10 +380,6 @@ impl IsData for Data {
         Ok(self.raw.fetch_raw_message())
     }
 }
-// pub enum MessageSet {
-//     Meta(Meta),
-//     Data(Data),
-// }
 
 impl From<RawRes> for MessageSet<Meta, Data> {
     fn from(raw: RawRes) -> Self {
@@ -406,22 +400,9 @@ impl Iterator for Data {
     }
 }
 
-// impl Iterator for MessageSet {
-//     type Item = RawBlock;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         match self {
-//             MessageSet::Meta(data) => None,
-//             MessageSet::Data(data) => data.raw.fetch_raw_message(data.precision),
-//         }
-//     }
-// }
-
 impl AsConsumer for Consumer {
     type Offset = Offset;
-
     type Meta = Meta;
-
     type Data = Data;
 
     fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
@@ -506,8 +487,6 @@ impl AsConsumer for Consumer {
     }
 }
 
-// impl AsyncOnSync for Consumer {}
-
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
     type Offset = Offset;
@@ -572,7 +551,7 @@ impl AsAsyncConsumer for Consumer {
                        Ok(None)
                     }
                     raw = self.tmq.poll_async() => {
-                        let message =    (
+                        let message = (
                             Offset(raw.clone()),
                             match raw.tmq_message_type() {
                                 tmq_res_t::TMQ_RES_INVALID => unreachable!(),
@@ -595,7 +574,7 @@ impl AsAsyncConsumer for Consumer {
                        Ok(None)
                     }
                     raw = self.tmq.poll_async() => {
-                        let message =    (
+                        let message = (
                             Offset(raw.clone()),
                             match raw.tmq_message_type() {
                                 tmq_res_t::TMQ_RES_INVALID => unreachable!(),
@@ -689,6 +668,7 @@ impl AsAsyncConsumer for Consumer {
         self.tmq.position(topic, vgroup_id)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::TmqBuilder;

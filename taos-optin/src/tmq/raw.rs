@@ -183,6 +183,7 @@ pub(super) mod tmq {
                 tracing::trace!("tmq polling interval: {}", interval);
                 interval
             });
+
             loop {
                 // res is cancellation safe since the memory is handled by the C library.
                 let res = unsafe { (self.tmq.tmq_consumer_poll)(self.as_ptr(), *interval) };
@@ -356,6 +357,7 @@ pub(super) mod conf {
         pub(crate) fn as_ptr(&self) -> *mut tmq_conf_t {
             self.ptr
         }
+
         pub(crate) fn new(api: TmqConfApi) -> Self {
             Self {
                 api,
