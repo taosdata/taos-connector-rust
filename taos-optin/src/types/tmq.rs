@@ -37,6 +37,12 @@ pub struct tmq_t {
     _unused: [u8; 0],
 }
 
+#[derive(Debug)]
+pub(crate) struct SafeTmqT(pub(crate) *mut tmq_t);
+
+unsafe impl Send for SafeTmqT {}
+unsafe impl Sync for SafeTmqT {}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct tmq_conf_t {

@@ -3,11 +3,9 @@ pub(super) use list::Topics;
 pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
-    use std::{
-        ffi::CStr,
-        sync::{Arc, OnceLock},
-        time::Duration,
-    };
+    use std::{ffi::CStr, sync::Arc};
+
+    use taos_query::prelude::tokio::sync::{mpsc, oneshot};
     use taos_query::{
         tmq::{Assignment, VGroupId},
         RawError,
@@ -16,23 +14,38 @@ pub(super) mod tmq {
     use crate::{
         into_c_str::IntoCStr,
         raw::{ApiEntry, TmqApi},
-        types::{tmq_resp_err_t, tmq_t},
+        types::{tmq_resp_err_t, tmq_t, SafeTmqT},
         RawRes, RawResult,
     };
 
     use super::Topics;
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug)]
     pub(crate) struct RawTmq {
-        pub(crate) c: Arc<ApiEntry>,
-        pub(crate) tmq: TmqApi,
-        pub(crate) ptr: *mut tmq_t,
+        c: Arc<ApiEntry>,
+        tmq: TmqApi,
+        ptr: *mut tmq_t,
+        timeout: i64,
+        sender: mpsc::Sender<oneshot::Sender<Option<RawRes>>>,
+        receiver: Option<mpsc::Receiver<oneshot::Sender<Option<RawRes>>>>,
     }
 
     unsafe impl Send for RawTmq {}
     unsafe impl Sync for RawTmq {}
 
     impl RawTmq {
+        pub(crate) fn new(c: Arc<ApiEntry>, tmq: TmqApi, ptr: *mut tmq_t, timeout: i64) -> Self {
+            let (sender, receiver) = mpsc::channel(10);
+            Self {
+                c,
+                tmq,
+                ptr,
+                timeout,
+                sender,
+                receiver: Some(receiver),
+            }
+        }
+
         fn as_ptr(&self) -> *mut tmq_t {
             self.ptr
         }
@@ -161,43 +174,6 @@ pub(super) mod tmq {
                 None
             } else {
                 Some(unsafe { RawRes::from_ptr_unchecked(self.c.clone(), res) })
-            }
-        }
-
-        pub async fn poll_async(&self) -> RawRes {
-            let elapsed = std::time::Instant::now();
-            #[cfg(not(test))]
-            use taos_query::prelude::tokio;
-
-            let mut backoff = 0;
-            const BACKOFF_STEP: u64 = 100;
-            const BACKOFF_LIMIT: u64 = 1000;
-            const DEFAULT_POLLING_INTERVAL: i64 = 0;
-
-            static TMQ_POLLING_INTERVAL: OnceLock<i64> = OnceLock::new();
-            let interval = TMQ_POLLING_INTERVAL.get_or_init(|| {
-                let interval = std::env::var("TMQ_POLLING_INTERVAL")
-                    .ok()
-                    .and_then(|s| s.parse::<i64>().ok())
-                    .unwrap_or(DEFAULT_POLLING_INTERVAL);
-                tracing::trace!("tmq polling interval: {}", interval);
-                interval
-            });
-
-            loop {
-                // res is cancellation safe since the memory is handled by the C library.
-                let res = unsafe { (self.tmq.tmq_consumer_poll)(self.as_ptr(), *interval) };
-                if res.is_null() {
-                    tokio::time::sleep(Duration::from_millis(backoff)).await;
-                    if backoff < BACKOFF_LIMIT {
-                        backoff += BACKOFF_STEP;
-                    }
-                    continue;
-                } else {
-                    let res = unsafe { RawRes::from_ptr_unchecked(self.c.clone(), res) };
-                    tracing::trace!(elapsed = ?elapsed.elapsed(), "poll next message");
-                    return res;
-                }
             }
         }
 
@@ -333,18 +309,80 @@ pub(super) mod tmq {
                 (self.tmq.tmq_consumer_close)(self.as_ptr());
             }
         }
+
+        pub(crate) fn spawn_thread(&mut self) {
+            tracing::debug!("Spawn thread to call poll");
+
+            if self.receiver.is_none() {
+                return;
+            }
+
+            let mut receiver = self.receiver.take().unwrap();
+            let ptr = SafeTmqT(self.as_ptr());
+            let tmq = self.tmq;
+            let c = self.c.clone();
+            let timeout = self.timeout;
+
+            std::thread::spawn(move || {
+                futures::executor::block_on(async {
+                    let elapsed = std::time::Instant::now();
+                    let ptr = ptr;
+                    let mut cache: Option<RawRes> = None;
+                    while let Some(sender) = receiver.recv().await {
+                        if let Some(res) = cache.take() {
+                            if let Err(res) = sender.send(Some(res)) {
+                                tracing::warn!("Send res failed, cache res: {:?}", res);
+                                cache = res;
+                            }
+                            tracing::debug!(elapsed = ?elapsed.elapsed(), "Use cache, poll next message");
+                            continue;
+                        }
+
+                        tracing::debug!("Calling C function `tmq_consumer_poll` with ptr: {ptr:?}, timeout: {timeout}");
+
+                        let res = unsafe { (tmq.tmq_consumer_poll)(ptr.0, timeout) };
+
+                        tracing::debug!(
+                            "C function `tmq_consumer_poll` returned a pointer: {res:?}"
+                        );
+
+                        if res.is_null() {
+                            if sender.send(None).is_err() {
+                                tracing::warn!("Send res failed");
+                            }
+                            tracing::warn!(elapsed = ?elapsed.elapsed(), "Res is null, poll next message");
+                            continue;
+                        }
+
+                        let res = unsafe { RawRes::from_ptr_unchecked(c.clone(), res) };
+                        if let Err(res) = sender.send(Some(res)) {
+                            tracing::warn!("Send res failed, cache res: {res:?}");
+                            cache = res;
+                        }
+                        tracing::debug!(elapsed = ?elapsed.elapsed(), "Poll next message");
+                    }
+                })
+            });
+        }
+
+        pub(crate) fn tmq(&self) -> TmqApi {
+            self.tmq
+        }
+
+        pub(crate) fn sender(&self) -> mpsc::Sender<oneshot::Sender<Option<RawRes>>> {
+            self.sender.clone()
+        }
     }
 }
 
 pub(super) mod conf {
+    use taos_query::Dsn;
+
+    use crate::*;
     use crate::{
         raw::TmqConfApi,
         types::{tmq_conf_t, tmq_t},
     };
-    // use taos_error::*;
-
-    use crate::*;
-    use taos_query::Dsn;
 
     /* tmq conf */
     #[derive(Debug)]

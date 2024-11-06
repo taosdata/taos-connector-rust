@@ -82,11 +82,12 @@ impl taos_query::TBuilder for TmqBuilder {
 
     fn build(&self) -> RawResult<Self::Target> {
         let ptr = self.conf.build()?;
-        let tmq = RawTmq {
-            c: self.lib.clone(),
-            tmq: self.lib.tmq.unwrap(),
+        let tmq = RawTmq::new(
+            self.lib.clone(),
+            self.lib.tmq.unwrap(),
             ptr,
-        };
+            self.timeout.as_raw_timeout(),
+        );
         Ok(Consumer {
             tmq,
             timeout: self.timeout,
@@ -168,11 +169,12 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 
     async fn build(&self) -> RawResult<Self::Target> {
         let ptr = self.conf.build()?;
-        let tmq = RawTmq {
-            c: self.lib.clone(),
-            tmq: self.lib.tmq.unwrap(),
+        let tmq = RawTmq::new(
+            self.lib.clone(),
+            self.lib.tmq.unwrap(),
             ptr,
-        };
+            self.timeout.as_raw_timeout(),
+        );
         Ok(Consumer {
             tmq,
             timeout: self.timeout,
@@ -410,7 +412,7 @@ impl AsConsumer for Consumer {
         topics: I,
     ) -> RawResult<()> {
         let topics = topics.into_iter().map(|item| item.into()).collect_vec();
-        let topics = Topics::from_topics(self.tmq.tmq.list_api, topics)?;
+        let topics = Topics::from_topics(self.tmq.tmq().list_api, topics)?;
         // dbg!(&topics);
         self.tmq.subscribe(&topics)
     }
@@ -499,8 +501,10 @@ impl AsAsyncConsumer for Consumer {
         &mut self,
         topics: I,
     ) -> RawResult<()> {
-        let topics =
-            Topics::from_topics(self.tmq.tmq.list_api, topics.into_iter().map(|s| s.into()))?;
+        let topics = Topics::from_topics(
+            self.tmq.tmq().list_api,
+            topics.into_iter().map(|s| s.into()),
+        )?;
         let r = self.tmq.subscribe(&topics);
 
         if let Some(offset) = self.dsn.get("offset") {
@@ -527,6 +531,8 @@ impl AsAsyncConsumer for Consumer {
             }
         }
 
+        self.tmq.spawn_thread();
+
         r
     }
 
@@ -540,56 +546,46 @@ impl AsAsyncConsumer for Consumer {
         )>,
     > {
         use taos_query::prelude::tokio;
+        use taos_query::prelude::tokio::sync::oneshot;
+        use taos_query::tmq::MessageSet;
+
+        let (tx, rx) = oneshot::channel();
+
+        self.tmq
+            .sender()
+            .send(tx)
+            .await
+            .map_err(RawError::from_any)?;
+
+        let duration = match timeout {
+            Timeout::Duration(duration) => duration,
+            _ => Duration::MAX,
+        };
+        let sleep = tokio::time::sleep(duration);
+        tokio::pin!(sleep);
+
         tracing::trace!("Waiting for next message");
-        let res = match timeout {
-            Timeout::Never | Timeout::None => {
-                let timeout = Duration::MAX;
-                let sleep = tokio::time::sleep(timeout);
-                tokio::pin!(sleep);
-                tokio::select! {
-                    _ = &mut sleep, if !sleep.is_elapsed() => {
-                       Ok(None)
-                    }
-                    raw = self.tmq.poll_async() => {
-                        let message = (
-                            Offset(raw.clone()),
-                            match raw.tmq_message_type() {
-                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                                tmq_res_t::TMQ_RES_TABLE_META => {
-                                    taos_query::tmq::MessageSet::Meta(Meta::new(raw))
-                                }
-                                tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
-                            },
-                        );
-                        Ok(Some(message))
-                    }
-                }
+
+        let res = tokio::select! {
+            _ = &mut sleep, if !sleep.is_elapsed() => {
+               Ok(None)
             }
-            Timeout::Duration(timeout) => {
-                let sleep = tokio::time::sleep(timeout);
-                tokio::pin!(sleep);
-                tokio::select! {
-                    _ = &mut sleep, if !sleep.is_elapsed() => {
-                       Ok(None)
-                    }
-                    raw = self.tmq.poll_async() => {
-                        let message = (
-                            Offset(raw.clone()),
-                            match raw.tmq_message_type() {
-                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                                tmq_res_t::TMQ_RES_TABLE_META => {
-                                    taos_query::tmq::MessageSet::Meta(Meta::new(raw))
-                                }
-                                tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
-                            },
-                        );
-                        Ok(Some(message))
-                    }
-                }
+            res = rx => {
+                let raw = res.map_err(RawError::from_any)?.map(|raw| {
+                    (
+                        Offset(raw.clone()),
+                        match raw.tmq_message_type() {
+                            tmq_res_t::TMQ_RES_INVALID => unreachable!(),
+                            tmq_res_t::TMQ_RES_DATA => MessageSet::Data(Data::new(raw)),
+                            tmq_res_t::TMQ_RES_TABLE_META => MessageSet::Meta(Meta::new(raw)),
+                            tmq_res_t::TMQ_RES_METADATA => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
+                        },
+                    )
+                });
+                Ok(raw)
             }
         };
+
         match res {
             Ok(res) => {
                 tracing::trace!("Got a new message");
