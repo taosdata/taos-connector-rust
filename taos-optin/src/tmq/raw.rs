@@ -311,7 +311,7 @@ pub(super) mod tmq {
         }
 
         pub(crate) fn spawn_thread(&mut self) {
-            tracing::debug!("Spawn thread to call poll");
+            tracing::debug!("Spawn thread to call C function `tmq_consumer_poll`");
 
             if self.receiver.is_none() {
                 return;
@@ -325,10 +325,10 @@ pub(super) mod tmq {
 
             std::thread::spawn(move || {
                 futures::executor::block_on(async {
-                    let elapsed = std::time::Instant::now();
                     let ptr = ptr;
                     let mut cache: Option<RawRes> = None;
                     while let Some(sender) = receiver.recv().await {
+                        let elapsed = std::time::Instant::now();
                         if let Some(res) = cache.take() {
                             if let Err(res) = sender.send(Some(res)) {
                                 tracing::warn!("Send res failed, cache res: {:?}", res);
@@ -338,19 +338,18 @@ pub(super) mod tmq {
                             continue;
                         }
 
+                        let ptr = ptr.0;
                         tracing::debug!("Calling C function `tmq_consumer_poll` with ptr: {ptr:?}, timeout: {timeout}");
-
-                        let res = unsafe { (tmq.tmq_consumer_poll)(ptr.0, timeout) };
-
+                        let res = unsafe { (tmq.tmq_consumer_poll)(ptr, timeout) };
                         tracing::debug!(
                             "C function `tmq_consumer_poll` returned a pointer: {res:?}"
                         );
 
                         if res.is_null() {
-                            if sender.send(None).is_err() {
+                            if let Err(_) = sender.send(None) {
                                 tracing::warn!("Send res failed");
                             }
-                            tracing::warn!(elapsed = ?elapsed.elapsed(), "Res is null, poll next message");
+                            tracing::debug!(elapsed = ?elapsed.elapsed(), "Res is null, poll next message");
                             continue;
                         }
 

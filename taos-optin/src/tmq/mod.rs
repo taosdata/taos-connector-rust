@@ -568,7 +568,7 @@ impl AsAsyncConsumer for Consumer {
 
         let res = tokio::select! {
             _ = &mut sleep, if !sleep.is_elapsed() => {
-               Ok(None)
+                Ok(None)
             }
             res = rx => {
                 let raw = res.map_err(RawError::from_any)?.map(|raw| {
@@ -588,7 +588,7 @@ impl AsAsyncConsumer for Consumer {
 
         match res {
             Ok(res) => {
-                tracing::trace!("Got a new message");
+                tracing::debug!("Got a new message");
                 Ok(res)
             }
             Err(err) => {
@@ -2466,6 +2466,87 @@ mod async_tests {
                 Ok(())
             })
             .await?;
+
+        consumer.unsubscribe().await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_recv_timeout() -> anyhow::Result<()> {
+        use std::str::FromStr;
+
+        use futures::TryStreamExt;
+        use itertools::Itertools;
+        use taos_query::{
+            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
+            AsyncQueryable, AsyncTBuilder, Dsn,
+        };
+        use tracing::debug;
+
+        use crate::TaosBuilder;
+
+        pretty_env_logger::init();
+
+        let dsn = "taos://localhost:6030";
+        let builder = TaosBuilder::from_dsn(dsn)?;
+        let taos = builder.build().await?;
+        let db = "tmq";
+
+        taos.exec_many([
+            "DROP TOPIC IF EXISTS tmq_meters".into(),
+            format!("DROP DATABASE IF EXISTS `{db}`"),
+            format!("CREATE DATABASE `{db}`"),
+            format!("USE `{db}`"),
+            "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) TAGS (`groupid` INT, `location` BINARY(20))".into(),
+            format!("CREATE TOPIC tmq_meters with META AS DATABASE {db}")
+        ]).await?;
+
+        let inserted = taos.exec_many([
+            "CREATE TABLE `d0` USING `meters` TAGS(0, 'Los Angles')",
+            "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32)",
+            "INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL)",
+            "INSERT INTO `d1` USING `meters` TAGS(1, 'San Francisco') values(now - 9s, 10.1, 119, 0.33)",
+            "INSERT INTO `d1` values (now-8s, 10, 120, 0.33) (now - 6s, 10, 119, 0.34) (now - 4s, 11.2, 118, 0.322)",
+        ]).await?;
+        assert_eq!(inserted, 6);
+
+        let mut dsn = Dsn::from_str("tmq://localhost:6030")?;
+        dsn.params.insert("group.id".into(), "test".into());
+        dsn.params.insert("timeout".into(), "1s".into());
+        dsn.params
+            .insert("auto.offset.reset".into(), "earliest".into());
+
+        let builder = TmqBuilder::from_dsn(dsn)?;
+        let mut consumer = builder.build().await?;
+        consumer.subscribe(["tmq_meters"]).await?;
+
+        {
+            let mut stream = consumer.stream();
+            while let Some((offset, message)) = stream.try_next().await? {
+                debug!(
+                    "topic: {}, database: {}, vgroup_id: {}",
+                    offset.topic(),
+                    offset.database(),
+                    offset.vgroup_id()
+                );
+
+                if let Some(data) = message.into_data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        let table_name = block.table_name().unwrap();
+                        let records: Vec<Record> = block.deserialize().try_collect()?;
+                        debug!(
+                            "table_name: {}, got {} records: {:#?}",
+                            table_name,
+                            records.len(),
+                            records
+                        );
+                    }
+                }
+
+                consumer.commit(offset).await?;
+            }
+        }
 
         consumer.unsubscribe().await;
 
