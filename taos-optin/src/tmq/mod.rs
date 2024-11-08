@@ -382,6 +382,10 @@ impl IsData for Data {
         Ok(self.raw.fetch_raw_message())
     }
 }
+// pub enum MessageSet {
+//     Meta(Meta),
+//     Data(Data),
+// }
 
 impl From<RawRes> for MessageSet<Meta, Data> {
     fn from(raw: RawRes) -> Self {
@@ -401,6 +405,17 @@ impl Iterator for Data {
         self.raw.fetch_raw_message().map(Ok)
     }
 }
+
+// impl Iterator for MessageSet {
+//     type Item = RawBlock;
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         match self {
+//             MessageSet::Meta(data) => None,
+//             MessageSet::Data(data) => data.raw.fetch_raw_message(data.precision),
+//         }
+//     }
+// }
 
 impl AsConsumer for Consumer {
     type Offset = Offset;
@@ -488,6 +503,8 @@ impl AsConsumer for Consumer {
         self.tmq.position(topic, vg_id)
     }
 }
+
+// impl AsyncOnSync for Consumer {}
 
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
