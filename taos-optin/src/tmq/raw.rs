@@ -22,8 +22,8 @@ pub(super) mod tmq {
 
     #[derive(Debug)]
     pub(crate) struct RawTmq {
-        c: Arc<ApiEntry>,
-        tmq: TmqApi,
+        api: Arc<ApiEntry>,
+        tmq_api: TmqApi,
         ptr: *mut tmq_t,
         timeout: i64,
         sender: mpsc::Sender<oneshot::Sender<Option<RawRes>>>,
@@ -34,11 +34,16 @@ pub(super) mod tmq {
     unsafe impl Sync for RawTmq {}
 
     impl RawTmq {
-        pub(crate) fn new(c: Arc<ApiEntry>, tmq: TmqApi, ptr: *mut tmq_t, timeout: i64) -> Self {
+        pub(crate) fn new(
+            api: Arc<ApiEntry>,
+            tmq_api: TmqApi,
+            ptr: *mut tmq_t,
+            timeout: i64,
+        ) -> Self {
             let (sender, receiver) = mpsc::channel(10);
             Self {
-                c,
-                tmq,
+                api,
+                tmq_api,
                 ptr,
                 timeout,
                 sender,
@@ -49,10 +54,12 @@ pub(super) mod tmq {
         fn as_ptr(&self) -> *mut tmq_t {
             self.ptr
         }
+
         pub(crate) fn subscribe(&mut self, topics: &Topics) -> RawResult<()> {
-            let rsp = unsafe { (self.tmq.tmq_subscribe)(self.as_ptr(), topics.as_ptr()) };
+            let rsp = unsafe { (self.tmq_api.tmq_subscribe)(self.as_ptr(), topics.as_ptr()) };
             if rsp.is_err() {
-                let str = unsafe { CStr::from_ptr((self.tmq.tmq_err2str)(rsp)) }.to_string_lossy();
+                let str =
+                    unsafe { CStr::from_ptr((self.tmq_api.tmq_err2str)(rsp)) }.to_string_lossy();
                 return Err(taos_query::RawError::new(rsp.0, str));
             }
             Ok(())
@@ -60,23 +67,23 @@ pub(super) mod tmq {
 
         pub fn err_as_str(&self, tmq_resp: tmq_resp_err_t) -> String {
             unsafe {
-                CStr::from_ptr((self.tmq.tmq_err2str)(tmq_resp))
+                CStr::from_ptr((self.tmq_api.tmq_err2str)(tmq_resp))
                     .to_string_lossy()
                     .to_string()
             }
         }
 
         pub fn subscription(&self) -> Topics {
-            let tl = Topics::new(self.tmq.list_api);
+            let tl = Topics::new(self.tmq_api.list_api);
 
-            unsafe { (self.tmq.tmq_subscription)(self.as_ptr(), &mut tl.as_ptr()) }
+            unsafe { (self.tmq_api.tmq_subscription)(self.as_ptr(), &mut tl.as_ptr()) }
                 .ok_or("get topic list failed")
                 .expect("get topic should always success");
             tl
         }
 
         pub fn commit_sync(&self, msg: RawRes) -> RawResult<()> {
-            unsafe { (self.tmq.tmq_commit_sync)(self.as_ptr(), msg.as_ptr() as _) }
+            unsafe { (self.tmq_api.tmq_commit_sync)(self.as_ptr(), msg.as_ptr() as _) }
                 .ok_or("commit failed")
         }
 
@@ -86,7 +93,7 @@ pub(super) mod tmq {
             vgroup_id: VGroupId,
             offset: i64,
         ) -> RawResult<()> {
-            if let Some(tmq_commit_offset_sync) = self.tmq.tmq_commit_offset_sync {
+            if let Some(tmq_commit_offset_sync) = self.tmq_api.tmq_commit_offset_sync {
                 unsafe {
                     tmq_commit_offset_sync(
                         self.as_ptr(),
@@ -119,7 +126,7 @@ pub(super) mod tmq {
 
             unsafe {
                 tracing::trace!("commit async with {:p}", msg.as_ptr());
-                (self.tmq.tmq_commit_async)(
+                (self.tmq_api.tmq_commit_async)(
                     self.as_ptr(),
                     msg.as_ptr(),
                     tmq_commit_async_cb,
@@ -135,7 +142,7 @@ pub(super) mod tmq {
             vgroup_id: VGroupId,
             offset: i64,
         ) -> RawResult<()> {
-            if let Some(tmq_commit_offset_async) = self.tmq.tmq_commit_offset_async {
+            if let Some(tmq_commit_offset_async) = self.tmq_api.tmq_commit_offset_async {
                 use std::sync::mpsc::{channel, Sender};
                 let (sender, rx) = channel::<RawResult<()>>();
                 unsafe extern "C" fn tmq_commit_offset_async_cb(
@@ -169,23 +176,23 @@ pub(super) mod tmq {
 
         pub fn poll_timeout(&self, timeout: i64) -> Option<RawRes> {
             tracing::trace!("poll next message with timeout {}", timeout);
-            let res = unsafe { (self.tmq.tmq_consumer_poll)(self.as_ptr(), timeout) };
+            let res = unsafe { (self.tmq_api.tmq_consumer_poll)(self.as_ptr(), timeout) };
             if res.is_null() {
                 None
             } else {
-                Some(unsafe { RawRes::from_ptr_unchecked(self.c.clone(), res) })
+                Some(unsafe { RawRes::from_ptr_unchecked(self.api.clone(), res) })
             }
         }
 
         pub fn unsubscribe(&mut self) {
             unsafe {
-                (self.tmq.tmq_unsubscribe)(self.as_ptr());
+                (self.tmq_api.tmq_unsubscribe)(self.as_ptr());
             }
         }
 
         pub fn get_topic_assignment(&self, topic_name: &str) -> Vec<Assignment> {
             let pt: *mut *mut Assignment = Box::into_raw(Box::new(std::ptr::null_mut()));
-            if let Some(tmq_get_topic_assignment) = self.tmq.tmq_get_topic_assignment {
+            if let Some(tmq_get_topic_assignment) = self.tmq_api.tmq_get_topic_assignment {
                 let mut num: i32 = 0;
 
                 let tmq_resp = unsafe {
@@ -202,7 +209,7 @@ pub(super) mod tmq {
                 }
                 let vec = unsafe { std::slice::from_raw_parts(*pt, num as usize).to_vec() };
                 unsafe {
-                    self.tmq
+                    self.tmq_api
                         .tmq_free_assignment
                         .expect("tmq_free_assignment not found")(*pt)
                 };
@@ -219,7 +226,7 @@ pub(super) mod tmq {
             offset: i64,
         ) -> RawResult<()> {
             let tmq_resp;
-            if let Some(tmq_offset_seek) = self.tmq.tmq_offset_seek {
+            if let Some(tmq_offset_seek) = self.tmq_api.tmq_offset_seek {
                 tmq_resp = unsafe {
                     tmq_offset_seek(
                         self.as_ptr(),
@@ -248,7 +255,7 @@ pub(super) mod tmq {
 
         pub fn committed(&self, topic_name: &str, vgroup_id: VGroupId) -> RawResult<i64> {
             let tmq_resp;
-            if let Some(tmq_committed) = self.tmq.tmq_committed {
+            if let Some(tmq_committed) = self.tmq_api.tmq_committed {
                 tmq_resp = unsafe {
                     tmq_committed(self.as_ptr(), topic_name.into_c_str().as_ptr(), vgroup_id)
                 };
@@ -277,7 +284,7 @@ pub(super) mod tmq {
 
         pub fn position(&self, topic_name: &str, vgroup_id: VGroupId) -> RawResult<i64> {
             let tmq_resp;
-            if let Some(tmq_position) = self.tmq.tmq_position {
+            if let Some(tmq_position) = self.tmq_api.tmq_position {
                 tmq_resp = unsafe {
                     tmq_position(self.as_ptr(), topic_name.into_c_str().as_ptr(), vgroup_id)
                 };
@@ -306,7 +313,7 @@ pub(super) mod tmq {
 
         pub fn close(&mut self) {
             unsafe {
-                (self.tmq.tmq_consumer_close)(self.as_ptr());
+                (self.tmq_api.tmq_consumer_close)(self.as_ptr());
             }
         }
 
@@ -318,44 +325,44 @@ pub(super) mod tmq {
             }
 
             let mut receiver = self.receiver.take().unwrap();
-            let ptr = SafeTmqT(self.as_ptr());
-            let tmq = self.tmq;
-            let c = self.c.clone();
+            let safe_tmq = SafeTmqT(self.as_ptr());
+            let tmq_api = self.tmq_api;
+            let api = self.api.clone();
             let timeout = self.timeout;
 
             std::thread::spawn(move || {
                 futures::executor::block_on(async {
-                    let ptr = ptr;
+                    let safe_tmq = safe_tmq;
                     let mut cache: Option<RawRes> = None;
                     while let Some(sender) = receiver.recv().await {
                         let elapsed = std::time::Instant::now();
                         if let Some(res) = cache.take() {
                             if let Err(res) = sender.send(Some(res)) {
-                                tracing::warn!("Send res failed, cache res: {:?}", res);
+                                tracing::debug!("Receiver has been closed, cached res: {:?}", res);
                                 cache = res;
                             }
                             tracing::debug!(elapsed = ?elapsed.elapsed(), "Use cache, poll next message");
                             continue;
                         }
 
-                        let ptr = ptr.0;
-                        tracing::debug!("Calling C function `tmq_consumer_poll` with ptr: {ptr:?}, timeout: {timeout}");
-                        let res = unsafe { (tmq.tmq_consumer_poll)(ptr, timeout) };
+                        let tmq_ptr = safe_tmq.0;
+                        tracing::debug!("Calling C function `tmq_consumer_poll` with ptr: {tmq_ptr:?}, timeout: {timeout}");
+                        let res = unsafe { (tmq_api.tmq_consumer_poll)(tmq_ptr, timeout) };
                         tracing::debug!(
                             "C function `tmq_consumer_poll` returned a pointer: {res:?}"
                         );
 
                         if res.is_null() {
                             if let Err(_) = sender.send(None) {
-                                tracing::warn!("Send res failed");
+                                tracing::debug!("Receiver has been closed");
                             }
                             tracing::debug!(elapsed = ?elapsed.elapsed(), "Res is null, poll next message");
                             continue;
                         }
 
-                        let res = unsafe { RawRes::from_ptr_unchecked(c.clone(), res) };
+                        let res = unsafe { RawRes::from_ptr_unchecked(api.clone(), res) };
                         if let Err(res) = sender.send(Some(res)) {
-                            tracing::warn!("Send res failed, cache res: {res:?}");
+                            tracing::debug!("Receiver has been closed, cached res: {:?}", res);
                             cache = res;
                         }
                         tracing::debug!(elapsed = ?elapsed.elapsed(), "Poll next message");
@@ -365,7 +372,7 @@ pub(super) mod tmq {
         }
 
         pub(crate) fn tmq(&self) -> TmqApi {
-            self.tmq
+            self.tmq_api
         }
 
         pub(crate) fn sender(&self) -> mpsc::Sender<oneshot::Sender<Option<RawRes>>> {
