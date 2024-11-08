@@ -2540,6 +2540,7 @@ mod async_tests {
 
         {
             let mut stream = consumer.stream();
+            let mut cnt = 0;
             while let Some((offset, message)) = stream.try_next().await? {
                 debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
@@ -2552,6 +2553,7 @@ mod async_tests {
                     while let Some(block) = data.fetch_raw_block().await? {
                         let table_name = block.table_name().unwrap();
                         let records: Vec<Record> = block.deserialize().try_collect()?;
+                        cnt += records.len();
                         debug!(
                             "table_name: {}, got {} records: {:#?}",
                             table_name,
@@ -2563,6 +2565,8 @@ mod async_tests {
 
                 consumer.commit(offset).await?;
             }
+
+            assert_eq!(inserted, cnt);
         }
 
         consumer.unsubscribe().await;
