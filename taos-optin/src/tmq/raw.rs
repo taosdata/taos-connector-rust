@@ -24,7 +24,7 @@ pub(super) mod tmq {
     pub(crate) struct RawTmq {
         api: Arc<ApiEntry>,
         tmq_api: TmqApi,
-        ptr: *mut tmq_t,
+        tmq_ptr: *mut tmq_t,
         timeout: i64,
         sender: mpsc::Sender<oneshot::Sender<Option<RawRes>>>,
         receiver: Option<mpsc::Receiver<oneshot::Sender<Option<RawRes>>>>,
@@ -37,14 +37,14 @@ pub(super) mod tmq {
         pub(crate) fn new(
             api: Arc<ApiEntry>,
             tmq_api: TmqApi,
-            ptr: *mut tmq_t,
+            tmq_ptr: *mut tmq_t,
             timeout: i64,
         ) -> Self {
             let (sender, receiver) = mpsc::channel(10);
             Self {
                 api,
                 tmq_api,
-                ptr,
+                tmq_ptr,
                 timeout,
                 sender,
                 receiver: Some(receiver),
@@ -52,7 +52,7 @@ pub(super) mod tmq {
         }
 
         fn as_ptr(&self) -> *mut tmq_t {
-            self.ptr
+            self.tmq_ptr
         }
 
         pub(crate) fn subscribe(&mut self, topics: &Topics) -> RawResult<()> {
