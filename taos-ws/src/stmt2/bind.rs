@@ -4,6 +4,7 @@ use taos_query::{
     common::{BorrowedValue, ColumnView},
     RawResult,
 };
+use tracing::debug;
 
 const TOTAL_LENGTH_POSITION: usize = 0;
 const TABLE_COUNT_POSITION: usize = TOTAL_LENGTH_POSITION + 4;
@@ -101,10 +102,15 @@ pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResul
                 return Err("Query column cannot be null".into());
             }
         }
+
+        col_cnt = data.columns.len();
     }
 
     let have_tags = tag_cnt != 0;
     let have_cols = col_cnt != 0;
+
+    debug!("table_cnt: {table_cnt}, tag_cnt: {tag_cnt}, col_cnt: {col_cnt}");
+    debug!("have_table_names: {have_table_names}, have_tags: {have_tags}, have_cols: {have_cols}");
 
     if !have_table_names && !have_tags && !have_cols {
         return Err("No data".into());
@@ -113,7 +119,11 @@ pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResul
     let mut tmp_buf = BytesMut::new();
 
     let mut table_name_buf = BytesMut::new();
-    let mut table_name_lens = vec![0; table_cnt];
+    let mut table_name_lens = if have_table_names {
+        vec![0; table_cnt]
+    } else {
+        vec![]
+    };
 
     let mut tag_buf = BytesMut::new();
     let mut tag_data_lens = if have_tags {
@@ -178,11 +188,26 @@ pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResul
         }
     }
 
-    let tag_offset = DATA_POSITION + table_name_buf.len() + table_name_lens.len() * 2;
-    let col_offset = tag_offset + tag_buf.len() + tag_data_lens.len() * 4;
-    let total_len = col_offset + col_buf.len() + col_data_lens.len() * 4;
+    let tags_offset = DATA_POSITION + table_name_buf.len() + table_name_lens.len() * 2;
+    let cols_offset = tags_offset + tag_buf.len() + tag_data_lens.len() * 4;
+    let total_len = cols_offset + col_buf.len() + col_data_lens.len() * 4;
 
     let mut buf = vec![0u8; total_len];
+
+    debug!("total_len: {total_len}");
+    debug!(
+        "table_name_buf_len: {}, tag_buf_len: {}, col_buf_len: {}",
+        table_name_buf.len(),
+        tag_buf.len(),
+        col_buf.len()
+    );
+    debug!(
+        "table_name_lens_len: {}, tag_data_lens_len: {}, col_data_lens_len: {}",
+        table_name_lens.len(),
+        tag_data_lens.len(),
+        col_data_lens.len()
+    );
+    debug!("tags_offset: {tags_offset}, cols_offset: {cols_offset}");
 
     // write total length
     LittleEndian::write_u32(&mut buf, total_len as _);
@@ -207,8 +232,8 @@ pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResul
         // write tag count
         LittleEndian::write_u32(&mut buf[TAG_COUNT_POSITION..], tag_cnt as _);
         // write tags offset
-        LittleEndian::write_u32(&mut buf[TAGS_OFFSET_POSITION..], tag_offset as _);
-        let mut offset = tag_offset;
+        LittleEndian::write_u32(&mut buf[TAGS_OFFSET_POSITION..], tags_offset as _);
+        let mut offset = tags_offset;
         // write tags data length
         for len in tag_data_lens {
             LittleEndian::write_u32(&mut buf[offset..], len as _);
@@ -222,8 +247,8 @@ pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResul
         // write col count
         LittleEndian::write_u32(&mut buf[COL_COUNT_POSITION..], col_cnt as _);
         // write cols offset
-        LittleEndian::write_u32(&mut buf[COLS_OFFSET_POSITION..], col_offset as _);
-        let mut offset = col_offset;
+        LittleEndian::write_u32(&mut buf[COLS_OFFSET_POSITION..], cols_offset as _);
+        let mut offset = cols_offset;
         // write col data length
         for len in col_data_lens {
             LittleEndian::write_u32(&mut buf[offset..], len as _);
@@ -1569,6 +1594,199 @@ mod tests {
                 0x14, 0x00, 0x00, 0x00,
                 0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, 0x31,
                 0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, 0x32,
+            ];
+
+            assert_eq!(res, expected);
+        }
+
+        {
+            let cols = &[
+                ColumnView::from_millis_timestamp(vec![1726803356466]),
+                ColumnView::from_bools(vec![true]),
+                ColumnView::from_tiny_ints(vec![1]),
+                ColumnView::from_small_ints(vec![2]),
+                ColumnView::from_ints(vec![3]),
+                ColumnView::from_big_ints(vec![4]),
+                ColumnView::from_floats(vec![5.5]),
+                ColumnView::from_doubles(vec![6.6]),
+                ColumnView::from_unsigned_tiny_ints(vec![7]),
+                ColumnView::from_unsigned_small_ints(vec![8]),
+                ColumnView::from_unsigned_ints(vec![9]),
+                ColumnView::from_unsigned_big_ints(vec![10]),
+                ColumnView::from_varchar(vec!["binary"]),
+                ColumnView::from_nchar(vec!["nchar"]),
+                ColumnView::from_geobytes(vec![vec![
+                    0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40,
+                ]]),
+                ColumnView::from_bytes(vec!["varbinary".as_bytes()]),
+            ];
+
+            let data = Stmt2BindData::new(None, None, cols);
+            let res = bind_datas_as_bytes(&[data], false)?;
+
+            #[rustfmt::skip]
+            let expected = [
+                0xac, 0x01, 0x00, 0x00, // total length
+                0x01, 0x00, 0x00, 0x00, // table count
+                0x00, 0x00, 0x00, 0x00, // tag count
+                0x10, 0x00, 0x00, 0x00, // col count
+                0x00, 0x00, 0x00, 0x00, // table names offset
+                0x00, 0x00, 0x00, 0x00, // tags offset
+                0x1c, 0x00, 0x00, 0x00, // cols offset
+
+                // cols
+
+                0x8c, 0x01, 0x00, 0x00, // col data length
+                // table 0 cols
+                // col 0
+                0x1a, 0x00, 0x00, 0x00, // total length
+                0x09, 0x00, 0x00, 0x00, // type
+                0x01, 0x00, 0x00, 0x00, // num
+                0x00, // isnull
+                0x00, // have length
+                0x08, 0x00, 0x00, 0x00, // buffer length
+                0x32, 0x2b, 0x80, 0x0d, 0x92, 0x01, 0x00, 0x00, // buffer
+
+                // col 1
+                0x13, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x01,
+
+                // col 2
+                0x13, 0x00, 0x00, 0x00,
+                0x02, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x01,
+
+                // col 3
+                0x14, 0x00, 0x00, 0x00,
+                0x03, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x02, 0x00, 0x00, 0x00,
+                0x02, 0x00,
+
+                // col 4
+                0x16, 0x00, 0x00, 0x00,
+                0x04, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x04, 0x00, 0x00, 0x00,
+                0x03, 0x00, 0x00, 0x00,
+
+                // col 5
+                0x1a, 0x00, 0x00, 0x00,
+                0x05, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x08, 0x00, 0x00, 0x00,
+                0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+                // col 6
+                0x16, 0x00, 0x00, 0x00,
+                0x06, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x04, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0xb0, 0x40,
+
+                // col 7
+                0x1a, 0x00, 0x00, 0x00,
+                0x07, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x08, 0x00, 0x00, 0x00,
+                0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x1a, 0x40,
+
+                // col 8
+                0x13, 0x00, 0x00, 0x00,
+                0x0b, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x07,
+
+                // col 9
+                0x14, 0x00, 0x00, 0x00,
+                0x0c, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x02, 0x00, 0x00, 0x00,
+                0x08, 0x00,
+
+                // col 10
+                0x16, 0x00, 0x00, 0x00,
+                0x0d, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x04, 0x00, 0x00, 0x00,
+                0x09, 0x00, 0x00, 0x00,
+
+                // col 11
+                0x1a, 0x00, 0x00, 0x00,
+                0x0e, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+                0x08, 0x00, 0x00, 0x00,
+                0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+                // col 12
+                0x1c, 0x00, 0x00, 0x00,
+                0x08, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x01,
+                0x06, 0x00, 0x00, 0x00,
+                0x06, 0x00, 0x00, 0x00,
+                0x62, 0x69, 0x6e, 0x61, 0x72, 0x79,
+
+                // col 13
+                0x1b, 0x00, 0x00, 0x00,
+                0x0a, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x01,
+                0x05, 0x00, 0x00, 0x00,
+                0x05, 0x00, 0x00, 0x00,
+                0x6e, 0x63, 0x68, 0x61, 0x72,
+
+                // col 14
+                0x2b, 0x00, 0x00, 0x00,
+                0x14, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x01,
+                0x15, 0x00, 0x00, 0x00,
+                0x15, 0x00, 0x00, 0x00,
+                0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40,
+
+                // col 15
+                0x1f, 0x00, 0x00, 0x00,
+                0x10, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x00,
+                0x01,
+                0x09, 0x00, 0x00, 0x00,
+                0x09, 0x00, 0x00, 0x00,
+                0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79,
             ];
 
             assert_eq!(res, expected);
