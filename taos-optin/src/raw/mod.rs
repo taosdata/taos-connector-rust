@@ -819,7 +819,7 @@ impl ApiEntry {
                 tracing::trace!(cost = ?elapsed, "connect failed");
                 retries -= 1;
                 let err = self.check(ptr).unwrap_err();
-                if retries <= 0 {
+                if retries == 0 {
                     break Err(err);
                 }
                 if err.code() == 0x000B {

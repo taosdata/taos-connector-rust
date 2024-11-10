@@ -19,8 +19,10 @@ enum ResultSetInner {
     Native(crate::sys::ResultSet),
     Ws(taos_ws::ResultSet),
 }
+
 #[derive(Debug)]
 pub struct TaosBuilder(TaosBuilderInner);
+
 #[derive(Debug)]
 pub struct Taos(pub(super) TaosInner);
 
@@ -393,6 +395,7 @@ impl AsyncQueryable for Taos {
             if let Err(err) = ok {
                 if err.to_string().contains("0x032C") {
                     tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
                 } else {
                     break Err(err);
                 }

@@ -1442,7 +1442,7 @@ pub unsafe extern "C" fn ws_print_row(
 
     let mut len = 0;
     let mut remain_space = (str_len - 1) as usize;
-    if remain_space <= 0
+    if remain_space == 0
         || str_len <= 0
         || str.is_null()
         || row.is_null()
