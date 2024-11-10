@@ -1,9 +1,8 @@
+use serde::de::{self, DeserializeSeed, IntoDeserializer, Visitor};
+use serde::forward_to_deserialize_any;
+
 use super::super::*;
 use super::*;
-use serde::{
-    de::{self, DeserializeSeed, IntoDeserializer, Visitor},
-    forward_to_deserialize_any,
-};
 
 impl<'b, 'de: 'b> serde::de::EnumAccess<'de> for BorrowedValue<'b> {
     type Error = Error;
@@ -38,9 +37,8 @@ impl<'de, 'b: 'de> serde::de::EnumAccess<'de> for EnumValueDeserializer<'b> {
     where
         V: DeserializeSeed<'de>,
     {
-        return seed
-            .deserialize(self.value.ty().as_variant_str().into_deserializer())
-            .map(|v| (v, self));
+        seed.deserialize(self.value.ty().as_variant_str().into_deserializer())
+            .map(|v| (v, self))
     }
 }
 
@@ -77,7 +75,7 @@ impl<'de, 'b: 'de> de::VariantAccess<'de> for EnumValueDeserializer<'b> {
     }
 }
 
-impl<'b, 'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'b> {
+impl<'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'_> {
     type Error = Error;
 
     type Variant = VariantTimestampDeserializer;
@@ -107,7 +105,7 @@ impl<'b, 'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'b> {
     }
 }
 
-impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
+impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -150,7 +148,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
-            _ => Err(<Self::Error as de::Error>::custom(
+            Decimal(_) => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
         }
@@ -222,7 +220,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
 
     fn deserialize_newtype_struct<V>(
         self,
-        _name: &'static str,
+        name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -252,12 +250,12 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
             NChar(v) => _v_!(v),
             Json(v) => match v {
                 Cow::Borrowed(v) => serde_json::Deserializer::from_slice(v)
-                    .deserialize_newtype_struct(_name, visitor)
+                    .deserialize_newtype_struct(name, visitor)
                     .map_err(<Self::Error as de::Error>::custom),
                 Cow::Owned(v) => serde_json::from_slice::<serde_json::Value>(&v)
                     .map_err(<Self::Error as de::Error>::custom)?
                     .into_deserializer()
-                    .deserialize_newtype_struct(_name, visitor)
+                    .deserialize_newtype_struct(name, visitor)
                     .map_err(<Self::Error as de::Error>::custom),
             },
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
@@ -266,7 +264,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
-            _ => Err(<Self::Error as de::Error>::custom(
+            Decimal(_) => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
         }
@@ -435,9 +433,9 @@ impl<'de> serde::de::IntoDeserializer<'de, Error> for BorrowedValue<'de> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn de_value_as_inner() {

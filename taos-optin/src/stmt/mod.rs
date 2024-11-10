@@ -1,26 +1,15 @@
-use crate::{
-    err_or,
-    into_c_str::IntoCStr,
-    raw::{ApiEntry, StmtApi},
-    RawRes, RawTaos, ResultSet,
-};
-
-use std::{
-    ffi::{c_void, CStr, CString},
-    sync::Arc,
-};
+use std::ffi::{c_void, CStr, CString};
+use std::sync::Arc;
 
 use itertools::Itertools;
-// use taos_error::{Code};
-use taos_query::{
-    prelude::{
-        sync::{Bindable, Queryable, RawError as Error},
-        Code, RawResult,
-    },
-    stmt::AsyncBindable,
-};
+use taos_query::prelude::sync::{Bindable, Queryable, RawError as Error};
+use taos_query::prelude::{Code, RawResult};
+use taos_query::stmt::AsyncBindable;
 
+use crate::into_c_str::IntoCStr;
+use crate::raw::{ApiEntry, StmtApi};
 use crate::types::*;
+use crate::{err_or, RawRes, RawTaos, ResultSet};
 
 mod bind;
 mod multi;
@@ -150,7 +139,7 @@ impl AsyncBindable<super::Taos> for Stmt {
 }
 
 #[derive(Debug)]
-pub(crate) struct RawStmt {
+pub struct RawStmt {
     c: Arc<ApiEntry>,
     api: StmtApi,
     ptr: *mut TAOS_STMT,
@@ -159,6 +148,7 @@ pub(crate) struct RawStmt {
 
 unsafe impl Sync for RawStmt {}
 unsafe impl Send for RawStmt {}
+
 impl Drop for RawStmt {
     fn drop(&mut self) {
         let _ = self.close();
@@ -169,10 +159,10 @@ impl RawStmt {
     fn is_v3(&self) -> bool {
         self.c.version().starts_with('3')
     }
+
     #[inline(always)]
     fn ok(&self, code: impl Into<Code>) -> RawResult<()> {
         let code = code.into();
-
         if code.success() {
             Ok(())
         } else {
@@ -184,11 +174,6 @@ impl RawStmt {
     pub unsafe fn as_ptr(&self) -> *mut TAOS_STMT {
         self.ptr
     }
-
-    // #[inline]
-    // pub fn errstr(&self) -> &CStr {
-    //     unsafe { CStr::from_ptr((self.api.taos_stmt_errstr)(self.as_ptr())) }
-    // }
 
     #[inline]
     pub fn err_as_str(&self) -> String {
@@ -221,13 +206,14 @@ impl RawStmt {
             tbname: None,
         }
     }
+
     #[inline]
     pub fn close(&mut self) -> RawResult<()> {
         err_or!(self, (self.api.taos_stmt_close)(self.as_ptr()))
     }
 
     #[inline]
-    pub fn prepare<'c>(&mut self, sql: impl IntoCStr<'c>) -> RawResult<()> {
+    pub fn prepare<'c, T: IntoCStr<'c>>(&mut self, sql: T) -> RawResult<()> {
         let sql = sql.into_c_str();
         tracing::trace!("prepare stmt with sql: {sql:?}");
         self.ok(unsafe {
@@ -235,22 +221,8 @@ impl RawStmt {
         })
     }
 
-    // pub fn set_tbname_tags_v3<'a>(
-    //     &mut self,
-    //     name: impl IntoCStr<'a>,
-    //     tags: &[TaosBindV3],
-    // ) -> Result<()> {
-    //     self.ok(unsafe {
-    //         (self.api.taos_stmt_set_tbname_tags)(
-    //             self.as_ptr(),
-    //             name.into_c_str().as_ptr(),
-    //             tags.as_ptr() as _,
-    //         )
-    //     })
-    // }
-
     #[inline]
-    pub fn set_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> RawResult<()> {
+    pub fn set_tbname<'c, T: IntoCStr<'c>>(&mut self, name: T) -> RawResult<()> {
         let name = name.into_c_str();
         let res = self.ok(unsafe {
             match self.api.taos_stmt_set_tbname {
@@ -263,13 +235,6 @@ impl RawStmt {
         }
         res
     }
-
-    // #[inline]
-    // pub fn set_sub_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> Result<()> {
-    //     self.ok(unsafe {
-    //         (self.api.taos_stmt_set_sub_tbname)(self.as_ptr(), name.into_c_str().as_ptr())
-    //     })
-    // }
 
     #[inline]
     pub fn set_tags(&mut self, tags: *const c_void) -> RawResult<()> {
@@ -323,40 +288,6 @@ impl RawStmt {
         err_or!(self, (self.api.taos_stmt_add_batch)(self.as_ptr()))
     }
 
-    // #[inline]
-    // pub fn is_insert(&self) -> Result<bool> {
-    //     let mut is_insert = 0;
-    //     err_or!(
-    //         self,
-    //         (self.api.taos_stmt_is_insert)(self.as_ptr(), &mut is_insert as _),
-    //         is_insert != 0
-    //     )
-    // }
-
-    // #[inline]
-    // pub fn num_params(&self) -> Result<usize> {
-    //     let mut num = 0i32;
-    //     err_or!(
-    //         self,
-    //         (self.api.taos_stmt_num_params)(self.as_ptr(), &mut num as _),
-    //         num as usize
-    //     )
-    // }
-
-    // #[inline]
-    // pub fn get_param(&mut self, idx: i32) -> Result<(Ty, i32)> {
-    //     let (mut type_, mut bytes) = (0, 0);
-    //     err_or!(
-    //         self,
-    //         (self.api.taos_stmt_get_param)(self.as_ptr(), idx, &mut type_ as _, &mut bytes as _),
-    //         ((type_ as u8).into(), bytes)
-    //     )
-    // }
-    // #[inline]
-    // pub fn bind_param(&mut self, bind: *const c_void) -> Result<()> {
-    //     err_or!(self, (self.api.taos_stmt_bind_param)(self.as_ptr(), bind))
-    // }
-
     #[inline]
     pub fn bind_param_batch(&mut self, bind: &[TaosMultiBind]) -> RawResult<()> {
         match self.api.taos_stmt_bind_param_batch {
@@ -364,21 +295,15 @@ impl RawStmt {
             None => todo!(),
         }
     }
-
-    // #[inline]
-    // pub fn bind_single_param_batch(&self, bind: &TaosMultiBind, col: i32) -> Result<()> {
-    //     self.ok(unsafe {
-    //         (self.api.taos_stmt_bind_single_param_batch)(self.as_ptr(), bind as *const _ as _, col)
-    //     })
-    // }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use crate::{Stmt, TaosBuilder};
     use bytes::Bytes;
     use taos_query::util::hex::*;
+
+    use crate::{Stmt, TaosBuilder};
 
     #[test]
     fn test_tbname_tags() -> anyhow::Result<()> {

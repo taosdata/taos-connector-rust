@@ -1,7 +1,5 @@
-use std::{
-    fmt::{self, Display},
-    str::FromStr,
-};
+use std::fmt::{self, Display};
+use std::str::FromStr;
 
 use serde::Deserialize;
 
@@ -124,6 +122,7 @@ impl<'de> Deserialize<'de> for Precision {
             {
                 self.visit_i32(v as _)
             }
+
             fn visit_i16<E>(self, v: i16) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
@@ -135,7 +134,7 @@ impl<'de> Deserialize<'de> for Precision {
             where
                 E: serde::de::Error,
             {
-                Precision::try_from(v).map_err(<E as serde::de::Error>::custom)
+                Ok(v.into())
             }
 
             fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
@@ -208,13 +207,9 @@ impl<'de> Deserialize<'de> for Precision {
 
 #[cfg(test)]
 mod tests {
-    use serde::{
-        de::{
-            value::{I32Deserializer, StrDeserializer, UnitDeserializer},
-            IntoDeserializer,
-        },
-        Deserialize,
-    };
+    use serde::de::value::{I32Deserializer, StrDeserializer, UnitDeserializer};
+    use serde::de::IntoDeserializer;
+    use serde::Deserialize;
 
     use super::Precision;
 

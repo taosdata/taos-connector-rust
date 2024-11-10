@@ -1,5 +1,4 @@
 use derive_more::{Deref, DerefMut, Display, From};
-
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -24,7 +23,7 @@ pub type IDecimal = Decimal;
 #[derive(Debug, Clone, Copy, Deref, DerefMut, Deserialize, Serialize, Display, From)]
 pub struct ITimestamp(pub i64);
 
-#[derive(Debug, Deref, DerefMut, Clone, Deserialize, Serialize)]
+#[derive(Debug, Deref, DerefMut, Clone, Deserialize, Serialize, Default)]
 pub struct IVarChar(String);
 
 impl AsRef<str> for IVarChar {
@@ -32,6 +31,7 @@ impl AsRef<str> for IVarChar {
         self.0.as_str()
     }
 }
+
 impl AsRef<[u8]> for IVarChar {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
@@ -99,10 +99,12 @@ impl IVarChar {
     pub const fn new() -> Self {
         Self(String::new())
     }
+
     pub fn with_capacity(cap: usize) -> Self {
         Self(String::with_capacity(cap))
     }
 }
+
 pub trait IsValue: Sized + Clone {
     const TY: Ty;
 

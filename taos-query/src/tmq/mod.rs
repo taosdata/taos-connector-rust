@@ -1,14 +1,15 @@
-use std::{fmt::Debug, pin::Pin, str::FromStr, time::Duration};
+use std::fmt::Debug;
+use std::pin::Pin;
+use std::str::FromStr;
+use std::time::Duration;
 
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    common::{RawData, RawMeta},
-    JsonMeta, RawBlock, RawResult,
-};
+use crate::common::{RawData, RawMeta};
+use crate::{JsonMeta, RawBlock, RawResult};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Timeout {
     /// Wait forever.
     Never,
@@ -36,7 +37,7 @@ impl Timeout {
     }
     pub fn as_raw_timeout(&self) -> i64 {
         match self {
-            Timeout::Never => -1,
+            Timeout::Never => i64::MAX,
             Timeout::None => 0,
             Timeout::Duration(t) => t.as_millis() as _,
         }
@@ -51,7 +52,7 @@ impl Timeout {
     }
 }
 
-#[derive(Debug, thiserror::Error, PartialEq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum TimeoutError {
     #[error("empty timeout value")]
     Empty,
@@ -61,7 +62,7 @@ pub enum TimeoutError {
 
 fn parse_duration(s: &str) -> Result<Duration, TimeoutError> {
     let s = s.trim();
-    let (value, unit) = s.split_at(s.find(|c: char| !c.is_digit(10)).unwrap_or(s.len()));
+    let (value, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len()));
 
     let value: u64 = value
         .parse()
@@ -123,16 +124,14 @@ where
 impl<M, D> MessageSet<M, D> {
     pub fn into_meta(self) -> Option<M> {
         match self {
-            MessageSet::Meta(m) => Some(m),
+            MessageSet::Meta(m) | MessageSet::MetaData(m, _) => Some(m),
             MessageSet::Data(_) => None,
-            MessageSet::MetaData(m, _) => Some(m),
         }
     }
     pub fn into_data(self) -> Option<D> {
         match self {
             MessageSet::Meta(_) => None,
-            MessageSet::Data(d) => Some(d),
-            MessageSet::MetaData(_, d) => Some(d),
+            MessageSet::Data(d) | MessageSet::MetaData(_, d) => Some(d),
         }
     }
 
@@ -145,16 +144,14 @@ impl<M, D> MessageSet<M, D> {
 
     pub fn meta(&self) -> Option<&M> {
         match self {
-            MessageSet::Meta(m) => Some(m),
+            MessageSet::Meta(m) | MessageSet::MetaData(m, _) => Some(m),
             MessageSet::Data(_) => None,
-            MessageSet::MetaData(m, _) => Some(m),
         }
     }
     pub fn data(&mut self) -> Option<&mut D> {
         match self {
             MessageSet::Meta(_) => None,
-            MessageSet::Data(d) => Some(d),
-            MessageSet::MetaData(_, d) => Some(d),
+            MessageSet::Data(d) | MessageSet::MetaData(_, d) => Some(d),
         }
     }
 }
@@ -335,7 +332,7 @@ pub trait AsConsumer: Sized {
     fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()>;
 
     fn unsubscribe(self) {
-        drop(self)
+        drop(self);
     }
 
     fn list_topics(&self) -> RawResult<Vec<String>>;
@@ -354,7 +351,7 @@ pub struct MessageSetsIter<'a, C> {
     timeout: Timeout,
 }
 
-impl<'a, C> Iterator for MessageSetsIter<'a, C>
+impl<C> Iterator for MessageSetsIter<'_, C>
 where
     C: AsConsumer,
 {
@@ -427,7 +424,7 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     ) -> RawResult<()>;
 
     async fn unsubscribe(self) {
-        drop(self)
+        drop(self);
     }
 
     async fn list_topics(&self) -> RawResult<Vec<String>>;

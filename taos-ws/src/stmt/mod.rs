@@ -1,29 +1,24 @@
-use futures::{SinkExt, StreamExt};
-use itertools::Itertools;
+use std::fmt::Debug;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use std::time::Duration;
+
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
-
+use futures::{SinkExt, StreamExt};
+use itertools::Itertools;
+use messages::*;
 use serde::Deserialize;
-
 use taos_query::common::views::views_to_raw_block;
 use taos_query::common::{ColumnView, Precision, Ty};
 use taos_query::prelude::{InlinableWrite, RawResult};
 use taos_query::stmt::{AsyncBindable, Bindable};
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
-
 use tokio::sync::{oneshot, watch};
-
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::query::infra::ToMessage;
 use crate::{Taos, TaosBuilder};
-use messages::*;
-
-use std::fmt::Debug;
-
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
-use std::time::Duration;
 
 mod messages;
 
@@ -253,17 +248,18 @@ pub struct StmtField {
     pub scale: u8,
     pub bytes: i32,
 }
+
 impl Debug for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WsClient")
             .field("req_id", &self.req_id)
-            .field("...", &"...")
-            .finish()
+            .finish_non_exhaustive()
     }
 }
+
 impl Drop for Stmt {
     fn drop(&mut self) {
-        // send close signal to reader/writer spawned tasks.
+        // Send close signal to reader/writer spawned tasks.
         let _ = self.close_signal.send(true);
     }
 }
@@ -470,8 +466,7 @@ impl Stmt {
     /// ```text
     /// ws://localhost:6041/
     /// ```
-    ///
-    pub async fn from_dsn(dsn: impl IntoDsn) -> RawResult<Self> {
+    pub async fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let info = TaosBuilder::from_dsn(dsn)?;
         Self::from_wsinfo(&info).await
     }
@@ -524,7 +519,7 @@ impl Stmt {
         Ok(self)
     }
 
-    pub async fn s_stmt<'a>(&'a mut self, sql: &'a str) -> RawResult<&mut Self> {
+    pub async fn s_stmt<'a>(&'a mut self, sql: &'a str) -> RawResult<&'a mut Self> {
         let stmt = self.stmt_init().await?;
         stmt.stmt_prepare(sql).await?;
         Ok(self)
@@ -767,9 +762,11 @@ impl Stmt {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use taos_query::{common::ColumnView, AsyncTBuilder, Dsn};
+    use taos_query::common::ColumnView;
+    use taos_query::{AsyncTBuilder, Dsn};
 
-    use crate::{stmt::Stmt, TaosBuilder};
+    use crate::stmt::Stmt;
+    use crate::TaosBuilder;
 
     #[tokio::test()]
     async fn test_client() -> anyhow::Result<()> {

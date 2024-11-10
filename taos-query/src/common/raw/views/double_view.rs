@@ -1,10 +1,9 @@
 use std::ffi::c_void;
 
-use crate::common::{BorrowedValue, Ty};
+use bytes::Bytes;
 
 use super::{IsColumnView, NullBits, NullsIter};
-
-use bytes::Bytes;
+use crate::common::{BorrowedValue, Ty};
 
 type Item = f64;
 type View = DoubleView;
@@ -20,8 +19,9 @@ impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::Double
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter(iter.map(|v| v.to_f64()))
+        iter.map(|v| v.to_f64()).collect()
     }
 }
 
@@ -36,12 +36,12 @@ impl std::ops::Add for &View {
     type Output = View;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -147,8 +147,7 @@ impl DoubleView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(BorrowedValue::Double)
-            .unwrap_or(BorrowedValue::Null(Ty::Double))
+            .map_or(BorrowedValue::Null(Ty::Double), BorrowedValue::Double)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -206,12 +205,12 @@ impl DoubleView {
     }
 
     pub fn concat(&self, rhs: &View) -> View {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -229,7 +228,7 @@ pub struct DoubleViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for DoubleViewIter<'a> {
+impl Iterator for DoubleViewIter<'_> {
     type Item = Option<Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -253,7 +252,7 @@ impl<'a> Iterator for DoubleViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for DoubleViewIter<'a> {
+impl ExactSizeIterator for DoubleViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }
