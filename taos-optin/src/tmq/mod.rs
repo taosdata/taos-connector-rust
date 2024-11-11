@@ -562,8 +562,7 @@ impl AsAsyncConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
-        use taos_query::prelude::tokio;
-        use taos_query::prelude::tokio::sync::oneshot;
+        use taos_query::prelude::{tokio, tokio::sync::oneshot};
         use taos_query::tmq::MessageSet;
 
         let (tx, rx) = oneshot::channel();
@@ -605,11 +604,11 @@ impl AsAsyncConsumer for Consumer {
 
         match res {
             Ok(res) => {
-                tracing::debug!("Got a new message");
+                tracing::trace!("Got a new message");
                 Ok(res)
             }
             Err(err) => {
-                tracing::warn!("Polling message error: {err:?}");
+                tracing::trace!("Polling message error: {err:?}");
                 Err(err)
             }
         }

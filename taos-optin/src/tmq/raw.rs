@@ -3,7 +3,13 @@ pub(super) use list::Topics;
 pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
-    use std::{ffi::CStr, sync::Arc};
+    use std::{
+        ffi::CStr,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+    };
 
     use taos_query::{
         prelude::tokio::sync::oneshot,
@@ -28,6 +34,7 @@ pub(super) mod tmq {
         timeout: i64,
         sender: flume::Sender<oneshot::Sender<Option<RawRes>>>,
         receiver: Option<flume::Receiver<oneshot::Sender<Option<RawRes>>>>,
+        has_cache: Arc<AtomicBool>,
     }
 
     unsafe impl Send for RawTmq {}
@@ -48,6 +55,7 @@ pub(super) mod tmq {
                 timeout,
                 sender,
                 receiver: Some(receiver),
+                has_cache: Arc::new(AtomicBool::new(false)),
             }
         }
 
@@ -109,7 +117,10 @@ pub(super) mod tmq {
         }
 
         pub async fn commit(&self, msg: RawRes) -> RawResult<()> {
-            // use tokio::sync::oneshot::{channel, Sender};
+            if self.has_cache.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+
             use std::sync::mpsc::{channel, Sender};
             let (sender, rx) = channel::<RawResult<()>>();
             unsafe extern "C" fn tmq_commit_async_cb(
@@ -142,6 +153,10 @@ pub(super) mod tmq {
             vgroup_id: VGroupId,
             offset: i64,
         ) -> RawResult<()> {
+            if self.has_cache.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+
             if let Some(tmq_commit_offset_async) = self.tmq_api.tmq_commit_offset_async {
                 use std::sync::mpsc::{channel, Sender};
                 let (sender, rx) = channel::<RawResult<()>>();
@@ -318,7 +333,7 @@ pub(super) mod tmq {
         }
 
         pub(crate) fn spawn_thread(&mut self) {
-            tracing::debug!("Spawn thread to call C function `tmq_consumer_poll`");
+            tracing::trace!("Spawn thread to call C function `tmq_consumer_poll`");
 
             if self.receiver.is_none() {
                 return;
@@ -329,40 +344,45 @@ pub(super) mod tmq {
             let tmq_api = self.tmq_api;
             let api = self.api.clone();
             let timeout = self.timeout;
+            let has_cache = self.has_cache.clone();
 
             std::thread::spawn(move || {
                 let safe_tmq = safe_tmq;
-                let mut cache: Option<RawRes> = None;
+                let mut cache = None;
                 while let Ok(sender) = receiver.recv() {
                     let elapsed = std::time::Instant::now();
                     if let Some(res) = cache.take() {
-                        if let Err(res) = sender.send(Some(res)) {
-                            tracing::debug!("Receiver has been closed, cached res: {res:?}");
-                            cache = res;
+                        match sender.send(Some(res)) {
+                            Ok(_) => has_cache.store(false, Ordering::Relaxed),
+                            Err(res) => {
+                                tracing::trace!("Receiver has been closed, cached res: {res:?}");
+                                cache = res;
+                            }
                         }
-                        tracing::debug!(elapsed = ?elapsed.elapsed(), "Use cache, poll next message");
+                        tracing::trace!(elapsed = ?elapsed.elapsed(), "Use cache, poll next message");
                         continue;
                     }
 
                     let tmq_ptr = safe_tmq.0;
-                    tracing::debug!("Calling C function `tmq_consumer_poll` with ptr: {tmq_ptr:?}, timeout: {timeout}");
+                    tracing::trace!("Calling C function `tmq_consumer_poll` with ptr: {tmq_ptr:?}, timeout: {timeout}");
                     let res = unsafe { (tmq_api.tmq_consumer_poll)(tmq_ptr, timeout) };
-                    tracing::debug!("C function `tmq_consumer_poll` returned a pointer: {res:?}");
+                    tracing::trace!("C function `tmq_consumer_poll` returned a pointer: {res:?}");
 
                     if res.is_null() {
                         if let Err(_) = sender.send(None) {
-                            tracing::debug!("Receiver has been closed");
+                            tracing::trace!("Receiver has been closed");
                         }
-                        tracing::debug!(elapsed = ?elapsed.elapsed(), "Res is null, poll next message");
+                        tracing::trace!(elapsed = ?elapsed.elapsed(), "Res is null, poll next message");
                         continue;
                     }
 
                     let res = unsafe { RawRes::from_ptr_unchecked(api.clone(), res) };
                     if let Err(res) = sender.send(Some(res)) {
-                        tracing::debug!("Receiver has been closed, cached res: {res:?}");
+                        tracing::trace!("Receiver has been closed, cached res: {res:?}");
                         cache = res;
+                        has_cache.store(true, Ordering::Relaxed);
                     }
-                    tracing::debug!(elapsed = ?elapsed.elapsed(), "Poll next message");
+                    tracing::trace!(elapsed = ?elapsed.elapsed(), "Poll next message");
                 }
             });
         }
