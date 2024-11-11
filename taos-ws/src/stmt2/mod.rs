@@ -5,13 +5,15 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bind::{bind_datas_as_bytes, Stmt2BindData};
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
 use messages::*;
 use serde::Serialize;
 use taos_query::prelude::RawResult;
-use taos_query::IntoDsn;
+use taos_query::stmt2::Stmt2BindData;
+use taos_query::stmt2::{AsyncBindable, Bindable};
+use taos_query::util::InlinableWrite;
+use taos_query::{IntoDsn, RawError};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tracing::{debug, warn};
@@ -32,12 +34,25 @@ type StmtResultResult = RawResult<Stmt2Result>;
 type StmtResultResultSender = mpsc::Sender<StmtResultResult>;
 type StmtResultResultReceiver = mpsc::Receiver<StmtResultResult>;
 
+type StmtBindResult = RawResult<()>;
+type StmtBindSender = mpsc::Sender<StmtBindResult>;
+type StmtBindReceiver = mpsc::Receiver<StmtBindResult>;
+
+type StmtFieldResult = RawResult<Stmt2Fields>;
+type StmtFieldSender = mpsc::Sender<StmtFieldResult>;
+type StmtFieldReceiver = mpsc::Receiver<StmtFieldResult>;
+
+type StmtCloseResult = RawResult<()>;
+type StmtCloseSender = mpsc::Sender<StmtCloseResult>;
+type StmtCloseReceiver = mpsc::Receiver<StmtCloseResult>;
+
 type WsSender = mpsc::Sender<Message>;
 type StmtIdSender = oneshot::Sender<RawResult<StmtId>>;
 
 pub type ReqId = u64;
 pub type StmtId = u64;
 
+#[derive(Debug)]
 pub struct Stmt2 {
     ws: WsSender,
     timeout: Duration,
@@ -50,6 +65,12 @@ pub struct Stmt2 {
     stmt_prepare_res_sender_map: Arc<DashMap<StmtId, StmtPrepareResultSender>>,
     stmt_res_res_receiver: Option<StmtResultResultReceiver>,
     stmt_res_res_sender_map: Arc<DashMap<StmtId, StmtResultResultSender>>,
+    stmt_bind_receiver: Option<StmtBindReceiver>,
+    stmt_bind_sender_map: Arc<DashMap<StmtId, StmtBindSender>>,
+    stmt_fields_receiver: Option<StmtFieldReceiver>,
+    stmt_fields_sender_map: Arc<DashMap<StmtId, StmtFieldSender>>,
+    stmt_close_receiver: Option<StmtCloseReceiver>,
+    stmt_close_sender_map: Arc<DashMap<StmtId, StmtCloseSender>>,
     affected_rows: usize,
     affected_rows_once: usize,
     is_insert: Option<bool>,
@@ -90,11 +111,17 @@ impl Stmt2 {
         let stmt_prepare_res_sender_map =
             Arc::new(DashMap::<StmtId, StmtPrepareResultSender>::new());
         let stmt_res_res_sender_map = Arc::new(DashMap::<StmtId, StmtResultResultSender>::new());
+        let stmt_bind_sender_map = Arc::new(DashMap::<StmtId, StmtBindSender>::new());
+        let stmt_field_sender_map = Arc::new(DashMap::<StmtId, StmtFieldSender>::new());
+        let stmt_close_sender_map = Arc::new(DashMap::<StmtId, StmtCloseSender>::new());
 
         let stmt_id_sender_map_clone = stmt_id_sender_map.clone();
         let stmt_num_res_sender_map_clone = stmt_num_res_sender_map.clone();
         let stmt_prepare_res_sender_map_clone = stmt_prepare_res_sender_map.clone();
         let stmt_res_res_sender_map_clone = stmt_res_res_sender_map.clone();
+        let stmt_bind_sender_map_clone = stmt_bind_sender_map.clone();
+        let stmt_field_sender_map_clone = stmt_field_sender_map.clone();
+        let stmt_close_sender_map_clone = stmt_close_sender_map.clone();
 
         let (msg_sender, mut msg_receiver) = mpsc::channel(100);
         let (watch_sender, mut watch_receiver) = watch::channel(false);
@@ -157,7 +184,38 @@ impl Stmt2 {
                                                 debug!("got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
-                                        _ => {}
+                                        Stmt2Ok::Stmt2BindParam(stmt_id, res) => {
+                                            if let Some(sender) = stmt_bind_sender_map.get(&stmt_id) {
+                                                debug!("Send data to bind with stmt_id: {stmt_id}");
+                                                sender.send(res).await.unwrap();
+                                            } else {
+                                                debug!("Bind got unknown stmt_id: {stmt_id}");
+                                            }
+                                        }
+                                        Stmt2Ok::Stmt2Fields(stmt_id, res) => {
+                                            if let Some(sender) = stmt_field_sender_map.get(&stmt_id) {
+                                                debug!("Send data to fields with stmt_id: {stmt_id}");
+                                                sender.send(res).await.unwrap();
+                                            } else {
+                                                debug!("GetFields got unknown stmt_id: {stmt_id}");
+                                            }
+                                        }
+                                        Stmt2Ok::Stmt2Close(stmt_id, res) => {
+                                            if let Some(sender) = stmt_close_sender_map.get(&stmt_id) {
+                                                debug!("Send data to close with stmt_id: {stmt_id}");
+                                                sender.send(res).await.unwrap();
+                                            } else {
+                                                debug!("Close got unknown stmt_id: {stmt_id}");
+                                            }
+                                        }
+                                        Stmt2Ok::Stmt2ExecRes(stmt_id, res) => {
+                                            if let Some(sender) = stmt_num_res_sender_map.get(&stmt_id) {
+                                                debug!("Send data to exec with stmt_id: {stmt_id}");
+                                                sender.send(res).await.unwrap();
+                                            } else {
+                                                debug!("Close got unknown stmt_id: {stmt_id}");
+                                            }
+                                        }
                                     }
                                 }
                                 Message::Binary(_) => {
@@ -203,6 +261,12 @@ impl Stmt2 {
             stmt_prepare_res_sender_map: stmt_prepare_res_sender_map_clone,
             stmt_res_res_receiver: None,
             stmt_res_res_sender_map: stmt_res_res_sender_map_clone,
+            stmt_bind_receiver: None,
+            stmt_bind_sender_map: stmt_bind_sender_map_clone,
+            stmt_fields_receiver: None,
+            stmt_fields_sender_map: stmt_field_sender_map_clone,
+            stmt_close_receiver: None,
+            stmt_close_sender_map: stmt_close_sender_map_clone,
             is_insert: None,
             affected_rows: 0,
             affected_rows_once: 0,
@@ -250,6 +314,18 @@ impl Stmt2 {
             .stmt_res_res_sender_map
             .insert(stmt_id, stmt_res_res_sender);
         self.stmt_res_res_receiver = Some(stmt_res_res_recevier);
+
+        let (bind_sender, bind_receiver) = mpsc::channel(2);
+        let _ = self.stmt_bind_sender_map.insert(stmt_id, bind_sender);
+        self.stmt_bind_receiver = Some(bind_receiver);
+
+        let (fields_sender, fields_receiver) = mpsc::channel(2);
+        let _ = self.stmt_fields_sender_map.insert(stmt_id, fields_sender);
+        self.stmt_fields_receiver = Some(fields_receiver);
+
+        let (close_sender, close_receiver) = mpsc::channel(2);
+        let _ = self.stmt_close_sender_map.insert(stmt_id, close_sender);
+        self.stmt_close_receiver = Some(close_receiver);
 
         Ok(self)
     }
@@ -327,7 +403,19 @@ impl Stmt2 {
         datas: &[Stmt2BindData<'a>],
         is_insert: bool,
     ) -> RawResult<()> {
-        let bytes = bind_datas_as_bytes(datas, is_insert)?;
+        let args = self.args.unwrap();
+        let action = 9;
+        let version = 1;
+        let col_idx = -1;
+        let bind_data = bind::bind_datas_as_bytes(datas, is_insert)?;
+
+        let mut bytes = vec![];
+        bytes.write_u64_le(args.req_id).map_err(Error::from)?;
+        bytes.write_u64_le(args.stmt_id).map_err(Error::from)?;
+        bytes.write_u64_le(action).map_err(Error::from)?;
+        bytes.write_u16_le(version).map_err(Error::from)?;
+        bytes.write_i32_le(col_idx).map_err(Error::from)?;
+        bytes.extend(bind_data);
 
         self.ws
             .send(Message::binary(bytes))
@@ -335,24 +423,56 @@ impl Stmt2 {
             .map_err(Error::from)?;
 
         let _ = self
-            .stmt_num_res_receiver
+            .stmt_bind_receiver
             .as_mut()
             .unwrap()
             .recv()
             .await
-            .ok_or(taos_query::RawError::from_string(
+            .ok_or(RawError::from_string(
                 "Can't receive stmt2 bind param response",
             ))??;
 
         Ok(())
     }
 
-    pub async fn stmt2_get_fields(&self) {
-        todo!()
+    pub async fn stmt2_get_fields(&mut self) -> RawResult<Stmt2Fields> {
+        debug!("stmt2 get fields");
+        let message = Stmt2Send::Stmt2GetFields {
+            args: self.args.unwrap(),
+            field_types: vec![],
+        };
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
+        let fields = self
+            .stmt_fields_receiver
+            .as_mut()
+            .unwrap()
+            .recv()
+            .await
+            .ok_or(taos_query::RawError::from_string(
+                "Can't receive stmt get_tag_fields response",
+            ))??;
+        Ok(fields)
     }
 
-    pub async fn stmt2_close(&self) {
-        todo!()
+    pub async fn stmt2_close(&mut self) -> RawResult<()> {
+        debug!("stmt2 close");
+        let message = Stmt2Send::Stmt2Close(self.args.unwrap());
+        self.ws
+            .send_timeout(message.to_msg(), self.timeout)
+            .await
+            .map_err(Error::from)?;
+        self.stmt_close_receiver
+            .as_mut()
+            .unwrap()
+            .recv()
+            .await
+            .ok_or(taos_query::RawError::from_string(
+                "Can't receive stmt get_tag_fields response",
+            ))??;
+        Ok(())
     }
 }
 
@@ -360,6 +480,61 @@ impl Drop for Stmt2 {
     fn drop(&mut self) {
         // send close signal to reader/writer spawned tasks.
         let _ = self.close_signal.send(true);
+    }
+}
+
+impl Bindable<super::Taos> for Stmt2 {
+    fn init(taos: &super::Taos) -> RawResult<Self> {
+        todo!()
+    }
+
+    fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
+        todo!()
+    }
+
+    fn bind(&mut self, datas: &[taos_query::stmt2::Stmt2BindData]) -> RawResult<&mut Self> {
+        todo!()
+    }
+
+    fn execute(&mut self) -> RawResult<usize> {
+        todo!()
+    }
+
+    fn affected_rows(&self) -> usize {
+        todo!()
+    }
+
+    fn result_set(&mut self) -> RawResult<<super::Taos as taos_query::Queryable>::ResultSet> {
+        todo!()
+    }
+}
+
+#[async_trait::async_trait]
+impl AsyncBindable<super::Taos> for Stmt2 {
+    async fn init(taos: &super::Taos) -> RawResult<Self> {
+        todo!()
+    }
+
+    async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
+        todo!()
+    }
+
+    async fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<&mut Self> {
+        todo!()
+    }
+
+    async fn execute(&mut self) -> RawResult<usize> {
+        todo!()
+    }
+
+    async fn affected_rows(&self) -> usize {
+        todo!()
+    }
+
+    async fn result_set(
+        &mut self,
+    ) -> RawResult<<super::Taos as taos_query::AsyncQueryable>::AsyncResultSet> {
+        todo!()
     }
 }
 

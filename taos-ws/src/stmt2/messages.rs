@@ -27,7 +27,6 @@ pub enum Stmt2Send {
         sql: String,
         get_fields: bool,
     },
-    Stmt2BindParam,
     Stmt2Exec(Stmt2Args),
     Stmt2GetFields {
         #[serde(flatten)]
@@ -62,7 +61,7 @@ pub enum Stmt2RecvData {
     Stmt2Prepare {
         is_insert: bool,
         fields: Option<Vec<String>>,
-        field_count: u64,
+        fields_count: u64,
     },
     Stmt2BindParam,
     Stmt2Exec {
@@ -72,8 +71,8 @@ pub enum Stmt2RecvData {
     Stmt2GetFields {
         table_count: u32,
         query_count: u32,
-        col_fields: Option<Vec<i8>>,
-        tag_fields: Option<Vec<i8>>,
+        col_fields: Option<Vec<Field>>,
+        tag_fields: Option<Vec<Field>>,
     },
     Stmt2Result {
         result_id: u64,
@@ -86,16 +85,25 @@ pub enum Stmt2RecvData {
     Stmt2Close,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Field {
+    name: String,
+    field_type: i8,
+    precision: u8,
+    scale: u8,
+    bytes: i32,
+}
+
 #[derive(Debug)]
 pub enum Stmt2Ok {
     Conn(Result<(), Error>),
     Stmt2Init(ReqId, Result<StmtId, Error>),
-    Stmt2BindParam(Result<(), Error>),
+    Stmt2BindParam(StmtId, Result<(), Error>),
     Stmt2Res(StmtId, Result<Stmt2Result, Error>),
-    Stmt2NumRes(StmtId, Result<Option<usize>, Error>),
+    Stmt2ExecRes(StmtId, Result<Option<usize>, Error>),
     Stmt2PrepareRes(StmtId, Result<Stmt2PrepareResult, Error>),
     Stmt2Fields(StmtId, Result<Stmt2Fields, Error>),
-    Stmt2Close(Result<(), Error>),
+    Stmt2Close(StmtId, Result<(), Error>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,8 +129,8 @@ pub struct Stmt2PrepareResult {
 pub struct Stmt2Fields {
     table_count: u32,
     query_count: u32,
-    col_fields: Option<Vec<i8>>,
-    tag_fields: Option<Vec<i8>>,
+    col_fields: Option<Vec<Field>>,
+    tag_fields: Option<Vec<Field>>,
 }
 
 impl Stmt2Recv {
@@ -154,7 +162,7 @@ impl Stmt2Recv {
             Stmt2RecvData::Stmt2Prepare {
                 is_insert,
                 fields,
-                field_count,
+                fields_count: field_count,
             } => Stmt2Ok::Stmt2PrepareRes(
                 self.stmt_id,
                 if self.code == 0 {
@@ -169,14 +177,10 @@ impl Stmt2Recv {
                     _e!()
                 },
             ),
-            Stmt2RecvData::Stmt2BindParam => Stmt2Ok::Stmt2BindParam({
-                if self.code == 0 {
-                    Ok(())
-                } else {
-                    _e!()
-                }
-            }),
-            Stmt2RecvData::Stmt2Exec { affected } => Stmt2Ok::Stmt2NumRes(
+            Stmt2RecvData::Stmt2BindParam => {
+                Stmt2Ok::Stmt2BindParam(self.stmt_id, if self.code == 0 { Ok(()) } else { _e!() })
+            }
+            Stmt2RecvData::Stmt2Exec { affected } => Stmt2Ok::Stmt2ExecRes(
                 self.stmt_id,
                 if self.code == 0 {
                     Ok(Some(affected))
@@ -226,7 +230,7 @@ impl Stmt2Recv {
                 },
             ),
             Stmt2RecvData::Stmt2Close => {
-                Stmt2Ok::Stmt2Close(if self.code == 0 { Ok(()) } else { _e!() })
+                Stmt2Ok::Stmt2Close(self.stmt_id, if self.code == 0 { Ok(()) } else { _e!() })
             }
         }
     }
