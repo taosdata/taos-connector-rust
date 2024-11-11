@@ -5,8 +5,8 @@ pub(super) use tmq::RawTmq;
 pub(super) mod tmq {
     use std::{ffi::CStr, sync::Arc};
 
-    use taos_query::prelude::tokio::sync::{mpsc, oneshot};
     use taos_query::{
+        prelude::tokio::sync::oneshot,
         tmq::{Assignment, VGroupId},
         RawError,
     };
@@ -26,8 +26,8 @@ pub(super) mod tmq {
         tmq_api: TmqApi,
         tmq_ptr: *mut tmq_t,
         timeout: i64,
-        sender: mpsc::Sender<oneshot::Sender<Option<RawRes>>>,
-        receiver: Option<mpsc::Receiver<oneshot::Sender<Option<RawRes>>>>,
+        sender: flume::Sender<oneshot::Sender<Option<RawRes>>>,
+        receiver: Option<flume::Receiver<oneshot::Sender<Option<RawRes>>>>,
     }
 
     unsafe impl Send for RawTmq {}
@@ -40,7 +40,7 @@ pub(super) mod tmq {
             tmq_ptr: *mut tmq_t,
             timeout: i64,
         ) -> Self {
-            let (sender, receiver) = mpsc::channel(10);
+            let (sender, receiver) = flume::bounded(10);
             Self {
                 api,
                 tmq_api,
@@ -324,50 +324,46 @@ pub(super) mod tmq {
                 return;
             }
 
-            let mut receiver = self.receiver.take().unwrap();
+            let receiver = self.receiver.take().unwrap();
             let safe_tmq = SafeTmqT(self.as_ptr());
             let tmq_api = self.tmq_api;
             let api = self.api.clone();
             let timeout = self.timeout;
 
             std::thread::spawn(move || {
-                futures::executor::block_on(async {
-                    let safe_tmq = safe_tmq;
-                    let mut cache: Option<RawRes> = None;
-                    while let Some(sender) = receiver.recv().await {
-                        let elapsed = std::time::Instant::now();
-                        if let Some(res) = cache.take() {
-                            if let Err(res) = sender.send(Some(res)) {
-                                tracing::debug!("Receiver has been closed, cached res: {:?}", res);
-                                cache = res;
-                            }
-                            tracing::debug!(elapsed = ?elapsed.elapsed(), "Use cache, poll next message");
-                            continue;
-                        }
-
-                        let tmq_ptr = safe_tmq.0;
-                        tracing::debug!("Calling C function `tmq_consumer_poll` with ptr: {tmq_ptr:?}, timeout: {timeout}");
-                        let res = unsafe { (tmq_api.tmq_consumer_poll)(tmq_ptr, timeout) };
-                        tracing::debug!(
-                            "C function `tmq_consumer_poll` returned a pointer: {res:?}"
-                        );
-
-                        if res.is_null() {
-                            if let Err(_) = sender.send(None) {
-                                tracing::debug!("Receiver has been closed");
-                            }
-                            tracing::debug!(elapsed = ?elapsed.elapsed(), "Res is null, poll next message");
-                            continue;
-                        }
-
-                        let res = unsafe { RawRes::from_ptr_unchecked(api.clone(), res) };
+                let safe_tmq = safe_tmq;
+                let mut cache: Option<RawRes> = None;
+                while let Ok(sender) = receiver.recv() {
+                    let elapsed = std::time::Instant::now();
+                    if let Some(res) = cache.take() {
                         if let Err(res) = sender.send(Some(res)) {
-                            tracing::debug!("Receiver has been closed, cached res: {:?}", res);
+                            tracing::debug!("Receiver has been closed, cached res: {res:?}");
                             cache = res;
                         }
-                        tracing::debug!(elapsed = ?elapsed.elapsed(), "Poll next message");
+                        tracing::debug!(elapsed = ?elapsed.elapsed(), "Use cache, poll next message");
+                        continue;
                     }
-                })
+
+                    let tmq_ptr = safe_tmq.0;
+                    tracing::debug!("Calling C function `tmq_consumer_poll` with ptr: {tmq_ptr:?}, timeout: {timeout}");
+                    let res = unsafe { (tmq_api.tmq_consumer_poll)(tmq_ptr, timeout) };
+                    tracing::debug!("C function `tmq_consumer_poll` returned a pointer: {res:?}");
+
+                    if res.is_null() {
+                        if let Err(_) = sender.send(None) {
+                            tracing::debug!("Receiver has been closed");
+                        }
+                        tracing::debug!(elapsed = ?elapsed.elapsed(), "Res is null, poll next message");
+                        continue;
+                    }
+
+                    let res = unsafe { RawRes::from_ptr_unchecked(api.clone(), res) };
+                    if let Err(res) = sender.send(Some(res)) {
+                        tracing::debug!("Receiver has been closed, cached res: {res:?}");
+                        cache = res;
+                    }
+                    tracing::debug!(elapsed = ?elapsed.elapsed(), "Poll next message");
+                }
             });
         }
 
@@ -375,7 +371,7 @@ pub(super) mod tmq {
             self.tmq_api
         }
 
-        pub(crate) fn sender(&self) -> mpsc::Sender<oneshot::Sender<Option<RawRes>>> {
+        pub(crate) fn sender(&self) -> flume::Sender<oneshot::Sender<Option<RawRes>>> {
             self.sender.clone()
         }
     }

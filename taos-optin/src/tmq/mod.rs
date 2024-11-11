@@ -570,7 +570,7 @@ impl AsAsyncConsumer for Consumer {
 
         self.tmq
             .sender()
-            .send(tx)
+            .send_async(tx)
             .await
             .map_err(RawError::from_any)?;
 
@@ -2493,9 +2493,9 @@ mod async_tests {
     async fn test_recv_timeout() -> anyhow::Result<()> {
         use std::str::FromStr;
 
-        use futures::TryStreamExt;
         use itertools::Itertools;
         use taos_query::{
+            prelude::TryStreamExt,
             tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
             AsyncQueryable, AsyncTBuilder, Dsn,
         };
