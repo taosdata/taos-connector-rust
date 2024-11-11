@@ -2,6 +2,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use bytes::{BufMut, BytesMut};
 use taos_query::{
     common::{BorrowedValue, ColumnView},
+    stmt2::Stmt2BindData,
     RawResult,
 };
 use tracing::debug;
@@ -20,27 +21,7 @@ const BIND_DATA_TYPE_OFFSET: usize = BIND_DATA_TOTAL_LENGTH_OFFSET + 4;
 const BIND_DATA_NUM_OFFSET: usize = BIND_DATA_TYPE_OFFSET + 4;
 const BIND_DATA_IS_NULL_OFFSET: usize = BIND_DATA_NUM_OFFSET + 4;
 
-pub struct Stmt2BindData<'a> {
-    table_name: Option<&'a str>,
-    tags: Option<&'a [ColumnView]>,
-    columns: &'a [ColumnView],
-}
-
-impl<'a> Stmt2BindData<'a> {
-    pub fn new(
-        table_name: Option<&'a str>,
-        tags: Option<&'a [ColumnView]>,
-        columns: &'a [ColumnView],
-    ) -> Self {
-        Self {
-            table_name,
-            tags,
-            columns,
-        }
-    }
-}
-
-pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResult<Vec<u8>> {
+pub(crate) fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResult<Vec<u8>> {
     let table_cnt = datas.len();
     if table_cnt == 0 {
         return Err("Empty data".into());
@@ -53,20 +34,21 @@ pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResul
 
     if is_insert {
         for data in datas {
-            if data.table_name.map_or(false, |s| !s.is_empty()) {
+            if data.table_name().map_or(false, |s| !s.is_empty()) {
                 have_table_names = true;
             }
 
-            if let Some(views) = data.tags {
+            if let Some(views) = data.tags() {
                 tag_cnt = views.len();
                 if views.iter().any(|view| view.len() != 1) {
                     return Err("Tag can only have one row".into());
                 };
             }
 
-            col_cnt = data.columns.len();
+            let columns = data.columns();
+            col_cnt = columns.len();
             for i in 1..col_cnt {
-                if data.columns[i - 1].len() != data.columns[i].len() {
+                if columns[i - 1].len() != columns[i].len() {
                     return Err("Columns row count not match".into());
                 }
             }
@@ -79,16 +61,18 @@ pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResul
         }
 
         let data = &datas[0];
-        if data.table_name.is_some() {
+        if data.table_name().is_some() {
             return Err("Query not needs table name".into());
         }
-        if data.tags.is_some() {
+        if data.tags().is_some() {
             return Err("Query not needs tags".into());
         }
-        if data.columns.len() == 0 {
+
+        let columns = data.columns();
+        if columns.len() == 0 {
             return Err("Query needs columns".into());
         }
-        for (i, view) in data.columns.iter().enumerate() {
+        for (i, view) in columns.iter().enumerate() {
             if view.len() != 1 {
                 return Err(format!(
                     "Query columns must be one row, column: {}, count: {}",
@@ -103,7 +87,7 @@ pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResul
             }
         }
 
-        col_cnt = data.columns.len();
+        col_cnt = columns.len();
     }
 
     let have_tags = tag_cnt != 0;
@@ -142,7 +126,7 @@ pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResul
     for (i, data) in datas.iter().enumerate() {
         if have_table_names {
             let mut len = 0;
-            if let Some(tbname) = data.table_name {
+            if let Some(tbname) = data.table_name() {
                 if !tbname.is_empty() {
                     if tbname.len() > (u16::MAX - 1) as _ {
                         return Err(format!(
@@ -165,7 +149,7 @@ pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResul
 
         if have_tags {
             let mut len = 0;
-            for tag in data.tags.unwrap() {
+            for tag in data.tags().unwrap() {
                 let tag_data_buf = generate_bind_insert_data(tag, &mut tmp_buf)?;
                 len += tag_data_buf.len();
                 tag_buf.extend_from_slice(&tag_data_buf);
@@ -175,7 +159,7 @@ pub fn bind_datas_as_bytes(datas: &[Stmt2BindData], is_insert: bool) -> RawResul
 
         if have_cols {
             let mut len = 0;
-            for col in data.columns {
+            for col in data.columns() {
                 let col_data_buf = if is_insert {
                     generate_bind_insert_data(col, &mut tmp_buf)?
                 } else {
