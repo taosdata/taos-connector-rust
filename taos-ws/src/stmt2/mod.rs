@@ -184,7 +184,7 @@ impl Stmt2 {
                                                 debug!("got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
-                                        Stmt2Ok::Stmt2BindParam(stmt_id, res) => {
+                                        Stmt2Ok::Stmt2Bind(stmt_id, res) => {
                                             if let Some(sender) = stmt_bind_sender_map.get(&stmt_id) {
                                                 debug!("Send data to bind with stmt_id: {stmt_id}");
                                                 sender.send(res).await.unwrap();
@@ -347,6 +347,7 @@ impl Stmt2 {
                 "Can't receive stmt2 prepare result response",
             ))??;
         self.is_insert = Some(res.is_insert);
+        debug!("is_insert: {:?}", self.is_insert);
         Ok(())
     }
 
@@ -398,23 +399,21 @@ impl Stmt2 {
         Ok(use_result)
     }
 
-    pub async fn stmt2_bind_param<'a>(
-        &mut self,
-        datas: &[Stmt2BindData<'a>],
-        is_insert: bool,
-    ) -> RawResult<()> {
+    pub async fn stmt2_bind_param<'a>(&mut self, datas: &[Stmt2BindData<'a>]) -> RawResult<()> {
+        const ACTION: u64 = 9;
+        const VERSION: u16 = 1;
+        const COL_IDX: i32 = -1;
+
         let args = self.args.unwrap();
-        let action = 9;
-        let version = 1;
-        let col_idx = -1;
+        let is_insert = self.is_insert.unwrap();
         let bind_data = bind::bind_datas_as_bytes(datas, is_insert)?;
 
         let mut bytes = vec![];
         bytes.write_u64_le(args.req_id).map_err(Error::from)?;
         bytes.write_u64_le(args.stmt_id).map_err(Error::from)?;
-        bytes.write_u64_le(action).map_err(Error::from)?;
-        bytes.write_u16_le(version).map_err(Error::from)?;
-        bytes.write_i32_le(col_idx).map_err(Error::from)?;
+        bytes.write_u64_le(ACTION).map_err(Error::from)?;
+        bytes.write_u16_le(VERSION).map_err(Error::from)?;
+        bytes.write_i32_le(COL_IDX).map_err(Error::from)?;
         bytes.extend(bind_data);
 
         self.ws
@@ -540,14 +539,18 @@ impl AsyncBindable<super::Taos> for Stmt2 {
 
 #[cfg(test)]
 mod tests {
+    use taos_query::common::ColumnView;
+    use taos_query::stmt2::Stmt2BindData;
     use taos_query::{AsyncQueryable, AsyncTBuilder};
+    use tracing::debug;
 
     use crate::stmt2::Stmt2;
     use crate::TaosBuilder;
 
     #[tokio::test]
     async fn test_stmt2() -> anyhow::Result<()> {
-        tracing_subscriber::fmt::init();
+        // tracing_subscriber::fmt::init();
+        // std::env::set_var("RUST_LOG", "trace");
 
         let db = "stmt2";
         let default_dsn = "taos://localhost:6041";
@@ -559,13 +562,43 @@ mod tests {
         taos.exec(format!("create table {db}.ctb (ts timestamp, a int)"))
             .await?;
 
-        std::env::set_var("RUST_LOG", "trace");
         let dsn_stmt = format!("{dsn}/{db}");
         let mut stmt2 = Stmt2::from_dsn(dsn_stmt).await?;
         stmt2.stmt2_init(100, false, false).await?;
         stmt2
             .stmt2_prepare("insert into ctb values (?, ?)", false)
             .await?;
+
+        let columns = vec![
+            ColumnView::from_millis_timestamp(vec![1726803356466]),
+            ColumnView::from_ints(vec![99]),
+        ];
+        let data = Stmt2BindData::new(None, None, &columns);
+        stmt2.stmt2_bind_param(&[data]).await?;
+
+        let affected = stmt2.stmt2_exec().await?;
+        assert_eq!(affected, 1);
+
+        let fields = stmt2.stmt2_get_fields().await?;
+        debug!("fields: {fields:?}");
+
+        stmt2
+            .stmt2_prepare("select count(*) from ctb where a > ?", true)
+            .await?;
+
+        let columns = vec![ColumnView::from_ints(vec![0])];
+        let data = Stmt2BindData::new(None, None, &columns);
+        stmt2.stmt2_bind_param(&[data]).await?;
+
+        let affected = stmt2.stmt2_exec().await?;
+        assert_eq!(affected, 0);
+
+        let fields = stmt2.stmt2_get_fields().await?;
+        debug!("fields: {fields:?}");
+
+        let res = stmt2.stmt2_result().await?;
+        debug!("res: {res:?}");
+
         Ok(())
     }
 }

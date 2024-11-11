@@ -46,7 +46,6 @@ pub struct Stmt2Recv {
     #[serde_as(as = "NoneAsEmptyString")]
     pub message: Option<String>,
     pub req_id: ReqId,
-    pub stmt_id: StmtId,
     pub timing: u64,
     #[serde(flatten)]
     pub data: Stmt2RecvData,
@@ -57,24 +56,32 @@ pub struct Stmt2Recv {
 #[serde(rename_all = "snake_case")]
 pub enum Stmt2RecvData {
     Conn,
-    Stmt2Init,
+    Stmt2Init {
+        stmt_id: StmtId,
+    },
     Stmt2Prepare {
+        stmt_id: StmtId,
         is_insert: bool,
-        fields: Option<Vec<String>>,
+        fields: Option<Vec<Field>>,
         fields_count: u64,
     },
-    Stmt2BindParam,
+    Stmt2Bind {
+        stmt_id: StmtId,
+    },
     Stmt2Exec {
+        stmt_id: StmtId,
         #[serde(default)]
         affected: usize,
     },
     Stmt2GetFields {
+        stmt_id: StmtId,
         table_count: u32,
         query_count: u32,
         col_fields: Option<Vec<Field>>,
         tag_fields: Option<Vec<Field>>,
     },
     Stmt2Result {
+        stmt_id: StmtId,
         result_id: u64,
         fields_count: u64,
         fields_names: Option<Vec<String>>,
@@ -82,7 +89,9 @@ pub enum Stmt2RecvData {
         fields_lengths: Option<Vec<u64>>,
         precision: Precision,
     },
-    Stmt2Close,
+    Stmt2Close {
+        stmt_id: StmtId,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,7 +107,7 @@ pub struct Field {
 pub enum Stmt2Ok {
     Conn(Result<(), Error>),
     Stmt2Init(ReqId, Result<StmtId, Error>),
-    Stmt2BindParam(StmtId, Result<(), Error>),
+    Stmt2Bind(StmtId, Result<(), Error>),
     Stmt2Res(StmtId, Result<Stmt2Result, Error>),
     Stmt2ExecRes(StmtId, Result<Option<usize>, Error>),
     Stmt2PrepareRes(StmtId, Result<Stmt2PrepareResult, Error>),
@@ -121,7 +130,7 @@ pub struct Stmt2PrepareResult {
     pub timing: u64,
     pub stmt_id: StmtId,
     pub is_insert: bool,
-    pub fields: Option<Vec<String>>,
+    pub fields: Option<Vec<Field>>,
     pub field_count: u64,
 }
 
@@ -151,24 +160,21 @@ impl Stmt2Recv {
                     _e!()
                 }
             }),
-            Stmt2RecvData::Stmt2Init => Stmt2Ok::Stmt2Init(
+            Stmt2RecvData::Stmt2Init { stmt_id } => Stmt2Ok::Stmt2Init(
                 self.req_id,
-                if self.code == 0 {
-                    Ok(self.stmt_id)
-                } else {
-                    _e!()
-                },
+                if self.code == 0 { Ok(stmt_id) } else { _e!() },
             ),
             Stmt2RecvData::Stmt2Prepare {
+                stmt_id,
                 is_insert,
                 fields,
                 fields_count: field_count,
             } => Stmt2Ok::Stmt2PrepareRes(
-                self.stmt_id,
+                stmt_id,
                 if self.code == 0 {
                     Ok(Stmt2PrepareResult {
                         timing: self.timing,
-                        stmt_id: self.stmt_id,
+                        stmt_id,
                         is_insert,
                         fields,
                         field_count,
@@ -177,11 +183,11 @@ impl Stmt2Recv {
                     _e!()
                 },
             ),
-            Stmt2RecvData::Stmt2BindParam => {
-                Stmt2Ok::Stmt2BindParam(self.stmt_id, if self.code == 0 { Ok(()) } else { _e!() })
+            Stmt2RecvData::Stmt2Bind { stmt_id } => {
+                Stmt2Ok::Stmt2Bind(stmt_id, if self.code == 0 { Ok(()) } else { _e!() })
             }
-            Stmt2RecvData::Stmt2Exec { affected } => Stmt2Ok::Stmt2ExecRes(
-                self.stmt_id,
+            Stmt2RecvData::Stmt2Exec { stmt_id, affected } => Stmt2Ok::Stmt2ExecRes(
+                stmt_id,
                 if self.code == 0 {
                     Ok(Some(affected))
                 } else {
@@ -189,12 +195,13 @@ impl Stmt2Recv {
                 },
             ),
             Stmt2RecvData::Stmt2GetFields {
+                stmt_id,
                 table_count,
                 query_count,
                 col_fields,
                 tag_fields,
             } => Stmt2Ok::Stmt2Fields(
-                self.stmt_id,
+                stmt_id,
                 if self.code == 0 {
                     Ok(Stmt2Fields {
                         table_count,
@@ -207,6 +214,7 @@ impl Stmt2Recv {
                 },
             ),
             Stmt2RecvData::Stmt2Result {
+                stmt_id,
                 result_id,
                 fields_count,
                 fields_names,
@@ -214,7 +222,7 @@ impl Stmt2Recv {
                 fields_lengths,
                 precision,
             } => Stmt2Ok::Stmt2Res(
-                self.stmt_id,
+                stmt_id,
                 if self.code == 0 {
                     Ok(Stmt2Result {
                         result_id,
@@ -229,8 +237,8 @@ impl Stmt2Recv {
                     _e!()
                 },
             ),
-            Stmt2RecvData::Stmt2Close => {
-                Stmt2Ok::Stmt2Close(self.stmt_id, if self.code == 0 { Ok(()) } else { _e!() })
+            Stmt2RecvData::Stmt2Close { stmt_id } => {
+                Stmt2Ok::Stmt2Close(stmt_id, if self.code == 0 { Ok(()) } else { _e!() })
             }
         }
     }
