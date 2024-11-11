@@ -608,7 +608,7 @@ impl AsAsyncConsumer for Consumer {
                 Ok(res)
             }
             Err(err) => {
-                tracing::trace!("Polling message error: {err:?}");
+                tracing::warn!("Polling message error: {err:?}");
                 Err(err)
             }
         }
