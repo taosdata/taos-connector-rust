@@ -1,9 +1,13 @@
 use std::ffi::c_void;
 
-use crate::common::{BorrowedValue, Ty};
+use crate::{
+    common::{BorrowedValue, Ty},
+    util,
+};
 
 use super::{IsColumnView, NullBits, NullsIter};
 
+use byteorder::{ByteOrder, LittleEndian};
 use bytes::Bytes;
 
 #[derive(Debug, Clone)]
@@ -273,7 +277,21 @@ impl<A: Into<Option<Item>>> FromIterator<A> for UBigIntView {
             data: Bytes::from({
                 let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
                 std::mem::forget(values);
-                unsafe { Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE) }
+                let mut bytes = unsafe {
+                    Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE)
+                };
+
+                if util::is_big_endian() {
+                    for i in (0..bytes.len()).step_by(ITEM_SIZE) {
+                        let bs = &bytes[i..i + ITEM_SIZE];
+                        let value = Item::from_ne_bytes(
+                            bs.try_into().expect("slice with incorrect length"),
+                        );
+                        LittleEndian::write_u64(&mut bytes[i..], value);
+                    }
+                }
+
+                bytes
             }),
         }
     }

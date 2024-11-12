@@ -1,9 +1,13 @@
 use std::ffi::c_void;
 
-use crate::common::{BorrowedValue, Ty};
+use crate::{
+    common::{BorrowedValue, Ty},
+    util,
+};
 
 use super::{IsColumnView, NullBits, NullsIter};
 
+use byteorder::{ByteOrder, LittleEndian};
 use bytes::Bytes;
 
 type Item = i32;
@@ -274,26 +278,76 @@ impl<A: Into<Option<Item>>> FromIterator<A> for View {
             data: Bytes::from({
                 let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
                 std::mem::forget(values);
-                unsafe { Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE) }
+                let mut bytes = unsafe {
+                    Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE)
+                };
+
+                if util::is_big_endian() {
+                    for i in (0..bytes.len()).step_by(ITEM_SIZE) {
+                        let bs = &bytes[i..i + ITEM_SIZE];
+                        let value = Item::from_ne_bytes(
+                            bs.try_into().expect("slice with incorrect length"),
+                        );
+                        LittleEndian::write_i32(&mut bytes[i..], value);
+                    }
+                }
+
+                bytes
             }),
         }
     }
 }
 
-#[test]
-fn test_slice() {
-    let data = [0, 1, Item::MIN, Item::MAX];
-    let view = View::from_iter(data);
-    dbg!(&view);
-    let slice = view.slice(1..3);
-    dbg!(&slice);
+#[cfg(test)]
+mod tests {
+    use crate::views::int_view::{Item, View};
 
-    let data = [None, Some(Item::MIN), Some(Item::MAX), None];
-    let view = View::from_iter(data);
-    dbg!(&view);
-    let range = 1..4;
-    let slice = view.slice(range.clone()).unwrap();
-    for (v, i) in slice.iter().zip(range) {
-        assert_eq!(v, data[i]);
+    #[test]
+    fn test_slice() {
+        let data = [0, 1, Item::MIN, Item::MAX];
+        let view = View::from_iter(data);
+        dbg!(&view);
+        let slice = view.slice(1..3);
+        dbg!(&slice);
+
+        let data = [None, Some(Item::MIN), Some(Item::MAX), None];
+        let view = View::from_iter(data);
+        dbg!(&view);
+        let range = 1..4;
+        let slice = view.slice(range.clone()).unwrap();
+        for (v, i) in slice.iter().zip(range) {
+            assert_eq!(v, data[i]);
+        }
+    }
+
+    #[test]
+    fn test_from_iterator() {
+        let data = [0x12345678];
+        let view = View::from_iter(data);
+        let bytes = view.data;
+        assert_eq!(bytes.to_vec(), vec![0x78, 0x56, 0x34, 0x12]);
+    }
+
+    #[test]
+    fn test_from_iterator_big_endian() {
+        use byteorder::{BigEndian, ByteOrder, LittleEndian};
+
+        let mut bytes = [0u8; 16];
+        BigEndian::write_i32(&mut bytes, 0x12345678);
+        BigEndian::write_i32(&mut bytes[4..], 0x78563412);
+        BigEndian::write_i32(&mut bytes[8..], 0x12131415);
+        BigEndian::write_i32(&mut bytes[12..], 0x51413121);
+
+        for i in (0..bytes.len()).step_by(4) {
+            let bs = &bytes[i..i + 4];
+            let value = i32::from_be_bytes(bs.try_into().expect("slice with incorrect length"));
+            LittleEndian::write_i32(&mut bytes[i..], value);
+        }
+
+        let expect = vec![
+            0x78, 0x56, 0x34, 0x12, 0x12, 0x34, 0x56, 0x78, 0x15, 0x14, 0x13, 0x12, 0x21, 0x31,
+            0x41, 0x51,
+        ];
+        assert_eq!(bytes.to_vec(), expect);
     }
 }
