@@ -27,12 +27,12 @@ pub enum Stmt2Send {
         sql: String,
         get_fields: bool,
     },
-    Stmt2Exec(Stmt2Args),
     Stmt2GetFields {
         #[serde(flatten)]
         args: Stmt2Args,
         field_types: Vec<i8>,
     },
+    Stmt2Exec(Stmt2Args),
     Stmt2Result(Stmt2Args),
     Stmt2Close(Stmt2Args),
 }
