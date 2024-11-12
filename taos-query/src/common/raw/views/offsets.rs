@@ -105,7 +105,7 @@ pub struct OffsetsIter<'a> {
     index: usize,
 }
 
-impl<'a> Iterator for OffsetsIter<'a> {
+impl Iterator for OffsetsIter<'_> {
     type Item = i32;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -86,7 +86,7 @@ macro_rules! borrowed_value_to_float {
     };
 }
 
-impl<'b> BorrowedValue<'b> {
+impl BorrowedValue<'_> {
     /// The data type of this value.
     pub const fn ty(&self) -> Ty {
         use BorrowedValue::*;
@@ -154,7 +154,7 @@ impl<'b> BorrowedValue<'b> {
             Float(v) => format!("{v}"),
             Double(v) => format!("{v}"),
             VarChar(v) => format!("\"{}\"", v.escape_debug()),
-            Timestamp(v) => format!("{}", v.to_string()),
+            Timestamp(v) => format!("{}", v),
             NChar(v) => format!("\"{}\"", v.escape_debug()),
             UTinyInt(v) => format!("{v}"),
             USmallInt(v) => format!("{v}"),
@@ -406,7 +406,7 @@ impl<'b> BorrowedValue<'b> {
     }
 }
 
-impl<'b> Display for BorrowedValue<'b> {
+impl Display for BorrowedValue<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use BorrowedValue::*;
         match self {
@@ -435,7 +435,7 @@ impl<'b> Display for BorrowedValue<'b> {
     }
 }
 
-unsafe impl<'b> Send for BorrowedValue<'b> {}
+unsafe impl Send for BorrowedValue<'_> {}
 
 // #[derive(Debug, Clone)]
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -604,7 +604,7 @@ impl Value {
             Float(v) => format!("{v}"),
             Double(v) => format!("{v}"),
             VarChar(v) => format!("\"{}\"", v.escape_debug()),
-            Timestamp(v) => format!("\"{}\"", v.to_string()),
+            Timestamp(v) => format!("\"{}\"", v),
             NChar(v) => format!("\"{}\"", v.escape_debug()),
             UTinyInt(v) => format!("{v}"),
             USmallInt(v) => format!("{v}"),
@@ -671,13 +671,13 @@ impl Value {
     }
 }
 
-impl<'b> PartialEq<&Value> for BorrowedValue<'b> {
+impl PartialEq<&Value> for BorrowedValue<'_> {
     fn eq(&self, other: &&Value) -> bool {
         self == *other
     }
 }
 
-impl<'b> PartialEq<Value> for BorrowedValue<'b> {
+impl PartialEq<Value> for BorrowedValue<'_> {
     fn eq(&self, other: &Value) -> bool {
         match (self, other) {
             (Self::Null(l0), Value::Null(r0)) => l0 == r0,

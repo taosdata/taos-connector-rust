@@ -540,7 +540,7 @@ impl Display for Dsn {
 
         if !self.params.is_empty() {
             fn percent_encode_or_not(v: &str) -> Cow<str> {
-                if v.contains(|c| c == '=' || c == '&' || c == '#' || c == '@') {
+                if v.contains(['=', '&', '#', '@']) {
                     urlencoding::encode(v)
                 } else {
                     v.into()
@@ -1160,17 +1160,17 @@ mod tests {
     }
     #[test]
     fn unix_path_with_glob() {
-        let dsn = Dsn::from_str(&format!("csv:./**.csv?param=1")).unwrap();
+        let dsn = Dsn::from_str(&"csv:./**.csv?param=1".to_string()).unwrap();
         dbg!(&dsn);
         assert!(dsn.path.is_some());
         assert_eq!(dsn.get("param").unwrap(), "1");
 
-        let dsn = Dsn::from_str(&format!("csv:./**.csv?param=1")).unwrap();
+        let dsn = Dsn::from_str(&"csv:./**.csv?param=1".to_string()).unwrap();
         dbg!(&dsn);
         assert!(dsn.path.is_some());
         assert_eq!(dsn.get("param").unwrap(), "1");
 
-        let dsn = Dsn::from_str(&format!("csv:.\\**.csv?param=1")).unwrap();
+        let dsn = Dsn::from_str(&"csv:.\\**.csv?param=1".to_string()).unwrap();
         dbg!(&dsn);
         assert!(dsn.path.is_some());
         assert_eq!(dsn.get("param").unwrap(), "1");
@@ -1178,21 +1178,21 @@ mod tests {
 
     #[test]
     fn unix_path_with_space() {
-        let dsn = Dsn::from_str(&format!("csv:./a b.csv?param=1")).unwrap();
+        let dsn = Dsn::from_str(&"csv:./a b.csv?param=1".to_string()).unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.path.unwrap(), "./a b.csv");
     }
 
     #[test]
     fn unix_multiple_path() {
-        let dsn = Dsn::from_str(&format!("csv:./a b.csv,c d .csv?param=1")).unwrap();
+        let dsn = Dsn::from_str(&"csv:./a b.csv,c d .csv?param=1".to_string()).unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.path.unwrap(), "./a b.csv,c d .csv");
     }
 
     #[test]
     fn unit_path_with_utf8() {
-        let dsn = Dsn::from_str(&format!("csv:./文件 Aa1.csv?param=1")).unwrap();
+        let dsn = Dsn::from_str(&"csv:./文件 Aa1.csv?param=1".to_string()).unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.path.unwrap(), "./文件 Aa1.csv");
     }

@@ -103,7 +103,7 @@ pub struct NullsIter<'a> {
     pub(super) len: usize,
 }
 
-impl<'a> Iterator for NullsIter<'a> {
+impl Iterator for NullsIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -134,7 +134,7 @@ impl<'a> Iterator for NullsIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for NullsIter<'a> {}
+impl ExactSizeIterator for NullsIter<'_> {}
 
 #[test]
 fn test_null_bits() {

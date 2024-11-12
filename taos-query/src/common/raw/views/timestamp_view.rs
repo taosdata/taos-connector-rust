@@ -253,7 +253,7 @@ pub struct TimestampViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for TimestampViewIter<'a> {
+impl Iterator for TimestampViewIter<'_> {
     type Item = Option<Timestamp>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -283,7 +283,7 @@ impl<'a> Iterator for TimestampViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for TimestampViewIter<'a> {}
+impl ExactSizeIterator for TimestampViewIter<'_> {}
 
 pub struct TimestampMillisecondView(View);
 

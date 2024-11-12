@@ -220,7 +220,7 @@ pub struct BoolViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for BoolViewIter<'a> {
+impl Iterator for BoolViewIter<'_> {
     type Item = Option<bool>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -244,7 +244,7 @@ impl<'a> Iterator for BoolViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for BoolViewIter<'a> {
+impl ExactSizeIterator for BoolViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

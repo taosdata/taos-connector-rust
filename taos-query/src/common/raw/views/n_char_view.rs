@@ -322,7 +322,7 @@ impl<'a> Iterator for NCharViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for NCharViewIter<'a> {
+impl ExactSizeIterator for NCharViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

@@ -229,7 +229,7 @@ impl<'a> Iterator for VarCharIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for VarCharIter<'a> {
+impl ExactSizeIterator for VarCharIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

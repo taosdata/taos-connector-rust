@@ -267,7 +267,7 @@ impl Display for MetaCreate {
                                 match t.field.ty() {
                                     Ty::Json => format!("'{}'", t.value.as_str().unwrap()),
                                     Ty::VarChar | Ty::NChar => {
-                                        format!("{}", t.value.as_str().unwrap())
+                                        t.value.as_str().unwrap().to_string()
                                     }
                                     _ => format!("{}", t.value),
                                 }
@@ -563,7 +563,7 @@ impl<'a> Iterator for JsonMetaIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for JsonMetaIter<'a> {
+impl ExactSizeIterator for JsonMetaIter<'_> {
     #[inline]
     fn len(&self) -> usize {
         match &self.iter {
@@ -573,7 +573,7 @@ impl<'a> ExactSizeIterator for JsonMetaIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for JsonMetaIter<'a> {
+impl DoubleEndedIterator for JsonMetaIter<'_> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         match &mut self.iter {
@@ -599,7 +599,7 @@ impl<'a> Iterator for JsonMetaIterMut<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for JsonMetaIterMut<'a> {
+impl ExactSizeIterator for JsonMetaIterMut<'_> {
     #[inline]
     fn len(&self) -> usize {
         match &self.iter {
@@ -609,7 +609,7 @@ impl<'a> ExactSizeIterator for JsonMetaIterMut<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for JsonMetaIterMut<'a> {
+impl DoubleEndedIterator for JsonMetaIterMut<'_> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         match &mut self.iter {

@@ -22,7 +22,7 @@ pub struct QueryFuture<'a> {
     state: Arc<UnsafeCell<State>>,
 }
 
-unsafe impl<'a> Send for QueryFuture<'a> {}
+unsafe impl Send for QueryFuture<'_> {}
 
 /// Shared state between the future and the waiting thread
 struct State {
@@ -55,8 +55,8 @@ struct AsyncQueryParam {
 }
 
 impl Unpin for State {}
-impl<'a> Unpin for QueryFuture<'a> {}
-impl<'a> Future for QueryFuture<'a> {
+impl Unpin for QueryFuture<'_> {}
+impl Future for QueryFuture<'_> {
     type Output = Result<RawRes, RawError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let state = unsafe { &mut *self.state.get() };

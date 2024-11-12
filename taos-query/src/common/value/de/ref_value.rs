@@ -5,7 +5,7 @@ use serde::{
     forward_to_deserialize_any,
 };
 
-impl<'de, 'v> serde::de::EnumAccess<'de> for &'v Value {
+impl<'de> serde::de::EnumAccess<'de> for &Value {
     type Error = Error;
 
     type Variant = UnitOnly;
@@ -29,7 +29,7 @@ struct EnumTimestampDeserializer<'v> {
     value: &'v Value,
 }
 
-impl<'v, 'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'v> {
+impl<'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'_> {
     type Error = Error;
 
     type Variant = VariantTimestampDeserializer;

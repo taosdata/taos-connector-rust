@@ -220,14 +220,14 @@ impl<'a> Iterator for GeometryIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for GeometryIter<'a> {}
+impl ExactSizeIterator for GeometryIter<'_> {}
 
 pub struct GeometryNullsIter<'a> {
     view: &'a GeometryView,
     row: usize,
 }
 
-impl<'a> Iterator for GeometryNullsIter<'a> {
+impl Iterator for GeometryNullsIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -241,7 +241,7 @@ impl<'a> Iterator for GeometryNullsIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for GeometryNullsIter<'a> {
+impl ExactSizeIterator for GeometryNullsIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

@@ -93,7 +93,7 @@ impl<'de> de::Deserializer<'de> for StringDeserializer {
         tuple_struct struct tuple enum identifier ignored_any
     }
 }
-impl<'de, 'b: 'de> serde::de::EnumAccess<'de> for EnumValueDeserializer {
+impl<'de: 'de> serde::de::EnumAccess<'de> for EnumValueDeserializer {
     type Error = Error;
 
     type Variant = Self;
@@ -114,7 +114,7 @@ impl<'de, 'b: 'de> serde::de::EnumAccess<'de> for EnumValueDeserializer {
     }
 }
 
-impl<'de, 'b: 'de> de::VariantAccess<'de> for EnumValueDeserializer {
+impl<'de: 'de> de::VariantAccess<'de> for EnumValueDeserializer {
     type Error = Error;
 
     fn unit_variant(self) -> Result<(), Self::Error> {
@@ -147,7 +147,7 @@ impl<'de, 'b: 'de> de::VariantAccess<'de> for EnumValueDeserializer {
     }
 }
 
-impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
+impl<'de: 'de> serde::de::Deserializer<'de> for Value {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -356,7 +356,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
     }
 }
 
-impl<'de, 'b: 'de> serde::de::IntoDeserializer<'de, Error> for Value {
+impl<'de: 'de> serde::de::IntoDeserializer<'de, Error> for Value {
     type Deserializer = Self;
 
     fn into_deserializer(self) -> Self::Deserializer {

@@ -1687,7 +1687,7 @@ mod async_tests {
 
         let sql = // create child table
         r#"create table if not exists `subtable00000000001` using `tb0001` (`varchar`,`aid`,`bid`) tags("涛思数据-涛思数据-涛思数据-涛思数据-涛思数据-涛思数据-涛思数据-涛思数据",1,2)"#;
-        match taos.exec_with_req_id(&sql, 0).await {
+        match taos.exec_with_req_id(sql, 0).await {
             Err(e) => {
                 dbg!(&e);
                 assert_eq!(e.code(), 0x2653);

@@ -220,14 +220,14 @@ impl<'a> Iterator for VarBinaryIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for VarBinaryIter<'a> {}
+impl ExactSizeIterator for VarBinaryIter<'_> {}
 
 pub struct VarBinaryNullsIter<'a> {
     view: &'a VarBinaryView,
     row: usize,
 }
 
-impl<'a> Iterator for VarBinaryNullsIter<'a> {
+impl Iterator for VarBinaryNullsIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -241,7 +241,7 @@ impl<'a> Iterator for VarBinaryNullsIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for VarBinaryNullsIter<'a> {
+impl ExactSizeIterator for VarBinaryNullsIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

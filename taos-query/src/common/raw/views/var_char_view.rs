@@ -240,14 +240,14 @@ impl<'a> Iterator for VarCharIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for VarCharIter<'a> {}
+impl ExactSizeIterator for VarCharIter<'_> {}
 
 pub struct VarCharNullsIter<'a> {
     view: &'a VarCharView,
     row: usize,
 }
 
-impl<'a> Iterator for VarCharNullsIter<'a> {
+impl Iterator for VarCharNullsIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -261,7 +261,7 @@ impl<'a> Iterator for VarCharNullsIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for VarCharNullsIter<'a> {
+impl ExactSizeIterator for VarCharNullsIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

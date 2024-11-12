@@ -16,8 +16,8 @@ pub struct IntoRowsIter<'a> {
     pub(crate) _marker: PhantomData<&'a bool>,
 }
 
-unsafe impl<'a> Send for IntoRowsIter<'a> {}
-unsafe impl<'a> Sync for IntoRowsIter<'a> {}
+unsafe impl Send for IntoRowsIter<'_> {}
+unsafe impl Sync for IntoRowsIter<'_> {}
 
 impl<'a> Iterator for IntoRowsIter<'a> {
     type Item = RowView<'a>;
@@ -43,8 +43,8 @@ pub struct RowsIter<'a> {
     pub(crate) _marker: PhantomData<&'a usize>,
 }
 
-unsafe impl<'a> Send for RowsIter<'a> {}
-unsafe impl<'a> Sync for RowsIter<'a> {}
+unsafe impl Send for RowsIter<'_> {}
+unsafe impl Sync for RowsIter<'_> {}
 
 impl<'a> Iterator for RowsIter<'a> {
     type Item = RowView<'a>;
@@ -64,7 +64,7 @@ impl<'a> Iterator for RowsIter<'a> {
     }
 }
 
-impl<'a> RowsIter<'a> {
+impl RowsIter<'_> {
     pub fn values(&mut self) -> ValueIter {
         ValueIter {
             raw: unsafe { self.raw.as_mut() },
@@ -138,9 +138,9 @@ impl<'a> Iterator for RowView<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for RowView<'a> {}
+impl ExactSizeIterator for RowView<'_> {}
 
-impl<'a> std::fmt::Debug for RowView<'a> {
+impl std::fmt::Debug for RowView<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RowView")
             .field("raw", &self.raw)

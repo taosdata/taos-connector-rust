@@ -215,7 +215,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         // Ensure server is ready.
         taos.exec("select server_version()").await?;
 
-        match self
+        if self
             .info
             .addr
             .matches(".cloud.tdengine.com")
@@ -228,11 +228,8 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
                 .next()
                 .is_some()
         {
-            true => {
-                let edition = Edition::new("cloud", false);
-                return Ok(edition);
-            }
-            false => (),
+            let edition = Edition::new("cloud", false);
+            return Ok(edition);
         }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
@@ -299,12 +296,12 @@ impl WsMessageBase {
         if let TmqRecvData::Bytes(bytes) = data {
             let raw = RawBlock::parse_from_multi_raw_block(bytes)
                 .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
-            if raw.len() > 0 {
+            if !raw.is_empty() {
                 raw_blocks_option.replace(raw);
                 return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
             }
         }
-        return Ok(None);
+        Ok(None)
     }
     async fn fetch_raw_block_old(&self) -> RawResult<Option<RawBlock>> {
         let req_id = self.sender.req_id();

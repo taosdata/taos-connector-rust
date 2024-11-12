@@ -952,14 +952,14 @@ impl<'a> PrettyBlock<'a> {
     }
 }
 
-impl<'a> Deref for PrettyBlock<'a> {
+impl Deref for PrettyBlock<'_> {
     type Target = RawBlock;
     fn deref(&self) -> &Self::Target {
         self.raw
     }
 }
 
-impl<'a> Display for PrettyBlock<'a> {
+impl Display for PrettyBlock<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use prettytable::{Row, Table};
         let mut table = Table::new();

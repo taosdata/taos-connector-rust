@@ -354,7 +354,7 @@ pub struct MessageSetsIter<'a, C> {
     timeout: Timeout,
 }
 
-impl<'a, C> Iterator for MessageSetsIter<'a, C>
+impl<C> Iterator for MessageSetsIter<'_, C>
 where
     C: AsConsumer,
 {

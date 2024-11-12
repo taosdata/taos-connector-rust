@@ -38,9 +38,9 @@ impl<'de, 'b: 'de> serde::de::EnumAccess<'de> for EnumValueDeserializer<'b> {
     where
         V: DeserializeSeed<'de>,
     {
-        return seed
+        seed
             .deserialize(self.value.ty().as_variant_str().into_deserializer())
-            .map(|v| (v, self));
+            .map(|v| (v, self))
     }
 }
 
@@ -77,7 +77,7 @@ impl<'de, 'b: 'de> de::VariantAccess<'de> for EnumValueDeserializer<'b> {
     }
 }
 
-impl<'b, 'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'b> {
+impl<'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'_> {
     type Error = Error;
 
     type Variant = VariantTimestampDeserializer;
@@ -107,7 +107,7 @@ impl<'b, 'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'b> {
     }
 }
 
-impl<'de, 'b: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
+impl<'de: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>

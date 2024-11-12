@@ -229,7 +229,7 @@ pub struct DoubleViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for DoubleViewIter<'a> {
+impl Iterator for DoubleViewIter<'_> {
     type Item = Option<Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -253,7 +253,7 @@ impl<'a> Iterator for DoubleViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for DoubleViewIter<'a> {
+impl ExactSizeIterator for DoubleViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

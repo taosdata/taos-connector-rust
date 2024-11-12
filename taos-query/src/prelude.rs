@@ -112,7 +112,7 @@ pub mod sync {
         query: &'a mut T,
     }
 
-    impl<'a, T> Iterator for IBlockIter<'a, T>
+    impl<T> Iterator for IBlockIter<'_, T>
     where
         T: Fetchable,
     {
@@ -326,7 +326,7 @@ mod r#async {
         query: &'a mut T,
     }
 
-    impl<'a, T> Stream for AsyncBlocks<'a, T>
+    impl<T> Stream for AsyncBlocks<'_, T>
     where
         T: AsyncFetchable,
     {
@@ -403,9 +403,9 @@ mod r#async {
         _marker: PhantomData<V>,
     }
 
-    impl<'a, T, V> Unpin for AsyncDeserialized<'a, T, V> {}
+    impl<T, V> Unpin for AsyncDeserialized<'_, T, V> {}
 
-    impl<'a, T, V> Stream for AsyncDeserialized<'a, T, V>
+    impl<T, V> Stream for AsyncDeserialized<'_, T, V>
     where
         T: AsyncFetchable,
         V: DeserializeOwned,

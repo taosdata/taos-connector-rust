@@ -502,12 +502,12 @@ impl TaosMultiBind {
     }
 
     pub(crate) fn from_bytes(values: &[Option<impl AsRef<[u8]>>]) -> Self {
-        let mut s = Self::from_binary_vec(&values);
+        let mut s = Self::from_binary_vec(values);
         s.buffer_type = Ty::VarBinary as _;
         s
     }
     pub(crate) fn from_geobytes(values: &[Option<impl AsRef<[u8]>>]) -> Self {
-        let mut s = Self::from_binary_vec(&values);
+        let mut s = Self::from_binary_vec(values);
         s.buffer_type = Ty::Geometry as _;
         s
     }

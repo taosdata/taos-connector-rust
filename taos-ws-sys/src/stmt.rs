@@ -914,7 +914,7 @@ mod tests {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
                 panic!()
             }
-            let params = vec![
+            let params = [
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
                 TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
                 TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
@@ -981,12 +981,11 @@ mod tests {
                 dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
                 panic!()
             }
-            let params = vec![
+            let params = [
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
                 TaosMultiBind::from_primitives(vec![false, false], &[0.0f32, 0.1f32]),
                 TaosMultiBind::from_primitives(vec![false, false], &[0, 0]),
                 TaosMultiBind::from_primitives(vec![false, false], &[0.0f32, 0.1f32]),
-                // TaosMultiBind::from_binary_vec(&vec![None, Some("涛思数据")]),
             ];
             let code = ws_stmt_bind_param_batch(stmt, params.as_ptr(), params.len() as _);
             if code != 0 {
@@ -1054,7 +1053,7 @@ mod tests {
                     dbg!(CStr::from_ptr(ws_errstr(stmt)).to_str().unwrap());
                     panic!()
                 }
-                let params = vec![
+                let params = [
                     TaosMultiBind::from_raw_timestamps(vec![false], &[0]),
                     TaosMultiBind::from_primitives(vec![true], &[0u8]),
                 ];
@@ -1149,13 +1148,13 @@ mod tests {
             }
             ws_stmt_set_tbname(stmt, b"ws_stmt_with_tags.t1\0".as_ptr() as _);
 
-            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+            let tags = [TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
             )])];
 
             ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
 
-            let params = vec![
+            let params = [
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
                 TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
                 TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
@@ -1216,13 +1215,13 @@ mod tests {
             }
             ws_stmt_set_tbname(stmt, b"t1\0".as_ptr() as _);
 
-            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+            let tags = [TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
             )])];
 
             ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
 
-            let params = vec![
+            let params = [
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
                 TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
                 TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
@@ -1247,7 +1246,7 @@ mod tests {
 
             // add batch again, affected_rows_once should be 2, affected_rows should be 4
 
-            let params = vec![
+            let params = [
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[2, 3]),
                 TaosMultiBind::from_primitives(vec![false, false], &[4, 5]),
                 TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
@@ -1273,7 +1272,7 @@ mod tests {
 
             // add batch again, affected_rows_once should be 2, affected_rows should be 6
 
-            let params = vec![
+            let params = [
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[4, 5]),
                 TaosMultiBind::from_primitives(vec![false, false], &[6, 7]),
                 TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
@@ -1344,13 +1343,13 @@ mod tests {
             }
             ws_stmt_set_sub_tbname(stmt, b"sub_t1\0".as_ptr() as _);
 
-            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+            let tags = [TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
             )])];
 
             ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
 
-            let params = vec![
+            let params = [
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
                 TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
                 TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
@@ -1475,13 +1474,13 @@ mod tests {
                 tracing::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
             }
 
-            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+            let tags = [TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
             )])];
 
             ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
 
-            let params = vec![
+            let params = [
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
                 TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
                 TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
@@ -1584,13 +1583,13 @@ mod tests {
             let table_name = format!("{db}.t1");
             ws_stmt_set_tbname(stmt, table_name.as_ptr() as _);
 
-            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+            let tags = [TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
             )])];
 
             ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
 
-            let params = vec![
+            let params = [
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
                 TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
                 TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),
@@ -1741,13 +1740,13 @@ mod tests {
                 tracing::trace!("tag_fields_after after reclaim: {:?}", tag_fields_after_rs);
             }
 
-            let tags = vec![TaosMultiBind::from_string_vec(&[Some(
+            let tags = [TaosMultiBind::from_string_vec(&[Some(
                 r#"{"name":"姓名"}"#.to_string(),
             )])];
 
             ws_stmt_set_tags(stmt, tags.as_ptr(), tags.len() as _);
 
-            let params = vec![
+            let params = [
                 TaosMultiBind::from_raw_timestamps(vec![false, false], &[0, 1]),
                 TaosMultiBind::from_primitives(vec![false, false], &[2, 3]),
                 TaosMultiBind::from_binary_vec(&[None, Some("涛思数据")]),

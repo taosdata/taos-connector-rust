@@ -47,7 +47,7 @@ fn get_err_code_fromated(err_code: i32) -> i32 {
         let uerror_code: u32 = err_code as _;
         return (uerror_code | 0x80000000) as i32;
     }
-    return err_code;
+    err_code
 }
 
 unsafe fn set_error_and_get_code(ws_err: WsError) -> i32 {
@@ -73,11 +73,11 @@ fn get_c_error_str() -> *const c_char {
     C_ERROR_CONTAINER.with(|container| {
         let container = container.borrow();
         let slice = &container[..container.len()];
-        let ptr = slice.as_ptr() as *const c_char;
+        
 
         // println!("Pointer address: {:?}", ptr);
         // println!("C_ERROR_CONTAINER contents: {:?}", &container[..]);
-        ptr
+        slice.as_ptr() as *const c_char
     })
 }
 
@@ -814,7 +814,7 @@ impl WsResultSetTrait for WsSqlResultSet {
                 self.row.data[col] = tuple.2;
             }
 
-            self.row.current_row = self.row.current_row + 1;
+            self.row.current_row += 1;
             Ok(self.row.data.as_ptr() as _)
         } else {
             Ok(std::ptr::null())
@@ -866,17 +866,17 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
                 match result {
                     Ok(mut taos) => {
                         builder.ping(&mut taos)?;
-                        return Ok(taos);
+                        Ok(taos)
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => Err(e),
                 }
             })
             .expect("Failed to spawn thread");
 
         let result = handle.join().expect("Thread panicked");
         match result {
-            Ok(taos) => return Ok(taos),
-            Err(e) => return Err(WsError::new(Code::FAILED, &format!("{}", e))),
+            Ok(taos) => Ok(taos),
+            Err(e) => Err(WsError::new(Code::FAILED, &format!("{}", e))),
         }
     } else {
         let mut taos = builder.build()?;
@@ -1054,9 +1054,9 @@ pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) -> i32 {
     {
         Some(rs) => {
             rs.stop_query();
-            return Code::SUCCESS.into();
+            Code::SUCCESS.into()
         }
-        _ => return set_error_and_get_code(WsError::new(Code::INVALID_PARA, "object is invalid")),
+        _ => set_error_and_get_code(WsError::new(Code::INVALID_PARA, "object is invalid")),
     }
 }
 
@@ -1090,7 +1090,7 @@ pub unsafe extern "C" fn ws_take_timing(rs: *mut WS_RES) -> i64 {
 /// Always use this to ensure that the query is executed correctly.
 pub unsafe extern "C" fn ws_errno(rs: *mut WS_RES) -> i32 {
     if rs.is_null() {
-        return get_c_errno().into();
+        return get_c_errno();
     }
     match (rs as *mut WsMaybeError<()>)
         .as_ref()
@@ -1200,7 +1200,7 @@ pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
 
     let version = package.version.to_string();
     std::ptr::copy_nonoverlapping(version.as_ptr(), VERSION_INFO.as_mut_ptr(), version.len());
-    return VERSION_INFO.as_ptr() as *const c_char;
+    VERSION_INFO.as_ptr() as *const c_char
 }
 
 #[no_mangle]
@@ -1652,7 +1652,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw(
     protocal: c_int,
     precision: c_int,
 ) -> *mut WS_RES {
-    return ws_schemaless_insert_raw_ttl_with_reqid(
+    ws_schemaless_insert_raw_ttl_with_reqid(
         taos,
         lines,
         len,
@@ -1661,7 +1661,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw(
         precision,
         0,
         get_req_id(taos),
-    );
+    )
 }
 
 #[no_mangle]
@@ -1674,9 +1674,9 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_with_reqid(
     precision: c_int,
     reqid: u64,
 ) -> *mut WS_RES {
-    return ws_schemaless_insert_raw_ttl_with_reqid(
+    ws_schemaless_insert_raw_ttl_with_reqid(
         taos, lines, len, totalRows, protocal, precision, 0, reqid,
-    );
+    )
 }
 
 #[no_mangle]
@@ -1689,7 +1689,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl(
     precision: c_int,
     ttl: c_int,
 ) -> *mut WS_RES {
-    return ws_schemaless_insert_raw_ttl_with_reqid(
+    ws_schemaless_insert_raw_ttl_with_reqid(
         taos,
         lines,
         len,
@@ -1698,7 +1698,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl(
         precision,
         ttl,
         get_req_id(taos),
-    );
+    )
 }
 
 #[no_mangle]
@@ -1716,13 +1716,13 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl_with_reqid(
         Ok(rs) => {
             tracing::trace!("schemaless insert done: {:?}", rs);
             let rs: WsMaybeError<WsResultSet> = rs.into();
-            return Box::into_raw(Box::new(rs)) as _;
+            Box::into_raw(Box::new(rs)) as _
         }
         Err(e) => {
             tracing::trace!("schemaless insert failed: {:?}", e);
-            let error_message = format!("schemaless insert failed: {}", e.to_string());
+            let error_message = format!("schemaless insert failed: {}", e);
             set_error_and_get_code(WsError::new(e.code, &error_message));
-            return std::ptr::null_mut() as _;
+            std::ptr::null_mut() as _
         }
     }
 }
@@ -1746,10 +1746,10 @@ unsafe fn schemaless_insert_raw(
     let data = String::from_utf8(slice.to_vec())?;
 
     let sml_data = SmlDataBuilder::default()
-        .protocol(SchemalessProtocol::from(protocal as i32))
-        .precision(SchemalessPrecision::from(precision as i32))
+        .protocol(SchemalessProtocol::from(protocal))
+        .precision(SchemalessPrecision::from(precision))
         .data(vec![data])
-        .ttl(ttl as i32)
+        .ttl(ttl)
         .req_id(reqid)
         .build()?;
 
@@ -1963,11 +1963,11 @@ mod tests {
             assert_eq!(code, 0);
 
             let is_null = ws_is_null(rs, 0, 0);
-            assert_eq!(is_null, false);
+            assert!(!is_null);
             let is_null = ws_is_null(rs, 0, cols);
-            assert_eq!(is_null, true);
+            assert!(is_null);
             let is_null = ws_is_null(rs, 0, 1);
-            assert_eq!(is_null, false);
+            assert!(!is_null);
 
             dbg!(rows);
             for row in 0..rows {
@@ -2245,7 +2245,7 @@ mod tests {
                 }
 
                 println!("line num = {}", line_num);
-                line_num = line_num + 1;
+                line_num += 1;
             }
 
             if get_c_errno() == 0 {

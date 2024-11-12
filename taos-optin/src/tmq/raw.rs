@@ -285,16 +285,16 @@ pub(super) mod tmq {
                 vgroup_id
             );
 
-            if tmq_resp.0 as i32 > 0 {
-                return Ok(tmq_resp.0 as _);
+            if tmq_resp.0 > 0 {
+                Ok(tmq_resp.0 as _)
             } else {
                 let err_str = self.err_as_str(tmq_resp);
                 tracing::trace!("committed tmq_resp err string: {}", err_str);
 
-                return Err(RawError::new(
+                Err(RawError::new(
                     tmq_resp.0,
                     format!("get committed failed: {err_str}"),
-                ));
+                ))
             }
         }
 
@@ -314,16 +314,16 @@ pub(super) mod tmq {
                 vgroup_id
             );
 
-            if tmq_resp.0 as i32 > 0 {
-                return Ok(tmq_resp.0 as _);
+            if tmq_resp.0 > 0 {
+                Ok(tmq_resp.0 as _)
             } else {
                 let err_str = self.err_as_str(tmq_resp);
                 tracing::trace!("position tmq_resp err string: {}", err_str);
 
-                return Err(RawError::new(
+                Err(RawError::new(
                     tmq_resp.0,
                     format!("get position failed: {err_str}"),
-                ));
+                ))
             }
         }
 
@@ -565,7 +565,7 @@ pub(super) mod list {
         }
     }
 
-    impl<'a> ExactSizeIterator for Iter<'a> {
+    impl ExactSizeIterator for Iter<'_> {
         fn len(&self) -> usize {
             if self.len >= self.index {
                 self.len - self.index

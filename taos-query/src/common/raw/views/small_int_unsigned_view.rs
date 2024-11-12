@@ -228,7 +228,7 @@ pub struct USmallIntViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for USmallIntViewIter<'a> {
+impl Iterator for USmallIntViewIter<'_> {
     type Item = Option<Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -252,7 +252,7 @@ impl<'a> Iterator for USmallIntViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for USmallIntViewIter<'a> {
+impl ExactSizeIterator for USmallIntViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

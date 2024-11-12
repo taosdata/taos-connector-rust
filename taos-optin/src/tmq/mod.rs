@@ -51,9 +51,9 @@ impl taos_query::TBuilder for TmqBuilder {
             .into_dsn()
             .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
-            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::dlopen(path).map_err(taos_query::RawError::any)?
         } else {
-            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::open_default().map_err(taos_query::RawError::any)?
         };
         let conf = Conf::from_dsn(&dsn, lib.tmq.unwrap().conf_api)?;
         let timeout = if let Some(timeout) = dsn.params.remove("timeout") {
@@ -137,9 +137,9 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
             .into_dsn()
             .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
-            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::dlopen(path).map_err(taos_query::RawError::any)?
         } else {
-            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::open_default().map_err(taos_query::RawError::any)?
         };
         let conf = Conf::from_dsn(&dsn, lib.tmq.unwrap().conf_api)?;
         let timeout = if let Some(timeout) = dsn.params.remove("timeout") {
@@ -365,7 +365,7 @@ impl Data {
 #[async_trait::async_trait]
 impl IsAsyncData for Data {
     async fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
-        Ok(self.raw.tmq_get_raw().into())
+        Ok(self.raw.tmq_get_raw())
     }
 
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
@@ -375,7 +375,7 @@ impl IsAsyncData for Data {
 
 impl IsData for Data {
     fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
-        Ok(self.raw.tmq_get_raw().into())
+        Ok(self.raw.tmq_get_raw())
     }
 
     fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
@@ -1114,8 +1114,8 @@ mod tests {
 
                     let json = meta.as_json_meta()?;
                     for json in json {
-                        match &json {
-                            taos_query::common::MetaUnit::Create(m) => match m {
+                        if let taos_query::common::MetaUnit::Create(m) = &json {
+                            match m {
                                 taos_query::common::MetaCreate::Super {
                                     table_name,
                                     columns: _,
@@ -1140,8 +1140,7 @@ mod tests {
                                     let _desc = taos.describe(table_name.as_str())?;
                                     // dbg!(_desc);
                                 }
-                            },
-                            _ => (),
+                            }
                         }
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
@@ -1318,8 +1317,8 @@ mod tests {
 
                     let metas = meta.as_json_meta()?;
                     for json in metas {
-                        match &json {
-                            taos_query::common::MetaUnit::Create(m) => match m {
+                        if let taos_query::common::MetaUnit::Create(m) = &json {
+                            match m {
                                 taos_query::common::MetaCreate::Super {
                                     table_name,
                                     columns: _,
@@ -1344,8 +1343,7 @@ mod tests {
                                     let desc = taos.describe(table_name.as_str())?;
                                     tracing::trace!("{:?}", desc);
                                 }
-                            },
-                            _ => (),
+                            }
                         }
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
@@ -2444,14 +2442,14 @@ mod async_tests {
 
         let taos = crate::TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec_many([
-            format!("DROP TOPIC IF EXISTS tmq_meters"),
+            "DROP TOPIC IF EXISTS tmq_meters".to_string(),
             format!("DROP DATABASE IF EXISTS `{db}`"),
             format!("CREATE DATABASE `{db}` WAL_RETENTION_PERIOD 3600"),
             format!("USE `{db}`"),
             // create super table
-            format!("CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT, cvb1 varbinary(50)) TAGS (`groupid` INT, `location` BINARY(24))"),
+            "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT, cvb1 varbinary(50)) TAGS (`groupid` INT, `location` BINARY(24))".to_string(),
             // create topic for subscription
-            format!("CREATE TOPIC tmq_meters AS SELECT * FROM `meters`")
+            "CREATE TOPIC tmq_meters AS SELECT * FROM `meters`".to_string()
         ])
         .await?;
 

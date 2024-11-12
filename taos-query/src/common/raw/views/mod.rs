@@ -209,13 +209,13 @@ impl<'c> Iterator for ColumnViewIter<'c> {
     }
 }
 
-impl<'c> ExactSizeIterator for ColumnViewIter<'c> {
+impl ExactSizeIterator for ColumnViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }
 }
 
-impl<'a> FusedIterator for ColumnViewIter<'a> {}
+impl FusedIterator for ColumnViewIter<'_> {}
 
 impl<'a> IntoIterator for &'a ColumnView {
     type Item = BorrowedValue<'a>;
@@ -1339,7 +1339,7 @@ mod tests {
     fn test_concat_iter() {
         let column_view_int = ColumnView::from(vec![1, 2, 3]);
 
-        let iterator_values = vec![
+        let iterator_values = [
             BorrowedValue::Int(7),
             BorrowedValue::UInt(8),
             BorrowedValue::Int(9),

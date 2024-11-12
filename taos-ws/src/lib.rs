@@ -249,11 +249,10 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         // Ensue server is ready.
         taos.exec("select server_version()").await?;
 
-        match self.addr.matches(".cloud.tdengine.com").next().is_some()
+        if self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
         {
-            true => return Ok(true),
-            false => (),
+            return Ok(true);
         }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
@@ -289,14 +288,11 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         // Ensure server is ready.
         taos.exec("select server_version()").await?;
 
-        match self.addr.matches(".cloud.tdengine.com").next().is_some()
+        if self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
         {
-            true => {
-                let edition = Edition::new("cloud", false);
-                return Ok(edition);
-            }
-            false => (),
+            let edition = Edition::new("cloud", false);
+            return Ok(edition);
         }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
@@ -370,10 +366,9 @@ impl TaosBuilder {
             })
             .unwrap_or(false);
 
-        let conn_retries = dsn.remove("conn_retries").map_or_else(
-            || Retries::default(),
-            |s| Retries(s.parse::<u32>().unwrap_or(5)),
-        );
+        let conn_retries = dsn
+            .remove("conn_retries")
+            .map_or_else(Retries::default, |s| Retries(s.parse::<u32>().unwrap_or(5)));
 
         // let timeout = dsn
         //     .params
@@ -455,13 +450,13 @@ impl TaosBuilder {
             WsAuth::Token(_token) => WsConnReq {
                 user: Some("root".to_string()),
                 password: Some("taosdata".to_string()),
-                db: self.database.as_ref().map(Clone::clone),
+                db: self.database.clone(),
                 mode,
             },
             WsAuth::Plain(user, pass) => WsConnReq {
                 user: Some(user.to_string()),
                 password: Some(pass.to_string()),
-                db: self.database.as_ref().map(Clone::clone),
+                db: self.database.clone(),
                 mode,
             },
         }
