@@ -38,8 +38,8 @@ use tmq::WsTmqResultSet;
 const MAX_ERROR_MSG_LEN: usize = 4096;
 const EMPTY: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") };
 thread_local! {
-    static C_ERROR_CONTAINER: RefCell<[u8; MAX_ERROR_MSG_LEN]> = RefCell::new([0; MAX_ERROR_MSG_LEN]);
-    static C_ERRNO: RefCell<i32> = RefCell::new(0);
+    static C_ERROR_CONTAINER: RefCell<[u8; MAX_ERROR_MSG_LEN]> = const { RefCell::new([0; MAX_ERROR_MSG_LEN]) };
+    static C_ERRNO: RefCell<i32> = const { RefCell::new(0) };
 }
 
 fn get_err_code_fromated(err_code: i32) -> i32 {
@@ -73,7 +73,6 @@ fn get_c_error_str() -> *const c_char {
     C_ERROR_CONTAINER.with(|container| {
         let container = container.borrow();
         let slice = &container[..container.len()];
-        
 
         // println!("Pointer address: {:?}", ptr);
         // println!("C_ERROR_CONTAINER contents: {:?}", &container[..]);
