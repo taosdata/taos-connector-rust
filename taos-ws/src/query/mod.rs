@@ -457,7 +457,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_websocket_with_mock() {
+    async fn test_ws_disconnect_with_mock() {
         use futures::{SinkExt, StreamExt};
         use serde_json::json;
         use taos_query::{AsyncQueryable, AsyncTBuilder};
