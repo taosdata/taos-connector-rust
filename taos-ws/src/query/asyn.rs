@@ -535,14 +535,20 @@ async fn read_queries(
     };
     loop {
         tokio::select! {
-            Ok(frame) = reader.try_next() => {
-                if let Some(frame) = frame {
-                match parse_frame(frame) {
-                    ControlFlow::Break(()) => {
+            res = reader.try_next() => {
+                match res {
+                    Ok(frame) => {
+                        if let Some(frame) = frame {
+                            if let ControlFlow::Break(()) = parse_frame(frame) {
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("reader err: {e:?}");
                         break;
                     }
-                    _ => {}
-                }}
+                }
             }
             _ = close_listener.changed() => {
                 tracing::trace!("close reader task");
@@ -748,7 +754,7 @@ impl WsTaos {
                 tokio::select! {
                     _ = interval.tick() => {
                         if let Err(err) = sender.send(Message::Ping(b"TAOS".to_vec())).await {
-                            tracing::error!("Write websocket error: {}", err);
+                            tracing::error!("Write websocket ping error: {}", err);
                             break;
                         }
                         let _ = sender.flush();
@@ -762,7 +768,7 @@ impl WsTaos {
                         match msg {
                             Ok(msg) => {
                                 if let Err(err) = sender.send(msg).await {
-                                tracing::error!("Write websocket error: {}", err);
+                                    tracing::error!("Write websocket error: {}", err);
                                     let mut keys = Vec::new();
                                     queries3.scan(|k, _| keys.push(*k));
                                     for k in keys {
