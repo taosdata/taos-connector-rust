@@ -465,8 +465,6 @@ mod tests {
         use tracing::debug;
         use warp::Filter;
 
-        tracing_subscriber::fmt::init();
-
         let (query_tx, query_rx) = oneshot::channel();
 
         tokio::spawn(async move {
