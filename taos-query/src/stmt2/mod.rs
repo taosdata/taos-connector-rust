@@ -1,36 +1,4 @@
-use crate::{AsyncQueryable, ColumnView, Queryable, RawResult};
-
-pub struct Stmt2BindData<'a> {
-    table_name: Option<&'a str>,
-    tags: Option<&'a [ColumnView]>,
-    columns: &'a [ColumnView],
-}
-
-impl<'a> Stmt2BindData<'a> {
-    pub fn new(
-        table_name: Option<&'a str>,
-        tags: Option<&'a [ColumnView]>,
-        columns: &'a [ColumnView],
-    ) -> Self {
-        Self {
-            table_name,
-            tags,
-            columns,
-        }
-    }
-
-    pub fn table_name(&self) -> Option<&str> {
-        self.table_name
-    }
-
-    pub fn tags(&self) -> Option<&[ColumnView]> {
-        self.tags
-    }
-
-    pub fn columns(&self) -> &[ColumnView] {
-        self.columns
-    }
-}
+use crate::{AsyncQueryable, ColumnView, Queryable, RawResult, Value};
 
 pub trait Bindable<Q>
 where
@@ -67,4 +35,36 @@ where
     async fn affected_rows(&self) -> usize;
 
     async fn result_set(&mut self) -> RawResult<Q::AsyncResultSet>;
+}
+
+pub struct Stmt2BindData<'a> {
+    table_name: Option<&'a str>,
+    tags: Option<&'a [Value]>,
+    columns: Option<&'a [ColumnView]>,
+}
+
+impl<'a> Stmt2BindData<'a> {
+    pub fn new(
+        table_name: Option<&'a str>,
+        tags: Option<&'a [Value]>,
+        columns: Option<&'a [ColumnView]>,
+    ) -> Self {
+        Self {
+            table_name,
+            tags,
+            columns,
+        }
+    }
+
+    pub fn table_name(&self) -> Option<&str> {
+        self.table_name
+    }
+
+    pub fn tags(&self) -> Option<&[Value]> {
+        self.tags
+    }
+
+    pub fn columns(&self) -> Option<&[ColumnView]> {
+        self.columns
+    }
 }

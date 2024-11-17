@@ -1,3 +1,7 @@
+use std::fmt;
+
+use serde::de::{self, Visitor};
+use serde::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::NoneAsEmptyString;
@@ -62,8 +66,8 @@ pub enum Stmt2RecvData {
     Stmt2Prepare {
         stmt_id: StmtId,
         is_insert: bool,
-        fields: Option<Vec<Field>>,
-        fields_count: u64,
+        fields: Option<Vec<PrepareField>>,
+        fields_count: usize,
     },
     Stmt2Bind {
         stmt_id: StmtId,
@@ -103,6 +107,113 @@ pub struct Field {
     bytes: i32,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PrepareField {
+    pub name: String,
+    pub field_type: i8,
+    pub precision: u8,
+    pub scale: u8,
+    pub bytes: i32,
+    pub bind_type: BindType,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PrepareField2 {
+    pub name: String,
+    pub field_type: i8,
+    pub precision: u8,
+    pub scale: u8,
+    pub bytes: i32,
+    pub bind_type: u8,
+}
+
+#[derive(Debug)]
+pub enum BindType {
+    Column,
+    Tag,
+    TableName,
+}
+
+impl<'de> Deserialize<'de> for BindType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct BindTypeVisitor;
+
+        impl<'de> Visitor<'de> for BindTypeVisitor {
+            type Value = BindType;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a valid number for BindType")
+            }
+
+            fn visit_i8<E>(self, v: i8) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(match v {
+                    1 => BindType::Column,
+                    2 => BindType::Tag,
+                    4 => BindType::TableName,
+                    _ => return Err(E::custom(format!("Invalid bind type: {}", v))),
+                })
+            }
+
+            fn visit_i16<E>(self, v: i16) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_u16<E>(self, v: u16) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_u32<E>(self, v: u32) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+        }
+
+        deserializer.deserialize_any(BindTypeVisitor)
+    }
+}
+
 #[derive(Debug)]
 pub enum Stmt2Ok {
     Conn(Result<(), Error>),
@@ -130,8 +241,8 @@ pub struct Stmt2PrepareResult {
     pub timing: u64,
     pub stmt_id: StmtId,
     pub is_insert: bool,
-    pub fields: Option<Vec<Field>>,
-    pub field_count: u64,
+    pub fields: Option<Vec<PrepareField>>,
+    pub fields_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,7 +279,7 @@ impl Stmt2Recv {
                 stmt_id,
                 is_insert,
                 fields,
-                fields_count: field_count,
+                fields_count,
             } => Stmt2Ok::Stmt2PrepareRes(
                 stmt_id,
                 if self.code == 0 {
@@ -177,7 +288,7 @@ impl Stmt2Recv {
                         stmt_id,
                         is_insert,
                         fields,
-                        field_count,
+                        fields_count,
                     })
                 } else {
                     _e!()

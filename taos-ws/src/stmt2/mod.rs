@@ -12,7 +12,6 @@ use serde::Serialize;
 use taos_query::prelude::RawResult;
 use taos_query::stmt2::Stmt2BindData;
 use taos_query::stmt2::{AsyncBindable, Bindable};
-use taos_query::util::InlinableWrite;
 use taos_query::{IntoDsn, RawError};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -73,7 +72,10 @@ pub struct Stmt2 {
     stmt_close_sender_map: Arc<DashMap<StmtId, StmtCloseSender>>,
     affected_rows: usize,
     affected_rows_once: usize,
+    // prepare get_fields
     is_insert: Option<bool>,
+    fields: Option<Vec<PrepareField>>,
+    fields_count: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Clone, Copy)]
@@ -267,10 +269,12 @@ impl Stmt2 {
             stmt_fields_sender_map: stmt_field_sender_map_clone,
             stmt_close_receiver: None,
             stmt_close_sender_map: stmt_close_sender_map_clone,
-            is_insert: None,
             affected_rows: 0,
             affected_rows_once: 0,
             close_signal: watch_sender,
+            is_insert: None,
+            fields: None,
+            fields_count: None,
         })
     }
 
@@ -330,10 +334,14 @@ impl Stmt2 {
         Ok(self)
     }
 
-    pub async fn stmt2_prepare(&mut self, sql: &str, get_fields: bool) -> RawResult<()> {
+    pub async fn stmt2_prepare<S: AsRef<str>>(
+        &mut self,
+        sql: S,
+        get_fields: bool,
+    ) -> RawResult<()> {
         let prepare = Stmt2Send::Stmt2Prepare {
             args: self.args.unwrap(),
-            sql: sql.to_string(),
+            sql: sql.as_ref().to_string(),
             get_fields,
         };
         self.ws.send(prepare.to_msg()).await.map_err(Error::from)?;
@@ -346,7 +354,11 @@ impl Stmt2 {
             .ok_or(taos_query::RawError::from_string(
                 "Can't receive stmt2 prepare result response",
             ))??;
+
         self.is_insert = Some(res.is_insert);
+        self.fields = res.fields;
+        self.fields_count = Some(res.fields_count);
+
         debug!("is_insert: {:?}", self.is_insert);
         Ok(())
     }
@@ -400,21 +412,19 @@ impl Stmt2 {
     }
 
     pub async fn stmt2_bind_param<'a>(&mut self, datas: &[Stmt2BindData<'a>]) -> RawResult<()> {
-        const ACTION: u64 = 9;
-        const VERSION: u16 = 1;
-        const COL_IDX: i32 = -1;
-
         let args = self.args.unwrap();
         let is_insert = self.is_insert.unwrap();
-        let bind_data = bind::bind_datas_as_bytes(datas, is_insert)?;
 
-        let mut bytes = vec![];
-        bytes.write_u64_le(args.req_id).map_err(Error::from)?;
-        bytes.write_u64_le(args.stmt_id).map_err(Error::from)?;
-        bytes.write_u64_le(ACTION).map_err(Error::from)?;
-        bytes.write_u16_le(VERSION).map_err(Error::from)?;
-        bytes.write_i32_le(COL_IDX).map_err(Error::from)?;
-        bytes.extend(bind_data);
+        let bytes = bind::bind_datas_as_bytes(
+            datas,
+            args.req_id,
+            args.stmt_id,
+            is_insert,
+            self.fields.as_ref(),
+            self.fields_count.unwrap(),
+        )?;
+
+        debug!("bytes len: {}", bytes.len());
 
         self.ws
             .send(Message::binary(bytes))
@@ -542,62 +552,72 @@ mod tests {
     use taos_query::common::ColumnView;
     use taos_query::stmt2::Stmt2BindData;
     use taos_query::{AsyncQueryable, AsyncTBuilder};
-    use tracing::debug;
 
     use crate::stmt2::Stmt2;
     use crate::TaosBuilder;
 
     #[tokio::test]
-    async fn test_stmt2() -> anyhow::Result<()> {
-        // tracing_subscriber::fmt::init();
-        // std::env::set_var("RUST_LOG", "trace");
-
+    async fn test_stmt2_with_insert() -> anyhow::Result<()> {
         let db = "stmt2";
-        let default_dsn = "taos://localhost:6041";
-        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or(default_dsn.to_string());
+        let dsn = "taos://localhost:6041";
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!("create table {db}.ctb (ts timestamp, a int)"))
             .await?;
 
-        let dsn_stmt = format!("{dsn}/{db}");
-        let mut stmt2 = Stmt2::from_dsn(dsn_stmt).await?;
+        let mut stmt2 = Stmt2::from_dsn(dsn).await?;
         stmt2.stmt2_init(100, false, false).await?;
         stmt2
-            .stmt2_prepare("insert into ctb values (?, ?)", false)
+            .stmt2_prepare(format!("insert into {db}.ctb values(?, ?)"), true)
             .await?;
 
-        let columns = vec![
+        let cols = &[
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_ints(vec![99]),
         ];
-        let data = Stmt2BindData::new(None, None, &columns);
+        let data = Stmt2BindData::new(None, None, Some(cols));
         stmt2.stmt2_bind_param(&[data]).await?;
 
         let affected = stmt2.stmt2_exec().await?;
         assert_eq!(affected, 1);
 
-        let fields = stmt2.stmt2_get_fields().await?;
-        debug!("fields: {fields:?}");
+        stmt2.stmt2_close().await?;
 
-        stmt2
-            .stmt2_prepare("select count(*) from ctb where a > ?", true)
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stmt2_with_query() -> anyhow::Result<()> {
+        tracing_subscriber::fmt::init();
+
+        let db = "stmt2";
+        let dsn = "taos://localhost:6041";
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+        taos.exec(format!("create database {db}")).await?;
+        taos.exec(format!("create table {db}.ctb (ts timestamp, a int)"))
+            .await?;
+        taos.exec(format!("insert into {db}.ctb values(now, 100)"))
             .await?;
 
-        let columns = vec![ColumnView::from_ints(vec![0])];
-        let data = Stmt2BindData::new(None, None, &columns);
+        let mut stmt2 = Stmt2::from_dsn(dsn).await?;
+        stmt2.stmt2_init(100, false, false).await?;
+        stmt2
+            .stmt2_prepare(format!("select * from {db}.ctb where a > ?"), true)
+            .await?;
+
+        let cols = &[ColumnView::from_ints(vec![0])];
+        let data = Stmt2BindData::new(None, None, Some(cols));
         stmt2.stmt2_bind_param(&[data]).await?;
 
         let affected = stmt2.stmt2_exec().await?;
         assert_eq!(affected, 0);
 
-        let fields = stmt2.stmt2_get_fields().await?;
-        debug!("fields: {fields:?}");
-
-        let res = stmt2.stmt2_result().await?;
-        debug!("res: {res:?}");
+        let _ = stmt2.stmt2_result().await?;
+        stmt2.stmt2_close().await?;
 
         Ok(())
     }
