@@ -1144,9 +1144,31 @@ impl TmqBuilder {
                                                 //
                                                 if let Err(err) = sender.send(ok.map(|_|recv)) {
                                                     tracing::error!(req_id, kind = "poll", "poll message received but no receiver alive, message lost: {:?}", err);
+
+                                                    let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                    for k in keys {
+                                                        if let Some((_, sender)) = queries_sender.remove(&k) {
+                                                            let _ = sender.send(Err(RawError::new(
+                                                                WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                                format!("Consumer messages lost"),
+                                                            )));
+                                                        }
+                                                    }
+                                                    break 'ws;
                                                 }
                                             }  else {
                                                 tracing::warn!("poll message received but no receiver alive");
+
+                                                let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                for k in keys {
+                                                    if let Some((_, sender)) = queries_sender.remove(&k) {
+                                                        let _ = sender.send(Err(RawError::new(
+                                                            WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                            format!("Consumer connection lost"),
+                                                        )));
+                                                    }
+                                                }
+                                                break 'ws;
                                             }
                                         },
                                         TmqRecvData::FetchJsonMeta { data }=> {
