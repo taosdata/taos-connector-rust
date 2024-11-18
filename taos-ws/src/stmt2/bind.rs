@@ -80,6 +80,10 @@ pub(super) fn bind_datas_as_bytes(
     debug!("need_tbnames: {need_tbnames}, need_tags: {need_tags}, need_cols: {need_cols}");
     debug!("table_cnt: {table_cnt}, tag_cnt: {tag_cnt}, col_cnt: {col_cnt}");
 
+    if !need_tbnames && !need_tags && !need_cols {
+        return Err("empty data".into());
+    }
+
     let mut tbname_lens = vec![];
     let mut tbname_buf_len = 0;
     if need_tbnames {
