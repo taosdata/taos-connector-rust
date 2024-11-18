@@ -36,7 +36,7 @@ impl Timeout {
     }
     pub fn as_raw_timeout(&self) -> i64 {
         match self {
-            Timeout::Never => -1,
+            Timeout::Never => i64::MAX,
             Timeout::None => 0,
             Timeout::Duration(t) => t.as_millis() as _,
         }
