@@ -6,7 +6,7 @@ use taos_query::{
 };
 use tracing::debug;
 
-use super::{BindType, PrepareField, ReqId, StmtId};
+use super::{BindType, ReqId, Stmt2PrepareField, StmtId};
 
 const REQ_ID_POS: usize = 0;
 const STMT_ID_POS: usize = REQ_ID_POS + 8;
@@ -39,7 +39,7 @@ pub(super) fn bind_datas_as_bytes(
     req_id: ReqId,
     stmt_id: StmtId,
     is_insert: bool,
-    fields: Option<&Vec<PrepareField>>,
+    fields: Option<&Vec<Stmt2PrepareField>>,
     fields_count: usize,
 ) -> RawResult<Vec<u8>> {
     if datas.is_empty() {
@@ -673,7 +673,7 @@ mod tests {
     use bytes::Bytes;
     use taos_query::common::{ColumnView, Timestamp, Ty, Value};
 
-    use crate::stmt2::{BindType, PrepareField};
+    use crate::stmt2::{BindType, Stmt2PrepareField};
 
     use super::{bind_datas_as_bytes, Stmt2BindData};
 
@@ -684,7 +684,7 @@ mod tests {
         let data3 = Stmt2BindData::new(Some("test3"), None, None);
         let datas = [data1, data2, data3];
 
-        let fields = vec![PrepareField {
+        let fields = vec![Stmt2PrepareField {
             name: "".to_string(),
             field_type: 1,
             precision: 0,
@@ -730,7 +730,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_as_bytes_with_tags_1() -> anyhow::Result<()> {
+    fn test_bind_datas_as_bytes_with_tags() -> anyhow::Result<()> {
         let tags = &[
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
@@ -757,7 +757,7 @@ mod tests {
         let datas = [data];
 
         let fields = vec![
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -765,7 +765,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -773,7 +773,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -781,7 +781,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -789,7 +789,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -797,7 +797,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -805,7 +805,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -813,7 +813,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -821,7 +821,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -829,7 +829,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -837,7 +837,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -845,7 +845,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -853,7 +853,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -861,7 +861,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -869,7 +869,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -877,7 +877,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1067,7 +1067,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_as_bytes_with_tags_2() -> anyhow::Result<()> {
+    fn test_bind_datas_as_bytes_with_null_tags() -> anyhow::Result<()> {
         let tags = &[
             Value::Null(Ty::Timestamp),
             Value::Null(Ty::Bool),
@@ -1091,7 +1091,7 @@ mod tests {
         let datas = [data];
 
         let fields = vec![
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1099,7 +1099,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1107,7 +1107,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1115,7 +1115,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1123,7 +1123,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1131,7 +1131,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1139,7 +1139,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1147,7 +1147,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1155,7 +1155,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1163,7 +1163,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1171,7 +1171,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1179,7 +1179,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1187,7 +1187,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1195,7 +1195,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1203,7 +1203,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1211,7 +1211,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1385,7 +1385,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_as_bytes_with_tags_3() -> anyhow::Result<()> {
+    fn test_bind_datas_as_bytes_with_tbnames_and_tags() -> anyhow::Result<()> {
         let tags1 = &[
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
@@ -1458,7 +1458,7 @@ mod tests {
         let datas = [data1, data2, data3];
 
         let fields = vec![
-            PrepareField {
+            Stmt2PrepareField {
                 name: "".to_string(),
                 field_type: 1,
                 precision: 0,
@@ -1466,7 +1466,7 @@ mod tests {
                 bytes: 131584,
                 bind_type: BindType::TableName,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1474,7 +1474,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1482,7 +1482,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1490,7 +1490,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1498,7 +1498,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1506,7 +1506,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1514,7 +1514,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1522,7 +1522,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1530,7 +1530,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1538,7 +1538,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1546,7 +1546,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1554,7 +1554,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1562,7 +1562,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1570,7 +1570,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1578,7 +1578,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -1586,7 +1586,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2070,7 +2070,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_as_bytes_with_cols_1() -> anyhow::Result<()> {
+    fn test_bind_datas_as_bytes_with_cols() -> anyhow::Result<()> {
         let cols = &[
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_bools(vec![true]),
@@ -2279,7 +2279,213 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_as_bytes_with_cols_2() -> anyhow::Result<()> {
+    fn test_bind_datas_as_bytes_with_null_cols() -> anyhow::Result<()> {
+        let cols = &[
+            ColumnView::null(5, Ty::Timestamp),
+            ColumnView::null(5, Ty::Bool),
+            ColumnView::null(5, Ty::TinyInt),
+            ColumnView::null(5, Ty::SmallInt),
+            ColumnView::null(5, Ty::Int),
+            ColumnView::null(5, Ty::BigInt),
+            ColumnView::null(5, Ty::Float),
+            ColumnView::null(5, Ty::Double),
+            ColumnView::null(5, Ty::UTinyInt),
+            ColumnView::null(5, Ty::USmallInt),
+            ColumnView::null(5, Ty::UInt),
+            ColumnView::null(5, Ty::UBigInt),
+            ColumnView::null(5, Ty::VarChar),
+            ColumnView::null(5, Ty::NChar),
+            ColumnView::from_geobytes::<&[u8], _, _, _>(vec![None, None, None, None, None]),
+            ColumnView::from_bytes::<&[u8], _, _, _>(vec![None, None, None, None, None]),
+        ];
+
+        let data = Stmt2BindData::new(None, None, Some(cols));
+
+        let res = bind_datas_as_bytes(&[data], 100, 200, false, None, 16)?;
+
+        #[rustfmt::skip]
+        let expected = [
+            // fixed headers
+            0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // req_id
+            0xc8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // stmt_id
+            0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // action
+            0x01, 0x00, // version
+            0xff, 0xff, 0xff, 0xff, // col_idx
+
+            // data
+            0xd0, 0x01, 0x00, 0x00, // TotalLength
+            0x01, 0x00, 0x00, 0x00, // TableCount
+            0x00, 0x00, 0x00, 0x00, // TagCount
+            0x10, 0x00, 0x00, 0x00, // ColCount
+            0x00, 0x00, 0x00, 0x00, // TableNamesOffset
+            0x00, 0x00, 0x00, 0x00, // TagsOffset
+            0x1c, 0x00, 0x00, 0x00, // ColsOffset
+
+            // cols
+            // ColDataLength
+            0xb0, 0x01, 0x00, 0x00,
+            // ColBuffer
+            // table 0 cols
+            // col 0
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x09, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 1
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x01, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 2
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x02, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 3
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x03, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 4
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x04, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 5
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x05, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 6
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x06, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 7
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x07, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 8
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x0b, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 9
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x0c, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 10
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x0d, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 11
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x0e, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x00, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 12
+            0x2a, 0x00, 0x00, 0x00, // TotalLength
+            0x08, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x01, // HaveLength
+            // Length
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 13
+            0x2a, 0x00, 0x00, 0x00, // TotalLength
+            0x0a, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x01, // HaveLength
+            // Length
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 14
+            0x2a, 0x00, 0x00, 0x00, // TotalLength
+            0x14, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x01, // HaveLength
+            // Length
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 15
+            0x2a, 0x00, 0x00, 0x00, // TotalLength
+            0x10, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x01, // HaveLength
+            // Length
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+        ];
+
+        assert_eq!(res, expected);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_bind_datas_as_bytes_with_tbnames_tags_and_cols() -> anyhow::Result<()> {
         let tags = &[
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
@@ -2338,7 +2544,7 @@ mod tests {
         let data = Stmt2BindData::new(Some("test1"), Some(tags), Some(cols));
 
         let fields = vec![
-            PrepareField {
+            Stmt2PrepareField {
                 name: "".to_string(),
                 field_type: 1,
                 precision: 0,
@@ -2346,7 +2552,7 @@ mod tests {
                 bytes: 131584,
                 bind_type: BindType::TableName,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2354,7 +2560,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2362,7 +2568,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2370,7 +2576,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2378,7 +2584,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2386,7 +2592,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2394,7 +2600,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2402,7 +2608,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2410,7 +2616,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2418,7 +2624,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2426,7 +2632,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2434,7 +2640,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2442,7 +2648,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2450,7 +2656,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2458,7 +2664,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2466,7 +2672,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "ts".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2474,7 +2680,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2482,7 +2688,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2490,7 +2696,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2498,7 +2704,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2506,7 +2712,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2514,7 +2720,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2522,7 +2728,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2530,7 +2736,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2538,7 +2744,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2546,7 +2752,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2554,7 +2760,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2562,7 +2768,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2570,7 +2776,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2578,7 +2784,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2586,7 +2792,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2594,7 +2800,7 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            PrepareField {
+            Stmt2PrepareField {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
