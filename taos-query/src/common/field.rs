@@ -29,7 +29,7 @@ fn test_c_field_t() {
 ///
 /// 1. `{ name: "ts", ty: Timestamp, bytes: 8 }`, a `TIMESTAMP` field with name `ts`,
 ///    bytes length 8 which is the byte-width of `i64`.
-/// 2. `{ name: "n", ty: NChar, bytes: 100 }`, a `NCHAR` filed with name `n`,
+/// 2. `{ name: "n", ty: NChar, bytes: 100 }`, a `NCHAR` field with name `n`,
 ///    bytes length 100 which is the length of the variable-length data.
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
