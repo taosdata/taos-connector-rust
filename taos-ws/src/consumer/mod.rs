@@ -589,8 +589,12 @@ impl AsAsyncConsumer for Consumer {
         };
         if let Err(err) = self.sender.send_recv(action).await {
             tracing::error!("subscribe error: {:?}", err);
+            if self.tmq_conf.enable_batch_meta.is_none() {
+                return Err(err);
+            }
+            let code: i32 = err.code().into();
 
-            if err.code() == 0xFFFE {
+            if code & 0xFFFF == 0xFFFE {
                 // subscribe conf error -2.
                 let action = TmqSend::Subscribe {
                     req_id: self.sender.req_id(),
@@ -599,8 +603,9 @@ impl AsAsyncConsumer for Consumer {
                     conn: self.conn.clone(),
                 };
                 self.sender.send_recv(action).await?;
+            } else {
+                return Err(err);
             }
-            return Err(err);
         }
 
         // dbg!(&self.tmq_conf);
