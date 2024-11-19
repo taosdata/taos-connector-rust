@@ -21,6 +21,10 @@ struct Opts {
     #[clap(short, long, default_value = "./")]
     raw_dir: PathBuf,
 
+    /// Print data block
+    #[clap(short, long)]
+    print_block: bool,
+
     /// Do not dump meta message.
     #[clap(long)]
     no_meta: bool,
@@ -94,10 +98,32 @@ async fn main() -> anyhow::Result<()> {
                     let raw = data.as_raw_data().await?;
                     let bytes = raw.as_bytes();
                     println!("{mid},data,{}", bytes.len());
+
+                    if args.print_block {
+                        while let Some(block) = data.fetch_raw_block().await? {
+                            // one block for one table, get table name if needed
+                            let name = block.table_name();
+                            let nrows = block.nrows();
+                            let ncols = block.ncols();
+                            if let Some(name) = name {
+                                eprintln!(
+                                    "data[{mid}] block with table name {}, cols: {}, rows: {}",
+                                    name, ncols, nrows
+                                );
+                                eprintln!("{}", block.pretty_format());
+                            } else {
+                                eprintln!(
+                                    "data[{mid}] block without table name, cols: {}, rows: {}",
+                                    ncols, nrows
+                                );
+                                eprintln!("{}", block.pretty_format());
+                            }
+                        }
+                    }
                     let path = args.raw_dir.join(format!("raw_{}_data.bin", mid));
                     std::fs::write(path, bytes.deref())?;
                 }
-                MessageSet::MetaData(meta, _data) => {
+                MessageSet::MetaData(meta, data) => {
                     if args.no_metadata {
                         continue;
                     }
@@ -105,6 +131,27 @@ async fn main() -> anyhow::Result<()> {
                     let raw = meta.as_raw_meta().await?;
                     let bytes = raw.as_bytes();
                     println!("{mid},metadata,{}", bytes.len());
+                    if args.print_block {
+                        while let Some(block) = data.fetch_raw_block().await? {
+                            // one block for one table, get table name if needed
+                            let name = block.table_name();
+                            let nrows = block.nrows();
+                            let ncols = block.ncols();
+                            if let Some(name) = name {
+                                eprintln!(
+                                    "data[{mid}] block with table name {}, cols: {}, rows: {}",
+                                    name, ncols, nrows
+                                );
+                                eprintln!("{}", block.pretty_format());
+                            } else {
+                                eprintln!(
+                                    "data[{mid}] block without table name, cols: {}, rows: {}",
+                                    ncols, nrows
+                                );
+                                eprintln!("{}", block.pretty_format());
+                            }
+                        }
+                    }
                     let path = args.raw_dir.join(format!("raw_{}_metadata.bin", mid));
                     std::fs::write(path, bytes.deref())?;
                 }

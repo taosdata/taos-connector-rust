@@ -19,8 +19,6 @@ use taos_query::{
 
 use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t, TaosBuilder};
 
-// use taos_error::Error;
-
 mod raw;
 
 use raw::RawTmq;
@@ -84,11 +82,12 @@ impl taos_query::TBuilder for TmqBuilder {
 
     fn build(&self) -> RawResult<Self::Target> {
         let ptr = self.conf.build()?;
-        let tmq = RawTmq {
-            c: self.lib.clone(),
-            tmq: self.lib.tmq.unwrap(),
+        let tmq = RawTmq::new(
+            self.lib.clone(),
+            self.lib.tmq.unwrap(),
             ptr,
-        };
+            self.timeout.as_raw_timeout(),
+        );
         Ok(Consumer {
             tmq,
             timeout: self.timeout,
@@ -170,11 +169,12 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 
     async fn build(&self) -> RawResult<Self::Target> {
         let ptr = self.conf.build()?;
-        let tmq = RawTmq {
-            c: self.lib.clone(),
-            tmq: self.lib.tmq.unwrap(),
+        let tmq = RawTmq::new(
+            self.lib.clone(),
+            self.lib.tmq.unwrap(),
             ptr,
-        };
+            self.timeout.as_raw_timeout(),
+        );
         Ok(Consumer {
             tmq,
             timeout: self.timeout,
@@ -419,9 +419,7 @@ impl Iterator for Data {
 
 impl AsConsumer for Consumer {
     type Offset = Offset;
-
     type Meta = Meta;
-
     type Data = Data;
 
     fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
@@ -429,7 +427,7 @@ impl AsConsumer for Consumer {
         topics: I,
     ) -> RawResult<()> {
         let topics = topics.into_iter().map(|item| item.into()).collect_vec();
-        let topics = Topics::from_topics(self.tmq.tmq.list_api, topics)?;
+        let topics = Topics::from_topics(self.tmq.tmq().list_api, topics)?;
         // dbg!(&topics);
         self.tmq.subscribe(&topics)
     }
@@ -520,8 +518,10 @@ impl AsAsyncConsumer for Consumer {
         &mut self,
         topics: I,
     ) -> RawResult<()> {
-        let topics =
-            Topics::from_topics(self.tmq.tmq.list_api, topics.into_iter().map(|s| s.into()))?;
+        let topics = Topics::from_topics(
+            self.tmq.tmq().list_api,
+            topics.into_iter().map(|s| s.into()),
+        )?;
         let r = self.tmq.subscribe(&topics);
 
         if let Some(offset) = self.dsn.get("offset") {
@@ -548,6 +548,8 @@ impl AsAsyncConsumer for Consumer {
             }
         }
 
+        self.tmq.spawn_thread();
+
         r
     }
 
@@ -560,57 +562,46 @@ impl AsAsyncConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
-        use taos_query::prelude::tokio;
+        use taos_query::prelude::{tokio, tokio::sync::oneshot};
+        use taos_query::tmq::MessageSet;
+
+        let (tx, rx) = oneshot::channel();
+
+        self.tmq
+            .sender()
+            .send_async(tx)
+            .await
+            .map_err(RawError::from_any)?;
+
+        let duration = match timeout {
+            Timeout::Duration(duration) => duration,
+            _ => Duration::MAX,
+        };
+        let sleep = tokio::time::sleep(duration);
+        tokio::pin!(sleep);
+
         tracing::trace!("Waiting for next message");
-        let res = match timeout {
-            Timeout::Never | Timeout::None => {
-                let timeout = Duration::MAX;
-                let sleep = tokio::time::sleep(timeout);
-                tokio::pin!(sleep);
-                tokio::select! {
-                    _ = &mut sleep, if !sleep.is_elapsed() => {
-                       Ok(None)
-                    }
-                    raw = self.tmq.poll_async() => {
-                        let message =    (
-                            Offset(raw.clone()),
-                            match raw.tmq_message_type() {
-                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                                tmq_res_t::TMQ_RES_TABLE_META => {
-                                    taos_query::tmq::MessageSet::Meta(Meta::new(raw))
-                                }
-                                tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
-                            },
-                        );
-                        Ok(Some(message))
-                    }
-                }
+
+        let res = tokio::select! {
+            _ = &mut sleep, if !sleep.is_elapsed() => {
+                Ok(None)
             }
-            Timeout::Duration(timeout) => {
-                let sleep = tokio::time::sleep(timeout);
-                tokio::pin!(sleep);
-                tokio::select! {
-                    _ = &mut sleep, if !sleep.is_elapsed() => {
-                       Ok(None)
-                    }
-                    raw = self.tmq.poll_async() => {
-                        let message =    (
-                            Offset(raw.clone()),
-                            match raw.tmq_message_type() {
-                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                                tmq_res_t::TMQ_RES_TABLE_META => {
-                                    taos_query::tmq::MessageSet::Meta(Meta::new(raw))
-                                }
-                                tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
-                            },
-                        );
-                        Ok(Some(message))
-                    }
-                }
+            res = rx => {
+                let raw = res.map_err(RawError::from_any)?.map(|raw| {
+                    (
+                        Offset(raw.clone()),
+                        match raw.tmq_message_type() {
+                            tmq_res_t::TMQ_RES_INVALID => unreachable!(),
+                            tmq_res_t::TMQ_RES_DATA => MessageSet::Data(Data::new(raw)),
+                            tmq_res_t::TMQ_RES_TABLE_META => MessageSet::Meta(Meta::new(raw)),
+                            tmq_res_t::TMQ_RES_METADATA => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
+                        },
+                    )
+                });
+                Ok(raw)
             }
         };
+
         match res {
             Ok(res) => {
                 tracing::trace!("Got a new message");
@@ -689,6 +680,7 @@ impl AsAsyncConsumer for Consumer {
         self.tmq.position(topic, vgroup_id)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::TmqBuilder;
@@ -2488,6 +2480,91 @@ mod async_tests {
                 Ok(())
             })
             .await?;
+
+        consumer.unsubscribe().await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_recv_timeout() -> anyhow::Result<()> {
+        use std::str::FromStr;
+
+        use itertools::Itertools;
+        use taos_query::{
+            prelude::TryStreamExt,
+            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
+            AsyncQueryable, AsyncTBuilder, Dsn,
+        };
+        use tracing::debug;
+
+        use crate::TaosBuilder;
+
+        pretty_env_logger::init();
+
+        let dsn = "taos://localhost:6030";
+        let builder = TaosBuilder::from_dsn(dsn)?;
+        let taos = builder.build().await?;
+        let db = "tmq";
+
+        taos.exec_many([
+            "DROP TOPIC IF EXISTS tmq_meters".into(),
+            format!("DROP DATABASE IF EXISTS `{db}`"),
+            format!("CREATE DATABASE `{db}`"),
+            format!("USE `{db}`"),
+            "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) TAGS (`groupid` INT, `location` BINARY(20))".into(),
+            format!("CREATE TOPIC tmq_meters with META AS DATABASE {db}")
+        ]).await?;
+
+        let inserted = taos.exec_many([
+            "CREATE TABLE `d0` USING `meters` TAGS(0, 'Los Angles')",
+            "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32)",
+            "INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL)",
+            "INSERT INTO `d1` USING `meters` TAGS(1, 'San Francisco') values(now - 9s, 10.1, 119, 0.33)",
+            "INSERT INTO `d1` values (now-8s, 10, 120, 0.33) (now - 6s, 10, 119, 0.34) (now - 4s, 11.2, 118, 0.322)",
+        ]).await?;
+        assert_eq!(inserted, 6);
+
+        let mut dsn = Dsn::from_str("tmq://localhost:6030")?;
+        dsn.params.insert("group.id".into(), "test".into());
+        dsn.params.insert("timeout".into(), "1s".into());
+        dsn.params
+            .insert("auto.offset.reset".into(), "earliest".into());
+
+        let builder = TmqBuilder::from_dsn(dsn)?;
+        let mut consumer = builder.build().await?;
+        consumer.subscribe(["tmq_meters"]).await?;
+
+        {
+            let mut stream = consumer.stream();
+            let mut cnt = 0;
+            while let Some((offset, message)) = stream.try_next().await? {
+                debug!(
+                    "topic: {}, database: {}, vgroup_id: {}",
+                    offset.topic(),
+                    offset.database(),
+                    offset.vgroup_id()
+                );
+
+                if let Some(data) = message.into_data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        let table_name = block.table_name().unwrap();
+                        let records: Vec<Record> = block.deserialize().try_collect()?;
+                        cnt += records.len();
+                        debug!(
+                            "table_name: {}, got {} records: {:#?}",
+                            table_name,
+                            records.len(),
+                            records
+                        );
+                    }
+                }
+
+                consumer.commit(offset).await?;
+            }
+
+            assert_eq!(inserted, cnt);
+        }
 
         consumer.unsubscribe().await;
 

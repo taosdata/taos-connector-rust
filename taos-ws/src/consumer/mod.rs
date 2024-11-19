@@ -1116,6 +1116,7 @@ impl TmqBuilder {
 
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
+                                                // We don't care about the result of the sender for subscribe
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
                                                 tracing::warn!("subscribe message received but no receiver alive");
@@ -1125,7 +1126,9 @@ impl TmqBuilder {
                                             tracing::trace!("unsubscribe with: {:?} successed", req_id);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
+                                                // We don't care about the result of the sender for unsubscribe
                                                 let _ = sender.send(ok.map(|_|recv));
+
                                             }  else {
                                                 tracing::warn!("unsubscribe message received but no receiver alive");
                                             }
@@ -1133,16 +1136,43 @@ impl TmqBuilder {
                                         TmqRecvData::Poll(_) => {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                //
+                                                if let Err(err) = sender.send(ok.map(|_|recv)) {
+                                                    tracing::error!(req_id, kind = "poll", "poll message received but no receiver alive, message lost: {:?}", err);
+
+                                                    let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                    for k in keys {
+                                                        if let Some((_, sender)) = queries_sender.remove(&k) {
+                                                            let _ = sender.send(Err(RawError::new(
+                                                                WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                                format!("Consumer messages lost"),
+                                                            )));
+                                                        }
+                                                    }
+                                                    break 'ws;
+                                                }
                                             }  else {
                                                 tracing::warn!("poll message received but no receiver alive");
+
+                                                let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                for k in keys {
+                                                    if let Some((_, sender)) = queries_sender.remove(&k) {
+                                                        let _ = sender.send(Err(RawError::new(
+                                                            WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                            format!("Consumer connection lost"),
+                                                        )));
+                                                    }
+                                                }
+                                                break 'ws;
                                             }
                                         },
                                         TmqRecvData::FetchJsonMeta { data }=> {
                                             tracing::trace!("fetch json meta data: {:?}", data);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                if let Err(err) = sender.send(ok.map(|_|recv)) {
+                                                    tracing::warn!(req_id, kind = "fetch_json_meta", "fetch json meta message received but no receiver alive: {:?}", err);
+                                                }
                                             }  else {
                                                 tracing::warn!("poll message received but no receiver alive");
                                             }
@@ -1150,7 +1180,9 @@ impl TmqBuilder {
                                         TmqRecvData::FetchRaw { meta: _ }=> {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                if let Err(err) = sender.send(ok.map(|_|recv)) {
+                                                    tracing::warn!(req_id, kind = "fetch_raw_meta", "fetch raw meta message received but no receiver alive: {:?}", err);
+                                                }
                                             }  else {
                                                 tracing::warn!("poll message received but no receiver alive");
                                             }
@@ -1159,6 +1191,7 @@ impl TmqBuilder {
                                             tracing::trace!("commit done: {:?}", recv);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
+                                                // We don't care about the result of the sender for commit
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
                                                 tracing::warn!("poll message received but no receiver alive");
@@ -1168,6 +1201,7 @@ impl TmqBuilder {
                                             tracing::trace!("fetch done: {:?}", fetch);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
+                                                // We don't care about the result of the sender for fetch
                                                 let _ = sender.send(ok.map(|_|recv));
                                             }  else {
                                                 tracing::warn!("poll message received but no receiver alive");
@@ -1254,7 +1288,9 @@ impl TmqBuilder {
 
                                     if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                         tracing::trace!("send data to fetches with id {}", req_id);
-                                        let _ = sender.send(Ok(TmqRecvData::Bytes(part.into())));
+                                        if let Err(_) = sender.send(Ok(TmqRecvData::Bytes(part.into()))) {
+                                            tracing::warn!(req_id, kind = "binary", "req_id {req_id} not detected, message might be lost");
+                                        }
                                     } else {
                                         tracing::warn!("req_id {req_id} not detected, message might be lost");
                                     }

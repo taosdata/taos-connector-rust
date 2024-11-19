@@ -322,9 +322,7 @@ impl taos_query::tmq::IsAsyncData for Data {
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
     type Offset = Offset;
-
     type Meta = Meta;
-
     type Data = Data;
 
     fn default_timeout(&self) -> Timeout {
