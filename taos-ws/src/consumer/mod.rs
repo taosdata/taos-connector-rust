@@ -567,9 +567,7 @@ impl Consumer {
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
     type Offset = Offset;
-
     type Meta = Meta;
-
     type Data = Data;
 
     async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
@@ -580,7 +578,7 @@ impl AsAsyncConsumer for Consumer {
         let req_id = self.sender.req_id();
         let action = TmqSend::Subscribe {
             req_id,
-            req: self.tmq_conf.clone(),
+            req: Box::new(self.tmq_conf.clone()),
             topics: self.topics.clone(),
             conn: self.conn.clone(),
         };

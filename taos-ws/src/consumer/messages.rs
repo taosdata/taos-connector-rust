@@ -105,7 +105,7 @@ pub enum TmqSend {
         #[serde(flatten)]
         conn: WsConnReq,
         #[serde(flatten)]
-        req: TmqInit,
+        req: Box<TmqInit>,
         topics: Vec<String>,
     },
     Unsubscribe {
