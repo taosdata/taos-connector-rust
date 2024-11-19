@@ -1,28 +1,9 @@
 [target.'cfg(all())']
 rustflags = [
-    # "-Dclippy::correctness",
-
-    # "-Dclippy::perf",
-    "-Dclippy::box_collection",
-    "-Dclippy::boxed_local",
-    "-Dclippy::cmp_owned",
-    "-Dclippy::collapsible_str_replace",
-    "-Dclippy::drain_collect",
-    "-Dclippy::expect_fun_call",
-    "-Dclippy::extend_with_drain",
-    "-Dclippy::format_collect",
-    "-Dclippy::format_in_format_args",
-    "-Dclippy::iter_overeager_cloned",
-    # "-Dclippy::large_const_arrays",
-    # "-Dclippy::large_enum_variant",
-    # "-Dclippy::manual_ignore_case_cmp",
-    # "-Dclippy::manual_memcpy",
-    # "-Dclippy::manual_retain",
-    # "-Dclippy::manual_str_repeat",
-
+    "-Dclippy::perf",
+    # "-Dclippy::complexity",
 
     # "-Dclippy::style",
-    # "-Dclippy::complexity",
     # "-Aclippy::module_name_repetitions",
 
     # "-Dunsafe_code",
