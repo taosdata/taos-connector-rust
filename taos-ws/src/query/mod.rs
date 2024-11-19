@@ -455,4 +455,74 @@ mod tests {
         assert_eq!(client.exec("drop database ws_test_client").await?, 0);
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_ws_disconnect_with_mock() {
+        use futures::{SinkExt, StreamExt};
+        use serde_json::json;
+        use taos_query::{AsyncQueryable, AsyncTBuilder};
+        use tokio::sync::{mpsc, oneshot};
+        use tracing::debug;
+        use warp::Filter;
+
+        let (query_tx, query_rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            let builder = TaosBuilder::from_dsn("ws://127.0.0.1:9981/").unwrap();
+            let client = builder.build().await.unwrap();
+            let _ = client.query("select * from meters").await;
+            debug!("query end");
+            let _ = query_tx.send(());
+        });
+
+        let (close_tx, mut close_rx) = mpsc::channel(1);
+        let routes = warp::path("ws").and(warp::ws()).map({
+            move |ws: warp::ws::Ws| {
+                let close = close_tx.clone();
+                ws.on_upgrade(move |ws| async {
+                    let close = close;
+                    let (mut tx, mut rx) = ws.split();
+                    while let Some(msg) = rx.next().await {
+                        let msg = msg.unwrap();
+                        debug!("ws recv msg: {msg:?}");
+                        if msg.is_text() {
+                            let text = msg.to_str().unwrap();
+                            if text.contains("version") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "version msg",
+                                    "action": "version",
+                                    "req_id": 100,
+                                    "version": "3.0"
+                                });
+                                let msg = warp::ws::Message::text(data.to_string());
+                                let _ = tx.send(msg).await;
+                            } else if text.contains("conn") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "conn msg",
+                                    "action": "conn",
+                                    "req_id": 100
+                                });
+                                let msg = warp::ws::Message::text(data.to_string());
+                                let _ = tx.send(msg).await;
+                            } else if text.contains("query") {
+                                let _ = close.send(()).await;
+                                break;
+                            }
+                        }
+                    }
+                })
+            }
+        });
+
+        let (_, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9981), async move {
+                let _ = close_rx.recv().await;
+                debug!("Shutting down...");
+            });
+
+        server.await;
+        let _ = query_rx.await;
+    }
 }
