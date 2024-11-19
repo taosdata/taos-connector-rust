@@ -524,7 +524,7 @@ impl Stmt {
         Ok(self)
     }
 
-    pub async fn s_stmt<'a>(&'a mut self, sql: &'a str) -> RawResult<&mut Self> {
+    pub async fn s_stmt<'a>(&'a mut self, sql: &'a str) -> RawResult<&'a mut Self> {
         let stmt = self.stmt_init().await?;
         stmt.stmt_prepare(sql).await?;
         Ok(self)
