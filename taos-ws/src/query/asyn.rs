@@ -156,6 +156,9 @@ struct QueryMetrics {
     time_cost_in_block_parse: Duration,
     time_cost_in_flume: Duration,
 }
+
+type BlockFuture = Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>;
+
 pub struct ResultSet {
     sender: WsQuerySender,
     args: WsResArgs,
@@ -165,7 +168,7 @@ pub struct ResultSet {
     precision: Precision,
     summary: (usize, usize),
     timing: Duration,
-    block_future: Option<Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>>,
+    block_future: Option<BlockFuture>,
     closer: Option<oneshot::Sender<()>>,
     completed: bool,
     metrics: QueryMetrics,

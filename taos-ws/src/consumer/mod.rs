@@ -1145,7 +1145,7 @@ impl TmqBuilder {
                                                         if let Some((_, sender)) = queries_sender.remove(&k) {
                                                             let _ = sender.send(Err(RawError::new(
                                                                 WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                                format!("Consumer messages lost"),
+                                                                "Consumer messages lost",
                                                             )));
                                                         }
                                                     }
@@ -1159,7 +1159,7 @@ impl TmqBuilder {
                                                     if let Some((_, sender)) = queries_sender.remove(&k) {
                                                         let _ = sender.send(Err(RawError::new(
                                                             WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                            format!("Consumer connection lost"),
+                                                            "Consumer connection lost",
                                                         )));
                                                     }
                                                 }

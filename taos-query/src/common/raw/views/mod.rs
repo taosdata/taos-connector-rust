@@ -1270,7 +1270,7 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
         (*(bytes.as_mut_ptr() as *mut super::Header)).length = bytes.len() as _;
         std::ptr::copy_nonoverlapping(
             lengths.as_ptr() as *mut u8,
-            bytes.as_mut_ptr().add(length_offset) as *mut u8,
+            bytes.as_mut_ptr().add(length_offset),
             lengths.len() * std::mem::size_of::<u32>(),
         );
     }

@@ -1451,7 +1451,7 @@ pub unsafe extern "C" fn ws_print_row(
         return Code::SUCCESS.into();
     }
 
-    let row_slice = std::slice::from_raw_parts(row as *const *const c_void, num_fields as usize);
+    let row_slice = std::slice::from_raw_parts(row, num_fields as usize);
     let fields_slice = std::slice::from_raw_parts(fields, num_fields as usize);
 
     for i in 0..num_fields as usize {
@@ -1726,6 +1726,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl_with_reqid(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 unsafe fn schemaless_insert_raw(
     taos: *mut WS_TAOS,
     lines: *const c_char,
