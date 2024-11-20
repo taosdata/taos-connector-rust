@@ -675,7 +675,7 @@ impl AsAsyncConsumer for Consumer {
                 // subscribe conf error -2.
                 let action = TmqSend::Subscribe {
                     req_id: self.sender.req_id(),
-                    req: self.tmq_conf.clone().disable_batch_meta(),
+                    req: Box::new(self.tmq_conf.clone().disable_batch_meta()),
                     topics: self.topics.clone(),
                     conn: self.conn.clone(),
                 };
