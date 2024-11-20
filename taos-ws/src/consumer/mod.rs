@@ -583,6 +583,9 @@ impl Consumer {
                             raw_blocks: Arc::new(Mutex::new(None)),
                         };
                         tracing::trace!("Got message in {}ms", dur.as_millis());
+
+                        // Release the lock.
+                        self.polling_mutex.store(false, Ordering::Release);
                         break match message_type {
                             MessageType::Meta => Ok((offset, MessageSet::Meta(Meta(message)))),
                             MessageType::Data => Ok((offset, MessageSet::Data(Data(message)))),
@@ -1244,7 +1247,6 @@ impl TmqBuilder {
                                             }
                                         },
                                         TmqRecvData::Poll(_) => {
-                                            polling_mutex2.store(true, Ordering::Release);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 if let Err(err) = sender.send(ok.map(|_|recv)) {
@@ -1269,6 +1271,8 @@ impl TmqBuilder {
                                                                 }
                                                             }
                                                             break 'ws;
+                                                        } else {
+                                                            polling_mutex2.store(true, Ordering::Release);
                                                         };
                                                     }
                                                 }
@@ -1292,7 +1296,9 @@ impl TmqBuilder {
                                                         }
                                                     }
                                                     break 'ws;
-                                                };
+                                                } else {
+                                                    polling_mutex2.store(true, Ordering::Release);
+                                                }
                                             }
                                         },
                                         TmqRecvData::FetchJsonMeta { data }=> {
