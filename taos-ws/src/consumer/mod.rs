@@ -1,7 +1,6 @@
 //! TMQ consumer.
 //!
 use anyhow::bail;
-use futures::lock::Mutex;
 use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
 // use scc::HashMap;
@@ -19,7 +18,7 @@ use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
 use tracing::warn;
 
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{oneshot, watch, Mutex};
 
 use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -35,7 +34,7 @@ use messages::*;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::str::FromStr;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -482,9 +481,70 @@ impl Consumer {
     //     Ok(())
     // }
     async fn poll_wait(&self) -> RawResult<(Offset, MessageSet<Meta, Data>)> {
-        // use crate::query::asyn::is_support_binary_sql;
-
         let elapsed = tokio::time::Instant::now();
+
+        let is_in_polling =
+            self.polling_mutex
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed);
+
+        if is_in_polling.is_err() {
+            if let Ok(data) = self.cache.recv_async().await {
+                match data {
+                    TmqRecvData::Poll(TmqPoll {
+                        message_id,
+                        database,
+                        have_message,
+                        topic,
+                        vgroup_id,
+                        message_type,
+                        offset,
+                        timing,
+                    }) => {
+                        if have_message {
+                            let dur = elapsed.elapsed();
+                            let offset = Offset {
+                                message_id,
+                                database,
+                                topic,
+                                vgroup_id,
+                                offset,
+                                timing,
+                            };
+                            let message = WsMessageBase {
+                                is_support_fetch_raw: self.support_fetch_raw,
+                                sender: self.sender.clone(),
+                                message_id,
+                                raw_blocks: Arc::new(Mutex::new(None)),
+                            };
+                            tracing::trace!("Got message in {}ms", dur.as_millis());
+
+                            // Release the lock.
+                            self.polling_mutex.store(false, Ordering::Release);
+
+                            return match message_type {
+                                MessageType::Meta => Ok((offset, MessageSet::Meta(Meta(message)))),
+                                MessageType::Data => Ok((offset, MessageSet::Data(Data(message)))),
+                                MessageType::MetaData => Ok((
+                                    offset,
+                                    MessageSet::MetaData(
+                                        Meta(message),
+                                        Data(WsMessageBase {
+                                            is_support_fetch_raw: self.support_fetch_raw,
+                                            sender: self.sender.clone(),
+                                            message_id,
+                                            raw_blocks: Arc::new(Mutex::new(None)),
+                                        }),
+                                    ),
+                                )),
+                                MessageType::Invalid => unreachable!(),
+                                // _ => unreachable!(),
+                            };
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
 
         loop {
             let req_id = self.sender.req_id();
@@ -674,6 +734,11 @@ impl AsAsyncConsumer for Consumer {
     }
 
     async fn commit_all(&self) -> RawResult<()> {
+        if self.polling_mutex.load(Ordering::Acquire) {
+            return Err(RawError::from_string(
+                "polling data is in queue, can't commit all",
+            ));
+        }
         let req_id = self.sender.req_id();
         let action = TmqSend::Commit(MessageArgs {
             req_id,
@@ -685,6 +750,11 @@ impl AsAsyncConsumer for Consumer {
     }
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()> {
+        if self.polling_mutex.load(Ordering::Acquire) {
+            return Err(RawError::from_string(
+                "polling data is in queue, can't commit current message",
+            ));
+        }
         let req_id = self.sender.req_id();
         let action = TmqSend::Commit(MessageArgs {
             req_id,
@@ -1133,6 +1203,10 @@ impl TmqBuilder {
             }
         });
 
+        let (cache_tx, cache_rx) = flume::bounded(1);
+        let polling_mutex = Arc::new(AtomicBool::new(false));
+        let polling_mutex2 = polling_mutex.clone();
+
         tokio::spawn(async move {
             let instant = Instant::now();
             'ws: loop {
@@ -1157,7 +1231,7 @@ impl TmqBuilder {
                                             }
                                         },
                                         TmqRecvData::Unsubscribe => {
-                                            tracing::trace!("unsubscribe with: {:?} successed", req_id);
+                                            tracing::trace!("unsubscribe with: {:?} success", req_id);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 // We don't care about the result of the sender for unsubscribe
@@ -1168,43 +1242,55 @@ impl TmqBuilder {
                                             }
                                         },
                                         TmqRecvData::Poll(_) => {
+                                            polling_mutex2.store(true, Ordering::Release);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 if let Err(err) = sender.send(ok.map(|_|recv)) {
-                                                    if let Ok(TmqRecvData::Poll(TmqPoll {message_id, have_message, topic, ..})) = err {
-                                                        if !have_message {
-                                                            continue;
-                                                        }
-                                                        tracing::error!(req_id, message_id, topic, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
-
-                                                        let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                                        for k in keys {
-                                                            if let Some((_, sender)) = queries_sender.remove(&k) {
-                                                                let _ = sender.send(Err(RawError::new(
-                                                                    WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                                    format!("Consumer messages lost"),
-                                                                )));
+                                                    if let Ok(data) = err {
+                                                        if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
+                                                            if !have_message {
+                                                                polling_mutex2.store(false, Ordering::Release);
+                                                                continue;
                                                             }
                                                         }
-                                                        break 'ws;
-                                                    }
-                                                }
-                                            }  else if let TmqRecvData::Poll(TmqPoll {message_id, have_message, topic, ..}) = recv {
-                                                if !have_message {
-                                                    continue;
-                                                }
-                                                tracing::error!(req_id, message_id, topic, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
 
-                                                let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                                for k in keys {
-                                                    if let Some((_, sender)) = queries_sender.remove(&k) {
-                                                        let _ = sender.send(Err(RawError::new(
-                                                            WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                            format!("Consumer messages lost"),
-                                                        )));
+                                                        if let Err(err) = cache_tx.send(data) {
+                                                            tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
+
+                                                            let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                            for k in keys {
+                                                                if let Some((_, sender)) = queries_sender.remove(&k) {
+                                                                    let _ = sender.send(Err(RawError::new(
+                                                                        WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                                        format!("Consumer messages lost"),
+                                                                    )));
+                                                                }
+                                                            }
+                                                            break 'ws;
+                                                        };
                                                     }
                                                 }
-                                                break 'ws;
+                                            }  else {
+                                                if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &recv {
+                                                    if !have_message {
+                                                        polling_mutex2.store(false, Ordering::Release);
+                                                        continue;
+                                                    }
+                                                }
+                                                if let Err(err) = cache_tx.send(recv) {
+                                                    tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
+
+                                                    let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                    for k in keys {
+                                                        if let Some((_, sender)) = queries_sender.remove(&k) {
+                                                            let _ = sender.send(Err(RawError::new(
+                                                                WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                                format!("Consumer messages lost"),
+                                                            )));
+                                                        }
+                                                    }
+                                                    break 'ws;
+                                                };
                                             }
                                         },
                                         TmqRecvData::FetchJsonMeta { data }=> {
@@ -1407,6 +1493,8 @@ impl TmqBuilder {
             timeout: self.timeout,
             topics: vec![],
             support_fetch_raw: is_support_binary_sql(&version),
+            polling_mutex,
+            cache: cache_rx,
         };
 
         Ok(consumer)
@@ -1422,6 +1510,9 @@ pub struct Consumer {
     timeout: Timeout,
     topics: Vec<String>,
     support_fetch_raw: bool,
+    /// Polling, if true, the consumer will wait for the message to be consumed.
+    polling_mutex: Arc<AtomicBool>,
+    cache: flume::Receiver<TmqRecvData>,
 }
 
 impl Drop for Consumer {
