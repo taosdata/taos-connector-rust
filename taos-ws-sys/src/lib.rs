@@ -956,6 +956,7 @@ pub unsafe extern "C" fn ws_connect(dsn: *const c_char) -> *mut WS_TAOS {
 }
 
 #[no_mangle]
+#[allow(static_mut_refs)]
 /// Same to taos_get_server_info, returns server version info.
 pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char {
     static mut VERSION_INFO: [u8; 128] = [0; 128];
@@ -1173,6 +1174,7 @@ pub unsafe extern "C" fn ws_select_db(taos: *mut WS_TAOS, db: *const c_char) -> 
     }
 }
 
+#[allow(static_mut_refs)]
 #[no_mangle]
 /// If the query is update query or not
 pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
