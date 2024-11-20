@@ -780,7 +780,7 @@ impl RawBlock {
     #[inline]
     pub fn deserialize<'de, 'a: 'de, T>(
         &'a self,
-    ) -> std::iter::Map<rows::RowsIter<'_>, fn(RowView<'a>) -> Result<T, DeError>>
+    ) -> std::iter::Map<rows::RowsIter<'a>, fn(RowView<'a>) -> Result<T, DeError>>
     where
         T: Deserialize<'de>,
     {

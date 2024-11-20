@@ -1381,7 +1381,7 @@ impl AsyncQueryable for WsTaos {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flume::{unbounded, SendError};
+    use flume::unbounded;
     use futures::TryStreamExt;
 
     #[test]

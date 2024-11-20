@@ -82,11 +82,20 @@ pub struct TmqInit {
     pub snapshot_enable: String,
     pub with_table_name: String,
     pub auto_commit: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_commit_interval_ms: Option<String>,
     pub offset_seek: Option<String>,
-    pub enable_batch_meta: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_batch_meta: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub msg_consume_excluded: Option<String>,
+}
+
+impl TmqInit {
+    pub(super) fn disable_batch_meta(mut self) -> Self {
+        self.enable_batch_meta = None;
+        self
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
