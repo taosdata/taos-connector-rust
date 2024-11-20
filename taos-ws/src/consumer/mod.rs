@@ -92,6 +92,7 @@ pub struct TmqBuilder {
     info: TaosBuilder,
     conf: TmqInit,
     timeout: Timeout,
+    server_version: std::sync::OnceLock<String>,
 }
 
 impl TBuilder for TmqBuilder {
@@ -122,7 +123,7 @@ impl TBuilder for TmqBuilder {
     }
 
     fn server_version(&self) -> RawResult<&str> {
-        todo!()
+        Ok("3.0.0.0")
     }
 
     fn is_enterprise_edition(&self) -> RawResult<bool> {
@@ -184,7 +185,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
     }
 
     fn client_version() -> &'static str {
-        "0"
+        env!("CARGO_PKG_VERSION")
     }
 
     async fn ping(&self, _: &mut Self::Target) -> RawResult<()> {
@@ -200,11 +201,29 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
     }
 
     async fn server_version(&self) -> RawResult<&str> {
-        todo!()
+        match self.server_version.get().map(|x| x.as_str()) {
+            Some(v) => Ok(v),
+            None => {
+                use taos_query::prelude::AsyncQueryable;
+
+                let taos = taos_query::AsyncTBuilder::build(&self.info).await?;
+                // Ensure server is ready.
+                let version: Option<String> = taos.query_one("select server_version()").await?;
+                if let Some(version) = version {
+                    let _ = self.server_version.set(version);
+                }
+                self.server_version
+                    .get()
+                    .map(|x| x.as_str())
+                    .ok_or_else(|| RawError::from_string("Server version is unknown"))
+            }
+        }
     }
 
     async fn is_enterprise_edition(&self) -> RawResult<bool> {
-        todo!()
+        taos_query::AsyncTBuilder::get_edition(self)
+            .await
+            .map(|edition| edition.is_enterprise_edition())
     }
 
     async fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
@@ -1071,6 +1090,7 @@ impl TmqBuilder {
             info,
             conf,
             timeout,
+            server_version: std::sync::OnceLock::new(),
         })
     }
 
@@ -1249,8 +1269,21 @@ impl TmqBuilder {
                                         TmqRecvData::Poll(_) => {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
+                                                #[cfg(test)]
+                                                #[allow(static_mut_refs)]
+                                                {
+                                                    if std::env::var("TEST_POLLING_LOST").is_ok() {
+                                                        static mut POLLING_LOST_IDX: u64 = 0;
+                                                        unsafe {
+                                                            POLLING_LOST_IDX += 1;
+                                                            tokio::time::sleep(Duration::from_millis(500)).await;
+                                                            tracing::warn!(lost = POLLING_LOST_IDX, "polling lost");
+                                                        }
+                                                    }
+                                                }
                                                 if let Err(err) = sender.send(ok.map(|_|recv)) {
                                                     if let Ok(data) = err {
+                                                        tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data);
                                                         if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
                                                             if !have_message {
                                                                 polling_mutex2.store(false, Ordering::Release);
@@ -1625,6 +1658,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_tmq_meta_batch() -> anyhow::Result<()> {
+        use taos_query::prelude::AsyncTBuilder;
         use taos_query::prelude::*;
         let _ = tracing_subscriber::fmt()
             .with_file(true)
@@ -1714,6 +1748,10 @@ mod tests {
         let builder = TmqBuilder::new(
             "taos://localhost:6041?group.id=10&timeout=5s&auto.offset.reset=earliest&msg.enable.batchmeta=true&experimental.snapshot.enable=true",
         )?;
+
+        let _ = dbg!(builder.get_edition().await);
+        let _ = dbg!(builder.server_version().await);
+        assert!(builder.ready().await);
         let mut consumer = builder.build_consumer().await?;
         consumer.subscribe(["ws_tmq_meta_batch"]).await?;
 
@@ -2493,13 +2531,12 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_ws_tmq_poll_lost() -> anyhow::Result<()> {
         use taos_query::prelude::*;
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::DEBUG)
+            .with_max_level(tracing::Level::TRACE)
             .compact()
             .try_init();
 
@@ -2521,6 +2558,12 @@ mod tests {
             "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
             "create table tb1 using stb1 tags(NULL)",
             "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)
+            tb1 values(now, true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            "insert into tb1 using stb1 tags(NULL) values(now, NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL)
             tb1 values(now, true, -2, -3, -4, -5, \
@@ -2586,14 +2629,13 @@ mod tests {
         )?;
         let mut consumer = builder.build_consumer().await?;
         consumer.subscribe(["test_ws_tmq_poll_lost"]).await?;
+        std::env::set_var("TEST_POLLING_LOST", "1");
 
         {
-            let mut stream = consumer.stream();
-
             let sleep = tokio::time::sleep(Duration::from_millis(400));
             tokio::pin!(sleep);
             let _ = tokio::select! {
-                res = stream.try_next() => {
+                res = consumer.recv_timeout(Timeout::Duration(Duration::from_millis(400))) => {
                     res
                 }
                 _ = &mut sleep => {
@@ -2606,7 +2648,7 @@ mod tests {
             })?;
 
             let _ = tokio::select! {
-                res = stream.try_next() => {
+                res = consumer.recv_timeout(Timeout::Duration(Duration::from_millis(400))) => {
                     res
                 }
                 _ = &mut sleep => {
@@ -2618,7 +2660,7 @@ mod tests {
                 println!("err: {:?}", err);
             })?;
             let _ = tokio::select! {
-                res = stream.try_next() => {
+                res = consumer.recv_timeout(Timeout::Duration(Duration::from_millis(400))) => {
                     res
                 }
                 _ = &mut sleep => {
@@ -2629,6 +2671,8 @@ mod tests {
             .inspect_err(|err| {
                 println!("err: {:?}", err);
             })?;
+
+            let mut stream = consumer.stream();
 
             while let Some((offset, message)) = stream.try_next().await? {
                 // Offset contains information for topic name, database name and vgroup id,
