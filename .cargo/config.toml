@@ -1,12 +1,16 @@
 [target.'cfg(all())']
 rustflags = [
     "-Dclippy::perf",
-    # "-Dclippy::complexity",
+    "-Dclippy::complexity",
+    # "-Dclippy::not_unsafe_ptr_arg_deref",
+    # "-Dclippy::msrv=1.65",
+    # "-Dclippy::incompatible_msrv",
 
     # "-Dclippy::style",
+    # "-Dunsafe_code",
+
     # "-Aclippy::module_name_repetitions",
 
-    # "-Dunsafe_code",
     # "-Wclippy::all",
     # "-Wclippy::await_holding_lock",
     # "-Wclippy::char_lit_as_u8",
