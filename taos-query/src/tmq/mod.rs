@@ -61,7 +61,7 @@ pub enum TimeoutError {
 
 fn parse_duration(s: &str) -> Result<Duration, TimeoutError> {
     let s = s.trim();
-    let (value, unit) = s.split_at(s.find(|c: char| !c.is_digit(10)).unwrap_or(s.len()));
+    let (value, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len()));
 
     let value: u64 = value
         .parse()
