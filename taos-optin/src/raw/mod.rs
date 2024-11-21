@@ -1311,6 +1311,7 @@ impl RawRes {
             )
         }
     }
+
     #[inline]
     pub fn with_code(self, code: Code) -> Result<Self, RawError> {
         if code.success() {
@@ -1319,16 +1320,19 @@ impl RawRes {
             Err(RawError::new(code, self.err_as_str()))
         }
     }
+
     #[inline]
     pub fn from_ptr(c: Arc<ApiEntry>, ptr: *mut TAOS_RES) -> Result<Self, RawError> {
         let raw = unsafe { Self::from_ptr_unchecked(c, ptr) };
         let code = raw.errno();
         raw.with_code(code)
     }
+
     #[inline]
     pub unsafe fn from_ptr_unchecked(c: Arc<ApiEntry>, ptr: *mut TAOS_RES) -> RawRes {
         Self { c, ptr }
     }
+
     #[inline]
     pub fn from_ptr_with_code(
         c: Arc<ApiEntry>,

@@ -411,6 +411,7 @@ mod tests {
     }
 
     impl<'q> crate::Fetchable for MyResultSet {
+        #[allow(static_mut_refs)]
         fn fields(&self) -> &[Field] {
             static mut F: Option<Vec<Field>> = None;
             unsafe { F.get_or_insert(vec![Field::new("a", Ty::TinyInt, 1)]) };
@@ -431,6 +432,7 @@ mod tests {
 
         fn update_summary(&mut self, _rows: usize) {}
 
+        #[allow(static_mut_refs)]
         fn fetch_raw_block(&mut self) -> RawResult<Option<RawBlock>> {
             static mut B: AtomicUsize = AtomicUsize::new(4);
             unsafe {

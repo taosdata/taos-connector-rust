@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use std::thread;
 use std::{
     cell::RefCell,
     ffi::{c_void, CStr, CString},
@@ -854,10 +855,35 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     };
     let dsn = dsn.to_str()?;
     let builder = TaosBuilder::from_dsn(dsn)?;
-    let mut taos = builder.build()?;
 
-    builder.ping(&mut taos)?;
-    Ok(taos)
+    if dsn.contains("kepware") {
+        let stack_size = 4 * 1024 * 1024;
+
+        let handle = thread::Builder::new()
+            .stack_size(stack_size)
+            .spawn(move || {
+                let result = builder.build();
+                match result {
+                    Ok(mut taos) => {
+                        builder.ping(&mut taos)?;
+                        return Ok(taos);
+                    }
+                    Err(e) => return Err(e),
+                }
+            })
+            .expect("Failed to spawn thread");
+
+        let result = handle.join().expect("Thread panicked");
+        match result {
+            Ok(taos) => return Ok(taos),
+            Err(e) => return Err(WsError::new(Code::FAILED, &format!("{}", e))),
+        }
+    } else {
+        let mut taos = builder.build()?;
+
+        builder.ping(&mut taos)?;
+        Ok(taos)
+    }
 }
 
 /// Enable inner log to stdout with para log_level.
@@ -931,6 +957,7 @@ pub unsafe extern "C" fn ws_connect(dsn: *const c_char) -> *mut WS_TAOS {
 }
 
 #[no_mangle]
+#[allow(static_mut_refs)]
 /// Same to taos_get_server_info, returns server version info.
 pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char {
     static mut VERSION_INFO: [u8; 128] = [0; 128];
@@ -1148,6 +1175,7 @@ pub unsafe extern "C" fn ws_select_db(taos: *mut WS_TAOS, db: *const c_char) -> 
     }
 }
 
+#[allow(static_mut_refs)]
 #[no_mangle]
 /// If the query is update query or not
 pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
@@ -2003,6 +2031,40 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn kepware_connect() {
+        let stack_size = 256 * 1024;
+
+        let handle = thread::Builder::new()
+            .stack_size(stack_size)
+            .spawn(|| {
+                // 在线程中执行连接操作
+                let dsn = "http://localhost:6041?company=kepware";
+
+                init_env();
+                unsafe {
+                    // 将 Rust 的 String 转换为 CString
+                    let c_dsn = CString::new(dsn).expect("CString::new failed");
+
+                    let taos = ws_connect(c_dsn.as_ptr() as *const u8 as _);
+                    if taos.is_null() {
+                        let code = ws_errno(taos);
+                        assert!(code != 0);
+                        let str = ws_errstr(taos);
+                        dbg!(CStr::from_ptr(str));
+                    }
+                    assert!(!taos.is_null());
+
+                    let version = ws_get_server_info(taos);
+                    dbg!(CStr::from_ptr(version as _));
+                }
+            })
+            .expect("Failed to spawn thread");
+
+        // 等待线程完成
+        handle.join().expect("Thread panicked");
+    }
+
     #[test]
     fn connect_cloud() {
         use std::env;
