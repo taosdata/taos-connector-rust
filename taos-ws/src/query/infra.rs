@@ -6,14 +6,15 @@ use serde_with::NoneAsEmptyString;
 use taos_query::common::{Precision, Ty};
 use taos_query::prelude::RawError;
 
-pub type ReqId = u64;
+pub(crate) type ReqId = u64;
+pub(crate) type StmtId = u64;
 
 /// Type for result ID.
-pub type ResId = u64;
+pub(crate) type ResId = u64;
 
 #[serde_as]
 #[derive(Debug, Serialize, Default, Clone)]
-pub struct WsConnReq {
+pub(crate) struct WsConnReq {
     pub(crate) user: Option<String>,
     pub(crate) password: Option<String>,
     #[serde_as(as = "NoneAsEmptyString")]
@@ -24,7 +25,7 @@ pub struct WsConnReq {
 
 impl WsConnReq {
     #[cfg(test)]
-    pub fn new(user: impl Into<String>, password: impl Into<String>) -> Self {
+    fn new(user: impl Into<String>, password: impl Into<String>) -> Self {
         Self {
             user: Some(user.into()),
             password: Some(password.into()),
@@ -32,6 +33,7 @@ impl WsConnReq {
             mode: None,
         }
     }
+
     // pub fn with_database(mut self, db: impl Into<String>) -> Self {
     //     self.db = Some(db.into());
     //     self
@@ -39,7 +41,7 @@ impl WsConnReq {
 }
 
 #[derive(Debug, Serialize, Clone, Copy)]
-pub struct WsResArgs {
+pub(crate) struct WsResArgs {
     pub req_id: ReqId,
     pub id: ResId,
 }
@@ -47,7 +49,7 @@ pub struct WsResArgs {
 #[derive(Debug, Serialize)]
 #[serde(tag = "action", content = "args")]
 #[serde(rename_all = "snake_case")]
-pub enum WsSend {
+pub(crate) enum WsSend {
     Version,
     // Pong(Vec<u8>),
     Conn {
@@ -70,18 +72,46 @@ pub enum WsSend {
     FetchBlock(WsResArgs),
     Binary(Vec<u8>),
     FreeResult(WsResArgs),
+    Stmt2Init {
+        req_id: ReqId,
+        single_stb_insert: bool,
+        single_table_bind_once: bool,
+    },
+    Stmt2Prepare {
+        req_id: ReqId,
+        stmt_id: StmtId,
+        sql: String,
+        get_fields: bool,
+    },
+    Stmt2Exec {
+        req_id: ReqId,
+        stmt_id: StmtId,
+    },
+    Stmt2Result {
+        req_id: ReqId,
+        stmt_id: StmtId,
+    },
+    Stmt2Close {
+        req_id: ReqId,
+        stmt_id: StmtId,
+    },
 }
 
 impl WsSend {
     pub(crate) fn req_id(&self) -> ReqId {
         match self {
-            WsSend::Conn { req_id, req: _ } => *req_id,
+            WsSend::Conn { req_id, .. }
+            | WsSend::Query { req_id, .. }
+            | WsSend::Stmt2Init { req_id, .. }
+            | WsSend::Stmt2Prepare { req_id, .. }
+            | WsSend::Stmt2Exec { req_id, .. }
+            | WsSend::Stmt2Result { req_id, .. }
+            | WsSend::Stmt2Close { req_id, .. } => *req_id,
             WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
-            WsSend::Query { req_id, sql: _ } => *req_id,
-            WsSend::Fetch(args) => args.req_id,
-            WsSend::FetchBlock(args) => args.req_id,
-            WsSend::FreeResult(args) => args.req_id,
             WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
+            WsSend::Fetch(args) | WsSend::FetchBlock(args) | WsSend::FreeResult(args) => {
+                args.req_id
+            }
             _ => unreachable!(),
         }
     }
@@ -109,16 +139,16 @@ fn test_serde_send() {
     assert_eq!(v, j);
 }
 
-#[derive(Debug, Serialize)]
-pub struct WsFetchArgs {
-    req_id: ReqId,
-    id: ResId,
-}
+// #[derive(Debug, Serialize)]
+// pub struct WsFetchArgs {
+//     req_id: ReqId,
+//     id: ResId,
+// }
 
 #[serde_as]
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
-pub struct WsQueryResp {
+pub(crate) struct WsQueryResp {
     pub id: ResId,
     pub is_update: bool,
     pub affected_rows: usize,
@@ -134,7 +164,7 @@ pub struct WsQueryResp {
 #[serde_as]
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(default)]
-pub struct InsertResp {
+pub(crate) struct InsertResp {
     #[serde_as(as = "serde_with::DurationNanoSeconds")]
     pub timing: Duration,
 }
@@ -142,7 +172,7 @@ pub struct InsertResp {
 #[serde_as]
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(default)]
-pub struct WsFetchResp {
+pub(crate) struct WsFetchResp {
     pub id: ResId,
     pub completed: bool,
     pub lengths: Option<Vec<u32>>,
@@ -151,11 +181,42 @@ pub struct WsFetchResp {
     pub timing: Duration,
 }
 
+#[serde_as]
+#[derive(Debug, Deserialize)]
+pub(crate) struct WsRecv {
+    pub code: i32,
+    #[serde_as(as = "NoneAsEmptyString")]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub req_id: ReqId,
+    #[serde(flatten)]
+    pub data: WsRecvData,
+}
+
+impl WsRecv {
+    pub(crate) fn ok(self) -> (ReqId, WsRecvData, Result<(), RawError>) {
+        (
+            self.req_id,
+            self.data,
+            if self.code == 0 {
+                Ok(())
+            } else {
+                if self.message.as_deref() == Some("success") {
+                    Err(RawError::from_code(self.code))
+                } else {
+                    Err(RawError::new(self.code, self.message.unwrap_or_default()))
+                }
+            },
+        )
+    }
+}
+
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 #[serde_as]
 #[serde(tag = "action")]
 #[serde(rename_all = "snake_case")]
-pub enum WsRecvData {
+pub(crate) enum WsRecvData {
     Conn,
     Version {
         version: String,
@@ -196,35 +257,159 @@ pub enum WsRecvData {
     WriteRaw,
     WriteRawBlock,
     WriteRawBlockWithFields,
+    Stmt2Init {
+        #[serde(default)]
+        stmt_id: StmtId,
+        #[serde(default)]
+        timing: u64,
+    },
+    Stmt2Prepare {
+        #[serde(default)]
+        stmt_id: StmtId,
+        #[serde(default)]
+        is_insert: bool,
+        #[serde(default)]
+        fields: Option<Vec<Stmt2Field>>,
+        #[serde(default)]
+        fields_count: usize,
+        #[serde(default)]
+        timing: u64,
+    },
+    Stmt2Bind {
+        #[serde(default)]
+        stmt_id: StmtId,
+        #[serde(default)]
+        timing: u64,
+    },
+    Stmt2Exec {
+        #[serde(default)]
+        stmt_id: StmtId,
+        #[serde(default)]
+        affected: usize,
+        #[serde(default)]
+        timing: u64,
+    },
+    Stmt2Result {
+        #[serde(default)]
+        stmt_id: StmtId,
+        #[serde(default)]
+        result_id: u64,
+        #[serde(default)]
+        fields_count: u64,
+        #[serde(default)]
+        fields_names: Vec<String>,
+        #[serde(default)]
+        fields_types: Vec<Ty>,
+        #[serde(default)]
+        fields_lengths: Vec<u64>,
+        #[serde(default)]
+        precision: Precision,
+        #[serde(default)]
+        timing: u64,
+    },
+    Stmt2Close {
+        #[serde(default)]
+        stmt_id: StmtId,
+        #[serde(default)]
+        timing: u64,
+    },
 }
 
-#[serde_as]
-#[derive(Debug, Deserialize)]
-pub struct WsRecv {
-    pub code: i32,
-    #[serde_as(as = "NoneAsEmptyString")]
-    pub message: Option<String>,
-    #[serde(default)]
-    pub req_id: ReqId,
-    #[serde(flatten)]
-    pub data: WsRecvData,
+#[allow(dead_code)]
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct Stmt2Field {
+    pub name: String,
+    pub field_type: i8,
+    pub precision: u8,
+    pub scale: u8,
+    pub bytes: i32,
+    pub bind_type: BindType,
 }
 
-impl WsRecv {
-    pub(crate) fn ok(self) -> (ReqId, WsRecvData, Result<(), RawError>) {
-        (
-            self.req_id,
-            self.data,
-            if self.code == 0 {
-                Ok(())
-            } else {
-                if self.message.as_deref() == Some("success") {
-                    Err(RawError::from_code(self.code))
-                } else {
-                    Err(RawError::new(self.code, self.message.unwrap_or_default()))
-                }
-            },
-        )
+#[derive(Clone, Debug)]
+pub(crate) enum BindType {
+    Column,
+    Tag,
+    TableName,
+}
+
+impl<'de> Deserialize<'de> for BindType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct BindTypeVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for BindTypeVisitor {
+            type Value = BindType;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a valid number for BindType")
+            }
+
+            fn visit_i8<E>(self, v: i8) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(match v {
+                    1 => BindType::Column,
+                    2 => BindType::Tag,
+                    4 => BindType::TableName,
+                    _ => return Err(E::custom(format!("Invalid bind type: {}", v))),
+                })
+            }
+
+            fn visit_i16<E>(self, v: i16) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_u16<E>(self, v: u16) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_u32<E>(self, v: u32) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_i8(v as _)
+            }
+        }
+
+        deserializer.deserialize_any(BindTypeVisitor)
     }
 }
 
@@ -250,7 +435,6 @@ impl ToMessage for WsSend {}
 
 #[cfg(test)]
 mod tests {
-
     use crate::*;
 
     #[test]

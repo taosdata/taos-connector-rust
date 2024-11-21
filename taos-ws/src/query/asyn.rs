@@ -121,6 +121,7 @@ impl WsQuerySender {
         tracing::trace!("[req id: {req_id}] message received: {res:?}");
         Ok(res)
     }
+
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
         timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
             .await
@@ -141,6 +142,7 @@ pub struct WsTaos {
     close_signal: watch::Sender<bool>,
     sender: WsQuerySender,
 }
+
 impl Drop for WsTaos {
     fn drop(&mut self) {
         tracing::trace!("dropping connection");
@@ -394,7 +396,19 @@ async fn read_queries(
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     }
-
+                    WsRecvData::Stmt2Init { .. }
+                    | WsRecvData::Stmt2Prepare { .. }
+                    | WsRecvData::Stmt2Bind { .. }
+                    | WsRecvData::Stmt2Exec { .. }
+                    | WsRecvData::Stmt2Result { .. }
+                    | WsRecvData::Stmt2Close { .. } => match queries_sender.remove(&req_id) {
+                        Some((_, sender)) => {
+                            let _ = sender.send(ok.map(|_| data));
+                        }
+                        None => {
+                            tracing::warn!("req_id {req_id} not detected, message might be lost")
+                        }
+                    },
                     // Block type is for binary.
                     _ => unreachable!(),
                 }
@@ -621,7 +635,7 @@ impl WsTaos {
         let info = TaosBuilder::from_dsn(dsn)?;
         Self::from_wsinfo(&info).await
     }
-    #[allow(dead_code)]
+
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
         let ws = info.build_stream(info.to_query_url()).await?;
 
@@ -858,6 +872,7 @@ impl WsTaos {
             }
         }
     }
+
     async fn s_write_raw_block(&self, raw: &RawBlock) -> RawResult<()> {
         let req_id = self.sender.req_id();
         self.s_write_raw_block_with_req_id(raw, req_id)
@@ -1212,6 +1227,10 @@ impl WsTaos {
     pub fn get_req_id(&self) -> ReqId {
         self.sender.req_id()
     }
+
+    pub(crate) async fn send_request(&self, req: WsSend) -> RawResult<WsRecvData> {
+        self.sender.send_recv(req).await
+    }
 }
 
 impl ResultSet {
@@ -1375,7 +1394,7 @@ impl AsyncQueryable for WsTaos {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flume::{unbounded, SendError};
+    use flume::unbounded;
     use futures::TryStreamExt;
 
     #[test]

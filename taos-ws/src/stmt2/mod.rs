@@ -1,516 +1,158 @@
 mod bind;
-mod messages;
 
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::Duration;
 
-use dashmap::DashMap;
-use futures::{SinkExt, StreamExt};
-use messages::*;
-use serde::Serialize;
+use taos_query::block_in_place_or_global;
 use taos_query::prelude::RawResult;
-use taos_query::stmt2::Stmt2BindData;
-use taos_query::stmt2::{AsyncBindable, Bindable};
-use taos_query::{IntoDsn, RawError};
-use tokio::sync::{mpsc, oneshot, watch};
-use tokio_tungstenite::tungstenite::protocol::Message;
-use tracing::{debug, warn};
+use taos_query::stmt2::{AsyncBindable, Bindable, Stmt2BindData};
 
-use crate::query::asyn::Error;
-use crate::query::infra::ToMessage;
-use crate::TaosBuilder;
-
-type StmtNumResult = RawResult<Option<usize>>;
-type StmtNumResultSender = mpsc::Sender<StmtNumResult>;
-type StmtNumResultReceiver = mpsc::Receiver<StmtNumResult>;
-
-type StmtPrepareResultResult = RawResult<Stmt2PrepareResult>;
-type StmtPrepareResultSender = mpsc::Sender<StmtPrepareResultResult>;
-type StmtPrepareResultReceiver = mpsc::Receiver<StmtPrepareResultResult>;
-
-type StmtResultResult = RawResult<Stmt2Result>;
-type StmtResultResultSender = mpsc::Sender<StmtResultResult>;
-type StmtResultResultReceiver = mpsc::Receiver<StmtResultResult>;
-
-type StmtBindResult = RawResult<()>;
-type StmtBindSender = mpsc::Sender<StmtBindResult>;
-type StmtBindReceiver = mpsc::Receiver<StmtBindResult>;
-
-type StmtFieldResult = RawResult<Stmt2Fields>;
-type StmtFieldSender = mpsc::Sender<StmtFieldResult>;
-type StmtFieldReceiver = mpsc::Receiver<StmtFieldResult>;
-
-type StmtCloseResult = RawResult<()>;
-type StmtCloseSender = mpsc::Sender<StmtCloseResult>;
-type StmtCloseReceiver = mpsc::Receiver<StmtCloseResult>;
-
-type WsSender = mpsc::Sender<Message>;
-type StmtIdSender = oneshot::Sender<RawResult<StmtId>>;
-
-pub type ReqId = u64;
-pub type StmtId = u64;
+use crate::query::infra::{ReqId, Stmt2Field, StmtId, WsRecvData, WsSend};
+use crate::query::WsTaos;
 
 #[derive(Debug)]
 pub struct Stmt2 {
-    ws: WsSender,
-    timeout: Duration,
-    close_signal: watch::Sender<bool>,
-    args: Option<Stmt2Args>,
-    stmt_id_sender_map: Arc<DashMap<ReqId, StmtIdSender>>,
-    stmt_num_res_receiver: Option<StmtNumResultReceiver>,
-    stmt_num_res_sender_map: Arc<DashMap<StmtId, StmtNumResultSender>>,
-    stmt_prepare_res_receiver: Option<StmtPrepareResultReceiver>,
-    stmt_prepare_res_sender_map: Arc<DashMap<StmtId, StmtPrepareResultSender>>,
-    stmt_res_res_receiver: Option<StmtResultResultReceiver>,
-    stmt_res_res_sender_map: Arc<DashMap<StmtId, StmtResultResultSender>>,
-    stmt_bind_receiver: Option<StmtBindReceiver>,
-    stmt_bind_sender_map: Arc<DashMap<StmtId, StmtBindSender>>,
-    stmt_fields_receiver: Option<StmtFieldReceiver>,
-    stmt_fields_sender_map: Arc<DashMap<StmtId, StmtFieldSender>>,
-    stmt_close_receiver: Option<StmtCloseReceiver>,
-    stmt_close_sender_map: Arc<DashMap<StmtId, StmtCloseSender>>,
+    client: Arc<WsTaos>,
+    stmt_id: Option<StmtId>,
+    is_insert: Option<bool>,
+    fields: Option<Vec<Stmt2Field>>,
+    fields_count: Option<usize>,
     affected_rows: usize,
     affected_rows_once: usize,
-    // prepare get_fields
-    is_insert: Option<bool>,
-    fields: Option<Vec<PrepareField>>,
-    fields_count: Option<usize>,
-}
-
-#[derive(Debug, Serialize, Clone, Copy)]
-pub struct Stmt2Args {
-    pub req_id: ReqId,
-    pub stmt_id: StmtId,
 }
 
 impl Stmt2 {
-    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        let ws = info.build_stream(info.to_stmt_url()).await?;
-        let (mut ws_sender, mut ws_recevier) = ws.split();
-
-        let req_id = 0;
-        let login = Stmt2Send::Conn {
-            req_id,
-            req: info.to_conn_request(),
-        };
-        ws_sender.send(login.to_msg()).await.map_err(Error::from)?;
-        if let Some(Ok(message)) = ws_recevier.next().await {
-            match message {
-                Message::Text(text) => {
-                    let v: Stmt2Recv = serde_json::from_str(&text).unwrap();
-                    match v.data {
-                        Stmt2RecvData::Conn => (),
-                        _ => unreachable!(),
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-
-        let stmt_id_sender_map = Arc::new(DashMap::<ReqId, StmtIdSender>::new());
-        let stmt_num_res_sender_map = Arc::new(DashMap::<StmtId, StmtNumResultSender>::new());
-        let stmt_prepare_res_sender_map =
-            Arc::new(DashMap::<StmtId, StmtPrepareResultSender>::new());
-        let stmt_res_res_sender_map = Arc::new(DashMap::<StmtId, StmtResultResultSender>::new());
-        let stmt_bind_sender_map = Arc::new(DashMap::<StmtId, StmtBindSender>::new());
-        let stmt_field_sender_map = Arc::new(DashMap::<StmtId, StmtFieldSender>::new());
-        let stmt_close_sender_map = Arc::new(DashMap::<StmtId, StmtCloseSender>::new());
-
-        let stmt_id_sender_map_clone = stmt_id_sender_map.clone();
-        let stmt_num_res_sender_map_clone = stmt_num_res_sender_map.clone();
-        let stmt_prepare_res_sender_map_clone = stmt_prepare_res_sender_map.clone();
-        let stmt_res_res_sender_map_clone = stmt_res_res_sender_map.clone();
-        let stmt_bind_sender_map_clone = stmt_bind_sender_map.clone();
-        let stmt_field_sender_map_clone = stmt_field_sender_map.clone();
-        let stmt_close_sender_map_clone = stmt_close_sender_map.clone();
-
-        let (msg_sender, mut msg_receiver) = mpsc::channel(100);
-        let (watch_sender, mut watch_receiver) = watch::channel(false);
-        let mut close_listener = watch_receiver.clone();
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    Some(msg) = msg_receiver.recv() => {
-                        debug!("receive msg: {msg}"); // delete
-                        if let Err(err) = ws_sender.send(msg).await {
-                            warn!("sender error: {err:#}");
-                            break;
-                        }
-                    }
-                    _ = watch_receiver.changed() => {
-                        debug!("close sender task");
-                        break;
-                    }
-                }
-            }
-        });
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    Some(message) = ws_recevier.next() => {
-                        match message {
-                            Ok(message) => match message {
-                                Message::Text(text) => {
-                                    tracing::trace!("json response: {}", text);
-                                    debug!("json response: {}", text);
-                                    let v: Stmt2Recv = serde_json::from_str(&text).unwrap();
-                                    debug!("object Stmt2Recv: {v:?}");
-                                    match v.ok() {
-                                        Stmt2Ok::Conn(_) => {
-                                            warn!("[{req_id}] received connected response in message loop");
-                                        },
-                                        Stmt2Ok::Stmt2Init(req_id, stmt_id) => {
-                                            debug!("stmt2 init done: {{ req_id: {}, stmt_id: {:?} }}", req_id, stmt_id);
-                                            if let Some((_, sender)) = stmt_id_sender_map.remove(&req_id) {
-                                                sender.send(stmt_id).unwrap();
-                                            } else {
-                                                debug!("stmt2 init failed because req id {req_id} not exist");
-                                            }
-                                        }
-                                        Stmt2Ok::Stmt2PrepareRes(stmt_id, res) => {
-                                            if let Some(sender) = stmt_prepare_res_sender_map.get(&stmt_id) {
-                                                debug!("send data to fetches with id {}", stmt_id);
-                                                sender.send(res).await.unwrap();
-                                            } else {
-                                                debug!("got unknown stmt id: {stmt_id} with result: {res:?}");
-                                            }
-                                        }
-                                        Stmt2Ok::Stmt2Res(stmt_id, res) => {
-                                            if let Some(sender) = stmt_res_res_sender_map.get(&stmt_id) {
-                                                debug!("send data to fetches with id {}", stmt_id);
-                                                sender.send(res).await.unwrap();
-                                            } else {
-                                                debug!("got unknown stmt id: {stmt_id} with result: {res:?}");
-                                            }
-                                        }
-                                        Stmt2Ok::Stmt2Bind(stmt_id, res) => {
-                                            if let Some(sender) = stmt_bind_sender_map.get(&stmt_id) {
-                                                debug!("Send data to bind with stmt_id: {stmt_id}");
-                                                sender.send(res).await.unwrap();
-                                            } else {
-                                                debug!("Bind got unknown stmt_id: {stmt_id}");
-                                            }
-                                        }
-                                        Stmt2Ok::Stmt2Fields(stmt_id, res) => {
-                                            if let Some(sender) = stmt_field_sender_map.get(&stmt_id) {
-                                                debug!("Send data to fields with stmt_id: {stmt_id}");
-                                                sender.send(res).await.unwrap();
-                                            } else {
-                                                debug!("GetFields got unknown stmt_id: {stmt_id}");
-                                            }
-                                        }
-                                        Stmt2Ok::Stmt2Close(stmt_id, res) => {
-                                            if let Some(sender) = stmt_close_sender_map.get(&stmt_id) {
-                                                debug!("Send data to close with stmt_id: {stmt_id}");
-                                                sender.send(res).await.unwrap();
-                                            } else {
-                                                debug!("Close got unknown stmt_id: {stmt_id}");
-                                            }
-                                        }
-                                        Stmt2Ok::Stmt2ExecRes(stmt_id, res) => {
-                                            if let Some(sender) = stmt_num_res_sender_map.get(&stmt_id) {
-                                                debug!("Send data to exec with stmt_id: {stmt_id}");
-                                                sender.send(res).await.unwrap();
-                                            } else {
-                                                debug!("Close got unknown stmt_id: {stmt_id}");
-                                            }
-                                        }
-                                    }
-                                }
-                                Message::Binary(_) => {
-                                    warn!("received (unexpected) binary message, do nothing");
-                                }
-                                Message::Close(_) => {
-                                    warn!("websocket connection is closed (unexpected?)");
-                                    break;
-                                }
-                                Message::Ping(_) => {
-                                    warn!("received (unexpected) ping message, do nothing");
-                                }
-                                Message::Pong(_) => {
-                                    warn!("received (unexpected) pong message, do nothing");
-                                }
-                                Message::Frame(frame) => {
-                                    warn!("received (unexpected) frame message, do nothing");
-                                    debug!("* frame data: {frame:?}");
-                                }
-                            },
-                            Err(err) => {
-                                debug!("receiving cause error: {err:?}");
-                                break;
-                            }
-                        }
-                    }
-                    _ = close_listener.changed() => {
-                        debug!("close reader task");
-                        break
-                    }
-                }
-            }
-        });
-
-        Ok(Self {
-            ws: msg_sender,
-            args: None,
-            timeout: Duration::from_secs(5),
-            stmt_id_sender_map: stmt_id_sender_map_clone,
-            stmt_num_res_receiver: None,
-            stmt_num_res_sender_map: stmt_num_res_sender_map_clone,
-            stmt_prepare_res_receiver: None,
-            stmt_prepare_res_sender_map: stmt_prepare_res_sender_map_clone,
-            stmt_res_res_receiver: None,
-            stmt_res_res_sender_map: stmt_res_res_sender_map_clone,
-            stmt_bind_receiver: None,
-            stmt_bind_sender_map: stmt_bind_sender_map_clone,
-            stmt_fields_receiver: None,
-            stmt_fields_sender_map: stmt_field_sender_map_clone,
-            stmt_close_receiver: None,
-            stmt_close_sender_map: stmt_close_sender_map_clone,
-            affected_rows: 0,
-            affected_rows_once: 0,
-            close_signal: watch_sender,
+    fn new(client: Arc<WsTaos>) -> Self {
+        Self {
+            client,
+            stmt_id: None,
             is_insert: None,
             fields: None,
             fields_count: None,
-        })
+            affected_rows: 0,
+            affected_rows_once: 0,
+        }
     }
 
-    pub async fn from_dsn(dsn: impl IntoDsn) -> RawResult<Self> {
-        let info = TaosBuilder::from_dsn(dsn)?;
-        Self::from_wsinfo(&info).await
-    }
-
-    pub async fn stmt2_init(
-        &mut self,
-        req_id: u64,
-        single_stb_insert: bool,
-        single_table_bind_once: bool,
-    ) -> RawResult<&mut Self> {
-        let init = Stmt2Send::Stmt2Init {
-            req_id,
-            single_stb_insert,
-            single_table_bind_once,
+    async fn init(&mut self) -> RawResult<()> {
+        let req = WsSend::Stmt2Init {
+            req_id: req_id(),
+            single_stb_insert: true,
+            single_table_bind_once: false,
         };
-        let (stmt_id_sender, stmt_id_recviver) = oneshot::channel();
-        self.stmt_id_sender_map.insert(req_id, stmt_id_sender);
-        self.ws.send(init.to_msg()).await.map_err(Error::from)?;
-        let stmt_id = stmt_id_recviver.await.map_err(Error::from)??;
-        let args = Stmt2Args { req_id, stmt_id };
-        self.args = Some(args);
-
-        let (stmt_num_res_sender, stmt_num_res_receiver) = mpsc::channel(2);
-        let _ = self
-            .stmt_num_res_sender_map
-            .insert(stmt_id, stmt_num_res_sender);
-        self.stmt_num_res_receiver = Some(stmt_num_res_receiver);
-
-        let (stmt_prepare_res_sender, stmt_prepare_res_receiver) = mpsc::channel(2);
-        let _ = self
-            .stmt_prepare_res_sender_map
-            .insert(stmt_id, stmt_prepare_res_sender);
-        self.stmt_prepare_res_receiver = Some(stmt_prepare_res_receiver);
-
-        let (stmt_res_res_sender, stmt_res_res_recevier) = mpsc::channel(2);
-        let _ = self
-            .stmt_res_res_sender_map
-            .insert(stmt_id, stmt_res_res_sender);
-        self.stmt_res_res_receiver = Some(stmt_res_res_recevier);
-
-        let (bind_sender, bind_receiver) = mpsc::channel(2);
-        let _ = self.stmt_bind_sender_map.insert(stmt_id, bind_sender);
-        self.stmt_bind_receiver = Some(bind_receiver);
-
-        let (fields_sender, fields_receiver) = mpsc::channel(2);
-        let _ = self.stmt_fields_sender_map.insert(stmt_id, fields_sender);
-        self.stmt_fields_receiver = Some(fields_receiver);
-
-        let (close_sender, close_receiver) = mpsc::channel(2);
-        let _ = self.stmt_close_sender_map.insert(stmt_id, close_sender);
-        self.stmt_close_receiver = Some(close_receiver);
-
-        Ok(self)
-    }
-
-    pub async fn stmt2_prepare<S: AsRef<str>>(
-        &mut self,
-        sql: S,
-        get_fields: bool,
-    ) -> RawResult<()> {
-        let prepare = Stmt2Send::Stmt2Prepare {
-            args: self.args.unwrap(),
-            sql: sql.as_ref().to_string(),
-            get_fields,
-        };
-        self.ws.send(prepare.to_msg()).await.map_err(Error::from)?;
-        let res = self
-            .stmt_prepare_res_receiver
-            .as_mut()
-            .unwrap()
-            .recv()
-            .await
-            .ok_or(taos_query::RawError::from_string(
-                "Can't receive stmt2 prepare result response",
-            ))??;
-
-        self.is_insert = Some(res.is_insert);
-        self.fields = res.fields;
-        self.fields_count = Some(res.fields_count);
-
-        debug!("is_insert: {:?}", self.is_insert);
+        let resp = self.client.send_request(req).await?;
+        if let WsRecvData::Stmt2Init { stmt_id, .. } = resp {
+            self.stmt_id = Some(stmt_id);
+        }
         Ok(())
     }
 
-    pub async fn stmt2_exec(&mut self) -> RawResult<usize> {
-        let message = Stmt2Send::Stmt2Exec(self.args.unwrap());
-        self.ws
-            .send_timeout(message.to_msg(), self.timeout)
-            .await
-            .map_err(Error::from)?;
-        if let Some(affected) = self
-            .stmt_num_res_receiver
-            .as_mut()
-            .unwrap()
-            .recv()
-            .await
-            .ok_or(taos_query::RawError::from_string(
-                "Can't receive stmt2 exec response",
-            ))??
+    async fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<()> {
+        let req = WsSend::Stmt2Prepare {
+            req_id: req_id(),
+            stmt_id: self.stmt_id.unwrap(),
+            sql: sql.as_ref().to_string(),
+            get_fields: true,
+        };
+        let resp = self.client.send_request(req).await?;
+        if let WsRecvData::Stmt2Prepare {
+            is_insert,
+            fields,
+            fields_count,
+            ..
+        } = resp
         {
-            self.affected_rows += affected;
-            self.affected_rows_once = affected;
-            Ok(affected)
-        } else {
-            panic!("xxx")
+            self.is_insert = Some(is_insert);
+            self.fields = fields;
+            self.fields_count = Some(fields_count);
         }
+        Ok(())
     }
 
-    pub async fn stmt2_result(&mut self) -> RawResult<Stmt2Result> {
-        if self.is_insert.unwrap() {
-            return Err(taos_query::RawError::from_string(
-                "Can't use result for insert stmt2",
-            ));
-        }
-        let message = Stmt2Send::Stmt2Result(self.args.unwrap());
-        debug!("use result message: {:#?}", &message);
-        self.ws
-            .send_timeout(message.to_msg(), self.timeout)
-            .await
-            .map_err(Error::from)?;
-        let use_result = self
-            .stmt_res_res_receiver
-            .as_mut()
-            .unwrap()
-            .recv()
-            .await
-            .ok_or(taos_query::RawError::from_string(
-                "Can't receive stmt use_result response",
-            ))??;
-        Ok(use_result)
-    }
-
-    pub async fn stmt2_bind_param<'a>(&mut self, datas: &[Stmt2BindData<'a>]) -> RawResult<()> {
-        let args = self.args.unwrap();
-        let is_insert = self.is_insert.unwrap();
-
+    async fn bind<'b>(&mut self, datas: &[Stmt2BindData<'b>]) -> RawResult<()> {
         let bytes = bind::bind_datas_as_bytes(
             datas,
-            args.req_id,
-            args.stmt_id,
-            is_insert,
+            req_id(),
+            self.stmt_id.unwrap(),
+            self.is_insert.unwrap(),
             self.fields.as_ref(),
             self.fields_count.unwrap(),
         )?;
-
-        debug!("bytes len: {}", bytes.len());
-
-        self.ws
-            .send(Message::binary(bytes))
-            .await
-            .map_err(Error::from)?;
-
-        let _ = self
-            .stmt_bind_receiver
-            .as_mut()
-            .unwrap()
-            .recv()
-            .await
-            .ok_or(RawError::from_string(
-                "Can't receive stmt2 bind param response",
-            ))??;
-
+        let req = WsSend::Binary(bytes);
+        let _ = self.client.send_request(req).await?;
         Ok(())
     }
 
-    pub async fn stmt2_get_fields(&mut self) -> RawResult<Stmt2Fields> {
-        debug!("stmt2 get fields");
-        let message = Stmt2Send::Stmt2GetFields {
-            args: self.args.unwrap(),
-            field_types: vec![],
+    async fn exec(&mut self) -> RawResult<usize> {
+        let req = WsSend::Stmt2Exec {
+            req_id: req_id(),
+            stmt_id: self.stmt_id.unwrap(),
         };
-        self.ws
-            .send_timeout(message.to_msg(), self.timeout)
-            .await
-            .map_err(Error::from)?;
-        let fields = self
-            .stmt_fields_receiver
-            .as_mut()
-            .unwrap()
-            .recv()
-            .await
-            .ok_or(taos_query::RawError::from_string(
-                "Can't receive stmt get_tag_fields response",
-            ))??;
-        Ok(fields)
+        let resp = self.client.send_request(req).await?;
+        if let WsRecvData::Stmt2Exec { affected, .. } = resp {
+            self.affected_rows += affected;
+            self.affected_rows_once = affected;
+        }
+        Ok(self.affected_rows)
     }
 
-    pub async fn stmt2_close(&mut self) -> RawResult<()> {
-        debug!("stmt2 close");
-        let message = Stmt2Send::Stmt2Close(self.args.unwrap());
-        self.ws
-            .send_timeout(message.to_msg(), self.timeout)
-            .await
-            .map_err(Error::from)?;
-        self.stmt_close_receiver
-            .as_mut()
-            .unwrap()
-            .recv()
-            .await
-            .ok_or(taos_query::RawError::from_string(
-                "Can't receive stmt get_tag_fields response",
-            ))??;
+    async fn result(&mut self) -> RawResult<()> {
+        if self.is_insert.unwrap() {
+            return Err("Can't use result for insert stmt2".into());
+        }
+        let req = WsSend::Stmt2Result {
+            req_id: req_id(),
+            stmt_id: self.stmt_id.unwrap(),
+        };
+        let resp = self.client.send_request(req).await?;
+        if let WsRecvData::Stmt2Result { result_id, .. } = resp {
+            // TODO
+            println!("stmt2 result res_id: {result_id}");
+        }
         Ok(())
+    }
+
+    async fn close(&mut self) {
+        let req = WsSend::Stmt2Close {
+            req_id: req_id(),
+            stmt_id: self.stmt_id.unwrap(),
+        };
+        let resp = self.client.send_request(req).await;
+        if let Err(e) = resp {
+            tracing::error!("Failed to close Stmt2: {e:?}");
+        }
     }
 }
 
 impl Drop for Stmt2 {
     fn drop(&mut self) {
-        // send close signal to reader/writer spawned tasks.
-        let _ = self.close_signal.send(true);
+        block_in_place_or_global(self.close());
     }
 }
 
 impl Bindable<super::Taos> for Stmt2 {
     fn init(taos: &super::Taos) -> RawResult<Self> {
-        todo!()
+        let mut stmt2 = Self::new(taos.client());
+        block_in_place_or_global(stmt2.init())?;
+        Ok(stmt2)
     }
 
     fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
-        todo!()
+        block_in_place_or_global(self.prepare(sql))?;
+        Ok(self)
     }
 
-    fn bind(&mut self, datas: &[taos_query::stmt2::Stmt2BindData]) -> RawResult<&mut Self> {
-        todo!()
+    fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<&mut Self> {
+        block_in_place_or_global(self.bind(datas))?;
+        Ok(self)
     }
 
     fn execute(&mut self) -> RawResult<usize> {
-        todo!()
+        block_in_place_or_global(self.exec())
     }
 
     fn affected_rows(&self) -> usize {
-        todo!()
+        self.affected_rows
     }
 
     fn result_set(&mut self) -> RawResult<<super::Taos as taos_query::Queryable>::ResultSet> {
@@ -521,30 +163,40 @@ impl Bindable<super::Taos> for Stmt2 {
 #[async_trait::async_trait]
 impl AsyncBindable<super::Taos> for Stmt2 {
     async fn init(taos: &super::Taos) -> RawResult<Self> {
-        todo!()
+        let mut stmt2 = Self::new(taos.client());
+        stmt2.init().await?;
+        Ok(stmt2)
     }
 
     async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
-        todo!()
+        self.prepare(sql).await?;
+        Ok(self)
     }
 
     async fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<&mut Self> {
-        todo!()
+        self.bind(datas).await?;
+        Ok(self)
     }
 
     async fn execute(&mut self) -> RawResult<usize> {
-        todo!()
+        self.exec().await
     }
 
     async fn affected_rows(&self) -> usize {
-        todo!()
+        self.affected_rows
     }
 
     async fn result_set(
         &mut self,
     ) -> RawResult<<super::Taos as taos_query::AsyncQueryable>::AsyncResultSet> {
+        let _ = self.result().await?;
         todo!()
     }
+}
+
+// TODO
+fn req_id() -> ReqId {
+    0
 }
 
 #[cfg(test)]
@@ -556,21 +208,23 @@ mod tests {
     use crate::stmt2::Stmt2;
     use crate::TaosBuilder;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_stmt2_with_insert() -> anyhow::Result<()> {
-        let db = "stmt2";
+        let db = "stmt2_insert";
         let dsn = "taos://localhost:6041";
 
         let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
-        taos.exec(format!("drop database if exists {db}")).await?;
-        taos.exec(format!("create database {db}")).await?;
-        taos.exec(format!("create table {db}.ctb (ts timestamp, a int)"))
-            .await?;
+        taos.exec_many(vec![
+            format!("drop database if exists {db}"),
+            format!("create database {db}"),
+            format!("create table {db}.t0 (ts timestamp, a int)"),
+        ])
+        .await?;
 
-        let mut stmt2 = Stmt2::from_dsn(dsn).await?;
-        stmt2.stmt2_init(100, false, false).await?;
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
         stmt2
-            .stmt2_prepare(format!("insert into {db}.ctb values(?, ?)"), true)
+            .prepare(format!("insert into {db}.t0 values(?, ?)"))
             .await?;
 
         let cols = &[
@@ -578,46 +232,42 @@ mod tests {
             ColumnView::from_ints(vec![99]),
         ];
         let data = Stmt2BindData::new(None, None, Some(cols));
-        stmt2.stmt2_bind_param(&[data]).await?;
+        stmt2.bind(&[data]).await?;
 
-        let affected = stmt2.stmt2_exec().await?;
+        let affected = stmt2.exec().await?;
         assert_eq!(affected, 1);
-
-        stmt2.stmt2_close().await?;
 
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_stmt2_with_query() -> anyhow::Result<()> {
-        tracing_subscriber::fmt::init();
-
-        let db = "stmt2";
+        let db = "stmt2_query";
         let dsn = "taos://localhost:6041";
 
         let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
-        taos.exec(format!("drop database if exists {db}")).await?;
-        taos.exec(format!("create database {db}")).await?;
-        taos.exec(format!("create table {db}.ctb (ts timestamp, a int)"))
-            .await?;
-        taos.exec(format!("insert into {db}.ctb values(now, 100)"))
-            .await?;
+        taos.exec_many(vec![
+            format!("drop database if exists {db}"),
+            format!("create database {db}"),
+            format!("create table {db}.t1 (ts timestamp, a int)"),
+            format!("insert into {db}.t1 values(now, 100)"),
+        ])
+        .await?;
 
-        let mut stmt2 = Stmt2::from_dsn(dsn).await?;
-        stmt2.stmt2_init(100, false, false).await?;
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
         stmt2
-            .stmt2_prepare(format!("select * from {db}.ctb where a > ?"), true)
+            .prepare(format!("select * from {db}.t1 where a > ?"))
             .await?;
 
         let cols = &[ColumnView::from_ints(vec![0])];
         let data = Stmt2BindData::new(None, None, Some(cols));
-        stmt2.stmt2_bind_param(&[data]).await?;
+        stmt2.bind(&[data]).await?;
 
-        let affected = stmt2.stmt2_exec().await?;
+        let affected = stmt2.exec().await?;
         assert_eq!(affected, 0);
 
-        let _ = stmt2.stmt2_result().await?;
-        stmt2.stmt2_close().await?;
+        stmt2.result().await?;
 
         Ok(())
     }
