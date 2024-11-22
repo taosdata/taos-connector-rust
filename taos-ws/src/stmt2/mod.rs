@@ -6,8 +6,9 @@ use std::sync::Arc;
 use taos_query::block_in_place_or_global;
 use taos_query::prelude::RawResult;
 use taos_query::stmt2::{AsyncBindable, Bindable, Stmt2BindData};
+use taos_query::util::generate_req_id;
 
-use crate::query::infra::{ReqId, Stmt2Field, StmtId, WsRecvData, WsSend};
+use crate::query::infra::{Stmt2Field, StmtId, WsRecvData, WsSend};
 use crate::query::WsTaos;
 
 #[derive(Debug)]
@@ -36,7 +37,7 @@ impl Stmt2 {
 
     async fn init(&mut self) -> RawResult<()> {
         let req = WsSend::Stmt2Init {
-            req_id: req_id(),
+            req_id: generate_req_id(),
             single_stb_insert: true,
             single_table_bind_once: false,
         };
@@ -49,7 +50,7 @@ impl Stmt2 {
 
     async fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<()> {
         let req = WsSend::Stmt2Prepare {
-            req_id: req_id(),
+            req_id: generate_req_id(),
             stmt_id: self.stmt_id.unwrap(),
             sql: sql.as_ref().to_string(),
             get_fields: true,
@@ -72,7 +73,7 @@ impl Stmt2 {
     async fn bind<'b>(&mut self, datas: &[Stmt2BindData<'b>]) -> RawResult<()> {
         let bytes = bind::bind_datas_as_bytes(
             datas,
-            req_id(),
+            generate_req_id(),
             self.stmt_id.unwrap(),
             self.is_insert.unwrap(),
             self.fields.as_ref(),
@@ -85,7 +86,7 @@ impl Stmt2 {
 
     async fn exec(&mut self) -> RawResult<usize> {
         let req = WsSend::Stmt2Exec {
-            req_id: req_id(),
+            req_id: generate_req_id(),
             stmt_id: self.stmt_id.unwrap(),
         };
         let resp = self.client.send_request(req).await?;
@@ -101,7 +102,7 @@ impl Stmt2 {
             return Err("Can't use result for insert stmt2".into());
         }
         let req = WsSend::Stmt2Result {
-            req_id: req_id(),
+            req_id: generate_req_id(),
             stmt_id: self.stmt_id.unwrap(),
         };
         let resp = self.client.send_request(req).await?;
@@ -114,7 +115,7 @@ impl Stmt2 {
 
     async fn close(&mut self) {
         let req = WsSend::Stmt2Close {
-            req_id: req_id(),
+            req_id: generate_req_id(),
             stmt_id: self.stmt_id.unwrap(),
         };
         let resp = self.client.send_request(req).await;
@@ -192,11 +193,6 @@ impl AsyncBindable<super::Taos> for Stmt2 {
         let _ = self.result().await?;
         todo!()
     }
-}
-
-// TODO
-fn req_id() -> ReqId {
-    0
 }
 
 #[cfg(test)]
