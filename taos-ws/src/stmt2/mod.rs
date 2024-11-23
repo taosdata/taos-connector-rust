@@ -148,7 +148,7 @@ impl Bindable<super::Taos> for Stmt2 {
         Ok(self)
     }
 
-    fn execute(&mut self) -> RawResult<usize> {
+    fn exec(&mut self) -> RawResult<usize> {
         block_in_place_or_global(self.exec())
     }
 
@@ -179,7 +179,7 @@ impl AsyncBindable<super::Taos> for Stmt2 {
         Ok(self)
     }
 
-    async fn execute(&mut self) -> RawResult<usize> {
+    async fn exec(&mut self) -> RawResult<usize> {
         self.exec().await
     }
 

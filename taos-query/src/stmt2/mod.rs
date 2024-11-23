@@ -11,7 +11,7 @@ where
 
     fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<&mut Self>;
 
-    fn execute(&mut self) -> RawResult<usize>;
+    fn exec(&mut self) -> RawResult<usize>;
 
     fn affected_rows(&self) -> usize;
 
@@ -30,7 +30,7 @@ where
 
     async fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<&mut Self>;
 
-    async fn execute(&mut self) -> RawResult<usize>;
+    async fn exec(&mut self) -> RawResult<usize>;
 
     async fn affected_rows(&self) -> usize;
 

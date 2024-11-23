@@ -40,9 +40,9 @@ impl taos_query::stmt2::Bindable<super::Taos> for Stmt2 {
         Ok(self)
     }
 
-    fn execute(&mut self) -> RawResult<usize> {
+    fn exec(&mut self) -> RawResult<usize> {
         match &mut self.0 {
-            Stmt2Inner::Ws(stmt) => Ok(stmt.execute()?),
+            Stmt2Inner::Ws(stmt) => Ok(stmt.exec()?),
         }
     }
 
@@ -88,9 +88,9 @@ impl taos_query::stmt2::AsyncBindable<super::Taos> for Stmt2 {
         Ok(self)
     }
 
-    async fn execute(&mut self) -> RawResult<usize> {
+    async fn exec(&mut self) -> RawResult<usize> {
         match &mut self.0 {
-            Stmt2Inner::Ws(stmt) => Ok(stmt.execute().await?),
+            Stmt2Inner::Ws(stmt) => Ok(stmt.exec().await?),
         }
     }
 
@@ -145,7 +145,7 @@ mod tests {
         let data = Stmt2BindData::new(None, None, Some(cols));
         stmt2.bind(&[data])?;
 
-        let affected = stmt2.execute()?;
+        let affected = stmt2.exec()?;
         assert_eq!(affected, cols[0].len());
 
         Ok(())
@@ -171,7 +171,7 @@ mod tests {
         let data = Stmt2BindData::new(None, None, Some(cols));
         stmt2.bind(&[data])?;
 
-        let affected = stmt2.execute()?;
+        let affected = stmt2.exec()?;
         assert_eq!(affected, 0);
 
         Ok(())
@@ -221,7 +221,7 @@ mod async_tests {
         let data = Stmt2BindData::new(None, None, Some(cols));
         stmt2.bind(&[data]).await?;
 
-        let affected = stmt2.execute().await?;
+        let affected = stmt2.exec().await?;
         assert_eq!(affected, cols[0].len());
 
         Ok(())
@@ -251,7 +251,7 @@ mod async_tests {
         let data = Stmt2BindData::new(None, None, Some(cols));
         stmt2.bind(&[data]).await?;
 
-        let affected = stmt2.execute().await?;
+        let affected = stmt2.exec().await?;
         assert_eq!(affected, 0);
 
         Ok(())
