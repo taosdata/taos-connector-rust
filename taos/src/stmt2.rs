@@ -104,3 +104,156 @@ impl taos_query::stmt2::AsyncBindable<super::Taos> for Stmt2 {
         todo!()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use taos_query::{
+        common::ColumnView,
+        stmt2::{Bindable, Stmt2BindData},
+        Queryable, TBuilder,
+    };
+
+    use crate::TaosBuilder;
+
+    use super::Stmt2;
+
+    #[test]
+    fn test_stmt2_with_insert() -> anyhow::Result<()> {
+        let db = "stmt2_202411222151";
+        let dsn = "ws://localhost:6041";
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build()?;
+        taos.exec_many(vec![
+            format!("drop database if exists {db}"),
+            format!("create database {db}"),
+            format!("create table {db}.t0 (ts timestamp, a int)"),
+        ])?;
+
+        let mut stmt2 = Stmt2::init(&taos)?;
+        stmt2.prepare(&format!("insert into {db}.t0 values(?, ?)"))?;
+
+        let cols = &[
+            ColumnView::from_millis_timestamp(vec![
+                1726803356466,
+                1726803357466,
+                1726803358466,
+                1726803359466,
+            ]),
+            ColumnView::from_ints(vec![99, 100, 101, 102]),
+        ];
+
+        let data = Stmt2BindData::new(None, None, Some(cols));
+        stmt2.bind(&[data])?;
+
+        let affected = stmt2.execute()?;
+        assert_eq!(affected, cols[0].len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_stmt2_with_query() -> anyhow::Result<()> {
+        let db = "stmt2_202411222202";
+        let dsn = "ws://localhost:6041";
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build()?;
+        taos.exec_many(vec![
+            format!("drop database if exists {db}"),
+            format!("create database {db}"),
+            format!("create table {db}.t1 (ts timestamp, a int)"),
+            format!("insert into {db}.t1 values(now, 100)"),
+        ])?;
+
+        let mut stmt2 = Stmt2::init(&taos)?;
+        stmt2.prepare(&format!("select * from {db}.t1 where a > ?"))?;
+
+        let cols = &[ColumnView::from_ints(vec![0])];
+        let data = Stmt2BindData::new(None, None, Some(cols));
+        stmt2.bind(&[data])?;
+
+        let affected = stmt2.execute()?;
+        assert_eq!(affected, 0);
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod async_tests {
+    use taos_query::{
+        common::ColumnView,
+        stmt2::{AsyncBindable, Stmt2BindData},
+        AsyncQueryable, AsyncTBuilder,
+    };
+
+    use crate::TaosBuilder;
+
+    use super::Stmt2;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2_with_insert() -> anyhow::Result<()> {
+        let db = "stmt2_202411222208";
+        let dsn = "ws://localhost:6041";
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        taos.exec_many(vec![
+            format!("drop database if exists {db}"),
+            format!("create database {db}"),
+            format!("create table {db}.t0 (ts timestamp, a int)"),
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::init(&taos).await?;
+        stmt2
+            .prepare(&format!("insert into {db}.t0 values(?, ?)"))
+            .await?;
+
+        let cols = &[
+            ColumnView::from_millis_timestamp(vec![
+                1726803356466,
+                1726803357466,
+                1726803358466,
+                1726803359466,
+            ]),
+            ColumnView::from_ints(vec![99, 100, 101, 102]),
+        ];
+
+        let data = Stmt2BindData::new(None, None, Some(cols));
+        stmt2.bind(&[data]).await?;
+
+        let affected = stmt2.execute().await?;
+        assert_eq!(affected, cols[0].len());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2_with_query() -> anyhow::Result<()> {
+        pretty_env_logger::env_logger::init();
+        let db = "stmt2_202411222213";
+        let dsn = "ws://localhost:6041";
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        taos.exec_many(vec![
+            format!("drop database if exists {db}"),
+            format!("create database {db}"),
+            format!("create table {db}.t1 (ts timestamp, a int)"),
+            format!("insert into {db}.t1 values(now, 100)"),
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::init(&taos).await?;
+        stmt2
+            .prepare(&format!("select * from {db}.t1 where a > ?"))
+            .await?;
+
+        let cols = &[ColumnView::from_ints(vec![0])];
+        let data = Stmt2BindData::new(None, None, Some(cols));
+        stmt2.bind(&[data]).await?;
+
+        let affected = stmt2.execute().await?;
+        assert_eq!(affected, 0);
+
+        Ok(())
+    }
+}
