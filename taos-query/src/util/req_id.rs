@@ -71,7 +71,7 @@ fn fmix32(mut h: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use crate::util::req_id::murmur_hash3_32;
+    use super::murmur_hash3_32;
 
     #[test]
     fn test_murmur_hash3_32() {
