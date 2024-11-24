@@ -7,7 +7,6 @@ pub mod hex;
 mod inline_read;
 mod inline_write;
 
-pub mod endian;
 pub mod req_id;
 
 use std::{
@@ -25,7 +24,6 @@ pub use inline_str::InlineStr;
 pub use inline_read::AsyncInlinableRead;
 pub use inline_write::AsyncInlinableWrite;
 
-pub use endian::is_big_endian;
 pub use req_id::generate_req_id;
 
 use crate::{RawError, RawResult};

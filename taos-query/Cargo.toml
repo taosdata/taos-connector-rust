@@ -69,9 +69,9 @@ lazy_static = "1.4"
 derive_builder = "0.12.0"
 tracing = { version = "0.1", features = ["log"] }
 uuid = { version = "1.11.0", features = [
-    "v4",
-    "fast-rng",
-    "macro-diagnostics",
+	"v4",
+	"fast-rng",
+	"macro-diagnostics",
 ] }
 
 [dev-dependencies]

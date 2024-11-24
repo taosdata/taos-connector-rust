@@ -1,11 +1,9 @@
-mod bool_view;
+use itertools::Itertools;
 
+mod bool_view;
 pub use bool_view::BoolView;
 
 mod tinyint_view;
-
-// use bytes::Bytes;
-use itertools::Itertools;
 pub use tinyint_view::TinyIntView;
 
 mod smallint_view;
@@ -1299,6 +1297,66 @@ impl From<Value> for ColumnView {
         }
     }
 }
+
+macro_rules! fixed_view_from_iter {
+    ($(($view:ident, $item:ty)),+ $(,)?) => {
+        $(
+            impl<A: Into<Option<$item>>> FromIterator<A> for $view {
+                fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
+                    let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
+                        .into_iter()
+                        .map(|v| match v.into() {
+                            Some(v) => (false, v),
+                            None => (true, <$item>::default()),
+                        })
+                        .unzip();
+
+                    Self {
+                        nulls: NullBits::from_iter(nulls),
+                        data: bytes::Bytes::from({
+                            let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
+                            std::mem::forget(values);
+
+                            let item_size = std::mem::size_of::<$item>();
+
+                            #[cfg(target_endian = "little")]
+                            unsafe {
+                                Vec::from_raw_parts(ptr as *mut u8, len * item_size, cap * item_size)
+                            }
+
+                            #[cfg(target_endian = "big")]
+                            {
+                                let mut bytes = unsafe {
+                                    Vec::from_raw_parts(ptr as *mut u8, len * item_size, cap * item_size)
+                                };
+                                for i in (0..bytes.len()).step_by(item_size) {
+                                    let j = i + item_size;
+                                    let val = <$item>::from_ne_bytes(&bytes[i..j].try_into().expect("slice with incorrect length"));
+                                    bytes[i..j].copy_from_slice(&val.to_le_bytes());
+                                }
+                                bytes
+                            }
+                        }),
+                    }
+                }
+            }
+        )+
+    };
+}
+
+fixed_view_from_iter!(
+    (BoolView, bool),
+    (TinyIntView, i8),
+    (SmallIntView, i16),
+    (IntView, i32),
+    (BigIntView, i64),
+    (UTinyIntView, u8),
+    (USmallIntView, u16),
+    (UIntView, u32),
+    (UBigIntView, u64),
+    (FloatView, f32),
+    (DoubleView, f64),
+);
 
 #[cfg(test)]
 mod tests {
