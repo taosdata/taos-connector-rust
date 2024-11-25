@@ -4,7 +4,6 @@ use taos_query::{
     stmt2::Stmt2BindData,
     RawResult,
 };
-use tracing::debug;
 
 use crate::query::infra::{BindType, ReqId, StmtId};
 
@@ -79,8 +78,8 @@ pub(super) fn bind_datas_as_bytes(
         col_cnt = fields_count;
     }
 
-    debug!("need_tbnames: {need_tbnames}, need_tags: {need_tags}, need_cols: {need_cols}");
-    debug!("table_cnt: {table_cnt}, tag_cnt: {tag_cnt}, col_cnt: {col_cnt}");
+    tracing::trace!("need_tbnames: {need_tbnames}, need_tags: {need_tags}, need_cols: {need_cols}");
+    tracing::trace!("table_cnt: {table_cnt}, tag_cnt: {tag_cnt}, col_cnt: {col_cnt}");
 
     if !need_tbnames && !need_tags && !need_cols {
         return Err("empty data".into());
@@ -112,10 +111,10 @@ pub(super) fn bind_datas_as_bytes(
     let col_total_len = col_lens.len() * 4 + col_buf_len;
     let total_len = DATA_POS + tbname_total_len + tag_total_len + col_total_len;
 
-    debug!("tbname_total_len: {tbname_total_len}, tbname_buf_len: {tbname_buf_len}");
-    debug!("tag_total_len: {tag_total_len}, tag_buf_len: {tag_buf_len}");
-    debug!("col_total_len: {col_total_len}, col_buf_len: {col_buf_len}");
-    debug!("total_len: {total_len}");
+    tracing::trace!("tbname_total_len: {tbname_total_len}, tbname_buf_len: {tbname_buf_len}");
+    tracing::trace!("tag_total_len: {tag_total_len}, tag_buf_len: {tag_buf_len}");
+    tracing::trace!("col_total_len: {col_total_len}, col_buf_len: {col_buf_len}");
+    tracing::trace!("total_len: {total_len}");
 
     let mut data = vec![0u8; FIXED_HEADER_LEN + total_len];
     write_fixed_headers(&mut data, req_id, stmt_id);
