@@ -32,9 +32,10 @@ pub use query::*;
 #[cfg(all(feature = "ws", not(feature = "optin")))]
 pub use taos_ws::*;
 
-#[cfg(all(any(feature = "optin"), not(feature = "ws")))]
+#[cfg(all(feature = "optin", not(feature = "ws")))]
 pub use crate::sys::*;
-#[cfg(all(any(feature = "optin"), not(feature = "ws")))]
+
+#[cfg(all(feature = "optin", not(feature = "ws")))]
 pub use sys::tmq::Offset;
 
 #[cfg(all(not(feature = "ws"), not(feature = "optin")))]
