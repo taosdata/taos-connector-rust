@@ -32,11 +32,17 @@ struct Opts {
     /// Do not dump metadata message (`insert into .. using ...`).
     #[clap(long)]
     no_metadata: bool,
+
+    /// Do not commit any offset
+    #[clap(long)]
+    no_commit: bool,
 }
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // std::env::set_var("RUST_LOG", "trace");
-    pretty_env_logger::init();
+    pretty_env_logger::formatted_timed_builder()
+        .parse_default_env()
+        .try_init()?;
 
     let args = Opts::parse();
     if args.raw_dir.exists() {
@@ -70,16 +76,17 @@ async fn main() -> anyhow::Result<()> {
     // let assignment = consumer.assignments().await;
     // println!("assignments: {:?}", assignment);
 
+    let mut last_offset = None;
     let blocks_cost = Duration::ZERO;
     {
-        let mut stream = consumer.stream();
+        // let mut stream = consumer.stream();
         eprintln!("start consuming");
 
         let begin = Instant::now();
 
         let mut mid = 0;
         println!("id,type,size");
-        while let Some((offset, message)) = stream.try_next().await? {
+        while let Some((offset, message)) = consumer.recv_timeout(Timeout::from_secs(5)).await? {
             // println!("{mid} offset: {:?}", offset);
             // get information from offset
             match message {
@@ -158,13 +165,20 @@ async fn main() -> anyhow::Result<()> {
             }
             mid += 1;
 
-            consumer.commit(offset).await?;
+            if !args.no_commit {
+                println!("committing offset: {:?}", offset);
+                consumer.commit(offset).await?;
+            } else {
+                last_offset = Some(offset);
+                println!("no commit, sleep 5s instead");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
         }
+        drop(last_offset);
         eprintln!("total cost: {:?}", begin.elapsed());
     }
     eprintln!("blocks cost: {:?}", blocks_cost);
 
     consumer.unsubscribe().await;
-
     Ok(())
 }

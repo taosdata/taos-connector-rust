@@ -2502,7 +2502,7 @@ mod async_tests {
 
         use crate::TaosBuilder;
 
-        pretty_env_logger::init();
+        let _ = pretty_env_logger::try_init();
 
         let dsn = "taos://localhost:6030";
         let builder = TaosBuilder::from_dsn(dsn)?;
@@ -2569,6 +2569,213 @@ mod async_tests {
         }
 
         consumer.unsubscribe().await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_no_auto_commit() -> anyhow::Result<()> {
+        use std::str::FromStr;
+
+        use itertools::Itertools;
+        use taos_query::{
+            prelude::TryStreamExt,
+            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
+            AsyncQueryable, AsyncTBuilder, Dsn,
+        };
+        use tracing::debug;
+
+        use crate::TaosBuilder;
+
+        std::env::set_var("RUST_LOG", "TRACE");
+        let _ = pretty_env_logger::formatted_timed_builder()
+            .parse_default_env()
+            .try_init();
+
+        let dsn = "taos://localhost:6030";
+        let builder = TaosBuilder::from_dsn(dsn)?;
+        let taos = builder.build().await?;
+        let db = "tmq_ts5679";
+
+        taos.exec_many([
+            "DROP TOPIC IF EXISTS tmq_ts5679".into(),
+            format!("DROP DATABASE IF EXISTS `{db}`"),
+            format!("CREATE DATABASE `{db}` vgroups 1"),
+            format!("USE `{db}`"),
+            "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) TAGS (`groupid` INT, `location` BINARY(20))".into(),
+            format!("CREATE TOPIC tmq_ts5679 with META AS DATABASE {db}")
+        ]).await?;
+
+        let inserted = taos.exec_many([
+            "CREATE TABLE `d0` USING `meters` TAGS(0, 'Los Angles')",
+            "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32)",
+            "INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL)",
+            "INSERT INTO `d1` USING `meters` TAGS(1, 'San Francisco') values(now - 9s, 10.1, 119, 0.33)",
+            "INSERT INTO `d1` values (now-8s, 10, 120, 0.33) (now - 6s, 10, 119, 0.34) (now - 4s, 11.2, 118, 0.322)",
+        ]).await?;
+        assert_eq!(inserted, 6);
+
+        let mut dsn = Dsn::from_str("tmq://localhost:6030")?;
+        dsn.params.insert("group.id".into(), "test".into());
+        dsn.params.insert("timeout".into(), "1s".into());
+        dsn.params
+            .insert("auto.offset.reset".into(), "earliest".into());
+
+        let builder = TmqBuilder::from_dsn(dsn)?;
+        let mut consumer = builder.build().await?;
+        consumer.subscribe(["tmq_ts5679"]).await?;
+
+        let mut vgroup_id = 0;
+        {
+            let mut stream = consumer.stream();
+            let mut cnt = 0;
+            while let Some((offset, message)) = stream.try_next().await? {
+                debug!(
+                    "topic: {}, database: {}, vgroup_id: {}",
+                    offset.topic(),
+                    offset.database(),
+                    offset.vgroup_id()
+                );
+                vgroup_id = offset.vgroup_id();
+
+                if let Some(data) = message.into_data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        let table_name = block.table_name().unwrap();
+                        let records: Vec<Record> = block.deserialize().try_collect()?;
+                        cnt += records.len();
+                        debug!(
+                            "table_name: {}, got {} records: {:#?}",
+                            table_name,
+                            records.len(),
+                            records
+                        );
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+
+            assert_eq!(inserted, cnt);
+        }
+
+        let committed = consumer.committed("tmq_ts5679", vgroup_id).await;
+        let err = committed.expect_err("No committed info");
+        assert_eq!(
+            err.to_string(),
+            "[0x4011] Internal error: `get committed failed: No committed info`"
+        );
+
+        consumer.unsubscribe().await;
+
+        taos.exec_many([
+            "DROP TOPIC IF EXISTS tmq_ts5679",
+            "DROP DATABASE IF EXISTS `tmq_ts5679`",
+        ])
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_auto_commit() -> anyhow::Result<()> {
+        use std::str::FromStr;
+
+        use itertools::Itertools;
+        use taos_query::{
+            prelude::TryStreamExt,
+            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
+            AsyncQueryable, AsyncTBuilder, Dsn,
+        };
+        use tracing::debug;
+
+        use crate::TaosBuilder;
+
+        std::env::set_var("RUST_LOG", "TRACE");
+        let _ = pretty_env_logger::formatted_timed_builder()
+            .parse_default_env()
+            .try_init();
+
+        let dsn = "taos://localhost:6030";
+        let builder = TaosBuilder::from_dsn(dsn)?;
+        let taos = builder.build().await?;
+        let db = "tmq_ts5679_auto_commit";
+
+        taos.exec_many([
+            "DROP TOPIC IF EXISTS tmq_ts5679_auto_commit".into(),
+            format!("DROP DATABASE IF EXISTS `{db}`"),
+            format!("CREATE DATABASE `{db}` vgroups 1"),
+            format!("USE `{db}`"),
+            "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) TAGS (`groupid` INT, `location` BINARY(20))".into(),
+            format!("CREATE TOPIC tmq_ts5679_auto_commit with META AS DATABASE {db}")
+        ]).await?;
+
+        let inserted = taos.exec_many([
+            "CREATE TABLE `d0` USING `meters` TAGS(0, 'Los Angles')",
+            "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32)",
+            "INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL)",
+            "INSERT INTO `d1` USING `meters` TAGS(1, 'San Francisco') values(now - 9s, 10.1, 119, 0.33)",
+            "INSERT INTO `d1` values (now-8s, 10, 120, 0.33) (now - 6s, 10, 119, 0.34) (now - 4s, 11.2, 118, 0.322)",
+        ]).await?;
+        assert_eq!(inserted, 6);
+
+        let mut dsn = Dsn::from_str("tmq://localhost:6030")?;
+        dsn.params.insert("group.id".into(), "test".into());
+        dsn.params.insert("timeout".into(), "1s".into());
+        dsn.params
+            .insert("auto.offset.reset".into(), "earliest".into());
+        dsn.params
+            .insert("enable.auto.commit".into(), "true".into());
+        dsn.params
+            .insert("auto.commit.interval.ms".into(), "1000".into());
+
+        let builder = TmqBuilder::from_dsn(dsn)?;
+        let mut consumer = builder.build().await?;
+        consumer.subscribe(["tmq_ts5679_auto_commit"]).await?;
+
+        let mut vgroup_id = 0;
+        {
+            let mut stream = consumer.stream();
+            let mut cnt = 0;
+            while let Some((offset, message)) = stream.try_next().await? {
+                debug!(
+                    "topic: {}, database: {}, vgroup_id: {}",
+                    offset.topic(),
+                    offset.database(),
+                    offset.vgroup_id()
+                );
+                vgroup_id = offset.vgroup_id();
+
+                if let Some(data) = message.into_data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        let table_name = block.table_name().unwrap();
+                        let records: Vec<Record> = block.deserialize().try_collect()?;
+                        cnt += records.len();
+                        debug!(
+                            "table_name: {}, got {} records: {:#?}",
+                            table_name,
+                            records.len(),
+                            records
+                        );
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+
+            assert_eq!(inserted, cnt);
+        }
+
+        let committed = consumer
+            .committed("tmq_ts5679_auto_commit", vgroup_id)
+            .await;
+        let offset = committed.expect("With committed info");
+        assert!(offset > 0);
+
+        consumer.unsubscribe().await;
+
+        taos.exec_many([
+            "DROP TOPIC IF EXISTS tmq_ts5679_auto_commit",
+            "DROP DATABASE IF EXISTS `tmq_ts5679_auto_commit`",
+        ])
+        .await?;
 
         Ok(())
     }
