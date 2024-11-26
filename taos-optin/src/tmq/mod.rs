@@ -2570,7 +2570,7 @@ mod async_tests {
         consumer.unsubscribe().await;
 
         taos.exec_many(vec![
-            format!("DROP TOPIC IF EXISTS {topic}"),
+            format!("DROP TOPIC {topic}"),
             format!("DROP DATABASE {db}"),
         ])
         .await?;
