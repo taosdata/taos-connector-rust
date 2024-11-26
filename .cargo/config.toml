@@ -8,6 +8,7 @@ rustflags = [
     # "-Dclippy::fn_to_numeric_cast_with_truncation",
     # "-Wclippy::missing_safety_doc",
     "-Dclippy::mutex_atomic",
+    "-Aclippy::missing_safety_doc",
     # "-Aclippy::macro_metavars_in_unsafe",
 
     # "-Dclippy::not_unsafe_ptr_arg_deref",
