@@ -306,14 +306,14 @@ impl TmqConfApi {
         (self.tmq_conf_set)(conf, key.as_ptr(), value.as_ptr()).ok(k, v)
     }
 
-    // pub(crate) unsafe fn auto_commit_cb(
-    //     &self,
-    //     conf: *mut tmq_conf_t,
-    //     cb: tmq_commit_cb,
-    //     param: *mut c_void,
-    // ) {
-    //     (self.tmq_conf_set_auto_commit_cb)(conf, cb, param)
-    // }
+    pub(crate) unsafe fn auto_commit_cb(
+        &self,
+        conf: *mut tmq_conf_t,
+        cb: tmq_commit_cb,
+        param: *mut c_void,
+    ) {
+        (self.tmq_conf_set_auto_commit_cb)(conf, cb, param)
+    }
 
     pub(crate) unsafe fn consumer(&self, conf: *mut tmq_conf_t) -> Result<*mut tmq_t, RawError> {
         let mut err = [0; 256];

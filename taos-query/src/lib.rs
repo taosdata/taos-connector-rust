@@ -4,7 +4,7 @@
 #![allow(clippy::type_complexity)]
 
 use async_trait::async_trait;
-pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
+pub use mdsn::{value_is_true, Address, Dsn, DsnError, IntoDsn};
 pub use serde::de::value::Error as DeError;
 use std::time::Duration;
 use std::{
