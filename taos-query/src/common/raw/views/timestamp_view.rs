@@ -307,7 +307,7 @@ impl TimestampNanosecondView {
     }
 }
 
-macro_rules! timestamp_view_from_iter {
+macro_rules! _impl_from_iter {
     ($(($view:ident, $precision:expr)),+ $(,)?) => {
         $(
             impl<A: Into<Option<Item>>> FromIterator<A> for $view {
@@ -352,7 +352,7 @@ macro_rules! timestamp_view_from_iter {
     };
 }
 
-timestamp_view_from_iter!(
+_impl_from_iter!(
     (TimestampMillisecondView, Precision::Millisecond),
     (TimestampMicrosecondView, Precision::Microsecond),
     (TimestampNanosecondView, Precision::Nanosecond),

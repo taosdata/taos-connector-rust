@@ -1298,7 +1298,7 @@ impl From<Value> for ColumnView {
     }
 }
 
-macro_rules! fixed_view_from_iter {
+macro_rules! _impl_from_iter {
     ($(($view:ident, $item:ty)),+ $(,)?) => {
         $(
             impl<A: Into<Option<$item>>> FromIterator<A> for $view {
@@ -1344,7 +1344,7 @@ macro_rules! fixed_view_from_iter {
     };
 }
 
-fixed_view_from_iter!(
+_impl_from_iter!(
     (BoolView, bool),
     (TinyIntView, i8),
     (SmallIntView, i16),
