@@ -1,7 +1,10 @@
+#![allow(clippy::macro_metavars_in_unsafe)]
+
 use std::{
     cell::UnsafeCell,
     ffi::{c_char, CStr, CString},
     mem::ManuallyDrop,
+    rc::Rc,
     sync::Arc,
     time::Duration,
 };
@@ -48,18 +51,17 @@ pub mod prelude {
 macro_rules! err_or {
     ($res:ident, $code:expr, $ret:expr) => {
         unsafe {
-            let code: taos_query::prelude::Code = { $code }.into();
+            let code: Code = { $code }.into();
             if code.success() {
                 Ok($ret)
             } else {
-                Err(taos_query::prelude::RawError::new(code, $res.err_as_str()))
+                Err(taos_query::RawError::new(code, $res.err_as_str()))
             }
         }
     };
-
-    ($res:ident, $code:expr) => {{
+    ($res:ident, $code:expr) => {
         err_or!($res, $code, ())
-    }};
+    };
     ($code:expr, $ret:expr) => {
         unsafe {
             let code: Code = { $code }.into();
@@ -70,7 +72,6 @@ macro_rules! err_or {
             }
         }
     };
-
     ($code:expr) => {
         err_or!($code, ())
     };
@@ -703,7 +704,7 @@ pub struct ResultSet {
     raw: RawRes,
     fields: OnceCell<Vec<Field>>,
     summary: UnsafeCell<(usize, usize)>,
-    state: Arc<UnsafeCell<BlockState>>,
+    state: Rc<UnsafeCell<BlockState>>,
 }
 
 impl ResultSet {
@@ -712,7 +713,7 @@ impl ResultSet {
             raw,
             fields: OnceCell::new(),
             summary: UnsafeCell::new((0, 0)),
-            state: Arc::new(UnsafeCell::new(BlockState::default())),
+            state: Rc::new(UnsafeCell::new(BlockState::default())),
         }
     }
 

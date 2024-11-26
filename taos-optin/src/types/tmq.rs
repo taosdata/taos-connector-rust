@@ -6,12 +6,6 @@ use taos_query::prelude::RawError;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct tmq_resp_err_t(pub i32);
 
-impl PartialEq<i32> for tmq_conf_res_t {
-    fn eq(&self, other: &i32) -> bool {
-        self == other
-    }
-}
-
 impl tmq_resp_err_t {
     pub const OK: i32 = 0;
 
@@ -57,6 +51,7 @@ pub struct tmq_list_t {
 
 #[repr(C)]
 #[allow(dead_code)]
+#[derive(PartialEq)]
 pub enum tmq_conf_res_t {
     Unknown = -2,
     Invalid = -1,

@@ -66,8 +66,9 @@ impl Bindable<super::Taos> for Stmt {
 
     fn bind(&mut self, params: &[taos_query::common::ColumnView]) -> RawResult<&mut Self> {
         let params: Vec<DropMultiBind> = params.iter().map(|c| c.into()).collect_vec();
-        self.raw
-            .bind_param_batch(unsafe { std::mem::transmute(params.as_slice()) })?;
+        self.raw.bind_param_batch(unsafe {
+            std::mem::transmute::<&[DropMultiBind], &[TaosMultiBind]>(params.as_slice())
+        })?;
         Ok(self)
     }
 
@@ -126,8 +127,9 @@ impl AsyncBindable<super::Taos> for Stmt {
 
     async fn bind(&mut self, params: &[taos_query::common::ColumnView]) -> RawResult<&mut Self> {
         let params: Vec<DropMultiBind> = params.iter().map(|c| c.into()).collect_vec();
-        self.raw
-            .bind_param_batch(unsafe { std::mem::transmute(params.as_slice()) })?;
+        self.raw.bind_param_batch(unsafe {
+            std::mem::transmute::<&[DropMultiBind], &[TaosMultiBind]>(params.as_slice())
+        })?;
         Ok(self)
     }
 
@@ -221,6 +223,7 @@ impl RawStmt {
             tbname: None,
         }
     }
+
     #[inline]
     pub fn close(&mut self) -> RawResult<()> {
         err_or!(self, (self.api.taos_stmt_close)(self.as_ptr()))

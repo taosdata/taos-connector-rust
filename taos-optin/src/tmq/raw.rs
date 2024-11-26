@@ -349,7 +349,7 @@ pub(super) mod tmq {
                     tracing::trace!("C function `tmq_consumer_poll` returned a pointer: {res:?}");
 
                     if res.is_null() {
-                        if let Err(_) = sender.send(None) {
+                        if sender.send(None).is_err() {
                             tracing::trace!("Receiver has been closed");
                         }
                         tracing::trace!(elapsed = ?elapsed.elapsed(), "Res is null, poll next message");
@@ -400,7 +400,7 @@ pub(super) mod conf {
         pub(crate) fn new(api: TmqConfApi) -> Self {
             Self {
                 api,
-                ptr: unsafe { api.new() },
+                ptr: unsafe { api.new_conf() },
             }
             .disable_auto_commit()
             .enable_heartbeat_background()
@@ -497,7 +497,11 @@ pub(super) mod conf {
         }
 
         fn set<K: AsRef<str>, V: AsRef<str>>(&mut self, key: K, value: V) -> RawResult<&mut Self> {
-            unsafe { self.api.set(self.as_ptr(), key.as_ref(), value.as_ref()) }.map(|_| self)
+            unsafe {
+                self.api
+                    .set_conf(self.as_ptr(), key.as_ref(), value.as_ref())
+            }
+            .map(|_| self)
         }
 
         // pub(crate) fn with_auto_commit_cb(&mut self, cb: tmq_commit_cb, param: *mut c_void) {
@@ -507,13 +511,13 @@ pub(super) mod conf {
         // }
 
         pub(crate) fn build(&self) -> RawResult<*mut tmq_t> {
-            unsafe { self.api.consumer(self.as_ptr()) }
+            unsafe { self.api.new_consumer(self.as_ptr()) }
         }
     }
 
     impl Drop for Conf {
         fn drop(&mut self) {
-            unsafe { self.api.destroy(self.as_ptr()) };
+            unsafe { self.api.destroy_conf(self.as_ptr()) };
         }
     }
 }
@@ -540,7 +544,7 @@ pub(super) mod list {
         pub(crate) fn new(api: TmqListApi) -> Self {
             Self {
                 api,
-                ptr: unsafe { api.new() },
+                ptr: unsafe { api.new_list() },
             }
         }
 
@@ -552,7 +556,7 @@ pub(super) mod list {
             api: TmqListApi,
             topics: impl IntoIterator<Item = T>,
         ) -> RawResult<Self> {
-            let ptr = unsafe { api.from_c_str_iter(topics)? };
+            let ptr = unsafe { api.new_list_from_cstr(topics)? };
             Ok(Self { api, ptr })
         }
 
@@ -581,7 +585,6 @@ pub(super) mod list {
         }
     }
 
-    ///
     pub struct Iter<'a> {
         inner: &'a [*mut c_char],
         len: usize,
@@ -620,7 +623,7 @@ pub(super) mod list {
     impl Drop for Topics {
         fn drop(&mut self) {
             unsafe {
-                self.api.destroy(self.as_ptr());
+                self.api.destroy_list(self.as_ptr());
             }
         }
     }

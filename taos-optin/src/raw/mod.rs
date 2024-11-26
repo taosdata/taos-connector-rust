@@ -7,6 +7,7 @@ use std::{
     collections::HashMap,
     ffi::{c_char, c_int, c_ulong, c_void, CStr, CString},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::{Arc, Mutex, Weak},
     task::{Context, Poll, Waker},
 };
@@ -224,25 +225,26 @@ pub(crate) struct TmqListApi {
 }
 
 impl TmqListApi {
-    pub(crate) unsafe fn new(&self) -> *mut tmq_list_t {
+    pub(crate) unsafe fn new_list(&self) -> *mut tmq_list_t {
         (self.tmq_list_new)()
     }
-    pub(crate) unsafe fn destroy(&self, list: *mut tmq_list_t) {
+
+    pub(crate) unsafe fn destroy_list(&self, list: *mut tmq_list_t) {
         (self.tmq_list_destroy)(list)
     }
 
-    pub(crate) unsafe fn from_c_str_iter<'a, T: IntoCStr<'a>>(
+    pub(crate) unsafe fn new_list_from_cstr<'a, T: IntoCStr<'a>>(
         &self,
         iter: impl IntoIterator<Item = T>,
     ) -> Result<*mut tmq_list_t, RawError> {
-        let list = self.new();
+        let list = self.new_list();
         for item in iter {
-            self.append(list, item)?;
+            self.append_list(list, item)?;
         }
         Ok(list)
     }
 
-    pub(crate) fn append<'a>(
+    pub(crate) fn append_list<'a>(
         &self,
         list: *mut tmq_list_t,
         item: impl IntoCStr<'a>,
@@ -255,11 +257,12 @@ impl TmqListApi {
         }
     }
 
-    pub(crate) fn len(&self, list: *mut tmq_list_t) -> i32 {
+    pub(crate) fn list_len(&self, list: *mut tmq_list_t) -> i32 {
         unsafe { (self.tmq_list_get_size)(list) }
     }
+
     pub(crate) fn as_c_str_slice(&self, list: *mut tmq_list_t) -> &[*mut c_char] {
-        let len = self.len(list) as usize;
+        let len = self.list_len(list) as usize;
         let data = unsafe { (self.tmq_list_to_c_array)(list) };
         unsafe { std::slice::from_raw_parts(data, len) }
     }
@@ -289,13 +292,15 @@ pub(crate) struct TmqConfApi {
 }
 
 impl TmqConfApi {
-    pub(crate) unsafe fn new(&self) -> *mut tmq_conf_t {
+    pub(crate) unsafe fn new_conf(&self) -> *mut tmq_conf_t {
         (self.tmq_conf_new)()
     }
-    pub(crate) unsafe fn destroy(&self, conf: *mut tmq_conf_t) {
+
+    pub(crate) unsafe fn destroy_conf(&self, conf: *mut tmq_conf_t) {
         (self.tmq_conf_destroy)(conf)
     }
-    pub(crate) unsafe fn set(
+
+    pub(crate) unsafe fn set_conf(
         &self,
         conf: *mut tmq_conf_t,
         k: &str,
@@ -315,7 +320,10 @@ impl TmqConfApi {
     //     (self.tmq_conf_set_auto_commit_cb)(conf, cb, param)
     // }
 
-    pub(crate) unsafe fn consumer(&self, conf: *mut tmq_conf_t) -> Result<*mut tmq_t, RawError> {
+    pub(crate) unsafe fn new_consumer(
+        &self,
+        conf: *mut tmq_conf_t,
+    ) -> Result<*mut tmq_t, RawError> {
         let mut err = [0; 256];
         let tmq = (self.tmq_consumer_new)(conf, err.as_mut_ptr() as _, 255);
         if err[0] != 0 {
@@ -1496,7 +1504,7 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &Arc<UnsafeCell<BlockState>>,
+        state: &Rc<UnsafeCell<BlockState>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         if self.c.is_v3() {
@@ -1512,7 +1520,7 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        _state: &Arc<UnsafeCell<BlockState>>,
+        _state: &Rc<UnsafeCell<BlockState>>,
         _cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let block = Box::into_raw(Box::new(std::ptr::null_mut()));
@@ -1538,7 +1546,7 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &Arc<UnsafeCell<BlockState>>,
+        state: &Rc<UnsafeCell<BlockState>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
@@ -1624,7 +1632,7 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &Arc<UnsafeCell<BlockState>>,
+        state: &Rc<UnsafeCell<BlockState>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
@@ -1646,7 +1654,7 @@ impl RawRes {
             Poll::Ready(item)
         } else {
             current.in_use = true;
-            let param = Box::new((Arc::downgrade(state), self.c.clone(), cx.waker().clone()));
+            let param = Box::new((Rc::downgrade(state), self.c.clone(), cx.waker().clone()));
             #[no_mangle]
             unsafe extern "C" fn taos_optin_fetch_raw_block_callback(
                 param: *mut c_void,

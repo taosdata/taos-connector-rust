@@ -5,7 +5,8 @@ use std::ffi::{c_char, CStr};
 use std::future::Future;
 use std::os::raw::{c_int, c_void};
 use std::pin::Pin;
-use std::sync::{Arc, Weak};
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
@@ -19,7 +20,7 @@ use super::ApiEntry;
 pub struct QueryFuture<'a> {
     raw: RawTaos,
     sql: Cow<'a, CStr>,
-    state: Arc<UnsafeCell<State>>,
+    state: Rc<UnsafeCell<State>>,
 }
 
 unsafe impl Send for QueryFuture<'_> {}
@@ -56,6 +57,7 @@ struct AsyncQueryParam {
 
 impl Unpin for State {}
 impl Unpin for QueryFuture<'_> {}
+
 impl Future for QueryFuture<'_> {
     type Output = Result<RawRes, RawError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -130,7 +132,7 @@ impl Future for QueryFuture<'_> {
             }
 
             let param = Box::new(AsyncQueryParam {
-                state: Arc::downgrade(&self.state),
+                state: Rc::downgrade(&self.state),
                 sql: self.sql.as_ptr() as _,
                 waker: cx.waker().clone(),
             });
@@ -143,11 +145,12 @@ impl Future for QueryFuture<'_> {
         }
     }
 }
+
 impl<'a> QueryFuture<'a> {
     /// Create a new `TimerFuture` which will complete after the provided
     /// timeout.
     pub fn new(taos: RawTaos, sql: impl IntoCStr<'a>) -> Self {
-        let state = Arc::new(UnsafeCell::new(State::new(taos.c.clone())));
+        let state = Rc::new(UnsafeCell::new(State::new(taos.c.clone())));
         let sql = sql.into_c_str();
         tracing::trace!("query with: {}", sql.to_str().unwrap_or("<...>"));
 

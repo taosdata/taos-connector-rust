@@ -323,7 +323,7 @@ impl AsyncOnSync for Meta {}
 
 impl IsMeta for Meta {
     fn as_raw_meta(&self) -> RawResult<RawMeta> {
-        Ok(unsafe { std::mem::transmute(self.raw.clone()) })
+        Ok(unsafe { std::mem::transmute::<RawData, RawMeta>(self.raw.clone()) })
     }
 
     fn as_json_meta(&self) -> RawResult<taos_query::common::JsonMeta> {

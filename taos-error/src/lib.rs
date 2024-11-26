@@ -177,6 +177,7 @@ impl Error {
             source: err.into().into(),
         }
     }
+
     #[inline]
     pub fn new(code: impl Into<Code>, err: impl Into<String>) -> Self {
         Self {

@@ -37,6 +37,7 @@ impl Code {
             None => "Incomplete",
         }
     }
+
     pub(crate) const fn _priv_err_str(&self) -> Option<&'static str> {
         constants::error_str_of(self.0 as _)
     }
