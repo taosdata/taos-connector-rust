@@ -334,6 +334,7 @@ pub enum AlterType {
     RenameColumn = 10,
     // TODO: TDengine 3.3.0 encode/compress/level support.
     // ModifyColumnCompression = 13,
+    SetMultiTagValue = 15,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -347,6 +348,16 @@ pub struct MetaAlter {
     pub col_new_name: Option<String>,
     pub col_value: Option<String>,
     pub col_value_null: Option<bool>,
+    pub tags: Option<Vec<Tag>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tag {
+    pub col_name: String,
+    #[serde(default)]
+    pub col_value: String,
+    pub col_value_null: bool,
 }
 
 impl Display for MetaAlter {
@@ -370,14 +381,12 @@ impl Display for MetaAlter {
             )),
             AlterType::SetTagValue => {
                 f.write_fmt(format_args!(
-                    "ALTER TABLE `{}` SET TAG `{}` ",
+                    "ALTER TABLE `{}` SET TAG `{}` = ",
                     self.table_name,
                     self.field.name()
                 ))?;
                 if self.col_value_null.unwrap_or(false) {
                     f.write_str("NULL")
-                } else if self.field.ty.is_var_type() {
-                    f.write_fmt(format_args!("'{}'", self.col_value.as_ref().unwrap()))
                 } else {
                     f.write_fmt(format_args!("{}", self.col_value.as_ref().unwrap()))
                 }
@@ -414,6 +423,22 @@ impl Display for MetaAlter {
             //     self.table_name,
             //     self.field.sql_repr(),
             // )),
+            AlterType::SetMultiTagValue => {
+                f.write_fmt(format_args!("ALTER TABLE `{}` SET TAG ", self.table_name))?;
+                if let Some(tags) = self.tags.as_deref() {
+                    for (i, tag) in tags.iter().enumerate() {
+                        if tag.col_value_null {
+                            f.write_fmt(format_args!("`{}` = NULL", tag.col_name))?;
+                        } else {
+                            f.write_fmt(format_args!("`{}` = {}", tag.col_name, tag.col_value))?;
+                        }
+                        if i < tags.len() - 1 {
+                            f.write_str(", ")?;
+                        }
+                    }
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -483,7 +508,7 @@ impl Display for MetaUnit {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(remote = "Field")]
 pub struct ColField {
-    #[serde(rename = "colName")]
+    #[serde(rename = "colName", default)]
     name: String,
     #[serde(default)]
     #[serde(rename = "colType")]
@@ -679,18 +704,71 @@ impl<'a> IntoIterator for &'a mut JsonMeta {
     }
 }
 
-#[test]
-fn test_json_meta_compress() {
-    let json ="{\"type\":\"create\",\"tableType\":\"normal\",\"tableName\":\"t3\",\"columns\":[{\"name\":\"ts\",\"type\":9,\"isPrimarykey\":false,\"encode\":\"delta-i\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"obj_id\",\"type\":5,\"isPrimarykey\":true,\"encode\":\"delta-i\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"data1\",\"type\":6,\"isPrimarykey\":false,\"encode\":\"delta-d\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"data2\",\"type\":4,\"isPrimarykey\":false,\"encode\":\"simple8b\",\"compress\":\"lz4\",\"level\":\"high\"}],\"tags\":[]}";
-    let meta = serde_json::from_str::<MetaUnit>(json).unwrap();
-    println!("{}", meta);
-    assert_eq!(meta.to_string(), "CREATE TABLE IF NOT EXISTS `t3`(`ts` TIMESTAMP ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium', `obj_id` BIGINT ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium', `data1` FLOAT ENCODE 'delta-d' COMPRESS 'lz4' LEVEL 'medium', `data2` INT ENCODE 'simple8b' COMPRESS 'lz4' LEVEL 'high')");
-}
+#[cfg(test)]
+mod tests {
+    use crate::itypes::IsJson;
 
-#[test]
-fn test_json_meta_plural() {
-    let json ="{\"tmq_meta_version\":\"1.0\",\"metas\":[{\"type\":\"create\",\"tableType\":\"normal\",\"tableName\":\"t3\",\"columns\":[{\"name\":\"ts\",\"type\":9,\"isPrimarykey\":false,\"encode\":\"delta-i\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"obj_id\",\"type\":5,\"isPrimarykey\":true,\"encode\":\"delta-i\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"data1\",\"type\":6,\"isPrimarykey\":false,\"encode\":\"delta-d\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"data2\",\"type\":4,\"isPrimarykey\":false,\"encode\":\"simple8b\",\"compress\":\"lz4\",\"level\":\"high\"}],\"tags\":[]}] }";
-    let meta = serde_json::from_str::<JsonMeta>(json).unwrap();
-    println!("{:?}", meta);
-    assert_eq!(meta.iter().map(ToString::to_string).next().unwrap(), "CREATE TABLE IF NOT EXISTS `t3`(`ts` TIMESTAMP ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium', `obj_id` BIGINT ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium', `data1` FLOAT ENCODE 'delta-d' COMPRESS 'lz4' LEVEL 'medium', `data2` INT ENCODE 'simple8b' COMPRESS 'lz4' LEVEL 'high')");
+    use super::{JsonMeta, MetaUnit};
+
+    #[test]
+    fn test_json_meta_compress() {
+        let json ="{\"type\":\"create\",\"tableType\":\"normal\",\"tableName\":\"t3\",\"columns\":[{\"name\":\"ts\",\"type\":9,\"isPrimarykey\":false,\"encode\":\"delta-i\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"obj_id\",\"type\":5,\"isPrimarykey\":true,\"encode\":\"delta-i\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"data1\",\"type\":6,\"isPrimarykey\":false,\"encode\":\"delta-d\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"data2\",\"type\":4,\"isPrimarykey\":false,\"encode\":\"simple8b\",\"compress\":\"lz4\",\"level\":\"high\"}],\"tags\":[]}";
+        let meta = serde_json::from_str::<MetaUnit>(json).unwrap();
+        println!("{}", meta);
+        assert_eq!(meta.to_string(), "CREATE TABLE IF NOT EXISTS `t3`(`ts` TIMESTAMP ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium', `obj_id` BIGINT ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium', `data1` FLOAT ENCODE 'delta-d' COMPRESS 'lz4' LEVEL 'medium', `data2` INT ENCODE 'simple8b' COMPRESS 'lz4' LEVEL 'high')");
+    }
+
+    #[test]
+    fn test_json_meta_plural() {
+        let json ="{\"tmq_meta_version\":\"1.0\",\"metas\":[{\"type\":\"create\",\"tableType\":\"normal\",\"tableName\":\"t3\",\"columns\":[{\"name\":\"ts\",\"type\":9,\"isPrimarykey\":false,\"encode\":\"delta-i\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"obj_id\",\"type\":5,\"isPrimarykey\":true,\"encode\":\"delta-i\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"data1\",\"type\":6,\"isPrimarykey\":false,\"encode\":\"delta-d\",\"compress\":\"lz4\",\"level\":\"medium\"},{\"name\":\"data2\",\"type\":4,\"isPrimarykey\":false,\"encode\":\"simple8b\",\"compress\":\"lz4\",\"level\":\"high\"}],\"tags\":[]}] }";
+        let meta = serde_json::from_str::<JsonMeta>(json).unwrap();
+        println!("{:?}", meta);
+        assert_eq!(meta.iter().map(ToString::to_string).next().unwrap(), "CREATE TABLE IF NOT EXISTS `t3`(`ts` TIMESTAMP ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium', `obj_id` BIGINT ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium', `data1` FLOAT ENCODE 'delta-d' COMPRESS 'lz4' LEVEL 'medium', `data2` INT ENCODE 'simple8b' COMPRESS 'lz4' LEVEL 'high')");
+    }
+
+    #[test]
+    fn test_meta_alter_set_tag_val() {
+        let value = serde_json::json!({
+            "type": "alter",
+            "tableType": "child",
+            "tableName": "ctb",
+            "alterType": 4,
+            "colName": "t1",
+            "colValue": "5000",
+            "colValueNull": false
+        });
+        let meta = serde_json::from_str::<MetaUnit>(&value.to_json()).unwrap();
+        assert_eq!(meta.to_string(), "ALTER TABLE `ctb` SET TAG `t1` = 5000");
+    }
+
+    #[test]
+    fn test_meta_alter_set_multi_tag_val() {
+        let value = serde_json::json!({
+            "type": "alter",
+            "tableType": "child",
+            "tableName": "ctb",
+            "alterType": 15,
+            "tags": [{
+                "colName": "t1",
+                "colValue": "5000",
+                "colValueNull": false
+            }, {
+                "colName": "t2",
+                "colValue": "1000",
+                "colValueNull": false
+            }, {
+                "colName": "t3",
+                "colValue": "'hello'",
+                "colValueNull": false
+            }, {
+                "colName": "t4",
+                "colValueNull": true
+            }]
+        });
+        let meta = serde_json::from_str::<MetaUnit>(&value.to_json()).unwrap();
+        assert_eq!(
+            meta.to_string(),
+            "ALTER TABLE `ctb` SET TAG `t1` = 5000, `t2` = 1000, `t3` = 'hello', `t4` = NULL"
+        );
+    }
 }
