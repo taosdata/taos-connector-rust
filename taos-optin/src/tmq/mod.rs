@@ -2498,24 +2498,24 @@ mod async_tests {
             tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
             AsyncQueryable, AsyncTBuilder, Dsn,
         };
-        use tracing::debug;
 
         use crate::TaosBuilder;
 
         pretty_env_logger::init();
 
         let dsn = "taos://localhost:6030";
-        let builder = TaosBuilder::from_dsn(dsn)?;
-        let taos = builder.build().await?;
-        let db = "tmq";
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let db = "test_recv_timeout";
+        let topic = "tmq_meters_202411260917";
 
         taos.exec_many([
-            "DROP TOPIC IF EXISTS tmq_meters".into(),
+            format!("DROP TOPIC IF EXISTS {topic}"),
             format!("DROP DATABASE IF EXISTS `{db}`"),
             format!("CREATE DATABASE `{db}`"),
             format!("USE `{db}`"),
             "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) TAGS (`groupid` INT, `location` BINARY(20))".into(),
-            format!("CREATE TOPIC tmq_meters with META AS DATABASE {db}")
+            format!("CREATE TOPIC {topic} with META AS DATABASE {db}")
         ]).await?;
 
         let inserted = taos.exec_many([
@@ -2533,15 +2533,14 @@ mod async_tests {
         dsn.params
             .insert("auto.offset.reset".into(), "earliest".into());
 
-        let builder = TmqBuilder::from_dsn(dsn)?;
-        let mut consumer = builder.build().await?;
-        consumer.subscribe(["tmq_meters"]).await?;
+        let mut consumer = TmqBuilder::from_dsn(dsn)?.build().await?;
+        consumer.subscribe([topic]).await?;
 
         {
             let mut stream = consumer.stream();
             let mut cnt = 0;
             while let Some((offset, message)) = stream.try_next().await? {
-                debug!(
+                tracing::debug!(
                     "topic: {}, database: {}, vgroup_id: {}",
                     offset.topic(),
                     offset.database(),
@@ -2553,7 +2552,7 @@ mod async_tests {
                         let table_name = block.table_name().unwrap();
                         let records: Vec<Record> = block.deserialize().try_collect()?;
                         cnt += records.len();
-                        debug!(
+                        tracing::debug!(
                             "table_name: {}, got {} records: {:#?}",
                             table_name,
                             records.len(),
@@ -2569,6 +2568,12 @@ mod async_tests {
         }
 
         consumer.unsubscribe().await;
+
+        taos.exec_many(vec![
+            format!("DROP TOPIC IF EXISTS {topic}"),
+            format!("DROP DATABASE {db}"),
+        ])
+        .await?;
 
         Ok(())
     }
