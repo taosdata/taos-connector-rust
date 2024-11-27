@@ -9,11 +9,12 @@ rustflags = [
     # "-Wclippy::missing_safety_doc",
     "-Dclippy::mutex_atomic",
     "-Aclippy::missing_safety_doc",
+    "-Aclippy::missing_transmute_annotations",
     # "-Aclippy::macro_metavars_in_unsafe",
 
     # "-Dclippy::not_unsafe_ptr_arg_deref",
     # "-Dclippy::msrv=1.65",
-    # "-Dclippy::incompatible_msrv",
+    "-Aclippy::incompatible_msrv",
 
     # "unwrap_used"
 

@@ -415,7 +415,7 @@ async fn read_queries(
 
                     let timing = if is_v3 {
                         let timing = slice.read_u64().unwrap();
-                        if timing == std::u64::MAX {
+                        if timing == u64::MAX {
                             is_block_new = true;
                             Duration::ZERO
                         } else {
@@ -434,12 +434,11 @@ async fn read_queries(
                         let block_message = slice.read_inlined_str::<4>().unwrap();
                         let _result_id = slice.read_u64().unwrap();
                         let finished = slice.read_u8().unwrap() == 1;
-                        let result_block: Vec<u8>;
-                        if finished {
-                            result_block = Vec::<u8>::new();
+                        let result_block = if finished {
+                            Vec::new()
                         } else {
-                            result_block = slice.read_inlined_bytes::<4>().unwrap();
-                        }
+                            slice.read_inlined_bytes::<4>().unwrap()
+                        };
                         if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
                             sender
                                 .send(Ok(WsRecvData::BlockNew {
@@ -760,7 +759,7 @@ impl WsTaos {
                             tracing::error!("Write websocket ping error: {}", err);
                             break;
                         }
-                        let _ = sender.flush();
+                        let _ = sender.flush().await;
                     }
                     _ = rx.changed() => {
                         let _ = sender.close().await;
@@ -942,16 +941,14 @@ impl WsTaos {
 
     pub async fn s_query(&self, sql: &str) -> RawResult<ResultSet> {
         let req_id = self.sender.req_id();
-        return self
-            .s_query_with_req_id(sql, req_id)
+        self.s_query_with_req_id(sql, req_id)
             .in_current_span()
-            .await;
+            .await
     }
 
     #[instrument(skip(self))]
     pub async fn s_query_with_req_id(&self, sql: &str, req_id: u64) -> RawResult<ResultSet> {
-        let req;
-        if self.is_support_binary_sql() {
+        let req = if self.is_support_binary_sql() {
             let mut req_vec = Vec::with_capacity(sql.len() + 30);
             req_vec.write_u64_le(req_id).map_err(Error::from)?;
             req_vec.write_u64_le(0).map_err(Error::from)?; //ResultID, uesless here
@@ -962,14 +959,14 @@ impl WsTaos {
                 .map_err(Error::from)?; //SQL length
             req_vec.write_all(sql.as_bytes()).map_err(Error::from)?;
 
-            req = self.sender.send_recv(WsSend::Binary(req_vec)).await?;
+            self.sender.send_recv(WsSend::Binary(req_vec)).await?
         } else {
             let action = WsSend::Query {
                 req_id,
                 sql: sql.to_string(),
             };
-            req = self.sender.send_recv(action).await?;
-        }
+            self.sender.send_recv(action).await?
+        };
 
         let resp = match req {
             WsRecvData::Query(resp) => resp,
@@ -1044,13 +1041,13 @@ impl WsTaos {
                                     let mut raw = RawBlock::parse_from_raw_block(raw, precision);
                                     metrics.time_cost_in_block_parse += now.elapsed();
                                     raw.with_field_names(&field_names);
-                                    if let Err(_) = tx.send_async(Ok((raw, timing))).await {
+                                    if tx.send_async(Ok((raw, timing))).await.is_err() {
                                         break;
                                     }
                                 }
                                 Ok(_) => {}
                                 Err(err) => {
-                                    if let Err(_) = tx.send_async(Err(err)).await {
+                                    if tx.send_async(Err(err)).await.is_err() {
                                         break;
                                     }
                                 }
@@ -1099,7 +1096,7 @@ impl WsTaos {
                                     metrics.time_cost_in_fetch += now.elapsed();
                                     let mut raw = RawBlock::parse_from_raw_block(raw, precision);
                                     raw.with_field_names(&field_names);
-                                    if let Err(_) = tx.send_async(Ok((raw, timing))).await {
+                                    if tx.send_async(Ok((raw, timing))).await.is_err() {
                                         break;
                                     }
                                 }
@@ -1114,14 +1111,14 @@ impl WsTaos {
                                     );
 
                                     raw.with_field_names(&field_names);
-                                    if let Err(_) = tx.send_async(Ok((raw, timing))).await {
+                                    if tx.send_async(Ok((raw, timing))).await.is_err() {
                                         break;
                                     }
                                 }
                                 Ok(_) => {}
                                 Err(err) => {
                                     metrics.time_cost_in_fetch += now.elapsed();
-                                    if let Err(_) = tx.send_async(Err(err)).await {
+                                    if tx.send_async(Err(err)).await.is_err() {
                                         break;
                                     }
                                 }

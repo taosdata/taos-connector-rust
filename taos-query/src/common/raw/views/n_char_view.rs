@@ -5,7 +5,8 @@ use std::{
     rc::Rc,
 };
 
-use super::{IsColumnView, Offsets, Version};
+use bytes::Bytes;
+use itertools::Itertools;
 
 use crate::{
     common::{layout::Layout, BorrowedValue, Ty},
@@ -13,8 +14,7 @@ use crate::{
     util::{InlineNChar, InlineStr},
 };
 
-use bytes::Bytes;
-use itertools::Itertools;
+use super::{IsColumnView, Offsets, Version};
 
 #[derive(Debug)]
 pub struct NCharView {
@@ -22,11 +22,12 @@ pub struct NCharView {
     pub(crate) offsets: Offsets,
     pub(crate) data: Bytes,
     /// TDengine v3 raw block use [char] for NChar data type, it's [str] in v2 websocket block.
-    pub is_chars: UnsafeCell<bool>,
+    pub(crate) is_chars: UnsafeCell<bool>,
     pub(crate) version: Version,
     /// Layout should set as NCHAR_DECODED when raw data decoded.
     pub(crate) layout: Rc<RefCell<Layout>>,
 }
+
 impl Clone for NCharView {
     fn clone(&self) -> Self {
         unsafe {
@@ -41,10 +42,12 @@ impl Clone for NCharView {
         }
     }
 }
+
 impl IsColumnView for NCharView {
     fn ty(&self) -> Ty {
         Ty::NChar
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         Self::from_iter::<String, _, _, _>(
             iter.map(|v| v.to_str().map(|v| v.into_owned()))

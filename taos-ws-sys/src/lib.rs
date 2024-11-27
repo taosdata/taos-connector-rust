@@ -467,9 +467,9 @@ struct WsSqlResultSet {
 
 #[derive(Debug)]
 enum WsResultSet {
-    SqlResultSet(WsSqlResultSet),
-    SchemalessResultSet(WsSchemalessResultSet),
-    TmqResultSet(WsTmqResultSet),
+    Sql(WsSqlResultSet),
+    Schemaless(WsSchemalessResultSet),
+    Tmq(WsTmqResultSet),
 }
 
 trait WsResultSetTrait {
@@ -575,133 +575,133 @@ impl WsResultSetTrait for WsSchemalessResultSet {
 impl WsResultSetTrait for WsResultSet {
     fn tmq_get_topic_name(&self) -> *const c_char {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_topic_name(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_topic_name(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_topic_name(),
+            WsResultSet::Sql(rs) => rs.tmq_get_topic_name(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_topic_name(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_topic_name(),
         }
     }
     fn tmq_get_db_name(&self) -> *const c_char {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_db_name(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_db_name(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_db_name(),
+            WsResultSet::Sql(rs) => rs.tmq_get_db_name(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_db_name(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_db_name(),
         }
     }
     fn tmq_get_table_name(&self) -> *const c_char {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_table_name(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_table_name(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_table_name(),
+            WsResultSet::Sql(rs) => rs.tmq_get_table_name(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_table_name(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_table_name(),
         }
     }
 
     fn tmq_get_offset(&self) -> Offset {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_offset(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_offset(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_offset(),
+            WsResultSet::Sql(rs) => rs.tmq_get_offset(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_offset(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_offset(),
         }
     }
 
     fn tmq_get_vgroup_offset(&self) -> i64 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_vgroup_offset(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_vgroup_offset(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_vgroup_offset(),
+            WsResultSet::Sql(rs) => rs.tmq_get_vgroup_offset(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_vgroup_offset(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_vgroup_offset(),
         }
     }
     fn tmq_get_vgroup_id(&self) -> i32 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_vgroup_id(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_vgroup_id(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_vgroup_id(),
+            WsResultSet::Sql(rs) => rs.tmq_get_vgroup_id(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_vgroup_id(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_vgroup_id(),
         }
     }
 
     fn precision(&self) -> Precision {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.precision(),
-            WsResultSet::TmqResultSet(rs) => rs.precision(),
-            WsResultSet::SchemalessResultSet(rs) => rs.precision(),
+            WsResultSet::Sql(rs) => rs.precision(),
+            WsResultSet::Tmq(rs) => rs.precision(),
+            WsResultSet::Schemaless(rs) => rs.precision(),
         }
     }
 
     fn affected_rows(&self) -> i32 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.affected_rows(),
-            WsResultSet::TmqResultSet(rs) => rs.affected_rows(),
-            WsResultSet::SchemalessResultSet(rs) => rs.affected_rows(),
+            WsResultSet::Sql(rs) => rs.affected_rows(),
+            WsResultSet::Tmq(rs) => rs.affected_rows(),
+            WsResultSet::Schemaless(rs) => rs.affected_rows(),
         }
     }
 
     fn affected_rows64(&self) -> i64 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.affected_rows64(),
-            WsResultSet::TmqResultSet(rs) => rs.affected_rows64(),
-            WsResultSet::SchemalessResultSet(rs) => rs.affected_rows64(),
+            WsResultSet::Sql(rs) => rs.affected_rows64(),
+            WsResultSet::Tmq(rs) => rs.affected_rows64(),
+            WsResultSet::Schemaless(rs) => rs.affected_rows64(),
         }
     }
 
     fn num_of_fields(&self) -> i32 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.num_of_fields(),
-            WsResultSet::TmqResultSet(rs) => rs.num_of_fields(),
-            WsResultSet::SchemalessResultSet(rs) => rs.num_of_fields(),
+            WsResultSet::Sql(rs) => rs.num_of_fields(),
+            WsResultSet::Tmq(rs) => rs.num_of_fields(),
+            WsResultSet::Schemaless(rs) => rs.num_of_fields(),
         }
     }
 
     fn get_fields(&mut self) -> *const WS_FIELD {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.get_fields(),
-            WsResultSet::TmqResultSet(rs) => rs.get_fields(),
-            WsResultSet::SchemalessResultSet(rs) => rs.get_fields(),
+            WsResultSet::Sql(rs) => rs.get_fields(),
+            WsResultSet::Tmq(rs) => rs.get_fields(),
+            WsResultSet::Schemaless(rs) => rs.get_fields(),
         }
     }
     fn get_fields_v2(&mut self) -> *const WS_FIELD_V2 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.get_fields_v2(),
-            WsResultSet::TmqResultSet(rs) => rs.get_fields_v2(),
-            WsResultSet::SchemalessResultSet(rs) => rs.get_fields_v2(),
+            WsResultSet::Sql(rs) => rs.get_fields_v2(),
+            WsResultSet::Tmq(rs) => rs.get_fields_v2(),
+            WsResultSet::Schemaless(rs) => rs.get_fields_v2(),
         }
     }
 
     unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.fetch_block(ptr, rows),
-            WsResultSet::TmqResultSet(rs) => rs.fetch_block(ptr, rows),
-            WsResultSet::SchemalessResultSet(rs) => rs.fetch_block(ptr, rows),
+            WsResultSet::Sql(rs) => rs.fetch_block(ptr, rows),
+            WsResultSet::Tmq(rs) => rs.fetch_block(ptr, rows),
+            WsResultSet::Schemaless(rs) => rs.fetch_block(ptr, rows),
         }
     }
 
     unsafe fn fetch_row(&mut self) -> Result<WS_ROW, Error> {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.fetch_row(),
-            WsResultSet::TmqResultSet(rs) => rs.fetch_row(),
-            WsResultSet::SchemalessResultSet(rs) => rs.fetch_row(),
+            WsResultSet::Sql(rs) => rs.fetch_row(),
+            WsResultSet::Tmq(rs) => rs.fetch_row(),
+            WsResultSet::Schemaless(rs) => rs.fetch_row(),
         }
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.get_raw_value(row, col),
-            WsResultSet::TmqResultSet(rs) => rs.get_raw_value(row, col),
-            WsResultSet::SchemalessResultSet(rs) => rs.get_raw_value(row, col),
+            WsResultSet::Sql(rs) => rs.get_raw_value(row, col),
+            WsResultSet::Tmq(rs) => rs.get_raw_value(row, col),
+            WsResultSet::Schemaless(rs) => rs.get_raw_value(row, col),
         }
     }
 
     fn take_timing(&mut self) -> Duration {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.take_timing(),
-            WsResultSet::TmqResultSet(rs) => rs.take_timing(),
-            WsResultSet::SchemalessResultSet(rs) => rs.take_timing(),
+            WsResultSet::Sql(rs) => rs.take_timing(),
+            WsResultSet::Tmq(rs) => rs.take_timing(),
+            WsResultSet::Schemaless(rs) => rs.take_timing(),
         }
     }
 
     fn stop_query(&mut self) {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.stop_query(),
-            WsResultSet::TmqResultSet(rs) => rs.stop_query(),
-            WsResultSet::SchemalessResultSet(rs) => rs.stop_query(),
+            WsResultSet::Sql(rs) => rs.stop_query(),
+            WsResultSet::Tmq(rs) => rs.stop_query(),
+            WsResultSet::Schemaless(rs) => rs.stop_query(),
         }
     }
 }
@@ -1008,7 +1008,7 @@ unsafe fn query_with_sql(
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
     let rs = client.query_with_req_id(sql, req_id)?;
-    Ok(WsResultSet::SqlResultSet(WsSqlResultSet::new(rs)))
+    Ok(WsResultSet::Sql(WsSqlResultSet::new(rs)))
 }
 
 unsafe fn query_with_sql_timeout(
@@ -1023,7 +1023,7 @@ unsafe fn query_with_sql_timeout(
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
     let rs = client.query(sql)?;
-    Ok(WsResultSet::SqlResultSet(WsSqlResultSet::new(rs)))
+    Ok(WsResultSet::Sql(WsSqlResultSet::new(rs)))
 }
 
 #[no_mangle]
@@ -1295,7 +1295,7 @@ pub unsafe extern "C" fn ws_is_null(rs: *const WS_RES, row: i32, col: i32) -> bo
         .as_ref()
         .and_then(|s| s.safe_deref())
     {
-        Some(WsResultSet::SqlResultSet(rs)) => match &(rs.block) {
+        Some(WsResultSet::Sql(rs)) => match &(rs.block) {
             Some(block) => block.is_null(row as _, col as _),
             _ => true,
         },
@@ -1756,7 +1756,7 @@ unsafe fn schemaless_insert_raw(
         .build()?;
 
     client.put(&sml_data)?;
-    let r = WsResultSet::SchemalessResultSet(WsSchemalessResultSet::new(
+    let r = WsResultSet::Schemaless(WsSchemalessResultSet::new(
         0,
         Precision::Millisecond,
         Duration::from_millis(0),

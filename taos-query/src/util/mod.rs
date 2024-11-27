@@ -37,13 +37,14 @@ impl Edition {
             expired,
         }
     }
+
     pub fn is_enterprise_edition(&self) -> bool {
-        match (self.edition.as_str(), self.expired) {
-            ("cloud", _) => true,
-            ("official" | "trial", false) => true,
-            _ => false,
-        }
+        matches!(
+            (self.edition.as_str(), self.expired),
+            ("cloud", _) | ("official" | "trial", false)
+        )
     }
+
     pub fn assert_enterprise_edition(&self) -> RawResult<()> {
         match (self.edition.as_str(), self.expired) {
             ("cloud", _) => Ok(()),

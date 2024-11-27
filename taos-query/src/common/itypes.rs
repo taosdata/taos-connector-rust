@@ -24,7 +24,7 @@ pub type IDecimal = Decimal;
 #[derive(Debug, Clone, Copy, Deref, DerefMut, Deserialize, Serialize, Display, From)]
 pub struct ITimestamp(pub i64);
 
-#[derive(Debug, Deref, DerefMut, Clone, Deserialize, Serialize)]
+#[derive(Debug, Deref, DerefMut, Clone, Deserialize, Serialize, Default)]
 pub struct IVarChar(String);
 
 impl AsRef<str> for IVarChar {
@@ -99,10 +99,12 @@ impl IVarChar {
     pub const fn new() -> Self {
         Self(String::new())
     }
+
     pub fn with_capacity(cap: usize) -> Self {
         Self(String::with_capacity(cap))
     }
 }
+
 pub trait IsValue: Sized + Clone {
     const TY: Ty;
 

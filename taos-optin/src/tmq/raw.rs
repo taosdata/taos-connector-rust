@@ -379,7 +379,6 @@ pub(super) mod tmq {
 
 pub(super) mod conf {
     use std::ffi::c_void;
-    use std::i32;
 
     use taos_query::{value_is_true, Dsn};
     use types::tmq_resp_err_t;

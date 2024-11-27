@@ -634,7 +634,7 @@ unsafe fn tmq_consumer_poll(tmq: *mut ws_tmq_t, timeout: i64) -> WsResult<Option
                         let data = message_set.into_data().unwrap();
                         match data.fetch_raw_block()? {
                             Some(block) => {
-                                let rs = WsResultSet::TmqResultSet(WsTmqResultSet::new(
+                                let rs = WsResultSet::Tmq(WsTmqResultSet::new(
                                     block, offset, data,
                                 ));
                                 Ok(Some(rs))
