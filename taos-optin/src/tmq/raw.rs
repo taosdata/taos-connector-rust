@@ -83,6 +83,7 @@ pub(super) mod tmq {
         }
 
         pub fn commit_sync(&self, msg: RawRes) -> RawResult<()> {
+            tracing::debug!("commit sync with {:?}", msg);
             unsafe { (self.tmq_api.tmq_commit_sync)(self.as_ptr(), msg.as_ptr() as _) }
                 .ok_or("commit failed")
         }
@@ -377,7 +378,11 @@ pub(super) mod tmq {
 }
 
 pub(super) mod conf {
-    use taos_query::Dsn;
+    use std::ffi::c_void;
+    use std::i32;
+
+    use taos_query::{value_is_true, Dsn};
+    use types::tmq_resp_err_t;
 
     use crate::*;
     use crate::{
@@ -385,11 +390,46 @@ pub(super) mod conf {
         types::{tmq_conf_t, tmq_t},
     };
 
+    #[derive(Debug)]
+    struct Settings {
+        experimental_snapshot_enable: bool,
+        msg_enable_batchmeta: bool,
+        with_table_name: bool,
+        enable_auto_commit: bool,
+        auto_commit_interval_ms: Option<i32>,
+    }
+
+    impl Default for Settings {
+        fn default() -> Self {
+            Self {
+                experimental_snapshot_enable: false,
+                msg_enable_batchmeta: true,
+                with_table_name: true,
+                enable_auto_commit: false,
+                auto_commit_interval_ms: None,
+            }
+        }
+    }
+
+    const TMQ_CONF_AUTO_COMMIT_INTERVAL_MS: &str = "auto.commit.interval.ms";
+    const TMQ_CONF_ENABLE_AUTO_COMMIT: &str = "enable.auto.commit";
+    const TMQ_CONF_EXPERIMENTAL_SNAPSHOT_ENABLE: &str = "experimental.snapshot.enable";
+    const TMQ_CONF_MSG_ENABLE_BATCHMETA: &str = "msg.enable.batchmeta";
+    const TMQ_CONF_WITH_TABLE_NAME: &str = "msg.with.table.name";
+
+    const TMQ_CONF_VALUE_TRUE: &str = "true";
+    const TMQ_CONF_VALUE_FALSE: &str = "false";
+    const TMQ_CONF_VALUE_ONE: &str = "1";
+    const TMQ_CONF_VALUE_ZERO: &str = "0";
+    const TMQ_CONF_MAX_AUTO_COMMIT_INTERVAL_MS: &str = "2147483647";
+    const TMQ_CONF_DEFAULT_AUTO_COMMIT_INTERVAL_MS: &str = "5000";
+
     /* tmq conf */
     #[derive(Debug)]
     pub struct Conf {
         api: TmqConfApi,
         ptr: *mut tmq_conf_t,
+        settings: Settings,
     }
 
     impl Conf {
@@ -401,16 +441,12 @@ pub(super) mod conf {
             Self {
                 api,
                 ptr: unsafe { api.new_conf() },
+                settings: Settings::default(),
             }
-            .disable_auto_commit()
-            .enable_heartbeat_background()
-            .disable_snapshot()
-            .enable_batch_meta()
-            .with_table_name()
         }
 
         pub(crate) fn from_dsn(dsn: &Dsn, api: TmqConfApi) -> RawResult<Self> {
-            let mut conf = Self::new(api);
+            let conf = Self::new(api);
             macro_rules! _set_opt {
                 ($f:ident, $c:literal) => {
                     if let Some($f) = &dsn.$f {
@@ -441,62 +477,38 @@ pub(super) mod conf {
             conf.with(dsn.params.iter().filter(|(k, _)| k.contains('.')))
         }
 
-        pub fn disable_auto_commit(mut self) -> Self {
-            self.set("enable.auto.commit", "false")
-                .expect("set group.id should always be ok");
-            self
-        }
-
-        pub(crate) fn enable_heartbeat_background(mut self) -> Self {
-            tracing::trace!("[tmq-conf] enable heartbeat in the background");
-            let _ = self.set("enable.heartbeat.background", "true");
-            self
-        }
-
-        #[allow(dead_code)]
-        pub(crate) fn enable_snapshot(mut self) -> Self {
-            tracing::trace!("[tmq-conf] enable snapshot");
-            self.set("experimental.snapshot.enable", "true")
-                .expect("enable experimental snapshot");
-            self
-        }
-
-        pub(crate) fn disable_snapshot(mut self) -> Self {
-            self.set("experimental.snapshot.enable", "false")
-                .expect("disable experimental snapshot");
-            self
-        }
-
-        pub fn with_table_name(mut self) -> Self {
-            tracing::trace!("set msg.with.table.name as true");
-            self.set("msg.with.table.name", "true")
-                .expect("set group.id should always be ok");
-            self
-        }
-
-        pub fn enable_batch_meta(mut self) -> Self {
-            // Safety: set enable.batch.meta as true, ignore error when not supported.
-            let _ = self.set("msg.enable.batchmeta", "1");
-            self
-        }
-
-        // pub fn without_table_name(mut self) -> Self {
-        //     self.set("msg.with.table.name", "false")
-        //         .expect("set group.id should always be ok");
-        //     self
-        // }
-
         pub(crate) fn with<K: AsRef<str>, V: AsRef<str>>(
             mut self,
             iter: impl Iterator<Item = (K, V)>,
         ) -> RawResult<Self> {
             for (k, v) in iter {
-                self.set(k, v)?;
+                match k.as_ref() {
+                    "auto.commit.interval.ms" => {
+                        self.settings.auto_commit_interval_ms =
+                            v.as_ref().parse().ok().filter(|&x| x > 0);
+                    }
+                    "msg.enable.batchmeta" => {
+                        self.settings.msg_enable_batchmeta = value_is_true(v.as_ref());
+                    }
+                    "enable.auto.commit" => {
+                        self.settings.enable_auto_commit = value_is_true(v.as_ref());
+                    }
+                    "experimental.snapshot.enable" => {
+                        self.settings.experimental_snapshot_enable = value_is_true(v.as_ref());
+                    }
+                    "msg.with.table.name" => {
+                        self.settings.with_table_name = value_is_true(v.as_ref());
+                    }
+                    _ => {
+                        self.set(k, v)?;
+                    }
+                };
             }
             Ok(self)
         }
 
-        fn set<K: AsRef<str>, V: AsRef<str>>(&mut self, key: K, value: V) -> RawResult<&mut Self> {
+        fn set<K: AsRef<str>, V: AsRef<str>>(&self, key: K, value: V) -> RawResult<&Self> {
+            tracing::info!("set {}={}", key.as_ref(), value.as_ref());
             unsafe {
                 self.api
                     .set_conf(self.as_ptr(), key.as_ref(), value.as_ref())
@@ -504,13 +516,56 @@ pub(super) mod conf {
             .map(|_| self)
         }
 
-        // pub(crate) fn with_auto_commit_cb(&mut self, cb: tmq_commit_cb, param: *mut c_void) {
-        //     unsafe {
-        //         self.api.auto_commit_cb(self.as_ptr(), cb, param);
-        //     }
-        // }
-
         pub(crate) fn build(&self) -> RawResult<*mut tmq_t> {
+            if self.settings.enable_auto_commit {
+                self.set(TMQ_CONF_ENABLE_AUTO_COMMIT, TMQ_CONF_VALUE_TRUE)?;
+                if let Some(ms) = self.settings.auto_commit_interval_ms {
+                    self.set(TMQ_CONF_AUTO_COMMIT_INTERVAL_MS, ms.to_string())?;
+                } else {
+                    self.set(
+                        TMQ_CONF_AUTO_COMMIT_INTERVAL_MS,
+                        TMQ_CONF_DEFAULT_AUTO_COMMIT_INTERVAL_MS,
+                    )?;
+                }
+                // Safety: auto commit callback is called by C function.
+                #[no_mangle]
+                unsafe extern "C" fn auto_commit_callback_by_rust(
+                    _tmq: *mut tmq_t,
+                    resp: tmq_resp_err_t,
+                    _param: *mut c_void,
+                ) {
+                    tracing::trace!(ok = resp.is_ok(), "auto commit callback is called");
+                }
+                unsafe {
+                    self.api.auto_commit_cb(
+                        self.as_ptr(),
+                        auto_commit_callback_by_rust,
+                        std::ptr::null_mut(),
+                    );
+                }
+            } else {
+                self.set(TMQ_CONF_ENABLE_AUTO_COMMIT, TMQ_CONF_VALUE_FALSE)?;
+                self.set(
+                    TMQ_CONF_AUTO_COMMIT_INTERVAL_MS,
+                    TMQ_CONF_MAX_AUTO_COMMIT_INTERVAL_MS,
+                )?;
+            }
+            if self.settings.experimental_snapshot_enable {
+                self.set(TMQ_CONF_EXPERIMENTAL_SNAPSHOT_ENABLE, TMQ_CONF_VALUE_TRUE)?;
+            } else {
+                self.set(TMQ_CONF_EXPERIMENTAL_SNAPSHOT_ENABLE, TMQ_CONF_VALUE_FALSE)?;
+            }
+            if self.settings.msg_enable_batchmeta {
+                self.set(TMQ_CONF_MSG_ENABLE_BATCHMETA, TMQ_CONF_VALUE_ONE)?;
+            } else {
+                self.set(TMQ_CONF_MSG_ENABLE_BATCHMETA, TMQ_CONF_VALUE_ZERO)?;
+            }
+            if self.settings.with_table_name {
+                self.set(TMQ_CONF_WITH_TABLE_NAME, TMQ_CONF_VALUE_TRUE)?;
+            } else {
+                self.set(TMQ_CONF_WITH_TABLE_NAME, TMQ_CONF_VALUE_FALSE)?;
+            }
+
             unsafe { self.api.new_consumer(self.as_ptr()) }
         }
     }
