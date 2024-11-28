@@ -54,7 +54,10 @@ impl Stmt2 {
                 self.stmt_id = Some(stmt_id);
                 Ok(())
             }
-            _ => Err("Unexpected response type".into()),
+            unexpected => {
+                tracing::error!("Unexpected response type: {unexpected:?}");
+                Err("Unexpected response type".into())
+            }
         }
     }
 
@@ -77,7 +80,10 @@ impl Stmt2 {
                 self.fields_count = Some(fields_count);
                 Ok(())
             }
-            _ => Err("Unexpected response type".into()),
+            unexpected => {
+                tracing::error!("Unexpected response type: {unexpected:?}");
+                Err("Unexpected response type".into())
+            }
         }
     }
 
@@ -93,7 +99,10 @@ impl Stmt2 {
         let req = WsSend::Binary(bytes);
         match self.client.send_request(req).await? {
             WsRecvData::Stmt2Bind { .. } => Ok(()),
-            _ => Err("Unexpected response type".into()),
+            unexpected => {
+                tracing::error!("Unexpected response type: {unexpected:?}");
+                Err("Unexpected response type".into())
+            }
         }
     }
 
@@ -108,19 +117,22 @@ impl Stmt2 {
                 self.affected_rows_once = affected;
                 Ok(affected)
             }
-            _ => Err("Unexpected response type".into()),
+            unexpected => {
+                tracing::error!("Unexpected response type: {unexpected:?}");
+                Err("Unexpected response type".into())
+            }
         }
     }
 
-    // TODO
-    async fn close(&mut self) {
+    fn close(&self) {
         let req = WsSend::Stmt2Close {
             req_id: generate_req_id(),
             stmt_id: self.stmt_id.unwrap(),
         };
-        let resp = self.client.send_request(req).await;
-        if let Err(e) = resp {
-            tracing::error!("Failed to close Stmt2: {e:?}");
+        match block_in_place_or_global(self.client.send_request(req)) {
+            Ok(WsRecvData::Stmt2Close { .. }) => tracing::trace!("Stmt2 closed successfully"),
+            Ok(unexpected) => tracing::error!("Unexpected response type: {unexpected:?}"),
+            Err(err) => tracing::error!("Failed to close Stmt2: {err:?}"),
         }
     }
 
@@ -279,7 +291,7 @@ async fn fetch(
 
 impl Drop for Stmt2 {
     fn drop(&mut self) {
-        block_in_place_or_global(self.close());
+        self.close();
     }
 }
 
