@@ -4,18 +4,15 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use byteorder::{ByteOrder, LittleEndian};
-use flume::Sender;
 use futures::channel::oneshot;
 use taos_query::common::{Field, Precision};
 use taos_query::prelude::RawResult;
 use taos_query::stmt2::{AsyncBindable, Bindable, Stmt2BindData};
 use taos_query::util::generate_req_id;
-use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable, RawBlock, RawError};
+use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable};
 use tracing::Instrument;
 
-use crate::query::asyn::QueryMetrics as Metrics;
-use crate::query::infra::{ResId, Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
+use crate::query::infra::{Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
 use crate::query::WsTaos;
 use crate::{ResultSet, Taos};
 
@@ -178,8 +175,8 @@ impl Stmt2 {
                 let (raw_block_tx, raw_block_rx) = flume::bounded(64);
 
                 tokio::spawn(
-                    fetch(
-                        self.client.clone(),
+                    crate::query::asyn::fetch(
+                        self.client.sender(),
                         result_id,
                         raw_block_tx,
                         precision,
@@ -216,77 +213,6 @@ impl Stmt2 {
             _ => Err("Unexpected response type".into()),
         }
     }
-}
-
-async fn fetch(
-    client: Arc<WsTaos>,
-    res_id: ResId,
-    raw_block_tx: Sender<Result<(RawBlock, Duration), RawError>>,
-    precision: Precision,
-    field_names: Vec<String>,
-) -> RawResult<()> {
-    const ACTION: u64 = 7;
-    const VERSION: u16 = 1;
-
-    let mut bytes = vec![0u8; 26];
-    LittleEndian::write_u64(&mut bytes[8..], res_id);
-    LittleEndian::write_u64(&mut bytes[16..], ACTION);
-    LittleEndian::write_u16(&mut bytes[24..], VERSION);
-
-    let mut metrics = Metrics::default();
-
-    loop {
-        LittleEndian::write_u64(&mut bytes, generate_req_id());
-
-        let fetch_start = Instant::now();
-        match client.send_request(WsSend::Binary(bytes.clone())).await {
-            Ok(WsRecvData::BlockNew {
-                block_code,
-                block_message,
-                timing,
-                finished,
-                raw,
-                ..
-            }) => {
-                metrics.num_of_fetches += 1;
-                metrics.time_cost_in_fetch += fetch_start.elapsed();
-
-                if block_code != 0 {
-                    return Err(RawError::new(block_code, block_message));
-                }
-
-                if finished {
-                    tracing::trace!("Finished processing result:{res_id}");
-                    drop(raw_block_tx);
-                    break;
-                }
-
-                let parse_start = Instant::now();
-                let mut raw_block = RawBlock::parse_from_raw_block(raw, precision);
-                metrics.time_cost_in_block_parse += parse_start.elapsed();
-
-                raw_block.with_field_names(&field_names);
-                if raw_block_tx
-                    .send_async(Ok((raw_block, timing)))
-                    .await
-                    .is_err()
-                {
-                    tracing::error!("Failed to send raw block; receiver may be closed");
-                    break;
-                }
-            }
-            Ok(_) => tracing::warn!("Unexpected response for result:{res_id}"),
-            Err(err) => {
-                if raw_block_tx.send_async(Err(err)).await.is_err() {
-                    tracing::error!("Failed to send err; receiver may be closed");
-                    break;
-                }
-            }
-        }
-    }
-
-    tracing::trace!("Metrics for stmt2 result:{res_id}: {metrics:?}");
-    Ok(())
 }
 
 impl Drop for Stmt2 {
