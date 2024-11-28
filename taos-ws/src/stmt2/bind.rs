@@ -234,51 +234,26 @@ fn get_col_data_len(col: &ColumnView) -> usize {
         return 0;
     }
 
-    let fixed_len = col.as_ty().fixed_length();
-    if fixed_len != 0 {
-        return fixed_len * col.len();
-    }
-
     let mut len = 0;
+
+    macro_rules! view_iter {
+        ($view:ident) => {
+            for val in $view.iter() {
+                if let Some(v) = val {
+                    len += v.len();
+                }
+            }
+        };
+    }
 
     use ColumnView::*;
     match col {
-        VarChar(view) => {
-            for val in view.iter() {
-                if let Some(str) = val {
-                    len += str.len();
-                }
-            }
-        }
-        NChar(view) => {
-            for val in view.iter() {
-                if let Some(str) = val {
-                    len += str.len();
-                }
-            }
-        }
-        Json(view) => {
-            for val in view.iter() {
-                if let Some(json) = val {
-                    len += json.len();
-                }
-            }
-        }
-        VarBinary(view) => {
-            for val in view.iter() {
-                if let Some(bytes) = val {
-                    len += bytes.len();
-                }
-            }
-        }
-        Geometry(view) => {
-            for val in view.iter() {
-                if let Some(bytes) = val {
-                    len += bytes.len();
-                }
-            }
-        }
-        _ => unreachable!(),
+        VarChar(view) => view_iter!(view),
+        NChar(view) => view_iter!(view),
+        Json(view) => view_iter!(view),
+        VarBinary(view) => view_iter!(view),
+        Geometry(view) => view_iter!(view),
+        _ => len = col.as_ty().fixed_length() * col.len(),
     }
 
     len
@@ -441,6 +416,41 @@ fn write_col(bytes: &mut [u8], col: &ColumnView) -> usize {
         let mut is_null_offset = TC_DATA_IS_NULL_POS;
         // TC_DATA_IS_NULL_POS + IsNull(num) + HaveLength(1)
         let mut len_offset = is_null_offset + num + 1;
+
+        macro_rules! fixed_view_iter {
+            ($view:ident, $ty:ty) => {
+                for val in $view.iter() {
+                    if val.is_none() {
+                        bytes[is_null_offset] = 1;
+                    }
+                    let size = std::mem::size_of::<$ty>();
+                    bytes[buf_offset..buf_offset + size]
+                        .copy_from_slice(&val.unwrap_or_default().to_le_bytes());
+                    buf_offset += size;
+                    is_null_offset += 1;
+                }
+            };
+        }
+
+        macro_rules! variable_view_iter {
+            ($view:ident) => {
+                for val in $view.iter() {
+                    let mut len = 0;
+                    match val {
+                        Some(v) => {
+                            len = v.len();
+                            bytes[buf_offset..buf_offset + len].copy_from_slice(v.as_bytes());
+                            buf_offset += len;
+                        }
+                        None => bytes[is_null_offset] = 1,
+                    }
+                    LittleEndian::write_i32(&mut bytes[len_offset..], len as _);
+                    is_null_offset += 1;
+                    len_offset += 4;
+                }
+            };
+        }
+
         use ColumnView::*;
         match col {
             Bool(view) => {
@@ -457,106 +467,6 @@ fn write_col(bytes: &mut [u8], col: &ColumnView) -> usize {
                     is_null_offset += 1;
                 }
             }
-            TinyInt(view) => {
-                for val in view.iter() {
-                    if val.is_none() {
-                        bytes[is_null_offset] = 1;
-                    }
-                    bytes[buf_offset] = val.unwrap_or(0) as _;
-                    buf_offset += 1;
-                    is_null_offset += 1;
-                }
-            }
-            UTinyInt(view) => {
-                for val in view.iter() {
-                    if val.is_none() {
-                        bytes[is_null_offset] = 1;
-                    }
-                    bytes[buf_offset] = val.unwrap_or(0);
-                    buf_offset += 1;
-                    is_null_offset += 1;
-                }
-            }
-            SmallInt(view) => {
-                for val in view.iter() {
-                    if val.is_none() {
-                        bytes[is_null_offset] = 1;
-                    }
-                    LittleEndian::write_i16(&mut bytes[buf_offset..], val.unwrap_or(0));
-                    buf_offset += 2;
-                    is_null_offset += 1;
-                }
-            }
-            USmallInt(view) => {
-                for val in view.iter() {
-                    if val.is_none() {
-                        bytes[is_null_offset] = 1;
-                    }
-                    LittleEndian::write_u16(&mut bytes[buf_offset..], val.unwrap_or(0));
-                    buf_offset += 2;
-                    is_null_offset += 1;
-                }
-            }
-            Int(view) => {
-                for val in view.iter() {
-                    if val.is_none() {
-                        bytes[is_null_offset] = 1;
-                    }
-                    LittleEndian::write_i32(&mut bytes[buf_offset..], val.unwrap_or(0));
-                    buf_offset += 4;
-                    is_null_offset += 1;
-                }
-            }
-            UInt(view) => {
-                for val in view.iter() {
-                    if val.is_none() {
-                        bytes[is_null_offset] = 1;
-                    }
-                    LittleEndian::write_u32(&mut bytes[buf_offset..], val.unwrap_or(0));
-                    buf_offset += 4;
-                    is_null_offset += 1;
-                }
-            }
-            BigInt(view) => {
-                for val in view.iter() {
-                    if val.is_none() {
-                        bytes[is_null_offset] = 1;
-                    }
-                    LittleEndian::write_i64(&mut bytes[buf_offset..], val.unwrap_or(0));
-                    buf_offset += 8;
-                    is_null_offset += 1;
-                }
-            }
-            UBigInt(view) => {
-                for val in view.iter() {
-                    if val.is_none() {
-                        bytes[is_null_offset] = 1;
-                    }
-                    LittleEndian::write_u64(&mut bytes[buf_offset..], val.unwrap_or(0));
-                    buf_offset += 8;
-                    is_null_offset += 1;
-                }
-            }
-            Float(view) => {
-                for val in view.iter() {
-                    if val.is_none() {
-                        bytes[is_null_offset] = 1;
-                    }
-                    LittleEndian::write_f32(&mut bytes[buf_offset..], val.unwrap_or(0f32));
-                    buf_offset += 4;
-                    is_null_offset += 1;
-                }
-            }
-            Double(view) => {
-                for val in view.iter() {
-                    if val.is_none() {
-                        bytes[is_null_offset] = 1;
-                    }
-                    LittleEndian::write_f64(&mut bytes[buf_offset..], val.unwrap_or(0f64));
-                    buf_offset += 8;
-                    is_null_offset += 1;
-                }
-            }
             Timestamp(view) => {
                 for val in view.iter() {
                     if val.is_none() {
@@ -570,86 +480,21 @@ fn write_col(bytes: &mut [u8], col: &ColumnView) -> usize {
                     is_null_offset += 1;
                 }
             }
-            VarChar(view) => {
-                for val in view.iter() {
-                    let mut len = 0;
-                    match val {
-                        Some(str) => {
-                            len = str.len();
-                            bytes[buf_offset..buf_offset + len].copy_from_slice(str.as_bytes());
-                            buf_offset += len;
-                        }
-                        None => bytes[is_null_offset] = 1,
-                    }
-                    LittleEndian::write_i32(&mut bytes[len_offset..], len as _);
-                    is_null_offset += 1;
-                    len_offset += 4;
-                }
-            }
-            NChar(view) => {
-                for val in view.iter() {
-                    let mut len = 0;
-                    match val {
-                        Some(str) => {
-                            len = str.len();
-                            bytes[buf_offset..buf_offset + len].copy_from_slice(str.as_bytes());
-                            buf_offset += len;
-                        }
-                        None => bytes[is_null_offset] = 1,
-                    }
-                    LittleEndian::write_i32(&mut bytes[len_offset..], len as _);
-                    is_null_offset += 1;
-                    len_offset += 4;
-                }
-            }
-            Json(view) => {
-                for val in view.iter() {
-                    let mut len = 0;
-                    match val {
-                        Some(json) => {
-                            len = json.len();
-                            bytes[buf_offset..buf_offset + len].copy_from_slice(json.as_bytes());
-                            buf_offset += len;
-                        }
-                        None => bytes[is_null_offset] = 1,
-                    }
-                    LittleEndian::write_i32(&mut bytes[len_offset..], len as _);
-                    is_null_offset += 1;
-                    len_offset += 4;
-                }
-            }
-            VarBinary(view) => {
-                for val in view.iter() {
-                    let mut len = 0;
-                    match val {
-                        Some(bs) => {
-                            len = bs.len();
-                            bytes[buf_offset..buf_offset + len].copy_from_slice(bs.as_bytes());
-                            buf_offset += len;
-                        }
-                        None => bytes[is_null_offset] = 1,
-                    }
-                    LittleEndian::write_i32(&mut bytes[len_offset..], len as _);
-                    is_null_offset += 1;
-                    len_offset += 4;
-                }
-            }
-            Geometry(view) => {
-                for val in view.iter() {
-                    let mut len = 0;
-                    match val {
-                        Some(bs) => {
-                            len = bs.len();
-                            bytes[buf_offset..buf_offset + len].copy_from_slice(bs.as_bytes());
-                            buf_offset += len;
-                        }
-                        None => bytes[is_null_offset] = 1,
-                    }
-                    LittleEndian::write_i32(&mut bytes[len_offset..], len as _);
-                    is_null_offset += 1;
-                    len_offset += 4;
-                }
-            }
+            TinyInt(view) => fixed_view_iter!(view, i8),
+            UTinyInt(view) => fixed_view_iter!(view, u8),
+            SmallInt(view) => fixed_view_iter!(view, i16),
+            USmallInt(view) => fixed_view_iter!(view, u16),
+            Int(view) => fixed_view_iter!(view, i32),
+            UInt(view) => fixed_view_iter!(view, u32),
+            BigInt(view) => fixed_view_iter!(view, i64),
+            UBigInt(view) => fixed_view_iter!(view, u64),
+            Float(view) => fixed_view_iter!(view, f32),
+            Double(view) => fixed_view_iter!(view, f64),
+            VarChar(view) => variable_view_iter!(view),
+            NChar(view) => variable_view_iter!(view),
+            Json(view) => variable_view_iter!(view),
+            VarBinary(view) => variable_view_iter!(view),
+            Geometry(view) => variable_view_iter!(view),
         }
     }
 
