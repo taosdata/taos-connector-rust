@@ -2,14 +2,22 @@ mod bind;
 
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use taos_query::block_in_place_or_global;
+use byteorder::{ByteOrder, LittleEndian};
+use flume::Sender;
+use futures::channel::oneshot;
+use taos_query::common::{Field, Precision};
 use taos_query::prelude::RawResult;
 use taos_query::stmt2::{AsyncBindable, Bindable, Stmt2BindData};
 use taos_query::util::generate_req_id;
+use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable, RawBlock, RawError};
+use tracing::Instrument;
 
-use crate::query::infra::{Stmt2Field, StmtId, WsRecvData, WsSend};
+use crate::query::asyn::QueryMetrics as Metrics;
+use crate::query::infra::{ResId, Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
 use crate::query::WsTaos;
+use crate::{ResultSet, Taos};
 
 #[derive(Debug)]
 pub struct Stmt2 {
@@ -41,11 +49,13 @@ impl Stmt2 {
             single_stb_insert: true,
             single_table_bind_once: false,
         };
-        let resp = self.client.send_request(req).await?;
-        if let WsRecvData::Stmt2Init { stmt_id, .. } = resp {
-            self.stmt_id = Some(stmt_id);
+        match self.client.send_request(req).await? {
+            WsRecvData::Stmt2Init { stmt_id, .. } => {
+                self.stmt_id = Some(stmt_id);
+                Ok(())
+            }
+            _ => Err("Unexpected response type".into()),
         }
-        Ok(())
     }
 
     async fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<()> {
@@ -55,19 +65,20 @@ impl Stmt2 {
             sql: sql.as_ref().to_string(),
             get_fields: true,
         };
-        let resp = self.client.send_request(req).await?;
-        if let WsRecvData::Stmt2Prepare {
-            is_insert,
-            fields,
-            fields_count,
-            ..
-        } = resp
-        {
-            self.is_insert = Some(is_insert);
-            self.fields = fields;
-            self.fields_count = Some(fields_count);
+        match self.client.send_request(req).await? {
+            WsRecvData::Stmt2Prepare {
+                is_insert,
+                fields,
+                fields_count,
+                ..
+            } => {
+                self.is_insert = Some(is_insert);
+                self.fields = fields;
+                self.fields_count = Some(fields_count);
+                Ok(())
+            }
+            _ => Err("Unexpected response type".into()),
         }
-        Ok(())
     }
 
     async fn bind<'b>(&mut self, datas: &[Stmt2BindData<'b>]) -> RawResult<()> {
@@ -80,8 +91,10 @@ impl Stmt2 {
             self.fields_count.unwrap(),
         )?;
         let req = WsSend::Binary(bytes);
-        let _ = self.client.send_request(req).await?;
-        Ok(())
+        match self.client.send_request(req).await? {
+            WsRecvData::Stmt2Bind { .. } => Ok(()),
+            _ => Err("Unexpected response type".into()),
+        }
     }
 
     async fn exec(&mut self) -> RawResult<usize> {
@@ -89,30 +102,17 @@ impl Stmt2 {
             req_id: generate_req_id(),
             stmt_id: self.stmt_id.unwrap(),
         };
-        let resp = self.client.send_request(req).await?;
-        if let WsRecvData::Stmt2Exec { affected, .. } = resp {
-            self.affected_rows += affected;
-            self.affected_rows_once = affected;
+        match self.client.send_request(req).await? {
+            WsRecvData::Stmt2Exec { affected, .. } => {
+                self.affected_rows += affected;
+                self.affected_rows_once = affected;
+                Ok(affected)
+            }
+            _ => Err("Unexpected response type".into()),
         }
-        Ok(self.affected_rows)
     }
 
-    async fn result(&mut self) -> RawResult<()> {
-        if self.is_insert.unwrap() {
-            return Err("Can't use result for insert stmt2".into());
-        }
-        let req = WsSend::Stmt2Result {
-            req_id: generate_req_id(),
-            stmt_id: self.stmt_id.unwrap(),
-        };
-        let resp = self.client.send_request(req).await?;
-        if let WsRecvData::Stmt2Result { result_id, .. } = resp {
-            // TODO
-            println!("stmt2 result res_id: {result_id}");
-        }
-        Ok(())
-    }
-
+    // TODO
     async fn close(&mut self) {
         let req = WsSend::Stmt2Close {
             req_id: generate_req_id(),
@@ -123,6 +123,158 @@ impl Stmt2 {
             tracing::error!("Failed to close Stmt2: {e:?}");
         }
     }
+
+    async fn result(&self) -> RawResult<ResultSet> {
+        if self.is_insert.unwrap_or(false) {
+            return Err("Only query can use result".into());
+        }
+
+        let req_id = generate_req_id();
+        let req = WsSend::Stmt2Result {
+            req_id,
+            stmt_id: self.stmt_id.unwrap(),
+        };
+
+        match self.client.send_request(req).await? {
+            WsRecvData::Stmt2Result {
+                result_id,
+                precision,
+                fields_count,
+                fields_names,
+                fields_types,
+                fields_lengths,
+                timing,
+                ..
+            } => {
+                let (close_tx, close_rx) = oneshot::channel();
+                tokio::spawn(
+                    async move {
+                        let start = Instant::now();
+                        let _ = close_rx.await;
+                        tracing::trace!("stmt2 result:{} lived {:?}", result_id, start.elapsed());
+                    }
+                    .in_current_span(),
+                );
+
+                let fields: Vec<Field> = fields_names
+                    .iter()
+                    .zip(fields_types)
+                    .zip(fields_lengths)
+                    .map(|((name, ty), len)| Field::new(name, ty, len as _))
+                    .collect();
+
+                let (raw_block_tx, raw_block_rx) = flume::bounded(64);
+
+                tokio::spawn(
+                    fetch(
+                        self.client.clone(),
+                        result_id,
+                        raw_block_tx,
+                        precision,
+                        fields_names,
+                    )
+                    .in_current_span(),
+                );
+
+                let timing = match precision {
+                    Precision::Millisecond => Duration::from_millis(timing),
+                    Precision::Microsecond => Duration::from_micros(timing),
+                    Precision::Nanosecond => Duration::from_nanos(timing),
+                };
+
+                Ok(ResultSet {
+                    sender: self.client.sender(),
+                    args: WsResArgs {
+                        req_id,
+                        id: result_id,
+                    },
+                    fields: Some(fields),
+                    fields_count: fields_count as _,
+                    affected_rows: self.affected_rows_once,
+                    precision,
+                    summary: (0, 0),
+                    timing,
+                    block_future: None,
+                    closer: Some(close_tx),
+                    completed: false,
+                    metrics: Default::default(),
+                    blocks_buffer: Some(raw_block_rx),
+                })
+            }
+            _ => Err("Unexpected response type".into()),
+        }
+    }
+}
+
+async fn fetch(
+    client: Arc<WsTaos>,
+    res_id: ResId,
+    raw_block_tx: Sender<Result<(RawBlock, Duration), RawError>>,
+    precision: Precision,
+    field_names: Vec<String>,
+) -> RawResult<()> {
+    const ACTION: u64 = 7;
+    const VERSION: u16 = 1;
+
+    let mut bytes = vec![0u8; 26];
+    LittleEndian::write_u64(&mut bytes[8..], res_id);
+    LittleEndian::write_u64(&mut bytes[16..], ACTION);
+    LittleEndian::write_u16(&mut bytes[24..], VERSION);
+
+    let mut metrics = Metrics::default();
+
+    loop {
+        LittleEndian::write_u64(&mut bytes, generate_req_id());
+
+        let fetch_start = Instant::now();
+        match client.send_request(WsSend::Binary(bytes.clone())).await {
+            Ok(WsRecvData::BlockNew {
+                block_code,
+                block_message,
+                timing,
+                finished,
+                raw,
+                ..
+            }) => {
+                metrics.num_of_fetches += 1;
+                metrics.time_cost_in_fetch += fetch_start.elapsed();
+
+                if block_code != 0 {
+                    return Err(RawError::new(block_code, block_message));
+                }
+
+                if finished {
+                    tracing::trace!("Finished processing result:{res_id}");
+                    drop(raw_block_tx);
+                    break;
+                }
+
+                let parse_start = Instant::now();
+                let mut raw_block = RawBlock::parse_from_raw_block(raw, precision);
+                metrics.time_cost_in_block_parse += parse_start.elapsed();
+
+                raw_block.with_field_names(&field_names);
+                if raw_block_tx
+                    .send_async(Ok((raw_block, timing)))
+                    .await
+                    .is_err()
+                {
+                    tracing::error!("Failed to send raw block; receiver may be closed");
+                    break;
+                }
+            }
+            Ok(_) => tracing::warn!("Unexpected response for result:{res_id}"),
+            Err(err) => {
+                if raw_block_tx.send_async(Err(err)).await.is_err() {
+                    tracing::error!("Failed to send err; receiver may be closed");
+                    break;
+                }
+            }
+        }
+    }
+
+    tracing::trace!("Metrics for stmt2 result:{res_id}: {metrics:?}");
+    Ok(())
 }
 
 impl Drop for Stmt2 {
@@ -156,8 +308,8 @@ impl Bindable<super::Taos> for Stmt2 {
         self.affected_rows
     }
 
-    fn result_set(&mut self) -> RawResult<<super::Taos as taos_query::Queryable>::ResultSet> {
-        todo!()
+    fn result(&self) -> RawResult<<Taos as Queryable>::ResultSet> {
+        block_in_place_or_global(self.result())
     }
 }
 
@@ -187,11 +339,8 @@ impl AsyncBindable<super::Taos> for Stmt2 {
         self.affected_rows
     }
 
-    async fn result_set(
-        &mut self,
-    ) -> RawResult<<super::Taos as taos_query::AsyncQueryable>::AsyncResultSet> {
-        let _ = self.result().await?;
-        todo!()
+    async fn result(&self) -> RawResult<<Taos as AsyncQueryable>::AsyncResultSet> {
+        self.result().await
     }
 }
 
@@ -199,9 +348,9 @@ impl AsyncBindable<super::Taos> for Stmt2 {
 mod tests {
     use futures::TryStreamExt;
     use serde::Deserialize;
-    use taos_query::{
-        common::ColumnView, stmt2::Stmt2BindData, AsyncFetchable, AsyncQueryable, AsyncTBuilder,
-    };
+    use taos_query::common::ColumnView;
+    use taos_query::stmt2::Stmt2BindData;
+    use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};
 
     use crate::stmt2::Stmt2;
     use crate::TaosBuilder;
@@ -229,9 +378,9 @@ mod tests {
             .await?;
 
         let views = &[
-            ColumnView::from_millis_timestamp(vec![164000000000]),
+            ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_bools(vec![true]),
-            ColumnView::from_tiny_ints(vec![i8::MAX]),
+            ColumnView::from_tiny_ints(vec![None]),
             ColumnView::from_small_ints(vec![i16::MAX]),
             ColumnView::from_ints(vec![i32::MAX]),
             ColumnView::from_big_ints(vec![i64::MAX]),
@@ -253,9 +402,9 @@ mod tests {
 
         #[derive(Debug, Deserialize)]
         struct Row {
-            ts: String,
+            ts: i64,
             c1: bool,
-            c2: i8,
+            c2: Option<i8>,
             c3: i16,
             c4: i32,
             c5: i64,
@@ -280,9 +429,9 @@ mod tests {
 
         let row = &rows[0];
 
-        assert_eq!(row.ts, "1975-03-14T11:33:20+08:00");
+        assert_eq!(row.ts, 1726803356466);
         assert_eq!(row.c1, true);
-        assert_eq!(row.c2, i8::MAX);
+        assert_eq!(row.c2, None);
         assert_eq!(row.c3, i16::MAX);
         assert_eq!(row.c4, i32::MAX);
         assert_eq!(row.c5, i64::MAX);
@@ -290,7 +439,7 @@ mod tests {
         assert_eq!(row.c7, u16::MAX);
         assert_eq!(row.c8, u32::MAX);
         assert_eq!(row.c9, u64::MAX);
-        assert_eq!(row.c10.unwrap(), f32::MAX);
+        assert_eq!(row.c10, Some(f32::MAX));
         assert_eq!(row.c11, f64::MAX);
         assert_eq!(row.c12, "hello");
         assert_eq!(row.c13, "中文");
@@ -336,7 +485,7 @@ mod tests {
 
         #[derive(Debug, Deserialize)]
         struct Row {
-            ts: String,
+            ts: i64,
             c1: i32,
         }
 
@@ -349,10 +498,10 @@ mod tests {
 
         assert_eq!(rows.len(), 4);
 
-        assert_eq!(rows[0].ts, "2024-09-20T11:35:56.466+08:00");
-        assert_eq!(rows[1].ts, "2024-09-20T11:35:57.466+08:00");
-        assert_eq!(rows[2].ts, "2024-09-20T11:35:58.466+08:00");
-        assert_eq!(rows[3].ts, "2024-09-20T11:35:59.466+08:00");
+        assert_eq!(rows[0].ts, 1726803356466);
+        assert_eq!(rows[1].ts, 1726803357466);
+        assert_eq!(rows[2].ts, 1726803358466);
+        assert_eq!(rows[3].ts, 1726803359466);
 
         assert_eq!(rows[0].c1, 99);
         assert_eq!(rows[1].c1, 100);
@@ -365,7 +514,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_stmt2_query() -> anyhow::Result<()> {
+    async fn test_stmt2_query_single_row() -> anyhow::Result<()> {
         let db = "stmt2_202411231501";
         let dsn = "ws://localhost:6041";
 
@@ -374,8 +523,90 @@ mod tests {
             &format!("drop database if exists {db}"),
             &format!("create database {db}"),
             &format!("use {db}"),
+            "create table t0 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
+            c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
+            c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
+            &format!(
+                "insert into t0 values(1726803356466, 1, NULL, 2, 3, 4, 5, 6, 7, 8, 1.1, 2.2, 'hello', '中文')"
+            ),
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+        stmt2
+            .prepare("select * from t0 where c8 > ? and c10 > ? and c12 = ?")
+            .await?;
+
+        let views = &[
+            ColumnView::from_ints(vec![0]),
+            ColumnView::from_floats(vec![0f32]),
+            ColumnView::from_varchar(vec!["hello"]),
+        ];
+
+        let data = Stmt2BindData::new(None, None, Some(views));
+        stmt2.bind(&[data]).await?;
+
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 0);
+
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: bool,
+            c2: Option<u8>,
+            c3: i16,
+            c4: i32,
+            c5: i64,
+            c6: u8,
+            c7: u16,
+            c8: u32,
+            c9: u64,
+            c10: Option<f32>,
+            c11: f64,
+            c12: String,
+            c13: String,
+        }
+
+        let rows: Vec<Row> = stmt2.result().await?.deserialize().try_collect().await?;
+        assert_eq!(rows.len(), 1);
+
+        let row = &rows[0];
+        assert_eq!(row.ts, 1726803356466);
+        assert_eq!(row.c1, true);
+        assert_eq!(row.c2, None);
+        assert_eq!(row.c3, 2);
+        assert_eq!(row.c4, 3);
+        assert_eq!(row.c5, 4);
+        assert_eq!(row.c6, 5);
+        assert_eq!(row.c7, 6);
+        assert_eq!(row.c8, 7);
+        assert_eq!(row.c9, 8);
+        assert_eq!(row.c10, Some(1.1));
+        assert_eq!(row.c11, 2.2);
+        assert_eq!(row.c12, "hello");
+        assert_eq!(row.c13, "中文");
+
+        taos.exec(format!("drop database {db}")).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2_query_multi_row() -> anyhow::Result<()> {
+        let db = "stmt2_202411281646";
+        let dsn = "ws://localhost:6041";
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        taos.exec_many(vec![
+            &format!("drop database if exists {db}"),
+            &format!("create database {db}"),
+            &format!("use {db}"),
             "create table t0 (ts timestamp, c1 int)",
-            "insert into t0 values(now, 100)",
+            "insert into t0 values(1726803356466, 99)",
+            "insert into t0 values(1726803357466, 100)",
+            "insert into t0 values(1726803358466, 101)",
+            "insert into t0 values(1726803359466, 102)",
         ])
         .await?;
 
@@ -383,14 +614,27 @@ mod tests {
         stmt2.init().await?;
         stmt2.prepare("select * from t0 where c1 > ?").await?;
 
-        let views = &[ColumnView::from_ints(vec![0])];
+        let views = &[ColumnView::from_ints(vec![100])];
         let data = Stmt2BindData::new(None, None, Some(views));
         stmt2.bind(&[data]).await?;
 
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 0);
 
-        stmt2.result().await?;
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: i32,
+        }
+
+        let rows: Vec<Row> = stmt2.result().await?.deserialize().try_collect().await?;
+        assert_eq!(rows.len(), 2);
+
+        assert_eq!(rows[0].ts, 1726803358466);
+        assert_eq!(rows[1].ts, 1726803359466);
+
+        assert_eq!(rows[0].c1, 101);
+        assert_eq!(rows[1].c1, 102);
 
         taos.exec(format!("drop database {db}")).await?;
 

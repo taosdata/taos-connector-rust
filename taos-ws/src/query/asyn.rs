@@ -1,9 +1,20 @@
+use std::fmt::Debug;
+use std::future::Future;
+use std::io::Write;
+use std::mem::transmute;
+use std::ops::ControlFlow;
+use std::pin::Pin;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use std::task::Poll;
+use std::time::{Duration, Instant};
+
 use anyhow::bail;
+use futures::channel::oneshot;
 use futures::stream::SplitStream;
 use futures::{FutureExt, SinkExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
-use std::future::Future;
-use std::ops::ControlFlow;
+use oneshot::channel as query_channel;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::InlinableWrite;
@@ -12,32 +23,16 @@ use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::sync::watch;
+use tokio::time::{self, timeout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{instrument, trace, Instrument};
 
-use tokio::time::{self, timeout};
-
 use super::{infra::*, TaosBuilder};
 
-use std::fmt::Debug;
-use std::io::Write;
-use std::mem::transmute;
-use std::pin::Pin;
-// use std::io::Write;
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
-use std::task::Poll;
-use std::time::{Duration, Instant};
-
-// type WsSender = flume::Sender<WsMessage<bytes::Bytes>>;
 type WsSender = flume::Sender<Message>;
 
-use futures::channel::oneshot;
-use oneshot::channel as query_channel;
 type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
-// use tokio::sync::mpsc::unbounded_channel as query_channel;
-// type QueryChannelSender = tokio::sync::mpsc::UnboundedSender<Result<WsRecvData, RawError>>;
 type QueryInner = scc::HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = scc::HashMap<ResId, ReqId>;
@@ -55,14 +50,16 @@ struct Version {
 //         !self.0.starts_with("2")
 //     }
 // }
+
 #[derive(Debug, Clone)]
-struct WsQuerySender {
+pub(crate) struct WsQuerySender {
     version: Version,
     req_id: Arc<AtomicU64>,
     results: Arc<QueryResMapper>,
     sender: WsSender,
     queries: QueryAgent,
 }
+
 const SEND_TIMEOUT: Duration = Duration::from_millis(1000);
 
 impl WsQuerySender {
@@ -70,6 +67,7 @@ impl WsQuerySender {
         self.req_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
+
     fn req_id_ref(&self) -> &Arc<AtomicU64> {
         &self.req_id
     }
@@ -96,7 +94,6 @@ impl WsQuerySender {
                     .await
                     .map_err(Error::from)?
                     .map_err(Error::from)?;
-                //
             }
             WsSend::Binary(bytes) => {
                 timeout(SEND_TIMEOUT, self.sender.send_async(Message::Binary(bytes)))
@@ -126,7 +123,6 @@ impl WsQuerySender {
         timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
             .await
             .map_err(Error::from)?
-            // .await
             .map_err(Error::from)?;
         Ok(())
     }
@@ -145,33 +141,35 @@ pub struct WsTaos {
 
 impl Drop for WsTaos {
     fn drop(&mut self) {
-        tracing::trace!("dropping connection");
-        // send close signal to reader/writer spawned tasks.
+        trace!("dropping connection");
+        // Send close signal to reader/writer spawned tasks.
         let _ = self.close_signal.send(true);
     }
 }
 
 #[derive(Debug, Clone, Default)]
-struct QueryMetrics {
-    num_of_fetches: usize,
-    time_cost_in_fetch: Duration,
-    time_cost_in_block_parse: Duration,
-    time_cost_in_flume: Duration,
+pub(crate) struct QueryMetrics {
+    pub(crate) num_of_fetches: usize,
+    pub(crate) time_cost_in_fetch: Duration,
+    pub(crate) time_cost_in_block_parse: Duration,
+    pub(crate) time_cost_in_flume: Duration,
 }
+
 pub struct ResultSet {
-    sender: WsQuerySender,
-    args: WsResArgs,
-    fields: Option<Vec<Field>>,
-    fields_count: usize,
-    affected_rows: usize,
-    precision: Precision,
-    summary: (usize, usize),
-    timing: Duration,
-    block_future: Option<Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>>,
-    closer: Option<oneshot::Sender<()>>,
-    completed: bool,
-    metrics: QueryMetrics,
-    blocks_buffer: Option<flume::Receiver<RawResult<(RawBlock, Duration)>>>,
+    pub(crate) sender: WsQuerySender,
+    pub(crate) args: WsResArgs,
+    pub(crate) fields: Option<Vec<Field>>,
+    pub(crate) fields_count: usize,
+    pub(crate) affected_rows: usize,
+    pub(crate) precision: Precision,
+    pub(crate) summary: (usize, usize),
+    pub(crate) timing: Duration,
+    pub(crate) block_future:
+        Option<Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>>,
+    pub(crate) closer: Option<oneshot::Sender<()>>,
+    pub(crate) completed: bool,
+    pub(crate) metrics: QueryMetrics,
+    pub(crate) blocks_buffer: Option<flume::Receiver<RawResult<(RawBlock, Duration)>>>,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -1237,6 +1235,10 @@ impl WsTaos {
     pub(crate) async fn send_request(&self, req: WsSend) -> RawResult<WsRecvData> {
         self.sender.send_recv(req).await
     }
+
+    pub(crate) fn sender(&self) -> WsQuerySender {
+        self.sender.clone()
+    }
 }
 
 impl ResultSet {
@@ -1252,9 +1254,7 @@ impl ResultSet {
                 return Ok(Some(raw));
             }
             Ok(Err(err)) => return Err(err),
-            Err(_) => {
-                return Ok(None);
-            }
+            Err(_) => return Ok(None),
         }
     }
 

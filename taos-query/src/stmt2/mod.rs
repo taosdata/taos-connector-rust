@@ -15,7 +15,7 @@ where
 
     fn affected_rows(&self) -> usize;
 
-    fn result_set(&mut self) -> RawResult<Q::ResultSet>;
+    fn result(&self) -> RawResult<Q::ResultSet>;
 }
 
 #[async_trait::async_trait]
@@ -34,7 +34,7 @@ where
 
     async fn affected_rows(&self) -> usize;
 
-    async fn result_set(&mut self) -> RawResult<Q::AsyncResultSet>;
+    async fn result(&self) -> RawResult<Q::AsyncResultSet>;
 }
 
 pub struct Stmt2BindData<'a> {
