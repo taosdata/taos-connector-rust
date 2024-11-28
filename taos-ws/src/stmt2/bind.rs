@@ -469,12 +469,13 @@ fn write_col(bytes: &mut [u8], col: &ColumnView) -> usize {
             }
             Timestamp(view) => {
                 for val in view.iter() {
-                    if val.is_none() {
-                        bytes[is_null_offset] = 1;
-                    }
-                    let ts = val
-                        .unwrap_or(taos_query::common::Timestamp::Microseconds(0))
-                        .as_raw_i64();
+                    let ts = match val {
+                        Some(ts) => ts.as_raw_i64(),
+                        None => {
+                            bytes[is_null_offset] = 1;
+                            0
+                        }
+                    };
                     LittleEndian::write_i64(&mut bytes[buf_offset..], ts);
                     buf_offset += 8;
                     is_null_offset += 1;
