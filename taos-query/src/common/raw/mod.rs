@@ -915,7 +915,7 @@ impl RawBlock {
         let views = self
             .column_views()
             .iter()
-            .map(|view| view.cast_precision(precision).to_owned())
+            .map(|view| view.cast_precision(precision))
             .collect::<Vec<ColumnView>>();
         let mut block = Self::from_views(&views, precision);
         block.with_field_names(self.field_names());
@@ -976,27 +976,19 @@ impl Display for PrettyBlock<'_> {
         let mut rows_iter = self.raw.rows();
         if f.alternate() {
             for row in rows_iter {
-                table.add_row(Row::from_iter(
-                    row.map(|s| s.1.to_string().unwrap_or_default()),
-                ));
+                table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
         } else if nrows > 2 * MAX_DISPLAY_ROWS {
             for row in (&mut rows_iter).take(MAX_DISPLAY_ROWS) {
-                table.add_row(Row::from_iter(
-                    row.map(|s| s.1.to_string().unwrap_or_default()),
-                ));
+                table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
-            table.add_row(Row::from_iter(std::iter::repeat("...").take(self.ncols())));
+            table.add_row(std::iter::repeat("...").take(self.ncols()).collect());
             for row in rows_iter.skip(nrows - 2 * MAX_DISPLAY_ROWS) {
-                table.add_row(Row::from_iter(
-                    row.map(|s| s.1.to_string().unwrap_or_default()),
-                ));
+                table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
         } else {
             for row in rows_iter {
-                table.add_row(Row::from_iter(
-                    row.map(|s| s.1.to_string().unwrap_or_default()),
-                ));
+                table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
         }
 
@@ -1216,7 +1208,6 @@ impl From<i32> for SchemalessPrecision {
             1 => SchemalessPrecision::Hours,
             2 => SchemalessPrecision::Minutes,
             3 => SchemalessPrecision::Seconds,
-            4 => SchemalessPrecision::Millisecond,
             5 => SchemalessPrecision::Microsecond,
             6 => SchemalessPrecision::Nanosecond,
             _ => SchemalessPrecision::Millisecond,

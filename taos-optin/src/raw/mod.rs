@@ -338,7 +338,7 @@ impl TmqConfApi {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct TmqApi {
     tmq_get_res_type: unsafe extern "C" fn(res: *mut TAOS_RES) -> tmq_res_t,
     tmq_get_table_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
@@ -429,7 +429,7 @@ pub(crate) struct TmqApi {
     pub(crate) list_api: TmqListApi,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
 pub(crate) struct StmtApi {
     pub(crate) taos_stmt_init: unsafe extern "C" fn(taos: *mut TAOS) -> *mut TAOS_STMT,
@@ -493,6 +493,7 @@ pub(crate) struct StmtApi {
     pub(crate) taos_stmt_errstr:
         Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> *const c_char>,
 }
+
 const fn default_lib_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "taos.dll"
@@ -1184,9 +1185,9 @@ impl RawTaos {
 
     #[inline]
     pub fn put(&self, sml: &SmlData) -> Result<(), RawError> {
-        let data = sml.data().join("\n").to_string();
-        tracing::trace!("sml insert with data: {}", data.clone());
-        let length = data.clone().len() as i32;
+        let data = sml.data().join("\n");
+        tracing::trace!("sml insert with data: {}", data);
+        let length = data.len() as i32;
         let mut total_rows: i32 = 0;
         let res;
 

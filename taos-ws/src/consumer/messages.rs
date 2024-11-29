@@ -143,28 +143,18 @@ unsafe impl Sync for TmqSend {}
 impl TmqSend {
     pub fn req_id(&self) -> ReqId {
         match self {
-            TmqSend::Subscribe {
-                req_id,
-                conn: _,
-                req: _,
-                topics: _,
-            } => *req_id,
-            TmqSend::Unsubscribe { req_id } => *req_id,
-            TmqSend::Poll {
-                req_id,
-                blocking_time: _,
-            } => *req_id,
-            TmqSend::FetchJsonMeta(args) => args.req_id,
-            TmqSend::FetchRaw(args) => args.req_id,
-            TmqSend::FetchRawData(args) => args.req_id,
-            TmqSend::Fetch(args) => args.req_id,
-            TmqSend::FetchBlock(args) => args.req_id,
-            TmqSend::Commit(args) => args.req_id,
+            TmqSend::Subscribe { req_id, .. }
+            | TmqSend::Unsubscribe { req_id }
+            | TmqSend::Poll { req_id, .. } => *req_id,
+            TmqSend::FetchJsonMeta(args)
+            | TmqSend::FetchRaw(args)
+            | TmqSend::FetchRawData(args)
+            | TmqSend::Fetch(args)
+            | TmqSend::FetchBlock(args)
+            | TmqSend::Commit(args) => args.req_id,
             TmqSend::Assignment(args) => args.req_id,
-            TmqSend::Seek(args) => args.req_id,
-            TmqSend::Committed(args) => args.req_id,
-            TmqSend::Position(args) => args.req_id,
-            TmqSend::CommitOffset(args) => args.req_id,
+            TmqSend::Seek(args) | TmqSend::CommitOffset(args) => args.req_id,
+            TmqSend::Committed(args) | TmqSend::Position(args) => args.req_id,
         }
     }
 }

@@ -141,8 +141,7 @@ impl Deref for ColumnMeta {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            ColumnMeta::Column(v) => v,
-            ColumnMeta::Tag(v) => v,
+            ColumnMeta::Column(v) | ColumnMeta::Tag(v) => v,
         }
     }
 }
@@ -150,8 +149,7 @@ impl Deref for ColumnMeta {
 impl DerefMut for ColumnMeta {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
-            ColumnMeta::Column(v) => v,
-            ColumnMeta::Tag(v) => v,
+            ColumnMeta::Column(v) | ColumnMeta::Tag(v) => v,
         }
     }
 }
@@ -342,7 +340,6 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let field = field.ok_or_else(|| de::Error::missing_field("field"))?;
                 let ty = ty.ok_or_else(|| de::Error::missing_field("type"))?;
                 let length = length.ok_or_else(|| de::Error::missing_field("length"))?;
-                let note = note.map(|s| s.to_string());
                 let compression = if let (Some(encode), Some(compress), Some(level)) =
                     (encode, compress, level)
                 {

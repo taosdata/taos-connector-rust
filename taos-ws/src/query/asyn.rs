@@ -284,14 +284,14 @@ impl Error {
             Error::IoError(_) => Code::new(WS_ERROR_NO::IO_ERROR as _),
             Error::TungsteniteError(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
-            // Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
             Error::FlumeSendError(_) => Code::new(WS_ERROR_NO::CONN_CLOSED as _),
             _ => Code::FAILED,
         }
     }
+
     pub fn errstr(&self) -> String {
         match self {
-            Error::TaosError(error) => error.message().to_string(),
+            Error::TaosError(error) => error.message(),
             _ => format!("{}", self),
         }
     }
@@ -352,7 +352,6 @@ async fn read_queries(
                     WsRecvData::Fetch(fetch) => {
                         let id = fetch.id;
                         if fetch.completed {
-                            let ws2 = ws2.clone();
                             tokio::spawn(async move {
                                 let _ = ws2
                                     .send_async(
@@ -361,7 +360,6 @@ async fn read_queries(
                                     .await;
                             });
                         }
-                        // dbg!(&queries_sender);
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
                             let _ = sender.send(ok.map(|_| data));
                         } else {
@@ -448,7 +446,7 @@ async fn read_queries(
                                     block_code,
                                     block_message,
                                     finished,
-                                    raw: result_block.to_vec(),
+                                    raw: result_block,
                                 }))
                                 .unwrap();
                         } else {
@@ -606,11 +604,7 @@ pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
 }
 
 pub fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
-    match compare_versions(v1, v2) {
-        std::cmp::Ordering::Less => false,
-        std::cmp::Ordering::Equal => true,
-        std::cmp::Ordering::Greater => true,
-    }
+    !matches!(compare_versions(v1, v2), std::cmp::Ordering::Less)
 }
 
 pub fn is_support_binary_sql(v1: &str) -> bool {
@@ -799,7 +793,6 @@ impl WsTaos {
             is_v3,
             close_listener,
         ));
-        let ws_cloned = ws.clone();
 
         Ok(Self {
             close_signal: tx,
@@ -809,7 +802,7 @@ impl WsTaos {
                     is_support_binary_sql,
                 },
                 req_id: Default::default(),
-                sender: ws_cloned,
+                sender: ws,
                 queries: queries2_cloned,
                 results,
             },
@@ -1186,7 +1179,7 @@ impl WsTaos {
         let action = WsSend::Insert {
             protocol: sml.protocol() as u8,
             precision: sml.precision().into(),
-            data: sml.data().join("\n").to_string(),
+            data: sml.data().join("\n"),
             ttl: sml.ttl(),
             req_id: sml.req_id(),
         };

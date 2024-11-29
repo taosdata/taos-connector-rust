@@ -238,10 +238,8 @@ impl Error {
     #[inline]
     pub fn any(err: impl Into<anyhow::Error> + 'static) -> Self {
         if err.type_id() == std::any::TypeId::of::<Self>() {
-            // let err = Box::new(&err as &dyn Any);
             let err = &err as &dyn Any;
             let err = err.downcast_ref::<Self>().unwrap();
-            dbg!(err);
             return Self {
                 code: err.code,
                 context: err.context.clone(),

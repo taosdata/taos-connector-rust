@@ -37,7 +37,7 @@ struct State {
 impl State {
     pub fn new(api: Arc<ApiEntry>) -> Self {
         State {
-            api: api.clone(),
+            api,
             result: None,
             waiting: false,
             time: Instant::now(),

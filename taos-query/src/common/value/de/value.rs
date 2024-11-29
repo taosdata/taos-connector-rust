@@ -169,8 +169,7 @@ impl<'de: 'de> serde::de::Deserializer<'de> for Value {
             UBigInt(v) => visitor.visit_u64(v),
             Float(v) => visitor.visit_f32(v),
             Double(v) => visitor.visit_f64(v),
-            VarChar(v) => visitor.visit_string(v),
-            NChar(v) => visitor.visit_string(v),
+            VarChar(v) | NChar(v) => visitor.visit_string(v),
             Json(v) => v
                 .into_deserializer()
                 .deserialize_any(visitor)
@@ -215,7 +214,7 @@ impl<'de: 'de> serde::de::Deserializer<'de> for Value {
             Double(v) => visitor.visit_f64(v),
             VarChar(v) | NChar(v) => visitor.visit_string(v),
             Json(v) => visitor.visit_string(v.to_string()),
-            Timestamp(v) => visitor.visit_string(v.to_datetime_with_tz().to_rfc3339().to_string()),
+            Timestamp(v) => visitor.visit_string(v.to_datetime_with_tz().to_rfc3339()),
             _ => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),

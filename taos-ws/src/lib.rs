@@ -127,8 +127,7 @@ impl taos_query::TBuilder for TaosBuilder {
             use taos_query::prelude::sync::Queryable;
             let v: String = Queryable::query_one(&conn, "select server_version()")?.unwrap();
             Ok(match self.server_version.try_insert(v) {
-                Ok(v) => v.as_str(),
-                Err((v, _)) => v.as_str(),
+                Ok(v) | Err((v, _)) => v.as_str(),
             })
         }
     }
@@ -237,8 +236,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
                 .await?
                 .unwrap();
             Ok(match self.server_version.try_insert(v) {
-                Ok(v) => v.as_str(),
-                Err((v, _)) => v.as_str(),
+                Ok(v) | Err((v, _)) => v.as_str(),
             })
         }
     }
@@ -326,10 +324,8 @@ impl TaosBuilder {
     pub fn from_dsn(dsn: impl IntoDsn) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
         let scheme = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
-            ("ws" | "http", _) => "ws",
-            ("wss" | "https", _) => "wss",
-            ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => "ws",
-            ("taos" | "taosws" | "tmq", Some("wss" | "https")) => "wss",
+            ("ws" | "http", _) | ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => "ws",
+            ("wss" | "https", _) | ("taos" | "taosws" | "tmq", Some("wss" | "https")) => "wss",
             _ => Err(DsnError::InvalidDriver(dsn.to_string()))?,
         };
 

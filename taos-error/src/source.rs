@@ -132,8 +132,7 @@ impl Inner {
 
     pub fn deep(&self) -> bool {
         match self {
-            Inner::Empty { .. } => false,
-            Inner::Raw { .. } => false,
+            Inner::Empty { .. } | Inner::Raw { .. } => false,
             Inner::Any(any) => any.source().is_some(),
         }
     }
@@ -144,6 +143,7 @@ pub enum Chain<'a> {
     Raw(std::array::IntoIter<&'a str, 1>),
     Any(anyhow::Chain<'a>),
 }
+
 impl<'a> Iterator for Chain<'a> {
     type Item = Cow<'a, str>;
 
@@ -155,8 +155,9 @@ impl<'a> Iterator for Chain<'a> {
         }
     }
 }
+
 #[test]
 fn test_inner() {
-    let error = Inner::from(anyhow::anyhow!("error"));
-    assert_eq!(error.to_string(), "error");
+    let err = Inner::from(anyhow::anyhow!("error"));
+    assert_eq!(err.to_string(), "error");
 }

@@ -147,8 +147,7 @@ impl DoubleView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(BorrowedValue::Double)
-            .unwrap_or(BorrowedValue::Null(Ty::Double))
+            .map_or(BorrowedValue::Null(Ty::Double), BorrowedValue::Double)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {

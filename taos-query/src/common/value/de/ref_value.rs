@@ -169,8 +169,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
             UBigInt(v) => visitor.visit_u64(*v),
             Float(v) => visitor.visit_f32(*v),
             Double(v) => visitor.visit_f64(*v),
-            VarChar(v) => visitor.visit_borrowed_str(v),
-            NChar(v) => visitor.visit_borrowed_str(v),
+            VarChar(v) | NChar(v) => visitor.visit_borrowed_str(v),
             Json(v) => v
                 .clone()
                 .into_deserializer()

@@ -1416,8 +1416,7 @@ pub unsafe extern "C" fn ws_timestamp_to_rfc3339(
     let precision = Precision::from_u8(precision as u8);
     let s = Timestamp::new(raw, precision)
         .to_datetime_with_tz()
-        .to_rfc3339_opts(precision.to_seconds_format(), use_z)
-        .to_string();
+        .to_rfc3339_opts(precision.to_seconds_format(), use_z);
 
     std::ptr::copy_nonoverlapping(s.as_ptr(), dest, s.len());
 }
@@ -1518,7 +1517,7 @@ pub unsafe extern "C" fn ws_print_row(
                     format!("{}", value).as_str(),
                 );
             }
-            Ty::BigInt => {
+            Ty::BigInt | Ty::Timestamp => {
                 let value = std::ptr::read_unaligned(field_ptr as *const i64);
                 len += write_to_cstr(
                     &mut remain_space,
@@ -1544,14 +1543,6 @@ pub unsafe extern "C" fn ws_print_row(
             }
             Ty::Double => {
                 let value = std::ptr::read_unaligned(field_ptr as *const f64);
-                len += write_to_cstr(
-                    &mut remain_space,
-                    str.add(len as usize),
-                    format!("{}", value).as_str(),
-                );
-            }
-            Ty::Timestamp => {
-                let value = std::ptr::read_unaligned(field_ptr as *const i64);
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),

@@ -66,43 +66,43 @@ impl Debug for TaosBindV2 {
                             .field(&*(self.buffer as *const i8))
                             .finish(),
                         Ty::SmallInt => f
-                            .debug_tuple("TinyInt")
+                            .debug_tuple("SmallInt")
                             .field(&*(self.buffer as *const i16))
                             .finish(),
                         Ty::Int => f
-                            .debug_tuple("TinyInt")
+                            .debug_tuple("Int")
                             .field(&*(self.buffer as *const i32))
                             .finish(),
                         Ty::BigInt => f
-                            .debug_tuple("TinyInt")
+                            .debug_tuple("BigInt")
                             .field(&*(self.buffer as *const i64))
                             .finish(),
                         Ty::UTinyInt => f
-                            .debug_tuple("TinyInt")
+                            .debug_tuple("UTinyInt")
                             .field(&*(self.buffer as *const u8))
                             .finish(),
                         Ty::USmallInt => f
-                            .debug_tuple("TinyInt")
+                            .debug_tuple("USmallInt")
                             .field(&*(self.buffer as *const u16))
                             .finish(),
                         Ty::UInt => f
-                            .debug_tuple("TinyInt")
+                            .debug_tuple("UInt")
                             .field(&*(self.buffer as *const u32))
                             .finish(),
                         Ty::UBigInt => f
-                            .debug_tuple("TinyInt")
+                            .debug_tuple("UBigInt")
                             .field(&*(self.buffer as *const u64))
                             .finish(),
                         Ty::Float => f
-                            .debug_tuple("TinyInt")
+                            .debug_tuple("Float")
                             .field(&*(self.buffer as *const f32))
                             .finish(),
                         Ty::Double => f
-                            .debug_tuple("TinyInt")
+                            .debug_tuple("Double")
                             .field(&*(self.buffer as *const f64))
                             .finish(),
                         Ty::Timestamp => f
-                            .debug_tuple("TinyInt")
+                            .debug_tuple("Timestamp")
                             .field(&*(self.buffer as *const i64))
                             .finish(),
                         Ty::VarChar => f
@@ -120,7 +120,7 @@ impl Debug for TaosBindV2 {
                             )))
                             .finish(),
                         Ty::Json => f
-                            .debug_tuple("VarChar")
+                            .debug_tuple("Json")
                             .field(&bytes::Bytes::from(std::slice::from_raw_parts(
                                 self.buffer as *const u8,
                                 *self.length,
@@ -133,6 +133,7 @@ impl Debug for TaosBindV2 {
         }
     }
 }
+
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union TaosBindUnionV2 {
@@ -147,6 +148,7 @@ pub union TaosBindUnionV2 {
     pub bin: *mut c_uchar,
     pub nchar: *mut c_char,
 }
+
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct TaosMultiBind {
@@ -280,7 +282,7 @@ impl TaosBindV2 {
             Ty::Int => {
                 let _ = Box::from_raw(self.buffer as *mut i32);
             }
-            Ty::BigInt => {
+            Ty::BigInt | Ty::Timestamp => {
                 let _ = Box::from_raw(self.buffer as *mut i64);
             }
             Ty::UTinyInt => {
@@ -300,9 +302,6 @@ impl TaosBindV2 {
             }
             Ty::Double => {
                 let _ = Box::from_raw(self.buffer as *mut f64);
-            }
-            Ty::Timestamp => {
-                let _ = Box::from_raw(self.buffer as *mut i64);
             }
             // Ty::VarChar |
             // Ty::NChar |

@@ -64,8 +64,9 @@ impl JsonView {
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         // todo: use simd_json::BorrowedValue as Json.
         self.get_unchecked(row)
-            .map(|s| BorrowedValue::Json(s.as_bytes().into()))
-            .unwrap_or(BorrowedValue::Null(Ty::Json))
+            .map_or(BorrowedValue::Null(Ty::Json), |s| {
+                BorrowedValue::Json(s.as_bytes().into())
+            })
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -110,9 +111,9 @@ impl JsonView {
         if range.is_empty() {
             return None;
         }
-        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range.clone()) };
+        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range) };
         if let Some(range) = range {
-            let range = range.0 as usize..range.1.map(|v| v as usize).unwrap_or(self.data.len());
+            let range = range.0 as usize..range.1.map_or(self.data.len(), |v| v as usize);
             let data = self.data.slice(range);
             Some(Self { offsets, data })
         } else {

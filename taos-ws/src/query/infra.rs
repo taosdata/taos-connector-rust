@@ -75,12 +75,11 @@ pub enum WsSend {
 impl WsSend {
     pub(crate) fn req_id(&self) -> ReqId {
         match self {
-            WsSend::Conn { req_id, req: _ } => *req_id,
+            WsSend::Conn { req_id, .. } | WsSend::Query { req_id, .. } => *req_id,
             WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
-            WsSend::Query { req_id, sql: _ } => *req_id,
-            WsSend::Fetch(args) => args.req_id,
-            WsSend::FetchBlock(args) => args.req_id,
-            WsSend::FreeResult(args) => args.req_id,
+            WsSend::Fetch(args) | WsSend::FetchBlock(args) | WsSend::FreeResult(args) => {
+                args.req_id
+            }
             WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
             _ => unreachable!(),
         }

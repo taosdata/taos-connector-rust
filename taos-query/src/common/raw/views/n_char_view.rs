@@ -162,8 +162,9 @@ impl NCharView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|s| BorrowedValue::NChar(s.into()))
-            .unwrap_or(BorrowedValue::Null(Ty::NChar))
+            .map_or(BorrowedValue::Null(Ty::NChar), |s| {
+                BorrowedValue::NChar(s.into())
+            })
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -184,9 +185,9 @@ impl NCharView {
         if range.is_empty() {
             return None;
         }
-        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range.clone()) };
+        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range) };
         let range = if let Some(range) = range {
-            range.0 as usize..range.1.map(|v| v as usize).unwrap_or(self.data.len())
+            range.0 as usize..range.1.map_or(self.data.len(), |v| v as usize)
         } else {
             0..0
         };

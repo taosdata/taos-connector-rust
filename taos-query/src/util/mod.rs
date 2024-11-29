@@ -47,8 +47,7 @@ impl Edition {
 
     pub fn assert_enterprise_edition(&self) -> RawResult<()> {
         match (self.edition.as_str(), self.expired) {
-            ("cloud", _) => Ok(()),
-            ("official" | "trial", false) => Ok(()),
+            ("cloud", _) | ("official" | "trial", false) => Ok(()),
             ("official" | "trial", true) => {
                 Err(RawError::from_string("your edition is expired".to_string()))
             }

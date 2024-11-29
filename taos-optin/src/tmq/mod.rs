@@ -308,7 +308,7 @@ impl Iterator for Messages {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.tmq
-            .poll_timeout(self.timeout.map(|t| t.as_millis() as i64).unwrap_or(-1))
+            .poll_timeout(self.timeout.map_or(-1, |t| t.as_millis() as i64))
             .map(|raw| (Offset(raw.clone()), MessageSet::from(raw)))
     }
 }

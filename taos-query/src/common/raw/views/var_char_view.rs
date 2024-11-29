@@ -73,8 +73,9 @@ impl VarCharView {
 
     pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|s| BorrowedValue::VarChar(s.as_str()))
-            .unwrap_or(BorrowedValue::Null(Ty::VarChar))
+            .map_or(BorrowedValue::Null(Ty::VarChar), |s| {
+                BorrowedValue::VarChar(s.as_str())
+            })
     }
 
     pub(crate) unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -119,9 +120,9 @@ impl VarCharView {
         if range.is_empty() {
             return None;
         }
-        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range.clone()) };
+        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range) };
         if let Some(range) = range {
-            let range = range.0 as usize..range.1.map(|v| v as usize).unwrap_or(self.data.len());
+            let range = range.0 as usize..range.1.map_or(self.data.len(), |v| v as usize);
             let data = self.data.slice(range);
             Some(Self { offsets, data })
         } else {

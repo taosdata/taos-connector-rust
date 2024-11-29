@@ -984,14 +984,13 @@ impl TmqBuilder {
         let auto_commit = dsn
             .params
             .get("enable.auto.commit")
-            .map(|s| {
+            .map_or("false".to_string(), |s| {
                 if s.is_empty() {
                     "false".to_string()
                 } else {
                     s.to_string()
                 }
-            })
-            .unwrap_or("false".to_string());
+            });
         let auto_commit_interval_ms = dsn.params.get("auto.commit.interval.ms").and_then(|s| {
             if s.is_empty() {
                 None
@@ -1511,27 +1510,23 @@ impl TmqBuilder {
             }
             tracing::trace!("Consuming done in {:?}", instant.elapsed());
         });
-        // let (ws, mut _msg_recv) = tokio::sync::mpsc::channel(100);
-        let ws_cloned = ws.clone();
-        let consumer = Consumer {
+
+        Ok(Consumer {
             conn: self.info.to_conn_request(),
             tmq_conf: self.conf.clone(),
             sender: WsTmqSender {
                 req_id: Arc::new(AtomicU64::new(1)),
                 queries,
-                sender: ws_cloned,
+                sender: ws,
                 timeout: Timeout::Duration(Duration::MAX),
             },
-            // fetches,
             close_signal: tx,
             timeout: self.timeout,
             topics: vec![],
             support_fetch_raw: is_support_binary_sql(&version),
             polling_mutex,
             cache: cache_rx,
-        };
-
-        Ok(consumer)
+        })
     }
 }
 
@@ -1621,7 +1616,7 @@ impl WsTmqError {
     }
     pub fn errstr(&self) -> String {
         match self {
-            WsTmqError::TaosError(error) => error.message().to_string(),
+            WsTmqError::TaosError(error) => error.message(),
             _ => format!("{}", self),
         }
     }

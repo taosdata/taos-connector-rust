@@ -126,7 +126,7 @@ impl FromStr for DatabaseProperties {
             ))(s)
         }
 
-        if let Ok((_s, props)) = dbg!(parse_props(s)) {
+        if let Ok((_s, props)) = parse_props(s) {
             for (prop, value) in props {
                 macro_rules! _parse {
                     ($($($f:ident) +, $t:ident);*) => {

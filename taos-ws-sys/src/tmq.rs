@@ -364,7 +364,7 @@ unsafe fn tmq_list_append(list: *mut ws_tmq_list_t, src: *const c_char) -> WsRes
                 ));
             }
 
-            list.topics.push(src.clone());
+            list.topics.push(src);
             Ok(())
         }
         _ => Err(WsError::new(Code::FAILED, "invalid tmq list Object")),
@@ -634,9 +634,7 @@ unsafe fn tmq_consumer_poll(tmq: *mut ws_tmq_t, timeout: i64) -> WsResult<Option
                         let data = message_set.into_data().unwrap();
                         match data.fetch_raw_block()? {
                             Some(block) => {
-                                let rs = WsResultSet::Tmq(WsTmqResultSet::new(
-                                    block, offset, data,
-                                ));
+                                let rs = WsResultSet::Tmq(WsTmqResultSet::new(block, offset, data));
                                 Ok(Some(rs))
                             }
                             None => Ok(None),

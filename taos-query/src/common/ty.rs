@@ -233,18 +233,10 @@ impl Ty {
     pub const fn fixed_length(&self) -> usize {
         use Ty::*;
         match self {
-            Bool => 1,
-            TinyInt => 1,
-            SmallInt => 2,
-            Int => 4,
-            BigInt => 8,
-            Float => 4,
-            Double => 8,
-            Timestamp => 8,
-            UTinyInt => 1,
-            USmallInt => 2,
-            UInt => 4,
-            UBigInt => 8,
+            Bool | TinyInt | UTinyInt => 1,
+            SmallInt | USmallInt => 2,
+            Int | UInt | Float => 4,
+            BigInt | Double | Timestamp | UBigInt => 8,
             Decimal => 16,
             _ => 0,
         }

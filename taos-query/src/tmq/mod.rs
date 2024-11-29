@@ -123,16 +123,14 @@ where
 impl<M, D> MessageSet<M, D> {
     pub fn into_meta(self) -> Option<M> {
         match self {
-            MessageSet::Meta(m) => Some(m),
+            MessageSet::Meta(m) | MessageSet::MetaData(m, _) => Some(m),
             MessageSet::Data(_) => None,
-            MessageSet::MetaData(m, _) => Some(m),
         }
     }
     pub fn into_data(self) -> Option<D> {
         match self {
             MessageSet::Meta(_) => None,
-            MessageSet::Data(d) => Some(d),
-            MessageSet::MetaData(_, d) => Some(d),
+            MessageSet::Data(d) | MessageSet::MetaData(_, d) => Some(d),
         }
     }
 
@@ -145,16 +143,14 @@ impl<M, D> MessageSet<M, D> {
 
     pub fn meta(&self) -> Option<&M> {
         match self {
-            MessageSet::Meta(m) => Some(m),
+            MessageSet::Meta(m) | MessageSet::MetaData(m, _) => Some(m),
             MessageSet::Data(_) => None,
-            MessageSet::MetaData(m, _) => Some(m),
         }
     }
     pub fn data(&mut self) -> Option<&mut D> {
         match self {
             MessageSet::Meta(_) => None,
-            MessageSet::Data(d) => Some(d),
-            MessageSet::MetaData(_, d) => Some(d),
+            MessageSet::Data(d) | MessageSet::MetaData(_, d) => Some(d),
         }
     }
 }

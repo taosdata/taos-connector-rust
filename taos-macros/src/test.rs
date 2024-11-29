@@ -234,8 +234,7 @@ impl Attr {
 
     fn databases(&self, requires: &Requires) -> usize {
         match requires {
-            Requires::None => 0,
-            Requires::TaosOnly => 0,
+            Requires::None | Requires::TaosOnly => 0,
             Requires::WithDatabase => 1,
             Requires::WithMulti => self.databases.unwrap_or(1),
         }

@@ -319,8 +319,7 @@ impl TaosBuilder {
         let join = task::spawn_blocking(move || {
             tracing::trace!("Async connecting to the server");
             let ptr = api.connect_with_retries(&auth, auth.max_retries())?;
-
-            RawTaos::new(api.clone(), ptr).map(|raw| Taos { raw })
+            RawTaos::new(api, ptr).map(|raw| Taos { raw })
         });
         let abort = join.abort_handle();
         task::spawn(async move {
@@ -472,8 +471,7 @@ impl taos_query::TBuilder for TaosBuilder {
             use taos_query::prelude::sync::Queryable;
             let v: String = Queryable::query_one(conn, "select server_version()")?.unwrap();
             Ok(match self.server_version.try_insert(v) {
-                Ok(v) => v.as_str(),
-                Err((v, _)) => v.as_str(),
+                Ok(v) | Err((v, _)) => v.as_str(),
             })
         }
     }
@@ -616,8 +614,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
                 .await?
                 .unwrap();
             Ok(match self.server_version.try_insert(v) {
-                Ok(v) => v.as_str(),
-                Err((v, _)) => v.as_str(),
+                Ok(v) | Err((v, _)) => v.as_str(),
             })
         }
     }

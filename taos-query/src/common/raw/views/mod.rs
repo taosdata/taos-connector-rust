@@ -485,20 +485,15 @@ impl ColumnView {
 
     pub fn max_variable_length(&self) -> usize {
         match self {
-            ColumnView::Bool(_) => 1,
-            ColumnView::TinyInt(_) => 1,
-            ColumnView::SmallInt(_) => 2,
-            ColumnView::Int(_) => 4,
-            ColumnView::BigInt(_) => 8,
-            ColumnView::Float(_) => 4,
-            ColumnView::Double(_) => 8,
+            ColumnView::Bool(_) | ColumnView::TinyInt(_) | ColumnView::UTinyInt(_) => 1,
+            ColumnView::SmallInt(_) | ColumnView::USmallInt(_) => 2,
+            ColumnView::Int(_) | ColumnView::UInt(_) | ColumnView::Float(_) => 4,
+            ColumnView::BigInt(_)
+            | ColumnView::Double(_)
+            | ColumnView::UBigInt(_)
+            | ColumnView::Timestamp(_) => 8,
             ColumnView::VarChar(view) => view.max_length(),
-            ColumnView::Timestamp(_) => 8,
             ColumnView::NChar(view) => view.max_length(),
-            ColumnView::UTinyInt(_) => 1,
-            ColumnView::USmallInt(_) => 2,
-            ColumnView::UInt(_) => 4,
-            ColumnView::UBigInt(_) => 8,
             ColumnView::Json(view) => view.max_length(),
             ColumnView::VarBinary(view) => view.max_length(),
             ColumnView::Geometry(view) => view.max_length(),
@@ -1223,7 +1218,7 @@ impl ColumnView {
 
 pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
     let header = super::Header {
-        nrows: views.first().map(|v| v.len()).unwrap_or(0) as _,
+        nrows: views.first().map_or(0, |v| v.len()) as _,
         ncols: views.len() as _,
         ..Default::default()
     };
