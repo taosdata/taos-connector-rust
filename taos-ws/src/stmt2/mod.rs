@@ -46,16 +46,12 @@ impl Stmt2 {
             single_stb_insert: true,
             single_table_bind_once: false,
         };
-        match self.client.send_request(req).await? {
-            WsRecvData::Stmt2Init { stmt_id, .. } => {
-                self.stmt_id = Some(stmt_id);
-                Ok(())
-            }
-            unexpected => {
-                tracing::error!("Unexpected response type: {unexpected:?}");
-                Err("Unexpected response type".into())
-            }
+        let resp = self.client.send_request(req).await?;
+        if let WsRecvData::Stmt2Init { stmt_id, .. } = resp {
+            self.stmt_id = Some(stmt_id);
+            return Ok(());
         }
+        unreachable!()
     }
 
     async fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<()> {
@@ -65,23 +61,20 @@ impl Stmt2 {
             sql: sql.as_ref().to_string(),
             get_fields: true,
         };
-        match self.client.send_request(req).await? {
-            WsRecvData::Stmt2Prepare {
-                is_insert,
-                fields,
-                fields_count,
-                ..
-            } => {
-                self.is_insert = Some(is_insert);
-                self.fields = fields;
-                self.fields_count = Some(fields_count);
-                Ok(())
-            }
-            unexpected => {
-                tracing::error!("Unexpected response type: {unexpected:?}");
-                Err("Unexpected response type".into())
-            }
+        let resp = self.client.send_request(req).await?;
+        if let WsRecvData::Stmt2Prepare {
+            is_insert,
+            fields,
+            fields_count,
+            ..
+        } = resp
+        {
+            self.is_insert = Some(is_insert);
+            self.fields = fields;
+            self.fields_count = Some(fields_count);
+            return Ok(());
         }
+        unreachable!()
     }
 
     async fn bind<'b>(&mut self, datas: &[Stmt2BindData<'b>]) -> RawResult<()> {
@@ -94,13 +87,11 @@ impl Stmt2 {
             self.fields_count.unwrap(),
         )?;
         let req = WsSend::Binary(bytes);
-        match self.client.send_request(req).await? {
-            WsRecvData::Stmt2Bind { .. } => Ok(()),
-            unexpected => {
-                tracing::error!("Unexpected response type: {unexpected:?}");
-                Err("Unexpected response type".into())
-            }
+        let resp = self.client.send_request(req).await?;
+        if let WsRecvData::Stmt2Bind { .. } = resp {
+            return Ok(());
         }
+        unreachable!()
     }
 
     async fn exec(&mut self) -> RawResult<usize> {
@@ -108,17 +99,13 @@ impl Stmt2 {
             req_id: generate_req_id(),
             stmt_id: self.stmt_id.unwrap(),
         };
-        match self.client.send_request(req).await? {
-            WsRecvData::Stmt2Exec { affected, .. } => {
-                self.affected_rows += affected;
-                self.affected_rows_once = affected;
-                Ok(affected)
-            }
-            unexpected => {
-                tracing::error!("Unexpected response type: {unexpected:?}");
-                Err("Unexpected response type".into())
-            }
+        let resp = self.client.send_request(req).await?;
+        if let WsRecvData::Stmt2Exec { affected, .. } = resp {
+            self.affected_rows += affected;
+            self.affected_rows_once = affected;
+            return Ok(affected);
         }
+        unreachable!()
     }
 
     fn close(&self) {
@@ -126,10 +113,11 @@ impl Stmt2 {
             req_id: generate_req_id(),
             stmt_id: self.stmt_id.unwrap(),
         };
-        match block_in_place_or_global(self.client.send_request(req)) {
+        let resp = block_in_place_or_global(self.client.send_request(req));
+        match resp {
             Ok(WsRecvData::Stmt2Close { .. }) => tracing::trace!("Stmt2 closed successfully"),
-            Ok(unexpected) => tracing::error!("Unexpected response type: {unexpected:?}"),
             Err(err) => tracing::error!("Failed to close Stmt2: {err:?}"),
+            _ => unreachable!(),
         }
     }
 
@@ -144,74 +132,74 @@ impl Stmt2 {
             stmt_id: self.stmt_id.unwrap(),
         };
 
-        match self.client.send_request(req).await? {
-            WsRecvData::Stmt2Result {
-                result_id,
-                precision,
-                fields_count,
-                fields_names,
-                fields_types,
-                fields_lengths,
-                timing,
-                ..
-            } => {
-                let (close_tx, close_rx) = oneshot::channel();
-                tokio::spawn(
-                    async move {
-                        let start = Instant::now();
-                        let _ = close_rx.await;
-                        tracing::trace!("stmt2 result:{} lived {:?}", result_id, start.elapsed());
-                    }
-                    .in_current_span(),
-                );
+        let resp = self.client.send_request(req).await?;
+        if let WsRecvData::Stmt2Result {
+            result_id,
+            precision,
+            fields_count,
+            fields_names,
+            fields_types,
+            fields_lengths,
+            timing,
+            ..
+        } = resp
+        {
+            let (close_tx, close_rx) = oneshot::channel();
+            tokio::spawn(
+                async move {
+                    let start = Instant::now();
+                    let _ = close_rx.await;
+                    tracing::trace!("stmt2 result:{} lived {:?}", result_id, start.elapsed());
+                }
+                .in_current_span(),
+            );
 
-                let fields: Vec<Field> = fields_names
-                    .iter()
-                    .zip(fields_types)
-                    .zip(fields_lengths)
-                    .map(|((name, ty), len)| Field::new(name, ty, len as _))
-                    .collect();
+            let fields: Vec<Field> = fields_names
+                .iter()
+                .zip(fields_types)
+                .zip(fields_lengths)
+                .map(|((name, ty), len)| Field::new(name, ty, len as _))
+                .collect();
 
-                let (raw_block_tx, raw_block_rx) = flume::bounded(64);
+            let (raw_block_tx, raw_block_rx) = flume::bounded(64);
 
-                tokio::spawn(
-                    crate::query::asyn::fetch(
-                        self.client.sender(),
-                        result_id,
-                        raw_block_tx,
-                        precision,
-                        fields_names,
-                    )
-                    .in_current_span(),
-                );
-
-                let timing = match precision {
-                    Precision::Millisecond => Duration::from_millis(timing),
-                    Precision::Microsecond => Duration::from_micros(timing),
-                    Precision::Nanosecond => Duration::from_nanos(timing),
-                };
-
-                Ok(ResultSet {
-                    sender: self.client.sender(),
-                    args: WsResArgs {
-                        req_id,
-                        id: result_id,
-                    },
-                    fields: Some(fields),
-                    fields_count: fields_count as _,
-                    affected_rows: self.affected_rows_once,
+            tokio::spawn(
+                crate::query::asyn::fetch(
+                    self.client.sender(),
+                    result_id,
+                    raw_block_tx,
                     precision,
-                    summary: (0, 0),
-                    timing,
-                    block_future: None,
-                    closer: Some(close_tx),
-                    completed: false,
-                    metrics: Default::default(),
-                    blocks_buffer: Some(raw_block_rx),
-                })
-            }
-            _ => Err("Unexpected response type".into()),
+                    fields_names,
+                )
+                .in_current_span(),
+            );
+
+            let timing = match precision {
+                Precision::Millisecond => Duration::from_millis(timing),
+                Precision::Microsecond => Duration::from_micros(timing),
+                Precision::Nanosecond => Duration::from_nanos(timing),
+            };
+
+            return Ok(ResultSet {
+                sender: self.client.sender(),
+                args: WsResArgs {
+                    req_id,
+                    id: result_id,
+                },
+                fields: Some(fields),
+                fields_count: fields_count as _,
+                affected_rows: self.affected_rows_once,
+                precision,
+                summary: (0, 0),
+                timing,
+                block_future: None,
+                closer: Some(close_tx),
+                completed: false,
+                metrics: Default::default(),
+                blocks_buffer: Some(raw_block_rx),
+            });
         }
+        unreachable!()
     }
 }
 
