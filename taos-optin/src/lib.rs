@@ -353,30 +353,39 @@ impl Auth {
     pub(crate) fn host(&self) -> Option<&CStr> {
         self.host.as_deref()
     }
+
     pub(crate) fn host_as_ptr(&self) -> *const c_char {
         self.host().map_or_else(std::ptr::null, |s| s.as_ptr())
     }
+
     pub(crate) fn user(&self) -> Option<&CStr> {
         self.user.as_deref()
     }
+
     pub(crate) fn user_as_ptr(&self) -> *const c_char {
         self.user().map_or_else(std::ptr::null, |s| s.as_ptr())
     }
+
     pub(crate) fn password(&self) -> Option<&CStr> {
         self.pass.as_deref()
     }
+
     pub(crate) fn password_as_ptr(&self) -> *const c_char {
         self.password().map_or_else(std::ptr::null, |s| s.as_ptr())
     }
+
     pub(crate) fn database(&self) -> Option<&CStr> {
         self.db.as_deref()
     }
+
     pub(crate) fn database_as_ptr(&self) -> *const c_char {
         self.database().map_or_else(std::ptr::null, |s| s.as_ptr())
     }
+
     pub(crate) fn port(&self) -> u16 {
         self.port
     }
+
     pub(crate) fn max_retries(&self) -> u8 {
         self.max_retries
     }
@@ -755,7 +764,7 @@ impl taos_query::Fetchable for ResultSet {
     }
 
     fn update_summary(&mut self, nrows: usize) {
-        self.update_summary(nrows)
+        self.update_summary(nrows);
     }
 
     fn fetch_raw_block(&mut self) -> RawResult<Option<RawBlock>> {
@@ -789,7 +798,7 @@ impl taos_query::AsyncFetchable for ResultSet {
     }
 
     fn update_summary(&mut self, nrows: usize) {
-        self.update_summary(nrows)
+        self.update_summary(nrows);
     }
 }
 

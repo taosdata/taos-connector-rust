@@ -86,7 +86,7 @@ unsafe fn clear_error_info() {
         *c_errno.borrow_mut() = 0;
     });
     C_ERROR_CONTAINER.with(|container| {
-        let bytes = "".as_bytes();
+        let bytes = b"";
         let length = bytes.len().min(MAX_ERROR_MSG_LEN - 1); // make sure the size max, and keep last byte for '\0'
         container.borrow_mut()[..length].copy_from_slice(&bytes[..length]);
         container.borrow_mut()[length] = 0; // add c str last '\0'
@@ -373,7 +373,7 @@ impl From<&Field> for WS_FIELD_V2 {
         let f_name = field.name();
         let mut name = [0 as c_char; 65usize];
         unsafe {
-            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len())
+            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len());
         };
         Self {
             name,
@@ -421,7 +421,7 @@ impl From<&Field> for WS_FIELD {
         let f_name = field.name();
         let mut name = [0 as c_char; 65usize];
         unsafe {
-            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len())
+            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len());
         };
         Self {
             name,
@@ -764,24 +764,21 @@ impl WsResultSetTrait for WsSqlResultSet {
     }
 
     fn get_fields(&mut self) -> *const WS_FIELD {
-        if self.fields.len() == self.rs.num_of_fields() {
-            self.fields.as_ptr()
-        } else {
+        if self.fields.len() != self.rs.num_of_fields() {
             self.fields.clear();
             self.fields
                 .extend(self.rs.fields().iter().map(WS_FIELD::from));
-            self.fields.as_ptr()
         }
+        self.fields.as_ptr()
     }
+
     fn get_fields_v2(&mut self) -> *const WS_FIELD_V2 {
-        if self.fields_v2.len() == self.rs.num_of_fields() {
-            self.fields_v2.as_ptr()
-        } else {
+        if self.fields_v2.len() != self.rs.num_of_fields() {
             self.fields_v2.clear();
             self.fields_v2
                 .extend(self.rs.fields().iter().map(WS_FIELD_V2::from));
-            self.fields_v2.as_ptr()
         }
+        self.fields_v2.as_ptr()
     }
 
     unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
@@ -970,10 +967,9 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
             let v = taos.version();
             std::ptr::copy_nonoverlapping(v.as_ptr(), VERSION_INFO.as_mut_ptr(), v.len());
         }
-        VERSION_INFO.as_ptr() as *const c_char
-    } else {
-        VERSION_INFO.as_ptr() as *const c_char
     }
+
+    VERSION_INFO.as_ptr() as *const c_char
 }
 
 #[no_mangle]

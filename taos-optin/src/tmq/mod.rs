@@ -1,8 +1,4 @@
-// pub(crate) mod ffi;
-
 use std::{fmt::Debug, str::FromStr, sync::Arc, time::Duration};
-
-// pub(crate) use ffi::*;
 
 use anyhow::Context;
 use itertools::Itertools;
@@ -84,7 +80,7 @@ impl taos_query::TBuilder for TmqBuilder {
         let ptr = self.conf.build()?;
         let tmq = RawTmq::new(
             self.lib.clone(),
-            self.lib.tmq.unwrap(),
+            Arc::new(self.lib.tmq.unwrap()),
             ptr,
             self.timeout.as_raw_timeout(),
         );
@@ -171,7 +167,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         let ptr = self.conf.build()?;
         let tmq = RawTmq::new(
             self.lib.clone(),
-            self.lib.tmq.unwrap(),
+            Arc::new(self.lib.tmq.unwrap()),
             ptr,
             self.timeout.as_raw_timeout(),
         );
@@ -382,6 +378,7 @@ impl IsData for Data {
         Ok(self.raw.fetch_raw_message())
     }
 }
+
 // pub enum MessageSet {
 //     Meta(Meta),
 //     Data(Data),

@@ -112,12 +112,7 @@ impl Inner {
     #[inline(always)]
     pub fn backtrace(&self) -> &Backtrace {
         match self {
-            Inner::Empty { backtrace } => backtrace,
-            Inner::Raw {
-                raw: _,
-                #[cfg(nightly)]
-                backtrace,
-            } => backtrace,
+            Inner::Empty { backtrace } | Inner::Raw { backtrace, .. } => backtrace,
             Inner::Any(any) => any.backtrace(),
         }
     }

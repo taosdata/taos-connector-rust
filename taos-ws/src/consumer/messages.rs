@@ -204,7 +204,7 @@ impl TmqFetch {
         (0..self.fields_count)
             .map(|i| {
                 Field::new(
-                    self.fields_names.as_ref().unwrap()[i].to_string(),
+                    self.fields_names.as_ref().unwrap()[i].clone(),
                     self.fields_types.as_ref().unwrap()[i],
                     self.fields_lengths.as_ref().unwrap()[i],
                 )

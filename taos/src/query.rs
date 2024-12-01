@@ -9,6 +9,7 @@ enum TaosBuilderInner {
     Native(crate::sys::TaosBuilder),
     Ws(taos_ws::TaosBuilder),
 }
+
 #[derive(Debug)]
 pub(super) enum TaosInner {
     Native(crate::sys::Taos),
@@ -77,13 +78,13 @@ impl taos_query::TBuilder for TaosBuilder {
                 TaosInner::Native(taos) => {
                     Ok(<sys::TaosBuilder as taos_query::TBuilder>::ping(b, taos)?)
                 }
-                _ => unreachable!(),
+                TaosInner::Ws(_) => unreachable!(),
             },
             TaosBuilderInner::Ws(b) => match &mut conn.0 {
                 TaosInner::Ws(taos) => Ok(<taos_ws::TaosBuilder as taos_query::TBuilder>::ping(
                     b, taos,
                 )?),
-                _ => unreachable!(),
+                TaosInner::Native(_) => unreachable!(),
             },
         }
     }
@@ -173,11 +174,11 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         match &self.0 {
             TaosBuilderInner::Native(b) => match &mut conn.0 {
                 TaosInner::Native(taos) => Ok(b.ping(taos).await?),
-                _ => unreachable!(),
+                TaosInner::Ws(_) => unreachable!(),
             },
             TaosBuilderInner::Ws(b) => match &mut conn.0 {
                 TaosInner::Ws(taos) => Ok(b.ping(taos).await?),
-                _ => unreachable!(),
+                TaosInner::Native(_) => unreachable!(),
             },
         }
     }
@@ -262,10 +263,10 @@ impl AsyncFetchable for ResultSet {
     fn update_summary(&mut self, nrows: usize) {
         match &mut self.0 {
             ResultSetInner::Native(rs) => {
-                <crate::sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
+                <crate::sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows);
             }
             ResultSetInner::Ws(rs) => {
-                <taos_ws::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
+                <taos_ws::ResultSet as AsyncFetchable>::update_summary(rs, nrows);
             }
         }
     }
@@ -320,10 +321,10 @@ impl taos_query::Fetchable for ResultSet {
     fn update_summary(&mut self, nrows: usize) {
         match &mut self.0 {
             ResultSetInner::Native(rs) => {
-                <crate::sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
+                <crate::sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows);
             }
             ResultSetInner::Ws(rs) => {
-                <taos_ws::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
+                <taos_ws::ResultSet as AsyncFetchable>::update_summary(rs, nrows);
             }
         }
     }

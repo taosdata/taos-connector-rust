@@ -45,12 +45,12 @@ pub trait BlockExt: Debug + Sized {
     /// **DO NOT** call it directly.
     unsafe fn get_col_unchecked(&self, col: usize) -> &ColumnView;
 
-    /// Query by rows.
+    // /// Query by rows.
     // fn iter_rows(&self) -> RowsIter<'_, Self> {
     //     RowsIter::new(self)
     // }
 
-    /// Consume self into rows.
+    // /// Consume self into rows.
     // fn into_iter_rows(self) -> IntoRowsIter<Self> {
     //     IntoRowsIter::new(self)
     // }

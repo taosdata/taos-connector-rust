@@ -520,12 +520,8 @@ async fn read_queries(
                     let _ = ws2.send_async(Message::Pong(data)).await;
                 });
             }
-            Message::Pong(_) => {
-                // do nothing
-                tracing::trace!("received pong message, do nothing");
-            }
-            _ => {
-                // do nothing
+            Message::Pong(_) => tracing::trace!("received pong message, do nothing"),
+            Message::Frame(_) => {
                 tracing::warn!("received (unexpected) frame message, do nothing");
                 tracing::trace!("* frame data: {frame:?}");
             }
@@ -623,7 +619,7 @@ impl WsTaos {
         let info = TaosBuilder::from_dsn(dsn)?;
         Self::from_wsinfo(&info).await
     }
-    #[allow(dead_code)]
+
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
         let ws = info.build_stream(info.to_query_url()).await?;
 

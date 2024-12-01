@@ -313,6 +313,7 @@ impl<T: TBuilder> Manager<T> {
     pub fn new(builder: T) -> Self {
         Self { manager: builder }
     }
+
     /// Build a connection manager from a DSN.
     #[inline]
     pub fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<(Self, BTreeMap<String, String>)> {

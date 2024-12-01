@@ -383,6 +383,7 @@ impl BindFrom for TaosBindV2 {
         param.length = box_into_raw(param.buffer_length) as _;
         param
     }
+
     fn from_json(v: &str) -> Self {
         let mut param = Self::new(Ty::Json);
         param.buffer_length = v.len();
@@ -390,6 +391,7 @@ impl BindFrom for TaosBindV2 {
         param.length = box_into_raw(param.buffer_length) as _;
         param
     }
+
     fn from_nchar(v: &str) -> Self {
         let mut param = Self::new(Ty::NChar);
         param.buffer_length = v.len();

@@ -423,17 +423,15 @@ pub unsafe extern "C" fn ws_tmq_list_to_c_array(
         Some(list) => {
             if !list.topics.is_empty() {
                 *topic_num = list.topics.len() as u32;
-                let c_strings: Vec<CString> = list
+                let mut raw_ptrs: Vec<*mut c_char> = list
                     .topics
                     .iter()
                     .map(|s| CString::new(&**s).expect("CString::new failed"))
+                    .map(|cs| cs.into_raw())
                     .collect();
 
-                let mut raw_ptrs: Vec<*mut c_char> =
-                    c_strings.into_iter().map(|cs| cs.into_raw()).collect();
-
                 let ptr = raw_ptrs.as_mut_ptr();
-                std::mem::forget(raw_ptrs); // 防止Rust清理raw_ptrs向量
+                std::mem::forget(raw_ptrs);
 
                 ptr
             } else {

@@ -26,7 +26,7 @@ impl From<WsStmtField> for StmtField {
         let f_name = f.name.as_str();
         let mut name = [0 as c_char; 65usize];
         unsafe {
-            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len())
+            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len());
         };
 
         Self {

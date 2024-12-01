@@ -144,7 +144,7 @@ impl Attr {
                     let value = iter.next().expect(EXPECT);
                     match value {
                         TokenTree::Literal(value) => {
-                            attr.databases = Some(value.to_string().parse().expect(EXPECT))
+                            attr.databases = Some(value.to_string().parse().expect(EXPECT));
                         }
                         _ => unreachable!("expect `[test(databases = \"\")]`"),
                     }
@@ -215,6 +215,7 @@ impl Attr {
             None => quote!(()),
         }
     }
+
     fn precision_token_stream(&self) -> TokenStream {
         match &self.precision {
             Some(precision) => precision.into_token_stream(),

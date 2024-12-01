@@ -23,7 +23,7 @@ pub(super) mod tmq {
     #[derive(Debug)]
     pub(crate) struct RawTmq {
         api: Arc<ApiEntry>,
-        tmq_api: TmqApi,
+        tmq_api: Arc<TmqApi>,
         tmq_ptr: *mut tmq_t,
         timeout: i64,
         sender: flume::Sender<oneshot::Sender<Option<RawRes>>>,
@@ -36,7 +36,7 @@ pub(super) mod tmq {
     impl RawTmq {
         pub(crate) fn new(
             api: Arc<ApiEntry>,
-            tmq_api: TmqApi,
+            tmq_api: Arc<TmqApi>,
             tmq_ptr: *mut tmq_t,
             timeout: i64,
         ) -> Self {
@@ -131,7 +131,7 @@ pub(super) mod tmq {
                     msg.as_ptr(),
                     tmq_commit_async_cb,
                     Box::into_raw(Box::new(sender)) as *mut _,
-                )
+                );
             }
             rx.recv().unwrap()
         }
@@ -166,7 +166,7 @@ pub(super) mod tmq {
                         offset,
                         tmq_commit_offset_async_cb,
                         Box::into_raw(Box::new(sender)) as *mut _,
-                    )
+                    );
                 }
                 rx.recv().unwrap()
             } else {
@@ -211,7 +211,7 @@ pub(super) mod tmq {
                 unsafe {
                     self.tmq_api
                         .tmq_free_assignment
-                        .expect("tmq_free_assignment not found")(*pt)
+                        .expect("tmq_free_assignment not found")(*pt);
                 };
                 vec
             } else {
@@ -326,7 +326,7 @@ pub(super) mod tmq {
 
             let receiver = self.receiver.take().unwrap();
             let safe_tmq = SafeTmqT(self.as_ptr());
-            let tmq_api = self.tmq_api;
+            let tmq_api = self.tmq_api.clone();
             let api = self.api.clone();
             let timeout = self.timeout;
 
@@ -367,8 +367,8 @@ pub(super) mod tmq {
             });
         }
 
-        pub(crate) fn tmq(&self) -> TmqApi {
-            self.tmq_api
+        pub(crate) fn tmq(&self) -> Arc<TmqApi> {
+            self.tmq_api.clone()
         }
 
         pub(crate) fn sender(&self) -> flume::Sender<oneshot::Sender<Option<RawRes>>> {

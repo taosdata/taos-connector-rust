@@ -38,8 +38,7 @@ impl<'de, 'b: 'de> serde::de::EnumAccess<'de> for EnumValueDeserializer<'b> {
     where
         V: DeserializeSeed<'de>,
     {
-        seed
-            .deserialize(self.value.ty().as_variant_str().into_deserializer())
+        seed.deserialize(self.value.ty().as_variant_str().into_deserializer())
             .map(|v| (v, self))
     }
 }
@@ -150,7 +149,7 @@ impl<'de: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
-            _ => Err(<Self::Error as de::Error>::custom(
+            Decimal(_) => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
         }
@@ -266,7 +265,7 @@ impl<'de: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
-            _ => Err(<Self::Error as de::Error>::custom(
+            Decimal(_) => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
         }

@@ -384,12 +384,14 @@ impl ColumnMeta {
             ColumnMeta::Column(desc) | ColumnMeta::Tag(desc) => desc.length,
         }
     }
+
     pub fn note(&self) -> &str {
         match self {
+            ColumnMeta::Column(_) => "",
             ColumnMeta::Tag(_) => "TAG",
-            _ => "",
         }
     }
+
     pub fn is_tag(&self) -> bool {
         matches!(self, ColumnMeta::Tag(_))
     }

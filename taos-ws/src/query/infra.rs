@@ -81,7 +81,7 @@ impl WsSend {
                 args.req_id
             }
             WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
-            _ => unreachable!(),
+            WsSend::Version => unreachable!(),
         }
     }
 }

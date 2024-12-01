@@ -470,7 +470,7 @@ impl Dsn {
     }
 }
 
-pub trait IntoDsn {
+pub trait IntoDsn: Send {
     fn into_dsn(self) -> Result<Dsn, DsnError>;
 }
 
@@ -518,7 +518,7 @@ impl Display for Dsn {
 
         match (&self.username, &self.password) {
             (Some(username), Some(password)) => {
-                write!(f, "{}:{}@", encode(username), encode(password))?
+                write!(f, "{}:{}@", encode(username), encode(password))?;
             }
             (Some(username), None) => write!(f, "{}@", encode(username))?,
             (None, Some(password)) => write!(f, ":{}@", encode(password))?,

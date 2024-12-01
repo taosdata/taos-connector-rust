@@ -83,11 +83,11 @@ impl taos_query::TBuilder for TmqBuilder {
         match &self.0 {
             TmqBuilderInner::Native(b) => match &mut conn.0 {
                 ConsumerInner::Native(taos) => Ok(b.ping(taos)?),
-                _ => unreachable!(),
+                ConsumerInner::Ws(_) => unreachable!(),
             },
             TmqBuilderInner::Ws(b) => match &mut conn.0 {
                 ConsumerInner::Ws(taos) => Ok(b.ping(taos)?),
-                _ => unreachable!(),
+                ConsumerInner::Native(_) => unreachable!(),
             },
         }
     }
@@ -151,11 +151,11 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         match &self.0 {
             TmqBuilderInner::Native(b) => match &mut conn.0 {
                 ConsumerInner::Native(taos) => Ok(b.ping(taos).await?),
-                _ => unreachable!(),
+                ConsumerInner::Ws(_) => unreachable!(),
             },
             TmqBuilderInner::Ws(b) => match &mut conn.0 {
                 ConsumerInner::Ws(taos) => Ok(b.ping(taos).await?),
-                _ => unreachable!(),
+                ConsumerInner::Native(_) => unreachable!(),
             },
         }
     }
@@ -357,10 +357,10 @@ impl AsAsyncConsumer for Consumer {
     async fn unsubscribe(self) {
         match self.0 {
             ConsumerInner::Native(c) => {
-                <crate::sys::Consumer as AsAsyncConsumer>::unsubscribe(c).await
+                <crate::sys::Consumer as AsAsyncConsumer>::unsubscribe(c).await;
             }
             ConsumerInner::Ws(c) => {
-                <taos_ws::consumer::Consumer as AsAsyncConsumer>::unsubscribe(c).await
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::unsubscribe(c).await;
             }
         }
     }
@@ -439,7 +439,7 @@ impl AsAsyncConsumer for Consumer {
                         .await
                         .map_err(Into::into)
                 }
-                _ => unreachable!(),
+                OffsetInner::Native(_) => unreachable!(),
             },
         }
     }

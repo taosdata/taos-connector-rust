@@ -147,10 +147,9 @@ impl FromStr for DatabaseProperties {
                         keep, String;
                         precision, Precision);
             }
-            Ok(repr)
-        } else {
-            Ok(repr)
         }
+
+        Ok(repr)
     }
 }
 

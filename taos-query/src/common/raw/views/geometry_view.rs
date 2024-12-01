@@ -177,7 +177,6 @@ impl GeometryView {
                 offsets.push(-1);
             }
         }
-        // dbg!(&offsets);
         let offsets_bytes = unsafe {
             Vec::from_raw_parts(
                 offsets.as_mut_ptr() as *mut u8,

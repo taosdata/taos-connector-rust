@@ -966,7 +966,7 @@ impl AsConsumer for Consumer {
     }
 
     fn unsubscribe(self) {
-        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::unsubscribe(self))
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::unsubscribe(self));
     }
 }
 
@@ -1430,12 +1430,10 @@ impl TmqBuilder {
                                     use taos_query::util::InlinableRead;
 
                                     let timing = slice.read_u64().unwrap();
-                                    let req_id: u64;
                                     let part: Vec<u8>;
                                     if timing != u64::MAX{
                                         let offset = 16;
                                         part = slice[offset..].to_vec();
-                                        req_id = slice.read_u64().unwrap();
                                     } else {
                                         // new version
                                         let offset = 26;
@@ -1443,8 +1441,8 @@ impl TmqBuilder {
                                         let _action = slice.read_u64().unwrap();
                                         let _version = slice.read_u16().unwrap();
                                         let _time = slice.read_u64().unwrap();
-                                        req_id = slice.read_u64().unwrap();
                                     }
+                                    let req_id = slice.read_u64().unwrap();
 
                                     if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                         tracing::trace!("send data to fetches with id {}", req_id);

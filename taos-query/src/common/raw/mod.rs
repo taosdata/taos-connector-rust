@@ -368,15 +368,18 @@ impl RawBlock {
                     offset += rows * std::mem::size_of::<i64>();
                     // byte slice from start to end: `[start, end)`.
                     let data = bytes.slice(start..offset);
-                    let nulls = NullBits::from_iter((0..rows).map(|row| unsafe {
-                        big_int_is_null(
-                            &(data
-                                .as_ptr()
-                                .offset(row as isize * std::mem::size_of::<i64>() as isize)
-                                as *const i64)
-                                .read_unaligned() as _,
-                        )
-                    }));
+                    let nulls = (0..rows)
+                        .map(|row| unsafe {
+                            big_int_is_null(
+                                &(data
+                                    .as_ptr()
+                                    .offset(row as isize * std::mem::size_of::<i64>() as isize)
+                                    as *const i64)
+                                    .read_unaligned() as _,
+                            )
+                        })
+                        .collect();
+
                     // Set data lengths for v3-compatible block.
                     data_lengths[i] = data.len() as u32;
 
@@ -793,10 +796,8 @@ impl RawBlock {
             let bytes = bytes.into();
             self.data.replace(bytes);
             self.layout.borrow_mut().set_schema_changed(false);
-            unsafe { &*self.data.as_ptr() }
-        } else {
-            unsafe { &(*self.data.as_ptr()) }
         }
+        unsafe { &(*self.data.as_ptr()) }
     }
 
     pub fn is_null(&self, row: usize, col: usize) -> bool {

@@ -8,7 +8,7 @@ use crate::{
     JsonMeta, RawBlock, RawResult,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Timeout {
     /// Wait forever.
     Never,
@@ -51,7 +51,7 @@ impl Timeout {
     }
 }
 
-#[derive(Debug, thiserror::Error, PartialEq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum TimeoutError {
     #[error("empty timeout value")]
     Empty,
@@ -331,7 +331,7 @@ pub trait AsConsumer: Sized {
     fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()>;
 
     fn unsubscribe(self) {
-        drop(self)
+        drop(self);
     }
 
     fn list_topics(&self) -> RawResult<Vec<String>>;
@@ -423,7 +423,7 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     ) -> RawResult<()>;
 
     async fn unsubscribe(self) {
-        drop(self)
+        drop(self);
     }
 
     async fn list_topics(&self) -> RawResult<Vec<String>>;

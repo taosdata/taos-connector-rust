@@ -230,7 +230,7 @@ impl TmqListApi {
     }
 
     pub(crate) unsafe fn destroy_list(&self, list: *mut tmq_list_t) {
-        (self.tmq_list_destroy)(list)
+        (self.tmq_list_destroy)(list);
     }
 
     pub(crate) unsafe fn new_list_from_cstr<'a, T: IntoCStr<'a>>(
@@ -297,7 +297,7 @@ impl TmqConfApi {
     }
 
     pub(crate) unsafe fn destroy_conf(&self, conf: *mut tmq_conf_t) {
-        (self.tmq_conf_destroy)(conf)
+        (self.tmq_conf_destroy)(conf);
     }
 
     pub(crate) unsafe fn set_conf(
@@ -317,7 +317,7 @@ impl TmqConfApi {
         cb: tmq_commit_cb,
         param: *mut c_void,
     ) {
-        (self.tmq_conf_set_auto_commit_cb)(conf, cb, param)
+        (self.tmq_conf_set_auto_commit_cb)(conf, cb, param);
     }
 
     pub(crate) unsafe fn new_consumer(
@@ -1548,7 +1548,7 @@ impl RawRes {
         fields: &[Field],
         precision: Precision,
         state: &Rc<UnsafeCell<BlockState>>,
-        cx: &mut Context<'_>,
+        cx: &Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
         if current.in_use {
@@ -1616,14 +1616,14 @@ impl RawRes {
                         state.result.replace(Ok(None));
                     }
                 }
-                param.2.wake()
+                param.2.wake();
             }
             unsafe {
                 (self.c.taos_fetch_rows_a)(
                     self.as_ptr(),
                     taos_optin_fetch_rows_callback as _,
                     Box::into_raw(param) as *mut _ as _,
-                )
+                );
             };
             Poll::Pending
         }
@@ -1634,7 +1634,7 @@ impl RawRes {
         fields: &[Field],
         precision: Precision,
         state: &Rc<UnsafeCell<BlockState>>,
-        cx: &mut Context<'_>,
+        cx: &Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
         // Do not do anything until callback received.
@@ -1689,7 +1689,7 @@ impl RawRes {
                             state.result.replace(Ok(None));
                         }
                     }
-                    param.2.wake()
+                    param.2.wake();
                 }
             }
             unsafe {
@@ -1697,7 +1697,7 @@ impl RawRes {
                     self.as_ptr(),
                     taos_optin_fetch_raw_block_callback as _,
                     Box::into_raw(param) as *mut _ as _,
-                )
+                );
             };
             Poll::Pending
         }

@@ -20,10 +20,12 @@ impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::USmallInt
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter(iter.map(|v| v.to_i8()))
+        iter.map(|v| v.to_i8()).collect()
     }
 }
+
 impl TinyIntView {
     /// Rows
     pub fn len(&self) -> usize {
@@ -158,12 +160,12 @@ impl TinyIntView {
     }
 
     pub fn concat(&self, rhs: &View) -> View {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()

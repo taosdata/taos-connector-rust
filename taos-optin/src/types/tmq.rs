@@ -51,7 +51,7 @@ pub struct tmq_list_t {
 
 #[repr(C)]
 #[allow(dead_code)]
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub enum tmq_conf_res_t {
     Unknown = -2,
     Invalid = -1,
