@@ -120,25 +120,6 @@ impl WsSend {
 unsafe impl Send for WsSend {}
 unsafe impl Sync for WsSend {}
 
-#[test]
-fn test_serde_send() {
-    let s = WsSend::Conn {
-        req_id: 1,
-        req: WsConnReq::new("root", "taosdata"),
-    };
-    let v = serde_json::to_value(s).unwrap();
-    let j = serde_json::json!({
-        "action": "conn",
-        "args": {
-            "req_id": 1,
-            "user": "root",
-            "password": "taosdata",
-            "db": "",
-        }
-    });
-    assert_eq!(v, j);
-}
-
 // #[derive(Debug, Serialize)]
 // pub struct WsFetchArgs {
 //     req_id: ReqId,
@@ -326,7 +307,7 @@ pub(crate) struct Stmt2Field {
     pub bind_type: BindType,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum BindType {
     Column,
     Tag,
@@ -347,7 +328,7 @@ impl<'de> Deserialize<'de> for BindType {
                 formatter.write_str("a valid number for BindType")
             }
 
-            fn visit_i8<E>(self, v: i8) -> Result<Self::Value, E>
+            fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
@@ -359,70 +340,23 @@ impl<'de> Deserialize<'de> for BindType {
                 })
             }
 
-            fn visit_i16<E>(self, v: i16) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                self.visit_i8(v as _)
-            }
-
-            fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                self.visit_i8(v as _)
-            }
-
             fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                self.visit_i8(v as _)
-            }
-
-            fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                self.visit_i8(v as _)
-            }
-
-            fn visit_u16<E>(self, v: u16) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                self.visit_i8(v as _)
-            }
-
-            fn visit_u32<E>(self, v: u32) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                self.visit_i8(v as _)
+                self.visit_u8(v as _)
             }
 
             fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                self.visit_i8(v as _)
+                self.visit_u8(v as _)
             }
         }
 
         deserializer.deserialize_any(BindTypeVisitor)
     }
-}
-
-#[test]
-fn test_serde_recv_data() {
-    let json = r#"{
-        "code": 0,
-        "message": "",
-        "action": "conn",
-        "req_id": 1
-    }"#;
-    let d: WsRecv = serde_json::from_str(json).unwrap();
-    dbg!(d);
 }
 
 pub(crate) trait ToMessage: Serialize {
@@ -435,10 +369,77 @@ impl ToMessage for WsSend {}
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
+    use crate::{
+        query::{
+            infra::{WsRecv, WsSend},
+            WsConnReq,
+        },
+        TaosBuilder,
+    };
+
+    use super::BindType;
+
+    #[test]
+    fn test_serde_send() {
+        let s = WsSend::Conn {
+            req_id: 1,
+            req: WsConnReq::new("root", "taosdata"),
+        };
+        let v = serde_json::to_value(s).unwrap();
+        let j = serde_json::json!({
+            "action": "conn",
+            "args": {
+                "req_id": 1,
+                "user": "root",
+                "password": "taosdata",
+                "db": "",
+            }
+        });
+        assert_eq!(v, j);
+    }
+
+    #[test]
+    fn test_serde_recv_data() {
+        let json = r#"{
+        "code": 0,
+        "message": "",
+        "action": "conn",
+        "req_id": 1
+        }"#;
+        let d: WsRecv = serde_json::from_str(json).unwrap();
+        dbg!(d);
+    }
 
     #[test]
     fn dsn_error() {
         let _ = TaosBuilder::from_dsn("").unwrap_err();
+    }
+
+    #[test]
+    fn test_bind_type_deserialize() {
+        let valid_cases = vec![
+            (1, BindType::Column),
+            (2, BindType::Tag),
+            (4, BindType::TableName),
+        ];
+        for (val, expected) in valid_cases {
+            let res: BindType = serde_json::from_value(serde_json::json!(val as i64)).unwrap();
+            assert_eq!(res, expected);
+
+            let res: BindType = serde_json::from_value(serde_json::json!(val as u64)).unwrap();
+            assert_eq!(res, expected);
+        }
+
+        let invalid_cases = vec![0, 3, 255];
+        for val in invalid_cases {
+            let res: Result<BindType, _> = serde_json::from_value(serde_json::json!(val as i64));
+            assert!(res.is_err());
+
+            let res: Result<BindType, _> = serde_json::from_value(serde_json::json!(val as u64));
+            assert!(res.is_err());
+        }
+
+        let res: Result<BindType, _> = serde_json::from_value(serde_json::json!("invalid"));
+        assert!(res.is_err());
     }
 }

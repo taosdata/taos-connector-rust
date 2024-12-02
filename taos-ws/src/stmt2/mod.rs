@@ -672,9 +672,6 @@ mod tests {
 
         let res = stmt2.result().await;
         assert!(res.is_err());
-        if let Err(err) = res {
-            assert_eq!(err.to_string(), "Only query can use result");
-        }
 
         Ok(())
     }

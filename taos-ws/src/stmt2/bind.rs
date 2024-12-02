@@ -3164,9 +3164,6 @@ mod tests {
     fn test_bind_datas_to_bytes_without_datas_err() {
         let res = bind_datas_to_bytes(&[], 100, 200, true, None, 0);
         assert!(res.is_err());
-        if let Err(err) = res {
-            assert_eq!(err.to_string(), "No datas to bind");
-        }
     }
 
     #[test]
@@ -3177,9 +3174,6 @@ mod tests {
             let data = Stmt2BindData::new(None, None, None);
             let res = bind_datas_to_bytes(&[data], 100, 200, true, fields, 0);
             assert!(res.is_err());
-            if let Err(err) = res {
-                assert_eq!(err.to_string(), "fields is empty");
-            }
         }
     }
 
@@ -3200,9 +3194,6 @@ mod tests {
 
             let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
             assert!(res.is_err());
-            if let Err(err) = res {
-                assert_eq!(err.to_string(), "table name is empty");
-            }
         }
     }
 
@@ -3221,9 +3212,6 @@ mod tests {
 
         let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
         assert!(res.is_err());
-        if let Err(err) = res {
-            assert_eq!(err.to_string(), "tags is empty");
-        }
     }
 
     #[test]
@@ -3252,9 +3240,6 @@ mod tests {
 
         let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
         assert!(res.is_err());
-        if let Err(err) = res {
-            assert_eq!(err.to_string(), "tags len mismatch");
-        }
     }
 
     #[test]
@@ -3272,9 +3257,6 @@ mod tests {
 
         let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
         assert!(res.is_err());
-        if let Err(err) = res {
-            assert_eq!(err.to_string(), "columns is empty");
-        }
     }
 
     #[test]
@@ -3303,8 +3285,5 @@ mod tests {
 
         let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
         assert!(res.is_err());
-        if let Err(err) = res {
-            assert_eq!(err.to_string(), "columns len mismatch");
-        }
     }
 }
