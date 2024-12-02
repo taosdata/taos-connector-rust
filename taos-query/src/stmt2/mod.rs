@@ -37,6 +37,7 @@ where
     async fn result(&self) -> RawResult<Q::AsyncResultSet>;
 }
 
+#[derive(Clone, Debug)]
 pub struct Stmt2BindData<'a> {
     table_name: Option<&'a str>,
     tags: Option<&'a [Value]>,

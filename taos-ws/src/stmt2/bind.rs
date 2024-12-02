@@ -1,9 +1,7 @@
 use byteorder::{ByteOrder, LittleEndian};
-use taos_query::{
-    common::{BorrowedValue, ColumnView, Value},
-    stmt2::Stmt2BindData,
-    RawResult,
-};
+use taos_query::common::{BorrowedValue, ColumnView, Value};
+use taos_query::stmt2::Stmt2BindData;
+use taos_query::RawResult;
 
 use crate::query::infra::{BindType, ReqId, StmtId};
 
@@ -35,7 +33,7 @@ const ACTION: u64 = 9;
 const VERSION: u16 = 1;
 const COL_IDX: i32 = -1;
 
-pub(super) fn bind_datas_as_bytes(
+pub(super) fn bind_datas_to_bytes(
     datas: &[Stmt2BindData],
     req_id: ReqId,
     stmt_id: StmtId,
@@ -44,7 +42,7 @@ pub(super) fn bind_datas_as_bytes(
     fields_count: usize,
 ) -> RawResult<Vec<u8>> {
     if datas.is_empty() {
-        return Err("empty data".into());
+        return Err("No datas to bind".into());
     }
 
     let mut need_tbnames = false;
@@ -56,20 +54,22 @@ pub(super) fn bind_datas_as_bytes(
     let mut col_cnt = 0;
 
     if is_insert {
-        if let Some(fields) = fields {
-            for field in fields {
-                match field.bind_type {
-                    BindType::TableName => {
-                        need_tbnames = true;
-                    }
-                    BindType::Tag => {
-                        need_tags = true;
-                        tag_cnt += 1;
-                    }
-                    BindType::Column => {
-                        need_cols = true;
-                        col_cnt += 1;
-                    }
+        if fields.is_none() || fields.unwrap().is_empty() {
+            return Err("fields is empty".into());
+        }
+
+        for field in fields.unwrap() {
+            match field.bind_type {
+                BindType::TableName => {
+                    need_tbnames = true;
+                }
+                BindType::Tag => {
+                    need_tags = true;
+                    tag_cnt += 1;
+                }
+                BindType::Column => {
+                    need_cols = true;
+                    col_cnt += 1;
                 }
             }
         }
@@ -80,10 +80,6 @@ pub(super) fn bind_datas_as_bytes(
 
     tracing::trace!("need_tbnames: {need_tbnames}, need_tags: {need_tags}, need_cols: {need_cols}");
     tracing::trace!("table_cnt: {table_cnt}, tag_cnt: {tag_cnt}, col_cnt: {col_cnt}");
-
-    if !need_tbnames && !need_tags && !need_cols {
-        return Err("empty data".into());
-    }
 
     let mut tbname_lens = vec![];
     let mut tbname_buf_len = 0;
@@ -162,7 +158,7 @@ fn get_tag_lens(datas: &[Stmt2BindData], tag_cnt: usize) -> RawResult<Vec<u32>> 
     let mut tag_lens = vec![0u32; datas.len()];
     for (i, data) in datas.iter().enumerate() {
         if data.tags().is_none() {
-            return Err("tags are empty".into());
+            return Err("tags is empty".into());
         }
 
         let tags = data.tags().unwrap();
@@ -185,7 +181,7 @@ fn get_col_lens(datas: &[Stmt2BindData], col_cnt: usize) -> RawResult<Vec<u32>> 
     let mut col_lens = vec![0u32; datas.len()];
     for (i, data) in datas.iter().enumerate() {
         if data.columns().is_none() {
-            return Err("columns are empty".into());
+            return Err("columns is empty".into());
         }
 
         let cols = data.columns().unwrap();
@@ -325,7 +321,6 @@ fn write_tag(bytes: &mut [u8], tag: &Value) -> usize {
         // Write Buffer
         use BorrowedValue::*;
         match val {
-            Null(_) => unreachable!(),
             Bool(v) => {
                 if v {
                     bytes[offset] = 1;
@@ -526,10 +521,10 @@ mod tests {
 
     use crate::{query::infra::BindType, stmt2::Stmt2Field};
 
-    use super::{bind_datas_as_bytes, Stmt2BindData};
+    use super::{bind_datas_to_bytes, Stmt2BindData};
 
     #[test]
-    fn test_bind_datas_as_bytes_with_tbnames() -> anyhow::Result<()> {
+    fn test_bind_datas_to_bytes_with_tbnames() -> anyhow::Result<()> {
         let data1 = Stmt2BindData::new(Some("test1"), None, None);
         let data2 = Stmt2BindData::new(Some("test2"), None, None);
         let data3 = Stmt2BindData::new(Some("test3"), None, None);
@@ -544,7 +539,7 @@ mod tests {
             bind_type: BindType::TableName,
         }];
 
-        let res = bind_datas_as_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
+        let res = bind_datas_to_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -581,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_as_bytes_with_tags() -> anyhow::Result<()> {
+    fn test_bind_datas_to_bytes_with_tags() -> anyhow::Result<()> {
         let tags = &[
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
@@ -595,13 +590,14 @@ mod tests {
             Value::USmallInt(8),
             Value::UInt(9),
             Value::UBigInt(10),
-            Value::VarChar("binary".to_string()),
+            Value::VarChar("varchar".to_string()),
             Value::NChar("nchar".to_string()),
+            Value::Json(serde_json::json!({"key": "value"})),
+            Value::VarBinary(Bytes::from("varbinary".as_bytes())),
             Value::Geometry(Bytes::from(vec![
                 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40,
             ])),
-            Value::VarBinary(Bytes::from("varbinary".as_bytes())),
         ];
 
         let data = Stmt2BindData::new(None, Some(tags), None);
@@ -736,9 +732,17 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
+            Stmt2Field {
+                name: "ts".to_string(),
+                field_type: 9,
+                precision: 0,
+                scale: 0,
+                bytes: 8,
+                bind_type: BindType::Tag,
+            },
         ];
 
-        let res = bind_datas_as_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
+        let res = bind_datas_to_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -750,9 +754,9 @@ mod tests {
             0xff, 0xff, 0xff, 0xff, // col_idx
 
             // data
-            0xac, 0x01, 0x00, 0x00, // TotalLength
+            0xd2, 0x01, 0x00, 0x00, // TotalLength
             0x01, 0x00, 0x00, 0x00, // TableCount
-            0x10, 0x00, 0x00, 0x00, // TagCount
+            0x11, 0x00, 0x00, 0x00, // TagCount
             0x00, 0x00, 0x00, 0x00, // ColCount
             0x00, 0x00, 0x00, 0x00, // TableNamesOffset
             0x1c, 0x00, 0x00, 0x00, // TagsOffset
@@ -760,7 +764,7 @@ mod tests {
 
             // tags
             // TagsDataLength
-            0x8c, 0x01, 0x00, 0x00,
+            0xb2, 0x01, 0x00, 0x00,
             // TagsBuffer
             // table 0 tags
             // tag 0
@@ -872,14 +876,14 @@ mod tests {
             0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Buffer
 
             // tag 12
-            0x1c, 0x00, 0x00, 0x00, // TotalLength
+            0x1d, 0x00, 0x00, 0x00, // TotalLength
             0x08, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x00, // IsNull
             0x01, // HaveLength
-            0x06, 0x00, 0x00, 0x00, // Length
-            0x06, 0x00, 0x00, 0x00, // BufferLength
-            0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, // Buffer
+            0x07, 0x00, 0x00, 0x00, // Length
+            0x07, 0x00, 0x00, 0x00, // BufferLength
+            0x76, 0x61, 0x72, 0x63, 0x68, 0x61, 0x72, // Buffer
 
             // tag 13
             0x1b, 0x00, 0x00, 0x00, // TotalLength
@@ -892,14 +896,14 @@ mod tests {
             0x6e, 0x63, 0x68, 0x61, 0x72, // Buffer
 
             // tag 14
-            0x2b, 0x00, 0x00, 0x00, // TotalLength
-            0x14, 0x00, 0x00, 0x00, // Type
+            0x25, 0x00, 0x00, 0x00, // TotalLength
+            0x0f, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x00, // IsNull
             0x01, // HaveLength
-            0x15, 0x00, 0x00, 0x00, // Length
-            0x15, 0x00, 0x00, 0x00, // BufferLength
-            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
+            0x0f, 0x00, 0x00, 0x00, // Length
+            0x0f, 0x00, 0x00, 0x00, // BufferLength
+            0x7b, 0x22, 0x6b, 0x65, 0x79, 0x22, 0x3a, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x7d, // Buffer
 
             // tag 15
             0x1f, 0x00, 0x00, 0x00, // TotalLength
@@ -910,6 +914,16 @@ mod tests {
             0x09, 0x00, 0x00, 0x00, // Length
             0x09, 0x00, 0x00, 0x00, // BufferLength
             0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, // Buffer
+
+            // tag 16
+            0x2b, 0x00, 0x00, 0x00, // TotalLength
+            0x14, 0x00, 0x00, 0x00, // Type
+            0x01, 0x00, 0x00, 0x00, // Num
+            0x00, // IsNull
+            0x01, // HaveLength
+            0x15, 0x00, 0x00, 0x00, // Length
+            0x15, 0x00, 0x00, 0x00, // BufferLength
+            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
         ];
 
         assert_eq!(res, expected);
@@ -918,7 +932,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_as_bytes_with_null_tags() -> anyhow::Result<()> {
+    fn test_bind_datas_to_bytes_with_null_tags() -> anyhow::Result<()> {
         let tags = &[
             Value::Null(Ty::Timestamp),
             Value::Null(Ty::Bool),
@@ -934,8 +948,9 @@ mod tests {
             Value::Null(Ty::UBigInt),
             Value::Null(Ty::VarChar),
             Value::Null(Ty::NChar),
-            Value::Null(Ty::Geometry),
+            Value::Null(Ty::Json),
             Value::Null(Ty::VarBinary),
+            Value::Null(Ty::Geometry),
         ];
 
         let data = Stmt2BindData::new(None, Some(tags), None);
@@ -1070,9 +1085,17 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
+            Stmt2Field {
+                name: "ts".to_string(),
+                field_type: 9,
+                precision: 0,
+                scale: 0,
+                bytes: 8,
+                bind_type: BindType::Tag,
+            },
         ];
 
-        let res = bind_datas_as_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
+        let res = bind_datas_to_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -1084,9 +1107,9 @@ mod tests {
             0xff, 0xff, 0xff, 0xff, // col_idx
 
             // data
-            0x50, 0x01, 0x00, 0x00, // TotalLength
+            0x66, 0x01, 0x00, 0x00, // TotalLength
             0x01, 0x00, 0x00, 0x00, // TableCount
-            0x10, 0x00, 0x00, 0x00, // TagCount
+            0x11, 0x00, 0x00, 0x00, // TagCount
             0x00, 0x00, 0x00, 0x00, // ColCount
             0x00, 0x00, 0x00, 0x00, // TableNamesOffset
             0x1c, 0x00, 0x00, 0x00, // TagsOffset
@@ -1094,7 +1117,7 @@ mod tests {
 
             // tags
             // TagsDataLength
-            0x30, 0x01, 0x00, 0x00,
+            0x46, 0x01, 0x00, 0x00,
             // TagsBuffer
             // table 0 tags
             // tag 0
@@ -1213,7 +1236,7 @@ mod tests {
 
             // tag 14
             0x16, 0x00, 0x00, 0x00, // TotalLength
-            0x14, 0x00, 0x00, 0x00, // Type
+            0x0f, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x01, // IsNull
             0x01, // HaveLength
@@ -1228,6 +1251,15 @@ mod tests {
             0x01, // HaveLength
             0x00, 0x00, 0x00, 0x00, // Length
             0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // tag 16
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x14, 0x00, 0x00, 0x00, // Type
+            0x01, 0x00, 0x00, 0x00, // Num
+            0x01, // IsNull
+            0x01, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // Length
+            0x00, 0x00, 0x00, 0x00, // BufferLength
         ];
 
         assert_eq!(res, expected);
@@ -1236,7 +1268,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_as_bytes_with_tbnames_and_tags() -> anyhow::Result<()> {
+    fn test_bind_datas_to_bytes_with_tbnames_and_tags() -> anyhow::Result<()> {
         let tags1 = &[
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
@@ -1250,13 +1282,14 @@ mod tests {
             Value::USmallInt(8),
             Value::UInt(9),
             Value::UBigInt(10),
-            Value::VarChar("binary".to_string()),
+            Value::VarChar("varchar".to_string()),
             Value::NChar("nchar".to_string()),
+            Value::Json(serde_json::json!({"key": "value"})),
+            Value::VarBinary(Bytes::from("varbinary".as_bytes())),
             Value::Geometry(Bytes::from(vec![
                 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40,
             ])),
-            Value::VarBinary(Bytes::from("varbinary".as_bytes())),
         ];
 
         let data1 = Stmt2BindData::new(Some("test1"), Some(tags1), None);
@@ -1276,8 +1309,9 @@ mod tests {
             Value::Null(Ty::UBigInt),
             Value::Null(Ty::VarChar),
             Value::Null(Ty::NChar),
-            Value::Null(Ty::Geometry),
+            Value::Null(Ty::Json),
             Value::Null(Ty::VarBinary),
+            Value::Null(Ty::Geometry),
         ];
 
         let data2 = Stmt2BindData::new(Some("testnil"), Some(tags2), None);
@@ -1295,13 +1329,14 @@ mod tests {
             Value::USmallInt(8),
             Value::UInt(9),
             Value::UBigInt(10),
-            Value::VarChar("binary".to_string()),
+            Value::VarChar("varchar".to_string()),
             Value::NChar("nchar".to_string()),
+            Value::Json(serde_json::json!({"key": "value"})),
+            Value::VarBinary(Bytes::from("varbinary".as_bytes())),
             Value::Geometry(Bytes::from(vec![
                 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40,
             ])),
-            Value::VarBinary(Bytes::from("varbinary".as_bytes())),
         ];
 
         let data3 = Stmt2BindData::new(Some("test2"), Some(tags3), None);
@@ -1445,9 +1480,17 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Tag,
             },
+            Stmt2Field {
+                name: "ts".to_string(),
+                field_type: 9,
+                precision: 0,
+                scale: 0,
+                bytes: 8,
+                bind_type: BindType::Tag,
+            },
         ];
 
-        let res = bind_datas_as_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
+        let res = bind_datas_to_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -1459,9 +1502,9 @@ mod tests {
             0xff, 0xff, 0xff, 0xff, // col_idx
 
             // data
-            0x8a, 0x04, 0x00, 0x00, // TotalLength
+            0xec, 0x04, 0x00, 0x00, // TotalLength
             0x03, 0x00, 0x00, 0x00, // TableCount
-            0x10, 0x00, 0x00, 0x00, // TagCount
+            0x11, 0x00, 0x00, 0x00, // TagCount
             0x00, 0x00, 0x00, 0x00, // ColCount
             0x1c, 0x00, 0x00, 0x00, // TableNamesOffset
             0x36, 0x00, 0x00, 0x00, // TagsOffset
@@ -1479,9 +1522,9 @@ mod tests {
 
             // tags
             // TagsDataLength
-            0x8c, 0x01, 0x00, 0x00,
-            0x30, 0x01, 0x00, 0x00,
-            0x8c, 0x01, 0x00, 0x00,
+            0xb2, 0x01, 0x00, 0x00,
+            0x46, 0x01, 0x00, 0x00,
+            0xb2, 0x01, 0x00, 0x00,
             // TagsBuffer
             // table 0 tags
             // tag 0
@@ -1593,14 +1636,14 @@ mod tests {
             0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Buffer
 
             // tag 12
-            0x1c, 0x00, 0x00, 0x00, // TotalLength
+            0x1d, 0x00, 0x00, 0x00, // TotalLength
             0x08, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x00, // IsNull
             0x01, // HaveLength
-            0x06, 0x00, 0x00, 0x00, // Length
-            0x06, 0x00, 0x00, 0x00, // BufferLength
-            0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, // Buffer
+            0x07, 0x00, 0x00, 0x00, // Length
+            0x07, 0x00, 0x00, 0x00, // BufferLength
+            0x76, 0x61, 0x72, 0x63, 0x68, 0x61, 0x72, // Buffer
 
             // tag 13
             0x1b, 0x00, 0x00, 0x00, // TotalLength
@@ -1613,14 +1656,14 @@ mod tests {
             0x6e, 0x63, 0x68, 0x61, 0x72, // Buffer
 
             // tag 14
-            0x2b, 0x00, 0x00, 0x00, // TotalLength
-            0x14, 0x00, 0x00, 0x00, // Type
+            0x25, 0x00, 0x00, 0x00, // TotalLength
+            0x0f, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x00, // IsNull
             0x01, // HaveLength
-            0x15, 0x00, 0x00, 0x00, // Length
-            0x15, 0x00, 0x00, 0x00, // BufferLength
-            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
+            0x0f, 0x00, 0x00, 0x00, // Length
+            0x0f, 0x00, 0x00, 0x00, // BufferLength
+            0x7b, 0x22, 0x6b, 0x65, 0x79, 0x22, 0x3a, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x7d, // Buffer
 
             // tag 15
             0x1f, 0x00, 0x00, 0x00, // TotalLength
@@ -1631,6 +1674,16 @@ mod tests {
             0x09, 0x00, 0x00, 0x00, // Length
             0x09, 0x00, 0x00, 0x00, // BufferLength
             0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, // Buffer
+
+            // tag 16
+            0x2b, 0x00, 0x00, 0x00, // TotalLength
+            0x14, 0x00, 0x00, 0x00, // Type
+            0x01, 0x00, 0x00, 0x00, // Num
+            0x00, // IsNull
+            0x01, // HaveLength
+            0x15, 0x00, 0x00, 0x00, // Length
+            0x15, 0x00, 0x00, 0x00, // BufferLength
+            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
 
             // table 1 tags
             // tag 0
@@ -1749,7 +1802,7 @@ mod tests {
 
             // tag 14
             0x16, 0x00, 0x00, 0x00, // TotalLength
-            0x14, 0x00, 0x00, 0x00, // Type
+            0x0f, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x01, // IsNull
             0x01, // HaveLength
@@ -1759,6 +1812,15 @@ mod tests {
             // tag 15
             0x16, 0x00, 0x00, 0x00, // TotalLength
             0x10, 0x00, 0x00, 0x00, // Type
+            0x01, 0x00, 0x00, 0x00, // Num
+            0x01, // IsNull
+            0x01, // HaveLength
+            0x00, 0x00, 0x00, 0x00, // Length
+            0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // tag 16
+            0x16, 0x00, 0x00, 0x00, // TotalLength
+            0x14, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x01, // IsNull
             0x01, // HaveLength
@@ -1875,14 +1937,14 @@ mod tests {
             0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Buffer
 
             // tag 12
-            0x1c, 0x00, 0x00, 0x00, // TotalLength
+            0x1d, 0x00, 0x00, 0x00, // TotalLength
             0x08, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x00, // IsNull
             0x01, // HaveLength
-            0x06, 0x00, 0x00, 0x00, // Length
-            0x06, 0x00, 0x00, 0x00, // BufferLength
-            0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, // Buffer
+            0x07, 0x00, 0x00, 0x00, // Length
+            0x07, 0x00, 0x00, 0x00, // BufferLength
+            0x76, 0x61, 0x72, 0x63, 0x68, 0x61, 0x72, // Buffer
 
             // tag 13
             0x1b, 0x00, 0x00, 0x00, // TotalLength
@@ -1895,14 +1957,14 @@ mod tests {
             0x6e, 0x63, 0x68, 0x61, 0x72, // Buffer
 
             // tag 14
-            0x2b, 0x00, 0x00, 0x00, // TotalLength
-            0x14, 0x00, 0x00, 0x00, // Type
+            0x25, 0x00, 0x00, 0x00, // TotalLength
+            0x0f, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x00, // IsNull
             0x01, // HaveLength
-            0x15, 0x00, 0x00, 0x00, // Length
-            0x15, 0x00, 0x00, 0x00, // BufferLength
-            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
+            0x0f, 0x00, 0x00, 0x00, // Length
+            0x0f, 0x00, 0x00, 0x00, // BufferLength
+            0x7b, 0x22, 0x6b, 0x65, 0x79, 0x22, 0x3a, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x7d, // Buffer
 
             // tag 15
             0x1f, 0x00, 0x00, 0x00, // TotalLength
@@ -1913,6 +1975,16 @@ mod tests {
             0x09, 0x00, 0x00, 0x00, // Length
             0x09, 0x00, 0x00, 0x00, // BufferLength
             0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, // Buffer
+
+            // tag 16
+            0x2b, 0x00, 0x00, 0x00, // TotalLength
+            0x14, 0x00, 0x00, 0x00, // Type
+            0x01, 0x00, 0x00, 0x00, // Num
+            0x00, // IsNull
+            0x01, // HaveLength
+            0x15, 0x00, 0x00, 0x00, // Length
+            0x15, 0x00, 0x00, 0x00, // BufferLength
+            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
         ];
 
         assert_eq!(res, expected);
@@ -1921,7 +1993,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_as_bytes_with_cols() -> anyhow::Result<()> {
+    fn test_bind_datas_to_bytes_with_cols() -> anyhow::Result<()> {
         let cols = &[
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_bools(vec![true]),
@@ -1935,18 +2007,19 @@ mod tests {
             ColumnView::from_unsigned_small_ints(vec![8]),
             ColumnView::from_unsigned_ints(vec![9]),
             ColumnView::from_unsigned_big_ints(vec![10]),
-            ColumnView::from_varchar(vec!["binary"]),
+            ColumnView::from_varchar(vec!["varchar"]),
             ColumnView::from_nchar(vec!["nchar"]),
+            ColumnView::from_json(vec![r#"{"key":"value"}"#]),
+            ColumnView::from_bytes(vec!["varbinary".as_bytes()]),
             ColumnView::from_geobytes(vec![vec![
                 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40,
             ]]),
-            ColumnView::from_bytes(vec!["varbinary".as_bytes()]),
         ];
 
         let data = Stmt2BindData::new(None, None, Some(cols));
 
-        let res = bind_datas_as_bytes(&[data], 100, 200, false, None, 16)?;
+        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, 17)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -1958,17 +2031,17 @@ mod tests {
             0xff, 0xff, 0xff, 0xff, // col_idx
 
             // data
-            0xac, 0x01, 0x00, 0x00, // TotalLength
+            0xd2, 0x01, 0x00, 0x00, // TotalLength
             0x01, 0x00, 0x00, 0x00, // TableCount
             0x00, 0x00, 0x00, 0x00, // TagCount
-            0x10, 0x00, 0x00, 0x00, // ColCount
+            0x11, 0x00, 0x00, 0x00, // ColCount
             0x00, 0x00, 0x00, 0x00, // TableNamesOffset
             0x00, 0x00, 0x00, 0x00, // TagsOffset
             0x1c, 0x00, 0x00, 0x00, // ColsOffset
 
             // cols
             // ColDataLength
-            0x8c, 0x01, 0x00, 0x00,
+            0xb2, 0x01, 0x00, 0x00,
             // ColBuffer
             // table 0 cols
             // col 0
@@ -2080,15 +2153,15 @@ mod tests {
             0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Buffer
 
             // col 12
-            0x1c, 0x00, 0x00, 0x00, // TotalLength
+            0x1d, 0x00, 0x00, 0x00, // TotalLength
             0x08, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x00, // IsNull
             0x01, // HaveLength
             // Length
-            0x06, 0x00, 0x00, 0x00,
-            0x06, 0x00, 0x00, 0x00, // BufferLength
-            0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, // Buffer
+            0x07, 0x00, 0x00, 0x00,
+            0x07, 0x00, 0x00, 0x00, // BufferLength
+            0x76, 0x61, 0x72, 0x63, 0x68, 0x61, 0x72, // Buffer
 
             // col 13
             0x1b, 0x00, 0x00, 0x00, // TotalLength
@@ -2102,15 +2175,15 @@ mod tests {
             0x6e, 0x63, 0x68, 0x61, 0x72, // Buffer
 
             // col 14
-            0x2b, 0x00, 0x00, 0x00, // TotalLength
-            0x14, 0x00, 0x00, 0x00, // Type
+            0x25, 0x00, 0x00, 0x00, // TotalLength
+            0x0f, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x00, // IsNull
             0x01, // HaveLength
             // Length
-            0x15, 0x00, 0x00, 0x00,
-            0x15, 0x00, 0x00, 0x00, // BufferLength
-            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
+            0x0f, 0x00, 0x00, 0x00,
+            0x0f, 0x00, 0x00, 0x00, // BufferLength
+            0x7b, 0x22, 0x6b, 0x65, 0x79, 0x22, 0x3a, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x7d, // Buffer
 
             // col 15
             0x1f, 0x00, 0x00, 0x00, // TotalLength
@@ -2122,6 +2195,17 @@ mod tests {
             0x09, 0x00, 0x00, 0x00,
             0x09, 0x00, 0x00, 0x00, // BufferLength
             0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, // Buffer
+
+            // col 16
+            0x2b, 0x00, 0x00, 0x00, // TotalLength
+            0x14, 0x00, 0x00, 0x00, // Type
+            0x01, 0x00, 0x00, 0x00, // Num
+            0x00, // IsNull
+            0x01, // HaveLength
+            // Length
+            0x15, 0x00, 0x00, 0x00,
+            0x15, 0x00, 0x00, 0x00, // BufferLength
+            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
         ];
 
         assert_eq!(res, expected);
@@ -2130,7 +2214,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_as_bytes_with_null_cols() -> anyhow::Result<()> {
+    fn test_bind_datas_to_bytes_with_null_cols() -> anyhow::Result<()> {
         let cols = &[
             ColumnView::null(5, Ty::Timestamp),
             ColumnView::null(5, Ty::Bool),
@@ -2146,13 +2230,14 @@ mod tests {
             ColumnView::null(5, Ty::UBigInt),
             ColumnView::null(5, Ty::VarChar),
             ColumnView::null(5, Ty::NChar),
-            ColumnView::from_geobytes::<&[u8], _, _, _>(vec![None, None, None, None, None]),
+            ColumnView::from_json::<&str, _, _, _>(vec![None, None, None, None, None]),
             ColumnView::from_bytes::<&[u8], _, _, _>(vec![None, None, None, None, None]),
+            ColumnView::from_geobytes::<&[u8], _, _, _>(vec![None, None, None, None, None]),
         ];
 
         let data = Stmt2BindData::new(None, None, Some(cols));
 
-        let res = bind_datas_as_bytes(&[data], 100, 200, false, None, 16)?;
+        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, 17)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -2164,17 +2249,17 @@ mod tests {
             0xff, 0xff, 0xff, 0xff, // col_idx
 
             // data
-            0xd0, 0x01, 0x00, 0x00, // TotalLength
+            0xfa, 0x01, 0x00, 0x00, // TotalLength
             0x01, 0x00, 0x00, 0x00, // TableCount
             0x00, 0x00, 0x00, 0x00, // TagCount
-            0x10, 0x00, 0x00, 0x00, // ColCount
+            0x11, 0x00, 0x00, 0x00, // ColCount
             0x00, 0x00, 0x00, 0x00, // TableNamesOffset
             0x00, 0x00, 0x00, 0x00, // TagsOffset
             0x1c, 0x00, 0x00, 0x00, // ColsOffset
 
             // cols
             // ColDataLength
-            0xb0, 0x01, 0x00, 0x00,
+            0xda, 0x01, 0x00, 0x00,
             // ColBuffer
             // table 0 cols
             // col 0
@@ -2303,7 +2388,7 @@ mod tests {
 
             // col 14
             0x2a, 0x00, 0x00, 0x00, // TotalLength
-            0x14, 0x00, 0x00, 0x00, // Type
+            0x0f, 0x00, 0x00, 0x00, // Type
             0x05, 0x00, 0x00, 0x00, // Num
             0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
             0x01, // HaveLength
@@ -2328,6 +2413,20 @@ mod tests {
             0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, // BufferLength
+
+            // col 16
+            0x2a, 0x00, 0x00, 0x00, // TotalLength
+            0x14, 0x00, 0x00, 0x00, // Type
+            0x05, 0x00, 0x00, 0x00, // Num
+            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
+            0x01, // HaveLength
+            // Length
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, // BufferLength
         ];
 
         assert_eq!(res, expected);
@@ -2336,7 +2435,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_as_bytes_with_tbnames_tags_and_cols() -> anyhow::Result<()> {
+    fn test_bind_datas_to_bytes_with_tbnames_tags_and_cols() -> anyhow::Result<()> {
         let tags = &[
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
@@ -2350,17 +2449,18 @@ mod tests {
             Value::USmallInt(8),
             Value::UInt(9),
             Value::UBigInt(10),
-            Value::VarChar("binary".to_string()),
+            Value::VarChar("varchar".to_string()),
             Value::NChar("nchar".to_string()),
+            Value::Json(serde_json::json!({"key": "value"})),
+            Value::VarBinary(Bytes::from("varbinary".as_bytes())),
             Value::Geometry(Bytes::from(vec![
                 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40,
             ])),
-            Value::VarBinary(Bytes::from("varbinary".as_bytes())),
         ];
 
         let cols = &[
-            ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466, 1726803358466]),
+            ColumnView::from_millis_timestamp(vec![Some(1726803356466), None, Some(1726803358466)]),
             ColumnView::from_bools(vec![Some(true), None, Some(false)]),
             ColumnView::from_tiny_ints(vec![Some(11), None, Some(12)]),
             ColumnView::from_small_ints(vec![Some(11), None, Some(12)]),
@@ -2372,8 +2472,22 @@ mod tests {
             ColumnView::from_unsigned_small_ints(vec![Some(11), None, Some(12)]),
             ColumnView::from_unsigned_ints(vec![Some(11), None, Some(12)]),
             ColumnView::from_unsigned_big_ints(vec![Some(11), None, Some(12)]),
-            ColumnView::from_varchar::<&str, _, _, _>(vec![Some("binary1"), None, Some("binary2")]),
+            ColumnView::from_varchar::<&str, _, _, _>(vec![
+                Some("varchar1"),
+                None,
+                Some("varchar2"),
+            ]),
             ColumnView::from_nchar::<&str, _, _, _>(vec![Some("nchar1"), None, Some("nchar2")]),
+            ColumnView::from_json::<&str, _, _, _>(vec![
+                Some(r#"{"key1": "value1"}"#),
+                None,
+                Some(r#"{"key2": "value2"}"#),
+            ]),
+            ColumnView::from_bytes::<&[u8], _, _, _>(vec![
+                Some("varbinary1".as_bytes()),
+                None,
+                Some("varbinary2".as_bytes()),
+            ]),
             ColumnView::from_geobytes::<Vec<u8>, _, _, _>(vec![
                 Some(vec![
                     0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40,
@@ -2384,11 +2498,6 @@ mod tests {
                     0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40,
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40,
                 ]),
-            ]),
-            ColumnView::from_bytes::<&[u8], _, _, _>(vec![
-                Some("varbinary1".as_bytes()),
-                None,
-                Some("varbinary2".as_bytes()),
             ]),
         ];
 
@@ -2532,6 +2641,22 @@ mod tests {
                 bind_type: BindType::Tag,
             },
             Stmt2Field {
+                name: "ts".to_string(),
+                field_type: 9,
+                precision: 0,
+                scale: 0,
+                bytes: 8,
+                bind_type: BindType::Tag,
+            },
+            Stmt2Field {
+                name: "a".to_string(),
+                field_type: 9,
+                precision: 0,
+                scale: 0,
+                bytes: 8,
+                bind_type: BindType::Column,
+            },
+            Stmt2Field {
                 name: "a".to_string(),
                 field_type: 9,
                 precision: 0,
@@ -2661,7 +2786,7 @@ mod tests {
             },
         ];
 
-        let res = bind_datas_as_bytes(&[data], 100, 200, true, Some(&fields), 0)?;
+        let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -2673,13 +2798,13 @@ mod tests {
             0xff, 0xff, 0xff, 0xff, // col_id
 
             // data
-            0x19, 0x04, 0x00, 0x00, // TotalLength
+            0x85, 0x04, 0x00, 0x00, // TotalLength
             0x01, 0x00, 0x00, 0x00, // TableCount
-            0x10, 0x00, 0x00, 0x00, // TagCount
-            0x10, 0x00, 0x00, 0x00, // ColCount
+            0x11, 0x00, 0x00, 0x00, // TagCount
+            0x11, 0x00, 0x00, 0x00, // ColCount
             0x1c, 0x00, 0x00, 0x00, // TableNamesOffset
             0x24, 0x00, 0x00, 0x00, // TagsOffset
-            0xb4, 0x01, 0x00, 0x00, // ColsOffset
+            0xda, 0x01, 0x00, 0x00, // ColsOffset
 
             // table names
             // TableNameLength
@@ -2689,7 +2814,7 @@ mod tests {
 
             // tags
             // TagsDataLength
-            0x8c, 0x01, 0x00, 0x00,
+            0xb2, 0x01, 0x00, 0x00,
             // TagsBuffer
             // table 0 tags
             // tag 0
@@ -2801,14 +2926,14 @@ mod tests {
             0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Buffer
 
             // tag 12
-            0x1c, 0x00, 0x00, 0x00, // TotalLength
+            0x1d, 0x00, 0x00, 0x00, // TotalLength
             0x08, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x00, // IsNull
             0x01, // HaveLength
-            0x06, 0x00, 0x00, 0x00, // Length
-            0x06, 0x00, 0x00, 0x00, // BufferLength
-            0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, // Buffer
+            0x07, 0x00, 0x00, 0x00, // Length
+            0x07, 0x00, 0x00, 0x00, // BufferLength
+            0x76, 0x61, 0x72, 0x63, 0x68, 0x61, 0x72, // Buffer
 
             // tag 13
             0x1b, 0x00, 0x00, 0x00, // TotalLength
@@ -2821,14 +2946,14 @@ mod tests {
             0x6e, 0x63, 0x68, 0x61, 0x72, // Buffer
 
             // tag 14
-            0x2b, 0x00, 0x00, 0x00, // TotalLength
-            0x14, 0x00, 0x00, 0x00, // Type
+            0x25, 0x00, 0x00, 0x00, // TotalLength
+            0x0f, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
             0x00, // IsNull
             0x01, // HaveLength
-            0x15, 0x00, 0x00, 0x00, // Length
-            0x15, 0x00, 0x00, 0x00, // BufferLength
-            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
+            0x0f, 0x00, 0x00, 0x00, // Length
+            0x0f, 0x00, 0x00, 0x00, // BufferLength
+            0x7b, 0x22, 0x6b, 0x65, 0x79, 0x22, 0x3a, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x7d, // Buffer
 
             // tag 15
             0x1f, 0x00, 0x00, 0x00, // TotalLength
@@ -2840,19 +2965,30 @@ mod tests {
             0x09, 0x00, 0x00, 0x00, // BufferLength
             0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, // Buffer
 
+            // tag 16
+            0x2b, 0x00, 0x00, 0x00, // TotalLength
+            0x14, 0x00, 0x00, 0x00, // Type
+            0x01, 0x00, 0x00, 0x00, // Num
+            0x00, // IsNull
+            0x01, // HaveLength
+            0x15, 0x00, 0x00, 0x00, // Length
+            0x15, 0x00, 0x00, 0x00, // BufferLength
+            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
+
+
             // cols
             // ColDataLength
-            0x61, 0x02, 0x00, 0x00,
+            0xa7, 0x02, 0x00, 0x00,
             // ColBuffer
             // table 0 cols
             // col 0
             0x2c, 0x00, 0x00, 0x00, // TotalLength
             0x09, 0x00, 0x00, 0x00, // Type
             0x03, 0x00, 0x00, 0x00, // Num
-            0x00, 0x00, 0x00, // IsNull
+            0x00, 0x01, 0x00, // IsNull
             0x00, // HaveLength
             0x18, 0x00, 0x00, 0x00, // BufferLength
-            0x32, 0x2b, 0x80, 0x0d, 0x92, 0x01, 0x00, 0x00, 0x1a, 0x2f, 0x80, 0x0d, 0x92, 0x01, 0x00, 0x00, 0x02, 0x33, 0x80, 0x0d, 0x92, 0x01, 0x00, 0x00, // Buffer
+            0x32, 0x2b, 0x80, 0x0d, 0x92, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x33, 0x80, 0x0d, 0x92, 0x01, 0x00, 0x00, // Buffer
 
             // col 1
             0x17, 0x00, 0x00, 0x00, // TotalLength
@@ -2954,17 +3090,17 @@ mod tests {
             0x0b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Buffer
 
             // col 12
-            0x2e, 0x00, 0x00, 0x00, // TotalLength
+            0x30, 0x00, 0x00, 0x00, // TotalLength
             0x08, 0x00, 0x00, 0x00, // Type
             0x03, 0x00, 0x00, 0x00, // Num
             0x00, 0x01, 0x00, // IsNull
             0x01, // HaveLength
             // Length
-            0x07, 0x00, 0x00, 0x00,
+            0x08, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00,
-            0x07, 0x00, 0x00, 0x00,
-            0x0e, 0x00, 0x00, 0x00, // BufferLength
-            0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, 0x31, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, 0x32, // Buffer
+            0x08, 0x00, 0x00, 0x00,
+            0x10, 0x00, 0x00, 0x00, // BufferLength
+            0x76, 0x61, 0x72, 0x63, 0x68, 0x61, 0x72, 0x31, 0x76, 0x61, 0x72, 0x63, 0x68, 0x61, 0x72, 0x32, // Buffer
 
             // col 13
             0x2c, 0x00, 0x00, 0x00, // TotalLength
@@ -2980,17 +3116,17 @@ mod tests {
             0x6e, 0x63, 0x68, 0x61, 0x72, 0x31, 0x6e, 0x63, 0x68, 0x61, 0x72, 0x32, // Buffer
 
             // col 14
-            0x4a, 0x00, 0x00, 0x00, // TotalLength
-            0x14, 0x00, 0x00, 0x00, // Type
+            0x44, 0x00, 0x00, 0x00, // TotalLength
+            0x0f, 0x00, 0x00, 0x00, // Type
             0x03, 0x00, 0x00, 0x00, // Num
             0x00, 0x01, 0x00, // IsNull
             0x01, // HaveLength
             // Length
-            0x15, 0x00, 0x00, 0x00,
+            0x12, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00,
-            0x15, 0x00, 0x00, 0x00,
-            0x2a, 0x00, 0x00, 0x00, // BufferLength
-            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
+            0x12, 0x00, 0x00, 0x00,
+            0x24, 0x00, 0x00, 0x00, // BufferLength
+            0x7b, 0x22, 0x6b, 0x65, 0x79, 0x31, 0x22, 0x3a, 0x20, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x31, 0x22, 0x7d, 0x7b, 0x22, 0x6b, 0x65, 0x79, 0x32, 0x22, 0x3a, 0x20, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x32, 0x22, 0x7d, // Buffer
 
             // col 15
             0x34, 0x00, 0x00, 0x00, // TotalLength
@@ -3004,10 +3140,171 @@ mod tests {
             0x0a, 0x00, 0x00, 0x00,
             0x14, 0x00, 0x00, 0x00, // BufferLength
             0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, 0x31, 0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, 0x32, // Buffer
+
+            // col 16
+            0x4a, 0x00, 0x00, 0x00, // TotalLength
+            0x14, 0x00, 0x00, 0x00, // Type
+            0x03, 0x00, 0x00, 0x00, // Num
+            0x00, 0x01, 0x00, // IsNull
+            0x01, // HaveLength
+            // Length
+            0x15, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x15, 0x00, 0x00, 0x00,
+            0x2a, 0x00, 0x00, 0x00, // BufferLength
+            0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, // Buffer
         ];
 
         assert_eq!(res, expected);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_bind_datas_to_bytes_without_datas_err() {
+        let res = bind_datas_to_bytes(&[], 100, 200, true, None, 0);
+        assert!(res.is_err());
+        if let Err(err) = res {
+            assert_eq!(err.to_string(), "No datas to bind");
+        }
+    }
+
+    #[test]
+    fn test_bind_datas_to_bytes_without_fields_err() {
+        let fields = vec![];
+        let test_cases = vec![None, Some(&fields)];
+        for fields in test_cases {
+            let data = Stmt2BindData::new(None, None, None);
+            let res = bind_datas_to_bytes(&[data], 100, 200, true, fields, 0);
+            assert!(res.is_err());
+            if let Err(err) = res {
+                assert_eq!(err.to_string(), "fields is empty");
+            }
+        }
+    }
+
+    #[test]
+    fn test_bind_datas_to_bytes_without_tbnames_err() {
+        let test_cases = vec![None, Some("")];
+        for tbname in test_cases {
+            let data = Stmt2BindData::new(tbname, None, None);
+
+            let fields = vec![Stmt2Field {
+                name: "".to_string(),
+                field_type: 1,
+                precision: 0,
+                scale: 0,
+                bytes: 131584,
+                bind_type: BindType::TableName,
+            }];
+
+            let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
+            assert!(res.is_err());
+            if let Err(err) = res {
+                assert_eq!(err.to_string(), "table name is empty");
+            }
+        }
+    }
+
+    #[test]
+    fn test_bind_datas_to_bytes_without_tags_err() {
+        let data = Stmt2BindData::new(None, None, None);
+
+        let fields = vec![Stmt2Field {
+            name: "".to_string(),
+            field_type: 1,
+            precision: 0,
+            scale: 0,
+            bytes: 131584,
+            bind_type: BindType::Tag,
+        }];
+
+        let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
+        assert!(res.is_err());
+        if let Err(err) = res {
+            assert_eq!(err.to_string(), "tags is empty");
+        }
+    }
+
+    #[test]
+    fn test_bind_datas_to_bytes_tags_len_mismatch_err() {
+        let tags = vec![Value::Int(1)];
+        let data = Stmt2BindData::new(None, Some(&tags), None);
+
+        let fields = vec![
+            Stmt2Field {
+                name: "".to_string(),
+                field_type: 1,
+                precision: 0,
+                scale: 0,
+                bytes: 131584,
+                bind_type: BindType::Tag,
+            },
+            Stmt2Field {
+                name: "".to_string(),
+                field_type: 1,
+                precision: 0,
+                scale: 0,
+                bytes: 131584,
+                bind_type: BindType::Tag,
+            },
+        ];
+
+        let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
+        assert!(res.is_err());
+        if let Err(err) = res {
+            assert_eq!(err.to_string(), "tags len mismatch");
+        }
+    }
+
+    #[test]
+    fn test_bind_datas_to_bytes_without_cols_err() {
+        let data = Stmt2BindData::new(None, None, None);
+
+        let fields = vec![Stmt2Field {
+            name: "".to_string(),
+            field_type: 1,
+            precision: 0,
+            scale: 0,
+            bytes: 131584,
+            bind_type: BindType::Column,
+        }];
+
+        let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
+        assert!(res.is_err());
+        if let Err(err) = res {
+            assert_eq!(err.to_string(), "columns is empty");
+        }
+    }
+
+    #[test]
+    fn test_bind_datas_to_bytes_cols_len_mismatch_err() {
+        let cols = vec![ColumnView::from_ints(vec![1])];
+        let data = Stmt2BindData::new(None, None, Some(&cols));
+
+        let fields = vec![
+            Stmt2Field {
+                name: "".to_string(),
+                field_type: 1,
+                precision: 0,
+                scale: 0,
+                bytes: 131584,
+                bind_type: BindType::Column,
+            },
+            Stmt2Field {
+                name: "".to_string(),
+                field_type: 1,
+                precision: 0,
+                scale: 0,
+                bytes: 131584,
+                bind_type: BindType::Column,
+            },
+        ];
+
+        let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
+        assert!(res.is_err());
+        if let Err(err) = res {
+            assert_eq!(err.to_string(), "columns len mismatch");
+        }
     }
 }

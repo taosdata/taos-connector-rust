@@ -168,6 +168,7 @@ mod tests {
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data])?.exec()?;
         assert_eq!(affected, 1);
+        assert_eq!(stmt2.affected_rows(), 1);
 
         #[derive(Debug, Deserialize)]
         struct Row {
@@ -244,7 +245,8 @@ mod tests {
 
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data])?.exec()?;
-        assert_eq!(affected, views[0].len());
+        assert_eq!(affected, 4);
+        assert_eq!(stmt2.affected_rows(), 4);
 
         #[derive(Debug, Deserialize)]
         struct Row {
@@ -304,6 +306,7 @@ mod tests {
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data])?.exec()?;
         assert_eq!(affected, 0);
+        assert_eq!(stmt2.affected_rows(), 0);
 
         #[derive(Debug, Deserialize)]
         struct Row {
@@ -371,6 +374,7 @@ mod tests {
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data])?.exec()?;
         assert_eq!(affected, 0);
+        assert_eq!(stmt2.affected_rows(), 0);
 
         #[derive(Debug, Deserialize)]
         struct Row {
@@ -445,6 +449,7 @@ mod async_tests {
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data]).await?.exec().await?;
         assert_eq!(affected, 1);
+        assert_eq!(stmt2.affected_rows().await, 1);
 
         #[derive(Debug, Deserialize)]
         struct Row {
@@ -524,7 +529,8 @@ mod async_tests {
 
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data]).await?.exec().await?;
-        assert_eq!(affected, views[0].len());
+        assert_eq!(affected, 4);
+        assert_eq!(stmt2.affected_rows().await, 4);
 
         #[derive(Debug, Deserialize)]
         struct Row {
@@ -589,6 +595,7 @@ mod async_tests {
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data]).await?.exec().await?;
         assert_eq!(affected, 0);
+        assert_eq!(stmt2.affected_rows().await, 0);
 
         #[derive(Debug, Deserialize)]
         struct Row {
@@ -657,6 +664,7 @@ mod async_tests {
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data]).await?.exec().await?;
         assert_eq!(affected, 0);
+        assert_eq!(stmt2.affected_rows().await, 0);
 
         #[derive(Debug, Deserialize)]
         struct Row {
