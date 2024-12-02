@@ -84,12 +84,6 @@ pub trait InlinableWrite: Write {
     }
 
     #[inline]
-    /// Write a [i32] value to writer.
-    fn write_i32_le(&mut self, value: i32) -> std::io::Result<usize> {
-        self.write(&value.to_le_bytes())
-    }
-
-    #[inline]
     /// Write a [u32] value to writer.
     fn write_u32_le(&mut self, value: u32) -> std::io::Result<usize> {
         self.write(&value.to_le_bytes())

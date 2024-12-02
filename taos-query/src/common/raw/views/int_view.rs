@@ -284,6 +284,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_endian = "little")]
     #[test]
     fn test_from_iterator() {
         let data = [0x12345678];
@@ -292,6 +293,7 @@ mod tests {
         assert_eq!(bytes.to_vec(), vec![0x78, 0x56, 0x34, 0x12]);
     }
 
+    #[cfg(target_endian = "little")]
     #[test]
     fn test_from_iterator_mock_big_endian() {
         let mut bytes = [0u8; 16];

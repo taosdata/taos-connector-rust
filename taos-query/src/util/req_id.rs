@@ -1,7 +1,5 @@
-use std::{
-    sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
 
@@ -18,6 +16,15 @@ static PID: Lazy<u64> = Lazy::new(|| {
 
 static SERIAL_NO: AtomicU64 = AtomicU64::new(0);
 
+/// The request id is an unsigned integer format of 64bit.
+///
+/// ```text
+/// +-------+-------+-----------+---------------+
+/// | uuid  | pid   | timestamp | serial number |
+/// +-------+-------+-----------+---------------+
+/// | 12bit | 12bit | 24bit     | 16bit         |
+/// +-------+-------+-----------+---------------+
+/// ```
 pub fn generate_req_id() -> u64 {
     let now = SystemTime::now();
     let ts = now.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
