@@ -70,8 +70,48 @@ impl Describe {
         if tags.is_empty() {
             format!("create table if not exists `{table}` ({col_sql})")
         } else {
-            let tags_sql = tags.into_iter().map(|f| f.sql_repr()).join(",");
+            let tags_sql = tags.into_iter().map(|f| f.short_sql_repr()).join(",");
             format!("create table if not exists `{table}` ({col_sql}) tags({tags_sql})")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        helpers::{CompressOptions, Described},
+        Ty,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_describe() {
+        let desc = Describe(vec![
+            ColumnMeta::Column(Described::new("ts", Ty::Timestamp, None)),
+            ColumnMeta::Column(Described::new("v1", Ty::Int, None)),
+        ]);
+        assert_eq!(desc.is_stable(), false);
+        assert_eq!(desc.names().collect::<Vec<_>>(), vec!["ts", "v1"]);
+        assert_eq!(desc.tag_names().count(), 0);
+        assert_eq!(
+            desc.to_create_table_sql("tb1"),
+            "create table if not exists `tb1` (`ts` TIMESTAMP,`v1` INT)"
+        );
+
+        let desc = Describe(vec![
+            ColumnMeta::Column(Described::new("ts", Ty::Timestamp, None)),
+            ColumnMeta::Column(Described::new("v1", Ty::Int, None)),
+            ColumnMeta::Tag(
+                Described::new("t1", Ty::Int, None).with_compression(CompressOptions::disabled()),
+            ),
+        ]);
+        assert_eq!(desc.is_stable(), true);
+        assert_eq!(desc.names().collect::<Vec<_>>(), vec!["ts", "v1", "t1"]);
+        assert_eq!(desc.tag_names().count(), 1);
+        assert_eq!(
+            desc.to_create_table_sql("tb1"),
+            "create table if not exists `tb1` (`ts` TIMESTAMP,`v1` INT) tags(`t1` INT)"
+        );
     }
 }
