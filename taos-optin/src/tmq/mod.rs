@@ -4,7 +4,10 @@ use anyhow::Context;
 use itertools::Itertools;
 use taos_query::{
     common::{raw_data_t, RawData, RawMeta},
-    prelude::{tokio::time, RawError, RawResult},
+    prelude::{
+        tokio::{self, sync::oneshot, time},
+        RawError, RawResult,
+    },
     tmq::{
         AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
         IsOffset, MessageSet, Timeout, Timing, VGroupId,
@@ -287,13 +290,6 @@ pub struct Consumer {
 unsafe impl Send for Consumer {}
 unsafe impl Sync for Consumer {}
 
-impl Drop for Consumer {
-    fn drop(&mut self) {
-        self.tmq.unsubscribe();
-        self.tmq.close();
-    }
-}
-
 pub struct Messages {
     tmq: RawTmq,
     timeout: Option<Duration>,
@@ -559,9 +555,6 @@ impl AsAsyncConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
-        use taos_query::prelude::{tokio, tokio::sync::oneshot};
-        use taos_query::tmq::MessageSet;
-
         let (tx, rx) = oneshot::channel();
 
         self.tmq
@@ -581,6 +574,7 @@ impl AsAsyncConsumer for Consumer {
 
         let res = tokio::select! {
             _ = &mut sleep, if !sleep.is_elapsed() => {
+                tracing::trace!("sleep is elapsed");
                 Ok(None)
             }
             res = rx => {
@@ -1415,12 +1409,11 @@ mod tests {
 
 #[cfg(test)]
 mod async_tests {
-
     use std::time::Duration;
 
-    use super::TmqBuilder;
-
     use bytes::Bytes;
+
+    use super::TmqBuilder;
 
     #[tokio::test]
     async fn test_write_raw_block_with_req_id() -> anyhow::Result<()> {
@@ -2776,6 +2769,52 @@ mod async_tests {
             "DROP DATABASE IF EXISTS `tmq_ts5679_auto_commit`",
         ])
         .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_tmq_poll() -> anyhow::Result<()> {
+        use taos_query::{
+            prelude::{AsAsyncConsumer, AsyncQueryable, AsyncTBuilder, TryStreamExt},
+            tmq::Timeout,
+        };
+
+        use crate::{TaosBuilder, TmqBuilder};
+
+        let pool = TaosBuilder::from_dsn("taos:///")?.pool()?;
+        let conn = pool.get().await?;
+        conn.exec_many([
+            "drop topic if exists tmq_poll_topic",
+            "drop database if exists tmq_poll_db",
+            "create database if not exists tmq_poll_db",
+            "create topic if not exists tmq_poll_topic with meta as database tmq_poll_db",
+            "create table if not exists tmq_poll_db.t0 (ts timestamp, c1 int, c2 double)",
+            "insert into tmq_poll_db.t0 values(now, 1, 0.12)",
+        ])
+        .await?;
+
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis();
+        let tmq = TmqBuilder::from_dsn(format!(
+            "taos:///tmq_poll_db?group.id={ms}&timeout=5s&enable.auto.commit=false"
+        ))?;
+
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["tmq_poll_topic"]).await?;
+
+        {
+            let mut stream = consumer.stream_with_timeout(Timeout::from_millis(200));
+            while let Ok(Some(msg)) = stream.try_next().await {
+                println!("msg: {msg:?}");
+            }
+        }
+
+        consumer.unsubscribe().await;
+
+        conn.exec_many(["drop topic tmq_poll_topic", "drop database tmq_poll_db"])
+            .await?;
 
         Ok(())
     }
