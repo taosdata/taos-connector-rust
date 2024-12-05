@@ -1,39 +1,35 @@
 [target.'cfg(all())']
 rustflags = [
-    "-Dclippy::perf",
+    # Complexity group
     "-Dclippy::complexity",
-    # "-Aclippy::manual_c_str_literals",
+    "-Aclippy::manual_c_str_literals",
+
+    # Perf group
+    "-Dclippy::perf",
+
+    # Style group
+    "-Aclippy::missing_safety_doc",
+
+    # Suspicious group
+    "-Aclippy::missing_transmute_annotations",
 
     # "-Dclippy::multiple_unsafe_ops_per_block",
     # "-Dclippy::fn_to_numeric_cast_with_truncation",
     # "-Wclippy::missing_safety_doc",
-    "-Dclippy::mutex_atomic",
-    "-Aclippy::missing_safety_doc",
-    "-Aclippy::missing_transmute_annotations",
     # "-Aclippy::macro_metavars_in_unsafe",
     # "-Dclippy::not_unsafe_ptr_arg_deref",
     # "-Dclippy::msrv=1.65",
-
-    # "unwrap_used"
-
-    # "-Dunsafe_code",
-
     # "-Aclippy::module_name_repetitions",
 
-    # "-Wclippy::all",
     "-Wclippy::await_holding_lock",
     "-Wclippy::char_lit_as_u8",
     "-Wclippy::checked_conversions",
     "-Wclippy::dbg_macro",
     "-Wclippy::debug_assert_with_mut_call",
-    # "-Aclippy::doc_markdown",
     "-Wclippy::empty_enum",
-    # "-Wclippy::enum_glob_use",
     "-Wclippy::exit",
     "-Wclippy::expl_impl_clone_on_copy",
-    # "-Wclippy::explicit_deref_methods",
     "-Wclippy::explicit_into_iter_loop",
-    # "-Wclippy::fallible_impl_from",
     "-Wclippy::filter_map_next",
     "-Wclippy::flat_map_option",
     "-Wclippy::float_cmp_const",
@@ -75,7 +71,6 @@ rustflags = [
     # "-Wclippy::single_match_else",
     # "-Wclippy::string_add_assign",
     # "-Wclippy::string_add",
-    "-Wclippy::string_lit_as_bytes",
     "-Wclippy::string_to_string",
     # "-Wclippy::todo",
     "-Wclippy::trait_duplication_in_bounds",
@@ -110,4 +105,9 @@ rustflags = [
     # "-Wclippy::redundant_pub_crate",
     "-Wclippy::set_contains_or_insert",
     "-Wclippy::significant_drop_in_scrutinee",
+    "-Wclippy::string_lit_as_bytes",
+    # ...
+
+    # Restriction group
+    "-Wclippy::mutex_atomic",
 ]
