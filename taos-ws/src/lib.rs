@@ -2,6 +2,7 @@
 use std::fmt::{Debug, Display};
 
 use once_cell::sync::OnceCell;
+use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
 use tracing::warn;
 
 use taos_query::prelude::Code;
@@ -464,6 +465,7 @@ impl TaosBuilder {
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         self.build_stream_opt(url, true).await
     }
+
     pub(crate) async fn build_stream_opt(
         &self,
         url: String,
@@ -476,7 +478,7 @@ impl TaosBuilder {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "deflate")] {
                     tracing::debug!(url, "Enable compression");
-                    config.compression = Some(Default::default());
+                    config.compression = Some(DeflateConfig::default());
                 } else {
                     tracing::warn!("WebSocket compression is not supported unless with `deflate` feature");
                 }

@@ -532,13 +532,12 @@ impl ApiEntry {
         } else {
             path.to_path_buf()
         };
-        // let path =
+
         let mut guard = RAW_LIBRARIES.lock().unwrap();
         let lib = if let Some(lib) = guard.get(&path) {
             lib.clone()
         } else {
             let lib = Library::open(path.as_os_str())?;
-
             let lib = Arc::new(lib);
             guard.insert(path, lib.clone());
             lib
@@ -779,6 +778,7 @@ impl ApiEntry {
             })
         }
     }
+
     pub fn version(&self) -> &str {
         &self.version
     }

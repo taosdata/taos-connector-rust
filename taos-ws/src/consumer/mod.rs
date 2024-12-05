@@ -291,10 +291,9 @@ impl WsMessageBase {
             self.fetch_raw_block_old().await
         }
     }
-    async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
-        let mut raw_blocks_ref_mut = self.raw_blocks.lock().await;
-        let raw_blocks_option = &mut *raw_blocks_ref_mut;
 
+    async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
+        let raw_blocks_option = &mut *self.raw_blocks.lock().await;
         if let Some(raw_blocks) = raw_blocks_option {
             if !raw_blocks.is_empty() {
                 return Ok(raw_blocks.pop_front());

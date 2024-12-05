@@ -797,7 +797,7 @@ impl WsTaos {
                     version,
                     is_support_binary_sql,
                 },
-                req_id: Default::default(),
+                req_id: Arc::default(),
                 sender: ws,
                 queries: queries2_cloned,
                 results,
@@ -1134,7 +1134,7 @@ impl WsTaos {
                 block_future: None,
                 closer: Some(closer),
                 completed: false,
-                metrics: Default::default(),
+                metrics: QueryMetrics::default(),
                 blocks_buffer,
             })
         } else {
@@ -1153,7 +1153,7 @@ impl WsTaos {
                 block_future: None,
                 closer: Some(closer),
                 completed: false,
-                metrics: Default::default(),
+                metrics: QueryMetrics::default(),
                 blocks_buffer: None,
             })
         }

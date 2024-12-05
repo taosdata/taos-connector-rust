@@ -161,6 +161,7 @@ pub(crate) struct RawStmt {
 
 unsafe impl Sync for RawStmt {}
 unsafe impl Send for RawStmt {}
+
 impl Drop for RawStmt {
     fn drop(&mut self) {
         let _ = self.close();
@@ -171,10 +172,10 @@ impl RawStmt {
     fn is_v3(&self) -> bool {
         self.c.version().starts_with('3')
     }
+
     #[inline(always)]
     fn ok(&self, code: impl Into<Code>) -> RawResult<()> {
         let code = code.into();
-
         if code.success() {
             Ok(())
         } else {

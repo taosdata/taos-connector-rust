@@ -364,15 +364,17 @@ fn parse_database_requires(params: &[TokenTree]) -> Requires {
                 ret = Requires::TaosOnly;
             }
             Ident(ident) if *ident == "database" || *ident == "_database" => {
-                if !has_taos {
-                    panic!("please use test fn parameters: `taos: &Taos, database: &str`");
-                }
+                assert!(
+                    has_taos,
+                    "please use test fn parameters: `taos: &Taos, database: &str`"
+                );
                 ret = Requires::WithDatabase;
             }
             Ident(ident) if *ident == "databases" || *ident == "_databases" => {
-                if !has_taos {
-                    panic!("please use test fn parameters: `taos: &Taos, databases: &[String]`");
-                }
+                assert!(
+                    has_taos,
+                    "please use test fn parameters: `taos: &Taos, databases: &[String]`"
+                );
                 ret = Requires::WithMulti;
             }
             _ => (),
