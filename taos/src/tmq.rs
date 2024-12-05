@@ -684,11 +684,19 @@ mod async_tests {
             "alter table `table` drop column new10_new",
             "alter table `table` drop column new2",
             "alter table `table` drop column new1",
-            // kind 9: drop normal table
+            // kind 9: alter child table tag
+            "alter table `tb2` set tag t2 = 1",
+            "alter table `tb2` set tag t7 = 1.1",
+            "alter table `tb2` set tag t9 = 'hello'",
+            "alter table `tb2` set tag t10 = '中文'",
+            "alter table `tb2` set tag t2 = 2, t7 = 2.2",
+            "alter table `tb2` set tag t2 = 3, t7 = 3.3, t9 = 'world'",
+            "alter table `tb2` set tag t2 = 4, t7 = 4.4, t9 = 'helloworld', t10 = '中文中文'",
+            // kind 10: drop normal table
             "drop table `table`",
-            // kind 10: drop child table
+            // kind 11: drop child table
             "drop table `tb2`, `tb1`",
-            // kind 11: drop super table
+            // kind 12: drop super table
             "drop table `stb2`",
             "drop table `stb1`",
         ])
@@ -730,10 +738,13 @@ mod async_tests {
                         taos.write_raw_meta(&raw).await?;
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
-                        let json = meta.as_json_meta().await?;
-                        let sql = json.iter().next().unwrap().to_string();
-                        if let Err(err) = taos.exec(sql).await {
-                            println!("maybe error: {}", err);
+                        let meta = meta.as_json_meta().await?;
+                        for unit in meta.iter() {
+                            let sql = unit.to_string();
+                            println!("meta exec sql: {sql}");
+                            if let Err(err) = taos.exec(sql).await {
+                                println!("meta maybe error: {err}");
+                            }
                         }
                     }
                     MessageSet::Data(data) => {
@@ -748,10 +759,13 @@ mod async_tests {
                         taos.write_raw_meta(&raw).await?;
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
-                        let json = meta.as_json_meta().await?;
-                        let sql = json.iter().next().unwrap().to_string();
-                        if let Err(err) = taos.exec(sql).await {
-                            println!("maybe error: {}", err);
+                        let meta = meta.as_json_meta().await?;
+                        for unit in meta.iter() {
+                            let sql = unit.to_string();
+                            println!("metadata exec sql: {sql}");
+                            if let Err(err) = taos.exec(sql).await {
+                                println!("metadata maybe error: {err}");
+                            }
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
