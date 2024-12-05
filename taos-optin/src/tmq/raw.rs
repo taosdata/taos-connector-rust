@@ -328,16 +328,15 @@ pub(super) mod tmq {
                 vgroup_id
             );
 
-            if tmq_resp.0 > 0 {
+            if tmq_resp.0 as i32 > 0 {
                 Ok(tmq_resp.0 as _)
             } else {
                 let err_str = self.err_as_str(tmq_resp);
                 tracing::trace!("position tmq_resp err string: {}", err_str);
-
                 Err(RawError::new(
                     tmq_resp.0,
                     format!("get position failed: {err_str}"),
-                ));
+                ))
             }
         }
 
