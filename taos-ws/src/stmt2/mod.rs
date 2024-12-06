@@ -653,7 +653,7 @@ mod tests {
     //     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_stmt2_result_err() -> anyhow::Result<()> {
+    async fn test_stmt2_result() -> anyhow::Result<()> {
         let db = "stmt2_202412021700";
         let dsn = "ws://localhost:6041";
 

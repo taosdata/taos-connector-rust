@@ -321,11 +321,7 @@ fn write_tag(bytes: &mut [u8], tag: &Value) -> usize {
         // Write Buffer
         use BorrowedValue::*;
         match val {
-            Bool(v) => {
-                if v {
-                    bytes[offset] = 1;
-                }
-            }
+            Bool(v) => bytes[offset] = v as _,
             TinyInt(v) => bytes[offset] = v as _,
             UTinyInt(v) => bytes[offset] = v,
             SmallInt(v) => LittleEndian::write_i16(&mut bytes[offset..], v as _),
@@ -451,11 +447,7 @@ fn write_col(bytes: &mut [u8], col: &ColumnView) -> usize {
             Bool(view) => {
                 for val in view.iter() {
                     match val {
-                        Some(b) => {
-                            if b {
-                                bytes[buf_offset] = 1;
-                            }
-                        }
+                        Some(b) => bytes[buf_offset] = b as _,
                         None => bytes[is_null_offset] = 1,
                     }
                     buf_offset += 1;
@@ -3160,14 +3152,14 @@ mod tests {
         Ok(())
     }
 
+    #[should_panic = "No datas to bind"]
     #[test]
-    fn test_bind_datas_to_bytes_without_datas_err() {
-        let res = bind_datas_to_bytes(&[], 100, 200, true, None, 0);
-        assert!(res.is_err());
+    fn test_bind_datas_to_bytes_without_datas() {
+        let _ = bind_datas_to_bytes(&[], 100, 200, true, None, 0).unwrap();
     }
 
     #[test]
-    fn test_bind_datas_to_bytes_without_fields_err() {
+    fn test_bind_datas_to_bytes_without_fields() {
         let fields = vec![];
         let test_cases = vec![None, Some(&fields)];
         for fields in test_cases {
@@ -3178,7 +3170,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_to_bytes_without_tbnames_err() {
+    fn test_bind_datas_to_bytes_without_tbnames() {
         let test_cases = vec![None, Some("")];
         for tbname in test_cases {
             let data = Stmt2BindData::new(tbname, None, None);
@@ -3197,8 +3189,9 @@ mod tests {
         }
     }
 
+    #[should_panic = "tags is empty"]
     #[test]
-    fn test_bind_datas_to_bytes_without_tags_err() {
+    fn test_bind_datas_to_bytes_without_tags() {
         let data = Stmt2BindData::new(None, None, None);
 
         let fields = vec![Stmt2Field {
@@ -3210,12 +3203,12 @@ mod tests {
             bind_type: BindType::Tag,
         }];
 
-        let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
-        assert!(res.is_err());
+        let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
     }
 
+    #[should_panic = "tags len mismatch"]
     #[test]
-    fn test_bind_datas_to_bytes_tags_len_mismatch_err() {
+    fn test_bind_datas_to_bytes_tags_len_mismatch() {
         let tags = vec![Value::Int(1)];
         let data = Stmt2BindData::new(None, Some(&tags), None);
 
@@ -3238,12 +3231,12 @@ mod tests {
             },
         ];
 
-        let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
-        assert!(res.is_err());
+        let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
     }
 
+    #[should_panic = "columns is empty"]
     #[test]
-    fn test_bind_datas_to_bytes_without_cols_err() {
+    fn test_bind_datas_to_bytes_without_cols() {
         let data = Stmt2BindData::new(None, None, None);
 
         let fields = vec![Stmt2Field {
@@ -3255,12 +3248,12 @@ mod tests {
             bind_type: BindType::Column,
         }];
 
-        let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
-        assert!(res.is_err());
+        let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
     }
 
+    #[should_panic = "columns len mismatch"]
     #[test]
-    fn test_bind_datas_to_bytes_cols_len_mismatch_err() {
+    fn test_bind_datas_to_bytes_cols_len_mismatch() {
         let cols = vec![ColumnView::from_ints(vec![1])];
         let data = Stmt2BindData::new(None, None, Some(&cols));
 
@@ -3283,7 +3276,6 @@ mod tests {
             },
         ];
 
-        let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
-        assert!(res.is_err());
+        let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
     }
 }
