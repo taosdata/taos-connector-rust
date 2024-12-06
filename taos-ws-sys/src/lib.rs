@@ -1,5 +1,3 @@
-use bytes::Bytes;
-use std::thread;
 use std::{
     cell::RefCell,
     ffi::{c_void, CStr, CString},
@@ -7,10 +5,12 @@ use std::{
     os::raw::{c_char, c_int},
     str::Utf8Error,
     string::FromUtf8Error,
+    thread,
     time::Duration,
 };
-use taos_error::Code;
 
+use bytes::Bytes;
+use taos_error::Code;
 use taos_query::{
     block_in_place_or_global,
     common::{Field, RawBlock as Block, Timestamp},
@@ -31,6 +31,7 @@ use cargo_metadata::MetadataCommand;
 pub use taos_ws::query::asyn::WS_ERROR_NO;
 
 pub mod stmt;
+pub mod stub;
 pub mod tmq;
 
 use tmq::WsTmqResultSet;
@@ -143,6 +144,7 @@ impl WsError {
         }
     }
 }
+
 #[derive(Debug)]
 pub struct WsMaybeError<T> {
     error: Option<WsError>,
@@ -154,7 +156,6 @@ impl<T> Drop for WsMaybeError<T> {
     fn drop(&mut self) {
         if !self.data.is_null() {
             tracing::trace!("dropping obj {}", self.type_id);
-            // let _ = unsafe { self.data.read() };
             let _ = unsafe { Box::from_raw(self.data) };
         }
     }
