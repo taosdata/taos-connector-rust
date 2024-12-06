@@ -221,7 +221,7 @@ impl<'de: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
 
     fn deserialize_newtype_struct<V>(
         self,
-        _name: &'static str,
+        name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -251,12 +251,12 @@ impl<'de: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
             NChar(v) => _v_!(v),
             Json(v) => match v {
                 Cow::Borrowed(v) => serde_json::Deserializer::from_slice(v)
-                    .deserialize_newtype_struct(_name, visitor)
+                    .deserialize_newtype_struct(name, visitor)
                     .map_err(<Self::Error as de::Error>::custom),
                 Cow::Owned(v) => serde_json::from_slice::<serde_json::Value>(&v)
                     .map_err(<Self::Error as de::Error>::custom)?
                     .into_deserializer()
-                    .deserialize_newtype_struct(_name, visitor)
+                    .deserialize_newtype_struct(name, visitor)
                     .map_err(<Self::Error as de::Error>::custom),
             },
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),

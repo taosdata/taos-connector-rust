@@ -427,7 +427,7 @@ pub unsafe extern "C" fn ws_tmq_list_to_c_array(
                     .topics
                     .iter()
                     .map(|s| CString::new(&**s).expect("CString::new failed"))
-                    .map(|cs| cs.into_raw())
+                    .map(CString::into_raw)
                     .collect();
 
                 let ptr = raw_ptrs.as_mut_ptr();
@@ -823,7 +823,7 @@ unsafe fn tmq_commit_sync(tmq: *mut ws_tmq_t, rs: *const WS_RES) -> WsResult<()>
     let offset = (rs as *const WsMaybeError<WsResultSet>)
         .as_ref()
         .and_then(|s| s.safe_deref())
-        .map(|rs| rs.tmq_get_offset());
+        .map(WsResultSetTrait::tmq_get_offset);
 
     match (tmq as *mut WsMaybeError<WsTmq>)
         .as_mut()

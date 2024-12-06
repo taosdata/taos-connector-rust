@@ -189,8 +189,7 @@ impl FieldMore {
         let mut sql = self.field.to_string();
         if let Some(compression) = &self.compression {
             sql.push(' ');
-            write!(&mut sql, "{}", compression).unwrap();
-            // sql.push_str(&format!(" {}", compression));
+            write!(&mut sql, "{compression}").unwrap();
         }
         if self.is_primary_key {
             sql.push_str(" PRIMARY KEY");
@@ -238,10 +237,10 @@ impl Display for MetaCreate {
                 columns,
                 tags,
             } => {
-                debug_assert!(!columns.is_empty(), "{:?}", self);
+                debug_assert!(!columns.is_empty(), "{self:?}");
                 debug_assert!(!tags.is_empty());
 
-                f.write_fmt(format_args!("`{}`", table_name))?;
+                f.write_fmt(format_args!("`{table_name}`"))?;
                 f.write_char('(')?;
                 f.write_str(&columns.iter().map(|f| f.sql_repr()).join(", "))?;
                 f.write_char(')')?;
@@ -289,7 +288,7 @@ impl Display for MetaCreate {
             } => {
                 debug_assert!(!columns.is_empty());
 
-                f.write_fmt(format_args!("`{}`", table_name))?;
+                f.write_fmt(format_args!("`{table_name}`"))?;
                 f.write_char('(')?;
                 f.write_str(&columns.iter().map(|f| f.sql_repr()).join(", "))?;
                 f.write_char(')')?;
@@ -463,7 +462,7 @@ impl Display for MetaDrop {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MetaDrop::Super { table_name } => {
-                f.write_fmt(format_args!("DROP TABLE IF EXISTS `{}`", table_name))
+                f.write_fmt(format_args!("DROP TABLE IF EXISTS `{table_name}`"))
             }
             MetaDrop::Other { table_name_list } => f.write_fmt(format_args!(
                 "DROP TABLE IF EXISTS {}",

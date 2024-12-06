@@ -171,20 +171,14 @@ impl<'a> RowView<'a> {
     pub fn into_value_iter(self) -> RowViewOfValue<'a> {
         RowViewOfValue(self)
     }
+
     fn walk_next(&mut self) -> Option<BorrowedValue<'a>> {
         self.next().map(|(_, v)| v)
     }
 
-    // fn walk(&mut self) {
-    //     self.col += 1;
-    // }
-
     fn peek_name(&self) -> Option<&'a str> {
-        self.raw.fields.get(self.col).map(|s| s.as_str())
+        self.raw.fields.get(self.col).map(String::as_str)
     }
-    // fn peek_value(&self) -> Option<BorrowedValue<'a>> {
-    //     self.raw.get_ref(self.row, self.col)
-    // }
 
     pub fn into_values(self) -> Vec<Value> {
         self.map(|(_, b)| b.to_value()).collect()

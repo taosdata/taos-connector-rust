@@ -397,9 +397,8 @@ impl AsyncQueryable for Taos {
                 if err.to_string().contains("0x032C") {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     continue;
-                } else {
-                    break Err(err);
                 }
+                break Err(err);
             }
             break Ok(());
         }

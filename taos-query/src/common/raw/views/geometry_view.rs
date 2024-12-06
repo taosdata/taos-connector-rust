@@ -120,13 +120,6 @@ impl GeometryView {
             })
             .collect()
     }
-    // pub fn iter_as_bytes(&self) -> impl Iterator<Item = Option<&[u8]>> {
-    //     (0..self.len()).map(|row| unsafe { self.get_unchecked(row) }.map(|s| s.as_bytes()))
-    // }
-
-    // pub fn to_bytes_vec(&self) -> Vec<Option<&[u8]>> {
-    //     self.iter_as_bytes().collect_vec()
-    // }
 
     /// Write column data as raw bytes.
     pub(crate) fn write_raw_into<W: std::io::Write>(&self, mut wtr: W) -> std::io::Result<usize> {

@@ -107,7 +107,7 @@ impl Dsn {
         let protocol = cap.name("protocol").map(|m| m.as_str().to_string());
         let protocol2 = cap.name("protocol2").map(|m| m.as_str().to_string());
         let protocol = match (protocol, protocol2) {
-            (Some(_), Some(_)) => Err(DsnError::InvalidProtocol("".to_string()))?,
+            (Some(_), Some(_)) => Err(DsnError::InvalidProtocol(String::new()))?,
             (Some(p), None) | (None, Some(p)) => Some(p),
             _ => None,
         };
@@ -173,7 +173,7 @@ impl Dsn {
                     }
                 } else {
                     let p = urlencoding::decode(p)?;
-                    params.insert(p.to_string(), "".to_string());
+                    params.insert(p.to_string(), String::new());
                 }
             }
         }

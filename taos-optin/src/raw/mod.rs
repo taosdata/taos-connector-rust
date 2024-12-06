@@ -833,13 +833,11 @@ impl ApiEntry {
                 }
                 if err.code() == 0x000B {
                     continue;
-                } else {
-                    break Err(err);
                 }
-            } else {
-                tracing::trace!(cost = ?elapsed, "connected");
-                break Ok(ptr);
+                break Err(err);
             }
+            tracing::trace!(cost = ?elapsed, "connected");
+            break Ok(ptr);
         }
     }
 
@@ -957,7 +955,7 @@ impl RawTaos {
             return Err(RawError::new_with_context(
                 code,
                 str.to_string(),
-                format!("Query with sql: {:?}", sql),
+                format!("Query with sql: {sql:?}"),
             ));
         }
         RawRes::from_ptr(self.c.clone(), ptr)
@@ -1394,9 +1392,7 @@ impl RawRes {
     #[inline]
     pub fn fetch_block(&self) -> Result<Option<(TAOS_ROW, i32, *const i32)>, RawError> {
         let block = Box::into_raw(Box::new(std::ptr::null_mut()));
-        // let mut num = 0;
         let num = unsafe { (self.c.taos_fetch_block)(self.as_ptr(), block) };
-        // taos_fetch_block(res, rows)
         if num > 0 {
             Ok(Some(unsafe { (*block, num, self.fetch_lengths_raw()) }))
         } else {
@@ -1571,7 +1567,7 @@ impl RawRes {
                             precision,
                         )
                     };
-                    raw.with_field_names(fields.iter().map(|f| f.name()));
+                    raw.with_field_names(fields.iter().map(Field::name));
                     raw
                 })
             });
@@ -1648,7 +1644,7 @@ impl RawRes {
                     debug_assert!(rows > 0);
                     // has next block.
                     let mut raw = unsafe { RawBlock::parse_from_ptr(ptr as _, precision) };
-                    raw.with_field_names(fields.iter().map(|f| f.name()));
+                    raw.with_field_names(fields.iter().map(Field::name));
                     raw
                 })
             });

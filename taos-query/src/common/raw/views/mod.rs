@@ -1218,7 +1218,7 @@ impl ColumnView {
 
 pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
     let header = super::Header {
-        nrows: views.first().map_or(0, |v| v.len()) as _,
+        nrows: views.first().map_or(0, ColumnView::len) as _,
         ncols: views.len() as _,
         ..Default::default()
     };

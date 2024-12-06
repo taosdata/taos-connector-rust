@@ -371,6 +371,7 @@ mod r#async {
                 Poll::Pending => Poll::Pending,
             }
         }
+
         fn next_row(&mut self, cx: &mut Context<'_>) -> Poll<RawResult<Option<RowView<'a>>>> {
             // has block
             if let Some(rows) = self.rows.as_mut() {
@@ -394,7 +395,7 @@ mod r#async {
         type Item = RawResult<RowView<'a>>;
 
         fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            self.next_row(cx).map(|row| row.transpose())
+            self.next_row(cx).map(Result::transpose)
         }
     }
 
@@ -430,7 +431,7 @@ mod r#async {
         fn fields(&self) -> &[Field];
 
         fn filed_names(&self) -> Vec<&str> {
-            self.fields().iter().map(|f| f.name()).collect_vec()
+            self.fields().iter().map(Field::name).collect_vec()
         }
 
         fn num_of_fields(&self) -> usize {

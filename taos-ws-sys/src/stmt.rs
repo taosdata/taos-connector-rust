@@ -177,7 +177,7 @@ pub unsafe extern "C" fn ws_stmt_set_tbname_tags(
             let name = CStr::from_ptr(name).to_str().unwrap();
             let tags = std::slice::from_raw_parts(bind, len as usize)
                 .iter()
-                .map(|bind| bind.to_tag_value())
+                .map(TaosMultiBind::to_tag_value)
                 .collect_vec();
 
             if let Err(e) = stmt
@@ -215,7 +215,7 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
         Some(stmt) => match stmt
             .safe_deref_mut()
             .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
-            .and_then(|s| s.get_tag_fields())
+            .and_then(WsFieldsable::get_tag_fields)
         {
             Ok(fields_vec) => {
                 let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
@@ -256,7 +256,7 @@ pub unsafe extern "C" fn ws_stmt_get_col_fields(
         Some(stmt) => match stmt
             .safe_deref_mut()
             .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
-            .and_then(|s| s.get_col_fields())
+            .and_then(WsFieldsable::get_col_fields)
         {
             Ok(fields_vec) => {
                 let fields_vec: Vec<StmtField> = fields_vec.into_iter().map(|f| f.into()).collect();
@@ -671,7 +671,7 @@ pub unsafe extern "C" fn ws_stmt_set_tags(
         Some(stmt) => {
             let columns = std::slice::from_raw_parts(bind, len as usize)
                 .iter()
-                .map(|bind| bind.to_tag_value())
+                .map(TaosMultiBind::to_tag_value)
                 .collect_vec();
 
             if let Err(e) = stmt
@@ -703,7 +703,7 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
         Some(stmt) => {
             let columns = std::slice::from_raw_parts(bind, len as usize)
                 .iter()
-                .map(|bind| bind.to_json())
+                .map(TaosMultiBind::to_json)
                 .collect();
 
             if let Err(e) = stmt
@@ -755,7 +755,7 @@ pub unsafe extern "C" fn ws_stmt_execute(stmt: *mut WS_STMT, affected_rows: *mut
         Some(stmt) => match stmt
             .safe_deref_mut()
             .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
-            .and_then(|stmt| stmt.execute())
+            .and_then(Bindable::execute)
         {
             Ok(rows) => {
                 *affected_rows = rows as _;
@@ -805,7 +805,7 @@ pub unsafe extern "C" fn ws_stmt_num_params(stmt: *mut WS_STMT, nums: *mut c_int
         Some(stmt) => match stmt
             .safe_deref_mut()
             .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
-            .and_then(|stmt| stmt.s_num_params())
+            .and_then(taos_ws::Stmt::s_num_params)
         {
             Ok(n) => {
                 *nums = n as _;

@@ -265,7 +265,7 @@ impl From<Utf8Error> for WsError {
     fn from(e: Utf8Error) -> Self {
         Self {
             code: Code::FAILED,
-            message: CString::new(format!("{}", e)).unwrap(),
+            message: CString::new(format!("{e}")).unwrap(),
             source: Some(Box::new(e)),
         }
     }
@@ -275,7 +275,7 @@ impl From<FromUtf8Error> for WsError {
     fn from(e: FromUtf8Error) -> Self {
         Self {
             code: Code::FAILED,
-            message: CString::new(format!("{}", e)).unwrap(),
+            message: CString::new(format!("{e}")).unwrap(),
             source: Some(Box::new(e)),
         }
     }
@@ -285,7 +285,7 @@ impl From<SmlDataBuilderError> for WsError {
     fn from(e: SmlDataBuilderError) -> Self {
         Self {
             code: Code::FAILED,
-            message: CString::new(format!("{}", e)).unwrap(),
+            message: CString::new(format!("{e}")).unwrap(),
             source: Some(Box::new(e)),
         }
     }
@@ -872,7 +872,7 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
         let result = handle.join().expect("Thread panicked");
         match result {
             Ok(taos) => Ok(taos),
-            Err(e) => Err(WsError::new(Code::FAILED, &format!("{}", e))),
+            Err(e) => Err(WsError::new(Code::FAILED, &format!("{e}"))),
         }
     } else {
         let mut taos = builder.build()?;
@@ -893,18 +893,15 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
 pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
     static ONCE_INIT: std::sync::Once = std::sync::Once::new();
 
-    let log_level = match log_level.is_null() {
-        true => "info",
-        false => {
-            if let Ok(log_level_str) = CStr::from_ptr(log_level).to_str() {
-                log_level_str
-            } else {
-                return set_error_and_get_code(WsError::new(
-                    Code::INVALID_PARA,
-                    "log_level is not a valid string",
-                ));
-            }
-        }
+    let log_level = if log_level.is_null() {
+        "info"
+    } else if let Ok(log_level_str) = CStr::from_ptr(log_level).to_str() {
+        log_level_str
+    } else {
+        return set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "log_level is not a valid string",
+        ));
     };
 
     ONCE_INIT.call_once(|| {
@@ -1090,7 +1087,7 @@ pub unsafe extern "C" fn ws_errno(rs: *mut WS_RES) -> i32 {
     }
     match (rs as *mut WsMaybeError<()>)
         .as_ref()
-        .and_then(|s| s.errno())
+        .and_then(WsMaybeError::errno)
     {
         Some(c) => get_err_code_fromated(c),
         _ => Code::SUCCESS.into(),
@@ -1103,13 +1100,12 @@ pub unsafe extern "C" fn ws_errstr(rs: *mut WS_RES) -> *const c_char {
     if rs.is_null() {
         if get_c_errno() == 0 {
             return EMPTY.as_ptr();
-        } else {
-            return get_c_error_str() as _;
         }
+        return get_c_error_str() as _;
     }
     match (rs as *mut WsMaybeError<()>)
         .as_ref()
-        .and_then(|s| s.errstr())
+        .and_then(WsMaybeError::errstr)
     {
         Some(e) => e,
         _ => EMPTY.as_ptr(),
@@ -1470,7 +1466,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::UTinyInt => {
@@ -1478,7 +1474,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::SmallInt => {
@@ -1486,7 +1482,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::USmallInt => {
@@ -1494,7 +1490,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::Int => {
@@ -1502,7 +1498,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::UInt => {
@@ -1510,7 +1506,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::BigInt | Ty::Timestamp => {
@@ -1518,7 +1514,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::UBigInt => {
@@ -1526,7 +1522,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::Float => {
@@ -1534,7 +1530,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::Double => {
@@ -1542,7 +1538,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::Bool => {
@@ -1708,7 +1704,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl_with_reqid(
         }
         Err(e) => {
             tracing::trace!("schemaless insert failed: {:?}", e);
-            let error_message = format!("schemaless insert failed: {}", e);
+            let error_message = format!("schemaless insert failed: {e}");
             set_error_and_get_code(WsError::new(e.code, &error_message));
             std::ptr::null_mut() as _
         }

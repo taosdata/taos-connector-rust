@@ -1,12 +1,20 @@
 //! TMQ consumer.
 //!
+mod messages;
+
+use std::collections::VecDeque;
+use std::fmt::Debug;
+use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use anyhow::bail;
+use dashmap::DashMap as HashMap;
 use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
-// use scc::HashMap;
-use dashmap::DashMap as HashMap;
-
-use taos_query::common::{JsonMeta, RawMeta};
+use messages::*;
+use taos_query::common::{Field, JsonMeta, RawMeta};
 use taos_query::prelude::{Code, RawError};
 use taos_query::tmq::{
     AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsData, IsOffset,
@@ -16,29 +24,16 @@ use taos_query::util::{Edition, InlinableRead};
 use taos_query::RawResult;
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
 use thiserror::Error;
-use tracing::warn;
-
 use tokio::sync::{oneshot, watch, Mutex};
-
 use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::tungstenite::Error as WsError;
+use tracing::warn;
 
 use crate::query::asyn::is_support_binary_sql;
 use crate::query::asyn::WS_ERROR_NO;
 use crate::query::infra::{ToMessage, WsConnReq, WsRecv, WsRecvData, WsSend};
-
 use crate::TaosBuilder;
-use messages::*;
-
-use std::collections::VecDeque;
-use std::fmt::Debug;
-use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-mod messages;
 
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 type WsTmqAgent = Arc<HashMap<ReqId, oneshot::Sender<RawResult<TmqRecvData>>>>;
@@ -201,7 +196,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
     }
 
     async fn server_version(&self) -> RawResult<&str> {
-        match self.server_version.get().map(|x| x.as_str()) {
+        match self.server_version.get().map(String::as_str) {
             Some(v) => Ok(v),
             None => {
                 use taos_query::prelude::AsyncQueryable;
@@ -214,7 +209,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
                 }
                 self.server_version
                     .get()
-                    .map(|x| x.as_str())
+                    .map(String::as_str)
                     .ok_or_else(|| RawError::from_string("Server version is unknown"))
             }
         }
@@ -297,9 +292,8 @@ impl WsMessageBase {
         if let Some(raw_blocks) = raw_blocks_option {
             if !raw_blocks.is_empty() {
                 return Ok(raw_blocks.pop_front());
-            } else {
-                return Ok(None);
             }
+            return Ok(None);
         }
 
         let req_id = self.sender.req_id();
@@ -345,15 +339,7 @@ impl WsMessageBase {
         let data = self.sender.send_recv(msg).await?;
         if let TmqRecvData::Bytes(bytes) = data {
             let mut raw = RawBlock::parse_from_raw_block(bytes, fetch.precision);
-
-            // for row in 0..raw.nrows() {
-            //     for col in 0..raw.ncols() {
-            //         tracing::trace!("at ({}, {})", row, col);
-            //         let v = unsafe { raw.get_ref_unchecked(row, col) };
-            //         println!("({}, {}): {:?}", row, col, v);
-            //     }
-            // }
-            raw.with_field_names(fetch.fields().iter().map(|f| f.name()));
+            raw.with_field_names(fetch.fields().iter().map(Field::name));
             if let Some(name) = fetch.table_name {
                 raw.with_table_name(name);
             }
@@ -569,7 +555,6 @@ impl Consumer {
             };
 
             let data = self.sender.send_recv(action).await?;
-
             match data {
                 TmqRecvData::Poll(TmqPoll {
                     message_id,
@@ -617,17 +602,14 @@ impl Consumer {
                                 ),
                             )),
                             MessageType::Invalid => unreachable!(),
-                            // _ => unreachable!(),
                         };
-                    } else {
-                        // tokio::time::sleep(Duration::from_millis(500)).await;
-                        continue;
                     }
                 }
                 _ => unreachable!(),
             }
         }
     }
+
     pub(crate) async fn poll_timeout(
         &self,
         timeout: Duration,
@@ -1296,9 +1278,8 @@ impl TmqBuilder {
                                                             }
                                                         }
                                                         break 'ws;
-                                                    } else {
-                                                        polling_mutex2.store(true, Ordering::Release);
-                                                    };
+                                                    }
+                                                    polling_mutex2.store(true, Ordering::Release);
                                                 }
                                             }  else {
                                                 if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &recv {
@@ -1320,9 +1301,8 @@ impl TmqBuilder {
                                                         }
                                                     }
                                                     break 'ws;
-                                                } else {
-                                                    polling_mutex2.store(true, Ordering::Release);
                                                 }
+                                                polling_mutex2.store(true, Ordering::Release);
                                             }
                                         },
                                         TmqRecvData::FetchJsonMeta { data }=> {
@@ -1457,7 +1437,7 @@ impl TmqBuilder {
 
                                     let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
                                     let err = if let Some(close) = close {
-                                        format!("WebSocket internal error: {}", close)
+                                        format!("WebSocket internal error: {close}")
                                     } else {
                                         "WebSocket internal error, connection is reset by server".to_string()
                                     };
@@ -1614,7 +1594,7 @@ impl WsTmqError {
     pub fn errstr(&self) -> String {
         match self {
             WsTmqError::TaosError(error) => error.message(),
-            _ => format!("{}", self),
+            _ => format!("{self}"),
         }
     }
 }

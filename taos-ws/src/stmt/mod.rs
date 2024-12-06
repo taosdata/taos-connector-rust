@@ -253,17 +253,18 @@ pub struct StmtField {
     pub scale: u8,
     pub bytes: i32,
 }
+
 impl Debug for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WsClient")
             .field("req_id", &self.req_id)
-            .field("...", &"...")
-            .finish()
+            .finish_non_exhaustive()
     }
 }
+
 impl Drop for Stmt {
     fn drop(&mut self) {
-        // send close signal to reader/writer spawned tasks.
+        // Send close signal to reader/writer spawned tasks.
         let _ = self.close_signal.send(true);
     }
 }

@@ -69,19 +69,19 @@ impl Debug for Error {
                 write!(f, "[{:#06X}] ", self.code)?;
             }
             if let Some(context) = &self.context {
-                f.write_fmt(format_args!("{}", context))?;
+                f.write_fmt(format_args!("{context}"))?;
                 writeln!(f)?;
                 writeln!(f)?;
                 writeln!(f, "Caused by:")?;
 
                 let chain = self.source.chain();
                 for (idx, source) in chain.enumerate() {
-                    writeln!(f, "{:4}: {}", idx, source)?;
+                    writeln!(f, "{idx:4}: {source}")?;
                 }
             } else {
                 let mut chain = self.source.chain();
                 if let Some(context) = chain.next() {
-                    f.write_fmt(format_args!("{}", context))?;
+                    f.write_fmt(format_args!("{context}"))?;
                 }
 
                 if self.source.deep() {
@@ -89,7 +89,7 @@ impl Debug for Error {
                     writeln!(f)?;
                     writeln!(f, "Caused by:")?;
                     for (idx, source) in chain.enumerate() {
-                        writeln!(f, "{:4}: {}", idx, source)?;
+                        writeln!(f, "{idx:4}: {source}")?;
                     }
                 }
             }
@@ -114,7 +114,7 @@ impl Display for Error {
         }
         // Error context
         if let Some(context) = self.context.as_deref() {
-            write!(f, "{}", context)?;
+            write!(f, "{context}")?;
 
             if self.source.is_empty() {
                 return Ok(());
@@ -435,7 +435,7 @@ impl FromStr for Error {
 impl serde::de::Error for Error {
     #[inline]
     fn custom<T: fmt::Display>(msg: T) -> Error {
-        Error::from_string(format!("{}", msg))
+        Error::from_string(format!("{msg}"))
     }
 }
 

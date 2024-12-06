@@ -74,9 +74,10 @@ impl Future for QueryFuture<'_> {
             if state.waiting {
                 tracing::trace!("It's waked but still waiting for taos_query_a callback.");
                 return Poll::Pending;
-            } else {
-                state.waiting = true;
             }
+
+            state.waiting = true;
+
             #[no_mangle]
             #[inline(never)]
             unsafe extern "C" fn taos_optin_query_future_callback(

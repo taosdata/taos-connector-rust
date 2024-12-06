@@ -46,7 +46,7 @@ impl taos_query::TBuilder for TmqBuilder {
     fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let mut dsn = dsn
             .into_dsn()
-            .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
+            .map_err(|e| RawError::from_string(format!("Parse dsn error: {e}")))?;
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
             ApiEntry::dlopen(path).map_err(taos_query::RawError::any)?
         } else {
@@ -133,7 +133,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
     fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let mut dsn = dsn
             .into_dsn()
-            .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
+            .map_err(|e| RawError::from_string(format!("Parse dsn error: {e}")))?;
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
             ApiEntry::dlopen(path).map_err(taos_query::RawError::any)?
         } else {
@@ -421,7 +421,6 @@ impl AsConsumer for Consumer {
     ) -> RawResult<()> {
         let topics = topics.into_iter().map(|item| item.into()).collect_vec();
         let topics = Topics::from_topics(self.tmq.tmq().list_api, topics)?;
-        // dbg!(&topics);
         self.tmq.subscribe(&topics)
     }
 

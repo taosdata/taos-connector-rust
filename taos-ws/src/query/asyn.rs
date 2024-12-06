@@ -125,7 +125,6 @@ impl WsQuerySender {
         timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
             .await
             .map_err(Error::from)?
-            // .await
             .map_err(Error::from)?;
         Ok(())
     }
@@ -186,7 +185,7 @@ impl Debug for ResultSet {
             .field("fields_count", &self.fields_count)
             .field("affected_rows", &self.affected_rows)
             .field("precision", &self.precision)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -292,7 +291,7 @@ impl Error {
     pub fn errstr(&self) -> String {
         match self {
             Error::TaosError(error) => error.message(),
-            _ => format!("{}", self),
+            _ => format!("{self}"),
         }
     }
 }
@@ -717,8 +716,7 @@ impl WsTaos {
                 }
                 _ => {
                     return Err(RawError::from_string(format!(
-                        "unexpected message on login: {:?}",
-                        message
+                        "unexpected message on login: {message:?}"
                     )));
                 }
             }

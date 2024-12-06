@@ -96,14 +96,10 @@ impl taos_query::Queryable for Taos {
         self.raw.query(sql.as_ref()).map(ResultSet::new)
     }
 
-    fn query_with_req_id<T: AsRef<str>>(
-        &self,
-        _sql: T,
-        _req_id: u64,
-    ) -> RawResult<Self::ResultSet> {
-        tracing::trace!("Query with SQL: {}", _sql.as_ref());
+    fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> RawResult<Self::ResultSet> {
+        tracing::trace!("Query with SQL: {}", sql.as_ref());
         self.raw
-            .query_with_req_id(_sql.as_ref(), _req_id)
+            .query_with_req_id(sql.as_ref(), req_id)
             .map(ResultSet::new)
     }
 
@@ -355,7 +351,7 @@ impl Auth {
     }
 
     pub(crate) fn host_as_ptr(&self) -> *const c_char {
-        self.host().map_or_else(std::ptr::null, |s| s.as_ptr())
+        self.host().map_or_else(std::ptr::null, CStr::as_ptr)
     }
 
     pub(crate) fn user(&self) -> Option<&CStr> {
@@ -363,7 +359,7 @@ impl Auth {
     }
 
     pub(crate) fn user_as_ptr(&self) -> *const c_char {
-        self.user().map_or_else(std::ptr::null, |s| s.as_ptr())
+        self.user().map_or_else(std::ptr::null, CStr::as_ptr)
     }
 
     pub(crate) fn password(&self) -> Option<&CStr> {
@@ -371,7 +367,7 @@ impl Auth {
     }
 
     pub(crate) fn password_as_ptr(&self) -> *const c_char {
-        self.password().map_or_else(std::ptr::null, |s| s.as_ptr())
+        self.password().map_or_else(std::ptr::null, CStr::as_ptr)
     }
 
     pub(crate) fn database(&self) -> Option<&CStr> {
@@ -379,7 +375,7 @@ impl Auth {
     }
 
     pub(crate) fn database_as_ptr(&self) -> *const c_char {
-        self.database().map_or_else(std::ptr::null, |s| s.as_ptr())
+        self.database().map_or_else(std::ptr::null, CStr::as_ptr)
     }
 
     pub(crate) fn port(&self) -> u16 {

@@ -148,12 +148,11 @@ impl Debug for RawBlock {
             .field("precision", &self.precision)
             .field("table", &self.table)
             .field("fields", &self.fields)
-            // .field("raw_fields", &self.raw_fields)
             .field("group_id", &self.group_id)
             .field("schemas", &self.schemas)
             .field("lengths", &self.lengths)
             .field("columns", &self.columns)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -844,7 +843,7 @@ impl RawBlock {
     // }
 
     pub fn to_values(&self) -> Vec<Vec<Value>> {
-        self.rows().map(|row| row.into_values()).collect_vec()
+        self.rows().map(RowView::into_values).collect_vec()
     }
 
     pub fn write<W: std::io::Write>(&self, _wtr: W) -> std::io::Result<usize> {
@@ -993,7 +992,7 @@ impl Display for PrettyBlock<'_> {
             }
         }
 
-        f.write_fmt(format_args!("{}", table))?;
+        f.write_fmt(format_args!("{table}"))?;
         Ok(())
     }
 }
@@ -1363,7 +1362,7 @@ impl MultiBlockCursor {
         match t {
             1 => 8,
             2 | 3 => 16,
-            _ => panic!("getTypeSkip error, type: {}", t),
+            _ => panic!("getTypeSkip error, type: {t}"),
         }
     }
 
