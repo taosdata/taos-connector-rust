@@ -3152,8 +3152,8 @@ mod tests {
         Ok(())
     }
 
-    #[should_panic = "No datas to bind"]
     #[test]
+    #[should_panic = "No datas to bind"]
     fn test_bind_datas_to_bytes_without_datas() {
         let _ = bind_datas_to_bytes(&[], 100, 200, true, None, 0).unwrap();
     }
@@ -3189,8 +3189,8 @@ mod tests {
         }
     }
 
-    #[should_panic = "tags is empty"]
     #[test]
+    #[should_panic = "tags is empty"]
     fn test_bind_datas_to_bytes_without_tags() {
         let data = Stmt2BindData::new(None, None, None);
 
@@ -3206,8 +3206,8 @@ mod tests {
         let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
     }
 
-    #[should_panic = "tags len mismatch"]
     #[test]
+    #[should_panic = "tags len mismatch"]
     fn test_bind_datas_to_bytes_tags_len_mismatch() {
         let tags = vec![Value::Int(1)];
         let data = Stmt2BindData::new(None, Some(&tags), None);
@@ -3234,8 +3234,8 @@ mod tests {
         let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
     }
 
-    #[should_panic = "columns is empty"]
     #[test]
+    #[should_panic = "columns is empty"]
     fn test_bind_datas_to_bytes_without_cols() {
         let data = Stmt2BindData::new(None, None, None);
 
@@ -3251,8 +3251,8 @@ mod tests {
         let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
     }
 
-    #[should_panic = "columns len mismatch"]
     #[test]
+    #[should_panic = "columns len mismatch"]
     fn test_bind_datas_to_bytes_cols_len_mismatch() {
         let cols = vec![ColumnView::from_ints(vec![1])];
         let data = Stmt2BindData::new(None, None, Some(&cols));
