@@ -2375,7 +2375,7 @@ mod tests {
             execute!(b"create database ws_get_current_db keep 36500\0");
             execute!(b"use ws_get_current_db\0");
 
-            let mut database_buffer: Vec<i8> = vec![0; 10];
+            let mut database_buffer = vec![0; 10];
             let database = database_buffer.as_mut_ptr();
             let len = database_buffer.len() as c_int;
             let mut required = 0;
@@ -2389,7 +2389,7 @@ mod tests {
                 CStr::from_bytes_with_nul(b"ws_get_cur\0").unwrap()
             );
 
-            let mut database_buffer: Vec<i8> = vec![0; 128];
+            let mut database_buffer = vec![0; 128];
             let database = database_buffer.as_mut_ptr();
             let len = database_buffer.len() as c_int;
             let mut required = 0;
