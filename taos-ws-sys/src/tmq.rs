@@ -30,6 +30,7 @@ pub enum ws_tmq_conf_res_t {
     WS_TMQ_CONF_INVALID = -1,
     WS_TMQ_CONF_OK = 0,
 }
+
 #[repr(C)]
 #[allow(non_camel_case_types)]
 pub enum ws_tmq_res_t {
