@@ -3,9 +3,7 @@ use taos_query::common::{BorrowedValue, ColumnView, Value};
 use taos_query::stmt2::Stmt2BindData;
 use taos_query::RawResult;
 
-use crate::query::infra::{BindType, ReqId, StmtId};
-
-use super::Stmt2Field;
+use crate::query::infra::{BindType, ReqId, Stmt2Field, StmtId};
 
 const REQ_ID_POS: usize = 0;
 const STMT_ID_POS: usize = REQ_ID_POS + 8;

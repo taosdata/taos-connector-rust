@@ -1,5 +1,3 @@
-mod bind;
-
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -15,6 +13,8 @@ use tracing::Instrument;
 use crate::query::infra::{Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
 use crate::query::WsTaos;
 use crate::{ResultSet, Taos};
+
+mod bind;
 
 #[derive(Debug)]
 pub struct Stmt2 {
