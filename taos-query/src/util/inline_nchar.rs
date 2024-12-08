@@ -44,6 +44,7 @@ macro_rules! _impl_inline_str {
             }
             impl<'a> Iterator for Chars<'a, $ty> {
                 type Item = char;
+
                 #[inline]
                 fn next(&mut self) -> Option<Self::Item> {
                     if self.i < self.data.chars_len() as $ty {

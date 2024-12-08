@@ -1,9 +1,8 @@
-use taos_query::prelude::Value;
-
-use crate::sys::Stmt as NativeStmt;
-use taos_query::prelude::ColumnView;
+use taos_query::prelude::{ColumnView, Value};
 use taos_query::RawResult;
 use taos_ws::Stmt as WsStmt;
+
+use crate::sys::Stmt as NativeStmt;
 
 #[derive(Debug)]
 enum StmtInner {
@@ -225,9 +224,10 @@ impl taos_query::prelude::AsyncBindable<super::Taos> for Stmt {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use bytes::Bytes;
     use serde::Deserialize;
-    use std::str::FromStr;
     use taos_query::util::hex::*;
     use taos_query::RawResult;
 

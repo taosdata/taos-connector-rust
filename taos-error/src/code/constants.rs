@@ -1,4 +1,5 @@
 /// Constant error string from both version 2.x and 3.x of libtaos
+#[allow(clippy::match_same_arms)]
 pub const fn error_str_of(code: u32) -> Option<&'static str> {
     match code {
         0x0001 => Some("Action in progress"),

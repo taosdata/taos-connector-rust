@@ -1,6 +1,7 @@
 use std::os::raw::{c_char, c_int, c_void};
 
-use crate::common::{itypes::IsValue, Ty};
+use crate::common::itypes::IsValue;
+use crate::common::Ty;
 
 #[repr(C)]
 #[derive(Debug, Clone)]

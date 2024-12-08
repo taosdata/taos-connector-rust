@@ -11,7 +11,8 @@ tarpaulin-report.html
 tarpaulin-report.json
 rust-toolchain
 sync.sh
-.cargo
+.cargo/*
+!.cargo/config.toml
 .cache-cargo
 default.profraw
 .idea

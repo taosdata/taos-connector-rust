@@ -1,5 +1,6 @@
-use bytes::Bytes;
 use std::str::FromStr;
+
+use bytes::Bytes;
 use taos_optin::TaosBuilder;
 use taos_query::util::hex::*;
 

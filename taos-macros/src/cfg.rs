@@ -3,7 +3,7 @@ use quote::*;
 use syn::{ForeignItemFn, ItemFn};
 
 /// Replace official `[cfg]` macro to add empty backport functions after the foreign mod block.
-pub fn cfg(attr: impl Into<TokenStream>, item: impl Into<TokenStream>) -> TokenStream {
+pub fn cfg<T: Into<TokenStream>>(attr: T, item: T) -> TokenStream {
     let cfg = attr.into();
 
     let item = item.into();
@@ -68,9 +68,10 @@ fn foreign_fn_to_item_fn(item: ForeignItemFn) -> ItemFn {
 
 #[cfg(test)]
 mod tests {
-    use super::cfg;
     use quote::quote;
     use syn::{ForeignItemFn, ItemFn};
+
+    use super::cfg;
 
     #[test]
     fn nothing() {

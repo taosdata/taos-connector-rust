@@ -10,7 +10,6 @@ pub struct InlineBytes<T = u16> {
 macro_rules! _impl_inline_lines {
     ($($ty:ty) *) => {
         $(
-
             impl fmt::Debug for InlineBytes<$ty> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct("InlineBytes")
@@ -45,6 +44,7 @@ macro_rules! _impl_inline_lines {
                 pub const fn as_ptr(&self) -> *const u8 {
                     self.data.as_ptr()
                 }
+
                 #[inline]
                 pub fn as_mut_ptr(&mut self) -> *mut u8 {
                     self.data.as_mut_ptr()
@@ -78,6 +78,7 @@ macro_rules! _impl_inline_lines {
         )*
     };
 }
+
 _impl_inline_lines!(u8 u16 u32 u64 usize);
 
 macro_rules! _impl_test_inline_lines {

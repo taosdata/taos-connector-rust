@@ -23,27 +23,7 @@ impl Debug for Code {
 }
 
 impl Code {
-    /// Error code == 0. It should not raised in any real errors.
-    pub fn success(&self) -> bool {
-        self.0 == 0
-    }
-
-    const fn as_err_str(&self) -> &'static str {
-        if self.0 == 0 {
-            return "Success";
-        }
-        match constants::error_str_of(self.0 as _) {
-            Some(s) => s,
-            None => "Incomplete",
-        }
-    }
-    pub(crate) const fn _priv_err_str(&self) -> Option<&'static str> {
-        constants::error_str_of(self.0 as _)
-    }
-}
-
-/// Constants
-impl Code {
+    // Constants
     #[allow(non_upper_case_globals)]
     #[deprecated(since = "0.9.0", note = "Use Code::FAILED instead")]
     pub const Failed: Code = Code(0xFFFF);
@@ -69,6 +49,30 @@ impl Code {
 
     pub const OBJECT_IS_NULL: Code = Code(0xE100);
     pub const TMQ_TOPIC_APPEND_ERR: Code = Code(0xE101);
+
+    /// Code from raw primitive type.
+    pub const fn new(code: i32) -> Self {
+        Code(code)
+    }
+
+    /// Error code == 0. It should not raised in any real errors.
+    pub fn success(&self) -> bool {
+        self.0 == 0
+    }
+
+    const fn as_err_str(&self) -> &'static str {
+        if self.0 == 0 {
+            return "Success";
+        }
+        match constants::error_str_of(self.0 as _) {
+            Some(s) => s,
+            None => "Incomplete",
+        }
+    }
+
+    pub(crate) const fn _priv_err_str(&self) -> Option<&'static str> {
+        constants::error_str_of(self.0 as _)
+    }
 }
 
 macro_rules! _impl_fmt {
@@ -104,13 +108,6 @@ macro_rules! _impl_from {
 }
 
 _impl_from!(i8 u8 i16 i32 u16 u32 i64 u64);
-
-impl Code {
-    /// Code from raw primitive type.
-    pub const fn new(code: i32) -> Self {
-        Code(code)
-    }
-}
 
 impl PartialEq<usize> for Code {
     fn eq(&self, other: &usize) -> bool {

@@ -1,9 +1,8 @@
+use serde::de::{self, DeserializeSeed, IntoDeserializer, Visitor};
+use serde::forward_to_deserialize_any;
+
 use super::super::*;
 use super::*;
-use serde::{
-    de::{self, DeserializeSeed, IntoDeserializer, Visitor},
-    forward_to_deserialize_any,
-};
 
 impl<'de> serde::de::EnumAccess<'de> for Value {
     type Error = Error;
@@ -93,7 +92,7 @@ impl<'de> de::Deserializer<'de> for StringDeserializer {
         tuple_struct struct tuple enum identifier ignored_any
     }
 }
-impl<'de, 'b: 'de> serde::de::EnumAccess<'de> for EnumValueDeserializer {
+impl<'de: 'de> serde::de::EnumAccess<'de> for EnumValueDeserializer {
     type Error = Error;
 
     type Variant = Self;
@@ -114,7 +113,7 @@ impl<'de, 'b: 'de> serde::de::EnumAccess<'de> for EnumValueDeserializer {
     }
 }
 
-impl<'de, 'b: 'de> de::VariantAccess<'de> for EnumValueDeserializer {
+impl<'de: 'de> de::VariantAccess<'de> for EnumValueDeserializer {
     type Error = Error;
 
     fn unit_variant(self) -> Result<(), Self::Error> {
@@ -147,7 +146,7 @@ impl<'de, 'b: 'de> de::VariantAccess<'de> for EnumValueDeserializer {
     }
 }
 
-impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
+impl<'de: 'de> serde::de::Deserializer<'de> for Value {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -169,8 +168,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
             UBigInt(v) => visitor.visit_u64(v),
             Float(v) => visitor.visit_f32(v),
             Double(v) => visitor.visit_f64(v),
-            VarChar(v) => visitor.visit_string(v),
-            NChar(v) => visitor.visit_string(v),
+            VarChar(v) | NChar(v) => visitor.visit_string(v),
             Json(v) => v
                 .into_deserializer()
                 .deserialize_any(visitor)
@@ -178,7 +176,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
             Blob(v) | MediumBlob(v) => v.into_deserializer().deserialize_any(visitor),
             VarBinary(v) | Geometry(v) => v.into_deserializer().deserialize_any(visitor),
-            _ => Err(<Self::Error as de::Error>::custom(
+            Decimal(_) => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
         }
@@ -215,7 +213,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
             Double(v) => visitor.visit_f64(v),
             VarChar(v) | NChar(v) => visitor.visit_string(v),
             Json(v) => visitor.visit_string(v.to_string()),
-            Timestamp(v) => visitor.visit_string(v.to_datetime_with_tz().to_rfc3339().to_string()),
+            Timestamp(v) => visitor.visit_string(v.to_datetime_with_tz().to_rfc3339()),
             _ => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
@@ -278,7 +276,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
             VarBinary(_v) | Geometry(_v) => {
                 todo!()
             }
-            _ => Err(<Self::Error as de::Error>::custom(
+            Decimal(_) => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
         }
@@ -356,7 +354,7 @@ impl<'de, 'b: 'de> serde::de::Deserializer<'de> for Value {
     }
 }
 
-impl<'de, 'b: 'de> serde::de::IntoDeserializer<'de, Error> for Value {
+impl<'de: 'de> serde::de::IntoDeserializer<'de, Error> for Value {
     type Deserializer = Self;
 
     fn into_deserializer(self) -> Self::Deserializer {
@@ -366,13 +364,14 @@ impl<'de, 'b: 'de> serde::de::IntoDeserializer<'de, Error> for Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn value_de_value() {
         use std::cmp::PartialEq;
+
         use Value::*;
         macro_rules! _de_value {
             ($($v:expr) *) => {
