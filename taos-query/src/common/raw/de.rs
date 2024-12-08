@@ -5,7 +5,6 @@ use serde::de::{DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor
 use serde::Deserializer;
 
 use crate::common::BorrowedValue;
-// use crate::Field;
 
 type Field = str;
 /// Row-based deserializer helper.
