@@ -25,6 +25,7 @@ static SERIAL_NO: AtomicU64 = AtomicU64::new(0);
 /// | 12bit | 12bit | 24bit     | 16bit         |
 /// +-------+-------+-----------+---------------+
 /// ```
+#[inline]
 pub fn generate_req_id() -> u64 {
     let now = SystemTime::now();
     let ts = now.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
