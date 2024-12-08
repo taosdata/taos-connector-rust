@@ -48,7 +48,85 @@ pub struct TaosBindV2 {
     pub allocated: c_uint,
 }
 
-impl TaosBindV2 {}
+impl TaosBindV2 {
+    #[inline]
+    pub fn new(buffer_type: Ty) -> Self {
+        let buffer: *mut c_void = ptr::null_mut();
+        let length: *mut usize = ptr::null_mut();
+        let is_null: *mut c_int = ptr::null_mut();
+        let error: *mut c_int = ptr::null_mut();
+        TaosBindV2 {
+            buffer_type: buffer_type as _,
+            buffer,
+            buffer_length: 0,
+            length,
+            is_null,
+            is_unsigned: 0,
+            error,
+            allocated: 1,
+            u: TaosBindUnionV2 { ts: 0 },
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn buffer(&self) -> *const c_void {
+        self.buffer
+    }
+
+    fn ty(&self) -> Ty {
+        Ty::from(self.buffer_type)
+    }
+
+    #[inline]
+    unsafe fn free(&mut self) {
+        let ty = self.ty();
+        match ty {
+            Ty::Bool => {
+                let _ = Box::from_raw(self.buffer as *mut bool);
+            }
+            Ty::TinyInt => {
+                let _ = Box::from_raw(self.buffer as *mut i8);
+            }
+            Ty::SmallInt => {
+                let _ = Box::from_raw(self.buffer as *mut i16);
+            }
+            Ty::Int => {
+                let _ = Box::from_raw(self.buffer as *mut i32);
+            }
+            Ty::BigInt | Ty::Timestamp => {
+                let _ = Box::from_raw(self.buffer as *mut i64);
+            }
+            Ty::UTinyInt => {
+                let _ = Box::from_raw(self.buffer as *mut u8);
+            }
+            Ty::USmallInt => {
+                let _ = Box::from_raw(self.buffer as *mut u16);
+            }
+            Ty::UInt => {
+                let _ = Box::from_raw(self.buffer as *mut u32);
+            }
+            Ty::UBigInt => {
+                let _ = Box::from_raw(self.buffer as *mut u64);
+            }
+            Ty::Float => {
+                let _ = Box::from_raw(self.buffer as *mut f32);
+            }
+            Ty::Double => {
+                let _ = Box::from_raw(self.buffer as *mut f64);
+            }
+            _ => (),
+        };
+        if !self.length.is_null() {
+            let _ = Box::from_raw(self.length);
+        }
+        if !self.is_null.is_null() {
+            let _ = Box::from_raw(self.is_null);
+        }
+        if !self.error.is_null() {
+            let _ = Box::from_raw(self.error);
+        }
+    }
+}
 
 impl Debug for TaosBindV2 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -171,7 +249,109 @@ impl TaosMultiBind {
             num: 1,
         }
     }
+
+    pub(crate) fn from_primitives_ptr<T: IValue>(nulls: Vec<bool>, ptr: *const T) -> Self {
+        TaosMultiBind {
+            buffer_type: T::TY as _,
+            buffer: ptr as _,
+            buffer_length: std::mem::size_of::<T>(),
+            length: nulls.len() as _,
+            num: nulls.len() as _,
+            is_null: ManuallyDrop::new(nulls).as_ptr() as _,
+        }
+    }
+
+    pub(crate) fn from_raw_timestamps_ptr(nulls: Vec<bool>, ptr: *const i64) -> Self {
+        TaosMultiBind {
+            buffer_type: Ty::Timestamp as _,
+            buffer: ptr as _,
+            buffer_length: std::mem::size_of::<i64>(),
+            length: nulls.len() as _,
+            num: nulls.len() as _,
+            is_null: ManuallyDrop::new(nulls).as_ptr() as _,
+        }
+    }
+
+    pub(crate) fn from_binary_vec(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        let mut buffer_length = 0;
+        let num = values.len();
+        let mut nulls = ManuallyDrop::new(Vec::with_capacity(num));
+        unsafe { nulls.set_len(num) };
+        nulls.fill(false);
+        let mut length: ManuallyDrop<Vec<i32>> = ManuallyDrop::new(Vec::with_capacity(num));
+        unsafe { length.set_len(num) };
+        for (i, v) in values.iter().enumerate() {
+            if let Some(v) = v {
+                let v = v.as_ref();
+                length[i] = v.len() as _;
+                if v.len() > buffer_length {
+                    buffer_length = v.len();
+                }
+            } else {
+                nulls[i] = true;
+            }
+        }
+        let buffer_size = buffer_length * values.len();
+        let mut buffer: ManuallyDrop<Vec<u8>> = ManuallyDrop::new(Vec::with_capacity(buffer_size));
+        unsafe { buffer.set_len(buffer_size) };
+        buffer.fill(0);
+        for (i, v) in values.iter().enumerate() {
+            if let Some(v) = v {
+                let v = v.as_ref();
+                unsafe {
+                    let dst = buffer.as_mut_ptr().add(buffer_length * i);
+                    std::ptr::copy_nonoverlapping(v.as_ptr(), dst, v.len());
+                }
+            }
+        }
+        TaosMultiBind {
+            buffer_type: Ty::VarChar as _,
+            buffer: buffer.as_ptr() as _,
+            buffer_length,
+            length: length.as_ptr() as _,
+            is_null: nulls.as_ptr() as _,
+            num: num as _,
+        }
+    }
+
+    pub(crate) fn from_string_vec(values: &[Option<impl AsRef<str>>]) -> Self {
+        let values: Vec<_> = values
+            .iter()
+            .map(|f| f.as_ref().map(|s| s.as_ref().as_bytes()))
+            .collect();
+        let mut s = Self::from_binary_vec(&values);
+        s.buffer_type = Ty::NChar as _;
+        s
+    }
+
+    pub(crate) fn from_json(values: &[Option<impl AsRef<str>>]) -> Self {
+        let values: Vec<_> = values
+            .iter()
+            .map(|f| f.as_ref().map(|s| s.as_ref().as_bytes()))
+            .collect();
+        let mut s = Self::from_binary_vec(&values);
+        s.buffer_type = Ty::Json as _;
+        s
+    }
+
+    pub(crate) fn from_bytes(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        let mut s = Self::from_binary_vec(values);
+        s.buffer_type = Ty::VarBinary as _;
+        s
+    }
+
+    pub(crate) fn from_geobytes(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        let mut s = Self::from_binary_vec(values);
+        s.buffer_type = Ty::Geometry as _;
+        s
+    }
+
+    #[cfg(test)]
+    pub(crate) fn buffer(&self) -> *const c_void {
+        self.buffer
+    }
 }
+
 impl BindFrom for TaosBindV3 {
     #[inline]
     fn null() -> Self {
@@ -231,96 +411,6 @@ impl BindFrom for TaosBindV3 {
 #[derive(Debug, Deref)]
 #[repr(transparent)]
 pub struct TaosBindV3(TaosMultiBind);
-
-// #[cfg(taos_v3)]
-// pub type TaosBind = TaosBindV3;
-// #[cfg(not(taos_v3))]
-// pub type TaosBind = TaosBindV2;
-
-impl TaosBindV2 {
-    #[inline]
-    pub fn new(buffer_type: Ty) -> Self {
-        let buffer: *mut c_void = ptr::null_mut();
-        let length: *mut usize = ptr::null_mut();
-        let is_null: *mut c_int = ptr::null_mut();
-        let error: *mut c_int = ptr::null_mut();
-        TaosBindV2 {
-            buffer_type: buffer_type as _,
-            buffer,
-            buffer_length: 0,
-            length,
-            is_null,
-            is_unsigned: 0,
-            error,
-            allocated: 1,
-            u: TaosBindUnionV2 { ts: 0 },
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn buffer(&self) -> *const c_void {
-        self.buffer
-    }
-
-    fn ty(&self) -> Ty {
-        Ty::from(self.buffer_type)
-    }
-
-    #[inline]
-    unsafe fn free(&mut self) {
-        let ty = self.ty();
-        match ty {
-            Ty::Bool => {
-                let _ = Box::from_raw(self.buffer as *mut bool);
-            }
-            Ty::TinyInt => {
-                let _ = Box::from_raw(self.buffer as *mut i8);
-            }
-            Ty::SmallInt => {
-                let _ = Box::from_raw(self.buffer as *mut i16);
-            }
-            Ty::Int => {
-                let _ = Box::from_raw(self.buffer as *mut i32);
-            }
-            Ty::BigInt | Ty::Timestamp => {
-                let _ = Box::from_raw(self.buffer as *mut i64);
-            }
-            Ty::UTinyInt => {
-                let _ = Box::from_raw(self.buffer as *mut u8);
-            }
-            Ty::USmallInt => {
-                let _ = Box::from_raw(self.buffer as *mut u16);
-            }
-            Ty::UInt => {
-                let _ = Box::from_raw(self.buffer as *mut u32);
-            }
-            Ty::UBigInt => {
-                let _ = Box::from_raw(self.buffer as *mut u64);
-            }
-            Ty::Float => {
-                let _ = Box::from_raw(self.buffer as *mut f32);
-            }
-            Ty::Double => {
-                let _ = Box::from_raw(self.buffer as *mut f64);
-            }
-            // Ty::VarChar |
-            // Ty::NChar |
-            // Ty::Json => {
-            //     Vec::from_raw_parts(self.buffer as _, *self.length, *self.length);
-            // }
-            _ => (),
-        };
-        if !self.length.is_null() {
-            let _ = Box::from_raw(self.length);
-        }
-        if !self.is_null.is_null() {
-            let _ = Box::from_raw(self.is_null);
-        }
-        if !self.error.is_null() {
-            let _ = Box::from_raw(self.error);
-        }
-    }
-}
 
 pub trait BindFrom: Sized {
     fn null() -> Self;
@@ -417,106 +507,6 @@ impl Drop for TaosBindV2 {
 #[allow(dead_code)]
 pub trait ToMultiBind {
     fn to_multi_bind(&self) -> TaosMultiBind;
-}
-
-impl TaosMultiBind {
-    pub(crate) fn from_primitives_ptr<T: IValue>(nulls: Vec<bool>, ptr: *const T) -> Self {
-        TaosMultiBind {
-            buffer_type: T::TY as _,
-            buffer: ptr as _,
-            buffer_length: std::mem::size_of::<T>(),
-            length: nulls.len() as _,
-            num: nulls.len() as _,
-            is_null: ManuallyDrop::new(nulls).as_ptr() as _,
-        }
-    }
-    pub(crate) fn from_raw_timestamps_ptr(nulls: Vec<bool>, ptr: *const i64) -> Self {
-        TaosMultiBind {
-            buffer_type: Ty::Timestamp as _,
-            buffer: ptr as _,
-            buffer_length: std::mem::size_of::<i64>(),
-            length: nulls.len() as _,
-            num: nulls.len() as _,
-            is_null: ManuallyDrop::new(nulls).as_ptr() as _,
-        }
-    }
-
-    pub(crate) fn from_binary_vec(values: &[Option<impl AsRef<[u8]>>]) -> Self {
-        let mut buffer_length = 0;
-        let num = values.len();
-        let mut nulls = ManuallyDrop::new(Vec::with_capacity(num));
-        unsafe { nulls.set_len(num) };
-        nulls.fill(false);
-        let mut length: ManuallyDrop<Vec<i32>> = ManuallyDrop::new(Vec::with_capacity(num));
-        unsafe { length.set_len(num) };
-        for (i, v) in values.iter().enumerate() {
-            if let Some(v) = v {
-                let v = v.as_ref();
-                length[i] = v.len() as _;
-                if v.len() > buffer_length {
-                    buffer_length = v.len();
-                }
-            } else {
-                nulls[i] = true;
-            }
-        }
-        let buffer_size = buffer_length * values.len();
-        let mut buffer: ManuallyDrop<Vec<u8>> = ManuallyDrop::new(Vec::with_capacity(buffer_size));
-        unsafe { buffer.set_len(buffer_size) };
-        buffer.fill(0);
-        for (i, v) in values.iter().enumerate() {
-            if let Some(v) = v {
-                let v = v.as_ref();
-                unsafe {
-                    let dst = buffer.as_mut_ptr().add(buffer_length * i);
-                    std::ptr::copy_nonoverlapping(v.as_ptr(), dst, v.len());
-                }
-            }
-        }
-        TaosMultiBind {
-            buffer_type: Ty::VarChar as _,
-            buffer: buffer.as_ptr() as _,
-            buffer_length,
-            length: length.as_ptr() as _,
-            is_null: nulls.as_ptr() as _,
-            num: num as _,
-        }
-    }
-    pub(crate) fn from_string_vec(values: &[Option<impl AsRef<str>>]) -> Self {
-        let values: Vec<_> = values
-            .iter()
-            .map(|f| f.as_ref().map(|s| s.as_ref().as_bytes()))
-            .collect();
-        let mut s = Self::from_binary_vec(&values);
-        s.buffer_type = Ty::NChar as _;
-        s
-    }
-
-    pub(crate) fn from_json(values: &[Option<impl AsRef<str>>]) -> Self {
-        let values: Vec<_> = values
-            .iter()
-            .map(|f| f.as_ref().map(|s| s.as_ref().as_bytes()))
-            .collect();
-        let mut s = Self::from_binary_vec(&values);
-        s.buffer_type = Ty::Json as _;
-        s
-    }
-
-    pub(crate) fn from_bytes(values: &[Option<impl AsRef<[u8]>>]) -> Self {
-        let mut s = Self::from_binary_vec(values);
-        s.buffer_type = Ty::VarBinary as _;
-        s
-    }
-    pub(crate) fn from_geobytes(values: &[Option<impl AsRef<[u8]>>]) -> Self {
-        let mut s = Self::from_binary_vec(values);
-        s.buffer_type = Ty::Geometry as _;
-        s
-    }
-
-    #[cfg(test)]
-    pub(crate) fn buffer(&self) -> *const c_void {
-        self.buffer
-    }
 }
 
 impl Drop for TaosMultiBind {

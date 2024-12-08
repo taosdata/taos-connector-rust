@@ -2,7 +2,7 @@ use std::{fmt::Debug, ops::Deref};
 
 use bytes::Bytes;
 
-use crate::common::{Field, Ty};
+use crate::common::Ty;
 
 /// Represent column basics information: type, length.
 #[derive(Debug, Clone, Copy)]
@@ -11,13 +11,6 @@ use crate::common::{Field, Ty};
 pub struct ColSchema {
     pub(crate) ty: Ty,
     pub(crate) len: u32,
-}
-
-impl Field {
-    #[inline]
-    pub(crate) fn to_column_schema(&self) -> ColSchema {
-        ColSchema::new(self.ty(), self.bytes() as _)
-    }
 }
 
 impl ColSchema {

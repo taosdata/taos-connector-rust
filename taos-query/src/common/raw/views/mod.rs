@@ -228,48 +228,62 @@ impl<'a> IntoIterator for &'a ColumnView {
 }
 
 impl ColumnView {
-    pub fn from_millis_timestamp(values: Vec<impl Into<Option<i64>>>) -> Self {
+    pub fn from_millis_timestamp<T: Into<Option<i64>>>(values: Vec<T>) -> Self {
         ColumnView::Timestamp(TimestampView::from_millis(values))
     }
-    pub fn from_micros_timestamp(values: Vec<impl Into<Option<i64>>>) -> Self {
+
+    pub fn from_micros_timestamp<T: Into<Option<i64>>>(values: Vec<T>) -> Self {
         ColumnView::Timestamp(TimestampView::from_micros(values))
     }
-    pub fn from_nanos_timestamp(values: Vec<impl Into<Option<i64>>>) -> Self {
+
+    pub fn from_nanos_timestamp<T: Into<Option<i64>>>(values: Vec<T>) -> Self {
         ColumnView::Timestamp(TimestampView::from_nanos(values))
     }
-    pub fn from_bools(values: Vec<impl Into<Option<bool>>>) -> Self {
+
+    pub fn from_bools<T: Into<Option<bool>>>(values: Vec<T>) -> Self {
         ColumnView::Bool(BoolView::from_iter(values))
     }
-    pub fn from_tiny_ints(values: Vec<impl Into<Option<i8>>>) -> Self {
+
+    pub fn from_tiny_ints<T: Into<Option<i8>>>(values: Vec<T>) -> Self {
         ColumnView::TinyInt(TinyIntView::from_iter(values))
     }
-    pub fn from_small_ints(values: Vec<impl Into<Option<i16>>>) -> Self {
+
+    pub fn from_small_ints<T: Into<Option<i16>>>(values: Vec<T>) -> Self {
         ColumnView::SmallInt(SmallIntView::from_iter(values))
     }
-    pub fn from_ints(values: Vec<impl Into<Option<i32>>>) -> Self {
+
+    pub fn from_ints<T: Into<Option<i32>>>(values: Vec<T>) -> Self {
         ColumnView::Int(IntView::from_iter(values))
     }
-    pub fn from_big_ints(values: Vec<impl Into<Option<i64>>>) -> Self {
+
+    pub fn from_big_ints<T: Into<Option<i64>>>(values: Vec<T>) -> Self {
         ColumnView::BigInt(BigIntView::from_iter(values))
     }
-    pub fn from_unsigned_tiny_ints(values: Vec<impl Into<Option<u8>>>) -> Self {
+
+    pub fn from_unsigned_tiny_ints<T: Into<Option<u8>>>(values: Vec<T>) -> Self {
         ColumnView::UTinyInt(UTinyIntView::from_iter(values))
     }
-    pub fn from_unsigned_small_ints(values: Vec<impl Into<Option<u16>>>) -> Self {
+
+    pub fn from_unsigned_small_ints<T: Into<Option<u16>>>(values: Vec<T>) -> Self {
         ColumnView::USmallInt(USmallIntView::from_iter(values))
     }
-    pub fn from_unsigned_ints(values: Vec<impl Into<Option<u32>>>) -> Self {
+
+    pub fn from_unsigned_ints<T: Into<Option<u32>>>(values: Vec<T>) -> Self {
         ColumnView::UInt(UIntView::from_iter(values))
     }
-    pub fn from_unsigned_big_ints(values: Vec<impl Into<Option<u64>>>) -> Self {
+
+    pub fn from_unsigned_big_ints<T: Into<Option<u64>>>(values: Vec<T>) -> Self {
         ColumnView::UBigInt(UBigIntView::from_iter(values))
     }
-    pub fn from_floats(values: Vec<impl Into<Option<f32>>>) -> Self {
+
+    pub fn from_floats<T: Into<Option<f32>>>(values: Vec<T>) -> Self {
         ColumnView::Float(FloatView::from_iter(values))
     }
-    pub fn from_doubles(values: Vec<impl Into<Option<f64>>>) -> Self {
+
+    pub fn from_doubles<T: Into<Option<f64>>>(values: Vec<T>) -> Self {
         ColumnView::Double(DoubleView::from_iter(values))
     }
+
     pub fn from_varchar<
         S: AsRef<str>,
         T: Into<Option<S>>,
@@ -280,6 +294,7 @@ impl ColumnView {
     ) -> Self {
         ColumnView::VarChar(VarCharView::from_iter(iter))
     }
+
     pub fn from_nchar<
         S: AsRef<str>,
         T: Into<Option<S>>,
@@ -290,6 +305,7 @@ impl ColumnView {
     ) -> Self {
         ColumnView::NChar(NCharView::from_iter(iter))
     }
+
     pub fn from_json<
         S: AsRef<str>,
         T: Into<Option<S>>,
@@ -324,9 +340,9 @@ impl ColumnView {
     }
 
     #[inline]
-    pub fn concat_iter<'b, 'a: 'b>(
+    pub fn concat_iter<'b, 'a: 'b, T: Iterator<Item = BorrowedValue<'b>>>(
         &'a self,
-        rhs: impl Iterator<Item = BorrowedValue<'b>>,
+        rhs: T,
         ty: Ty,
     ) -> ColumnView {
         match ty {

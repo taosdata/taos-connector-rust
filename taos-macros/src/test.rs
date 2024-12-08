@@ -135,8 +135,6 @@ impl Attr {
         let mut iter = iter.into_iter();
         let mut attr = Attr::default();
         while let Some(t) = iter.next() {
-            // panic!("{}", &t);
-            // dbg!(&t);
             match t {
                 TokenTree::Ident(ident) if ident == "databases" => {
                     const EXPECT: &str = "expect `[test(databases = \"\")]`";

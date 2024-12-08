@@ -194,8 +194,8 @@ impl RawBlock {
         Self::parse_from_raw_block_v2(bytes, fields, lengths, rows, precision)
     }
 
-    pub fn parse_from_raw_block_v2(
-        bytes: impl Into<Bytes>,
+    pub fn parse_from_raw_block_v2<T: Into<Bytes>>(
+        bytes: T,
         fields: &[Field],
         lengths: &[u32],
         rows: usize,
@@ -466,7 +466,7 @@ impl RawBlock {
         }
     }
 
-    pub fn parse_from_raw_block(bytes: impl Into<Bytes>, precision: Precision) -> Self {
+    pub fn parse_from_raw_block<T: Into<Bytes>>(bytes: T, precision: Precision) -> Self {
         let schema_start: usize = std::mem::size_of::<Header>();
 
         let layout = Rc::new(RefCell::new(Layout::INLINE_DEFAULT));
@@ -615,8 +615,8 @@ impl RawBlock {
         }
     }
 
-    pub fn parse_from_multi_raw_block(
-        bytes: impl Into<Bytes>,
+    pub fn parse_from_multi_raw_block<T: Into<Bytes>>(
+        bytes: T,
     ) -> Result<VecDeque<Self>, std::io::Error> {
         use byteorder::ReadBytesExt;
 
@@ -676,12 +676,13 @@ impl RawBlock {
     }
 
     /// Set table name of the block
-    pub fn with_database_name(&mut self, name: impl Into<String>) -> &mut Self {
+    pub fn with_database_name<T: Into<String>>(&mut self, name: T) -> &mut Self {
         self.database = Some(name.into());
         self
     }
+
     /// Set table name of the block
-    pub fn with_table_name(&mut self, name: impl Into<String>) -> &mut Self {
+    pub fn with_table_name<T: Into<String>>(&mut self, name: T) -> &mut Self {
         self.table = Some(name.into());
         self.layout.borrow_mut().with_table_name();
 

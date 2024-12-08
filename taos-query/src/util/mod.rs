@@ -31,7 +31,7 @@ pub struct Edition {
 }
 
 impl Edition {
-    pub fn new(edition: impl Into<String>, expired: bool) -> Self {
+    pub fn new<T: Into<String>>(edition: T, expired: bool) -> Self {
         Self {
             edition: edition.into(),
             expired,
@@ -224,7 +224,6 @@ pub trait InlinableRead: Read {
     /// | len: N bytes | data: len - N bytes |
     /// +--------------+-----------------+
     /// ```
-    ///
     fn read_len_with_data<const N: usize>(&mut self) -> std::io::Result<Vec<u8>> {
         let len = self.read_len_with_width::<N>()?;
         let mut buf = Vec::with_capacity(len);
@@ -233,6 +232,7 @@ pub trait InlinableRead: Read {
         self.read_exact(&mut buf[N..])?;
         Ok(buf)
     }
+
     #[inline]
     /// Read inlined bytes with specific length width `N`.
     ///

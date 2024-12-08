@@ -80,6 +80,187 @@ use regex::Regex;
 use thiserror::Error;
 use urlencoding::encode;
 
+#[cfg(feature = "pest")]
+#[derive(Parser)]
+#[grammar = "dsn.pest"]
+struct DsnParser;
+
+/// Error caused by [pest](https://docs.rs/pest) DSN parser.
+#[derive(Debug, Error)]
+pub enum DsnError {
+    #[cfg(feature = "pest")]
+    #[error("{0}")]
+    ParseErr(#[from] pest::error::Error<Rule>),
+    #[error("unable to parse port from {0}")]
+    PortErr(#[from] ParseIntError),
+    #[error("invalid driver {0}")]
+    InvalidDriver(String),
+    #[error("invalid protocol {0}")]
+    InvalidProtocol(String),
+    #[error("invalid password {0}: {1}")]
+    InvalidPassword(String, FromUtf8Error),
+    #[error("invalid connection {0}")]
+    InvalidConnection(String),
+    #[error("invalid addresses: {0}, error: {1}")]
+    InvalidAddresses(String, String),
+    #[error("requires database: {0}")]
+    RequireDatabase(String),
+    #[error("requires parameter: {0}")]
+    RequireParam(String),
+    #[error("invalid parameter for {0}: {1}")]
+    InvalidParam(String, String),
+    #[error("non utf8 character: {0}")]
+    NonUtf8Character(#[from] FromUtf8Error),
+}
+
+/// A simple struct to represent a server address, with host:port or socket path.
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+pub struct Address {
+    /// Host or ip address of the server.
+    pub host: Option<String>,
+    /// Port to connect to the server.
+    pub port: Option<u16>,
+    /// Use unix socket path to connect.
+    pub path: Option<String>,
+}
+
+impl Address {
+    /// Construct server address with host and port.
+    #[inline]
+    pub fn new<T: Into<String>>(host: T, port: u16) -> Self {
+        let host = host.into();
+        let host = if host.is_empty() { None } else { Some(host) };
+        Self {
+            host,
+            port: Some(port),
+            ..Default::default()
+        }
+    }
+
+    /// Construct server address with host or ip address only.
+    #[inline]
+    pub fn from_host<T: Into<String>>(host: T) -> Self {
+        let host = host.into();
+        let host = if host.is_empty() { None } else { Some(host) };
+        Self {
+            host,
+            ..Default::default()
+        }
+    }
+
+    /// Construct server address with unix socket path.
+    #[inline]
+    pub fn from_path<T: Into<String>>(path: T) -> Self {
+        Self {
+            path: Some(path.into()),
+            ..Default::default()
+        }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.host.is_none() && self.port.is_none() && self.path.is_none()
+    }
+}
+
+impl FromStr for Address {
+    type Err = DsnError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        #[cfg(feature = "pest")]
+        {
+            let mut addr = Self::default();
+            if let Some(dsn) = DsnParser::parse(Rule::address, &s)?.next() {
+                for inner in dsn.into_inner() {
+                    match inner.as_rule() {
+                        Rule::host => addr.host = Some(inner.as_str().to_string()),
+                        Rule::port => addr.port = Some(inner.as_str().parse()?),
+                        Rule::path => {
+                            addr.path = Some(
+                                urlencoding::decode(inner.as_str())
+                                    .expect("UTF-8")
+                                    .to_string(),
+                            )
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            Ok(addr)
+        }
+        #[cfg(not(feature = "pest"))]
+        {
+            if s.is_empty() {
+                Ok(Self::default())
+            } else if let Some((host, port)) = s.split_once(':') {
+                Ok(Address::new(host, port.parse().unwrap()))
+            } else if s.contains('%') {
+                Ok(Address::from_path(urlencoding::decode(s).unwrap()))
+            } else {
+                Ok(Address::from_host(s))
+            }
+        }
+    }
+}
+
+impl Display for Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (&self.host, self.port, &self.path) {
+            (Some(host), None, None) => write!(f, "{host}"),
+            (Some(host), Some(port), None) => write!(f, "{host}:{port}"),
+            (None, Some(port), None) => write!(f, ":{port}"),
+            (None, None, Some(path)) => write!(f, "{}", urlencoding::encode(path)),
+            (None, None, None) => Ok(()),
+            _ => unreachable!("path will be conflict with host/port"),
+        }
+    }
+}
+
+#[test]
+#[cfg(feature = "pest")]
+fn addr_parse() {
+    let s = "taosdata:6030";
+    let addr = Address::from_str(s).unwrap();
+    assert_eq!(addr.to_string(), s);
+    assert!(!addr.is_empty());
+
+    let s = "/var/lib/taos";
+    let addr = Address::from_str(&urlencoding::encode(s)).unwrap();
+    assert_eq!(addr.path.as_ref().unwrap(), s);
+    assert_eq!(addr.to_string(), urlencoding::encode(s));
+
+    assert_eq!(
+        Address::new("localhost", 6030).to_string(),
+        "localhost:6030"
+    );
+    assert_eq!(Address::from_host("localhost").to_string(), "localhost");
+    assert_eq!(
+        Address::from_path("/path/unix.sock").to_string(),
+        "%2Fpath%2Funix.sock"
+    );
+
+    let none = Address {
+        host: None,
+        port: None,
+        path: None,
+    };
+    assert!(none.is_empty());
+    assert_eq!(none.to_string(), "");
+}
+
+/// A DSN(**Data Source Name**) parser.
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+pub struct Dsn {
+    pub driver: String,
+    pub protocol: Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub addresses: Vec<Address>,
+    pub path: Option<String>,
+    pub subject: Option<String>,
+    pub params: BTreeMap<String, String>,
+}
+
 impl Dsn {
     pub fn from_regex(input: &str) -> Result<Self, DsnError> {
         lazy_static::lazy_static! {
@@ -278,190 +459,33 @@ impl Dsn {
         }
         Ok(to)
     }
-}
 
-#[cfg(feature = "pest")]
-#[derive(Parser)]
-#[grammar = "dsn.pest"]
-struct DsnParser;
-
-/// Error caused by [pest](https://docs.rs/pest) DSN parser.
-#[derive(Debug, Error)]
-pub enum DsnError {
-    #[cfg(feature = "pest")]
-    #[error("{0}")]
-    ParseErr(#[from] pest::error::Error<Rule>),
-    #[error("unable to parse port from {0}")]
-    PortErr(#[from] ParseIntError),
-    #[error("invalid driver {0}")]
-    InvalidDriver(String),
-    #[error("invalid protocol {0}")]
-    InvalidProtocol(String),
-    #[error("invalid password {0}: {1}")]
-    InvalidPassword(String, FromUtf8Error),
-    #[error("invalid connection {0}")]
-    InvalidConnection(String),
-    #[error("invalid addresses: {0}, error: {1}")]
-    InvalidAddresses(String, String),
-    #[error("requires database: {0}")]
-    RequireDatabase(String),
-    #[error("requires parameter: {0}")]
-    RequireParam(String),
-    #[error("invalid parameter for {0}: {1}")]
-    InvalidParam(String, String),
-    #[error("non utf8 character: {0}")]
-    NonUtf8Character(#[from] FromUtf8Error),
-}
-
-/// A simple struct to represent a server address, with host:port or socket path.
-#[derive(Debug, Default, PartialEq, Eq, Clone)]
-pub struct Address {
-    /// Host or ip address of the server.
-    pub host: Option<String>,
-    /// Port to connect to the server.
-    pub port: Option<u16>,
-    /// Use unix socket path to connect.
-    pub path: Option<String>,
-}
-
-impl Address {
-    /// Construct server address with host and port.
     #[inline]
-    pub fn new(host: impl Into<String>, port: u16) -> Self {
-        let host = host.into();
-        let host = if host.is_empty() { None } else { Some(host) };
-        Self {
-            host,
-            port: Some(port),
-            ..Default::default()
-        }
-    }
-    // ident: Ident,
-    /// Construct server address with host or ip address only.
-    #[inline]
-    pub fn from_host(host: impl Into<String>) -> Self {
-        let host = host.into();
-        let host = if host.is_empty() { None } else { Some(host) };
-        Self {
-            host,
-            ..Default::default()
-        }
-    }
-
-    /// Construct server address with unix socket path.
-    #[inline]
-    pub fn from_path(path: impl Into<String>) -> Self {
-        Self {
-            path: Some(path.into()),
-            ..Default::default()
-        }
+    pub fn drain_params(&mut self) -> BTreeMap<String, String> {
+        let drained = self
+            .params
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        self.params.clear();
+        drained
     }
 
     #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.host.is_none() && self.port.is_none() && self.path.is_none()
+    pub fn set<K: Into<String>, V: Into<String>>(&mut self, key: K, value: V) -> Option<String> {
+        self.params.insert(key.into(), value.into())
     }
-}
 
-impl FromStr for Address {
-    type Err = DsnError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        #[cfg(feature = "pest")]
-        {
-            let mut addr = Self::default();
-            if let Some(dsn) = DsnParser::parse(Rule::address, &s)?.next() {
-                for inner in dsn.into_inner() {
-                    match inner.as_rule() {
-                        Rule::host => addr.host = Some(inner.as_str().to_string()),
-                        Rule::port => addr.port = Some(inner.as_str().parse()?),
-                        Rule::path => {
-                            addr.path = Some(
-                                urlencoding::decode(inner.as_str())
-                                    .expect("UTF-8")
-                                    .to_string(),
-                            )
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-            }
-            Ok(addr)
-        }
-        #[cfg(not(feature = "pest"))]
-        {
-            if s.is_empty() {
-                Ok(Self::default())
-            } else if let Some((host, port)) = s.split_once(':') {
-                Ok(Address::new(host, port.parse().unwrap()))
-            } else if s.contains('%') {
-                Ok(Address::from_path(urlencoding::decode(s).unwrap()))
-            } else {
-                Ok(Address::from_host(s))
-            }
-        }
+    #[inline]
+    pub fn get<T: AsRef<str>>(&self, key: T) -> Option<&String> {
+        self.params.get(key.as_ref())
     }
-}
 
-impl Display for Address {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match (&self.host, self.port, &self.path) {
-            (Some(host), None, None) => write!(f, "{host}"),
-            (Some(host), Some(port), None) => write!(f, "{host}:{port}"),
-            (None, Some(port), None) => write!(f, ":{port}"),
-            (None, None, Some(path)) => write!(f, "{}", urlencoding::encode(path)),
-            (None, None, None) => Ok(()),
-            _ => unreachable!("path will be conflict with host/port"),
-        }
+    #[inline]
+    pub fn remove<T: AsRef<str>>(&mut self, key: T) -> Option<String> {
+        self.params.remove(key.as_ref())
     }
-}
 
-#[test]
-#[cfg(feature = "pest")]
-fn addr_parse() {
-    let s = "taosdata:6030";
-    let addr = Address::from_str(s).unwrap();
-    assert_eq!(addr.to_string(), s);
-    assert!(!addr.is_empty());
-
-    let s = "/var/lib/taos";
-    let addr = Address::from_str(&urlencoding::encode(s)).unwrap();
-    assert_eq!(addr.path.as_ref().unwrap(), s);
-    assert_eq!(addr.to_string(), urlencoding::encode(s));
-
-    assert_eq!(
-        Address::new("localhost", 6030).to_string(),
-        "localhost:6030"
-    );
-    assert_eq!(Address::from_host("localhost").to_string(), "localhost");
-    assert_eq!(
-        Address::from_path("/path/unix.sock").to_string(),
-        "%2Fpath%2Funix.sock"
-    );
-
-    let none = Address {
-        host: None,
-        port: None,
-        path: None,
-    };
-    assert!(none.is_empty());
-    assert_eq!(none.to_string(), "");
-}
-
-/// A DSN(**Data Source Name**) parser.
-#[derive(Debug, Default, PartialEq, Eq, Clone)]
-pub struct Dsn {
-    pub driver: String,
-    pub protocol: Option<String>,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub addresses: Vec<Address>,
-    pub path: Option<String>,
-    pub subject: Option<String>,
-    pub params: BTreeMap<String, String>,
-}
-
-impl Dsn {
     fn is_path_like(&self) -> bool {
         self.username.is_none()
             && self.password.is_none()
@@ -563,34 +587,6 @@ impl Display for Dsn {
     }
 }
 
-impl Dsn {
-    #[inline]
-    pub fn drain_params(&mut self) -> BTreeMap<String, String> {
-        let drained = self
-            .params
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        self.params.clear();
-        drained
-    }
-
-    #[inline]
-    pub fn set(&mut self, key: impl Into<String>, value: impl Into<String>) -> Option<String> {
-        self.params.insert(key.into(), value.into())
-    }
-
-    #[inline]
-    pub fn get(&self, key: impl AsRef<str>) -> Option<&String> {
-        self.params.get(key.as_ref())
-    }
-
-    #[inline]
-    pub fn remove(&mut self, key: impl AsRef<str>) -> Option<String> {
-        self.params.remove(key.as_ref())
-    }
-}
-
 impl TryFrom<&str> for Dsn {
     type Error = DsnError;
 
@@ -651,7 +647,7 @@ impl FromStr for Dsn {
 ///     assert_eq!(value_is_true(s), false);
 /// }
 /// ```
-pub fn value_is_true(s: impl AsRef<str>) -> bool {
+pub fn value_is_true<T: AsRef<str>>(s: T) -> bool {
     matches!(
         s.as_ref(),
         "" | "1"

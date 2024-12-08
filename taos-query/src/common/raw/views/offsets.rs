@@ -21,9 +21,10 @@ impl Debug for Offsets {
 }
 
 impl Offsets {
-    pub fn from_offsets(iter: impl ExactSizeIterator<Item = i32>) -> Self {
+    pub fn from_offsets<T: ExactSizeIterator<Item = i32>>(iter: T) -> Self {
         OffsetsMut::from_offsets(iter).into_offsets()
     }
+
     /// As a i32 slice.
     pub fn as_slice(&self) -> &[i32] {
         unsafe { std::slice::from_raw_parts(self.0.as_ptr() as *const i32, self.len()) }
@@ -155,7 +156,7 @@ impl OffsetsMut {
         Self(bytes)
     }
 
-    pub fn from_offsets(iter: impl ExactSizeIterator<Item = i32>) -> Self {
+    pub fn from_offsets<T: ExactSizeIterator<Item = i32>>(iter: T) -> Self {
         let mut offsets = Self::new(iter.len());
 
         iter.enumerate().for_each(|(i, offset)| unsafe {

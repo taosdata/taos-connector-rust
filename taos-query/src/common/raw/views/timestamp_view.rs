@@ -26,16 +26,17 @@ impl IsColumnView for View {
         Self::from_nullable_timestamp(iter.map(|v| v.to_timestamp()).collect_vec())
     }
 }
+
 impl TimestampView {
-    pub fn from_millis(values: Vec<impl Into<Option<i64>>>) -> Self {
+    pub fn from_millis<T: Into<Option<i64>>>(values: Vec<T>) -> Self {
         TimestampMillisecondView::from_iter(values).into_inner()
     }
 
-    pub fn from_micros(values: Vec<impl Into<Option<i64>>>) -> Self {
+    pub fn from_micros<T: Into<Option<i64>>>(values: Vec<T>) -> Self {
         TimestampMicrosecondView::from_iter(values).into_inner()
     }
 
-    pub fn from_nanos(values: Vec<impl Into<Option<i64>>>) -> Self {
+    pub fn from_nanos<T: Into<Option<i64>>>(values: Vec<T>) -> Self {
         TimestampNanosecondView::from_iter(values).into_inner()
     }
 
@@ -48,6 +49,7 @@ impl TimestampView {
             Precision::Nanosecond => Self::from_nanos(values),
         }
     }
+
     pub fn from_nullable_timestamp(values: Vec<Option<Timestamp>>) -> Self {
         let precision = values
             .iter()

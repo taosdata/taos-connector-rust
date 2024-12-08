@@ -471,8 +471,7 @@ impl Stmt {
     /// ```text
     /// ws://localhost:6041/
     /// ```
-    ///
-    pub async fn from_dsn(dsn: impl IntoDsn) -> RawResult<Self> {
+    pub async fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let info = TaosBuilder::from_dsn(dsn)?;
         Self::from_wsinfo(&info).await
     }

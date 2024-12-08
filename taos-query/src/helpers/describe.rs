@@ -42,12 +42,9 @@ macro_rules! disabled_or_empty {
     };
     () => {};
 }
+
 impl CompressOptions {
-    pub fn new(
-        encode: impl Into<String>,
-        compress: impl Into<String>,
-        level: impl Into<String>,
-    ) -> Self {
+    pub fn new<T: Into<String>>(encode: T, compress: T, level: T) -> Self {
         Self {
             encode: encode.into(),
             compress: compress.into(),
@@ -160,7 +157,7 @@ impl Described {
     }
 
     /// Create a new column description without primary-key/compression feature.
-    pub fn new(field: impl Into<String>, ty: Ty, length: impl Into<Option<usize>>) -> Self {
+    pub fn new<T: Into<String>, U: Into<Option<usize>>>(field: T, ty: Ty, length: U) -> Self {
         let field = field.into();
         let length = length.into();
         let length = length.unwrap_or_else(|| {

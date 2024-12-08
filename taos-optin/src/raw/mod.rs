@@ -215,9 +215,9 @@ pub struct ApiEntry {
     >,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct TmqListApi {
-    pub tmq_list_new: unsafe extern "C" fn() -> *mut tmq_list_t,
+    tmq_list_new: unsafe extern "C" fn() -> *mut tmq_list_t,
     tmq_list_append: unsafe extern "C" fn(arg1: *mut tmq_list_t, arg2: *const c_char) -> i32,
     tmq_list_destroy: unsafe extern "C" fn(list: *mut tmq_list_t),
     tmq_list_get_size: unsafe extern "C" fn(list: *const tmq_list_t) -> i32,

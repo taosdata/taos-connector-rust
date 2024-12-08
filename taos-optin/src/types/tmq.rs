@@ -17,7 +17,7 @@ impl tmq_resp_err_t {
         !self.is_ok()
     }
 
-    pub fn ok_or(self, s: impl Into<Cow<'static, str>>) -> Result<(), RawError> {
+    pub fn ok_or<T: Into<Cow<'static, str>>>(self, s: T) -> Result<(), RawError> {
         match self {
             Self(0) => Ok(()),
             _ => Err(RawError::new(self.0, s.into())),

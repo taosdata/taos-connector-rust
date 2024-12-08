@@ -408,7 +408,7 @@ async fn read_queries(
                     let offset = if is_v3 { 16 } else { 8 };
 
                     let mut slice = block.as_slice();
-                    let mut is_block_new: bool = false;
+                    let mut is_block_new = false;
 
                     let timing = if is_v3 {
                         let timing = slice.read_u64().unwrap();
@@ -612,8 +612,7 @@ impl WsTaos {
     /// ```text
     /// ws://localhost:6041/
     /// ```
-    ///
-    pub async fn from_dsn(dsn: impl IntoDsn) -> RawResult<Self> {
+    pub async fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
         let info = TaosBuilder::from_dsn(dsn)?;
         Self::from_wsinfo(&info).await

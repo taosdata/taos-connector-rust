@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::util::{Inlinable, InlinableRead, InlinableWrite};
 
-use super::ty::Ty;
+use super::{ty::Ty, views::ColSchema};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -31,7 +31,6 @@ fn test_c_field_t() {
 ///    bytes length 8 which is the byte-width of `i64`.
 /// 2. `{ name: "n", ty: NChar, bytes: 100 }`, a `NCHAR` field with name `n`,
 ///    bytes length 100 which is the length of the variable-length data.
-
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Field {
     pub(crate) name: String,
@@ -42,14 +41,8 @@ pub struct Field {
     pub(crate) bytes: u32,
 }
 
-// impl From<Field> for c_field_t {
-//     fn from(value: Field) -> Self {
-//         value.into()
-//     }
-// }
 impl From<&Field> for c_field_t {
     fn from(value: &Field) -> Self {
-        // let name = value.name().into_c_str().into_owned();
         let name = value.name().as_bytes();
         let mut field = c_field_t {
             name: [0; 65],
@@ -89,7 +82,8 @@ impl Field {
             bytes: 0,
         }
     }
-    pub fn new(name: impl Into<String>, ty: Ty, bytes: u32) -> Self {
+
+    pub fn new<T: Into<String>>(name: T, ty: Ty, bytes: u32) -> Self {
         let name = name.into();
         Self { name, ty, bytes }
     }
@@ -130,6 +124,11 @@ impl Field {
         } else {
             format!("`{}` {}", self.name(), ty.name())
         }
+    }
+
+    #[inline]
+    pub(crate) fn to_column_schema(&self) -> ColSchema {
+        ColSchema::new(self.ty(), self.bytes() as _)
     }
 }
 

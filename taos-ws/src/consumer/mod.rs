@@ -1316,7 +1316,7 @@ impl TmqBuilder {
                                                 tracing::warn!("poll message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::FetchRaw { meta: _ }=> {
+                                        TmqRecvData::FetchRaw { .. }=> {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 if let Err(err) = sender.send(ok.map(|_|recv)) {
@@ -1346,7 +1346,7 @@ impl TmqBuilder {
                                                 tracing::warn!("poll message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::FetchBlock{ data: _ }=> {
+                                        TmqRecvData::FetchBlock{ .. }=> {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                                 let _ = sender.send(Err(RawError::new(
                                                     WS_ERROR_NO::WEBSOCKET_ERROR.as_code(),

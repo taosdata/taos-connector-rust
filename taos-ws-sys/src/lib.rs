@@ -134,6 +134,14 @@ pub struct WsError {
 }
 
 impl WsError {
+    fn new(code: Code, message: &str) -> Self {
+        Self {
+            code,
+            message: CString::new(message).unwrap(),
+            source: None,
+        }
+    }
+
     pub fn from_err(err: Box<dyn std::error::Error + 'static>) -> Self {
         Self {
             code: Code::FAILED,
@@ -142,6 +150,7 @@ impl WsError {
         }
     }
 }
+
 #[derive(Debug)]
 pub struct WsMaybeError<T> {
     error: Option<WsError>,
@@ -238,16 +247,6 @@ where
 }
 
 pub type WsResult<T> = Result<T, WsError>;
-
-impl WsError {
-    fn new(code: Code, message: &str) -> Self {
-        Self {
-            code,
-            message: CString::new(message).unwrap(),
-            source: None,
-        }
-    }
-}
 
 impl Display for WsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -383,10 +382,10 @@ impl From<&Field> for WS_FIELD_V2 {
     }
 }
 
-/// Field struct that has v3-compatible memory layout, which is recommended.
 #[repr(C)]
 #[derive(Copy, Clone)]
 #[allow(non_camel_case_types)]
+/// Field struct that has v3-compatible memory layout, which is recommended.
 pub struct WS_FIELD {
     pub name: [c_char; 65usize],
     pub r#type: u8,
@@ -1166,7 +1165,6 @@ pub unsafe extern "C" fn ws_select_db(taos: *mut WS_TAOS, db: *const c_char) -> 
     }
 }
 
-#[allow(static_mut_refs)]
 #[no_mangle]
 /// If the query is update query or not
 pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {

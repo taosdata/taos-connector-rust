@@ -231,7 +231,7 @@ impl RawStmt {
     }
 
     #[inline]
-    pub fn prepare<'c>(&mut self, sql: impl IntoCStr<'c>) -> RawResult<()> {
+    pub fn prepare<'c, T: IntoCStr<'c>>(&mut self, sql: T) -> RawResult<()> {
         let sql = sql.into_c_str();
         tracing::trace!("prepare stmt with sql: {sql:?}");
         self.ok(unsafe {
@@ -239,22 +239,8 @@ impl RawStmt {
         })
     }
 
-    // pub fn set_tbname_tags_v3<'a>(
-    //     &mut self,
-    //     name: impl IntoCStr<'a>,
-    //     tags: &[TaosBindV3],
-    // ) -> Result<()> {
-    //     self.ok(unsafe {
-    //         (self.api.taos_stmt_set_tbname_tags)(
-    //             self.as_ptr(),
-    //             name.into_c_str().as_ptr(),
-    //             tags.as_ptr() as _,
-    //         )
-    //     })
-    // }
-
     #[inline]
-    pub fn set_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> RawResult<()> {
+    pub fn set_tbname<'c, T: IntoCStr<'c>>(&mut self, name: T) -> RawResult<()> {
         let name = name.into_c_str();
         let res = self.ok(unsafe {
             match self.api.taos_stmt_set_tbname {

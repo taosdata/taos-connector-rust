@@ -166,10 +166,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
     #[inline(always)]
-    pub fn new_with_context(
-        code: impl Into<Code>,
-        err: impl Into<String>,
-        context: impl Into<String>,
+    pub fn new_with_context<T: Into<Code>, U: Into<String>, V: Into<String>>(
+        code: T,
+        err: U,
+        context: V,
     ) -> Self {
         Self {
             code: code.into(),
@@ -179,7 +179,7 @@ impl Error {
     }
 
     #[inline]
-    pub fn new(code: impl Into<Code>, err: impl Into<String>) -> Self {
+    pub fn new<T: Into<Code>, U: Into<String>>(code: T, err: U) -> Self {
         Self {
             code: code.into(),
             context: None,
@@ -188,7 +188,7 @@ impl Error {
     }
 
     #[inline]
-    pub fn context(mut self, context: impl Into<String>) -> Self {
+    pub fn context<T: Into<String>>(mut self, context: T) -> Self {
         self.context = Some(match self.context {
             Some(pre) => format!("{}: {}", context.into(), pre),
             None => context.into(),
@@ -212,7 +212,7 @@ impl Error {
     }
 
     #[inline(always)]
-    pub fn from_code(code: impl Into<Code>) -> Self {
+    pub fn from_code<T: Into<Code>>(code: T) -> Self {
         let code = code.into();
         if let Some(str) = code._priv_err_str() {
             Self::new(code, str)
@@ -226,17 +226,17 @@ impl Error {
     }
 
     #[inline]
-    pub fn from_string(err: impl Into<Cow<'static, str>>) -> Self {
+    pub fn from_string<T: Into<Cow<'static, str>>>(err: T) -> Self {
         anyhow::format_err!("{}", err.into()).into()
     }
 
     #[inline]
-    pub fn from_any(err: impl Into<anyhow::Error>) -> Self {
+    pub fn from_any<T: Into<anyhow::Error>>(err: T) -> Self {
         err.into().into()
     }
 
     #[inline]
-    pub fn any(err: impl Into<anyhow::Error> + 'static) -> Self {
+    pub fn any<T: Into<anyhow::Error> + 'static>(err: T) -> Self {
         if err.type_id() == std::any::TypeId::of::<Self>() {
             let err = &err as &dyn Any;
             let err = err.downcast_ref::<Self>().unwrap();
@@ -255,7 +255,7 @@ impl Error {
     }
 
     #[inline]
-    pub fn with_code(mut self, code: impl Into<Code>) -> Self {
+    pub fn with_code<T: Into<Code>>(mut self, code: T) -> Self {
         self.code = code.into();
         self
     }

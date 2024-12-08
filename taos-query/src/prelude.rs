@@ -479,7 +479,6 @@ mod r#async {
     /// The synchronous query trait for TDengine connection.
     #[async_trait]
     pub trait AsyncQueryable: Send + Sync + Sized {
-        // type B: for<'b> BlockExt<'b, 'b>;
         type AsyncResultSet: AsyncFetchable;
 
         async fn query<T: AsRef<str> + Send + Sync>(

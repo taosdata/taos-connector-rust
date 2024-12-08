@@ -43,14 +43,14 @@ impl Default for Retries {
         Self(5)
     }
 }
-#[derive(Debug, Clone)]
+
+#[derive(Clone, Debug)]
 pub struct TaosBuilder {
     scheme: &'static str, // ws or wss
     addr: String,
     auth: WsAuth,
     database: Option<String>,
     server_version: OnceCell<String>,
-    // timeout: Duration,
     conn_mode: Option<u32>,
     compression: bool,
     conn_retries: Retries,
@@ -322,7 +322,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 }
 
 impl TaosBuilder {
-    pub fn from_dsn(dsn: impl IntoDsn) -> RawResult<Self> {
+    pub fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
         let scheme = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "http", _) | ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => "ws",
