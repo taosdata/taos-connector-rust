@@ -1,5 +1,6 @@
-use mdsn::Dsn;
 use std::str::FromStr;
+
+use mdsn::Dsn;
 
 fn main() -> Result<(), mdsn::DsnError> {
     // The two styles are equivalent.

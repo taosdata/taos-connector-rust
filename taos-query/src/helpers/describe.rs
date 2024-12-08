@@ -1,13 +1,9 @@
-use std::{
-    fmt,
-    ops::{Deref, DerefMut},
-    str::FromStr,
-};
+use std::fmt;
+use std::ops::{Deref, DerefMut};
+use std::str::FromStr;
 
-use serde::{
-    de::{self, MapAccess, SeqAccess, Visitor},
-    Deserialize, Deserializer, Serialize,
-};
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::common::Ty;
 

@@ -1,5 +1,5 @@
-use std::ops::Deref;
-use std::{fmt::Debug, ops::DerefMut};
+use std::fmt::Debug;
+use std::ops::{Deref, DerefMut};
 
 use bytes::{Bytes, BytesMut};
 

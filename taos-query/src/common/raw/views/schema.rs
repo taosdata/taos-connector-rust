@@ -1,4 +1,5 @@
-use std::{fmt::Debug, ops::Deref};
+use std::fmt::Debug;
+use std::ops::Deref;
 
 use bytes::Bytes;
 

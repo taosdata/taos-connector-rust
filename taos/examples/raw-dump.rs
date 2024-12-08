@@ -1,8 +1,6 @@
-use std::{
-    ops::Deref,
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use anyhow::bail;
 use clap::Parser;

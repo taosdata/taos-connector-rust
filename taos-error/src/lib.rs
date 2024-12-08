@@ -1,10 +1,8 @@
 #![cfg_attr(nightly, feature(error_generic_member_access))]
-use std::{
-    any::Any,
-    borrow::Cow,
-    fmt::{self, Debug, Display},
-    str::FromStr,
-};
+use std::any::Any;
+use std::borrow::Cow;
+use std::fmt::{self, Debug, Display};
+use std::str::FromStr;
 
 use mdsn::DsnError;
 use source::Inner;

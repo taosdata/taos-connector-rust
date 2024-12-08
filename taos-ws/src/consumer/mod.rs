@@ -21,8 +21,7 @@ use taos_query::tmq::{
     MessageSet, SyncOnAsync, Timeout, VGroupId,
 };
 use taos_query::util::{Edition, InlinableRead};
-use taos_query::RawResult;
-use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
+use taos_query::{DeError, DsnError, IntoDsn, RawBlock, RawResult, TBuilder};
 use thiserror::Error;
 use tokio::sync::{oneshot, watch, Mutex};
 use tokio::time;
@@ -30,8 +29,7 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tracing::warn;
 
-use crate::query::asyn::is_support_binary_sql;
-use crate::query::asyn::WS_ERROR_NO;
+use crate::query::asyn::{is_support_binary_sql, WS_ERROR_NO};
 use crate::query::infra::{ToMessage, WsConnReq, WsRecv, WsRecvData, WsSend};
 use crate::TaosBuilder;
 
@@ -1623,8 +1621,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_tmq_meta_batch() -> anyhow::Result<()> {
-        use taos_query::prelude::AsyncTBuilder;
-        use taos_query::prelude::*;
+        use taos_query::prelude::{AsyncTBuilder, *};
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
@@ -2480,6 +2477,7 @@ mod tests {
     #[tokio::test]
     async fn test_consumer_cloud_conn() -> anyhow::Result<()> {
         use std::env;
+
         use taos_query::prelude::*;
 
         std::env::set_var("RUST_LOG", "trace");

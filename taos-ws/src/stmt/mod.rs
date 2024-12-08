@@ -1,29 +1,24 @@
-use futures::{SinkExt, StreamExt};
-use itertools::Itertools;
+use std::fmt::Debug;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use std::time::Duration;
+
 // use scc::HashMap;
 use dashmap::DashMap as HashMap;
-
+use futures::{SinkExt, StreamExt};
+use itertools::Itertools;
+use messages::*;
 use serde::Deserialize;
-
 use taos_query::common::views::views_to_raw_block;
 use taos_query::common::{ColumnView, Precision, Ty};
 use taos_query::prelude::{InlinableWrite, RawResult};
 use taos_query::stmt::{AsyncBindable, Bindable};
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
-
 use tokio::sync::{oneshot, watch};
-
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::query::infra::ToMessage;
 use crate::{Taos, TaosBuilder};
-use messages::*;
-
-use std::fmt::Debug;
-
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
-use std::time::Duration;
 
 mod messages;
 
@@ -767,9 +762,11 @@ impl Stmt {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use taos_query::{common::ColumnView, AsyncTBuilder, Dsn};
+    use taos_query::common::ColumnView;
+    use taos_query::{AsyncTBuilder, Dsn};
 
-    use crate::{stmt::Stmt, TaosBuilder};
+    use crate::stmt::Stmt;
+    use crate::TaosBuilder;
 
     #[tokio::test()]
     async fn test_client() -> anyhow::Result<()> {

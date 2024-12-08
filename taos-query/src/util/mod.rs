@@ -7,20 +7,16 @@ pub mod hex;
 mod inline_read;
 mod inline_write;
 
-use std::{
-    collections::BTreeMap,
-    io::{Read, Write},
-};
-
-use tokio::io::{AsyncRead, AsyncWrite};
+use std::collections::BTreeMap;
+use std::io::{Read, Write};
 
 pub use inline_bytes::InlineBytes;
 pub use inline_json::InlineJson;
 pub use inline_nchar::InlineNChar;
-pub use inline_str::InlineStr;
-
 pub use inline_read::AsyncInlinableRead;
+pub use inline_str::InlineStr;
 pub use inline_write::AsyncInlinableWrite;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{RawError, RawResult};
 

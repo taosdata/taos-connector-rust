@@ -3,18 +3,12 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use serde_with::serde_as;
-use serde_with::NoneAsEmptyString;
-
-use taos_query::common::Field;
-use taos_query::common::Precision;
-use taos_query::common::Ty;
+use serde_with::{serde_as, NoneAsEmptyString};
+use taos_query::common::{Field, Precision, Ty};
 use taos_query::prelude::RawError;
-use taos_query::tmq::Assignment;
-use taos_query::tmq::VGroupId;
+use taos_query::tmq::{Assignment, VGroupId};
 
-use crate::query::infra::ToMessage;
-use crate::query::infra::WsConnReq;
+use crate::query::infra::{ToMessage, WsConnReq};
 
 pub type ReqId = u64;
 

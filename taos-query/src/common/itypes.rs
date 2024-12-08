@@ -1,5 +1,4 @@
 use derive_more::{Deref, DerefMut, Display, From};
-
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;

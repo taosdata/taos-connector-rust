@@ -1,20 +1,16 @@
-use std::{
-    cell::{RefCell, UnsafeCell},
-    ffi::c_void,
-    fmt::Debug,
-    rc::Rc,
-};
+use std::cell::{RefCell, UnsafeCell};
+use std::ffi::c_void;
+use std::fmt::Debug;
+use std::rc::Rc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 
-use crate::{
-    common::{layout::Layout, BorrowedValue, Ty},
-    prelude::InlinableWrite,
-    util::{InlineNChar, InlineStr},
-};
-
 use super::{IsColumnView, Offsets, Version};
+use crate::common::layout::Layout;
+use crate::common::{BorrowedValue, Ty};
+use crate::prelude::InlinableWrite;
+use crate::util::{InlineNChar, InlineStr};
 
 #[derive(Debug)]
 pub struct NCharView {

@@ -1,8 +1,6 @@
-use taos_query::{
-    prelude::{AsAsyncConsumer, RawMeta, Timeout},
-    tmq::{Assignment, VGroupId},
-    RawBlock, RawResult,
-};
+use taos_query::prelude::{AsAsyncConsumer, RawMeta, Timeout};
+use taos_query::tmq::{Assignment, VGroupId};
+use taos_query::{RawBlock, RawResult};
 
 #[derive(Debug)]
 enum TmqBuilderInner {
@@ -599,7 +597,8 @@ mod tests {
 
 #[cfg(test)]
 mod async_tests {
-    use std::{str::FromStr, time::Duration};
+    use std::str::FromStr;
+    use std::time::Duration;
 
     use super::TmqBuilder;
     use crate::TaosBuilder;

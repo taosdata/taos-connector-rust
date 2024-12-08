@@ -1,12 +1,13 @@
-use std::{fmt::Debug, pin::Pin, str::FromStr, time::Duration};
+use std::fmt::Debug;
+use std::pin::Pin;
+use std::str::FromStr;
+use std::time::Duration;
 
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    common::{RawData, RawMeta},
-    JsonMeta, RawBlock, RawResult,
-};
+use crate::common::{RawData, RawMeta};
+use crate::{JsonMeta, RawBlock, RawResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Timeout {

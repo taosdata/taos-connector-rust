@@ -1,10 +1,11 @@
-use std::{ffi::c_void, io::Write, ops::Range};
-
-use crate::common::{BorrowedValue, Ty};
-
-use super::{IsColumnView, NullBits, NullsIter};
+use std::ffi::c_void;
+use std::io::Write;
+use std::ops::Range;
 
 use bytes::Bytes;
+
+use super::{IsColumnView, NullBits, NullsIter};
+use crate::common::{BorrowedValue, Ty};
 
 type View = BoolView;
 

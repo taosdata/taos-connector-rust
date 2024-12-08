@@ -1,7 +1,5 @@
-use std::{
-    fmt::{self, Display},
-    str::FromStr,
-};
+use std::fmt::{self, Display};
+use std::str::FromStr;
 
 use serde::Deserialize;
 
@@ -209,13 +207,9 @@ impl<'de> Deserialize<'de> for Precision {
 
 #[cfg(test)]
 mod tests {
-    use serde::{
-        de::{
-            value::{I32Deserializer, StrDeserializer, UnitDeserializer},
-            IntoDeserializer,
-        },
-        Deserialize,
-    };
+    use serde::de::value::{I32Deserializer, StrDeserializer, UnitDeserializer};
+    use serde::de::IntoDeserializer;
+    use serde::Deserialize;
 
     use super::Precision;
 

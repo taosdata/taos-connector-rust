@@ -1,11 +1,10 @@
 use std::ffi::c_void;
 
-use crate::common::{BorrowedValue, Precision, Timestamp, Ty};
-
-use super::{IsColumnView, NullBits, NullsIter};
-
 use bytes::Bytes;
 use itertools::Itertools;
+
+use super::{IsColumnView, NullBits, NullsIter};
+use crate::common::{BorrowedValue, Precision, Timestamp, Ty};
 
 type Item = i64;
 type View = TimestampView;

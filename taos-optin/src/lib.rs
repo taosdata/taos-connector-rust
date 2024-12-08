@@ -1,27 +1,21 @@
 #![allow(clippy::macro_metavars_in_unsafe)]
 
-use std::{
-    cell::UnsafeCell,
-    ffi::{c_char, CStr, CString},
-    mem::ManuallyDrop,
-    rc::Rc,
-    sync::Arc,
-    time::Duration,
-};
+use std::cell::UnsafeCell;
+use std::ffi::{c_char, CStr, CString};
+use std::mem::ManuallyDrop;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use once_cell::sync::OnceCell;
 use raw::{ApiEntry, BlockState, RawRes, RawTaos};
+use taos_query::prelude::tokio::sync::oneshot;
+use taos_query::prelude::tokio::{select, task, time};
+use taos_query::prelude::{Field, Precision, RawBlock, RawMeta, RawResult};
+use taos_query::util::Edition;
+use taos_query::RawError;
 use tracing::{warn, Instrument};
-
-use taos_query::{
-    prelude::{
-        tokio::{select, sync::oneshot, task, time},
-        Field, Precision, RawBlock, RawMeta, RawResult,
-    },
-    util::Edition,
-    RawError,
-};
 
 const MAX_CONNECT_RETRIES: u8 = 2;
 
@@ -37,13 +31,14 @@ pub use stmt::Stmt;
 pub use tmq::{Consumer, TmqBuilder};
 
 pub mod prelude {
-    pub use super::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
-
     pub use taos_query::prelude::*;
 
+    pub use super::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
+
     pub mod sync {
-        pub use crate::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
         pub use taos_query::prelude::sync::*;
+
+        pub use crate::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
     }
 }
 
@@ -817,13 +812,10 @@ pub(crate) mod constants {
 
 #[cfg(test)]
 mod tests {
-    use crate::constants::{DSN_V2, DSN_V3};
+    use taos_query::common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder};
 
     use super::*;
-
-    use taos_query::common::SchemalessPrecision;
-    use taos_query::common::SchemalessProtocol;
-    use taos_query::common::SmlDataBuilder;
+    use crate::constants::{DSN_V2, DSN_V3};
 
     #[test]
     fn show_databases() -> RawResult<()> {

@@ -1,22 +1,24 @@
-use std::{fmt::Debug, str::FromStr, sync::Arc, time::Duration};
+use std::fmt::Debug;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use itertools::Itertools;
-use taos_query::{
-    common::{raw_data_t, RawData, RawMeta},
-    prelude::{
-        tokio::{self, sync::oneshot, time},
-        RawError, RawResult,
-    },
-    tmq::{
-        AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
-        IsOffset, MessageSet, Timeout, Timing, VGroupId,
-    },
-    util::Edition,
-    Dsn, IntoDsn, RawBlock,
+use taos_query::common::{raw_data_t, RawData, RawMeta};
+use taos_query::prelude::tokio::sync::oneshot;
+use taos_query::prelude::tokio::{self, time};
+use taos_query::prelude::{RawError, RawResult};
+use taos_query::tmq::{
+    AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta, IsOffset,
+    MessageSet, Timeout, Timing, VGroupId,
 };
+use taos_query::util::Edition;
+use taos_query::{Dsn, IntoDsn, RawBlock};
 
-use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t, TaosBuilder};
+use crate::raw::{ApiEntry, RawRes};
+use crate::types::tmq_res_t;
+use crate::TaosBuilder;
 
 mod raw;
 
@@ -674,7 +676,6 @@ impl AsAsyncConsumer for Consumer {
 #[cfg(test)]
 mod tests {
     use super::TmqBuilder;
-
     use crate::TaosBuilder;
 
     #[test]
@@ -2480,11 +2481,9 @@ mod async_tests {
         use std::str::FromStr;
 
         use itertools::Itertools;
-        use taos_query::{
-            prelude::TryStreamExt,
-            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
-            AsyncQueryable, AsyncTBuilder, Dsn,
-        };
+        use taos_query::prelude::TryStreamExt;
+        use taos_query::tmq::{AsAsyncConsumer, IsAsyncData, IsOffset};
+        use taos_query::{AsyncQueryable, AsyncTBuilder, Dsn};
 
         use crate::TaosBuilder;
 
@@ -2570,11 +2569,9 @@ mod async_tests {
         use std::str::FromStr;
 
         use itertools::Itertools;
-        use taos_query::{
-            prelude::TryStreamExt,
-            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
-            AsyncQueryable, AsyncTBuilder, Dsn,
-        };
+        use taos_query::prelude::TryStreamExt;
+        use taos_query::tmq::{AsAsyncConsumer, IsAsyncData, IsOffset};
+        use taos_query::{AsyncQueryable, AsyncTBuilder, Dsn};
         use tracing::debug;
 
         use crate::TaosBuilder;
@@ -2672,11 +2669,9 @@ mod async_tests {
         use std::str::FromStr;
 
         use itertools::Itertools;
-        use taos_query::{
-            prelude::TryStreamExt,
-            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
-            AsyncQueryable, AsyncTBuilder, Dsn,
-        };
+        use taos_query::prelude::TryStreamExt;
+        use taos_query::tmq::{AsAsyncConsumer, IsAsyncData, IsOffset};
+        use taos_query::{AsyncQueryable, AsyncTBuilder, Dsn};
         use tracing::debug;
 
         use crate::TaosBuilder;
@@ -2774,10 +2769,8 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_tmq_poll() -> anyhow::Result<()> {
-        use taos_query::{
-            prelude::{AsAsyncConsumer, AsyncQueryable, AsyncTBuilder, TryStreamExt},
-            tmq::Timeout,
-        };
+        use taos_query::prelude::{AsAsyncConsumer, AsyncQueryable, AsyncTBuilder, TryStreamExt};
+        use taos_query::tmq::Timeout;
 
         use crate::{TaosBuilder, TmqBuilder};
 

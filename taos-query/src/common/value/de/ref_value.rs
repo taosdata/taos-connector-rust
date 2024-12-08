@@ -1,9 +1,8 @@
+use serde::de::{self, DeserializeSeed, IntoDeserializer, Visitor};
+use serde::forward_to_deserialize_any;
+
 use super::super::*;
 use super::*;
-use serde::{
-    de::{self, DeserializeSeed, IntoDeserializer, Visitor},
-    forward_to_deserialize_any,
-};
 
 impl<'de> serde::de::EnumAccess<'de> for &Value {
     type Error = Error;
@@ -367,13 +366,14 @@ impl<'de, 'b: 'de> serde::de::IntoDeserializer<'de, Error> for &'b Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn value_de_value_ref() {
         use std::cmp::PartialEq;
+
         use Value::*;
         macro_rules! _de_value {
             ($($v:expr) *) => {

@@ -1,4 +1,5 @@
-use std::{io::Read, time::Instant};
+use std::io::Read;
+use std::time::Instant;
 
 use clap::Parser;
 use taos::*;

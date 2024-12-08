@@ -1,7 +1,8 @@
-use std::{borrow::Cow, fmt::Debug, ops::Deref};
-
 #[cfg(nightly)]
 use std::backtrace::Backtrace;
+use std::borrow::Cow;
+use std::fmt::Debug;
+use std::ops::Deref;
 
 use thiserror::Error;
 

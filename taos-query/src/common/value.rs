@@ -1,9 +1,12 @@
-use std::{borrow::Cow, fmt::Display, str::Utf8Error};
+use std::borrow::Cow;
+use std::fmt::Display;
+use std::str::Utf8Error;
 
-use super::{Timestamp, Ty};
 use bytes::Bytes;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
+
+use super::{Timestamp, Ty};
 
 #[derive(Debug, Clone)]
 pub enum BorrowedValue<'b> {
@@ -759,9 +762,8 @@ mod de;
 
 #[cfg(test)]
 mod tests {
-    use crate::common::Precision;
-
     use super::*;
+    use crate::common::Precision;
 
     #[test]
     fn test_borrowed_value_to_native() {

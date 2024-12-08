@@ -1,13 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serde_with::serde_as;
-use serde_with::NoneAsEmptyString;
+use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::prelude::RawError as Error;
 
+use super::StmtPrepareResult;
 use crate::query::infra::{ToMessage, WsConnReq};
 use crate::stmt::{StmtField, StmtParam, StmtUseResult};
-
-use super::StmtPrepareResult;
 
 pub type ReqId = u64;
 

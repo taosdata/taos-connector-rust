@@ -67,17 +67,13 @@ pub(crate) use lengths::*;
 
 mod from;
 
-use crate::{
-    common::{BorrowedValue, Ty, Value},
-    Precision,
-};
+use std::ffi::c_void;
+use std::fmt::{Debug, Display};
+use std::io::Write;
+use std::iter::FusedIterator;
 
-use std::{
-    ffi::c_void,
-    fmt::{Debug, Display},
-    io::Write,
-    iter::FusedIterator,
-};
+use crate::common::{BorrowedValue, Ty, Value};
+use crate::Precision;
 
 pub(crate) trait IsColumnView: Sized {
     #[allow(dead_code)]

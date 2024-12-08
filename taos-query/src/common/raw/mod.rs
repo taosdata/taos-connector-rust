@@ -1,27 +1,22 @@
 #![allow(clippy::size_of_in_element_count)]
 #![allow(clippy::type_complexity)]
 
-use crate::common::{BorrowedValue, Field, Precision, Ty, Value};
+use std::cell::{Cell, RefCell, UnsafeCell};
+use std::collections::VecDeque;
+use std::ffi::c_void;
+use std::fmt::{Debug, Display};
+use std::io::Cursor;
+use std::ops::Deref;
+use std::ptr::NonNull;
+use std::rc::Rc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 use rayon::prelude::*;
-
 use serde::Deserialize;
 use taos_error::Error;
 
-use std::{
-    cell::{Cell, RefCell, UnsafeCell},
-    collections::VecDeque,
-    ffi::c_void,
-    fmt::Debug,
-    fmt::Display,
-    ops::Deref,
-    ptr::NonNull,
-    rc::Rc,
-};
-
-use std::io::Cursor;
+use crate::common::{BorrowedValue, Field, Precision, Ty, Value};
 
 pub mod layout;
 pub mod meta;
@@ -34,18 +29,15 @@ use layout::Layout;
 #[allow(clippy::should_implement_trait)]
 pub mod views;
 
-pub use views::ColumnView;
-
-use views::*;
-
 pub use data::*;
 pub use meta::*;
+pub use views::ColumnView;
+use views::*;
 
 mod de;
 mod rows;
-pub use rows::*;
-
 use derive_builder::Builder;
+pub use rows::*;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(1))]
@@ -1266,8 +1258,9 @@ impl crate::prelude::AsyncInlinable for RawBlock {
     async fn read_optional_inlined<R: tokio::io::AsyncRead + Send + Unpin>(
         reader: &mut R,
     ) -> std::io::Result<Option<Self>> {
-        use crate::util::AsyncInlinableRead;
         use tokio::io::*;
+
+        use crate::util::AsyncInlinableRead;
         let layout = reader.read_u32_le().await?;
         if layout == 0xFFFFFFFF {
             return Ok(None);
@@ -1310,8 +1303,9 @@ impl crate::prelude::AsyncInlinable for RawBlock {
         &self,
         wtr: &mut W,
     ) -> std::io::Result<usize> {
-        use crate::util::AsyncInlinableWrite;
         use tokio::io::*;
+
+        use crate::util::AsyncInlinableWrite;
 
         let layout = self.layout();
         wtr.write_u32_le(layout.as_inner()).await?;
@@ -1431,8 +1425,9 @@ impl MultiBlockCursor {
     }
 
     fn get_str(&mut self) -> Result<String, std::io::Error> {
-        use byteorder::ReadBytesExt;
         use std::io::Read;
+
+        use byteorder::ReadBytesExt;
 
         let len = self.cursor.read_u32::<byteorder::LittleEndian>()?;
         let mut str = vec![0; len as usize];
@@ -1443,8 +1438,9 @@ impl MultiBlockCursor {
     }
 
     fn parse_schema(&mut self) -> Result<String, std::io::Error> {
-        use byteorder::ReadBytesExt;
         use std::io::Read;
+
+        use byteorder::ReadBytesExt;
         let _taos_type = self.cursor.read_u8()?;
         self.cursor.read_u8()?; // skip flag
         self.parse_zigzag_variable_byte_integer()?; // skip field len
@@ -1462,8 +1458,9 @@ impl MultiBlockCursor {
 
 #[tokio::test]
 async fn test_raw_from_v2() {
-    use crate::prelude::AsyncInlinable;
     use std::ops::Deref;
+
+    use crate::prelude::AsyncInlinable;
     // pretty_env_logger::formatted_builder()
     //     .filter_level(tracing::LevelFilter::Trace)
     //     .init();
@@ -1536,8 +1533,9 @@ async fn test_raw_from_v2() {
 fn test_v2_full() {
     let bytes = include_bytes!("../../../tests/v2.block.gz");
 
-    use flate2::read::GzDecoder;
     use std::io::prelude::*;
+
+    use flate2::read::GzDecoder;
     let mut buf = Vec::new();
     let len = GzDecoder::new(&bytes[..]).read_to_end(&mut buf).unwrap();
     assert_eq!(len, 66716);

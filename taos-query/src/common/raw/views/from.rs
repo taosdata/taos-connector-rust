@@ -1,6 +1,5 @@
-use crate::common::itypes::{INChar, IVarChar};
-
 use super::*;
+use crate::common::itypes::{INChar, IVarChar};
 
 impl From<Vec<bool>> for ColumnView {
     fn from(values: Vec<bool>) -> Self {

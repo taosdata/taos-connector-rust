@@ -1,9 +1,19 @@
+use std::fmt::Debug;
+use std::future::Future;
+use std::io::Write;
+use std::mem::transmute;
+use std::ops::ControlFlow;
+use std::pin::Pin;
+// use std::io::Write;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use std::task::Poll;
+use std::time::{Duration, Instant};
+
 use anyhow::bail;
 use futures::stream::SplitStream;
 use futures::{FutureExt, SinkExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
-use std::future::Future;
-use std::ops::ControlFlow;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::InlinableWrite;
@@ -12,23 +22,13 @@ use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::sync::watch;
+use tokio::time::{self, timeout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{instrument, trace, Instrument};
 
-use tokio::time::{self, timeout};
-
-use super::{infra::*, TaosBuilder};
-
-use std::fmt::Debug;
-use std::io::Write;
-use std::mem::transmute;
-use std::pin::Pin;
-// use std::io::Write;
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
-use std::task::Poll;
-use std::time::{Duration, Instant};
+use super::infra::*;
+use super::TaosBuilder;
 
 // type WsSender = flume::Sender<WsMessage<bytes::Bytes>>;
 type WsSender = flume::Sender<Message>;
@@ -1361,9 +1361,10 @@ impl AsyncQueryable for WsTaos {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use flume::unbounded;
     use futures::TryStreamExt;
+
+    use super::*;
 
     #[test]
     fn test_errno() {

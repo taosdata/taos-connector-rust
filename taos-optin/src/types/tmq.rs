@@ -1,4 +1,5 @@
-use std::{borrow::Cow, ffi::c_void};
+use std::borrow::Cow;
+use std::ffi::c_void;
 
 use taos_query::prelude::RawError;
 

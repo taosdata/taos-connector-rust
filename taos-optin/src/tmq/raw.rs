@@ -3,28 +3,19 @@ pub(super) use list::Topics;
 pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
-    use std::{
-        ffi::CStr,
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        },
-    };
+    use std::ffi::CStr;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
-    use taos_query::{
-        prelude::tokio::sync::oneshot,
-        tmq::{Assignment, VGroupId},
-        RawError,
-    };
-
-    use crate::{
-        into_c_str::IntoCStr,
-        raw::{ApiEntry, TmqApi},
-        types::{tmq_resp_err_t, tmq_t, SafeTmqT},
-        RawRes, RawResult,
-    };
+    use taos_query::prelude::tokio::sync::oneshot;
+    use taos_query::tmq::{Assignment, VGroupId};
+    use taos_query::RawError;
 
     use super::Topics;
+    use crate::into_c_str::IntoCStr;
+    use crate::raw::{ApiEntry, TmqApi};
+    use crate::types::{tmq_resp_err_t, tmq_t, SafeTmqT};
+    use crate::{RawRes, RawResult};
 
     #[derive(Debug)]
     pub(crate) struct RawTmq {
@@ -432,11 +423,9 @@ pub(super) mod conf {
     use taos_query::{value_is_true, Dsn};
     use types::tmq_resp_err_t;
 
+    use crate::raw::TmqConfApi;
+    use crate::types::{tmq_conf_t, tmq_t};
     use crate::*;
-    use crate::{
-        raw::TmqConfApi,
-        types::{tmq_conf_t, tmq_t},
-    };
 
     #[derive(Debug)]
     struct Settings {
@@ -631,7 +620,9 @@ pub(super) mod list {
 
     use taos_query::prelude::RawResult;
 
-    use crate::{into_c_str::IntoCStr, raw::TmqListApi, types::tmq_list_t};
+    use crate::into_c_str::IntoCStr;
+    use crate::raw::TmqListApi;
+    use crate::types::tmq_list_t;
 
     #[derive(Debug)]
     pub(crate) struct Topics {

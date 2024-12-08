@@ -1,25 +1,17 @@
-use std::{
-    collections::HashMap,
-    ffi::{c_void, CStr, CString},
-    fmt::Debug,
-    os::raw::{c_char, c_int},
-    str::FromStr,
-    time::Duration,
-};
+use std::collections::HashMap;
+use std::ffi::{c_void, CStr, CString};
+use std::fmt::Debug;
+use std::os::raw::{c_char, c_int};
+use std::str::FromStr;
+use std::time::Duration;
 
 use taos_error::Code;
-
-use taos_query::{
-    common::{Precision, RawBlock as Block, Ty},
-    tmq::{self, AsConsumer, IsData, IsOffset},
-    Dsn, TBuilder,
-};
-
-use taos_ws::{
-    consumer::{Data, Offset},
-    query::Error,
-    Consumer, TmqBuilder,
-};
+use taos_query::common::{Precision, RawBlock as Block, Ty};
+use taos_query::tmq::{self, AsConsumer, IsData, IsOffset};
+use taos_query::{Dsn, TBuilder};
+use taos_ws::consumer::{Data, Offset};
+use taos_ws::query::Error;
+use taos_ws::{Consumer, TmqBuilder};
 
 use crate::*;
 

@@ -68,9 +68,10 @@ fn foreign_fn_to_item_fn(item: ForeignItemFn) -> ItemFn {
 
 #[cfg(test)]
 mod tests {
-    use super::cfg;
     use quote::quote;
     use syn::{ForeignItemFn, ItemFn};
+
+    use super::cfg;
 
     #[test]
     fn nothing() {

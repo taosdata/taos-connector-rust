@@ -1,7 +1,5 @@
 pub use taos_query;
-pub use taos_query::prelude::*;
-
-pub use taos_query::prelude::RawError as Error;
+pub use taos_query::prelude::{RawError as Error, *};
 
 pub type TaosPool = taos_query::prelude::Pool<TaosBuilder>;
 
@@ -9,9 +7,7 @@ pub type TaosPool = taos_query::prelude::Pool<TaosBuilder>;
 pub mod sync {
     pub use taos_query::prelude::sync::*;
 
-    pub use super::Stmt;
-    pub use super::{Consumer, MessageSet, Offset, TmqBuilder};
-    pub use super::{Taos, TaosBuilder};
+    pub use super::{Consumer, MessageSet, Offset, Stmt, Taos, TaosBuilder, TmqBuilder};
 }
 
 #[cfg(all(feature = "ws", feature = "optin"))]
@@ -28,15 +24,13 @@ pub use tmq::{Consumer, Data, MessageSet, Meta, Offset, TmqBuilder};
 mod query;
 #[cfg(all(feature = "ws", feature = "optin"))]
 pub use query::*;
-
+#[cfg(all(feature = "optin", not(feature = "ws")))]
+pub use sys::tmq::Offset;
 #[cfg(all(feature = "ws", not(feature = "optin")))]
 pub use taos_ws::*;
 
 #[cfg(all(feature = "optin", not(feature = "ws")))]
 pub use crate::sys::*;
-
-#[cfg(all(feature = "optin", not(feature = "ws")))]
-pub use sys::tmq::Offset;
 
 #[cfg(all(not(feature = "ws"), not(feature = "optin")))]
 compile_error!("Either feature \"ws\" or \"native\"|"optin" or both must be enabled for this crate.");
@@ -48,7 +42,6 @@ compile_error!("Either feature \"ws\" or \"native\"|"optin" or both must be enab
 
 #[cfg(feature = "optin")]
 pub(crate) use taos_optin as sys;
-
 #[cfg(not(feature = "optin"))]
 #[cfg(feature = "native")]
 pub(crate) use taos_sys as sys;

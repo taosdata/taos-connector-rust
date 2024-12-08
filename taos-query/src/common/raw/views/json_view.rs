@@ -1,14 +1,13 @@
-use std::{ffi::c_void, fmt::Debug};
-
-use super::{IsColumnView, Offsets};
-use crate::{
-    common::{BorrowedValue, Ty},
-    prelude::InlinableWrite,
-    util::InlineJson,
-};
+use std::ffi::c_void;
+use std::fmt::Debug;
 
 use bytes::Bytes;
 use itertools::Itertools;
+
+use super::{IsColumnView, Offsets};
+use crate::common::{BorrowedValue, Ty};
+use crate::prelude::InlinableWrite;
+use crate::util::InlineJson;
 
 #[derive(Debug, Clone)]
 pub struct JsonView {

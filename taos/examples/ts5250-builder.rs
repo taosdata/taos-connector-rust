@@ -1,7 +1,5 @@
-use std::{
-    ops::Deref,
-    time::{Duration, Instant},
-};
+use std::ops::Deref;
+use std::time::{Duration, Instant};
 
 use sync::MessageSet;
 use taos::*;

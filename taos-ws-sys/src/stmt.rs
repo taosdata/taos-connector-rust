@@ -5,8 +5,7 @@ use std::os::raw::*;
 use taos_query::common::Value;
 use taos_query::prelude::Itertools;
 use taos_query::stmt::Bindable;
-use taos_ws::stmt::StmtField as WsStmtField;
-use taos_ws::stmt::WsFieldsable;
+use taos_ws::stmt::{StmtField as WsStmtField, WsFieldsable};
 use taos_ws::Stmt;
 
 use crate::*;
@@ -389,8 +388,7 @@ impl TaosMultiBind {
     }
 
     pub fn to_json(&self) -> serde_json::Value {
-        use serde_json::json;
-        use serde_json::Value;
+        use serde_json::{json, Value};
         assert!(self.num > 0, "invalid bind value");
         let len = self.num as usize;
 

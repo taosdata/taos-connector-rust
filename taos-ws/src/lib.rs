@@ -2,12 +2,11 @@
 use std::fmt::{Debug, Display};
 
 use once_cell::sync::OnceCell;
-use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
-use tracing::warn;
-
 use taos_query::prelude::Code;
 use taos_query::util::Edition;
 use taos_query::{DsnError, IntoDsn, RawResult};
+use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
+use tracing::warn;
 
 pub mod stmt;
 pub use stmt::Stmt;
@@ -17,17 +16,12 @@ pub mod consumer;
 pub use consumer::{Consumer, Offset, TmqBuilder};
 
 pub mod query;
-pub use query::ResultSet;
-pub use query::Taos;
-
-use query::Error as QueryError;
-use query::WsConnReq;
-
+use query::{Error as QueryError, WsConnReq};
+pub use query::{ResultSet, Taos};
 pub(crate) use taos_query::block_in_place_or_global;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::MaybeTlsStream;
-use tokio_tungstenite::{connect_async_with_config, WebSocketStream};
+use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
@@ -546,14 +540,14 @@ impl TaosBuilder {
 #[cfg(test)]
 mod lib_tests {
 
-    use crate::{
-        query::infra::{ToMessage, WsRecv, WsSend},
-        *,
-    };
-    use futures::{SinkExt, StreamExt};
     use std::time::Duration;
+
+    use futures::{SinkExt, StreamExt};
     use tracing::*;
     use tracing_subscriber::util::SubscriberInitExt;
+
+    use crate::query::infra::{ToMessage, WsRecv, WsSend};
+    use crate::*;
 
     #[cfg(feature = "rustls")]
     #[tokio::test]

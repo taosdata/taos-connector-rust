@@ -1,22 +1,16 @@
-use std::{
-    fmt::{Display, Write},
-    ops::Deref,
-};
+use std::fmt::{Display, Write};
+use std::ops::Deref;
 
 use bytes::Bytes;
-
 use either::Either;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::{
-    common::{Field, Ty},
-    helpers::CompressOptions,
-    util::Inlinable,
-};
-
 use super::RawData;
+use crate::common::{Field, Ty};
+use crate::helpers::CompressOptions;
+use crate::util::Inlinable;
 
 #[derive(Debug, Clone)]
 pub struct RawMeta(RawData);
@@ -705,9 +699,8 @@ impl<'a> IntoIterator for &'a mut JsonMeta {
 
 #[cfg(test)]
 mod tests {
-    use crate::itypes::IsJson;
-
     use super::{JsonMeta, MetaUnit};
+    use crate::itypes::IsJson;
 
     #[test]
     fn test_json_meta_compress() {

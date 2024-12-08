@@ -1,34 +1,26 @@
-use bytes::Bytes;
+use std::cell::RefCell;
+use std::ffi::{c_void, CStr, CString};
+use std::fmt::{Debug, Display};
+use std::os::raw::{c_char, c_int};
+use std::str::Utf8Error;
+use std::string::FromUtf8Error;
 use std::thread;
-use std::{
-    cell::RefCell,
-    ffi::{c_void, CStr, CString},
-    fmt::{Debug, Display},
-    os::raw::{c_char, c_int},
-    str::Utf8Error,
-    string::FromUtf8Error,
-    time::Duration,
-};
-use taos_error::Code;
+use std::time::Duration;
 
-use taos_query::{
-    block_in_place_or_global,
-    common::{Field, RawBlock as Block, Timestamp},
-    common::{Precision, Ty},
-    common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder, SmlDataBuilderError},
-    prelude::RawError,
-    util::{hex, InlineBytes, InlineNChar, InlineStr},
-    DsnError, Fetchable, Queryable, TBuilder,
-};
-use taos_ws::{
-    consumer::Offset,
-    query::{Error, ResultSet, Taos},
-    TaosBuilder,
-};
-
+use bytes::Bytes;
 use cargo_metadata::MetadataCommand;
-
+use taos_error::Code;
+use taos_query::common::{
+    Field, Precision, RawBlock as Block, SchemalessPrecision, SchemalessProtocol, SmlDataBuilder,
+    SmlDataBuilderError, Timestamp, Ty,
+};
+use taos_query::prelude::RawError;
+use taos_query::util::{hex, InlineBytes, InlineNChar, InlineStr};
+use taos_query::{block_in_place_or_global, DsnError, Fetchable, Queryable, TBuilder};
+use taos_ws::consumer::Offset;
 pub use taos_ws::query::asyn::WS_ERROR_NO;
+use taos_ws::query::{Error, ResultSet, Taos};
+use taos_ws::TaosBuilder;
 
 pub mod stmt;
 pub mod tmq;

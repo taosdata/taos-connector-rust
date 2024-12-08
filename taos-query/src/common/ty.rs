@@ -1,9 +1,8 @@
-use serde::de::Visitor;
+use std::fmt::{self, Display};
 use std::os::raw::c_char;
-use std::{
-    fmt::{self, Display},
-    str::FromStr,
-};
+use std::str::FromStr;
+
+use serde::de::Visitor;
 
 /// TDengine data type enumeration.
 ///

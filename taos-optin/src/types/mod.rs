@@ -1,11 +1,14 @@
-use std::{fmt::Debug, mem::ManuallyDrop, os::raw::*, ptr};
+use std::fmt::Debug;
+use std::mem::ManuallyDrop;
+use std::os::raw::*;
+use std::ptr;
 
 mod field;
 use derive_more::Deref;
 pub(crate) use field::from_raw_fields;
+use taos_query::common::itypes::*;
 pub use taos_query::common::Ty;
-
-use taos_query::common::{itypes::*, ColumnView, Value};
+use taos_query::common::{ColumnView, Value};
 
 mod tmq;
 pub use tmq::*;

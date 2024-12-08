@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
-
 use std::ffi::{c_char, CStr};
 use std::future::Future;
 use std::os::raw::{c_int, c_void};
@@ -10,12 +9,12 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
-use crate::into_c_str::IntoCStr;
-use crate::types::TAOS_RES;
-use crate::{RawRes, RawTaos};
 use taos_query::prelude::RawError;
 
 use super::ApiEntry;
+use crate::into_c_str::IntoCStr;
+use crate::types::TAOS_RES;
+use crate::{RawRes, RawTaos};
 
 pub struct QueryFuture<'a> {
     raw: RawTaos,

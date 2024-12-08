@@ -1,9 +1,8 @@
+use serde::de::{self, DeserializeSeed, IntoDeserializer, Visitor};
+use serde::forward_to_deserialize_any;
+
 use super::super::*;
 use super::*;
-use serde::{
-    de::{self, DeserializeSeed, IntoDeserializer, Visitor},
-    forward_to_deserialize_any,
-};
 
 impl<'b, 'de: 'b> serde::de::EnumAccess<'de> for BorrowedValue<'b> {
     type Error = Error;
@@ -434,9 +433,9 @@ impl<'de> serde::de::IntoDeserializer<'de, Error> for BorrowedValue<'de> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn de_value_as_inner() {

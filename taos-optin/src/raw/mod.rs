@@ -1,37 +1,29 @@
 // use dlopen2::wrapper::{Container, WrapperApi};
 // use dlopen2::symbor::{Library, PtrOrNull, Ref, SymBorApi, Symbol};
+use std::borrow::Cow;
+use std::cell::UnsafeCell;
+use std::collections::HashMap;
+use std::ffi::{c_char, c_int, c_ulong, c_void, CStr, CString};
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex, Weak};
+use std::task::{Context, Poll, Waker};
+
 use dlopen2::raw::Library;
-use std::{
-    borrow::Cow,
-    cell::UnsafeCell,
-    collections::HashMap,
-    ffi::{c_char, c_int, c_ulong, c_void, CStr, CString},
-    path::{Path, PathBuf},
-    rc::Rc,
-    sync::{Arc, Mutex, Weak},
-    task::{Context, Poll, Waker},
-};
+use taos_query::common::{c_field_t, raw_data_t, RawData, SmlData};
+use taos_query::prelude::{Code, Field, Precision, RawError};
+use taos_query::tmq::Assignment;
+use taos_query::RawBlock;
 use tracing::instrument;
 
-use taos_query::{
-    common::{c_field_t, raw_data_t, RawData, SmlData},
-    prelude::{Code, Field, Precision, RawError},
-    tmq::Assignment,
-    RawBlock,
-};
-
-use crate::{
-    err_or,
-    into_c_str::IntoCStr,
-    types::{
-        from_raw_fields, taos_async_fetch_cb, taos_async_query_cb, tmq_commit_cb, tmq_conf_res_t,
-        tmq_conf_t, tmq_list_t, tmq_res_t, tmq_resp_err_t, tmq_t, TaosMultiBind, TAOS, TAOS_RES,
-        TAOS_ROW, TAOS_STMT, TSDB_OPTION,
-    },
-    Auth,
-};
-
 use self::query_future::QueryFuture;
+use crate::into_c_str::IntoCStr;
+use crate::types::{
+    from_raw_fields, taos_async_fetch_cb, taos_async_query_cb, tmq_commit_cb, tmq_conf_res_t,
+    tmq_conf_t, tmq_list_t, tmq_res_t, tmq_resp_err_t, tmq_t, TaosMultiBind, TAOS, TAOS_RES,
+    TAOS_ROW, TAOS_STMT, TSDB_OPTION,
+};
+use crate::{err_or, Auth};
 
 mod query_future;
 

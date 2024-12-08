@@ -1,14 +1,11 @@
-use std::{marker::PhantomData, ptr::NonNull};
+use std::marker::PhantomData;
+use std::ptr::NonNull;
 
-use serde::{
-    de::{DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor},
-    Deserializer,
-};
+use serde::de::{DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor};
+use serde::Deserializer;
 
-use crate::{
-    common::{BorrowedValue, Value},
-    RawBlock,
-};
+use crate::common::{BorrowedValue, Value};
+use crate::RawBlock;
 
 pub struct IntoRowsIter<'a> {
     pub(crate) raw: RawBlock,

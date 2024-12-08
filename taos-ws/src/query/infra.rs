@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
-use serde_with::NoneAsEmptyString;
+use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::common::{Precision, Ty};
 use taos_query::prelude::RawError;
 

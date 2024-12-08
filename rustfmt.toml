@@ -3,5 +3,3 @@ style_edition = "2021"
 imports_granularity = "Module"
 group_imports = "StdExternalCrate"
 use_field_init_shorthand = true
-match_block_trailing_comma = true
-wrap_comments = true

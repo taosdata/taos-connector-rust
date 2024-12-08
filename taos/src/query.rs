@@ -526,10 +526,8 @@ mod tests {
 
     use std::str::FromStr;
 
-    use taos_query::common::SchemalessPrecision;
-    use taos_query::common::SchemalessProtocol;
-    use taos_query::common::SmlDataBuilder;
-    use taos_query::{common::Timestamp, RawResult, TBuilder};
+    use taos_query::common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder, Timestamp};
+    use taos_query::{RawResult, TBuilder};
 
     use super::TaosBuilder;
 
@@ -1151,8 +1149,9 @@ mod tests {
 
     #[test]
     fn test_ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
-        use crate::TmqBuilder;
         use taos_query::prelude::sync::*;
+
+        use crate::TmqBuilder;
 
         std::env::set_var("RUST_LOG", "taos=trace");
         // pretty_env_logger::init();
@@ -1255,14 +1254,10 @@ mod tests {
 #[cfg(test)]
 mod async_tests {
     use anyhow::Context;
-    use taos_query::common::SchemalessPrecision;
-    use taos_query::common::SchemalessProtocol;
-    use taos_query::common::SmlDataBuilder;
+    use taos_query::common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder};
     use taos_query::RawResult;
 
-    use crate::AsyncQueryable;
-    use crate::AsyncTBuilder;
-    use crate::TaosBuilder;
+    use crate::{AsyncQueryable, AsyncTBuilder, TaosBuilder};
 
     #[tokio::test()]
     #[ignore]

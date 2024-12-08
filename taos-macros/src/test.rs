@@ -391,9 +391,10 @@ pub(crate) fn test(
 
 #[cfg(test)]
 mod tests {
-    use super::Attr;
     use proc_macro2::*;
     use quote::quote;
+
+    use super::Attr;
 
     #[test]
     fn default_sync() {

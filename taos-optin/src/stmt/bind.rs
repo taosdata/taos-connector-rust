@@ -1,4 +1,5 @@
-use taos_query::common::{itypes::IsValue, Ty};
+use taos_query::common::itypes::IsValue;
+use taos_query::common::Ty;
 
 use crate::types::{BindFrom, TaosBindV2, TaosBindV3};
 impl<T> From<&T> for TaosBindV2
@@ -148,8 +149,9 @@ mod tests_v2 {
 #[cfg(test)]
 mod tests_v3 {
 
-    use crate::types::TaosBindV3 as TaosBind;
     use taos_query::common::itypes::IVarChar;
+
+    use crate::types::TaosBindV3 as TaosBind;
 
     #[test]
     fn bind_bool() {

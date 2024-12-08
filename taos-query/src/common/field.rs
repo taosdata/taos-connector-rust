@@ -2,9 +2,9 @@ use std::fmt::{Debug, Display};
 
 use serde::{Deserialize, Serialize};
 
+use super::ty::Ty;
+use super::views::ColSchema;
 use crate::util::{Inlinable, InlinableRead, InlinableWrite};
-
-use super::{ty::Ty, views::ColSchema};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
