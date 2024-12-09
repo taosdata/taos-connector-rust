@@ -1,4 +1,33 @@
+#![allow(unused_variables)]
+
 use std::ffi::{c_char, c_ulong, c_void};
+
+use crate::{
+    query::{__taos_async_fn_t, TAOS_FIELD},
+    stmt::TAOS_FIELD_E,
+    TAOS, TAOS_RES,
+};
+
+#[no_mangle]
+pub extern "C" fn taos_connect_auth(
+    ip: *const c_char,
+    user: *const c_char,
+    auth: *const c_char,
+    db: *const c_char,
+    port: u16,
+) -> *mut TAOS {
+    todo!("taos_connect_auth");
+}
+
+#[no_mangle]
+pub extern "C" fn taos_connect_dsn_auth(
+    dsn: *const c_char,
+    user: *const c_char,
+    auth: *const c_char,
+    db: *const c_char,
+) -> *mut TAOS {
+    todo!("taos_connect_dsn_auth");
+}
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
@@ -23,20 +52,12 @@ pub struct setConfRet {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_set_config(_config: *const c_char) -> setConfRet {
+pub extern "C" fn taos_set_config(config: *const c_char) -> setConfRet {
     todo!("taos_set_config");
 }
 
-pub type TAOS = c_void;
-
 #[allow(non_camel_case_types)]
 pub type TAOS_STMT2 = c_void;
-
-#[allow(non_camel_case_types)]
-pub type TAOS_RES = c_void;
-
-#[allow(non_camel_case_types)]
-pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: i32);
 
 #[repr(C)]
 #[allow(non_snake_case)]
@@ -68,80 +89,229 @@ pub struct TAOS_STMT2_BINDV {
     pub bind_cols: *mut *mut TAOS_STMT2_BIND,
 }
 
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub enum TAOS_FIELD_T {
+    TAOS_FIELD_COL = 1,
+    TAOS_FIELD_TAG = 2,
+    TAOS_FIELD_QUERY = 3,
+    TAOS_FIELD_TBNAME = 4,
+}
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_FIELD_STB {
+    pub name: [c_char; 65],
+    pub r#type: i8,
+    pub precision: u8,
+    pub scale: u8,
+    pub bytes: i32,
+    pub field_type: u8,
+}
+
 #[no_mangle]
 pub extern "C" fn taos_stmt2_init(
-    _taos: *mut TAOS,
-    _option: *mut TAOS_STMT2_OPTION,
+    taos: *mut TAOS,
+    option: *mut TAOS_STMT2_OPTION,
 ) -> *mut TAOS_STMT2 {
     todo!("taos_stmt2_init");
 }
 
 #[no_mangle]
 pub extern "C" fn taos_stmt2_prepare(
-    _stmt: *mut TAOS_STMT2,
-    _sql: *const c_char,
-    _length: c_ulong,
+    stmt: *mut TAOS_STMT2,
+    sql: *const c_char,
+    length: c_ulong,
 ) -> i32 {
     todo!("taos_stmt2_prepare");
 }
 
 #[no_mangle]
 pub extern "C" fn taos_stmt2_bind_param(
-    _stmt: *mut TAOS_STMT2,
-    _bindv: *mut TAOS_STMT2_BINDV,
-    _col_idx: i32,
+    stmt: *mut TAOS_STMT2,
+    bindv: *mut TAOS_STMT2_BINDV,
+    col_idx: i32,
 ) -> i32 {
     todo!("taos_stmt2_bind_param");
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt2_exec(_stmt: *mut TAOS_STMT2, _affected_rows: *mut i32) -> i32 {
+pub extern "C" fn taos_stmt2_exec(stmt: *mut TAOS_STMT2, affected_rows: *mut i32) -> i32 {
     todo!("taos_stmt2_exec");
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt2_close(_stmt: *mut TAOS_STMT2) -> i32 {
+pub extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> i32 {
     todo!("taos_stmt2_close");
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt2_is_insert(_stmt: *mut TAOS_STMT2, _insert: *mut i32) -> i32 {
+pub extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mut i32) -> i32 {
     todo!("taos_stmt2_is_insert");
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt2_result(_stmt: *mut TAOS_STMT2) -> *mut TAOS_RES {
+pub extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_RES {
     todo!("taos_stmt2_result");
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt2_error(_stmt: *mut TAOS_STMT2) -> *const c_char {
+pub extern "C" fn taos_stmt2_error(stmt: *mut TAOS_STMT2) -> *const c_char {
     todo!("taos_stmt2_error");
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[no_mangle]
+pub extern "C" fn taos_stmt2_get_fields(
+    stmt: *mut TAOS_STMT2,
+    field_type: TAOS_FIELD_T,
+    count: *mut i32,
+    fields: *mut *mut TAOS_FIELD_E,
+) -> i32 {
+    todo!("taos_stmt2_get_fields")
+}
 
-    #[test]
-    #[ignore]
-    fn test_taos_set_config() {
-        let config = c"config";
-        let _ = taos_set_config(config.as_ptr());
-    }
+#[no_mangle]
+pub extern "C" fn taos_stmt2_get_stb_fields(
+    stmt: *mut TAOS_STMT2,
+    count: *mut i32,
+    fields: *mut *mut TAOS_FIELD_STB,
+) -> i32 {
+    todo!("taos_stmt2_get_stb_fields")
+}
 
-    #[test]
-    #[ignore]
-    fn test_taos_stmt2_init() {
-        let taos = std::ptr::null_mut();
-        extern "C" fn async_exec_fn(_param: *mut c_void, _res: *mut TAOS_RES, _code: i32) {}
-        let mut option = TAOS_STMT2_OPTION {
-            reqid: 0,
-            singleStbInsert: false,
-            singleTableBindOnce: false,
-            asyncExecFn: async_exec_fn,
-            userdata: std::ptr::null_mut(),
-        };
-        let _ = taos_stmt2_init(taos, &mut option);
-    }
+#[no_mangle]
+pub extern "C" fn taos_stmt2_free_fields(stmt: *mut TAOS_STMT2, fields: *mut TAOS_FIELD_E) {
+    todo!("taos_stmt2_free_fields")
+}
+
+#[no_mangle]
+pub extern "C" fn taos_stmt2_free_stb_fields(stmt: *mut TAOS_STMT2, fields: *mut TAOS_FIELD_STB) {
+    todo!("taos_stmt2_free_stb_fields")
+}
+
+#[allow(non_camel_case_types)]
+pub type __taos_async_whitelist_fn_t = extern "C" fn(
+    param: *mut c_void,
+    code: i32,
+    taos: *mut TAOS,
+    numOfWhiteLists: i32,
+    pWhiteLists: *mut u64,
+);
+
+#[no_mangle]
+pub extern "C" fn taos_fetch_whitelist_a(
+    taos: *mut TAOS,
+    fp: __taos_async_whitelist_fn_t,
+    param: *mut c_void,
+) {
+    todo!("taos_fetch_whitelist_a");
+}
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct tmq_raw_data {
+    pub raw: *mut c_void,
+    pub raw_len: u32,
+    pub raw_type: u16,
+}
+
+#[no_mangle]
+pub extern "C" fn tmq_get_raw(res: *mut TAOS_RES, raw: *mut tmq_raw_data) -> i32 {
+    todo!("tmq_get_raw");
+}
+
+#[no_mangle]
+pub extern "C" fn tmq_write_raw(taos: *mut TAOS, raw: tmq_raw_data) -> i32 {
+    todo!("tmq_write_raw");
+}
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn taos_write_raw_block(
+    taos: *mut TAOS,
+    numOfRows: i32,
+    pData: *mut c_char,
+    tbname: *const c_char,
+) -> i32 {
+    todo!("taos_write_raw_block");
+}
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn taos_write_raw_block_with_reqid(
+    taos: *mut TAOS,
+    numOfRows: i32,
+    pData: *mut c_char,
+    tbname: *const c_char,
+    reqid: i64,
+) -> i32 {
+    todo!("taos_write_raw_block_with_reqid");
+}
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn taos_write_raw_block_with_fields(
+    taos: *mut TAOS,
+    rows: i32,
+    pData: *mut c_char,
+    tbname: *const c_char,
+    fields: *mut TAOS_FIELD,
+    numFields: i32,
+) -> i32 {
+    todo!("taos_write_raw_block_with_fields");
+}
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn taos_write_raw_block_with_fields_with_reqid(
+    taos: *mut TAOS,
+    rows: i32,
+    pData: *mut c_char,
+    tbname: *const c_char,
+    fields: *mut TAOS_FIELD,
+    numFields: i32,
+    reqid: i64,
+) -> i32 {
+    todo!("taos_write_raw_block_with_fields_with_reqid");
+}
+
+#[no_mangle]
+pub extern "C" fn tmq_free_raw(raw: tmq_raw_data) {
+    todo!("tmq_free_raw");
+}
+
+#[no_mangle]
+pub extern "C" fn tmq_get_json_meta(res: *mut TAOS_RES) -> *const c_char {
+    todo!("tmq_get_json_meta");
+}
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn tmq_free_json_meta(jsonMeta: *mut c_char) {
+    todo!("tmq_free_json_meta");
+}
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub enum TSDB_SERVER_STATUS {
+    TSDB_SRV_STATUS_UNAVAILABLE = 0,
+    TSDB_SRV_STATUS_NETWORK_OK = 1,
+    TSDB_SRV_STATUS_SERVICE_OK = 2,
+    TSDB_SRV_STATUS_SERVICE_DEGRADED = 3,
+    TSDB_SRV_STATUS_EXTING = 4,
+}
+
+#[no_mangle]
+pub extern "C" fn taos_check_server_status(
+    fqdn: *const c_char,
+    port: i32,
+    details: *mut c_char,
+    maxlen: i32,
+) -> TSDB_SERVER_STATUS {
+    todo!("taos_check_server_status");
+}
+
+#[no_mangle]
+pub extern "C" fn getBuildInfo() -> *const c_char {
+    todo!("getBuildInfo");
 }
