@@ -35,7 +35,7 @@ rustflags = [
     "-Wclippy::nonstandard_macro_braces",
     "-Wclippy::path_buf_push_overwrite",
     "-Wclippy::redundant_clone",
-    # "-Wclippy::redundant_pub_crate",
+    "-Wclippy::redundant_pub_crate",
     "-Wclippy::set_contains_or_insert",
     "-Wclippy::significant_drop_in_scrutinee",
     "-Wclippy::string_lit_as_bytes",

@@ -5,7 +5,7 @@ use std::ptr;
 
 mod field;
 use derive_more::Deref;
-pub(crate) use field::from_raw_fields;
+pub use field::from_raw_fields;
 use taos_query::common::itypes::*;
 pub use taos_query::common::Ty;
 use taos_query::common::{ColumnView, Value};

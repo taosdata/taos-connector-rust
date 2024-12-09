@@ -380,7 +380,8 @@ fn parse_database_requires(params: &[TokenTree]) -> Requires {
     }
     ret
 }
-pub(crate) fn test(
+
+pub fn test(
     attr: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {

@@ -141,7 +141,7 @@ impl AsyncBindable<super::Taos> for Stmt {
 }
 
 #[derive(Debug)]
-pub(crate) struct RawStmt {
+pub struct RawStmt {
     c: Arc<ApiEntry>,
     api: StmtApi,
     ptr: *mut TAOS_STMT,

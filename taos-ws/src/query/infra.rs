@@ -236,7 +236,7 @@ fn test_serde_recv_data() {
     dbg!(d);
 }
 
-pub(crate) trait ToMessage: Serialize {
+pub trait ToMessage: Serialize {
     fn to_msg(&self) -> tokio_tungstenite::tungstenite::Message {
         tokio_tungstenite::tungstenite::Message::Text(serde_json::to_string(self).unwrap())
     }

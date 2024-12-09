@@ -11,7 +11,7 @@ enum TaosBuilderInner {
 }
 
 #[derive(Debug)]
-pub(super) enum TaosInner {
+pub enum TaosInner {
     Native(crate::sys::Taos),
     Ws(taos_ws::Taos),
 }

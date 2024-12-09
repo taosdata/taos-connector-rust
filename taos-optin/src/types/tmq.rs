@@ -5,7 +5,7 @@ use taos_query::prelude::RawError;
 
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct tmq_resp_err_t(pub i32);
+pub struct tmq_resp_err_t(pub i32);
 
 impl tmq_resp_err_t {
     pub const OK: i32 = 0;
@@ -33,7 +33,7 @@ pub struct tmq_t {
 }
 
 #[derive(Debug)]
-pub(crate) struct SafeTmqT(pub(crate) *mut tmq_t);
+pub struct SafeTmqT(pub *mut tmq_t);
 
 unsafe impl Send for SafeTmqT {}
 unsafe impl Sync for SafeTmqT {}
@@ -84,7 +84,7 @@ impl tmq_conf_res_t {
     }
 }
 
-pub(crate) type tmq_commit_cb =
+pub type tmq_commit_cb =
     unsafe extern "C" fn(tmq: *mut tmq_t, resp: tmq_resp_err_t, param: *mut c_void);
 
 #[repr(C)]

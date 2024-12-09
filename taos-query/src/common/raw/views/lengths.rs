@@ -49,7 +49,7 @@ impl Deref for Lengths {
     }
 }
 
-pub(crate) struct LengthsMut(BytesMut);
+pub struct LengthsMut(BytesMut);
 
 impl<T: Into<BytesMut>> From<T> for LengthsMut {
     fn from(value: T) -> Self {

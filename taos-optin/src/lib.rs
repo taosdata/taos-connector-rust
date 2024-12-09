@@ -152,6 +152,7 @@ impl taos_query::AsyncQueryable for Taos {
             .map(ResultSet::new)
     }
 
+    #[allow(clippy::redundant_pub_crate)]
     #[tracing::instrument(level = "trace", skip_all)]
     async fn write_raw_meta(&self, meta: &taos_query::common::RawMeta) -> RawResult<()> {
         let raw = meta.as_raw_data_t();

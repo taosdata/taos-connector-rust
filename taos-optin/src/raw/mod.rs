@@ -208,7 +208,7 @@ pub struct ApiEntry {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct TmqListApi {
+pub struct TmqListApi {
     tmq_list_new: unsafe extern "C" fn() -> *mut tmq_list_t,
     tmq_list_append: unsafe extern "C" fn(arg1: *mut tmq_list_t, arg2: *const c_char) -> i32,
     tmq_list_destroy: unsafe extern "C" fn(list: *mut tmq_list_t),
@@ -261,7 +261,7 @@ impl TmqListApi {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct TmqConfApi {
+pub struct TmqConfApi {
     tmq_conf_new: unsafe extern "C" fn() -> *mut tmq_conf_t,
 
     tmq_conf_destroy: unsafe extern "C" fn(conf: *mut tmq_conf_t),
@@ -331,7 +331,7 @@ impl TmqConfApi {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct TmqApi {
+pub struct TmqApi {
     tmq_get_res_type: unsafe extern "C" fn(res: *mut TAOS_RES) -> tmq_res_t,
     tmq_get_table_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
     tmq_get_db_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
@@ -423,7 +423,7 @@ pub(crate) struct TmqApi {
 
 #[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
-pub(crate) struct StmtApi {
+pub struct StmtApi {
     pub(crate) taos_stmt_init: unsafe extern "C" fn(taos: *mut TAOS) -> *mut TAOS_STMT,
 
     pub(crate) taos_stmt_init_with_reqid:

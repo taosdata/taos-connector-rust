@@ -18,7 +18,7 @@ pub(super) mod tmq {
     use crate::{RawRes, RawResult};
 
     #[derive(Debug)]
-    pub(crate) struct RawTmq {
+    pub struct RawTmq {
         api: Arc<ApiEntry>,
         tmq_api: Arc<TmqApi>,
         tmq_ptr: *mut tmq_t,
@@ -625,7 +625,7 @@ pub(super) mod list {
     use crate::types::tmq_list_t;
 
     #[derive(Debug)]
-    pub(crate) struct Topics {
+    pub struct Topics {
         api: TmqListApi,
         ptr: *mut tmq_list_t,
     }

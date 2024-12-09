@@ -10,7 +10,7 @@ type Field = str;
 /// Row-based deserializer helper.
 ///
 /// 'b: field lifetime may go across the whole query.
-pub(crate) struct RecordDeserializer<'b, R>
+pub struct RecordDeserializer<'b, R>
 where
     R: IntoIterator<Item = (&'b Field, BorrowedValue<'b>)>,
 {

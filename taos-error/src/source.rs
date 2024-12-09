@@ -8,7 +8,7 @@ use thiserror::Error;
 
 /// Inner error source.
 #[derive(Error)]
-pub(super) enum Inner {
+pub enum Inner {
     /// Raw error message from taos C library.
     #[error("")]
     Empty {
