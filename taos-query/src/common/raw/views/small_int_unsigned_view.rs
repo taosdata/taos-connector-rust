@@ -1,10 +1,9 @@
 use std::ffi::c_void;
 
-use crate::common::{BorrowedValue, Ty};
+use bytes::Bytes;
 
 use super::{IsColumnView, NullBits, NullsIter};
-
-use bytes::Bytes;
+use crate::common::{BorrowedValue, Ty};
 
 type Item = u16;
 type View = USmallIntView;
@@ -20,8 +19,9 @@ impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::USmallInt
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter(iter.map(|v| v.to_u16()))
+        iter.map(|v| v.to_u16()).collect()
     }
 }
 
@@ -36,12 +36,12 @@ impl std::ops::Add for &View {
     type Output = View;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -147,8 +147,7 @@ impl USmallIntView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(BorrowedValue::USmallInt)
-            .unwrap_or(BorrowedValue::Null(Ty::USmallInt))
+            .map_or(BorrowedValue::Null(Ty::USmallInt), BorrowedValue::USmallInt)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -205,12 +204,12 @@ impl USmallIntView {
     }
 
     pub fn concat(&self, rhs: &View) -> View {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -228,7 +227,7 @@ pub struct USmallIntViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for USmallIntViewIter<'a> {
+impl Iterator for USmallIntViewIter<'_> {
     type Item = Option<Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -252,7 +251,7 @@ impl<'a> Iterator for USmallIntViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for USmallIntViewIter<'a> {
+impl ExactSizeIterator for USmallIntViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

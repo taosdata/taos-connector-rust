@@ -1,11 +1,10 @@
+use serde::de::{self, DeserializeSeed, IntoDeserializer, Visitor};
+use serde::forward_to_deserialize_any;
+
 use super::super::*;
 use super::*;
-use serde::{
-    de::{self, DeserializeSeed, IntoDeserializer, Visitor},
-    forward_to_deserialize_any,
-};
 
-impl<'de, 'v> serde::de::EnumAccess<'de> for &'v Value {
+impl<'de> serde::de::EnumAccess<'de> for &Value {
     type Error = Error;
 
     type Variant = UnitOnly;
@@ -29,7 +28,7 @@ struct EnumTimestampDeserializer<'v> {
     value: &'v Value,
 }
 
-impl<'v, 'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'v> {
+impl<'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'_> {
     type Error = Error;
 
     type Variant = VariantTimestampDeserializer;
@@ -169,8 +168,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
             UBigInt(v) => visitor.visit_u64(*v),
             Float(v) => visitor.visit_f32(*v),
             Double(v) => visitor.visit_f64(*v),
-            VarChar(v) => visitor.visit_borrowed_str(v),
-            NChar(v) => visitor.visit_borrowed_str(v),
+            VarChar(v) | NChar(v) => visitor.visit_borrowed_str(v),
             Json(v) => v
                 .clone()
                 .into_deserializer()
@@ -179,7 +177,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
             Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
             VarBinary(v) | Geometry(v) => visitor.visit_borrowed_bytes(v),
-            _ => Err(<Self::Error as de::Error>::custom(
+            Decimal(_) => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
         }
@@ -278,7 +276,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
                 visitor.visit_newtype_struct(v.as_slice().into_deserializer())
             }
             VarBinary(v) | Geometry(v) => visitor.visit_bytes(v),
-            _ => Err(<Self::Error as de::Error>::custom(
+            Decimal(_) => Err(<Self::Error as de::Error>::custom(
                 "un supported type to deserialize",
             )),
         }
@@ -368,13 +366,14 @@ impl<'de, 'b: 'de> serde::de::IntoDeserializer<'de, Error> for &'b Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn value_de_value_ref() {
         use std::cmp::PartialEq;
+
         use Value::*;
         macro_rules! _de_value {
             ($($v:expr) *) => {

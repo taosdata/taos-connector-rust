@@ -1,6 +1,5 @@
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local};
 use taos::*;
 
 #[tokio::main]
@@ -10,7 +9,7 @@ async fn main() -> anyhow::Result<()> {
 
     // subscribe
     let group = chrono::Local::now().timestamp_nanos();
-    let tmq = TmqBuilder::from_dsn(&format!(
+    let tmq = TmqBuilder::from_dsn(format!(
         "taos+ws://vm98:6041/?group.id={group}&experimental.snapshot.enable=true&timeout=5s&auto.offset.reset=earliest",
     ))?;
     println!("group id: {}", group);

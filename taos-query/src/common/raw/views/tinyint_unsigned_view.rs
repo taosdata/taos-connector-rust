@@ -1,10 +1,9 @@
 use std::ffi::c_void;
 
-use crate::common::{BorrowedValue, Ty};
+use bytes::Bytes;
 
 use super::{IsColumnView, NullBits, NullsIter};
-
-use bytes::Bytes;
+use crate::common::{BorrowedValue, Ty};
 
 type Item = u8;
 type View = UTinyIntView;
@@ -20,8 +19,9 @@ impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::USmallInt
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter(iter.map(|v| v.to_u8()))
+        iter.map(|v| v.to_u8()).collect()
     }
 }
 impl UTinyIntView {
@@ -101,8 +101,7 @@ impl UTinyIntView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(BorrowedValue::UTinyInt)
-            .unwrap_or(BorrowedValue::Null(Ty::UTinyInt))
+            .map_or(BorrowedValue::Null(Ty::UTinyInt), BorrowedValue::UTinyInt)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -159,12 +158,12 @@ impl UTinyIntView {
     }
 
     pub fn concat(&self, rhs: &View) -> View {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -182,7 +181,7 @@ pub struct UTinyIntViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for UTinyIntViewIter<'a> {
+impl Iterator for UTinyIntViewIter<'_> {
     type Item = Option<Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -206,7 +205,7 @@ impl<'a> Iterator for UTinyIntViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for UTinyIntViewIter<'a> {
+impl ExactSizeIterator for UTinyIntViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

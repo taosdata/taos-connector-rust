@@ -1,11 +1,10 @@
 use std::ffi::c_void;
 
-use crate::common::{BorrowedValue, Precision, Timestamp, Ty};
-
-use super::{IsColumnView, NullBits, NullsIter};
-
 use bytes::Bytes;
 use itertools::Itertools;
+
+use super::{IsColumnView, NullBits, NullsIter};
+use crate::common::{BorrowedValue, Precision, Timestamp, Ty};
 
 type Item = i64;
 type View = TimestampView;
@@ -26,16 +25,17 @@ impl IsColumnView for View {
         Self::from_nullable_timestamp(iter.map(|v| v.to_timestamp()).collect_vec())
     }
 }
+
 impl TimestampView {
-    pub fn from_millis(values: Vec<impl Into<Option<i64>>>) -> Self {
+    pub fn from_millis<T: Into<Option<i64>>>(values: Vec<T>) -> Self {
         TimestampMillisecondView::from_iter(values).into_inner()
     }
 
-    pub fn from_micros(values: Vec<impl Into<Option<i64>>>) -> Self {
+    pub fn from_micros<T: Into<Option<i64>>>(values: Vec<T>) -> Self {
         TimestampMicrosecondView::from_iter(values).into_inner()
     }
 
-    pub fn from_nanos(values: Vec<impl Into<Option<i64>>>) -> Self {
+    pub fn from_nanos<T: Into<Option<i64>>>(values: Vec<T>) -> Self {
         TimestampNanosecondView::from_iter(values).into_inner()
     }
 
@@ -48,6 +48,7 @@ impl TimestampView {
             Precision::Nanosecond => Self::from_nanos(values),
         }
     }
+
     pub fn from_nullable_timestamp(values: Vec<Option<Timestamp>>) -> Self {
         let precision = values
             .iter()
@@ -155,8 +156,7 @@ impl TimestampView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(BorrowedValue::Timestamp)
-            .unwrap_or(BorrowedValue::Null(Ty::Timestamp))
+            .map_or(BorrowedValue::Null(Ty::Timestamp), BorrowedValue::Timestamp)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -217,12 +217,12 @@ impl TimestampView {
     }
 
     pub fn concat(&self, rhs: &View) -> View {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -253,7 +253,7 @@ pub struct TimestampViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for TimestampViewIter<'a> {
+impl Iterator for TimestampViewIter<'_> {
     type Item = Option<Timestamp>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -283,7 +283,7 @@ impl<'a> Iterator for TimestampViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for TimestampViewIter<'a> {}
+impl ExactSizeIterator for TimestampViewIter<'_> {}
 
 pub struct TimestampMillisecondView(View);
 
