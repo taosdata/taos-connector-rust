@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tdengine_branch:
-        description: 'TDengine branch'
+        description: "TDengine branch"
         required: true
         type: string
 
@@ -141,7 +141,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           components: rustfmt, clippy, llvm-tools-preview
-          toolchain: stable
+          toolchain: nightly
           default: true
 
       - name: Install cargo-llvm-cov
