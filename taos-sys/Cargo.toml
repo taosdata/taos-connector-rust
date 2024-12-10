@@ -1,0 +1,23 @@
+[package]
+name = "taos-sys"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+categories.workspace = true
+description.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "taos"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+
+[build-dependencies]
+cbindgen = "0.27.0"
