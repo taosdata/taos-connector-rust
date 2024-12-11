@@ -10,6 +10,7 @@ pub mod sync {
     pub use taos_query::prelude::sync::*;
 
     pub use super::Stmt;
+    pub use super::Stmt2;
     pub use super::{Consumer, MessageSet, Offset, TmqBuilder};
     pub use super::{Taos, TaosBuilder};
 }
@@ -18,6 +19,11 @@ pub mod sync {
 mod stmt;
 #[cfg(all(feature = "ws", feature = "optin"))]
 pub use stmt::Stmt;
+
+#[cfg(all(feature = "ws", feature = "optin"))]
+mod stmt2;
+#[cfg(all(feature = "ws", feature = "optin"))]
+pub use stmt2::Stmt2;
 
 #[cfg(all(feature = "ws", feature = "optin"))]
 mod tmq;

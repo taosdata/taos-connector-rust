@@ -1,10 +1,10 @@
 use std::ffi::c_void;
 
+use bytes::Bytes;
+
 use crate::common::{BorrowedValue, Ty};
 
 use super::{IsColumnView, NullBits, NullsIter};
-
-use bytes::Bytes;
 
 type Item = u32;
 type View = UIntView;
@@ -251,26 +251,6 @@ impl<'a> Iterator for UIntViewIter<'a> {
 impl<'a> ExactSizeIterator for UIntViewIter<'a> {
     fn len(&self) -> usize {
         self.view.len() - self.row
-    }
-}
-
-impl<A: Into<Option<Item>>> FromIterator<A> for View {
-    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
-        let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
-            .into_iter()
-            .map(|v| match v.into() {
-                Some(v) => (false, v),
-                None => (true, Item::default()),
-            })
-            .unzip();
-        Self {
-            nulls: NullBits::from_iter(nulls),
-            data: Bytes::from({
-                let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
-                std::mem::forget(values);
-                unsafe { Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE) }
-            }),
-        }
     }
 }
 
