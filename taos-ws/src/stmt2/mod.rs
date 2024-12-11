@@ -134,7 +134,7 @@ impl Stmt2 {
 
         let resp = self.client.send_request(req).await?;
         if let WsRecvData::Stmt2Result {
-            result_id,
+            id,
             precision,
             fields_count,
             fields_names,
@@ -149,7 +149,7 @@ impl Stmt2 {
                 async move {
                     let start = Instant::now();
                     let _ = close_rx.await;
-                    tracing::trace!("stmt2 result:{} lived {:?}", result_id, start.elapsed());
+                    tracing::trace!("stmt2 result:{} lived {:?}", id, start.elapsed());
                 }
                 .in_current_span(),
             );
@@ -166,7 +166,7 @@ impl Stmt2 {
             tokio::spawn(
                 crate::query::asyn::fetch(
                     self.client.sender(),
-                    result_id,
+                    id,
                     raw_block_tx,
                     precision,
                     fields_names,
@@ -182,10 +182,7 @@ impl Stmt2 {
 
             return Ok(ResultSet {
                 sender: self.client.sender(),
-                args: WsResArgs {
-                    req_id,
-                    id: result_id,
-                },
+                args: WsResArgs { req_id, id },
                 fields: Some(fields),
                 fields_count: fields_count as _,
                 affected_rows: self.affected_rows_once,
@@ -199,6 +196,7 @@ impl Stmt2 {
                 blocks_buffer: Some(raw_block_rx),
             });
         }
+
         unreachable!()
     }
 }
@@ -274,7 +272,7 @@ impl AsyncBindable<super::Taos> for Stmt2 {
 mod tests {
     use futures::TryStreamExt;
     use serde::Deserialize;
-    use taos_query::common::ColumnView;
+    use taos_query::common::{ColumnView, Ty, Value};
     use taos_query::stmt2::Stmt2BindData;
     use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};
 
@@ -567,175 +565,175 @@ mod tests {
         Ok(())
     }
 
-    // #[tokio::test(flavor = "multi_thread")]
-    // async fn test_stmt2_insert_with_subtable_names() -> anyhow::Result<()> {
-    //     let db = "stmt2_202412021600";
-    //     let dsn = "ws://localhost:6041";
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2_insert_with_subtable_names() -> anyhow::Result<()> {
+        let db = "stmt2_202412021600";
+        let dsn = "ws://localhost:6041";
 
-    //     let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
-    //     taos.exec_many(vec![
-    //         &format!("drop database if exists {db}"),
-    //         &format!("create database {db}"),
-    //         &format!("use {db}"),
-    //         "create stable s0 (ts timestamp, c1 int) tags(t1 int)",
-    //     ])
-    //     .await?;
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        taos.exec_many(vec![
+            &format!("drop database if exists {db}"),
+            &format!("create database {db}"),
+            &format!("use {db}"),
+            "create stable s0 (ts timestamp, c1 int) tags(t1 int)",
+        ])
+        .await?;
 
-    //     let mut stmt2 = Stmt2::new(taos.client());
-    //     stmt2.init().await?;
-    //     stmt2
-    //         .prepare("insert into ? using s0 tags(?) values(?, ?)")
-    //         .await?;
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+        stmt2
+            .prepare("insert into ? using s0 tags(?) values(?, ?)")
+            .await?;
 
-    //     let tbname = "d0";
-    //     let tags = &[Value::Int(100)];
-    //     let views = &[
-    //         ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
-    //         ColumnView::from_ints(vec![100, 200]),
-    //     ];
-    //     let data = Stmt2BindData::new(Some(tbname), Some(tags), Some(views));
+        let tbname = "d0";
+        let tags = &[Value::Int(100)];
+        let views = &[
+            ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
+            ColumnView::from_ints(vec![100, 200]),
+        ];
+        let data = Stmt2BindData::new(Some(tbname), Some(tags), Some(views));
 
-    //     stmt2.bind(&[data]).await?;
+        stmt2.bind(&[data]).await?;
 
-    //     let affected = stmt2.exec().await?;
-    //     assert_eq!(affected, 2);
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 2);
 
-    //     #[derive(Debug, Deserialize)]
-    //     struct Row {
-    //         ts: i64,
-    //         c1: i32,
-    //     }
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: i32,
+        }
 
-    //     let rows: Vec<Row> = taos
-    //         .query(format!("select * from {tbname}"))
-    //         .await?
-    //         .deserialize()
-    //         .try_collect()
-    //         .await?;
+        let rows: Vec<Row> = taos
+            .query(format!("select * from {tbname}"))
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
 
-    //     assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 2);
 
-    //     assert_eq!(rows[0].ts, 1726803356466);
-    //     assert_eq!(rows[1].ts, 1726803357466);
+        assert_eq!(rows[0].ts, 1726803356466);
+        assert_eq!(rows[1].ts, 1726803357466);
 
-    //     assert_eq!(rows[0].c1, 100);
-    //     assert_eq!(rows[1].c1, 200);
+        assert_eq!(rows[0].c1, 100);
+        assert_eq!(rows[1].c1, 200);
 
-    //     #[derive(Debug, Deserialize)]
-    //     struct TagInfo {
-    //         table_name: String,
-    //         db_name: String,
-    //         stable_name: String,
-    //         tag_name: String,
-    //         tag_type: Ty,
-    //         tag_value: String,
-    //     }
+        #[derive(Debug, Deserialize)]
+        struct TagInfo {
+            table_name: String,
+            db_name: String,
+            stable_name: String,
+            tag_name: String,
+            tag_type: Ty,
+            tag_value: String,
+        }
 
-    //     let tag_infos: Vec<TagInfo> = taos
-    //         .query(format!("show tags from {tbname}"))
-    //         .await?
-    //         .deserialize()
-    //         .try_collect()
-    //         .await?;
+        let tag_infos: Vec<TagInfo> = taos
+            .query(format!("show tags from {tbname}"))
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
 
-    //     assert_eq!(tag_infos.len(), 1);
+        assert_eq!(tag_infos.len(), 1);
 
-    //     assert_eq!(tag_infos[0].table_name, tbname);
-    //     assert_eq!(tag_infos[0].db_name, db);
-    //     assert_eq!(tag_infos[0].stable_name, "s0");
-    //     assert_eq!(tag_infos[0].tag_name, "t1");
-    //     assert_eq!(tag_infos[0].tag_type, Ty::Int);
-    //     assert_eq!(tag_infos[0].tag_value, "100");
+        assert_eq!(tag_infos[0].table_name, tbname);
+        assert_eq!(tag_infos[0].db_name, db);
+        assert_eq!(tag_infos[0].stable_name, "s0");
+        assert_eq!(tag_infos[0].tag_name, "t1");
+        assert_eq!(tag_infos[0].tag_type, Ty::Int);
+        assert_eq!(tag_infos[0].tag_value, "100");
 
-    //     taos.exec(format!("drop database {db}")).await?;
+        taos.exec(format!("drop database {db}")).await?;
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
-    // #[tokio::test(flavor = "multi_thread")]
-    // async fn test_stmt2_insert_with_col_tbname() -> anyhow::Result<()> {
-    //     let db = "stmt2_202412061117";
-    //     let dsn = "ws://localhost:6041";
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2_insert_with_col_tbname() -> anyhow::Result<()> {
+        let db = "stmt2_202412061117";
+        let dsn = "ws://localhost:6041";
 
-    //     let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
-    //     taos.exec_many(vec![
-    //         &format!("drop database if exists {db}"),
-    //         &format!("create database {db}"),
-    //         &format!("use {db}"),
-    //         "create stable s0 (ts timestamp, c1 int) tags(t1 int)",
-    //     ])
-    //     .await?;
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        taos.exec_many(vec![
+            &format!("drop database if exists {db}"),
+            &format!("create database {db}"),
+            &format!("use {db}"),
+            "create stable s0 (ts timestamp, c1 int) tags(t1 int)",
+        ])
+        .await?;
 
-    //     let mut stmt2 = Stmt2::new(taos.client());
-    //     stmt2.init().await?;
-    //     stmt2
-    //         .prepare("insert into s0 (tbname, ts, c1, t1) values(?, ?, ?, ?)")
-    //         .await?;
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+        stmt2
+            .prepare("insert into s0 (tbname, ts, c1, t1) values(?, ?, ?, ?)")
+            .await?;
 
-    //     let tbname = "d0";
-    //     let tags = &[Value::Int(100)];
-    //     let views = &[
-    //         ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
-    //         ColumnView::from_ints(vec![100, 200]),
-    //     ];
-    //     let data = Stmt2BindData::new(Some(tbname), Some(tags), Some(views));
+        let tbname = "d0";
+        let tags = &[Value::Int(100)];
+        let views = &[
+            ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
+            ColumnView::from_ints(vec![100, 200]),
+        ];
+        let data = Stmt2BindData::new(Some(tbname), Some(tags), Some(views));
 
-    //     stmt2.bind(&[data]).await?;
+        stmt2.bind(&[data]).await?;
 
-    //     let affected = stmt2.exec().await?;
-    //     assert_eq!(affected, 2);
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 2);
 
-    //     #[derive(Debug, Deserialize)]
-    //     struct Row {
-    //         ts: i64,
-    //         c1: i32,
-    //     }
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: i32,
+        }
 
-    //     let rows: Vec<Row> = taos
-    //         .query(format!("select * from {tbname}"))
-    //         .await?
-    //         .deserialize()
-    //         .try_collect()
-    //         .await?;
+        let rows: Vec<Row> = taos
+            .query(format!("select * from {tbname}"))
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
 
-    //     assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 2);
 
-    //     assert_eq!(rows[0].ts, 1726803356466);
-    //     assert_eq!(rows[1].ts, 1726803357466);
+        assert_eq!(rows[0].ts, 1726803356466);
+        assert_eq!(rows[1].ts, 1726803357466);
 
-    //     assert_eq!(rows[0].c1, 100);
-    //     assert_eq!(rows[1].c1, 200);
+        assert_eq!(rows[0].c1, 100);
+        assert_eq!(rows[1].c1, 200);
 
-    //     #[derive(Debug, Deserialize)]
-    //     struct TagInfo {
-    //         table_name: String,
-    //         db_name: String,
-    //         stable_name: String,
-    //         tag_name: String,
-    //         tag_type: Ty,
-    //         tag_value: String,
-    //     }
+        #[derive(Debug, Deserialize)]
+        struct TagInfo {
+            table_name: String,
+            db_name: String,
+            stable_name: String,
+            tag_name: String,
+            tag_type: Ty,
+            tag_value: String,
+        }
 
-    //     let tag_infos: Vec<TagInfo> = taos
-    //         .query(format!("show tags from {tbname}"))
-    //         .await?
-    //         .deserialize()
-    //         .try_collect()
-    //         .await?;
+        let tag_infos: Vec<TagInfo> = taos
+            .query(format!("show tags from {tbname}"))
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
 
-    //     assert_eq!(tag_infos.len(), 1);
+        assert_eq!(tag_infos.len(), 1);
 
-    //     assert_eq!(tag_infos[0].table_name, tbname);
-    //     assert_eq!(tag_infos[0].db_name, db);
-    //     assert_eq!(tag_infos[0].stable_name, "s0");
-    //     assert_eq!(tag_infos[0].tag_name, "t1");
-    //     assert_eq!(tag_infos[0].tag_type, Ty::Int);
-    //     assert_eq!(tag_infos[0].tag_value, "100");
+        assert_eq!(tag_infos[0].table_name, tbname);
+        assert_eq!(tag_infos[0].db_name, db);
+        assert_eq!(tag_infos[0].stable_name, "s0");
+        assert_eq!(tag_infos[0].tag_name, "t1");
+        assert_eq!(tag_infos[0].tag_type, Ty::Int);
+        assert_eq!(tag_infos[0].tag_value, "100");
 
-    //     taos.exec(format!("drop database {db}")).await?;
+        taos.exec(format!("drop database {db}")).await?;
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_stmt2_result() -> anyhow::Result<()> {
