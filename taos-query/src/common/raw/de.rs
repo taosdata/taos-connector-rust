@@ -1,18 +1,16 @@
 use std::marker::PhantomData;
 
+use serde::de::value::Error;
 use serde::de::{DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor};
 use serde::Deserializer;
 
-use serde::de::value::Error;
-
 use crate::common::BorrowedValue;
-// use crate::Field;
 
 type Field = str;
 /// Row-based deserializer helper.
 ///
 /// 'b: field lifetime may go across the whole query.
-pub(crate) struct RecordDeserializer<'b, R>
+pub struct RecordDeserializer<'b, R>
 where
     R: IntoIterator<Item = (&'b Field, BorrowedValue<'b>)>,
 {
@@ -56,7 +54,6 @@ where
         match self.inner.next() {
             Some((field, value)) => {
                 self.value = Some(value);
-                let field = field;
                 seed.deserialize(field.into_deserializer()).map(Some)
             }
             _ => Ok(None),

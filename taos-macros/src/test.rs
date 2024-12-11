@@ -135,8 +135,6 @@ impl Attr {
         let mut iter = iter.into_iter();
         let mut attr = Attr::default();
         while let Some(t) = iter.next() {
-            // panic!("{}", &t);
-            // dbg!(&t);
             match t {
                 TokenTree::Ident(ident) if ident == "databases" => {
                     const EXPECT: &str = "expect `[test(databases = \"\")]`";
@@ -144,7 +142,7 @@ impl Attr {
                     let value = iter.next().expect(EXPECT);
                     match value {
                         TokenTree::Literal(value) => {
-                            attr.databases = Some(value.to_string().parse().expect(EXPECT))
+                            attr.databases = Some(value.to_string().parse().expect(EXPECT));
                         }
                         _ => unreachable!("expect `[test(databases = \"\")]`"),
                     }
@@ -215,6 +213,7 @@ impl Attr {
             None => quote!(()),
         }
     }
+
     fn precision_token_stream(&self) -> TokenStream {
         match &self.precision {
             Some(precision) => precision.into_token_stream(),
@@ -234,8 +233,7 @@ impl Attr {
 
     fn databases(&self, requires: &Requires) -> usize {
         match requires {
-            Requires::None => 0,
-            Requires::TaosOnly => 0,
+            Requires::None | Requires::TaosOnly => 0,
             Requires::WithDatabase => 1,
             Requires::WithMulti => self.databases.unwrap_or(1),
         }
@@ -364,15 +362,17 @@ fn parse_database_requires(params: &[TokenTree]) -> Requires {
                 ret = Requires::TaosOnly;
             }
             Ident(ident) if *ident == "database" || *ident == "_database" => {
-                if !has_taos {
-                    panic!("please use test fn parameters: `taos: &Taos, database: &str`");
-                }
+                assert!(
+                    has_taos,
+                    "please use test fn parameters: `taos: &Taos, database: &str`"
+                );
                 ret = Requires::WithDatabase;
             }
             Ident(ident) if *ident == "databases" || *ident == "_databases" => {
-                if !has_taos {
-                    panic!("please use test fn parameters: `taos: &Taos, databases: &[String]`");
-                }
+                assert!(
+                    has_taos,
+                    "please use test fn parameters: `taos: &Taos, databases: &[String]`"
+                );
                 ret = Requires::WithMulti;
             }
             _ => (),
@@ -380,7 +380,8 @@ fn parse_database_requires(params: &[TokenTree]) -> Requires {
     }
     ret
 }
-pub(crate) fn test(
+
+pub fn test(
     attr: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
@@ -391,9 +392,10 @@ pub(crate) fn test(
 
 #[cfg(test)]
 mod tests {
-    use super::Attr;
     use proc_macro2::*;
     use quote::quote;
+
+    use super::Attr;
 
     #[test]
     fn default_sync() {

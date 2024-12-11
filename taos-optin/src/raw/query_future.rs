@@ -1,28 +1,28 @@
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
-
 use std::ffi::{c_char, CStr};
 use std::future::Future;
 use std::os::raw::{c_int, c_void};
 use std::pin::Pin;
-use std::sync::{Arc, Weak};
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
-use crate::into_c_str::IntoCStr;
-use crate::types::TAOS_RES;
-use crate::{RawRes, RawTaos};
 use taos_query::prelude::RawError;
 
 use super::ApiEntry;
+use crate::into_c_str::IntoCStr;
+use crate::types::TAOS_RES;
+use crate::{RawRes, RawTaos};
 
 pub struct QueryFuture<'a> {
     raw: RawTaos,
     sql: Cow<'a, CStr>,
-    state: Arc<UnsafeCell<State>>,
+    state: Rc<UnsafeCell<State>>,
 }
 
-unsafe impl<'a> Send for QueryFuture<'a> {}
+unsafe impl Send for QueryFuture<'_> {}
 
 /// Shared state between the future and the waiting thread
 struct State {
@@ -36,7 +36,7 @@ struct State {
 impl State {
     pub fn new(api: Arc<ApiEntry>) -> Self {
         State {
-            api: api.clone(),
+            api,
             result: None,
             waiting: false,
             time: Instant::now(),
@@ -55,8 +55,9 @@ struct AsyncQueryParam {
 }
 
 impl Unpin for State {}
-impl<'a> Unpin for QueryFuture<'a> {}
-impl<'a> Future for QueryFuture<'a> {
+impl Unpin for QueryFuture<'_> {}
+
+impl Future for QueryFuture<'_> {
     type Output = Result<RawRes, RawError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let state = unsafe { &mut *self.state.get() };
@@ -72,9 +73,10 @@ impl<'a> Future for QueryFuture<'a> {
             if state.waiting {
                 tracing::trace!("It's waked but still waiting for taos_query_a callback.");
                 return Poll::Pending;
-            } else {
-                state.waiting = true;
             }
+
+            state.waiting = true;
+
             #[no_mangle]
             #[inline(never)]
             unsafe extern "C" fn taos_optin_query_future_callback(
@@ -130,7 +132,7 @@ impl<'a> Future for QueryFuture<'a> {
             }
 
             let param = Box::new(AsyncQueryParam {
-                state: Arc::downgrade(&self.state),
+                state: Rc::downgrade(&self.state),
                 sql: self.sql.as_ptr() as _,
                 waker: cx.waker().clone(),
             });
@@ -143,11 +145,12 @@ impl<'a> Future for QueryFuture<'a> {
         }
     }
 }
+
 impl<'a> QueryFuture<'a> {
     /// Create a new `TimerFuture` which will complete after the provided
     /// timeout.
-    pub fn new(taos: RawTaos, sql: impl IntoCStr<'a>) -> Self {
-        let state = Arc::new(UnsafeCell::new(State::new(taos.c.clone())));
+    pub fn new<T: IntoCStr<'a>>(taos: RawTaos, sql: T) -> Self {
+        let state = Rc::new(UnsafeCell::new(State::new(taos.c.clone())));
         let sql = sql.into_c_str();
         tracing::trace!("query with: {}", sql.to_str().unwrap_or("<...>"));
 

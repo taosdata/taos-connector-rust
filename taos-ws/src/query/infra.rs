@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
-use serde_with::NoneAsEmptyString;
+use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::common::{Precision, Ty};
 use taos_query::prelude::RawError;
 
@@ -75,14 +74,13 @@ pub enum WsSend {
 impl WsSend {
     pub(crate) fn req_id(&self) -> ReqId {
         match self {
-            WsSend::Conn { req_id, req: _ } => *req_id,
+            WsSend::Conn { req_id, .. } | WsSend::Query { req_id, .. } => *req_id,
             WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
-            WsSend::Query { req_id, sql: _ } => *req_id,
-            WsSend::Fetch(args) => args.req_id,
-            WsSend::FetchBlock(args) => args.req_id,
-            WsSend::FreeResult(args) => args.req_id,
+            WsSend::Fetch(args) | WsSend::FetchBlock(args) | WsSend::FreeResult(args) => {
+                args.req_id
+            }
             WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
-            _ => unreachable!(),
+            WsSend::Version => unreachable!(),
         }
     }
 }
@@ -217,12 +215,10 @@ impl WsRecv {
             self.data,
             if self.code == 0 {
                 Ok(())
+            } else if self.message.as_deref() == Some("success") {
+                Err(RawError::from_code(self.code))
             } else {
-                if self.message.as_deref() == Some("success") {
-                    Err(RawError::from_code(self.code))
-                } else {
-                    Err(RawError::new(self.code, self.message.unwrap_or_default()))
-                }
+                Err(RawError::new(self.code, self.message.unwrap_or_default()))
             },
         )
     }
@@ -240,7 +236,7 @@ fn test_serde_recv_data() {
     dbg!(d);
 }
 
-pub(crate) trait ToMessage: Serialize {
+pub trait ToMessage: Serialize {
     fn to_msg(&self) -> tokio_tungstenite::tungstenite::Message {
         tokio_tungstenite::tungstenite::Message::Text(serde_json::to_string(self).unwrap())
     }

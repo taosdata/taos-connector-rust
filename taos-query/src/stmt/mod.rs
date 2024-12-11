@@ -1,7 +1,6 @@
-use crate::{
-    common::{views::ColumnView, Value},
-    AsyncQueryable, Queryable, RawResult,
-};
+use crate::common::views::ColumnView;
+use crate::common::Value;
+use crate::{AsyncQueryable, Queryable, RawResult};
 
 mod column;
 pub use column::*;

@@ -1,4 +1,5 @@
 use std::str::FromStr;
+
 use taos_optin::TaosBuilder;
 
 #[test]

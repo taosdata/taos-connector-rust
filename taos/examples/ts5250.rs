@@ -1,12 +1,6 @@
-use std::{
-    io::Read,
-    ops::Deref,
-    time::{Duration, Instant},
-};
+use std::io::Read;
 
-use chrono::{DateTime, Local};
 use clap::Parser;
-use sync::MessageSet;
 use taos::*;
 
 #[derive(Debug, Parser)]

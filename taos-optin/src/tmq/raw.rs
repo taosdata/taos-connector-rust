@@ -3,33 +3,24 @@ pub(super) use list::Topics;
 pub(super) use tmq::RawTmq;
 
 pub(super) mod tmq {
-    use std::{
-        ffi::CStr,
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        },
-    };
+    use std::ffi::CStr;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
-    use taos_query::{
-        prelude::tokio::sync::oneshot,
-        tmq::{Assignment, VGroupId},
-        RawError,
-    };
-
-    use crate::{
-        into_c_str::IntoCStr,
-        raw::{ApiEntry, TmqApi},
-        types::{tmq_resp_err_t, tmq_t, SafeTmqT},
-        RawRes, RawResult,
-    };
+    use taos_query::prelude::tokio::sync::oneshot;
+    use taos_query::tmq::{Assignment, VGroupId};
+    use taos_query::RawError;
 
     use super::Topics;
+    use crate::into_c_str::IntoCStr;
+    use crate::raw::{ApiEntry, TmqApi};
+    use crate::types::{tmq_resp_err_t, tmq_t, SafeTmqT};
+    use crate::{RawRes, RawResult};
 
     #[derive(Debug)]
-    pub(crate) struct RawTmq {
+    pub struct RawTmq {
         api: Arc<ApiEntry>,
-        tmq_api: TmqApi,
+        tmq_api: Arc<TmqApi>,
         tmq_ptr: *mut tmq_t,
         timeout: i64,
         sender: flume::Sender<oneshot::Sender<Option<RawRes>>>,
@@ -44,7 +35,7 @@ pub(super) mod tmq {
     impl RawTmq {
         pub(crate) fn new(
             api: Arc<ApiEntry>,
-            tmq_api: TmqApi,
+            tmq_api: Arc<TmqApi>,
             tmq_ptr: *mut tmq_t,
             timeout: i64,
         ) -> Self {
@@ -141,7 +132,7 @@ pub(super) mod tmq {
                     msg.as_ptr(),
                     tmq_commit_async_cb,
                     Box::into_raw(Box::new(sender)) as *mut _,
-                )
+                );
             }
             rx.recv().unwrap()
         }
@@ -176,7 +167,7 @@ pub(super) mod tmq {
                         offset,
                         tmq_commit_offset_async_cb,
                         Box::into_raw(Box::new(sender)) as *mut _,
-                    )
+                    );
                 }
                 rx.recv().unwrap()
             } else {
@@ -241,7 +232,7 @@ pub(super) mod tmq {
                 unsafe {
                     self.tmq_api
                         .tmq_free_assignment
-                        .expect("tmq_free_assignment not found")(*pt)
+                        .expect("tmq_free_assignment not found")(*pt);
                 };
                 vec
             } else {
@@ -299,16 +290,16 @@ pub(super) mod tmq {
                 vgroup_id
             );
 
-            if tmq_resp.0 as i32 > 0 {
-                return Ok(tmq_resp.0 as _);
+            if tmq_resp.0 > 0 {
+                Ok(tmq_resp.0 as _)
             } else {
                 let err_str = self.err_as_str(tmq_resp);
                 tracing::trace!("committed tmq_resp err string: {}", err_str);
 
-                return Err(RawError::new(
+                Err(RawError::new(
                     tmq_resp.0,
                     format!("get committed failed: {err_str}"),
-                ));
+                ))
             }
         }
 
@@ -328,16 +319,15 @@ pub(super) mod tmq {
                 vgroup_id
             );
 
-            if tmq_resp.0 as i32 > 0 {
-                return Ok(tmq_resp.0 as _);
+            if tmq_resp.0 > 0 {
+                Ok(tmq_resp.0 as _)
             } else {
                 let err_str = self.err_as_str(tmq_resp);
                 tracing::trace!("position tmq_resp err string: {}", err_str);
-
-                return Err(RawError::new(
+                Err(RawError::new(
                     tmq_resp.0,
                     format!("get position failed: {err_str}"),
-                ));
+                ))
             }
         }
 
@@ -350,7 +340,7 @@ pub(super) mod tmq {
 
             let receiver = self.receiver.take().unwrap();
             let safe_tmq = SafeTmqT(self.as_ptr());
-            let tmq_api = self.tmq_api;
+            let tmq_api = self.tmq_api.clone();
             let api = self.api.clone();
             let timeout = self.timeout.min(2000);
             let stop_signal = self.stop_signal.clone();
@@ -411,8 +401,8 @@ pub(super) mod tmq {
             self.thread_handle = Some(handle);
         }
 
-        pub(crate) fn tmq(&self) -> TmqApi {
-            self.tmq_api
+        pub(crate) fn tmq(&self) -> Arc<TmqApi> {
+            self.tmq_api.clone()
         }
 
         pub(crate) fn sender(&self) -> flume::Sender<oneshot::Sender<Option<RawRes>>> {
@@ -429,16 +419,13 @@ pub(super) mod tmq {
 
 pub(super) mod conf {
     use std::ffi::c_void;
-    use std::i32;
 
     use taos_query::{value_is_true, Dsn};
     use types::tmq_resp_err_t;
 
+    use crate::raw::TmqConfApi;
+    use crate::types::{tmq_conf_t, tmq_t};
     use crate::*;
-    use crate::{
-        raw::TmqConfApi,
-        types::{tmq_conf_t, tmq_t},
-    };
 
     #[derive(Debug)]
     struct Settings {
@@ -490,7 +477,7 @@ pub(super) mod conf {
         pub(crate) fn new(api: TmqConfApi) -> Self {
             Self {
                 api,
-                ptr: unsafe { api.new() },
+                ptr: unsafe { api.new_conf() },
                 settings: Settings::default(),
             }
         }
@@ -559,7 +546,11 @@ pub(super) mod conf {
 
         fn set<K: AsRef<str>, V: AsRef<str>>(&self, key: K, value: V) -> RawResult<&Self> {
             tracing::info!("set {}={}", key.as_ref(), value.as_ref());
-            unsafe { self.api.set(self.as_ptr(), key.as_ref(), value.as_ref()) }.map(|_| self)
+            unsafe {
+                self.api
+                    .set_conf(self.as_ptr(), key.as_ref(), value.as_ref())
+            }
+            .map(|_| self)
         }
 
         pub(crate) fn build(&self) -> RawResult<*mut tmq_t> {
@@ -612,13 +603,13 @@ pub(super) mod conf {
                 self.set(TMQ_CONF_WITH_TABLE_NAME, TMQ_CONF_VALUE_FALSE)?;
             }
 
-            unsafe { self.api.consumer(self.as_ptr()) }
+            unsafe { self.api.new_consumer(self.as_ptr()) }
         }
     }
 
     impl Drop for Conf {
         fn drop(&mut self) {
-            unsafe { self.api.destroy(self.as_ptr()) };
+            unsafe { self.api.destroy_conf(self.as_ptr()) };
         }
     }
 }
@@ -629,10 +620,12 @@ pub(super) mod list {
 
     use taos_query::prelude::RawResult;
 
-    use crate::{into_c_str::IntoCStr, raw::TmqListApi, types::tmq_list_t};
+    use crate::into_c_str::IntoCStr;
+    use crate::raw::TmqListApi;
+    use crate::types::tmq_list_t;
 
     #[derive(Debug)]
-    pub(crate) struct Topics {
+    pub struct Topics {
         api: TmqListApi,
         ptr: *mut tmq_list_t,
     }
@@ -645,7 +638,7 @@ pub(super) mod list {
         pub(crate) fn new(api: TmqListApi) -> Self {
             Self {
                 api,
-                ptr: unsafe { api.new() },
+                ptr: unsafe { api.new_list() },
             }
         }
 
@@ -657,7 +650,7 @@ pub(super) mod list {
             api: TmqListApi,
             topics: impl IntoIterator<Item = T>,
         ) -> RawResult<Self> {
-            let ptr = unsafe { api.from_c_str_iter(topics)? };
+            let ptr = unsafe { api.new_list_from_cstr(topics)? };
             Ok(Self { api, ptr })
         }
 
@@ -686,7 +679,6 @@ pub(super) mod list {
         }
     }
 
-    ///
     pub struct Iter<'a> {
         inner: &'a [*mut c_char],
         len: usize,
@@ -711,7 +703,7 @@ pub(super) mod list {
         }
     }
 
-    impl<'a> ExactSizeIterator for Iter<'a> {
+    impl ExactSizeIterator for Iter<'_> {
         fn len(&self) -> usize {
             if self.len >= self.index {
                 self.len - self.index
@@ -725,7 +717,7 @@ pub(super) mod list {
     impl Drop for Topics {
         fn drop(&mut self) {
             unsafe {
-                self.api.destroy(self.as_ptr());
+                self.api.destroy_list(self.as_ptr());
             }
         }
     }

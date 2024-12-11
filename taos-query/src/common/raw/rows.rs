@@ -1,14 +1,11 @@
-use std::{marker::PhantomData, ptr::NonNull};
+use std::marker::PhantomData;
+use std::ptr::NonNull;
 
-use serde::{
-    de::{DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor},
-    Deserializer,
-};
+use serde::de::{DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor};
+use serde::Deserializer;
 
-use crate::{
-    common::{BorrowedValue, Value},
-    RawBlock,
-};
+use crate::common::{BorrowedValue, Value};
+use crate::RawBlock;
 
 pub struct IntoRowsIter<'a> {
     pub(crate) raw: RawBlock,
@@ -16,8 +13,8 @@ pub struct IntoRowsIter<'a> {
     pub(crate) _marker: PhantomData<&'a bool>,
 }
 
-unsafe impl<'a> Send for IntoRowsIter<'a> {}
-unsafe impl<'a> Sync for IntoRowsIter<'a> {}
+unsafe impl Send for IntoRowsIter<'_> {}
+unsafe impl Sync for IntoRowsIter<'_> {}
 
 impl<'a> Iterator for IntoRowsIter<'a> {
     type Item = RowView<'a>;
@@ -43,8 +40,8 @@ pub struct RowsIter<'a> {
     pub(crate) _marker: PhantomData<&'a usize>,
 }
 
-unsafe impl<'a> Send for RowsIter<'a> {}
-unsafe impl<'a> Sync for RowsIter<'a> {}
+unsafe impl Send for RowsIter<'_> {}
+unsafe impl Sync for RowsIter<'_> {}
 
 impl<'a> Iterator for RowsIter<'a> {
     type Item = RowView<'a>;
@@ -64,7 +61,7 @@ impl<'a> Iterator for RowsIter<'a> {
     }
 }
 
-impl<'a> RowsIter<'a> {
+impl RowsIter<'_> {
     pub fn values(&mut self) -> ValueIter {
         ValueIter {
             raw: unsafe { self.raw.as_mut() },
@@ -138,9 +135,9 @@ impl<'a> Iterator for RowView<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for RowView<'a> {}
+impl ExactSizeIterator for RowView<'_> {}
 
-impl<'a> std::fmt::Debug for RowView<'a> {
+impl std::fmt::Debug for RowView<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RowView")
             .field("raw", &self.raw)
@@ -171,20 +168,14 @@ impl<'a> RowView<'a> {
     pub fn into_value_iter(self) -> RowViewOfValue<'a> {
         RowViewOfValue(self)
     }
+
     fn walk_next(&mut self) -> Option<BorrowedValue<'a>> {
         self.next().map(|(_, v)| v)
     }
 
-    // fn walk(&mut self) {
-    //     self.col += 1;
-    // }
-
     fn peek_name(&self) -> Option<&'a str> {
-        self.raw.fields.get(self.col).map(|s| s.as_str())
+        self.raw.fields.get(self.col).map(String::as_str)
     }
-    // fn peek_value(&self) -> Option<BorrowedValue<'a>> {
-    //     self.raw.get_ref(self.row, self.col)
-    // }
 
     pub fn into_values(self) -> Vec<Value> {
         self.map(|(_, b)| b.to_value()).collect()
