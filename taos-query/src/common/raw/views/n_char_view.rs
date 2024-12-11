@@ -14,7 +14,6 @@ use crate::util::{InlineNChar, InlineStr};
 
 #[derive(Debug)]
 pub struct NCharView {
-    // version: Version,
     pub(crate) offsets: Offsets,
     pub(crate) data: Bytes,
     /// TDengine v3 raw block use [char] for NChar data type, it's [str] in v2 websocket block.

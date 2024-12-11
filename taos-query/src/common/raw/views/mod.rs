@@ -96,7 +96,6 @@ pub(crate) enum Version {
 }
 
 #[derive(Clone)]
-
 pub enum ColumnView {
     Bool(BoolView),           // 1
     TinyInt(TinyIntView),     // 2
@@ -116,6 +115,7 @@ pub enum ColumnView {
     VarBinary(VarBinaryView), // 16
     Geometry(GeometryView),   // 20
 }
+
 unsafe impl Send for ColumnView {}
 unsafe impl Sync for ColumnView {}
 

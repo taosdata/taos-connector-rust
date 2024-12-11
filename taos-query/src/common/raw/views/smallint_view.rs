@@ -8,11 +8,13 @@ use crate::common::{BorrowedValue, Ty};
 type Item = i16;
 type View = SmallIntView;
 const ITEM_SIZE: usize = std::mem::size_of::<Item>();
+
 #[derive(Debug, Clone)]
 pub struct SmallIntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
 }
+
 impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::USmallInt

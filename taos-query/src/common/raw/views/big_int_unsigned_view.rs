@@ -5,15 +5,15 @@ use bytes::Bytes;
 use super::{IsColumnView, NullBits, NullsIter};
 use crate::common::{BorrowedValue, Ty};
 
+type Item = u64;
+type View = UBigIntView;
+const ITEM_SIZE: usize = std::mem::size_of::<Item>();
+
 #[derive(Debug, Clone)]
 pub struct UBigIntView {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
 }
-
-type Item = u64;
-type View = UBigIntView;
-const ITEM_SIZE: usize = std::mem::size_of::<Item>();
 
 impl IsColumnView for View {
     fn ty(&self) -> Ty {

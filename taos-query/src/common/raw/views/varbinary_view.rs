@@ -12,7 +12,6 @@ use crate::util::InlineBytes;
 
 #[derive(Debug, Clone)]
 pub struct VarBinaryView {
-    // version: Version,
     pub(crate) offsets: Offsets,
     pub(crate) data: Bytes,
 }
@@ -21,6 +20,7 @@ impl IsColumnView for VarBinaryView {
     fn ty(&self) -> Ty {
         Ty::VarBinary
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         Self::from_iter::<Bytes, _, _, _>(iter.map(|v| v.to_bytes()).collect_vec())
     }

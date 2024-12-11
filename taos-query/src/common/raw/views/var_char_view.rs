@@ -11,7 +11,6 @@ use crate::util::InlineStr;
 
 #[derive(Debug, Clone)]
 pub struct VarCharView {
-    // version: Version,
     pub(crate) offsets: Offsets,
     pub(crate) data: Bytes,
 }

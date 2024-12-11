@@ -11,7 +11,6 @@ use crate::util::InlineJson;
 
 #[derive(Debug, Clone)]
 pub struct JsonView {
-    // version: Version,
     pub offsets: Offsets,
     pub data: Bytes,
 }
