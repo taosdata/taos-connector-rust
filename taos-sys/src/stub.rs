@@ -1,10 +1,11 @@
 #![allow(unused_variables)]
 
-use std::ffi::{c_char, c_ulong, c_void};
+use std::ffi::{c_char, c_int, c_ulong, c_void};
 
 use crate::{
     query::{__taos_async_fn_t, TAOS_FIELD},
     stmt::TAOS_FIELD_E,
+    tmq::tmq_t,
     TAOS, TAOS_RES,
 };
 
@@ -27,6 +28,101 @@ pub extern "C" fn taos_connect_dsn_auth(
     db: *const c_char,
 ) -> *mut TAOS {
     todo!("taos_connect_dsn_auth");
+}
+
+#[no_mangle]
+pub extern "C" fn taos_kill_query(taos: *mut TAOS) {}
+
+#[no_mangle]
+pub extern "C" fn taos_reset_current_db(taos: *mut TAOS) {
+    todo!("taos_reset_current_db")
+}
+
+#[repr(C)]
+#[allow(non_snake_case)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_VGROUP_HASH_INFO {
+    pub vgId: i32,
+    pub hashBegin: u32,
+    pub hashEnd: u32,
+}
+
+#[repr(C)]
+#[allow(non_snake_case)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_DB_ROUTE_INFO {
+    pub routeVersion: i32,
+    pub hashPrefix: i16,
+    pub hashSuffix: i16,
+    pub hashMethod: i8,
+    pub vgNum: i32,
+    pub vgHash: *mut TAOS_VGROUP_HASH_INFO,
+}
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn taos_get_db_route_info(
+    taos: *mut TAOS,
+    db: *const c_char,
+    dbInfo: *mut TAOS_DB_ROUTE_INFO,
+) -> c_int {
+    todo!("taos_get_db_route_info");
+}
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn taos_get_table_vgId(
+    taos: *mut TAOS,
+    db: *const c_char,
+    table: *const c_char,
+    vgId: *mut c_int,
+) -> c_int {
+    todo!("taos_get_table_vgId");
+}
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn taos_get_tables_vgId(
+    taos: *mut TAOS,
+    db: *const c_char,
+    table: *mut *const c_char,
+    tableNum: c_int,
+    vgId: *mut c_int,
+) -> c_int {
+    todo!("taos_get_tables_vgId");
+}
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn taos_load_table_info(taos: *mut TAOS, tableNameList: *const c_char) -> c_int {
+    0
+}
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn taos_set_hb_quit(quitByKill: i8) {}
+
+#[allow(non_camel_case_types)]
+pub type __taos_notify_fn_t = extern "C" fn(param: *mut c_void, ext: *mut c_void, r#type: c_int);
+
+#[no_mangle]
+pub extern "C" fn taos_set_notify_cb(
+    taos: *mut TAOS,
+    fp: __taos_notify_fn_t,
+    param: *mut c_void,
+    r#type: c_int,
+) -> c_int {
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn taos_set_conn_mode(taos: *mut TAOS, mode: c_int, value: c_int) -> c_int {
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn tmq_get_connect(tmq: *mut tmq_t) -> *mut TAOS {
+    std::ptr::null_mut()
 }
 
 #[repr(C)]

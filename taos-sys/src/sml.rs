@@ -1,4 +1,4 @@
-use std::ffi::c_char;
+use std::ffi::{c_char, c_int};
 
 use crate::{TAOS, TAOS_RES};
 
@@ -6,10 +6,10 @@ use crate::{TAOS, TAOS_RES};
 #[allow(non_snake_case)]
 pub extern "C" fn taos_schemaless_insert(
     taos: *mut TAOS,
-    lines: *mut *mut c_char, // todo
-    numLines: i32,
-    protocol: i32,
-    precision: i32,
+    lines: *mut *mut c_char,
+    numLines: c_int,
+    protocol: c_int,
+    precision: c_int,
 ) -> *mut TAOS_RES {
     todo!();
 }
@@ -18,10 +18,10 @@ pub extern "C" fn taos_schemaless_insert(
 #[allow(non_snake_case)]
 pub extern "C" fn taos_schemaless_insert_with_reqid(
     taos: *mut TAOS,
-    lines: *mut *mut c_char, // todo
-    numLines: i32,
-    protocol: i32,
-    precision: i32,
+    lines: *mut *mut c_char,
+    numLines: c_int,
+    protocol: c_int,
+    precision: c_int,
     reqid: i64,
 ) -> *mut TAOS_RES {
     todo!();
@@ -32,10 +32,10 @@ pub extern "C" fn taos_schemaless_insert_with_reqid(
 pub extern "C" fn taos_schemaless_insert_raw(
     taos: *mut TAOS,
     lines: *mut c_char,
-    len: i32,
+    len: c_int,
     totalRows: *mut i32,
-    protocol: i32,
-    precision: i32,
+    protocol: c_int,
+    precision: c_int,
 ) -> *mut TAOS_RES {
     todo!();
 }
@@ -45,10 +45,10 @@ pub extern "C" fn taos_schemaless_insert_raw(
 pub extern "C" fn taos_schemaless_insert_raw_with_reqid(
     taos: *mut TAOS,
     lines: *mut c_char,
-    len: i32,
+    len: c_int,
     totalRows: *mut i32,
-    protocol: i32,
-    precision: i32,
+    protocol: c_int,
+    precision: c_int,
     reqid: i64,
 ) -> *mut TAOS_RES {
     todo!();
@@ -58,10 +58,10 @@ pub extern "C" fn taos_schemaless_insert_raw_with_reqid(
 #[allow(non_snake_case)]
 pub extern "C" fn taos_schemaless_insert_ttl(
     taos: *mut TAOS,
-    lines: *mut *mut c_char, // todo
-    numLines: i32,
-    protocol: i32,
-    precision: i32,
+    lines: *mut *mut c_char,
+    numLines: c_int,
+    protocol: c_int,
+    precision: c_int,
     ttl: i32,
 ) -> *mut TAOS_RES {
     todo!();
@@ -71,10 +71,10 @@ pub extern "C" fn taos_schemaless_insert_ttl(
 #[allow(non_snake_case)]
 pub extern "C" fn taos_schemaless_insert_ttl_with_reqid(
     taos: *mut TAOS,
-    lines: *mut *mut c_char, // todo
-    numLines: i32,
-    protocol: i32,
-    precision: i32,
+    lines: *mut *mut c_char,
+    numLines: c_int,
+    protocol: c_int,
+    precision: c_int,
     ttl: i32,
     reqid: i64,
 ) -> *mut TAOS_RES {
@@ -86,10 +86,10 @@ pub extern "C" fn taos_schemaless_insert_ttl_with_reqid(
 pub extern "C" fn taos_schemaless_insert_raw_ttl(
     taos: *mut TAOS,
     lines: *mut c_char,
-    len: i32,
+    len: c_int,
     totalRows: *mut i32,
-    protocol: i32,
-    precision: i32,
+    protocol: c_int,
+    precision: c_int,
     ttl: i32,
 ) -> *mut TAOS_RES {
     todo!();
@@ -100,10 +100,10 @@ pub extern "C" fn taos_schemaless_insert_raw_ttl(
 pub extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid(
     taos: *mut TAOS,
     lines: *mut c_char,
-    len: i32,
+    len: c_int,
     totalRows: *mut i32,
-    protocol: i32,
-    precision: i32,
+    protocol: c_int,
+    precision: c_int,
     ttl: i32,
     reqid: i64,
 ) -> *mut TAOS_RES {
@@ -115,10 +115,10 @@ pub extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid(
 pub extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
     taos: *mut TAOS,
     lines: *mut c_char,
-    len: i32,
+    len: c_int,
     totalRows: *mut i32,
-    protocol: i32,
-    precision: i32,
+    protocol: c_int,
+    precision: c_int,
     ttl: i32,
     reqid: i64,
     tbnameKey: *mut c_char,
@@ -130,10 +130,10 @@ pub extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
 #[allow(non_snake_case)]
 pub extern "C" fn taos_schemaless_insert_ttl_with_reqid_tbname_key(
     taos: *mut TAOS,
-    lines: *mut *mut c_char, // todo
-    numLines: i32,
-    protocol: i32,
-    precision: i32,
+    lines: *mut *mut c_char,
+    numLines: c_int,
+    protocol: c_int,
+    precision: c_int,
     ttl: i32,
     reqid: i64,
     tbnameKey: *mut c_char,
