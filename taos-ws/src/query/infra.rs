@@ -274,7 +274,7 @@ pub(crate) enum WsRecvData {
         #[serde(default)]
         stmt_id: StmtId,
         #[serde(default)]
-        result_id: u64,
+        id: u64,
         #[serde(default)]
         fields_count: u64,
         #[serde(default)]

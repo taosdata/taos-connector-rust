@@ -244,9 +244,9 @@ fn get_col_data_len(col: &ColumnView) -> usize {
     match col {
         VarChar(view) => view_iter!(view),
         NChar(view) => view_iter!(view),
-        Json(view) => view_iter!(view),
         VarBinary(view) => view_iter!(view),
         Geometry(view) => view_iter!(view),
+        Json(_) => panic!("column does not support json type"),
         _ => len = col.as_ty().fixed_length() * col.len(),
     }
 
@@ -1999,7 +1999,6 @@ mod tests {
             ColumnView::from_unsigned_big_ints(vec![10]),
             ColumnView::from_varchar(vec!["varchar"]),
             ColumnView::from_nchar(vec!["nchar"]),
-            ColumnView::from_json(vec![r#"{"key":"value"}"#]),
             ColumnView::from_bytes(vec!["varbinary".as_bytes()]),
             ColumnView::from_geobytes(vec![vec![
                 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x59, 0x40, 0x00,
@@ -2009,7 +2008,7 @@ mod tests {
 
         let data = Stmt2BindData::new(None, None, Some(cols));
 
-        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, 17)?;
+        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, cols.len())?;
 
         #[rustfmt::skip]
         let expected = [
@@ -2021,17 +2020,17 @@ mod tests {
             0xff, 0xff, 0xff, 0xff, // col_idx
 
             // data
-            0xd2, 0x01, 0x00, 0x00, // TotalLength
+            0xad, 0x01, 0x00, 0x00, // TotalLength
             0x01, 0x00, 0x00, 0x00, // TableCount
             0x00, 0x00, 0x00, 0x00, // TagCount
-            0x11, 0x00, 0x00, 0x00, // ColCount
+            0x10, 0x00, 0x00, 0x00, // ColCount
             0x00, 0x00, 0x00, 0x00, // TableNamesOffset
             0x00, 0x00, 0x00, 0x00, // TagsOffset
             0x1c, 0x00, 0x00, 0x00, // ColsOffset
 
             // cols
             // ColDataLength
-            0xb2, 0x01, 0x00, 0x00,
+            0x8d, 0x01, 0x00, 0x00,
             // ColBuffer
             // table 0 cols
             // col 0
@@ -2165,17 +2164,6 @@ mod tests {
             0x6e, 0x63, 0x68, 0x61, 0x72, // Buffer
 
             // col 14
-            0x25, 0x00, 0x00, 0x00, // TotalLength
-            0x0f, 0x00, 0x00, 0x00, // Type
-            0x01, 0x00, 0x00, 0x00, // Num
-            0x00, // IsNull
-            0x01, // HaveLength
-            // Length
-            0x0f, 0x00, 0x00, 0x00,
-            0x0f, 0x00, 0x00, 0x00, // BufferLength
-            0x7b, 0x22, 0x6b, 0x65, 0x79, 0x22, 0x3a, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x7d, // Buffer
-
-            // col 15
             0x1f, 0x00, 0x00, 0x00, // TotalLength
             0x10, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
@@ -2186,7 +2174,7 @@ mod tests {
             0x09, 0x00, 0x00, 0x00, // BufferLength
             0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, // Buffer
 
-            // col 16
+            // col 15
             0x2b, 0x00, 0x00, 0x00, // TotalLength
             0x14, 0x00, 0x00, 0x00, // Type
             0x01, 0x00, 0x00, 0x00, // Num
@@ -2220,14 +2208,13 @@ mod tests {
             ColumnView::null(5, Ty::UBigInt),
             ColumnView::null(5, Ty::VarChar),
             ColumnView::null(5, Ty::NChar),
-            ColumnView::from_json::<&str, _, _, _>(vec![None, None, None, None, None]),
             ColumnView::from_bytes::<&[u8], _, _, _>(vec![None, None, None, None, None]),
             ColumnView::from_geobytes::<&[u8], _, _, _>(vec![None, None, None, None, None]),
         ];
 
         let data = Stmt2BindData::new(None, None, Some(cols));
 
-        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, 17)?;
+        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, cols.len())?;
 
         #[rustfmt::skip]
         let expected = [
@@ -2239,17 +2226,17 @@ mod tests {
             0xff, 0xff, 0xff, 0xff, // col_idx
 
             // data
-            0xfa, 0x01, 0x00, 0x00, // TotalLength
+            0xd0, 0x01, 0x00, 0x00, // TotalLength
             0x01, 0x00, 0x00, 0x00, // TableCount
             0x00, 0x00, 0x00, 0x00, // TagCount
-            0x11, 0x00, 0x00, 0x00, // ColCount
+            0x10, 0x00, 0x00, 0x00, // ColCount
             0x00, 0x00, 0x00, 0x00, // TableNamesOffset
             0x00, 0x00, 0x00, 0x00, // TagsOffset
             0x1c, 0x00, 0x00, 0x00, // ColsOffset
 
             // cols
             // ColDataLength
-            0xda, 0x01, 0x00, 0x00,
+            0xb0, 0x01, 0x00, 0x00,
             // ColBuffer
             // table 0 cols
             // col 0
@@ -2378,20 +2365,6 @@ mod tests {
 
             // col 14
             0x2a, 0x00, 0x00, 0x00, // TotalLength
-            0x0f, 0x00, 0x00, 0x00, // Type
-            0x05, 0x00, 0x00, 0x00, // Num
-            0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
-            0x01, // HaveLength
-            // Length
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, // BufferLength
-
-            // col 15
-            0x2a, 0x00, 0x00, 0x00, // TotalLength
             0x10, 0x00, 0x00, 0x00, // Type
             0x05, 0x00, 0x00, 0x00, // Num
             0x01, 0x01, 0x01, 0x01, 0x01, // IsNull
@@ -2404,7 +2377,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, // BufferLength
 
-            // col 16
+            // col 15
             0x2a, 0x00, 0x00, 0x00, // TotalLength
             0x14, 0x00, 0x00, 0x00, // Type
             0x05, 0x00, 0x00, 0x00, // Num
@@ -2468,11 +2441,6 @@ mod tests {
                 Some("varchar2"),
             ]),
             ColumnView::from_nchar::<&str, _, _, _>(vec![Some("nchar1"), None, Some("nchar2")]),
-            ColumnView::from_json::<&str, _, _, _>(vec![
-                Some(r#"{"key1": "value1"}"#),
-                None,
-                Some(r#"{"key2": "value2"}"#),
-            ]),
             ColumnView::from_bytes::<&[u8], _, _, _>(vec![
                 Some("varbinary1".as_bytes()),
                 None,
@@ -2766,14 +2734,6 @@ mod tests {
                 bytes: 8,
                 bind_type: BindType::Column,
             },
-            Stmt2Field {
-                name: "a".to_string(),
-                field_type: 9,
-                precision: 0,
-                scale: 0,
-                bytes: 8,
-                bind_type: BindType::Column,
-            },
         ];
 
         let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0)?;
@@ -2788,10 +2748,10 @@ mod tests {
             0xff, 0xff, 0xff, 0xff, // col_id
 
             // data
-            0x85, 0x04, 0x00, 0x00, // TotalLength
+            0x41, 0x04, 0x00, 0x00, // TotalLength
             0x01, 0x00, 0x00, 0x00, // TableCount
             0x11, 0x00, 0x00, 0x00, // TagCount
-            0x11, 0x00, 0x00, 0x00, // ColCount
+            0x10, 0x00, 0x00, 0x00, // ColCount
             0x1c, 0x00, 0x00, 0x00, // TableNamesOffset
             0x24, 0x00, 0x00, 0x00, // TagsOffset
             0xda, 0x01, 0x00, 0x00, // ColsOffset
@@ -2968,7 +2928,7 @@ mod tests {
 
             // cols
             // ColDataLength
-            0xa7, 0x02, 0x00, 0x00,
+            0x63, 0x02, 0x00, 0x00,
             // ColBuffer
             // table 0 cols
             // col 0
@@ -3106,19 +3066,6 @@ mod tests {
             0x6e, 0x63, 0x68, 0x61, 0x72, 0x31, 0x6e, 0x63, 0x68, 0x61, 0x72, 0x32, // Buffer
 
             // col 14
-            0x44, 0x00, 0x00, 0x00, // TotalLength
-            0x0f, 0x00, 0x00, 0x00, // Type
-            0x03, 0x00, 0x00, 0x00, // Num
-            0x00, 0x01, 0x00, // IsNull
-            0x01, // HaveLength
-            // Length
-            0x12, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x12, 0x00, 0x00, 0x00,
-            0x24, 0x00, 0x00, 0x00, // BufferLength
-            0x7b, 0x22, 0x6b, 0x65, 0x79, 0x31, 0x22, 0x3a, 0x20, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x31, 0x22, 0x7d, 0x7b, 0x22, 0x6b, 0x65, 0x79, 0x32, 0x22, 0x3a, 0x20, 0x22, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x32, 0x22, 0x7d, // Buffer
-
-            // col 15
             0x34, 0x00, 0x00, 0x00, // TotalLength
             0x10, 0x00, 0x00, 0x00, // Type
             0x03, 0x00, 0x00, 0x00, // Num
@@ -3131,7 +3078,7 @@ mod tests {
             0x14, 0x00, 0x00, 0x00, // BufferLength
             0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, 0x31, 0x76, 0x61, 0x72, 0x62, 0x69, 0x6e, 0x61, 0x72, 0x79, 0x32, // Buffer
 
-            // col 16
+            // col 15
             0x4a, 0x00, 0x00, 0x00, // TotalLength
             0x14, 0x00, 0x00, 0x00, // Type
             0x03, 0x00, 0x00, 0x00, // Num
@@ -3273,6 +3220,24 @@ mod tests {
                 bind_type: BindType::Column,
             },
         ];
+
+        let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
+    }
+
+    #[test]
+    #[should_panic = "column does not support json type"]
+    fn test_bind_datas_to_bypes_with_json_col() {
+        let cols = vec![ColumnView::from_json(vec!["{\"key\":\"value\"}"])];
+        let data = Stmt2BindData::new(None, None, Some(&cols));
+
+        let fields = vec![Stmt2Field {
+            name: "".to_string(),
+            field_type: 1,
+            precision: 0,
+            scale: 0,
+            bytes: 131584,
+            bind_type: BindType::Column,
+        }];
 
         let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
     }
