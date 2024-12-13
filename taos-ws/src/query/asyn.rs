@@ -1127,7 +1127,7 @@ impl WsTaos {
                 timing: resp.timing,
                 block_future: None,
                 closer: Some(closer),
-                completed: false,
+                completed: true,
                 metrics: Default::default(),
                 blocks_buffer: None,
             })
