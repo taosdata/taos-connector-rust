@@ -148,7 +148,7 @@ mod tests {
         let mut stmt2 = Stmt2::init(&taos)?;
         stmt2.prepare("insert into t0 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_bools(vec![true]),
             ColumnView::from_tiny_ints(vec![None]),
@@ -233,7 +233,7 @@ mod tests {
         let mut stmt2 = Stmt2::init(&taos)?;
         stmt2.prepare("insert into t0 values(?, ?)")?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_millis_timestamp(vec![
                 1726803356466,
                 1726803357466,
@@ -259,7 +259,7 @@ mod tests {
             .deserialize()
             .try_collect()?;
 
-        assert_eq!(rows.len(), views[0].len());
+        assert_eq!(rows.len(), 4);
 
         assert_eq!(rows[0].ts, 1726803356466);
         assert_eq!(rows[1].ts, 1726803357466);
@@ -297,7 +297,7 @@ mod tests {
         let mut stmt2 = Stmt2::init(&taos)?;
         stmt2.prepare("select * from t0 where c8 > ? and c10 > ? and c12 = ?")?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_ints(vec![0]),
             ColumnView::from_floats(vec![0f32]),
             ColumnView::from_varchar(vec!["hello"]),
@@ -370,7 +370,7 @@ mod tests {
         let mut stmt2 = Stmt2::init(&taos)?;
         stmt2.prepare("select * from t0 where c1 > ?")?;
 
-        let views = &[ColumnView::from_ints(vec![100])];
+        let views = vec![ColumnView::from_ints(vec![100])];
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data])?.exec()?;
         assert_eq!(affected, 0);
@@ -429,7 +429,7 @@ mod async_tests {
             .prepare("insert into t0 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .await?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_bools(vec![true]),
             ColumnView::from_tiny_ints(vec![None]),
@@ -517,7 +517,7 @@ mod async_tests {
         let mut stmt2 = Stmt2::init(&taos).await?;
         stmt2.prepare("insert into t0 values(?, ?)").await?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_millis_timestamp(vec![
                 1726803356466,
                 1726803357466,
@@ -545,7 +545,7 @@ mod async_tests {
             .try_collect()
             .await?;
 
-        assert_eq!(rows.len(), views[0].len());
+        assert_eq!(rows.len(), 4);
 
         assert_eq!(rows[0].ts, 1726803356466);
         assert_eq!(rows[1].ts, 1726803357466);
@@ -586,7 +586,7 @@ mod async_tests {
             .prepare("select * from t0 where c8 > ? and c10 > ? and c12 = ?")
             .await?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_ints(vec![0]),
             ColumnView::from_floats(vec![0f32]),
             ColumnView::from_varchar(vec!["hello"]),
@@ -660,7 +660,7 @@ mod async_tests {
         let mut stmt2 = Stmt2::init(&taos).await?;
         stmt2.prepare("select * from t0 where c1 > ?").await?;
 
-        let views = &[ColumnView::from_ints(vec![100])];
+        let views = vec![ColumnView::from_ints(vec![100])];
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data]).await?.exec().await?;
         assert_eq!(affected, 0);

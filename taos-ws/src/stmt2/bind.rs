@@ -515,9 +515,9 @@ mod tests {
 
     #[test]
     fn test_bind_datas_to_bytes_with_tbnames() -> anyhow::Result<()> {
-        let data1 = Stmt2BindData::new(Some("test1"), None, None);
-        let data2 = Stmt2BindData::new(Some("test2"), None, None);
-        let data3 = Stmt2BindData::new(Some("test3"), None, None);
+        let data1 = Stmt2BindData::new(Some("test1".to_owned()), None, None);
+        let data2 = Stmt2BindData::new(Some("test2".to_owned()), None, None);
+        let data3 = Stmt2BindData::new(Some("test3".to_owned()), None, None);
         let datas = [data1, data2, data3];
 
         let fields = vec![Stmt2Field {
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn test_bind_datas_to_bytes_with_tags() -> anyhow::Result<()> {
-        let tags = &[
+        let tags = vec![
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
             Value::TinyInt(1),
@@ -923,7 +923,7 @@ mod tests {
 
     #[test]
     fn test_bind_datas_to_bytes_with_null_tags() -> anyhow::Result<()> {
-        let tags = &[
+        let tags = vec![
             Value::Null(Ty::Timestamp),
             Value::Null(Ty::Bool),
             Value::Null(Ty::TinyInt),
@@ -1259,7 +1259,7 @@ mod tests {
 
     #[test]
     fn test_bind_datas_to_bytes_with_tbnames_and_tags() -> anyhow::Result<()> {
-        let tags1 = &[
+        let tags1 = vec![
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
             Value::TinyInt(1),
@@ -1282,9 +1282,9 @@ mod tests {
             ])),
         ];
 
-        let data1 = Stmt2BindData::new(Some("test1"), Some(tags1), None);
+        let data1 = Stmt2BindData::new(Some("test1".to_owned()), Some(tags1), None);
 
-        let tags2 = &[
+        let tags2 = vec![
             Value::Null(Ty::Timestamp),
             Value::Null(Ty::Bool),
             Value::Null(Ty::TinyInt),
@@ -1304,9 +1304,9 @@ mod tests {
             Value::Null(Ty::Geometry),
         ];
 
-        let data2 = Stmt2BindData::new(Some("testnil"), Some(tags2), None);
+        let data2 = Stmt2BindData::new(Some("testnil".to_owned()), Some(tags2), None);
 
-        let tags3 = &[
+        let tags3 = vec![
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
             Value::TinyInt(1),
@@ -1329,7 +1329,7 @@ mod tests {
             ])),
         ];
 
-        let data3 = Stmt2BindData::new(Some("test2"), Some(tags3), None);
+        let data3 = Stmt2BindData::new(Some("test2".to_owned()), Some(tags3), None);
 
         let datas = [data1, data2, data3];
 
@@ -1984,7 +1984,7 @@ mod tests {
 
     #[test]
     fn test_bind_datas_to_bytes_with_cols() -> anyhow::Result<()> {
-        let cols = &[
+        let cols = vec![
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_bools(vec![true]),
             ColumnView::from_tiny_ints(vec![1]),
@@ -2006,9 +2006,9 @@ mod tests {
             ]]),
         ];
 
+        let fields_cnt = cols.len();
         let data = Stmt2BindData::new(None, None, Some(cols));
-
-        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, cols.len())?;
+        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, fields_cnt)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -2193,7 +2193,7 @@ mod tests {
 
     #[test]
     fn test_bind_datas_to_bytes_with_null_cols() -> anyhow::Result<()> {
-        let cols = &[
+        let cols = vec![
             ColumnView::null(5, Ty::Timestamp),
             ColumnView::null(5, Ty::Bool),
             ColumnView::null(5, Ty::TinyInt),
@@ -2212,9 +2212,9 @@ mod tests {
             ColumnView::from_geobytes::<&[u8], _, _, _>(vec![None, None, None, None, None]),
         ];
 
+        let fields_cnt = cols.len();
         let data = Stmt2BindData::new(None, None, Some(cols));
-
-        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, cols.len())?;
+        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, fields_cnt)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -2399,7 +2399,7 @@ mod tests {
 
     #[test]
     fn test_bind_datas_to_bytes_with_tbnames_tags_and_cols() -> anyhow::Result<()> {
-        let tags = &[
+        let tags = vec![
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
             Value::TinyInt(1),
@@ -2422,7 +2422,7 @@ mod tests {
             ])),
         ];
 
-        let cols = &[
+        let cols = vec![
             ColumnView::from_millis_timestamp(vec![Some(1726803356466), None, Some(1726803358466)]),
             ColumnView::from_bools(vec![Some(true), None, Some(false)]),
             ColumnView::from_tiny_ints(vec![Some(11), None, Some(12)]),
@@ -2459,7 +2459,7 @@ mod tests {
             ]),
         ];
 
-        let data = Stmt2BindData::new(Some("test1"), Some(tags), Some(cols));
+        let data = Stmt2BindData::new(Some("test1".to_owned()), Some(tags), Some(cols));
 
         let fields = vec![
             Stmt2Field {
@@ -3116,7 +3116,7 @@ mod tests {
 
     #[test]
     fn test_bind_datas_to_bytes_without_tbnames() {
-        let test_cases = vec![None, Some("")];
+        let test_cases = vec![None, Some(String::new())];
         for tbname in test_cases {
             let data = Stmt2BindData::new(tbname, None, None);
 
@@ -3155,7 +3155,7 @@ mod tests {
     #[should_panic = "tags len mismatch"]
     fn test_bind_datas_to_bytes_tags_len_mismatch() {
         let tags = vec![Value::Int(1)];
-        let data = Stmt2BindData::new(None, Some(&tags), None);
+        let data = Stmt2BindData::new(None, Some(tags), None);
 
         let fields = vec![
             Stmt2Field {
@@ -3200,7 +3200,7 @@ mod tests {
     #[should_panic = "columns len mismatch"]
     fn test_bind_datas_to_bytes_cols_len_mismatch() {
         let cols = vec![ColumnView::from_ints(vec![1])];
-        let data = Stmt2BindData::new(None, None, Some(&cols));
+        let data = Stmt2BindData::new(None, None, Some(cols));
 
         let fields = vec![
             Stmt2Field {
@@ -3228,7 +3228,7 @@ mod tests {
     #[should_panic = "column does not support json type"]
     fn test_bind_datas_to_bypes_with_json_col() {
         let cols = vec![ColumnView::from_json(vec!["{\"key\":\"value\"}"])];
-        let data = Stmt2BindData::new(None, None, Some(&cols));
+        let data = Stmt2BindData::new(None, None, Some(cols));
 
         let fields = vec![Stmt2Field {
             name: "".to_string(),

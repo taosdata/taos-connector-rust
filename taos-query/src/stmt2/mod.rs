@@ -38,17 +38,17 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct Stmt2BindData<'a> {
-    table_name: Option<&'a str>,
-    tags: Option<&'a [Value]>,
-    columns: Option<&'a [ColumnView]>,
+pub struct Stmt2BindData {
+    table_name: Option<String>,
+    tags: Option<Vec<Value>>,
+    columns: Option<Vec<ColumnView>>,
 }
 
-impl<'a> Stmt2BindData<'a> {
+impl Stmt2BindData {
     pub fn new(
-        table_name: Option<&'a str>,
-        tags: Option<&'a [Value]>,
-        columns: Option<&'a [ColumnView]>,
+        table_name: Option<String>,
+        tags: Option<Vec<Value>>,
+        columns: Option<Vec<ColumnView>>,
     ) -> Self {
         Self {
             table_name,
@@ -57,15 +57,15 @@ impl<'a> Stmt2BindData<'a> {
         }
     }
 
-    pub fn table_name(&self) -> Option<&str> {
-        self.table_name
+    pub fn table_name(&self) -> Option<&String> {
+        self.table_name.as_ref()
     }
 
-    pub fn tags(&self) -> Option<&[Value]> {
-        self.tags
+    pub fn tags(&self) -> Option<&Vec<Value>> {
+        self.tags.as_ref()
     }
 
-    pub fn columns(&self) -> Option<&[ColumnView]> {
-        self.columns
+    pub fn columns(&self) -> Option<&Vec<ColumnView>> {
+        self.columns.as_ref()
     }
 }
