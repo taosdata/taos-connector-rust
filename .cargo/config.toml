@@ -1,24 +1,23 @@
 [target.'cfg(all())']
 rustflags = [
-    # Complexity group
+    # Complexity Group
     "-Dclippy::complexity",
-    "-Aclippy::manual_c_str_literals",
 
-    # Perf group
+    # Perf Group
     "-Dclippy::perf",
 
-    # Style group
+    # Style Group
     "-Aclippy::missing_safety_doc",
 
-    # Suspicious group
+    # Suspicious Group
     "-Aclippy::missing_transmute_annotations",
 
-    # Cargo group
+    # Cargo Group
     "-Wclippy::negative_feature_names",
     "-Wclippy::redundant_feature_names",
     "-Wclippy::wildcard_dependencies",
 
-    # Nursery group
+    # Nursery Group
     "-Wclippy::branches_sharing_code",
     "-Wclippy::clear_with_drain",
     "-Wclippy::collection_is_never_read",
@@ -50,7 +49,7 @@ rustflags = [
     "-Wclippy::useless_let_if_seq",
     "-Wclippy::while_float",
 
-    # Pedantic group
+    # Pedantic Group
     "-Wclippy::bool_to_int_with_if",
     "-Wclippy::checked_conversions",
     "-Wclippy::cloned_instead_of_copied",
@@ -120,7 +119,7 @@ rustflags = [
     "-Wclippy::verbose_bit_mask",
     "-Wclippy::zero_sized_map_values",
 
-    # Restriction group
+    # Restriction Group
     "-Wclippy::alloc_instead_of_core",
     "-Wclippy::big_endian_bytes",
     "-Wclippy::cfg_not_test",
