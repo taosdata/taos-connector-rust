@@ -4,6 +4,7 @@ use std::fmt::{Debug, Display};
 use std::os::raw::{c_char, c_int};
 use std::str::Utf8Error;
 use std::string::FromUtf8Error;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
@@ -944,20 +945,23 @@ pub unsafe extern "C" fn ws_connect(dsn: *const c_char) -> *mut WS_TAOS {
 #[allow(static_mut_refs)]
 /// Same to taos_get_server_info, returns server version info.
 pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char {
-    static mut VERSION_INFO: [u8; 128] = [0; 128];
+    static VERSION_INFO: OnceLock<CString> = OnceLock::new();
+
     if taos.is_null() {
         set_error_and_get_code(WsError::new(Code::INVALID_PARA, "taos is null"));
         return std::ptr::null();
     }
 
-    if VERSION_INFO[0] == 0 {
+    let version_info = VERSION_INFO.get_or_init(|| {
         if let Some(taos) = (taos as *mut Taos).as_mut() {
             let v = taos.version();
-            std::ptr::copy_nonoverlapping(v.as_ptr(), VERSION_INFO.as_mut_ptr(), v.len());
+            CString::new(v).unwrap()
+        } else {
+            CString::new("").unwrap()
         }
-    }
+    });
 
-    VERSION_INFO.as_ptr() as *const c_char
+    version_info.as_ptr()
 }
 
 #[no_mangle]
@@ -1160,7 +1164,7 @@ pub unsafe extern "C" fn ws_select_db(taos: *mut WS_TAOS, db: *const c_char) -> 
 #[no_mangle]
 /// If the query is update query or not
 pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
-    static mut VERSION_INFO: [u8; 128] = [0; 128];
+    static VERSION_INFO: OnceLock<CString> = OnceLock::new();
 
     let metadata = match MetadataCommand::new().no_deps().exec().ok() {
         Some(m) => m,
@@ -1169,6 +1173,7 @@ pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
             return std::ptr::null();
         }
     };
+
     let package = match metadata
         .packages
         .into_iter()
@@ -1182,8 +1187,9 @@ pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
     };
 
     let version = package.version.to_string();
-    std::ptr::copy_nonoverlapping(version.as_ptr(), VERSION_INFO.as_mut_ptr(), version.len());
-    VERSION_INFO.as_ptr() as *const c_char
+    let version = CString::new(version).unwrap();
+    VERSION_INFO.set(version).unwrap();
+    VERSION_INFO.get().unwrap().as_ptr()
 }
 
 #[no_mangle]
@@ -1760,6 +1766,17 @@ mod tests {
         unsafe {
             let pclient_info = ws_get_client_info();
             dbg!(CStr::from_ptr(pclient_info));
+        }
+    }
+
+    #[test]
+    fn test_server_info() {
+        unsafe {
+            let taos = ws_connect(c"http://localhost:6041".as_ptr());
+            assert!(!taos.is_null());
+
+            let version = ws_get_server_info(taos);
+            dbg!(CStr::from_ptr(version as _));
         }
     }
 

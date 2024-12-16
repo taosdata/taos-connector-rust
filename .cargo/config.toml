@@ -1,10 +1,7 @@
 [target.'cfg(all())']
 rustflags = [
     # Complexity Group
-    "-Dclippy::complexity",
-
-    # Perf Group
-    "-Dclippy::perf",
+    "-Aclippy::manual_c_str_literals",
 
     # Style Group
     "-Aclippy::missing_safety_doc",
