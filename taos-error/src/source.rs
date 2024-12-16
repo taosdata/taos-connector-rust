@@ -1,13 +1,14 @@
-use std::{borrow::Cow, fmt::Debug, ops::Deref};
-
 #[cfg(nightly)]
 use std::backtrace::Backtrace;
+use std::borrow::Cow;
+use std::fmt::Debug;
+use std::ops::Deref;
 
 use thiserror::Error;
 
 /// Inner error source.
 #[derive(Error)]
-pub(super) enum Inner {
+pub enum Inner {
     /// Raw error message from taos C library.
     #[error("")]
     Empty {
@@ -112,12 +113,7 @@ impl Inner {
     #[inline(always)]
     pub fn backtrace(&self) -> &Backtrace {
         match self {
-            Inner::Empty { backtrace } => backtrace,
-            Inner::Raw {
-                raw: _,
-                #[cfg(nightly)]
-                backtrace,
-            } => backtrace,
+            Inner::Empty { backtrace } | Inner::Raw { backtrace, .. } => backtrace,
             Inner::Any(any) => any.backtrace(),
         }
     }
@@ -132,8 +128,7 @@ impl Inner {
 
     pub fn deep(&self) -> bool {
         match self {
-            Inner::Empty { .. } => false,
-            Inner::Raw { .. } => false,
+            Inner::Empty { .. } | Inner::Raw { .. } => false,
             Inner::Any(any) => any.source().is_some(),
         }
     }
@@ -144,6 +139,7 @@ pub enum Chain<'a> {
     Raw(std::array::IntoIter<&'a str, 1>),
     Any(anyhow::Chain<'a>),
 }
+
 impl<'a> Iterator for Chain<'a> {
     type Item = Cow<'a, str>;
 
@@ -155,8 +151,9 @@ impl<'a> Iterator for Chain<'a> {
         }
     }
 }
+
 #[test]
 fn test_inner() {
-    let error = Inner::from(anyhow::anyhow!("error"));
-    assert_eq!(error.to_string(), "error");
+    let err = Inner::from(anyhow::anyhow!("error"));
+    assert_eq!(err.to_string(), "error");
 }

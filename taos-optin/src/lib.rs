@@ -1,24 +1,21 @@
-use std::{
-    cell::UnsafeCell,
-    ffi::{c_char, CStr, CString},
-    mem::ManuallyDrop,
-    sync::Arc,
-    time::Duration,
-};
+#![allow(clippy::macro_metavars_in_unsafe)]
+
+use std::cell::UnsafeCell;
+use std::ffi::{c_char, CStr, CString};
+use std::mem::ManuallyDrop;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use once_cell::sync::OnceCell;
 use raw::{ApiEntry, BlockState, RawRes, RawTaos};
+use taos_query::prelude::tokio::sync::oneshot;
+use taos_query::prelude::tokio::{select, task, time};
+use taos_query::prelude::{Field, Precision, RawBlock, RawMeta, RawResult};
+use taos_query::util::Edition;
+use taos_query::RawError;
 use tracing::{warn, Instrument};
-
-use taos_query::{
-    prelude::{
-        tokio::{select, sync::oneshot, task, time},
-        Field, Precision, RawBlock, RawMeta, RawResult,
-    },
-    util::Edition,
-    RawError,
-};
 
 const MAX_CONNECT_RETRIES: u8 = 2;
 
@@ -34,13 +31,14 @@ pub use stmt::Stmt;
 pub use tmq::{Consumer, TmqBuilder};
 
 pub mod prelude {
-    pub use super::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
-
     pub use taos_query::prelude::*;
 
+    pub use super::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
+
     pub mod sync {
-        pub use crate::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
         pub use taos_query::prelude::sync::*;
+
+        pub use crate::{Consumer, ResultSet, Stmt, Taos, TaosBuilder, TmqBuilder};
     }
 }
 
@@ -48,18 +46,17 @@ pub mod prelude {
 macro_rules! err_or {
     ($res:ident, $code:expr, $ret:expr) => {
         unsafe {
-            let code: taos_query::prelude::Code = { $code }.into();
+            let code: Code = { $code }.into();
             if code.success() {
                 Ok($ret)
             } else {
-                Err(taos_query::prelude::RawError::new(code, $res.err_as_str()))
+                Err(taos_query::RawError::new(code, $res.err_as_str()))
             }
         }
     };
-
-    ($res:ident, $code:expr) => {{
+    ($res:ident, $code:expr) => {
         err_or!($res, $code, ())
-    }};
+    };
     ($code:expr, $ret:expr) => {
         unsafe {
             let code: Code = { $code }.into();
@@ -70,7 +67,6 @@ macro_rules! err_or {
             }
         }
     };
-
     ($code:expr) => {
         err_or!($code, ())
     };
@@ -95,14 +91,10 @@ impl taos_query::Queryable for Taos {
         self.raw.query(sql.as_ref()).map(ResultSet::new)
     }
 
-    fn query_with_req_id<T: AsRef<str>>(
-        &self,
-        _sql: T,
-        _req_id: u64,
-    ) -> RawResult<Self::ResultSet> {
-        tracing::trace!("Query with SQL: {}", _sql.as_ref());
+    fn query_with_req_id<T: AsRef<str>>(&self, sql: T, req_id: u64) -> RawResult<Self::ResultSet> {
+        tracing::trace!("Query with SQL: {}", sql.as_ref());
         self.raw
-            .query_with_req_id(_sql.as_ref(), _req_id)
+            .query_with_req_id(sql.as_ref(), req_id)
             .map(ResultSet::new)
     }
 
@@ -160,6 +152,7 @@ impl taos_query::AsyncQueryable for Taos {
             .map(ResultSet::new)
     }
 
+    #[allow(clippy::redundant_pub_crate)]
     #[tracing::instrument(level = "trace", skip_all)]
     async fn write_raw_meta(&self, meta: &taos_query::common::RawMeta) -> RawResult<()> {
         let raw = meta.as_raw_data_t();
@@ -318,8 +311,7 @@ impl TaosBuilder {
         let join = task::spawn_blocking(move || {
             tracing::trace!("Async connecting to the server");
             let ptr = api.connect_with_retries(&auth, auth.max_retries())?;
-
-            RawTaos::new(api.clone(), ptr).map(|raw| Taos { raw })
+            RawTaos::new(api, ptr).map(|raw| Taos { raw })
         });
         let abort = join.abort_handle();
         task::spawn(async move {
@@ -353,30 +345,39 @@ impl Auth {
     pub(crate) fn host(&self) -> Option<&CStr> {
         self.host.as_deref()
     }
+
     pub(crate) fn host_as_ptr(&self) -> *const c_char {
-        self.host().map_or_else(std::ptr::null, |s| s.as_ptr())
+        self.host().map_or_else(std::ptr::null, CStr::as_ptr)
     }
+
     pub(crate) fn user(&self) -> Option<&CStr> {
         self.user.as_deref()
     }
+
     pub(crate) fn user_as_ptr(&self) -> *const c_char {
-        self.user().map_or_else(std::ptr::null, |s| s.as_ptr())
+        self.user().map_or_else(std::ptr::null, CStr::as_ptr)
     }
+
     pub(crate) fn password(&self) -> Option<&CStr> {
         self.pass.as_deref()
     }
+
     pub(crate) fn password_as_ptr(&self) -> *const c_char {
-        self.password().map_or_else(std::ptr::null, |s| s.as_ptr())
+        self.password().map_or_else(std::ptr::null, CStr::as_ptr)
     }
+
     pub(crate) fn database(&self) -> Option<&CStr> {
         self.db.as_deref()
     }
+
     pub(crate) fn database_as_ptr(&self) -> *const c_char {
-        self.database().map_or_else(std::ptr::null, |s| s.as_ptr())
+        self.database().map_or_else(std::ptr::null, CStr::as_ptr)
     }
+
     pub(crate) fn port(&self) -> u16 {
         self.port
     }
+
     pub(crate) fn max_retries(&self) -> u8 {
         self.max_retries
     }
@@ -395,10 +396,10 @@ impl taos_query::TBuilder for TaosBuilder {
 
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
             tracing::trace!("using library path: {path}");
-            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::dlopen(path).map_err(taos_query::RawError::any)?
         } else {
             tracing::trace!("using default library of taos");
-            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::open_default().map_err(taos_query::RawError::any)?
         };
         let mut auth = Auth::default();
         // let mut builder = TaosBuilder::default();
@@ -471,8 +472,7 @@ impl taos_query::TBuilder for TaosBuilder {
             use taos_query::prelude::sync::Queryable;
             let v: String = Queryable::query_one(conn, "select server_version()")?.unwrap();
             Ok(match self.server_version.try_insert(v) {
-                Ok(v) => v.as_str(),
-                Err((v, _)) => v.as_str(),
+                Ok(v) | Err((v, _)) => v.as_str(),
             })
         }
     }
@@ -541,10 +541,10 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
             tracing::trace!("using library path: {path}");
-            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::dlopen(path).map_err(taos_query::RawError::any)?
         } else {
             tracing::trace!("using default library of taos");
-            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::open_default().map_err(taos_query::RawError::any)?
         };
         let mut auth = Auth::default();
         // let mut builder = TaosBuilder::default();
@@ -615,8 +615,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
                 .await?
                 .unwrap();
             Ok(match self.server_version.try_insert(v) {
-                Ok(v) => v.as_str(),
-                Err((v, _)) => v.as_str(),
+                Ok(v) | Err((v, _)) => v.as_str(),
             })
         }
     }
@@ -703,7 +702,7 @@ pub struct ResultSet {
     raw: RawRes,
     fields: OnceCell<Vec<Field>>,
     summary: UnsafeCell<(usize, usize)>,
-    state: Arc<UnsafeCell<BlockState>>,
+    state: Rc<UnsafeCell<BlockState>>,
 }
 
 impl ResultSet {
@@ -712,7 +711,7 @@ impl ResultSet {
             raw,
             fields: OnceCell::new(),
             summary: UnsafeCell::new((0, 0)),
-            state: Arc::new(UnsafeCell::new(BlockState::default())),
+            state: Rc::new(UnsafeCell::new(BlockState::default())),
         }
     }
 
@@ -757,7 +756,7 @@ impl taos_query::Fetchable for ResultSet {
     }
 
     fn update_summary(&mut self, nrows: usize) {
-        self.update_summary(nrows)
+        self.update_summary(nrows);
     }
 
     fn fetch_raw_block(&mut self) -> RawResult<Option<RawBlock>> {
@@ -791,7 +790,7 @@ impl taos_query::AsyncFetchable for ResultSet {
     }
 
     fn update_summary(&mut self, nrows: usize) {
-        self.update_summary(nrows)
+        self.update_summary(nrows);
     }
 }
 
@@ -814,13 +813,10 @@ pub(crate) mod constants {
 
 #[cfg(test)]
 mod tests {
-    use crate::constants::{DSN_V2, DSN_V3};
+    use taos_query::common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder};
 
     use super::*;
-
-    use taos_query::common::SchemalessPrecision;
-    use taos_query::common::SchemalessProtocol;
-    use taos_query::common::SmlDataBuilder;
+    use crate::constants::{DSN_V2, DSN_V3};
 
     #[test]
     fn show_databases() -> RawResult<()> {

@@ -1,5 +1,4 @@
 use chrono::{DateTime, Local};
-
 use serde::{Deserialize, Serialize};
 
 /// Information for `show topics` record.

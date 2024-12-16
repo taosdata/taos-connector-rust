@@ -1,26 +1,25 @@
 mod _priv {
-    pub use crate::common::{
-        AlterType, BorrowedValue, ColumnView, Field, JsonMeta, MetaAlter, MetaCreate, MetaDrop,
-        MetaUnit, Precision, RawBlock, RawMeta, TagWithValue, Ty, Value,
-    };
-    pub use crate::util::{Inlinable, InlinableRead, InlinableWrite};
-
     pub use itertools::Itertools;
     pub use mdsn::{Dsn, DsnError, IntoDsn};
     pub use taos_error::{Code, Error as RawError};
 
+    pub use crate::common::{
+        AlterType, BorrowedValue, ColumnView, Field, JsonMeta, MetaAlter, MetaCreate, MetaDrop,
+        MetaUnit, Precision, RawBlock, RawMeta, TagWithValue, Ty, Value,
+    };
     pub use crate::tmq::{IsOffset, MessageSet, Timeout};
+    pub use crate::util::{Inlinable, InlinableRead, InlinableWrite};
 }
 
-pub use crate::tmq::{AsAsyncConsumer, IsAsyncData, IsAsyncMeta};
-pub use crate::AsyncTBuilder;
-#[cfg(feature = "deadpool")]
-pub use crate::Pool;
-pub use crate::RawResult;
 pub use _priv::*;
 pub use futures::stream::{Stream, StreamExt, TryStreamExt};
 pub use r#async::*;
 pub use tokio;
+
+pub use crate::tmq::{AsAsyncConsumer, IsAsyncData, IsAsyncMeta};
+#[cfg(feature = "deadpool")]
+pub use crate::Pool;
+pub use crate::{AsyncTBuilder, RawResult};
 
 pub trait Helpers {
     fn table_vgroup_id(&self, _db: &str, _table: &str) -> Option<i32> {
@@ -33,26 +32,22 @@ pub trait Helpers {
 }
 
 pub mod sync {
-    pub use crate::RawResult;
-    pub use crate::TBuilder;
-    #[cfg(feature = "r2d2")]
-    pub use crate::{Pool, PoolBuilder};
-    #[cfg(feature = "r2d2")]
-    pub use r2d2::ManageConnection;
     use std::borrow::Cow;
 
-    pub use super::_priv::*;
-
-    pub use crate::stmt::Bindable;
-    pub use crate::tmq::{AsConsumer, IsData, IsMeta};
-
+    pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
+    #[cfg(feature = "r2d2")]
+    pub use r2d2::ManageConnection;
+    pub use serde::de::value::Error as DeError;
     use serde::de::DeserializeOwned;
 
-    pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
-    pub use serde::de::value::Error as DeError;
-
+    pub use super::_priv::*;
     use crate::common::*;
     use crate::helpers::*;
+    pub use crate::stmt::Bindable;
+    pub use crate::tmq::{AsConsumer, IsData, IsMeta};
+    #[cfg(feature = "r2d2")]
+    pub use crate::{Pool, PoolBuilder};
+    pub use crate::{RawResult, TBuilder};
 
     pub struct IRowsIter<'a, T>
     where
@@ -112,7 +107,7 @@ pub mod sync {
         query: &'a mut T,
     }
 
-    impl<'a, T> Iterator for IBlockIter<'a, T>
+    impl<T> Iterator for IBlockIter<'_, T>
     where
         T: Fetchable,
     {
@@ -298,35 +293,30 @@ pub mod sync {
 }
 
 mod r#async {
-    use serde::de::DeserializeOwned;
     use std::borrow::Cow;
     use std::marker::PhantomData;
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
+    #[cfg(feature = "async")]
+    use async_trait::async_trait;
+    pub use futures::stream::{Stream, StreamExt, TryStreamExt};
+    pub use mdsn::Address;
+    pub use serde::de::value::Error as DeError;
+    use serde::de::DeserializeOwned;
+
+    pub use super::_priv::*;
     use crate::common::*;
     use crate::helpers::*;
     pub use crate::stmt::AsyncBindable;
+    pub use crate::util::{AsyncInlinable, AsyncInlinableRead, AsyncInlinableWrite};
     pub use crate::RawResult;
-
-    pub use super::_priv::*;
-    pub use crate::util::AsyncInlinable;
-    pub use crate::util::AsyncInlinableRead;
-    pub use crate::util::AsyncInlinableWrite;
-    pub use mdsn::Address;
-    pub use serde::de::value::Error as DeError;
-
-    pub use futures::stream::{Stream, StreamExt, TryStreamExt};
-
-    // use crate::iter::*;
-    #[cfg(feature = "async")]
-    use async_trait::async_trait;
 
     pub struct AsyncBlocks<'a, T> {
         query: &'a mut T,
     }
 
-    impl<'a, T> Stream for AsyncBlocks<'a, T>
+    impl<T> Stream for AsyncBlocks<'_, T>
     where
         T: AsyncFetchable,
     {
@@ -371,6 +361,7 @@ mod r#async {
                 Poll::Pending => Poll::Pending,
             }
         }
+
         fn next_row(&mut self, cx: &mut Context<'_>) -> Poll<RawResult<Option<RowView<'a>>>> {
             // has block
             if let Some(rows) = self.rows.as_mut() {
@@ -394,7 +385,7 @@ mod r#async {
         type Item = RawResult<RowView<'a>>;
 
         fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            self.next_row(cx).map(|row| row.transpose())
+            self.next_row(cx).map(Result::transpose)
         }
     }
 
@@ -403,9 +394,9 @@ mod r#async {
         _marker: PhantomData<V>,
     }
 
-    impl<'a, T, V> Unpin for AsyncDeserialized<'a, T, V> {}
+    impl<T, V> Unpin for AsyncDeserialized<'_, T, V> {}
 
-    impl<'a, T, V> Stream for AsyncDeserialized<'a, T, V>
+    impl<T, V> Stream for AsyncDeserialized<'_, T, V>
     where
         T: AsyncFetchable,
         V: DeserializeOwned,
@@ -430,7 +421,7 @@ mod r#async {
         fn fields(&self) -> &[Field];
 
         fn filed_names(&self) -> Vec<&str> {
-            self.fields().iter().map(|f| f.name()).collect_vec()
+            self.fields().iter().map(Field::name).collect_vec()
         }
 
         fn num_of_fields(&self) -> usize {
@@ -478,7 +469,6 @@ mod r#async {
     /// The synchronous query trait for TDengine connection.
     #[async_trait]
     pub trait AsyncQueryable: Send + Sync + Sized {
-        // type B: for<'b> BlockExt<'b, 'b>;
         type AsyncResultSet: AsyncFetchable;
 
         async fn query<T: AsRef<str> + Send + Sync>(

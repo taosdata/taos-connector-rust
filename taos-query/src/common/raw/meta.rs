@@ -1,22 +1,16 @@
-use std::{
-    fmt::{Display, Write},
-    ops::Deref,
-};
+use std::fmt::{Display, Write};
+use std::ops::Deref;
 
 use bytes::Bytes;
-
 use either::Either;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::{
-    common::{Field, Ty},
-    helpers::CompressOptions,
-    util::Inlinable,
-};
-
 use super::RawData;
+use crate::common::{Field, Ty};
+use crate::helpers::CompressOptions;
+use crate::util::Inlinable;
 
 #[derive(Debug, Clone)]
 pub struct RawMeta(RawData);
@@ -189,8 +183,7 @@ impl FieldMore {
         let mut sql = self.field.to_string();
         if let Some(compression) = &self.compression {
             sql.push(' ');
-            write!(&mut sql, "{}", compression).unwrap();
-            // sql.push_str(&format!(" {}", compression));
+            write!(&mut sql, "{compression}").unwrap();
         }
         if self.is_primary_key {
             sql.push_str(" PRIMARY KEY");
@@ -238,10 +231,10 @@ impl Display for MetaCreate {
                 columns,
                 tags,
             } => {
-                debug_assert!(!columns.is_empty(), "{:?}", self);
+                debug_assert!(!columns.is_empty(), "{self:?}");
                 debug_assert!(!tags.is_empty());
 
-                f.write_fmt(format_args!("`{}`", table_name))?;
+                f.write_fmt(format_args!("`{table_name}`"))?;
                 f.write_char('(')?;
                 f.write_str(&columns.iter().map(|f| f.sql_repr()).join(", "))?;
                 f.write_char(')')?;
@@ -267,7 +260,7 @@ impl Display for MetaCreate {
                                 match t.field.ty() {
                                     Ty::Json => format!("'{}'", t.value.as_str().unwrap()),
                                     Ty::VarChar | Ty::NChar => {
-                                        format!("{}", t.value.as_str().unwrap())
+                                        t.value.as_str().unwrap().to_string()
                                     }
                                     _ => format!("{}", t.value),
                                 }
@@ -289,7 +282,7 @@ impl Display for MetaCreate {
             } => {
                 debug_assert!(!columns.is_empty());
 
-                f.write_fmt(format_args!("`{}`", table_name))?;
+                f.write_fmt(format_args!("`{table_name}`"))?;
                 f.write_char('(')?;
                 f.write_str(&columns.iter().map(|f| f.sql_repr()).join(", "))?;
                 f.write_char(')')?;
@@ -463,7 +456,7 @@ impl Display for MetaDrop {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MetaDrop::Super { table_name } => {
-                f.write_fmt(format_args!("DROP TABLE IF EXISTS `{}`", table_name))
+                f.write_fmt(format_args!("DROP TABLE IF EXISTS `{table_name}`"))
             }
             MetaDrop::Other { table_name_list } => f.write_fmt(format_args!(
                 "DROP TABLE IF EXISTS {}",
@@ -588,7 +581,7 @@ impl<'a> Iterator for JsonMetaIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for JsonMetaIter<'a> {
+impl ExactSizeIterator for JsonMetaIter<'_> {
     #[inline]
     fn len(&self) -> usize {
         match &self.iter {
@@ -598,7 +591,7 @@ impl<'a> ExactSizeIterator for JsonMetaIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for JsonMetaIter<'a> {
+impl DoubleEndedIterator for JsonMetaIter<'_> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         match &mut self.iter {
@@ -624,7 +617,7 @@ impl<'a> Iterator for JsonMetaIterMut<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for JsonMetaIterMut<'a> {
+impl ExactSizeIterator for JsonMetaIterMut<'_> {
     #[inline]
     fn len(&self) -> usize {
         match &self.iter {
@@ -634,7 +627,7 @@ impl<'a> ExactSizeIterator for JsonMetaIterMut<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for JsonMetaIterMut<'a> {
+impl DoubleEndedIterator for JsonMetaIterMut<'_> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         match &mut self.iter {
@@ -706,9 +699,8 @@ impl<'a> IntoIterator for &'a mut JsonMeta {
 
 #[cfg(test)]
 mod tests {
-    use crate::itypes::IsJson;
-
     use super::{JsonMeta, MetaUnit};
+    use crate::itypes::IsJson;
 
     #[test]
     fn test_json_meta_compress() {

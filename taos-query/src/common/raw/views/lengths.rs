@@ -1,5 +1,5 @@
-use std::ops::Deref;
-use std::{fmt::Debug, ops::DerefMut};
+use std::fmt::Debug;
+use std::ops::{Deref, DerefMut};
 
 use bytes::{Bytes, BytesMut};
 
@@ -49,7 +49,7 @@ impl Deref for Lengths {
     }
 }
 
-pub(crate) struct LengthsMut(BytesMut);
+pub struct LengthsMut(BytesMut);
 
 impl<T: Into<BytesMut>> From<T> for LengthsMut {
     fn from(value: T) -> Self {
@@ -65,12 +65,12 @@ impl Debug for LengthsMut {
 
 impl LengthsMut {
     /// Creates a new `LengthsMut` with the specified length `len`.
-    ///
     pub fn new(len: usize) -> Self {
         let mut bytes = BytesMut::with_capacity(len * std::mem::size_of::<u32>());
         bytes.resize(len * std::mem::size_of::<u32>(), 0);
         Self(bytes)
     }
+
     /// As a [i32] slice.
     fn as_slice(&self) -> &[u32] {
         unsafe {
@@ -80,6 +80,7 @@ impl LengthsMut {
             )
         }
     }
+
     fn as_slice_mut(&mut self) -> &mut [u32] {
         unsafe {
             std::slice::from_raw_parts_mut(
@@ -88,6 +89,7 @@ impl LengthsMut {
             )
         }
     }
+
     pub fn into_lengths(self) -> Lengths {
         Lengths::from(self.0)
     }

@@ -80,206 +80,6 @@ use regex::Regex;
 use thiserror::Error;
 use urlencoding::encode;
 
-impl Dsn {
-    pub fn from_regex(input: &str) -> Result<Self, DsnError> {
-        lazy_static::lazy_static! {
-            static ref RE: Regex = Regex::new(r"(?x)
-                (?P<driver>[\w.-]+)(\+(?P<protocol>[^@/?\#]+))?: # abc
-                (
-                    # url-like dsn
-                    //((?P<username>[\w\s\-_%.]+)?(:(?P<password>[^@/?\#]+))?@)? # for authorization
-                        (((?P<protocol2>[\w\s.-]+)\()?
-                            (?P<addr>[\w\-_%.:]*(:\d{0,5})?(,[\w\-:_.]*(:\d{0,5})?)*)?  # for addresses
-                        \)?)?
-                        (/(?P<subject>[\w\s%$@.,/-]+)?)?                             # for subject
-                    | # or
-                    # path-like dsn
-                    (?P<path>([\\/.~]$|/\s*\w+[\w\s %$@*:,.\\\-/ _\(\)\[\]{}（）【】｛｝]*|[\.~\w\s]?[\w\s %$@*:,.\\\-/ _\(\)\[\]{}（）【】｛｝]+))
-                ) # abc
-                (\?(?P<params>(?s:.)*))?").unwrap();
-        }
-
-        let cap = RE
-            .captures(input)
-            .ok_or_else(|| DsnError::InvalidConnection(input.to_string()))?;
-
-        let driver = cap.name("driver").unwrap().as_str().to_string();
-        let protocol = cap.name("protocol").map(|m| m.as_str().to_string());
-        let protocol2 = cap.name("protocol2").map(|m| m.as_str().to_string());
-        let protocol = match (protocol, protocol2) {
-            (Some(_), Some(_)) => Err(DsnError::InvalidProtocol("".to_string()))?,
-            (Some(p), None) | (None, Some(p)) => Some(p),
-            _ => None,
-        };
-        let username = cap
-            .name("username")
-            .map(|m| {
-                let s = m.as_str();
-                urlencoding::decode(s)
-                    .map(|s| s.to_string())
-                    .map_err(|err| DsnError::InvalidPassword(s.to_string(), err))
-            })
-            .transpose()?;
-        let password = cap
-            .name("password")
-            .map(|m| {
-                let s = m.as_str();
-                urlencoding::decode(s)
-                    .map(|s| s.to_string())
-                    .map_err(|err| DsnError::InvalidPassword(s.to_string(), err))
-            })
-            .transpose()?;
-        let subject = cap.name("subject").map(|m| m.as_str().to_string());
-        let path = cap.name("path").map(|m| m.as_str().to_string());
-        let addresses = if let Some(addr) = cap.name("addr") {
-            let addr = addr.as_str();
-            if addr.is_empty() {
-                vec![]
-            } else {
-                let mut addrs = Vec::new();
-
-                for s in addr.split(',') {
-                    if s.is_empty() {
-                        continue;
-                    }
-                    if let Some((host, port)) = s.split_once(':') {
-                        let port = if port.is_empty() {
-                            0
-                        } else {
-                            port.parse::<u16>().map_err(|err| {
-                                DsnError::InvalidAddresses(s.to_string(), err.to_string())
-                            })?
-                        };
-                        addrs.push(Address::new(host, port));
-                    } else if s.contains('%') {
-                        addrs.push(Address::from_path(urlencoding::decode(s).unwrap()));
-                    } else {
-                        addrs.push(Address::from_host(s));
-                    }
-                }
-                addrs
-            }
-        } else {
-            vec![]
-        };
-        let mut params = BTreeMap::new();
-        if let Some(p) = cap.name("params") {
-            for p in p.as_str().split_terminator('&') {
-                if p.contains('=') {
-                    if let Some((k, v)) = p.split_once('=') {
-                        let k = urlencoding::decode(k)?;
-                        let v = urlencoding::decode(v)?;
-                        params.insert(k.to_string(), v.to_string());
-                    }
-                } else {
-                    let p = urlencoding::decode(p)?;
-                    params.insert(p.to_string(), "".to_string());
-                }
-            }
-        }
-        Ok(Dsn {
-            driver,
-            protocol,
-            username,
-            password,
-            addresses,
-            path,
-            subject,
-            params,
-        })
-    }
-
-    #[cfg(feature = "pest")]
-    pub fn from_pest(input: &str) -> Result<Self, DsnError> {
-        let dsn = DsnParser::parse(Rule::dsn, input)?.next().unwrap();
-
-        let mut to = Dsn::default();
-        for pair in dsn.into_inner() {
-            match pair.as_rule() {
-                Rule::scheme => {
-                    for inner in pair.into_inner() {
-                        match inner.as_rule() {
-                            Rule::driver => to.driver = inner.as_str().to_string(),
-                            Rule::protocol => to.protocol = Some(inner.as_str().to_string()),
-                            _ => unreachable!(),
-                        }
-                    }
-                }
-                Rule::SCHEME_IDENT => (),
-                Rule::username_with_password => {
-                    for inner in pair.into_inner() {
-                        match inner.as_rule() {
-                            Rule::username => to.username = Some(inner.as_str().to_string()),
-                            Rule::password => to.password = Some(inner.as_str().to_string()),
-                            _ => unreachable!(),
-                        }
-                    }
-                }
-                Rule::protocol_with_addresses => {
-                    for inner in pair.into_inner() {
-                        match inner.as_rule() {
-                            Rule::addresses => {
-                                for inner in inner.into_inner() {
-                                    match inner.as_rule() {
-                                        Rule::address => {
-                                            let mut addr = Address::default();
-                                            for inner in inner.into_inner() {
-                                                match inner.as_rule() {
-                                                    Rule::host => {
-                                                        addr.host = Some(inner.as_str().to_string())
-                                                    }
-                                                    Rule::port => {
-                                                        addr.port = Some(inner.as_str().parse()?)
-                                                    }
-                                                    Rule::path => {
-                                                        addr.path = Some(
-                                                            urlencoding::decode(inner.as_str())
-                                                                .expect("UTF-8")
-                                                                .to_string(),
-                                                        )
-                                                    }
-                                                    _ => unreachable!(),
-                                                }
-                                            }
-                                            to.addresses.push(addr);
-                                        }
-                                        _ => unreachable!(),
-                                    }
-                                }
-                            }
-                            Rule::protocol => to.protocol = Some(inner.as_str().to_string()),
-                            _ => unreachable!(),
-                        }
-                    }
-                }
-                Rule::database => {
-                    to.subject = Some(pair.as_str().to_string());
-                }
-                Rule::fragment => {
-                    to.path = Some(pair.as_str().to_string());
-                }
-                Rule::path_like => {
-                    to.path = Some(pair.as_str().to_string());
-                }
-                Rule::param => {
-                    let (mut name, mut value) = ("".to_string(), "".to_string());
-                    for inner in pair.into_inner() {
-                        match inner.as_rule() {
-                            Rule::name => name = inner.as_str().to_string(),
-                            Rule::value => value = inner.as_str().to_string(),
-                            _ => unreachable!(),
-                        }
-                    }
-                    to.params.insert(name, value);
-                }
-                Rule::EOI => {}
-                _ => unreachable!(),
-            }
-        }
-        Ok(to)
-    }
-}
-
 #[cfg(feature = "pest")]
 #[derive(Parser)]
 #[grammar = "dsn.pest"]
@@ -327,7 +127,7 @@ pub struct Address {
 impl Address {
     /// Construct server address with host and port.
     #[inline]
-    pub fn new(host: impl Into<String>, port: u16) -> Self {
+    pub fn new<T: Into<String>>(host: T, port: u16) -> Self {
         let host = host.into();
         let host = if host.is_empty() { None } else { Some(host) };
         Self {
@@ -336,10 +136,10 @@ impl Address {
             ..Default::default()
         }
     }
-    // ident: Ident,
+
     /// Construct server address with host or ip address only.
     #[inline]
-    pub fn from_host(host: impl Into<String>) -> Self {
+    pub fn from_host<T: Into<String>>(host: T) -> Self {
         let host = host.into();
         let host = if host.is_empty() { None } else { Some(host) };
         Self {
@@ -350,7 +150,7 @@ impl Address {
 
     /// Construct server address with unix socket path.
     #[inline]
-    pub fn from_path(path: impl Into<String>) -> Self {
+    pub fn from_path<T: Into<String>>(path: T) -> Self {
         Self {
             path: Some(path.into()),
             ..Default::default()
@@ -462,6 +262,230 @@ pub struct Dsn {
 }
 
 impl Dsn {
+    pub fn from_regex(input: &str) -> Result<Self, DsnError> {
+        lazy_static::lazy_static! {
+            static ref RE: Regex = Regex::new(r"(?x)
+                (?P<driver>[\w.-]+)(\+(?P<protocol>[^@/?\#]+))?: # abc
+                (
+                    # url-like dsn
+                    //((?P<username>[\w\s\-_%.]+)?(:(?P<password>[^@/?\#]+))?@)? # for authorization
+                        (((?P<protocol2>[\w\s.-]+)\()?
+                            (?P<addr>[\w\-_%.:]*(:\d{0,5})?(,[\w\-:_.]*(:\d{0,5})?)*)?  # for addresses
+                        \)?)?
+                        (/(?P<subject>[\w\s%$@.,/-]+)?)?                             # for subject
+                    | # or
+                    # path-like dsn
+                    (?P<path>([\\/.~]$|/\s*\w+[\w\s %$@*:,.\\\-/ _\(\)\[\]{}（）【】｛｝]*|[\.~\w\s]?[\w\s %$@*:,.\\\-/ _\(\)\[\]{}（）【】｛｝]+))
+                ) # abc
+                (\?(?P<params>(?s:.)*))?").unwrap();
+        }
+
+        let cap = RE
+            .captures(input)
+            .ok_or_else(|| DsnError::InvalidConnection(input.to_string()))?;
+
+        let driver = cap.name("driver").unwrap().as_str().to_string();
+        let protocol = cap.name("protocol").map(|m| m.as_str().to_string());
+        let protocol2 = cap.name("protocol2").map(|m| m.as_str().to_string());
+        let protocol = match (protocol, protocol2) {
+            (Some(_), Some(_)) => Err(DsnError::InvalidProtocol(String::new()))?,
+            (Some(p), None) | (None, Some(p)) => Some(p),
+            _ => None,
+        };
+        let username = cap
+            .name("username")
+            .map(|m| {
+                let s = m.as_str();
+                urlencoding::decode(s)
+                    .map(|s| s.to_string())
+                    .map_err(|err| DsnError::InvalidPassword(s.to_string(), err))
+            })
+            .transpose()?;
+        let password = cap
+            .name("password")
+            .map(|m| {
+                let s = m.as_str();
+                urlencoding::decode(s)
+                    .map(|s| s.to_string())
+                    .map_err(|err| DsnError::InvalidPassword(s.to_string(), err))
+            })
+            .transpose()?;
+        let subject = cap.name("subject").map(|m| m.as_str().to_string());
+        let path = cap.name("path").map(|m| m.as_str().to_string());
+        let addresses = if let Some(addr) = cap.name("addr") {
+            let addr = addr.as_str();
+            if addr.is_empty() {
+                vec![]
+            } else {
+                let mut addrs = Vec::new();
+
+                for s in addr.split(',') {
+                    if s.is_empty() {
+                        continue;
+                    }
+                    if let Some((host, port)) = s.split_once(':') {
+                        let port = if port.is_empty() {
+                            0
+                        } else {
+                            port.parse::<u16>().map_err(|err| {
+                                DsnError::InvalidAddresses(s.to_string(), err.to_string())
+                            })?
+                        };
+                        addrs.push(Address::new(host, port));
+                    } else if s.contains('%') {
+                        addrs.push(Address::from_path(urlencoding::decode(s).unwrap()));
+                    } else {
+                        addrs.push(Address::from_host(s));
+                    }
+                }
+                addrs
+            }
+        } else {
+            vec![]
+        };
+        let mut params = BTreeMap::new();
+        if let Some(p) = cap.name("params") {
+            for p in p.as_str().split_terminator('&') {
+                if p.contains('=') {
+                    if let Some((k, v)) = p.split_once('=') {
+                        let k = urlencoding::decode(k)?;
+                        let v = urlencoding::decode(v)?;
+                        params.insert(k.to_string(), v.to_string());
+                    }
+                } else {
+                    let p = urlencoding::decode(p)?;
+                    params.insert(p.to_string(), String::new());
+                }
+            }
+        }
+        Ok(Dsn {
+            driver,
+            protocol,
+            username,
+            password,
+            addresses,
+            path,
+            subject,
+            params,
+        })
+    }
+
+    #[cfg(feature = "pest")]
+    pub fn from_pest(input: &str) -> Result<Self, DsnError> {
+        let dsn = DsnParser::parse(Rule::dsn, input)?.next().unwrap();
+
+        let mut to = Dsn::default();
+        for pair in dsn.into_inner() {
+            match pair.as_rule() {
+                Rule::scheme => {
+                    for inner in pair.into_inner() {
+                        match inner.as_rule() {
+                            Rule::driver => to.driver = inner.as_str().to_string(),
+                            Rule::protocol => to.protocol = Some(inner.as_str().to_string()),
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+                Rule::SCHEME_IDENT => (),
+                Rule::username_with_password => {
+                    for inner in pair.into_inner() {
+                        match inner.as_rule() {
+                            Rule::username => to.username = Some(inner.as_str().to_string()),
+                            Rule::password => to.password = Some(inner.as_str().to_string()),
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+                Rule::protocol_with_addresses => {
+                    for inner in pair.into_inner() {
+                        match inner.as_rule() {
+                            Rule::addresses => {
+                                for inner in inner.into_inner() {
+                                    match inner.as_rule() {
+                                        Rule::address => {
+                                            let mut addr = Address::default();
+                                            for inner in inner.into_inner() {
+                                                match inner.as_rule() {
+                                                    Rule::host => {
+                                                        addr.host = Some(inner.as_str().to_string())
+                                                    }
+                                                    Rule::port => {
+                                                        addr.port = Some(inner.as_str().parse()?)
+                                                    }
+                                                    Rule::path => {
+                                                        addr.path = Some(
+                                                            urlencoding::decode(inner.as_str())
+                                                                .expect("UTF-8")
+                                                                .to_string(),
+                                                        )
+                                                    }
+                                                    _ => unreachable!(),
+                                                }
+                                            }
+                                            to.addresses.push(addr);
+                                        }
+                                        _ => unreachable!(),
+                                    }
+                                }
+                            }
+                            Rule::protocol => to.protocol = Some(inner.as_str().to_string()),
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+                Rule::database => {
+                    to.subject = Some(pair.as_str().to_string());
+                }
+                Rule::fragment => {
+                    to.path = Some(pair.as_str().to_string());
+                }
+                Rule::path_like => {
+                    to.path = Some(pair.as_str().to_string());
+                }
+                Rule::param => {
+                    let (mut name, mut value) = ("".to_string(), "".to_string());
+                    for inner in pair.into_inner() {
+                        match inner.as_rule() {
+                            Rule::name => name = inner.as_str().to_string(),
+                            Rule::value => value = inner.as_str().to_string(),
+                            _ => unreachable!(),
+                        }
+                    }
+                    to.params.insert(name, value);
+                }
+                Rule::EOI => {}
+                _ => unreachable!(),
+            }
+        }
+        Ok(to)
+    }
+
+    #[inline]
+    pub fn drain_params(&mut self) -> BTreeMap<String, String> {
+        let drained = self
+            .params
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        self.params.clear();
+        drained
+    }
+
+    #[inline]
+    pub fn set<K: Into<String>, V: Into<String>>(&mut self, key: K, value: V) -> Option<String> {
+        self.params.insert(key.into(), value.into())
+    }
+
+    #[inline]
+    pub fn get<T: AsRef<str>>(&self, key: T) -> Option<&String> {
+        self.params.get(key.as_ref())
+    }
+
+    #[inline]
+    pub fn remove<T: AsRef<str>>(&mut self, key: T) -> Option<String> {
+        self.params.remove(key.as_ref())
+    }
+
     fn is_path_like(&self) -> bool {
         self.username.is_none()
             && self.password.is_none()
@@ -470,7 +494,7 @@ impl Dsn {
     }
 }
 
-pub trait IntoDsn {
+pub trait IntoDsn: Send {
     fn into_dsn(self) -> Result<Dsn, DsnError>;
 }
 
@@ -518,7 +542,7 @@ impl Display for Dsn {
 
         match (&self.username, &self.password) {
             (Some(username), Some(password)) => {
-                write!(f, "{}:{}@", encode(username), encode(password))?
+                write!(f, "{}:{}@", encode(username), encode(password))?;
             }
             (Some(username), None) => write!(f, "{}@", encode(username))?,
             (None, Some(password)) => write!(f, ":{}@", encode(password))?,
@@ -540,7 +564,7 @@ impl Display for Dsn {
 
         if !self.params.is_empty() {
             fn percent_encode_or_not(v: &str) -> Cow<str> {
-                if v.contains(|c| c == '=' || c == '&' || c == '#' || c == '@') {
+                if v.contains(['=', '&', '#', '@']) {
                     urlencoding::encode(v)
                 } else {
                     v.into()
@@ -560,34 +584,6 @@ impl Display for Dsn {
             )?;
         }
         Ok(())
-    }
-}
-
-impl Dsn {
-    #[inline]
-    pub fn drain_params(&mut self) -> BTreeMap<String, String> {
-        let drained = self
-            .params
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        self.params.clear();
-        drained
-    }
-
-    #[inline]
-    pub fn set(&mut self, key: impl Into<String>, value: impl Into<String>) -> Option<String> {
-        self.params.insert(key.into(), value.into())
-    }
-
-    #[inline]
-    pub fn get(&self, key: impl AsRef<str>) -> Option<&String> {
-        self.params.get(key.as_ref())
-    }
-
-    #[inline]
-    pub fn remove(&mut self, key: impl AsRef<str>) -> Option<String> {
-        self.params.remove(key.as_ref())
     }
 }
 
@@ -651,7 +647,7 @@ impl FromStr for Dsn {
 ///     assert_eq!(value_is_true(s), false);
 /// }
 /// ```
-pub fn value_is_true(s: impl AsRef<str>) -> bool {
+pub fn value_is_true<T: AsRef<str>>(s: T) -> bool {
     matches!(
         s.as_ref(),
         "" | "1"
@@ -1216,6 +1212,7 @@ mod tests {
         assert_eq!(dsn.password.as_deref().unwrap(), p);
         assert_eq!(dsn.to_string(), format!("taos://root:{e}@localhost:6030"));
     }
+
     #[test]
     fn param_special_chars() {
         let p = "!@#$%^&*()";
@@ -1231,6 +1228,7 @@ mod tests {
             format!("taos://root:{e}@localhost:6030?code1={e}")
         );
     }
+
     #[test]
     fn param_special_chars_all() {
         let p = "!@#$%^&*()";
@@ -1246,19 +1244,20 @@ mod tests {
             format!("taos://{e}:{e}@localhost:6030?{e}={e}")
         );
     }
+
     #[test]
     fn unix_path_with_glob() {
-        let dsn = Dsn::from_str(&format!("csv:./**.csv?param=1")).unwrap();
+        let dsn = Dsn::from_str("csv:./**.csv?param=1").unwrap();
         dbg!(&dsn);
         assert!(dsn.path.is_some());
         assert_eq!(dsn.get("param").unwrap(), "1");
 
-        let dsn = Dsn::from_str(&format!("csv:./**.csv?param=1")).unwrap();
+        let dsn = Dsn::from_str("csv:./**.csv?param=1").unwrap();
         dbg!(&dsn);
         assert!(dsn.path.is_some());
         assert_eq!(dsn.get("param").unwrap(), "1");
 
-        let dsn = Dsn::from_str(&format!("csv:.\\**.csv?param=1")).unwrap();
+        let dsn = Dsn::from_str("csv:.\\**.csv?param=1").unwrap();
         dbg!(&dsn);
         assert!(dsn.path.is_some());
         assert_eq!(dsn.get("param").unwrap(), "1");
@@ -1266,21 +1265,21 @@ mod tests {
 
     #[test]
     fn unix_path_with_space() {
-        let dsn = Dsn::from_str(&format!("csv:./a b.csv?param=1")).unwrap();
+        let dsn = Dsn::from_str("csv:./a b.csv?param=1").unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.path.unwrap(), "./a b.csv");
     }
 
     #[test]
     fn unix_multiple_path() {
-        let dsn = Dsn::from_str(&format!("csv:./a b.csv,c d .csv?param=1")).unwrap();
+        let dsn = Dsn::from_str("csv:./a b.csv,c d .csv?param=1").unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.path.unwrap(), "./a b.csv,c d .csv");
     }
 
     #[test]
     fn unit_path_with_utf8() {
-        let dsn = Dsn::from_str(&format!("csv:./文件 Aa1.csv?param=1")).unwrap();
+        let dsn = Dsn::from_str("csv:./文件 Aa1.csv?param=1").unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.path.unwrap(), "./文件 Aa1.csv");
     }

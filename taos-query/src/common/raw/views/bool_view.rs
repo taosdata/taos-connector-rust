@@ -1,10 +1,11 @@
-use std::{ffi::c_void, io::Write, ops::Range};
-
-use crate::common::{BorrowedValue, Ty};
-
-use super::{IsColumnView, NullBits, NullsIter};
+use std::ffi::c_void;
+use std::io::Write;
+use std::ops::Range;
 
 use bytes::Bytes;
+
+use super::{IsColumnView, NullBits, NullsIter};
+use crate::common::{BorrowedValue, Ty};
 
 type View = BoolView;
 
@@ -18,8 +19,9 @@ impl IsColumnView for BoolView {
     fn ty(&self) -> Ty {
         Ty::Bool
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter(iter.map(|v| v.to_bool()))
+        iter.map(|v| v.to_bool()).collect()
     }
 }
 
@@ -34,12 +36,12 @@ impl std::ops::Add for &BoolView {
     type Output = BoolView;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -145,8 +147,7 @@ impl BoolView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(BorrowedValue::Bool)
-            .unwrap_or(BorrowedValue::Null(Ty::Bool))
+            .map_or(BorrowedValue::Null(Ty::Bool), BorrowedValue::Bool)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -197,12 +198,12 @@ impl BoolView {
     }
 
     pub fn concat(&self, rhs: &View) -> View {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -220,7 +221,7 @@ pub struct BoolViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for BoolViewIter<'a> {
+impl Iterator for BoolViewIter<'_> {
     type Item = Option<bool>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -244,7 +245,7 @@ impl<'a> Iterator for BoolViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for BoolViewIter<'a> {
+impl ExactSizeIterator for BoolViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

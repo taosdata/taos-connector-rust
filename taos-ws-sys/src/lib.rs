@@ -1,34 +1,27 @@
-use bytes::Bytes;
+use std::cell::RefCell;
+use std::ffi::{c_void, CStr, CString};
+use std::fmt::{Debug, Display};
+use std::os::raw::{c_char, c_int};
+use std::str::Utf8Error;
+use std::string::FromUtf8Error;
+use std::sync::OnceLock;
 use std::thread;
-use std::{
-    cell::RefCell,
-    ffi::{c_void, CStr, CString},
-    fmt::{Debug, Display},
-    os::raw::{c_char, c_int},
-    str::Utf8Error,
-    string::FromUtf8Error,
-    time::Duration,
-};
-use taos_error::Code;
+use std::time::Duration;
 
-use taos_query::{
-    block_in_place_or_global,
-    common::{Field, RawBlock as Block, Timestamp},
-    common::{Precision, Ty},
-    common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder, SmlDataBuilderError},
-    prelude::RawError,
-    util::{hex, InlineBytes, InlineNChar, InlineStr},
-    DsnError, Fetchable, Queryable, TBuilder,
-};
-use taos_ws::{
-    consumer::Offset,
-    query::{Error, ResultSet, Taos},
-    TaosBuilder,
-};
-
+use bytes::Bytes;
 use cargo_metadata::MetadataCommand;
-
+use taos_error::Code;
+use taos_query::common::{
+    Field, Precision, RawBlock as Block, SchemalessPrecision, SchemalessProtocol, SmlDataBuilder,
+    SmlDataBuilderError, Timestamp, Ty,
+};
+use taos_query::prelude::RawError;
+use taos_query::util::{hex, InlineBytes, InlineNChar, InlineStr};
+use taos_query::{block_in_place_or_global, DsnError, Fetchable, Queryable, TBuilder};
+use taos_ws::consumer::Offset;
 pub use taos_ws::query::asyn::WS_ERROR_NO;
+use taos_ws::query::{Error, ResultSet, Taos};
+use taos_ws::TaosBuilder;
 
 pub mod stmt;
 pub mod tmq;
@@ -38,8 +31,8 @@ use tmq::WsTmqResultSet;
 const MAX_ERROR_MSG_LEN: usize = 4096;
 const EMPTY: &CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") };
 thread_local! {
-    static C_ERROR_CONTAINER: RefCell<[u8; MAX_ERROR_MSG_LEN]> = RefCell::new([0; MAX_ERROR_MSG_LEN]);
-    static C_ERRNO: RefCell<i32> = RefCell::new(0);
+    static C_ERROR_CONTAINER: RefCell<[u8; MAX_ERROR_MSG_LEN]> = const { RefCell::new([0; MAX_ERROR_MSG_LEN]) };
+    static C_ERRNO: RefCell<i32> = const { RefCell::new(0) };
 }
 
 fn get_err_code_fromated(err_code: i32) -> i32 {
@@ -47,7 +40,7 @@ fn get_err_code_fromated(err_code: i32) -> i32 {
         let uerror_code: u32 = err_code as _;
         return (uerror_code | 0x80000000) as i32;
     }
-    return err_code;
+    err_code
 }
 
 unsafe fn set_error_and_get_code(ws_err: WsError) -> i32 {
@@ -73,11 +66,7 @@ fn get_c_error_str() -> *const c_char {
     C_ERROR_CONTAINER.with(|container| {
         let container = container.borrow();
         let slice = &container[..container.len()];
-        let ptr = slice.as_ptr() as *const c_char;
-
-        // println!("Pointer address: {:?}", ptr);
-        // println!("C_ERROR_CONTAINER contents: {:?}", &container[..]);
-        ptr
+        slice.as_ptr() as _
     })
 }
 
@@ -87,7 +76,7 @@ unsafe fn clear_error_info() {
         *c_errno.borrow_mut() = 0;
     });
     C_ERROR_CONTAINER.with(|container| {
-        let bytes = "".as_bytes();
+        let bytes = b"";
         let length = bytes.len().min(MAX_ERROR_MSG_LEN - 1); // make sure the size max, and keep last byte for '\0'
         container.borrow_mut()[..length].copy_from_slice(&bytes[..length]);
         container.borrow_mut()[length] = 0; // add c str last '\0'
@@ -135,6 +124,14 @@ pub struct WsError {
 }
 
 impl WsError {
+    fn new(code: Code, message: &str) -> Self {
+        Self {
+            code,
+            message: CString::new(message).unwrap(),
+            source: None,
+        }
+    }
+
     pub fn from_err(err: Box<dyn std::error::Error + 'static>) -> Self {
         Self {
             code: Code::FAILED,
@@ -143,6 +140,7 @@ impl WsError {
         }
     }
 }
+
 #[derive(Debug)]
 pub struct WsMaybeError<T> {
     error: Option<WsError>,
@@ -240,16 +238,6 @@ where
 
 pub type WsResult<T> = Result<T, WsError>;
 
-impl WsError {
-    fn new(code: Code, message: &str) -> Self {
-        Self {
-            code,
-            message: CString::new(message).unwrap(),
-            source: None,
-        }
-    }
-}
-
 impl Display for WsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{:#06X}] {}", self.code, self.message.to_str().unwrap())
@@ -266,7 +254,7 @@ impl From<Utf8Error> for WsError {
     fn from(e: Utf8Error) -> Self {
         Self {
             code: Code::FAILED,
-            message: CString::new(format!("{}", e)).unwrap(),
+            message: CString::new(format!("{e}")).unwrap(),
             source: Some(Box::new(e)),
         }
     }
@@ -276,7 +264,7 @@ impl From<FromUtf8Error> for WsError {
     fn from(e: FromUtf8Error) -> Self {
         Self {
             code: Code::FAILED,
-            message: CString::new(format!("{}", e)).unwrap(),
+            message: CString::new(format!("{e}")).unwrap(),
             source: Some(Box::new(e)),
         }
     }
@@ -286,7 +274,7 @@ impl From<SmlDataBuilderError> for WsError {
     fn from(e: SmlDataBuilderError) -> Self {
         Self {
             code: Code::FAILED,
-            message: CString::new(format!("{}", e)).unwrap(),
+            message: CString::new(format!("{e}")).unwrap(),
             source: Some(Box::new(e)),
         }
     }
@@ -374,7 +362,7 @@ impl From<&Field> for WS_FIELD_V2 {
         let f_name = field.name();
         let mut name = [0 as c_char; 65usize];
         unsafe {
-            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len())
+            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len());
         };
         Self {
             name,
@@ -422,7 +410,7 @@ impl From<&Field> for WS_FIELD {
         let f_name = field.name();
         let mut name = [0 as c_char; 65usize];
         unsafe {
-            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len())
+            std::ptr::copy_nonoverlapping(f_name.as_ptr(), name.as_mut_ptr() as _, f_name.len());
         };
         Self {
             name,
@@ -468,9 +456,9 @@ struct WsSqlResultSet {
 
 #[derive(Debug)]
 enum WsResultSet {
-    SqlResultSet(WsSqlResultSet),
-    SchemalessResultSet(WsSchemalessResultSet),
-    TmqResultSet(WsTmqResultSet),
+    Sql(WsSqlResultSet),
+    Schemaless(WsSchemalessResultSet),
+    Tmq(WsTmqResultSet),
 }
 
 trait WsResultSetTrait {
@@ -576,133 +564,133 @@ impl WsResultSetTrait for WsSchemalessResultSet {
 impl WsResultSetTrait for WsResultSet {
     fn tmq_get_topic_name(&self) -> *const c_char {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_topic_name(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_topic_name(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_topic_name(),
+            WsResultSet::Sql(rs) => rs.tmq_get_topic_name(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_topic_name(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_topic_name(),
         }
     }
     fn tmq_get_db_name(&self) -> *const c_char {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_db_name(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_db_name(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_db_name(),
+            WsResultSet::Sql(rs) => rs.tmq_get_db_name(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_db_name(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_db_name(),
         }
     }
     fn tmq_get_table_name(&self) -> *const c_char {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_table_name(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_table_name(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_table_name(),
+            WsResultSet::Sql(rs) => rs.tmq_get_table_name(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_table_name(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_table_name(),
         }
     }
 
     fn tmq_get_offset(&self) -> Offset {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_offset(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_offset(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_offset(),
+            WsResultSet::Sql(rs) => rs.tmq_get_offset(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_offset(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_offset(),
         }
     }
 
     fn tmq_get_vgroup_offset(&self) -> i64 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_vgroup_offset(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_vgroup_offset(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_vgroup_offset(),
+            WsResultSet::Sql(rs) => rs.tmq_get_vgroup_offset(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_vgroup_offset(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_vgroup_offset(),
         }
     }
     fn tmq_get_vgroup_id(&self) -> i32 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.tmq_get_vgroup_id(),
-            WsResultSet::TmqResultSet(rs) => rs.tmq_get_vgroup_id(),
-            WsResultSet::SchemalessResultSet(rs) => rs.tmq_get_vgroup_id(),
+            WsResultSet::Sql(rs) => rs.tmq_get_vgroup_id(),
+            WsResultSet::Tmq(rs) => rs.tmq_get_vgroup_id(),
+            WsResultSet::Schemaless(rs) => rs.tmq_get_vgroup_id(),
         }
     }
 
     fn precision(&self) -> Precision {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.precision(),
-            WsResultSet::TmqResultSet(rs) => rs.precision(),
-            WsResultSet::SchemalessResultSet(rs) => rs.precision(),
+            WsResultSet::Sql(rs) => rs.precision(),
+            WsResultSet::Tmq(rs) => rs.precision(),
+            WsResultSet::Schemaless(rs) => rs.precision(),
         }
     }
 
     fn affected_rows(&self) -> i32 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.affected_rows(),
-            WsResultSet::TmqResultSet(rs) => rs.affected_rows(),
-            WsResultSet::SchemalessResultSet(rs) => rs.affected_rows(),
+            WsResultSet::Sql(rs) => rs.affected_rows(),
+            WsResultSet::Tmq(rs) => rs.affected_rows(),
+            WsResultSet::Schemaless(rs) => rs.affected_rows(),
         }
     }
 
     fn affected_rows64(&self) -> i64 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.affected_rows64(),
-            WsResultSet::TmqResultSet(rs) => rs.affected_rows64(),
-            WsResultSet::SchemalessResultSet(rs) => rs.affected_rows64(),
+            WsResultSet::Sql(rs) => rs.affected_rows64(),
+            WsResultSet::Tmq(rs) => rs.affected_rows64(),
+            WsResultSet::Schemaless(rs) => rs.affected_rows64(),
         }
     }
 
     fn num_of_fields(&self) -> i32 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.num_of_fields(),
-            WsResultSet::TmqResultSet(rs) => rs.num_of_fields(),
-            WsResultSet::SchemalessResultSet(rs) => rs.num_of_fields(),
+            WsResultSet::Sql(rs) => rs.num_of_fields(),
+            WsResultSet::Tmq(rs) => rs.num_of_fields(),
+            WsResultSet::Schemaless(rs) => rs.num_of_fields(),
         }
     }
 
     fn get_fields(&mut self) -> *const WS_FIELD {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.get_fields(),
-            WsResultSet::TmqResultSet(rs) => rs.get_fields(),
-            WsResultSet::SchemalessResultSet(rs) => rs.get_fields(),
+            WsResultSet::Sql(rs) => rs.get_fields(),
+            WsResultSet::Tmq(rs) => rs.get_fields(),
+            WsResultSet::Schemaless(rs) => rs.get_fields(),
         }
     }
     fn get_fields_v2(&mut self) -> *const WS_FIELD_V2 {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.get_fields_v2(),
-            WsResultSet::TmqResultSet(rs) => rs.get_fields_v2(),
-            WsResultSet::SchemalessResultSet(rs) => rs.get_fields_v2(),
+            WsResultSet::Sql(rs) => rs.get_fields_v2(),
+            WsResultSet::Tmq(rs) => rs.get_fields_v2(),
+            WsResultSet::Schemaless(rs) => rs.get_fields_v2(),
         }
     }
 
     unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.fetch_block(ptr, rows),
-            WsResultSet::TmqResultSet(rs) => rs.fetch_block(ptr, rows),
-            WsResultSet::SchemalessResultSet(rs) => rs.fetch_block(ptr, rows),
+            WsResultSet::Sql(rs) => rs.fetch_block(ptr, rows),
+            WsResultSet::Tmq(rs) => rs.fetch_block(ptr, rows),
+            WsResultSet::Schemaless(rs) => rs.fetch_block(ptr, rows),
         }
     }
 
     unsafe fn fetch_row(&mut self) -> Result<WS_ROW, Error> {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.fetch_row(),
-            WsResultSet::TmqResultSet(rs) => rs.fetch_row(),
-            WsResultSet::SchemalessResultSet(rs) => rs.fetch_row(),
+            WsResultSet::Sql(rs) => rs.fetch_row(),
+            WsResultSet::Tmq(rs) => rs.fetch_row(),
+            WsResultSet::Schemaless(rs) => rs.fetch_row(),
         }
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.get_raw_value(row, col),
-            WsResultSet::TmqResultSet(rs) => rs.get_raw_value(row, col),
-            WsResultSet::SchemalessResultSet(rs) => rs.get_raw_value(row, col),
+            WsResultSet::Sql(rs) => rs.get_raw_value(row, col),
+            WsResultSet::Tmq(rs) => rs.get_raw_value(row, col),
+            WsResultSet::Schemaless(rs) => rs.get_raw_value(row, col),
         }
     }
 
     fn take_timing(&mut self) -> Duration {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.take_timing(),
-            WsResultSet::TmqResultSet(rs) => rs.take_timing(),
-            WsResultSet::SchemalessResultSet(rs) => rs.take_timing(),
+            WsResultSet::Sql(rs) => rs.take_timing(),
+            WsResultSet::Tmq(rs) => rs.take_timing(),
+            WsResultSet::Schemaless(rs) => rs.take_timing(),
         }
     }
 
     fn stop_query(&mut self) {
         match self {
-            WsResultSet::SqlResultSet(rs) => rs.stop_query(),
-            WsResultSet::TmqResultSet(rs) => rs.stop_query(),
-            WsResultSet::SchemalessResultSet(rs) => rs.stop_query(),
+            WsResultSet::Sql(rs) => rs.stop_query(),
+            WsResultSet::Tmq(rs) => rs.stop_query(),
+            WsResultSet::Schemaless(rs) => rs.stop_query(),
         }
     }
 }
@@ -765,24 +753,21 @@ impl WsResultSetTrait for WsSqlResultSet {
     }
 
     fn get_fields(&mut self) -> *const WS_FIELD {
-        if self.fields.len() == self.rs.num_of_fields() {
-            self.fields.as_ptr()
-        } else {
+        if self.fields.len() != self.rs.num_of_fields() {
             self.fields.clear();
             self.fields
                 .extend(self.rs.fields().iter().map(WS_FIELD::from));
-            self.fields.as_ptr()
         }
+        self.fields.as_ptr()
     }
+
     fn get_fields_v2(&mut self) -> *const WS_FIELD_V2 {
-        if self.fields_v2.len() == self.rs.num_of_fields() {
-            self.fields_v2.as_ptr()
-        } else {
+        if self.fields_v2.len() != self.rs.num_of_fields() {
             self.fields_v2.clear();
             self.fields_v2
                 .extend(self.rs.fields().iter().map(WS_FIELD_V2::from));
-            self.fields_v2.as_ptr()
         }
+        self.fields_v2.as_ptr()
     }
 
     unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
@@ -814,7 +799,7 @@ impl WsResultSetTrait for WsSqlResultSet {
                 self.row.data[col] = tuple.2;
             }
 
-            self.row.current_row = self.row.current_row + 1;
+            self.row.current_row += 1;
             Ok(self.row.data.as_ptr() as _)
         } else {
             Ok(std::ptr::null())
@@ -866,17 +851,17 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
                 match result {
                     Ok(mut taos) => {
                         builder.ping(&mut taos)?;
-                        return Ok(taos);
+                        Ok(taos)
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => Err(e),
                 }
             })
             .expect("Failed to spawn thread");
 
         let result = handle.join().expect("Thread panicked");
         match result {
-            Ok(taos) => return Ok(taos),
-            Err(e) => return Err(WsError::new(Code::FAILED, &format!("{}", e))),
+            Ok(taos) => Ok(taos),
+            Err(e) => Err(WsError::new(Code::FAILED, &format!("{e}"))),
         }
     } else {
         let mut taos = builder.build()?;
@@ -897,18 +882,15 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
 pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
     static ONCE_INIT: std::sync::Once = std::sync::Once::new();
 
-    let log_level = match log_level.is_null() {
-        true => "info",
-        false => {
-            if let Ok(log_level_str) = CStr::from_ptr(log_level).to_str() {
-                log_level_str
-            } else {
-                return set_error_and_get_code(WsError::new(
-                    Code::INVALID_PARA,
-                    "log_level is not a valid string",
-                ));
-            }
-        }
+    let log_level = if log_level.is_null() {
+        "info"
+    } else if let Ok(log_level_str) = CStr::from_ptr(log_level).to_str() {
+        log_level_str
+    } else {
+        return set_error_and_get_code(WsError::new(
+            Code::INVALID_PARA,
+            "log_level is not a valid string",
+        ));
     };
 
     ONCE_INIT.call_once(|| {
@@ -960,21 +942,23 @@ pub unsafe extern "C" fn ws_connect(dsn: *const c_char) -> *mut WS_TAOS {
 #[allow(static_mut_refs)]
 /// Same to taos_get_server_info, returns server version info.
 pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char {
-    static mut VERSION_INFO: [u8; 128] = [0; 128];
+    static VERSION_INFO: OnceLock<CString> = OnceLock::new();
+
     if taos.is_null() {
         set_error_and_get_code(WsError::new(Code::INVALID_PARA, "taos is null"));
         return std::ptr::null();
     }
 
-    if VERSION_INFO[0] == 0 {
+    let version_info = VERSION_INFO.get_or_init(|| {
         if let Some(taos) = (taos as *mut Taos).as_mut() {
             let v = taos.version();
-            std::ptr::copy_nonoverlapping(v.as_ptr(), VERSION_INFO.as_mut_ptr(), v.len());
+            CString::new(v).unwrap()
+        } else {
+            CString::new("").unwrap()
         }
-        VERSION_INFO.as_ptr() as *const c_char
-    } else {
-        VERSION_INFO.as_ptr() as *const c_char
-    }
+    });
+
+    version_info.as_ptr()
 }
 
 #[no_mangle]
@@ -1009,7 +993,7 @@ unsafe fn query_with_sql(
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
     let rs = client.query_with_req_id(sql, req_id)?;
-    Ok(WsResultSet::SqlResultSet(WsSqlResultSet::new(rs)))
+    Ok(WsResultSet::Sql(WsSqlResultSet::new(rs)))
 }
 
 unsafe fn query_with_sql_timeout(
@@ -1024,7 +1008,7 @@ unsafe fn query_with_sql_timeout(
 
     let sql = CStr::from_ptr(sql as _).to_str()?;
     let rs = client.query(sql)?;
-    Ok(WsResultSet::SqlResultSet(WsSqlResultSet::new(rs)))
+    Ok(WsResultSet::Sql(WsSqlResultSet::new(rs)))
 }
 
 #[no_mangle]
@@ -1055,9 +1039,9 @@ pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) -> i32 {
     {
         Some(rs) => {
             rs.stop_query();
-            return Code::SUCCESS.into();
+            Code::SUCCESS.into()
         }
-        _ => return set_error_and_get_code(WsError::new(Code::INVALID_PARA, "object is invalid")),
+        _ => set_error_and_get_code(WsError::new(Code::INVALID_PARA, "object is invalid")),
     }
 }
 
@@ -1091,11 +1075,11 @@ pub unsafe extern "C" fn ws_take_timing(rs: *mut WS_RES) -> i64 {
 /// Always use this to ensure that the query is executed correctly.
 pub unsafe extern "C" fn ws_errno(rs: *mut WS_RES) -> i32 {
     if rs.is_null() {
-        return get_c_errno().into();
+        return get_c_errno();
     }
     match (rs as *mut WsMaybeError<()>)
         .as_ref()
-        .and_then(|s| s.errno())
+        .and_then(WsMaybeError::errno)
     {
         Some(c) => get_err_code_fromated(c),
         _ => Code::SUCCESS.into(),
@@ -1108,13 +1092,12 @@ pub unsafe extern "C" fn ws_errstr(rs: *mut WS_RES) -> *const c_char {
     if rs.is_null() {
         if get_c_errno() == 0 {
             return EMPTY.as_ptr();
-        } else {
-            return get_c_error_str() as _;
         }
+        return get_c_error_str() as _;
     }
     match (rs as *mut WsMaybeError<()>)
         .as_ref()
-        .and_then(|s| s.errstr())
+        .and_then(WsMaybeError::errstr)
     {
         Some(e) => e,
         _ => EMPTY.as_ptr(),
@@ -1175,11 +1158,10 @@ pub unsafe extern "C" fn ws_select_db(taos: *mut WS_TAOS, db: *const c_char) -> 
     }
 }
 
-#[allow(static_mut_refs)]
 #[no_mangle]
 /// If the query is update query or not
 pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
-    static mut VERSION_INFO: [u8; 128] = [0; 128];
+    static VERSION_INFO: OnceLock<CString> = OnceLock::new();
 
     let metadata = match MetadataCommand::new().no_deps().exec().ok() {
         Some(m) => m,
@@ -1188,6 +1170,7 @@ pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
             return std::ptr::null();
         }
     };
+
     let package = match metadata
         .packages
         .into_iter()
@@ -1201,8 +1184,9 @@ pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
     };
 
     let version = package.version.to_string();
-    std::ptr::copy_nonoverlapping(version.as_ptr(), VERSION_INFO.as_mut_ptr(), version.len());
-    return VERSION_INFO.as_ptr() as *const c_char;
+    let version = CString::new(version).unwrap();
+    VERSION_INFO.set(version).unwrap();
+    VERSION_INFO.get().unwrap().as_ptr()
 }
 
 #[no_mangle]
@@ -1296,7 +1280,7 @@ pub unsafe extern "C" fn ws_is_null(rs: *const WS_RES, row: i32, col: i32) -> bo
         .as_ref()
         .and_then(|s| s.safe_deref())
     {
-        Some(WsResultSet::SqlResultSet(rs)) => match &(rs.block) {
+        Some(WsResultSet::Sql(rs)) => match &(rs.block) {
             Some(block) => block.is_null(row as _, col as _),
             _ => true,
         },
@@ -1417,8 +1401,7 @@ pub unsafe extern "C" fn ws_timestamp_to_rfc3339(
     let precision = Precision::from_u8(precision as u8);
     let s = Timestamp::new(raw, precision)
         .to_datetime_with_tz()
-        .to_rfc3339_opts(precision.to_seconds_format(), use_z)
-        .to_string();
+        .to_rfc3339_opts(precision.to_seconds_format(), use_z);
 
     std::ptr::copy_nonoverlapping(s.as_ptr(), dest, s.len());
 }
@@ -1444,7 +1427,7 @@ pub unsafe extern "C" fn ws_print_row(
 
     let mut len = 0;
     let mut remain_space = (str_len - 1) as usize;
-    if remain_space <= 0
+    if remain_space == 0
         || str_len <= 0
         || str.is_null()
         || row.is_null()
@@ -1454,7 +1437,7 @@ pub unsafe extern "C" fn ws_print_row(
         return Code::SUCCESS.into();
     }
 
-    let row_slice = std::slice::from_raw_parts(row as *const *const c_void, num_fields as usize);
+    let row_slice = std::slice::from_raw_parts(row, num_fields as usize);
     let fields_slice = std::slice::from_raw_parts(fields, num_fields as usize);
 
     for i in 0..num_fields as usize {
@@ -1476,7 +1459,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::UTinyInt => {
@@ -1484,7 +1467,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::SmallInt => {
@@ -1492,7 +1475,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::USmallInt => {
@@ -1500,7 +1483,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::Int => {
@@ -1508,7 +1491,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::UInt => {
@@ -1516,15 +1499,15 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
-            Ty::BigInt => {
+            Ty::BigInt | Ty::Timestamp => {
                 let value = std::ptr::read_unaligned(field_ptr as *const i64);
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::UBigInt => {
@@ -1532,7 +1515,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::Float => {
@@ -1540,7 +1523,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::Double => {
@@ -1548,15 +1531,7 @@ pub unsafe extern "C" fn ws_print_row(
                 len += write_to_cstr(
                     &mut remain_space,
                     str.add(len as usize),
-                    format!("{}", value).as_str(),
-                );
-            }
-            Ty::Timestamp => {
-                let value = std::ptr::read_unaligned(field_ptr as *const i64);
-                len += write_to_cstr(
-                    &mut remain_space,
-                    str.add(len as usize),
-                    format!("{}", value).as_str(),
+                    format!("{value}").as_str(),
                 );
             }
             Ty::Bool => {
@@ -1654,7 +1629,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw(
     protocal: c_int,
     precision: c_int,
 ) -> *mut WS_RES {
-    return ws_schemaless_insert_raw_ttl_with_reqid(
+    ws_schemaless_insert_raw_ttl_with_reqid(
         taos,
         lines,
         len,
@@ -1663,7 +1638,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw(
         precision,
         0,
         get_req_id(taos),
-    );
+    )
 }
 
 #[no_mangle]
@@ -1676,9 +1651,9 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_with_reqid(
     precision: c_int,
     reqid: u64,
 ) -> *mut WS_RES {
-    return ws_schemaless_insert_raw_ttl_with_reqid(
+    ws_schemaless_insert_raw_ttl_with_reqid(
         taos, lines, len, totalRows, protocal, precision, 0, reqid,
-    );
+    )
 }
 
 #[no_mangle]
@@ -1691,7 +1666,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl(
     precision: c_int,
     ttl: c_int,
 ) -> *mut WS_RES {
-    return ws_schemaless_insert_raw_ttl_with_reqid(
+    ws_schemaless_insert_raw_ttl_with_reqid(
         taos,
         lines,
         len,
@@ -1700,7 +1675,7 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl(
         precision,
         ttl,
         get_req_id(taos),
-    );
+    )
 }
 
 #[no_mangle]
@@ -1718,17 +1693,18 @@ pub unsafe extern "C" fn ws_schemaless_insert_raw_ttl_with_reqid(
         Ok(rs) => {
             tracing::trace!("schemaless insert done: {:?}", rs);
             let rs: WsMaybeError<WsResultSet> = rs.into();
-            return Box::into_raw(Box::new(rs)) as _;
+            Box::into_raw(Box::new(rs)) as _
         }
         Err(e) => {
             tracing::trace!("schemaless insert failed: {:?}", e);
-            let error_message = format!("schemaless insert failed: {}", e.to_string());
+            let error_message = format!("schemaless insert failed: {e}");
             set_error_and_get_code(WsError::new(e.code, &error_message));
-            return std::ptr::null_mut() as _;
+            std::ptr::null_mut() as _
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 unsafe fn schemaless_insert_raw(
     taos: *mut WS_TAOS,
     lines: *const c_char,
@@ -1748,15 +1724,15 @@ unsafe fn schemaless_insert_raw(
     let data = String::from_utf8(slice.to_vec())?;
 
     let sml_data = SmlDataBuilder::default()
-        .protocol(SchemalessProtocol::from(protocal as i32))
-        .precision(SchemalessPrecision::from(precision as i32))
+        .protocol(SchemalessProtocol::from(protocal))
+        .precision(SchemalessPrecision::from(precision))
         .data(vec![data])
-        .ttl(ttl as i32)
+        .ttl(ttl)
         .req_id(reqid)
         .build()?;
 
     client.put(&sml_data)?;
-    let r = WsResultSet::SchemalessResultSet(WsSchemalessResultSet::new(
+    let r = WsResultSet::Schemaless(WsSchemalessResultSet::new(
         0,
         Precision::Millisecond,
         Duration::from_millis(0),
@@ -1787,6 +1763,17 @@ mod tests {
         unsafe {
             let pclient_info = ws_get_client_info();
             dbg!(CStr::from_ptr(pclient_info));
+        }
+    }
+
+    #[test]
+    fn test_server_info() {
+        unsafe {
+            let taos = ws_connect(c"http://localhost:6041".as_ptr());
+            assert!(!taos.is_null());
+
+            let version = ws_get_server_info(taos);
+            dbg!(CStr::from_ptr(version as _));
         }
     }
 
@@ -1965,11 +1952,11 @@ mod tests {
             assert_eq!(code, 0);
 
             let is_null = ws_is_null(rs, 0, 0);
-            assert_eq!(is_null, false);
+            assert!(!is_null);
             let is_null = ws_is_null(rs, 0, cols);
-            assert_eq!(is_null, true);
+            assert!(is_null);
             let is_null = ws_is_null(rs, 0, 1);
-            assert_eq!(is_null, false);
+            assert!(!is_null);
 
             dbg!(rows);
             for row in 0..rows {
@@ -2247,7 +2234,7 @@ mod tests {
                 }
 
                 println!("line num = {}", line_num);
-                line_num = line_num + 1;
+                line_num += 1;
             }
 
             if get_c_errno() == 0 {
