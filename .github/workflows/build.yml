@@ -1,4 +1,4 @@
-name: build
+name: Build
 
 on:
   push:
@@ -23,8 +23,7 @@ jobs:
           echo "Pull request's branch is: ${GITHUB_REF##*/}"
           echo "Pull request's head ref is: ${GITHUB_HEAD_REF}"
 
-      - name: Checkout Connector
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Rust
         id: setup-rust
@@ -47,7 +46,7 @@ jobs:
           path: target
           key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.cachekey }}
 
-      - name: Build
+      - name: Cargo Build
         run: |
           cargo build -p taos --no-default-features --features ws-rustls
           cargo build -p taos-ws-sys

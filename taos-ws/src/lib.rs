@@ -361,12 +361,6 @@ impl TaosBuilder {
             .remove("conn_retries")
             .map_or_else(Retries::default, |s| Retries(s.parse::<u32>().unwrap_or(5)));
 
-        // let timeout = dsn
-        //     .params
-        //     .remove("timeout")
-        //     .and_then(|s| parse_duration::parse(&s).ok())
-        //     .unwrap_or(Duration::from_secs(60 * 5)); // default to 5m
-
         if let Some(token) = token {
             Ok(TaosBuilder {
                 scheme,
@@ -374,7 +368,6 @@ impl TaosBuilder {
                 auth: WsAuth::Token(token),
                 database: dsn.subject,
                 server_version: OnceCell::new(),
-                // timeout,
                 conn_mode,
                 compression,
                 conn_retries,
@@ -388,13 +381,13 @@ impl TaosBuilder {
                 auth: WsAuth::Plain(username, password),
                 database: dsn.subject,
                 server_version: OnceCell::new(),
-                // timeout,
                 conn_mode,
                 compression,
                 conn_retries,
             })
         }
     }
+
     pub(crate) fn to_query_url(&self) -> String {
         match &self.auth {
             WsAuth::Token(token) => {

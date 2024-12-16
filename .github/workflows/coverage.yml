@@ -35,7 +35,7 @@ jobs:
           path: "TDengine"
           ref: ${{ inputs.tdengine_branch }}
 
-      - name: Get commit id
+      - name: Get commit ID
         id: get_commit_id
         run: |
           cd TDengine
@@ -135,8 +135,6 @@ jobs:
       - name: Set up Rust
         id: setup-rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy, llvm-tools-preview
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov

@@ -40,7 +40,11 @@ macro_rules! disabled_or_empty {
 }
 
 impl CompressOptions {
-    pub fn new<T: Into<String>>(encode: T, compress: T, level: T) -> Self {
+    pub fn new<T: Into<String>, U: Into<String>, V: Into<String>>(
+        encode: T,
+        compress: U,
+        level: V,
+    ) -> Self {
         Self {
             encode: encode.into(),
             compress: compress.into(),

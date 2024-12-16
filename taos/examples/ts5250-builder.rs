@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
      */
 
     // subscribe
-    let group = chrono::Local::now().timestamp_nanos();
+    let group = chrono::Local::now().timestamp_nanos_opt().unwrap();
     let tmq = TmqBuilder::from_dsn(format!(
         "taos://localhost:6030/ts5250?group.id={group}&experimental.snapshot.enable=true&auto.offset.reset=earliest",
     ))?;
@@ -58,7 +58,6 @@ async fn main() -> anyhow::Result<()> {
 
         let begin = Instant::now();
 
-        let count = 0;
         let mut mid = 0;
         while let Some((offset, message)) = stream.try_next().await? {
             println!("{mid} offset: {:?}", offset);
@@ -78,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
                     let path = format!("raw_{}.bin", mid);
                     std::fs::write(path, bytes.deref())?;
                 }
-                MessageSet::MetaData(meta, data) => {
+                MessageSet::MetaData(meta, ..) => {
                     println!("{mid} meta data: {:?}", meta);
                     let raw = meta.as_raw_meta().await?;
                     let bytes = raw.as_bytes();

@@ -52,7 +52,6 @@ impl taos_query::TBuilder for TaosBuilder {
         if dsn.params.contains_key("token") {
             dsn.protocol = Some("ws".to_string());
         }
-        // dbg!(&dsn);
         use taos_query::TBuilder;
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(

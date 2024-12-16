@@ -317,7 +317,7 @@ impl AsyncOnSync for Meta {}
 
 impl IsMeta for Meta {
     fn as_raw_meta(&self) -> RawResult<RawMeta> {
-        Ok(unsafe { std::mem::transmute::<RawData, RawMeta>(self.raw.clone()) })
+        Ok(unsafe { std::mem::transmute(self.raw.clone()) })
     }
 
     fn as_json_meta(&self) -> RawResult<taos_query::common::JsonMeta> {
@@ -377,11 +377,6 @@ impl IsData for Data {
     }
 }
 
-// pub enum MessageSet {
-//     Meta(Meta),
-//     Data(Data),
-// }
-
 impl From<RawRes> for MessageSet<Meta, Data> {
     fn from(raw: RawRes) -> Self {
         match raw.tmq_message_type() {
@@ -400,17 +395,6 @@ impl Iterator for Data {
         self.raw.fetch_raw_message().map(Ok)
     }
 }
-
-// impl Iterator for MessageSet {
-//     type Item = RawBlock;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         match self {
-//             MessageSet::Meta(data) => None,
-//             MessageSet::Data(data) => data.raw.fetch_raw_message(data.precision),
-//         }
-//     }
-// }
 
 impl AsConsumer for Consumer {
     type Offset = Offset;
@@ -498,8 +482,6 @@ impl AsConsumer for Consumer {
     }
 }
 
-// impl AsyncOnSync for Consumer {}
-
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
     type Offset = Offset;
@@ -519,7 +501,6 @@ impl AsAsyncConsumer for Consumer {
         let r = self.tmq.subscribe(&topics);
 
         if let Some(offset) = self.dsn.get("offset") {
-            // dbg!(offset);
             let offsets = offset
                 .split(',')
                 .map(|s| {
@@ -640,7 +621,6 @@ impl AsAsyncConsumer for Consumer {
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.to_strings();
-        // tracing::info!("topics: {:?}", topics);
         let ret: Vec<(String, Vec<Assignment>)> = topics
             .into_iter()
             .map(|topic| {

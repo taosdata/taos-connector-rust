@@ -92,7 +92,8 @@ impl<'de> de::Deserializer<'de> for StringDeserializer {
         tuple_struct struct tuple enum identifier ignored_any
     }
 }
-impl<'de: 'de> serde::de::EnumAccess<'de> for EnumValueDeserializer {
+
+impl<'de> serde::de::EnumAccess<'de> for EnumValueDeserializer {
     type Error = Error;
 
     type Variant = Self;
@@ -113,7 +114,7 @@ impl<'de: 'de> serde::de::EnumAccess<'de> for EnumValueDeserializer {
     }
 }
 
-impl<'de: 'de> de::VariantAccess<'de> for EnumValueDeserializer {
+impl<'de> de::VariantAccess<'de> for EnumValueDeserializer {
     type Error = Error;
 
     fn unit_variant(self) -> Result<(), Self::Error> {
@@ -146,7 +147,7 @@ impl<'de: 'de> de::VariantAccess<'de> for EnumValueDeserializer {
     }
 }
 
-impl<'de: 'de> serde::de::Deserializer<'de> for Value {
+impl<'de> serde::de::Deserializer<'de> for Value {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -154,7 +155,6 @@ impl<'de: 'de> serde::de::Deserializer<'de> for Value {
         V: serde::de::Visitor<'de>,
     {
         use Value::*;
-        // todo!()
         match self {
             Null(_) => visitor.visit_none(),
             Bool(v) => visitor.visit_bool(v),
@@ -197,9 +197,6 @@ impl<'de: 'de> serde::de::Deserializer<'de> for Value {
         use Value::*;
         match self {
             Null(_) => visitor.visit_str(""), // todo: empty string or error?
-            // Null => Err(Self::Error::from_string(
-            // "expect non-optional String, but value is null",
-            // )),
             Bool(v) => visitor.visit_bool(v),
             TinyInt(v) => visitor.visit_i8(v),
             SmallInt(v) => visitor.visit_i16(v),
@@ -354,7 +351,7 @@ impl<'de: 'de> serde::de::Deserializer<'de> for Value {
     }
 }
 
-impl<'de: 'de> serde::de::IntoDeserializer<'de, Error> for Value {
+impl serde::de::IntoDeserializer<'_, Error> for Value {
     type Deserializer = Self;
 
     fn into_deserializer(self) -> Self::Deserializer {

@@ -1212,6 +1212,7 @@ mod tests {
         assert_eq!(dsn.password.as_deref().unwrap(), p);
         assert_eq!(dsn.to_string(), format!("taos://root:{e}@localhost:6030"));
     }
+
     #[test]
     fn param_special_chars() {
         let p = "!@#$%^&*()";
@@ -1227,6 +1228,7 @@ mod tests {
             format!("taos://root:{e}@localhost:6030?code1={e}")
         );
     }
+
     #[test]
     fn param_special_chars_all() {
         let p = "!@#$%^&*()";
@@ -1242,6 +1244,7 @@ mod tests {
             format!("taos://{e}:{e}@localhost:6030?{e}={e}")
         );
     }
+
     #[test]
     fn unix_path_with_glob() {
         let dsn = Dsn::from_str("csv:./**.csv?param=1").unwrap();

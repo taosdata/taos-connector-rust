@@ -4,11 +4,10 @@ use taos::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // std::env::set_var("RUST_LOG", "debug");
     pretty_env_logger::init();
 
     // subscribe
-    let group = chrono::Local::now().timestamp_nanos();
+    let group = chrono::Local::now().timestamp_nanos_opt().unwrap();
     let tmq = TmqBuilder::from_dsn(format!(
         "taos+ws://vm98:6041/?group.id={group}&experimental.snapshot.enable=true&timeout=5s&auto.offset.reset=earliest",
     ))?;
@@ -35,7 +34,6 @@ async fn main() -> anyhow::Result<()> {
                 let now = Instant::now();
                 while let Some(block) = data.fetch_raw_block().await? {
                     // one block for one table, get table name if needed
-                    let name = block.table_name();
                     let row = block.nrows();
                     count += row;
                 }

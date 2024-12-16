@@ -298,7 +298,6 @@ mod r#async {
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
-    // use crate::iter::*;
     #[cfg(feature = "async")]
     use async_trait::async_trait;
     pub use futures::stream::{Stream, StreamExt, TryStreamExt};

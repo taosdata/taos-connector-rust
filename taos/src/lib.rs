@@ -35,11 +35,6 @@ pub use crate::sys::*;
 #[cfg(all(not(feature = "ws"), not(feature = "optin")))]
 compile_error!("Either feature \"ws\" or \"native\"|"optin" or both must be enabled for this crate.");
 
-// #[cfg(all(feature = "optin", feature = "native"))]
-// compile_error!(
-//     "Feature \"optin\" is conflicted with \"native\", choose only one feature for native"
-// );
-
 #[cfg(feature = "optin")]
 pub(crate) use taos_optin as sys;
 #[cfg(not(feature = "optin"))]

@@ -105,7 +105,7 @@ impl<'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'_> {
     }
 }
 
-impl<'de: 'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
+impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>

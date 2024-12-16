@@ -31,6 +31,7 @@ impl AsRef<str> for IVarChar {
         self.0.as_str()
     }
 }
+
 impl AsRef<[u8]> for IVarChar {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()

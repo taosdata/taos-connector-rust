@@ -66,10 +66,7 @@ fn get_c_error_str() -> *const c_char {
     C_ERROR_CONTAINER.with(|container| {
         let container = container.borrow();
         let slice = &container[..container.len()];
-
-        // println!("Pointer address: {:?}", ptr);
-        // println!("C_ERROR_CONTAINER contents: {:?}", &container[..]);
-        slice.as_ptr() as *const c_char
+        slice.as_ptr() as _
     })
 }
 
@@ -375,10 +372,10 @@ impl From<&Field> for WS_FIELD_V2 {
     }
 }
 
+/// Field struct that has v3-compatible memory layout, which is recommended.
 #[repr(C)]
 #[derive(Copy, Clone)]
 #[allow(non_camel_case_types)]
-/// Field struct that has v3-compatible memory layout, which is recommended.
 pub struct WS_FIELD {
     pub name: [c_char; 65usize],
     pub r#type: u8,
