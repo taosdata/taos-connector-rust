@@ -1,6 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use taos::TaosBuilder;
-
 use taos_query::prelude::sync::*;
 
 fn criterion_benchmark(c: &mut Criterion) {

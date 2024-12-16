@@ -1,27 +1,22 @@
 #![allow(clippy::size_of_in_element_count)]
 #![allow(clippy::type_complexity)]
 
-use crate::common::{BorrowedValue, Field, Precision, Ty, Value};
+use std::cell::{Cell, RefCell, UnsafeCell};
+use std::collections::VecDeque;
+use std::ffi::c_void;
+use std::fmt::{Debug, Display};
+use std::io::Cursor;
+use std::ops::Deref;
+use std::ptr::NonNull;
+use std::rc::Rc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 use rayon::prelude::*;
-
 use serde::Deserialize;
 use taos_error::Error;
 
-use std::{
-    cell::{Cell, RefCell, UnsafeCell},
-    collections::VecDeque,
-    ffi::c_void,
-    fmt::Debug,
-    fmt::Display,
-    ops::Deref,
-    ptr::NonNull,
-    rc::Rc,
-};
-
-use std::io::Cursor;
+use crate::common::{BorrowedValue, Field, Precision, Ty, Value};
 
 pub mod layout;
 pub mod meta;
@@ -34,18 +29,15 @@ use layout::Layout;
 #[allow(clippy::should_implement_trait)]
 pub mod views;
 
-pub use views::ColumnView;
-
-use views::*;
-
 pub use data::*;
 pub use meta::*;
+pub use views::ColumnView;
+use views::*;
 
 mod de;
 mod rows;
-pub use rows::*;
-
 use derive_builder::Builder;
+pub use rows::*;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(1))]
@@ -148,12 +140,11 @@ impl Debug for RawBlock {
             .field("precision", &self.precision)
             .field("table", &self.table)
             .field("fields", &self.fields)
-            // .field("raw_fields", &self.raw_fields)
             .field("group_id", &self.group_id)
             .field("schemas", &self.schemas)
             .field("lengths", &self.lengths)
             .field("columns", &self.columns)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -195,8 +186,8 @@ impl RawBlock {
         Self::parse_from_raw_block_v2(bytes, fields, lengths, rows, precision)
     }
 
-    pub fn parse_from_raw_block_v2(
-        bytes: impl Into<Bytes>,
+    pub fn parse_from_raw_block_v2<T: Into<Bytes>>(
+        bytes: T,
         fields: &[Field],
         lengths: &[u32],
         rows: usize,
@@ -368,15 +359,18 @@ impl RawBlock {
                     offset += rows * std::mem::size_of::<i64>();
                     // byte slice from start to end: `[start, end)`.
                     let data = bytes.slice(start..offset);
-                    let nulls = NullBits::from_iter((0..rows).map(|row| unsafe {
-                        big_int_is_null(
-                            &(data
-                                .as_ptr()
-                                .offset(row as isize * std::mem::size_of::<i64>() as isize)
-                                as *const i64)
-                                .read_unaligned() as _,
-                        )
-                    }));
+                    let nulls = (0..rows)
+                        .map(|row| unsafe {
+                            big_int_is_null(
+                                &(data
+                                    .as_ptr()
+                                    .offset(row as isize * std::mem::size_of::<i64>() as isize)
+                                    as *const i64)
+                                    .read_unaligned() as _,
+                            )
+                        })
+                        .collect();
+
                     // Set data lengths for v3-compatible block.
                     data_lengths[i] = data.len() as u32;
 
@@ -464,7 +458,7 @@ impl RawBlock {
         }
     }
 
-    pub fn parse_from_raw_block(bytes: impl Into<Bytes>, precision: Precision) -> Self {
+    pub fn parse_from_raw_block<T: Into<Bytes>>(bytes: T, precision: Precision) -> Self {
         let schema_start: usize = std::mem::size_of::<Header>();
 
         let layout = Rc::new(RefCell::new(Layout::INLINE_DEFAULT));
@@ -613,8 +607,8 @@ impl RawBlock {
         }
     }
 
-    pub fn parse_from_multi_raw_block(
-        bytes: impl Into<Bytes>,
+    pub fn parse_from_multi_raw_block<T: Into<Bytes>>(
+        bytes: T,
     ) -> Result<VecDeque<Self>, std::io::Error> {
         use byteorder::ReadBytesExt;
 
@@ -674,12 +668,13 @@ impl RawBlock {
     }
 
     /// Set table name of the block
-    pub fn with_database_name(&mut self, name: impl Into<String>) -> &mut Self {
+    pub fn with_database_name<T: Into<String>>(&mut self, name: T) -> &mut Self {
         self.database = Some(name.into());
         self
     }
+
     /// Set table name of the block
-    pub fn with_table_name(&mut self, name: impl Into<String>) -> &mut Self {
+    pub fn with_table_name<T: Into<String>>(&mut self, name: T) -> &mut Self {
         self.table = Some(name.into());
         self.layout.borrow_mut().with_table_name();
 
@@ -780,7 +775,7 @@ impl RawBlock {
     #[inline]
     pub fn deserialize<'de, 'a: 'de, T>(
         &'a self,
-    ) -> std::iter::Map<rows::RowsIter<'_>, fn(RowView<'a>) -> Result<T, DeError>>
+    ) -> std::iter::Map<rows::RowsIter<'a>, fn(RowView<'a>) -> Result<T, DeError>>
     where
         T: Deserialize<'de>,
     {
@@ -793,10 +788,8 @@ impl RawBlock {
             let bytes = bytes.into();
             self.data.replace(bytes);
             self.layout.borrow_mut().set_schema_changed(false);
-            unsafe { &*self.data.as_ptr() }
-        } else {
-            unsafe { &(*self.data.as_ptr()) }
         }
+        unsafe { &(*self.data.as_ptr()) }
     }
 
     pub fn is_null(&self, row: usize, col: usize) -> bool {
@@ -843,7 +836,7 @@ impl RawBlock {
     // }
 
     pub fn to_values(&self) -> Vec<Vec<Value>> {
-        self.rows().map(|row| row.into_values()).collect_vec()
+        self.rows().map(RowView::into_values).collect_vec()
     }
 
     pub fn write<W: std::io::Write>(&self, _wtr: W) -> std::io::Result<usize> {
@@ -915,7 +908,7 @@ impl RawBlock {
         let views = self
             .column_views()
             .iter()
-            .map(|view| view.cast_precision(precision).to_owned())
+            .map(|view| view.cast_precision(precision))
             .collect::<Vec<ColumnView>>();
         let mut block = Self::from_views(&views, precision);
         block.with_field_names(self.field_names());
@@ -952,14 +945,14 @@ impl<'a> PrettyBlock<'a> {
     }
 }
 
-impl<'a> Deref for PrettyBlock<'a> {
+impl Deref for PrettyBlock<'_> {
     type Target = RawBlock;
     fn deref(&self) -> &Self::Target {
         self.raw
     }
 }
 
-impl<'a> Display for PrettyBlock<'a> {
+impl Display for PrettyBlock<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use prettytable::{Row, Table};
         let mut table = Table::new();
@@ -976,31 +969,23 @@ impl<'a> Display for PrettyBlock<'a> {
         let mut rows_iter = self.raw.rows();
         if f.alternate() {
             for row in rows_iter {
-                table.add_row(Row::from_iter(
-                    row.map(|s| s.1.to_string().unwrap_or_default()),
-                ));
+                table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
         } else if nrows > 2 * MAX_DISPLAY_ROWS {
             for row in (&mut rows_iter).take(MAX_DISPLAY_ROWS) {
-                table.add_row(Row::from_iter(
-                    row.map(|s| s.1.to_string().unwrap_or_default()),
-                ));
+                table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
-            table.add_row(Row::from_iter(std::iter::repeat("...").take(self.ncols())));
+            table.add_row(std::iter::repeat("...").take(self.ncols()).collect());
             for row in rows_iter.skip(nrows - 2 * MAX_DISPLAY_ROWS) {
-                table.add_row(Row::from_iter(
-                    row.map(|s| s.1.to_string().unwrap_or_default()),
-                ));
+                table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
         } else {
             for row in rows_iter {
-                table.add_row(Row::from_iter(
-                    row.map(|s| s.1.to_string().unwrap_or_default()),
-                ));
+                table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
         }
 
-        f.write_fmt(format_args!("{}", table))?;
+        f.write_fmt(format_args!("{table}"))?;
         Ok(())
     }
 }
@@ -1216,7 +1201,6 @@ impl From<i32> for SchemalessPrecision {
             1 => SchemalessPrecision::Hours,
             2 => SchemalessPrecision::Minutes,
             3 => SchemalessPrecision::Seconds,
-            4 => SchemalessPrecision::Millisecond,
             5 => SchemalessPrecision::Microsecond,
             6 => SchemalessPrecision::Nanosecond,
             _ => SchemalessPrecision::Millisecond,
@@ -1274,8 +1258,9 @@ impl crate::prelude::AsyncInlinable for RawBlock {
     async fn read_optional_inlined<R: tokio::io::AsyncRead + Send + Unpin>(
         reader: &mut R,
     ) -> std::io::Result<Option<Self>> {
-        use crate::util::AsyncInlinableRead;
         use tokio::io::*;
+
+        use crate::util::AsyncInlinableRead;
         let layout = reader.read_u32_le().await?;
         if layout == 0xFFFFFFFF {
             return Ok(None);
@@ -1318,8 +1303,9 @@ impl crate::prelude::AsyncInlinable for RawBlock {
         &self,
         wtr: &mut W,
     ) -> std::io::Result<usize> {
-        use crate::util::AsyncInlinableWrite;
         use tokio::io::*;
+
+        use crate::util::AsyncInlinableWrite;
 
         let layout = self.layout();
         wtr.write_u32_le(layout.as_inner()).await?;
@@ -1371,7 +1357,7 @@ impl MultiBlockCursor {
         match t {
             1 => 8,
             2 | 3 => 16,
-            _ => panic!("getTypeSkip error, type: {}", t),
+            _ => panic!("getTypeSkip error, type: {t}"),
         }
     }
 
@@ -1439,8 +1425,9 @@ impl MultiBlockCursor {
     }
 
     fn get_str(&mut self) -> Result<String, std::io::Error> {
-        use byteorder::ReadBytesExt;
         use std::io::Read;
+
+        use byteorder::ReadBytesExt;
 
         let len = self.cursor.read_u32::<byteorder::LittleEndian>()?;
         let mut str = vec![0; len as usize];
@@ -1451,8 +1438,9 @@ impl MultiBlockCursor {
     }
 
     fn parse_schema(&mut self) -> Result<String, std::io::Error> {
-        use byteorder::ReadBytesExt;
         use std::io::Read;
+
+        use byteorder::ReadBytesExt;
         let _taos_type = self.cursor.read_u8()?;
         self.cursor.read_u8()?; // skip flag
         self.parse_zigzag_variable_byte_integer()?; // skip field len
@@ -1470,8 +1458,9 @@ impl MultiBlockCursor {
 
 #[tokio::test]
 async fn test_raw_from_v2() {
-    use crate::prelude::AsyncInlinable;
     use std::ops::Deref;
+
+    use crate::prelude::AsyncInlinable;
     // pretty_env_logger::formatted_builder()
     //     .filter_level(tracing::LevelFilter::Trace)
     //     .init();
@@ -1544,8 +1533,9 @@ async fn test_raw_from_v2() {
 fn test_v2_full() {
     let bytes = include_bytes!("../../../tests/v2.block.gz");
 
-    use flate2::read::GzDecoder;
     use std::io::prelude::*;
+
+    use flate2::read::GzDecoder;
     let mut buf = Vec::new();
     let len = GzDecoder::new(&bytes[..]).read_to_end(&mut buf).unwrap();
     assert_eq!(len, 66716);

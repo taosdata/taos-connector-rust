@@ -3,18 +3,12 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use serde_with::serde_as;
-use serde_with::NoneAsEmptyString;
-
-use taos_query::common::Field;
-use taos_query::common::Precision;
-use taos_query::common::Ty;
+use serde_with::{serde_as, NoneAsEmptyString};
+use taos_query::common::{Field, Precision, Ty};
 use taos_query::prelude::RawError;
-use taos_query::tmq::Assignment;
-use taos_query::tmq::VGroupId;
+use taos_query::tmq::{Assignment, VGroupId};
 
-use crate::query::infra::ToMessage;
-use crate::query::infra::WsConnReq;
+use crate::query::infra::{ToMessage, WsConnReq};
 
 pub type ReqId = u64;
 
@@ -82,11 +76,20 @@ pub struct TmqInit {
     pub snapshot_enable: String,
     pub with_table_name: String,
     pub auto_commit: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_commit_interval_ms: Option<String>,
     pub offset_seek: Option<String>,
-    pub enable_batch_meta: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_batch_meta: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub msg_consume_excluded: Option<String>,
+}
+
+impl TmqInit {
+    pub(super) fn disable_batch_meta(mut self) -> Self {
+        self.enable_batch_meta = None;
+        self
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
@@ -105,7 +108,7 @@ pub enum TmqSend {
         #[serde(flatten)]
         conn: WsConnReq,
         #[serde(flatten)]
-        req: TmqInit,
+        req: Box<TmqInit>,
         topics: Vec<String>,
     },
     Unsubscribe {
@@ -134,28 +137,18 @@ unsafe impl Sync for TmqSend {}
 impl TmqSend {
     pub fn req_id(&self) -> ReqId {
         match self {
-            TmqSend::Subscribe {
-                req_id,
-                conn: _,
-                req: _,
-                topics: _,
-            } => *req_id,
-            TmqSend::Unsubscribe { req_id } => *req_id,
-            TmqSend::Poll {
-                req_id,
-                blocking_time: _,
-            } => *req_id,
-            TmqSend::FetchJsonMeta(args) => args.req_id,
-            TmqSend::FetchRaw(args) => args.req_id,
-            TmqSend::FetchRawData(args) => args.req_id,
-            TmqSend::Fetch(args) => args.req_id,
-            TmqSend::FetchBlock(args) => args.req_id,
-            TmqSend::Commit(args) => args.req_id,
+            TmqSend::Subscribe { req_id, .. }
+            | TmqSend::Unsubscribe { req_id }
+            | TmqSend::Poll { req_id, .. } => *req_id,
+            TmqSend::FetchJsonMeta(args)
+            | TmqSend::FetchRaw(args)
+            | TmqSend::FetchRawData(args)
+            | TmqSend::Fetch(args)
+            | TmqSend::FetchBlock(args)
+            | TmqSend::Commit(args) => args.req_id,
             TmqSend::Assignment(args) => args.req_id,
-            TmqSend::Seek(args) => args.req_id,
-            TmqSend::Committed(args) => args.req_id,
-            TmqSend::Position(args) => args.req_id,
-            TmqSend::CommitOffset(args) => args.req_id,
+            TmqSend::Seek(args) | TmqSend::CommitOffset(args) => args.req_id,
+            TmqSend::Committed(args) | TmqSend::Position(args) => args.req_id,
         }
     }
 }
@@ -205,7 +198,7 @@ impl TmqFetch {
         (0..self.fields_count)
             .map(|i| {
                 Field::new(
-                    self.fields_names.as_ref().unwrap()[i].to_string(),
+                    self.fields_names.as_ref().unwrap()[i].clone(),
                     self.fields_types.as_ref().unwrap()[i],
                     self.fields_lengths.as_ref().unwrap()[i],
                 )

@@ -1,32 +1,28 @@
-use std::{
-    cell::{RefCell, UnsafeCell},
-    ffi::c_void,
-    fmt::Debug,
-    rc::Rc,
-};
-
-use super::{IsColumnView, Offsets, Version};
-
-use crate::{
-    common::{layout::Layout, BorrowedValue, Ty},
-    prelude::InlinableWrite,
-    util::{InlineNChar, InlineStr},
-};
+use std::cell::{RefCell, UnsafeCell};
+use std::ffi::c_void;
+use std::fmt::Debug;
+use std::rc::Rc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 
+use super::{IsColumnView, Offsets, Version};
+use crate::common::layout::Layout;
+use crate::common::{BorrowedValue, Ty};
+use crate::prelude::InlinableWrite;
+use crate::util::{InlineNChar, InlineStr};
+
 #[derive(Debug)]
 pub struct NCharView {
-    // version: Version,
     pub(crate) offsets: Offsets,
     pub(crate) data: Bytes,
     /// TDengine v3 raw block use [char] for NChar data type, it's [str] in v2 websocket block.
-    pub is_chars: UnsafeCell<bool>,
+    pub(crate) is_chars: UnsafeCell<bool>,
     pub(crate) version: Version,
     /// Layout should set as NCHAR_DECODED when raw data decoded.
     pub(crate) layout: Rc<RefCell<Layout>>,
 }
+
 impl Clone for NCharView {
     fn clone(&self) -> Self {
         unsafe {
@@ -41,10 +37,12 @@ impl Clone for NCharView {
         }
     }
 }
+
 impl IsColumnView for NCharView {
     fn ty(&self) -> Ty {
         Ty::NChar
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         Self::from_iter::<String, _, _, _>(
             iter.map(|v| v.to_str().map(|v| v.into_owned()))
@@ -159,8 +157,9 @@ impl NCharView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|s| BorrowedValue::NChar(s.into()))
-            .unwrap_or(BorrowedValue::Null(Ty::NChar))
+            .map_or(BorrowedValue::Null(Ty::NChar), |s| {
+                BorrowedValue::NChar(s.into())
+            })
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -181,9 +180,9 @@ impl NCharView {
         if range.is_empty() {
             return None;
         }
-        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range.clone()) };
+        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range) };
         let range = if let Some(range) = range {
-            range.0 as usize..range.1.map(|v| v as usize).unwrap_or(self.data.len())
+            range.0 as usize..range.1.map_or(self.data.len(), |v| v as usize)
         } else {
             0..0
         };
@@ -322,7 +321,7 @@ impl<'a> Iterator for NCharViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for NCharViewIter<'a> {
+impl ExactSizeIterator for NCharViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

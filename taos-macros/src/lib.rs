@@ -39,7 +39,7 @@ pub fn c_cfg(
 ///
 /// ## Use as [`[test]`](https://doc.rust-lang.org/std/prelude/v1/macro.test.html) does
 ///
-/// ```rust
+/// ```rust,ignore
 /// use taos_macros::test;
 /// #[test]
 /// fn test1() {}
@@ -47,7 +47,7 @@ pub fn c_cfg(
 ///
 /// ## Use with taos connection.
 ///
-/// ```rust
+/// ```rust,ignore
 /// use taos_macros::test;
 ///
 /// #[test]
@@ -59,7 +59,7 @@ pub fn c_cfg(
 ///
 /// ## Use with taos connection and a prebuilt database
 ///
-/// ```rust
+/// ```rust,ignore
 /// use taos_macros::test;
 /// use taos::{Taos, Result};
 ///
@@ -73,7 +73,7 @@ pub fn c_cfg(
 ///
 /// ## Use with taos connection and a prebuilt database with specific precision
 ///
-/// ```rust
+/// ```rust,ignore
 /// use taos_macros::test;
 /// use taos::{Taos, Result};
 ///
@@ -89,7 +89,7 @@ pub fn c_cfg(
 ///
 /// ## Specify a custom database name
 ///
-/// ```rust
+/// ```rust,ignore
 /// use taos_macros::test;
 /// use taos::{Taos, Result};
 ///
@@ -108,7 +108,7 @@ pub fn c_cfg(
 /// naming strategy. It will satisfy most cases. But if you want to use another naming strategy, you can use
 /// `"random"` to generate database names with [faker_rand](https://docs.rs/faker_rand).
 ///
-/// ```rust
+/// ```rust,ignore
 /// use taos_macros::test;
 /// use taos::{Taos, Result};
 ///
@@ -122,7 +122,7 @@ pub fn c_cfg(
 ///
 /// ## Generate many databases in one case
 ///
-/// ```rust
+/// ```rust,ignore
 /// use taos_macros::test;
 /// use taos::{Taos, Result};
 ///

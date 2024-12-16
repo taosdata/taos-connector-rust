@@ -1,18 +1,17 @@
-use std::{borrow::Cow, ffi::c_void, fmt::Debug};
-
-use super::{IsColumnView, Offsets};
-use crate::{
-    common::{BorrowedValue, Ty},
-    prelude::InlinableWrite,
-    util::InlineBytes,
-};
+use std::borrow::Cow;
+use std::ffi::c_void;
+use std::fmt::Debug;
 
 use bytes::Bytes;
 use itertools::Itertools;
 
+use super::{IsColumnView, Offsets};
+use crate::common::{BorrowedValue, Ty};
+use crate::prelude::InlinableWrite;
+use crate::util::InlineBytes;
+
 #[derive(Debug, Clone)]
 pub struct VarBinaryView {
-    // version: Version,
     pub(crate) offsets: Offsets,
     pub(crate) data: Bytes,
 }
@@ -21,6 +20,7 @@ impl IsColumnView for VarBinaryView {
     fn ty(&self) -> Ty {
         Ty::VarBinary
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         Self::from_iter::<Bytes, _, _, _>(iter.map(|v| v.to_bytes()).collect_vec())
     }
@@ -70,8 +70,9 @@ impl VarBinaryView {
 
     pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|s| BorrowedValue::VarBinary(Cow::Borrowed(s.as_bytes())))
-            .unwrap_or(BorrowedValue::Null(Ty::VarBinary))
+            .map_or(BorrowedValue::Null(Ty::VarBinary), |s| {
+                BorrowedValue::VarBinary(Cow::Borrowed(s.as_bytes()))
+            })
     }
 
     pub(crate) unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -220,14 +221,14 @@ impl<'a> Iterator for VarBinaryIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for VarBinaryIter<'a> {}
+impl ExactSizeIterator for VarBinaryIter<'_> {}
 
 pub struct VarBinaryNullsIter<'a> {
     view: &'a VarBinaryView,
     row: usize,
 }
 
-impl<'a> Iterator for VarBinaryNullsIter<'a> {
+impl Iterator for VarBinaryNullsIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -241,7 +242,7 @@ impl<'a> Iterator for VarBinaryNullsIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for VarBinaryNullsIter<'a> {
+impl ExactSizeIterator for VarBinaryNullsIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }
