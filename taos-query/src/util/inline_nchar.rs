@@ -9,6 +9,11 @@ pub struct InlineNChar<T = u16> {
     data: [u8; 0],
 }
 
+pub struct Chars<'a, T = u16> {
+    data: &'a InlineNChar<T>,
+    i: T,
+}
+
 macro_rules! _impl_inline_str {
     ($($ty:ty) *) => {
         $(
@@ -31,16 +36,23 @@ macro_rules! _impl_inline_str {
                 }
             }
 
-            impl AsRef<[char]> for InlineNChar<$ty> {
-                #[inline]
-                fn as_ref(&self) -> &[char] {
-                    self.chars()
-                }
-            }
             impl AsRef<[u8]> for InlineNChar<$ty> {
                 #[inline]
                 fn as_ref(&self) -> &[u8] {
                     self.as_bytes()
+                }
+            }
+            impl<'a> Iterator for Chars<'a, $ty> {
+                type Item = char;
+                #[inline]
+                fn next(&mut self) -> Option<Self::Item> {
+                    if self.i < self.data.chars_len() as $ty {
+                        let c = unsafe { std::ptr::read_unaligned(self.data.data.as_ptr().add(self.i as usize * std::mem::size_of::<char>()) as *const char) };
+                        self.i += 1;
+                        Some(c)
+                    } else {
+                        None
+                    }
                 }
             }
 
@@ -73,7 +85,7 @@ macro_rules! _impl_inline_str {
                 }
                 #[inline]
                 pub fn to_string(&self) -> String {
-                    self.chars().iter().collect()
+                    self.chars().collect()
                 }
 
                 #[inline]
@@ -87,8 +99,11 @@ macro_rules! _impl_inline_str {
 
                 // #[inline]
                 // #[rustversion::attr(nightly, const)]
-                pub fn chars(&self) -> &[char] {
-                    unsafe { std::slice::from_raw_parts(self.data.as_ptr() as _, self.chars_len()) }
+                pub fn chars(&self) -> Chars<$ty> {
+                    Chars {
+                        data: self,
+                        i: 0,
+                    }
                 }
 
                 #[inline]
@@ -104,9 +119,9 @@ macro_rules! _impl_inline_str {
                     let v: &mut super::InlineStr<$ty> = std::mem::transmute(self);
                     // let ptr = self.data.as_ptr() as *mut u8;
                     let ptr = v.as_mut_ptr();
-                    let chars = std::slice::from_raw_parts(ptr as *mut char, chars_len);
                     let mut len = 0usize;
-                    for c in chars {
+                    for i in 0..chars_len {
+                        let c = std::ptr::read_unaligned(ptr.add(i * std::mem::size_of::<char>()) as *mut char);
                         let mut b = [0; 4];
                         let s = c.encode_utf8(&mut b);
                         debug_assert!(s.len() <= 4);

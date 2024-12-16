@@ -225,8 +225,10 @@ impl taos_query::prelude::AsyncBindable<super::Taos> for Stmt {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
     use serde::Deserialize;
     use std::str::FromStr;
+    use taos_query::util::hex::*;
     use taos_query::RawResult;
 
     #[test]
@@ -238,10 +240,13 @@ mod tests {
 
         use crate::sync::*;
         let taos = TaosBuilder::from_dsn(dsn)?.build()?;
+
+        let db = "taos_test_bindable";
+
         taos.exec_many([
-            "drop database if exists taos_test_bindable",
-            "create database taos_test_bindable keep 36500",
-            "use taos_test_bindable",
+            format!("drop database if exists {db}").as_str(),
+            format!("create database {db} keep 36500").as_str(),
+            format!("use {db}").as_str(),
             "create table tb1 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
             c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
             c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
@@ -300,7 +305,7 @@ mod tests {
         assert_eq!(row.c12, "ABC");
         assert_eq!(row.c13, "涛思数据");
 
-        taos.exec("drop database taos_test_bindable")?;
+        taos.exec(format!("drop database {db}").as_str())?;
 
         Ok(())
     }
@@ -314,10 +319,13 @@ mod tests {
 
         use crate::sync::*;
         let taos = TaosBuilder::from_dsn(dsn)?.build()?;
+
+        let db = "test_ws_stmt_with_req_id_sync";
+
         taos.exec_many([
-            "drop database if exists taos_test_bindable",
-            "create database taos_test_bindable keep 36500",
-            "use taos_test_bindable",
+            format!("drop database if exists {db}").as_str(),
+            format!("create database {db} keep 36500").as_str(),
+            format!("use {db}").as_str(),
             "create table tb1 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
             c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
             c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
@@ -377,7 +385,7 @@ mod tests {
         assert_eq!(row.c12, "ABC");
         assert_eq!(row.c13, "涛思数据");
 
-        taos.exec("drop database taos_test_bindable")?;
+        taos.exec(format!("drop database {db}").as_str())?;
 
         Ok(())
     }
@@ -389,10 +397,13 @@ mod tests {
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let db = "test_bindable2";
+
         taos.exec_many([
-            "drop database if exists test_bindable2",
-            "create database test_bindable2 keep 36500",
-            "use test_bindable2",
+            format!("drop database if exists {db}").as_str(),
+            format!("create database {db} keep 36500").as_str(),
+            format!("use {db}").as_str(),
             "create table tb1 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
             c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
             c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
@@ -461,7 +472,9 @@ mod tests {
         assert_eq!(row.c12, "ABC");
         assert_eq!(row.c13, "涛思数据");
 
-        taos.exec("drop database test_bindable2").await.unwrap();
+        taos.exec(format!("drop database {db}").as_str())
+            .await
+            .unwrap();
 
         Ok(())
     }
@@ -473,18 +486,21 @@ mod tests {
         let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let db = "test_ws_stmt_with_req_id_async";
+
         taos.exec_many([
-            "drop database if exists test_bindable2",
-            "create database test_bindable2 keep 36500",
-            "use test_bindable2",
+            format!("drop database if exists {db}").as_str(),
+            format!("create database {db} keep 36500").as_str(),
+            format!("use {db}").as_str(),
             "create table tb1 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
             c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
-            c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
+            c10 float, c11 double, c12 varchar(100), c13 nchar(100), c14 varbinary(50), c15 geometry(50))",
         ])
         .await?;
         let req_id = 1001;
         let mut stmt = Stmt::init_with_req_id(&taos, req_id).await.unwrap();
-        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .await?;
         let params = vec![
             ColumnView::from_millis_timestamp(vec![0]),
@@ -501,6 +517,11 @@ mod tests {
             ColumnView::from_doubles(vec![f64::MAX]),
             ColumnView::from_varchar(vec!["ABC"]),
             ColumnView::from_nchar(vec!["涛思数据"]),
+            ColumnView::from_bytes(vec![hex_string_to_bytes("123456").to_vec()]),
+            ColumnView::from_geobytes(vec![hex_string_to_bytes(
+                "0101000000000000000000F03F0000000000000040",
+            )
+            .to_vec()]),
         ];
         let rows = stmt
             .bind(&params)
@@ -531,6 +552,8 @@ mod tests {
             c11: f64,
             c12: String,
             c13: String,
+            c14: Bytes,
+            c15: Bytes,
         }
 
         let rows: Vec<Row> = taos
@@ -545,8 +568,15 @@ mod tests {
         assert_eq!(row.c11, f64::MAX);
         assert_eq!(row.c12, "ABC");
         assert_eq!(row.c13, "涛思数据");
+        assert_eq!(row.c14, hex_string_to_bytes("123456"));
+        assert_eq!(
+            row.c15,
+            hex_string_to_bytes("0101000000000000000000F03F0000000000000040")
+        );
 
-        taos.exec("drop database test_bindable2").await.unwrap();
+        taos.exec(format!("drop database {db}").as_str())
+            .await
+            .unwrap();
 
         Ok(())
     }

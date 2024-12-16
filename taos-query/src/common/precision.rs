@@ -13,7 +13,7 @@ pub enum PrecisionError {
 
 /// The precision of a timestamp or a database.
 #[repr(i32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, serde_repr::Serialize_repr)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, serde_repr::Serialize_repr)]
 pub enum Precision {
     Millisecond = 0,
     Microsecond,
@@ -242,5 +242,12 @@ mod tests {
 
         let json = serde_json::to_string(&precision).unwrap();
         assert_eq!(json, "0");
+    }
+
+    #[test]
+    fn ord() {
+        assert!(Precision::Millisecond <= Precision::Millisecond);
+        assert!(Precision::Millisecond < Precision::Microsecond);
+        assert!(Precision::Microsecond < Precision::Nanosecond);
     }
 }

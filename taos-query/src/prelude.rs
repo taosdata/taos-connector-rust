@@ -1,7 +1,7 @@
 mod _priv {
     pub use crate::common::{
         AlterType, BorrowedValue, ColumnView, Field, JsonMeta, MetaAlter, MetaCreate, MetaDrop,
-        Precision, RawBlock, RawMeta, TagWithValue, Ty, Value,
+        MetaUnit, Precision, RawBlock, RawMeta, TagWithValue, Ty, Value,
     };
     pub use crate::util::{Inlinable, InlinableRead, InlinableWrite};
 
@@ -21,6 +21,16 @@ pub use _priv::*;
 pub use futures::stream::{Stream, StreamExt, TryStreamExt};
 pub use r#async::*;
 pub use tokio;
+
+pub trait Helpers {
+    fn table_vgroup_id(&self, _db: &str, _table: &str) -> Option<i32> {
+        None
+    }
+
+    fn tables_vgroup_ids<T: AsRef<str>>(&self, _db: &str, _tables: &[T]) -> Option<Vec<i32>> {
+        None
+    }
+}
 
 pub mod sync {
     pub use crate::RawResult;
@@ -276,11 +286,18 @@ pub mod sync {
         }
 
         fn put(&self, data: &SmlData) -> RawResult<()>;
+
+        fn table_vgroup_id(&self, _db: &str, _table: &str) -> Option<i32> {
+            None
+        }
+
+        fn tables_vgroup_ids<T: AsRef<str>>(&self, _db: &str, _tables: &[T]) -> Option<Vec<i32>> {
+            None
+        }
     }
 }
 
 mod r#async {
-    use itertools::Itertools;
     use serde::de::DeserializeOwned;
     use std::borrow::Cow;
     use std::marker::PhantomData;
@@ -483,7 +500,7 @@ mod r#async {
 
         async fn exec<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<usize> {
             let sql = sql.as_ref();
-            // log::trace!("exec sql: {sql}");
+            // tracing::trace!("exec sql: {sql}");
             self.query(sql).await.map(|res| res.affected_rows() as _)
         }
 
@@ -493,7 +510,7 @@ mod r#async {
             req_id: u64,
         ) -> RawResult<usize> {
             let sql = sql.as_ref();
-            // log::trace!("exec sql: {sql}");
+            // tracing::trace!("exec sql: {sql}");
             self.query_with_req_id(sql, req_id)
                 .await
                 .map(|res| res.affected_rows() as _)
@@ -539,7 +556,7 @@ mod r#async {
             sql: T,
         ) -> RawResult<Option<O>> {
             use futures::StreamExt;
-            // log::trace!("query one with sql: {}", sql.as_ref());
+            // tracing::trace!("query one with sql: {}", sql.as_ref());
             self.query(sql)
                 .await?
                 .deserialize::<O>()
@@ -619,7 +636,7 @@ mod r#async {
         /// This is a 3.x-only API.
         async fn topics(&self) -> RawResult<Vec<Topic>> {
             let sql = "SELECT * FROM information_schema.ins_topics";
-            log::trace!("query one with sql: {sql}");
+            tracing::trace!("query one with sql: {sql}");
             Ok(self.query(sql).await?.deserialize().try_collect().await?)
         }
 
@@ -650,6 +667,18 @@ mod r#async {
             sql: T,
         ) -> RawResult<Self::AsyncResultSet> {
             crate::block_in_place_or_global(self.query(sql))
+        }
+
+        async fn table_vgroup_id(&self, _db: &str, _table: &str) -> Option<i32> {
+            None
+        }
+
+        async fn tables_vgroup_ids<T: AsRef<str> + Sync>(
+            &self,
+            _db: &str,
+            _tables: &[T],
+        ) -> Option<Vec<i32>> {
+            None
         }
     }
 

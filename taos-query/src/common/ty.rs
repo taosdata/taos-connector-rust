@@ -1,9 +1,9 @@
+use serde::de::Visitor;
+use std::os::raw::c_char;
 use std::{
     fmt::{self, Display},
     str::FromStr,
 };
-
-use serde::de::Visitor;
 
 /// TDengine data type enumeration.
 ///
@@ -25,6 +25,8 @@ use serde::de::Visitor;
 /// | UInt       | 13  | INT UNSIGNED     | u32               |
 /// | UBigInt    | 14  | BIGINT UNSIGNED  | u64               |
 /// | Json       | 15  | JSON             | serde_json::Value |
+/// | VarBinary  | 16  | VARBINARY        | Vec<u8>           |
+/// | Geometry   | 20  | GEOMETRY         | Vec<u8>           |
 ///
 /// Note:
 /// - VarChar sql name is BINARY in v2, and VARCHAR in v3.
@@ -73,9 +75,8 @@ pub enum Ty {
     /// 15: Json, `json` tag in sql, will be represented as [serde_json::value::Value] in Rust.
     Json = 15, // 15
 
-    /// 16, VarBinary, `varbinary` in sql, [`Vec<u8>`] in Rust, which will be supported since TDengine 3.1.
-    #[doc(hidden)]
-    VarBinary, // 16
+    /// 16, VarBinary, `varbinary` in sql, [`Vec<u8>`] in Rust.
+    VarBinary = 16, // 16
     /// 17, Not supported now.
     #[doc(hidden)]
     Decimal, // 17
@@ -85,6 +86,9 @@ pub enum Ty {
     /// 19, Not supported now.
     #[doc(hidden)]
     MediumBlob, // 19
+
+    /// 20, Geometry, `geometry` in sql, [`Vec<u8>`] in Rust.
+    Geometry, // 20
 }
 
 impl<'de> serde::Deserialize<'de> for Ty {
@@ -177,6 +181,7 @@ impl FromStr for Ty {
             "decimal" => Ok(Ty::Decimal),
             "blob" => Ok(Ty::Blob),
             "mediumblob" => Ok(Ty::MediumBlob),
+            "geometry" => Ok(Ty::Geometry),
             _ => Err("not a valid data type string"),
         }
     }
@@ -188,10 +193,10 @@ impl Ty {
         matches!(self, Ty::Null)
     }
 
-    /// Var type is one of [Ty::VarChar], [Ty::VarBinary], [Ty::NChar].
+    /// Var type is one of [Ty::VarChar], [Ty::VarBinary], [Ty::NChar], [Ty::Geometry].
     pub const fn is_var_type(&self) -> bool {
         use Ty::*;
-        matches!(self, VarChar | VarBinary | NChar)
+        matches!(self, VarChar | VarBinary | NChar | Geometry)
     }
 
     // /// Check if the data type need quotes, means one of [Ty::VarChar], [Ty::NChar], [Ty::Json].
@@ -269,6 +274,7 @@ impl Ty {
             Decimal => "DECIMAL",
             Blob => "BLOB",
             MediumBlob => "MEDIUMBLOB",
+            Geometry => "GEOMETRY",
         }
     }
 
@@ -295,6 +301,63 @@ impl Ty {
             Decimal => "decimal",
             Blob => "blob",
             MediumBlob => "mediumblob",
+            Geometry => "geometry",
+        }
+    }
+
+    pub const fn tsdb_name(&self) -> *const c_char {
+        use Ty::*;
+        match self {
+            Null => "TSDB_DATA_TYPE_NULL\0".as_ptr() as *const c_char,
+            Bool => "TSDB_DATA_TYPE_BOOL\0".as_ptr() as *const c_char,
+            TinyInt => "TSDB_DATA_TYPE_TINYINT\0".as_ptr() as *const c_char,
+            SmallInt => "TSDB_DATA_TYPE_SMALLINT\0".as_ptr() as *const c_char,
+            Int => "TSDB_DATA_TYPE_INT\0".as_ptr() as *const c_char,
+            BigInt => "TSDB_DATA_TYPE_BIGINT\0".as_ptr() as *const c_char,
+            Float => "TSDB_DATA_TYPE_FLOAT\0".as_ptr() as *const c_char,
+            Double => "TSDB_DATA_TYPE_DOUBLE\0".as_ptr() as *const c_char,
+            VarChar => "TSDB_DATA_TYPE_VARCHAR\0".as_ptr() as *const c_char,
+            Timestamp => "TSDB_DATA_TYPE_TIMESTAMP\0".as_ptr() as *const c_char,
+            NChar => "TSDB_DATA_TYPE_NCHAR\0".as_ptr() as *const c_char,
+            UTinyInt => "TSDB_DATA_TYPE_UTINYINT\0".as_ptr() as *const c_char,
+            USmallInt => "TSDB_DATA_TYPE_USMALLINT\0".as_ptr() as *const c_char,
+            UInt => "TSDB_DATA_TYPE_UINT\0".as_ptr() as *const c_char,
+            UBigInt => "TSDB_DATA_TYPE_UBIGINT\0".as_ptr() as *const c_char,
+            Json => "TSDB_DATA_TYPE_JSON\0".as_ptr() as *const c_char,
+            VarBinary => "TSDB_DATA_TYPE_VARBINARY\0".as_ptr() as *const c_char,
+            Decimal => "TSDB_DATA_TYPE_DECIMAL\0".as_ptr() as *const c_char,
+            Blob => "TSDB_DATA_TYPE_BLOB\0".as_ptr() as *const c_char,
+            MediumBlob => "TSDB_DATA_TYPE_MEDIUMBLOB\0".as_ptr() as *const c_char,
+            Geometry => "TSDB_DATA_TYPE_GEOMETRY\0".as_ptr() as *const c_char,
+        }
+    }
+
+    #[inline]
+    pub const fn from_u8_option(v: u8) -> Option<Self> {
+        use Ty::*;
+        match v {
+            0 => Some(Null),
+            1 => Some(Bool),
+            2 => Some(TinyInt),
+            3 => Some(SmallInt),
+            4 => Some(Int),
+            5 => Some(BigInt),
+            6 => Some(Float),
+            7 => Some(Double),
+            8 => Some(VarChar),
+            9 => Some(Timestamp),
+            10 => Some(NChar),
+            11 => Some(UTinyInt),
+            12 => Some(USmallInt),
+            13 => Some(UInt),
+            14 => Some(UBigInt),
+            15 => Some(Json),
+            16 => Some(VarBinary),
+            17 => Some(Decimal),
+            18 => Some(Blob),
+            19 => Some(MediumBlob),
+            20 => Some(Geometry),
+            _ => None,
         }
     }
 
@@ -311,7 +374,7 @@ impl Ty {
         }
         _var_str!(
             Null Bool TinyInt SmallInt Int BigInt UTinyInt USmallInt UInt UBigInt
-            Float Double VarChar NChar Timestamp Json VarBinary Decimal Blob MediumBlob
+            Float Double VarChar NChar Timestamp Json VarBinary Decimal Blob MediumBlob Geometry
         )
     }
 
@@ -339,6 +402,7 @@ impl Ty {
             17 => Decimal,
             18 => Blob,
             19 => MediumBlob,
+            20 => Geometry,
             _ => panic!("unknown data type"),
         }
     }

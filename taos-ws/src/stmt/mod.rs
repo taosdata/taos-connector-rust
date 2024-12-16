@@ -11,7 +11,6 @@ use taos_query::prelude::{InlinableWrite, RawResult};
 use taos_query::stmt::{AsyncBindable, Bindable};
 use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 
-use taos_query::prelude::tokio;
 use tokio::sync::{oneshot, watch};
 
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -45,36 +44,11 @@ type StmtUseResultResult = RawResult<StmtUseResult>;
 type StmtUseSender = tokio::sync::mpsc::Sender<StmtUseResultResult>;
 type StmtUseReceiver = tokio::sync::mpsc::Receiver<StmtUseResultResult>;
 
+type StmtPrepareResultResult = RawResult<StmtPrepareResult>;
+type StmtPrepareResultSender = tokio::sync::mpsc::Sender<StmtPrepareResultResult>;
+type StmtPrepareResultReceiver = tokio::sync::mpsc::Receiver<StmtPrepareResultResult>;
+
 type WsSender = tokio::sync::mpsc::Sender<Message>;
-
-trait ToJsonValue {
-    fn to_json_value(&self) -> serde_json::Value;
-}
-
-impl ToJsonValue for ColumnView {
-    fn to_json_value(&self) -> serde_json::Value {
-        match self {
-            ColumnView::Bool(view) => serde_json::json!(view.to_vec()),
-            ColumnView::TinyInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::SmallInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::Int(view) => serde_json::json!(view.to_vec()),
-            ColumnView::BigInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::Float(view) => serde_json::json!(view.to_vec()),
-            ColumnView::Double(view) => serde_json::json!(view.to_vec()),
-            ColumnView::VarChar(view) => serde_json::json!(view.to_vec()),
-            ColumnView::Timestamp(view) => serde_json::json!(view
-                .iter()
-                .map(|ts| ts.map(|ts| ts.to_datetime_with_tz()))
-                .collect_vec()),
-            ColumnView::NChar(view) => serde_json::json!(view.to_vec()),
-            ColumnView::UTinyInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::USmallInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::UInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::UBigInt(view) => serde_json::json!(view.to_vec()),
-            ColumnView::Json(view) => serde_json::json!(view.to_vec()),
-        }
-    }
-}
 
 impl Bindable<super::Taos> for Stmt {
     fn init(taos: &super::Taos) -> RawResult<Self> {
@@ -240,6 +214,9 @@ pub struct Stmt {
     param_receiver: Option<StmtParamReceiver>,
     use_result_fetches: Arc<HashMap<StmtId, StmtUseSender>>,
     use_result_receiver: Option<StmtUseReceiver>,
+    prepare_result_fetches: Arc<HashMap<StmtId, StmtPrepareResultSender>>,
+    prepare_result_receiver: Option<StmtPrepareResultReceiver>,
+    is_insert: Option<bool>,
 }
 
 #[repr(C)]
@@ -259,6 +236,12 @@ pub struct StmtUseResult {
     pub fields_types: Option<Vec<Ty>>,
     pub fields_lengths: Option<Vec<u32>>,
     pub precision: Precision,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct StmtPrepareResult {
+    pub stmt_id: StmtId,
+    pub is_insert: bool,
 }
 
 #[repr(C)]
@@ -286,6 +269,7 @@ impl Drop for Stmt {
 }
 
 impl Stmt {
+    #[allow(dead_code)]
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
         let ws = info.build_stream(info.to_stmt_url()).await?;
 
@@ -319,6 +303,9 @@ impl Stmt {
         let fields_fetches = Arc::new(HashMap::<StmtId, StmtFieldSender>::new());
         let fields_fetches_sender = fields_fetches.clone();
 
+        let prepare_result_fetches = Arc::new(HashMap::<StmtId, StmtPrepareResultSender>::new());
+        let prepare_result_fetches_sender = prepare_result_fetches.clone();
+
         let param_fetches = Arc::new(HashMap::<StmtId, StmtParamSender>::new());
         let param_fetches_sender = param_fetches.clone();
 
@@ -326,7 +313,6 @@ impl Stmt {
         let use_result_fetches_sender = use_result_fetches.clone();
 
         let (ws, mut msg_recv) = tokio::sync::mpsc::channel(100);
-        let ws2 = ws.clone();
 
         // Connection watcher
         let (tx, mut rx) = watch::channel(false);
@@ -338,12 +324,12 @@ impl Stmt {
                     Some(msg) = msg_recv.recv() => {
                         if let Err(err) = sender.send(msg).await {
                             //
-                            log::warn!("Sender error: {err:#}");
+                            tracing::warn!("Sender error: {err:#}");
                             break;
                         }
                     }
                     _ = rx.changed() => {
-                        log::trace!("close sender task");
+                        tracing::trace!("close sender task");
                         break;
                     }
                 }
@@ -358,88 +344,98 @@ impl Stmt {
                         match message {
                             Ok(message) => match message {
                                 Message::Text(text) => {
-                                    log::trace!("json response: {}", text);
+                                    tracing::trace!("json response: {}", text);
                                     let v: StmtRecv = serde_json::from_str(&text).unwrap();
                                     match v.ok() {
                                         StmtOk::Conn(_) => {
-                                            log::warn!("[{req_id}] received connected response in message loop");
+                                            tracing::warn!("[{req_id}] received connected response in message loop");
                                         },
                                         StmtOk::Init(req_id, stmt_id) => {
-                                            log::trace!("stmt init done: {{ req_id: {}, stmt_id: {:?}}}", req_id, stmt_id);
+                                            tracing::trace!("stmt init done: {{ req_id: {}, stmt_id: {:?}}}", req_id, stmt_id);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 sender.send(stmt_id).unwrap();
                                             }  else {
-                                                log::trace!("Stmt init failed because req id {req_id} not exist");
+                                                tracing::trace!("Stmt init failed because req id {req_id} not exist");
                                             }
                                         }
                                         StmtOk::Stmt(stmt_id, res) => {
                                             if let Some(sender) = fetches_sender.get(&stmt_id) {
-                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                tracing::trace!("send data to fetches with id {}", stmt_id);
                                                 // let res = res.clone();
                                                 sender.send(res).await.unwrap();
                                             // }) {
 
                                             } else {
-                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                                tracing::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                            }
+                                        }
+                                        StmtOk::StmtPrepare(stmt_id, res) => {
+                                            if let Some(sender) = prepare_result_fetches_sender.get(&stmt_id) {
+                                                tracing::trace!("send data to fetches with id {}", stmt_id);
+
+                                                sender.send(res).await.unwrap();
+
+                                            } else {
+                                                tracing::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
                                         StmtOk::StmtFields(stmt_id, res) => {
                                             if let Some(sender) = fields_fetches_sender.get(&stmt_id) {
-                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                tracing::trace!("send data to fetches with id {}", stmt_id);
                                                 // let res = res.clone();
                                                 sender.send(res).await.unwrap();
 
                                             } else {
-                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                                tracing::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
                                         StmtOk::StmtParam(stmt_id, res) => {
                                             if let Some(sender) = param_fetches_sender.get(&stmt_id) {
-                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                tracing::trace!("send data to fetches with id {}", stmt_id);
                                                 sender.send(res).await.unwrap();
                                             } else {
-                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                                tracing::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
                                         StmtOk::StmtUseResult(stmt_id, res) => {
                                             if let Some(sender) = use_result_fetches_sender.get(&stmt_id) {
-                                                log::trace!("send data to fetches with id {}", stmt_id);
+                                                tracing::trace!("send data to fetches with id {}", stmt_id);
                                                 sender.send(res).await.unwrap();
                                             } else {
-                                                log::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
+                                                tracing::trace!("Got unknown stmt id: {stmt_id} with result: {res:?}");
                                             }
                                         }
                                     }
                                 }
                                 Message::Binary(_) => {
-                                    log::warn!("received (unexpected) binary message, do nothing");
+                                    tracing::warn!("received (unexpected) binary message, do nothing");
                                 }
                                 Message::Close(_) => {
-                                    log::warn!("websocket connection is closed (unexpected?)");
+                                    tracing::warn!("websocket connection is closed (unexpected?)");
                                     break;
                                 }
-                                Message::Ping(bytes) => {
-                                    ws2.send(Message::Pong(bytes)).await.unwrap();
+                                Message::Ping(_) => {
+                                    tracing::warn!("received (unexpected) ping message, do nothing");
                                 }
                                 Message::Pong(_) => {
                                     // do nothing
-                                    log::warn!("received (unexpected) pong message, do nothing");
+                                    tracing::warn!("received (unexpected) pong message, do nothing");
                                 }
                                 Message::Frame(frame) => {
                                     // do nothing
-                                    log::warn!("received (unexpected) frame message, do nothing");
-                                    log::trace!("* frame data: {frame:?}");
+                                    tracing::warn!("received (unexpected) frame message, do nothing");
+                                    tracing::trace!("* frame data: {frame:?}");
                                 }
                             },
                             Err(err) => {
-                                log::trace!("receiving cause error: {err:?}");
+                                tracing::trace!("receiving cause error: {err:?}");
                                 break;
                             }
                         }
                     }
                     _ = close_listener.changed() => {
-                        log::trace!("close reader task");
+                        tracing::trace!("close reader task");
                         break
                     }
                 }
@@ -463,8 +459,12 @@ impl Stmt {
             param_receiver: None,
             use_result_fetches,
             use_result_receiver: None,
+            prepare_result_fetches,
+            prepare_result_receiver: None,
+            is_insert: None,
         })
     }
+
     /// Build TDengine websocket client from dsn.
     ///
     /// ```text
@@ -515,10 +515,16 @@ impl Stmt {
         let _ = self.use_result_fetches.insert(stmt_id, use_result_sender);
         self.use_result_receiver = Some(use_result_receiver);
 
+        let (prepare_result_sender, prepare_result_receiver) = tokio::sync::mpsc::channel(2);
+        let _ = self
+            .prepare_result_fetches
+            .insert(stmt_id, prepare_result_sender);
+        self.prepare_result_receiver = Some(prepare_result_receiver);
+
         Ok(self)
     }
 
-    pub async fn s_stmt<'a>(&'a mut self, sql: &'a str) -> RawResult<&mut Self> {
+    pub async fn s_stmt<'a>(&'a mut self, sql: &'a str) -> RawResult<&'a mut Self> {
         let stmt = self.stmt_init().await?;
         stmt.stmt_prepare(sql).await?;
         Ok(self)
@@ -534,13 +540,20 @@ impl Stmt {
             sql: sql.to_string(),
         };
         self.ws.send(prepare.to_msg()).await.map_err(Error::from)?;
-        let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
-            taos_query::RawError::from_string("Can't receive stmt prepare response"),
-        )??;
+        let res = self
+            .prepare_result_receiver
+            .as_mut()
+            .unwrap()
+            .recv()
+            .await
+            .ok_or(taos_query::RawError::from_string(
+                "Can't receive stmt prepare result response",
+            ))??;
+        self.is_insert = Some(res.is_insert);
         Ok(())
     }
     pub async fn stmt_add_batch(&mut self) -> RawResult<()> {
-        log::trace!("add batch");
+        tracing::trace!("add batch");
         let message = StmtSend::AddBatch(self.args.unwrap());
         self.ws.send(message.to_msg()).await.map_err(Error::from)?;
         let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
@@ -554,11 +567,11 @@ impl Stmt {
             columns,
         };
         {
-            log::trace!("bind with: {message:?}");
-            log::trace!("bind string: {}", message.to_msg());
+            tracing::trace!("bind with: {message:?}");
+            tracing::trace!("bind string: {}", message.to_msg());
             self.ws.send(message.to_msg()).await.map_err(Error::from)?;
         }
-        log::trace!("begin receive");
+        tracing::trace!("begin receive");
         let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
             taos_query::RawError::from_string("Can't receive stmt bind response"),
         )??;
@@ -580,15 +593,15 @@ impl Stmt {
         let block = views_to_raw_block(columns);
 
         bytes.extend(&block);
-        log::trace!("block: {:?}", block);
+        tracing::trace!("block: {:?}", block);
         // dbg!(bytes::Bytes::copy_from_slice(&block));
-        log::trace!(
+        tracing::trace!(
             "{:#?}",
             RawBlock::parse_from_raw_block(block, taos_query::prelude::Precision::Millisecond)
         );
 
         self.ws
-            .send(Message::Binary(bytes))
+            .send(Message::binary(bytes))
             .await
             .map_err(Error::from)?;
         let _ = self.receiver.as_mut().unwrap().recv().await.ok_or(
@@ -635,7 +648,7 @@ impl Stmt {
     }
 
     pub async fn stmt_exec(&mut self) -> RawResult<usize> {
-        log::trace!("exec");
+        tracing::trace!("exec");
         let message = StmtSend::Exec(self.args.unwrap());
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
@@ -653,7 +666,7 @@ impl Stmt {
     }
 
     pub async fn stmt_get_tag_fields(&mut self) -> RawResult<Vec<StmtField>> {
-        log::trace!("get tag fields");
+        tracing::trace!("get tag fields");
         let message = StmtSend::GetTagFields(self.args.unwrap());
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
@@ -666,7 +679,7 @@ impl Stmt {
     }
 
     pub async fn stmt_get_col_fields(&mut self) -> RawResult<Vec<StmtField>> {
-        log::trace!("get col fields");
+        tracing::trace!("get col fields");
         let message = StmtSend::GetColFields(self.args.unwrap());
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
@@ -695,8 +708,13 @@ impl Stmt {
     }
 
     pub async fn use_result(&mut self) -> RawResult<StmtUseResult> {
+        if self.is_insert.unwrap() {
+            return Err(taos_query::RawError::from_string(
+                "Can't use result for insert stmt",
+            ));
+        }
         let message = StmtSend::UseResult(self.args.unwrap());
-        log::trace!("use result message: {:#?}", &message);
+        tracing::trace!("use result message: {:#?}", &message);
         self.ws
             .send_timeout(message.to_msg(), self.timeout)
             .await
@@ -749,26 +767,30 @@ impl Stmt {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use taos_query::{common::ColumnView, Dsn, TBuilder};
+    use taos_query::{common::ColumnView, AsyncTBuilder, Dsn};
 
     use crate::{stmt::Stmt, TaosBuilder};
-
-    use taos_query::prelude::tokio;
 
     #[tokio::test()]
     async fn test_client() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
-        taos.exec("drop database if exists stmt").await?;
-        taos.exec("create database stmt").await?;
-        taos.exec("create table stmt.ctb (ts timestamp, v int)")
+        let default_dsn = "taos://localhost:6041";
+        let db = "stmt";
+        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or(default_dsn.to_string());
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+        taos.exec(format!("create database {db}")).await?;
+        taos.exec(format!("create table {db}.ctb (ts timestamp, v int)"))
             .await?;
 
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
-        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/stmt").await?;
-        let stmt = client.s_stmt("insert into stmt.ctb values(?, ?)").await?;
+        let dsn_stmt = format!("{dsn}/{db}", dsn = dsn, db = db);
+        let mut client = Stmt::from_dsn(dsn_stmt).await?;
+        let s_stmt = format!("insert into {db}.ctb values(?, ?)");
+        let stmt = client.s_stmt(&s_stmt).await?;
 
         stmt.bind_all(vec![
             json!([
@@ -788,18 +810,22 @@ mod tests {
     async fn test_stmt_stable_with_json() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 
-        let dsn = Dsn::try_from("taos://localhost:6041")?;
-        dbg!(&dsn);
+        let default_dsn = "taos://localhost:6041";
+        let db = "stmt_sj";
+        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or(default_dsn.to_string());
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
-        taos.exec("drop database if exists stmt_sj").await?;
-        taos.exec("create database stmt_sj").await?;
-        taos.exec("create table stmt_sj.stb (ts timestamp, v int) tags(tj json)")
-            .await?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        taos.exec(format!("drop database if exists {db}")).await?;
+        taos.exec(format!("create database {db}")).await?;
+        taos.exec(format!(
+            "create table {db}.stb (ts timestamp, v int) tags(tj json)"
+        ))
+        .await?;
 
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
-        let mut client = Stmt::from_dsn("taos+ws://localhost:6041/stmt_sj").await?;
+        let stmt_dsn = format!("{dsn}/{db}", dsn = dsn, db = db);
+        let mut client = Stmt::from_dsn(&stmt_dsn).await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
             .await?;
@@ -834,7 +860,9 @@ mod tests {
         let dsn = Dsn::try_from("taos://localhost:6041")?;
         dbg!(&dsn);
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
+        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
+            .build()
+            .await?;
         taos.exec("drop database if exists ws_stmt_sj2").await?;
         taos.exec("create database ws_stmt_sj2").await?;
         taos.exec("create table ws_stmt_sj2.stb (ts timestamp, v int) tags(tj json)")
@@ -849,9 +877,9 @@ mod tests {
 
         let tag_fields = stmt.stmt_get_tag_fields().await;
         if let Err(err) = tag_fields {
-            log::error!("tag fields error: {:?}", err);
+            tracing::error!("tag fields error: {:?}", err);
         } else {
-            log::debug!("tag fields: {:?}", tag_fields);
+            tracing::debug!("tag fields: {:?}", tag_fields);
         }
 
         stmt.stmt_set_tbname("tb1").await?;
@@ -878,11 +906,11 @@ mod tests {
 
         let tag_fields = stmt.stmt_get_tag_fields().await?;
 
-        log::debug!("tag fields: {:?}", tag_fields);
+        tracing::debug!("tag fields: {:?}", tag_fields);
 
         let col_fields = stmt.stmt_get_col_fields().await?;
 
-        log::debug!("col fields: {:?}", col_fields);
+        tracing::debug!("col fields: {:?}", col_fields);
 
         taos.exec("drop database ws_stmt_sj2").await?;
         Ok(())
@@ -896,7 +924,7 @@ mod tests {
 
         let db = "ws_stmt_use_result";
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!(
@@ -924,7 +952,7 @@ mod tests {
 
         let res = stmt.use_result().await;
 
-        log::debug!("use result: {:?}", res);
+        tracing::debug!("use result: {:?}", res);
 
         taos.exec(format!("drop database {db}")).await?;
         Ok(())
@@ -932,13 +960,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_stmt_use_result_usage_error() -> anyhow::Result<()> {
-        use taos_query::AsyncQueryable;
+        use taos_query::{AsyncQueryable, AsyncTBuilder};
 
         let dsn = Dsn::try_from("taos://localhost:6041")?;
 
         let db = "ws_stmt_use_result_usage_error";
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!(
@@ -959,8 +987,7 @@ mod tests {
 
         stmt.stmt_set_tbname("tb1").await?;
 
-        stmt.stmt_set_tags(vec![json!(1)])
-            .await?;
+        stmt.stmt_set_tags(vec![json!(1)]).await?;
 
         stmt.bind_all(vec![
             json!([
@@ -979,9 +1006,14 @@ mod tests {
 
         let res = stmt.use_result().await;
 
-        log::debug!("use result: {:?}", res);
+        tracing::debug!("use result: {:?}", res);
 
         assert!(res.is_err());
+
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains("Can't use result for insert stmt"));
 
         taos.exec(format!("drop database {db}")).await?;
         Ok(())
@@ -995,7 +1027,7 @@ mod tests {
 
         let db = "ws_stmt_num_params";
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!(
@@ -1035,11 +1067,11 @@ mod tests {
 
         let num_params = stmt.stmt_num_params().await?;
 
-        log::debug!("stmt num params: {:?}", num_params);
+        tracing::debug!("stmt num params: {:?}", num_params);
 
         for i in 0..num_params {
             let param = stmt.stmt_get_param(i as i64).await?;
-            log::debug!("param {}: {:?}", i, param);
+            tracing::debug!("param {}: {:?}", i, param);
         }
 
         taos.exec(format!("drop database {db}")).await?;
@@ -1053,7 +1085,9 @@ mod tests {
         let dsn = Dsn::try_from("taos://localhost:6041")?;
         dbg!(&dsn);
 
-        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?.build()?;
+        let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
+            .build()
+            .await?;
         taos.exec("drop database if exists stmt_s").await?;
         taos.exec("create database stmt_s").await?;
         taos.exec("create table stmt_s.stb (ts timestamp, v int) tags(t1 int)")

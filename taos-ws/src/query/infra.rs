@@ -55,6 +55,13 @@ pub enum WsSend {
         #[serde(flatten)]
         req: WsConnReq,
     },
+    Insert {
+        protocol: u8,
+        precision: String,
+        data: String,
+        ttl: Option<i32>,
+        req_id: Option<ReqId>,
+    },
     Query {
         req_id: ReqId,
         sql: String,
@@ -69,6 +76,7 @@ impl WsSend {
     pub(crate) fn req_id(&self) -> ReqId {
         match self {
             WsSend::Conn { req_id, req: _ } => *req_id,
+            WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
             WsSend::Query { req_id, sql: _ } => *req_id,
             WsSend::Fetch(args) => args.req_id,
             WsSend::FetchBlock(args) => args.req_id,
@@ -126,6 +134,14 @@ pub struct WsQueryResp {
 #[serde_as]
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(default)]
+pub struct InsertResp {
+    #[serde_as(as = "serde_with::DurationNanoSeconds")]
+    pub timing: Duration,
+}
+
+#[serde_as]
+#[derive(Debug, Default, Deserialize, Clone)]
+#[serde(default)]
 pub struct WsFetchResp {
     pub id: ResId,
     pub completed: bool,
@@ -144,6 +160,9 @@ pub enum WsRecvData {
     Version {
         version: String,
     },
+    Insert(InsertResp),
+
+    #[serde(alias = "binary_query")]
     Query(WsQueryResp),
     Fetch(WsFetchResp),
     /// Will only produced by error
@@ -152,6 +171,19 @@ pub enum WsRecvData {
         #[serde(default)]
         #[serde_as(as = "serde_with::DurationNanoSeconds")]
         timing: Duration,
+        raw: Vec<u8>,
+    },
+    BlockNew {
+        #[allow(dead_code)]
+        block_version: u16,
+        #[serde(default)]
+        #[serde_as(as = "serde_with::DurationNanoSeconds")]
+        timing: Duration,
+        #[allow(dead_code)]
+        block_req_id: ReqId,
+        block_code: u32,
+        block_message: String,
+        finished: bool,
         raw: Vec<u8>,
     },
     BlockV2 {
@@ -186,7 +218,11 @@ impl WsRecv {
             if self.code == 0 {
                 Ok(())
             } else {
-                Err(RawError::new(self.code, self.message.unwrap_or_default()))
+                if self.message.as_deref() == Some("success") {
+                    Err(RawError::from_code(self.code))
+                } else {
+                    Err(RawError::new(self.code, self.message.unwrap_or_default()))
+                }
             },
         )
     }
@@ -205,7 +241,6 @@ fn test_serde_recv_data() {
 }
 
 pub(crate) trait ToMessage: Serialize {
-    // #[cfg(feature = "async")]
     fn to_msg(&self) -> tokio_tungstenite::tungstenite::Message {
         tokio_tungstenite::tungstenite::Message::Text(serde_json::to_string(self).unwrap())
     }
@@ -215,8 +250,6 @@ impl ToMessage for WsSend {}
 
 #[cfg(test)]
 mod tests {
-
-    // use websocket::ClientBuilder;
 
     use crate::*;
 

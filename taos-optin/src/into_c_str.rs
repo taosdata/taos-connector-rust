@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{CStr, CString};
 
 /// Helper trait to auto convert Rust strings to CStr.
 pub trait IntoCStr<'a> {
@@ -58,89 +58,8 @@ _impl_for_str!(String);
 _impl_for_str!(str);
 _impl_for_str!(&str);
 
-pub struct NullableCStr<'a>(Option<Cow<'a, CStr>>);
-
-// impl<'a> NullableCStr<'a> {
-//     pub fn as_ptr(&self) -> *const c_char {
-//         match self.0.as_ref() {
-//             Some(c) => c.as_ptr(),
-//             None => std::ptr::null(),
-//         }
-//     }
-// }
-
-pub trait IntoNullableCStr<'a> {
-    fn into_nullable_c_str(self) -> NullableCStr<'a>;
-}
-
-impl<'a, T> IntoNullableCStr<'a> for T
-where
-    T: IntoCStr<'a>,
-{
-    fn into_nullable_c_str(self) -> NullableCStr<'a> {
-        NullableCStr(Some(self.into_c_str()))
-    }
-}
-
-impl<'a, T> IntoNullableCStr<'a> for Option<T>
-where
-    T: IntoCStr<'a>,
-{
-    fn into_nullable_c_str(self) -> NullableCStr<'a> {
-        NullableCStr(self.map(IntoCStr::into_c_str))
-    }
-}
-
-impl<'a, T> IntoNullableCStr<'a> for &'a Option<T>
-where
-    &'a T: IntoCStr<'a>,
-{
-    fn into_nullable_c_str(self) -> NullableCStr<'a> {
-        NullableCStr(self.as_ref().map(|c| c.into_c_str()))
-    }
-}
-
-impl<'a> IntoNullableCStr<'a> for () {
-    fn into_nullable_c_str(self) -> NullableCStr<'a> {
-        NullableCStr(None)
-    }
-}
-
-impl<'a, T> From<T> for NullableCStr<'a>
-where
-    T: IntoNullableCStr<'a>,
-{
-    fn from(rhs: T) -> NullableCStr<'a> {
-        rhs.into_nullable_c_str()
-    }
-}
-
-macro_rules! _impl_for_ptr {
-    ($t:ty) => {
-        impl<'a> IntoNullableCStr<'a> for $t {
-            fn into_nullable_c_str(self) -> NullableCStr<'a> {
-                NullableCStr(if self.is_null() {
-                    None
-                } else {
-                    Some(Cow::from(unsafe { CStr::from_ptr(self as _) }))
-                })
-            }
-        }
-    };
-}
-
-_impl_for_ptr!(*const i8);
-_impl_for_ptr!(*mut i8);
-_impl_for_ptr!(*const u8);
-_impl_for_ptr!(*mut u8);
-_impl_for_ptr!(*mut c_void);
-
 #[cfg(test)]
 mod test_into_c_str {
-    use std::{
-        borrow::Borrow,
-        ffi::{CStr, CString},
-    };
 
     use super::*;
 
@@ -170,20 +89,5 @@ mod test_into_c_str {
         from_c_str(&s);
         from_c_str(s.as_str());
         from_c_str(s);
-    }
-
-    #[test]
-    fn option_string_to_c_str() {
-        let s = Some(String::from("abc"));
-        let _ = s.borrow().into_nullable_c_str();
-        let _ = s.as_ref().into_nullable_c_str();
-        let _ = s.into_nullable_c_str();
-    }
-    #[test]
-    fn option_cstring_to_c_str() {
-        let s = Some(CString::new("abc").unwrap());
-        let _ = s.borrow().into_nullable_c_str();
-        let _ = s.as_ref().into_nullable_c_str();
-        let _ = s.into_nullable_c_str();
     }
 }

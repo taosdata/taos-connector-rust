@@ -15,21 +15,27 @@ description.workspace = true
 
 [dependencies]
 anyhow = "1"
-bytes = "1.1"
+bytes = { version = "1.1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-derive_more = "0.99"
-itertools = "0.11.0"
-log = "0.4"
-mdsn = { path = "../mdsn", version = "0.2.22" }
+derive_more = { version = "1", features = [
+	"deref",
+	"deref_mut",
+	"display",
+	"from",
+	"into",
+] }
+itertools = "0.13.0"
+mdsn = { path = "../mdsn", version = "0.2.25" }
 num_enum = "0.7.0"
 once_cell = "1.12.0"
-parse_duration = "2.1"
 prettytable = "0.10.0"
 rust_decimal = { version = "1", features = ["c-repr"] }
 rustversion = "1.0.6"
-taos-error = { path = "../taos-error", version = "0.10.23" }
+taos-error = { path = "../taos-error", version = "0.12.4" }
 thiserror = "1.0.47"
 url = "2.2.2"
+faststr = { version = "0.2.19", features = ["serde"] }
+either = { version = "1.12.0", features = ["serde"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -45,6 +51,7 @@ futures = { version = "0.3.21", optional = true, features = [
 	"thread-pool",
 ] }
 
+byteorder = "1.4.3"
 # column
 bitflags = "2.2.1"
 bitvec = "1.0.0"
@@ -60,6 +67,7 @@ tokio = { version = "1", features = [
 ] }
 lazy_static = "1.4"
 derive_builder = "0.12.0"
+tracing = { version = "0.1", features = ["log"] }
 
 [dev-dependencies]
 flate2 = "1"

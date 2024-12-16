@@ -237,6 +237,15 @@ impl TimestampView {
             precision: self.precision,
         }
     }
+
+    pub fn cast_precision(&self, precision: Precision) -> TimestampView {
+        if self.precision == precision {
+            self.clone()
+        } else {
+            let data = self.iter().map(|v| v.map(|v| v.cast_precision(precision)));
+            Self::from_nullable_timestamp(data.collect())
+        }
+    }
 }
 
 pub struct TimestampViewIter<'a> {
@@ -367,8 +376,8 @@ fn test_slice() {
     let slice = view.slice(1..3);
     dbg!(&slice);
 
-    let ts_min = chrono::NaiveDateTime::MIN.timestamp_millis();
-    let ts_max = chrono::NaiveDateTime::MAX.timestamp_millis();
+    let ts_min = chrono::NaiveDateTime::MIN.and_utc().timestamp_millis();
+    let ts_max = chrono::NaiveDateTime::MAX.and_utc().timestamp_millis();
     let data = [None, Some(ts_min), Some(ts_max), Some(0)];
     let view = TimestampMillisecondView::from_iter(data).into_inner();
     dbg!(&view);

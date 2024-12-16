@@ -178,7 +178,7 @@ impl BindFrom for TaosBindV3 {
             buffer_length: 0,
             buffer: std::ptr::null_mut(),
             length: std::ptr::null_mut(),
-            is_null: std::ptr::null_mut(),
+            is_null: box_into_raw(1) as _,
             num: 1 as _,
         })
     }
@@ -330,6 +330,7 @@ pub trait BindFrom: Sized {
     fn from_varchar(v: &str) -> Self;
     fn from_nchar(v: &str) -> Self;
     fn from_json(v: &str) -> Self;
+    #[allow(dead_code)]
     fn from_binary(v: &str) -> Self {
         Self::from_varchar(v)
     }
@@ -412,6 +413,7 @@ impl Drop for TaosBindV2 {
     }
 }
 
+#[allow(dead_code)]
 pub trait ToMultiBind {
     fn to_multi_bind(&self) -> TaosMultiBind;
 }
@@ -499,6 +501,17 @@ impl TaosMultiBind {
         s
     }
 
+    pub(crate) fn from_bytes(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        let mut s = Self::from_binary_vec(&values);
+        s.buffer_type = Ty::VarBinary as _;
+        s
+    }
+    pub(crate) fn from_geobytes(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        let mut s = Self::from_binary_vec(&values);
+        s.buffer_type = Ty::Geometry as _;
+        s
+    }
+
     #[cfg(test)]
     pub(crate) fn buffer(&self) -> *const c_void {
         self.buffer
@@ -571,6 +584,8 @@ impl<'b> From<&'b ColumnView> for DropMultiBind {
                 DropMultiBind::new(TaosMultiBind::from_primitives_ptr(nulls, view.as_raw_ptr()))
             }
             Json(view) => DropMultiBind::new(TaosMultiBind::from_json(&view.to_vec())),
+            VarBinary(view) => DropMultiBind::new(TaosMultiBind::from_bytes(&view.to_vec())),
+            Geometry(view) => DropMultiBind::new(TaosMultiBind::from_geobytes(&view.to_vec())),
         }
     }
 }

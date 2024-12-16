@@ -10,9 +10,10 @@ use std::{
     sync::{Arc, Mutex, Weak},
     task::{Context, Poll, Waker},
 };
+use tracing::instrument;
 
 use taos_query::{
-    common::{c_field_t, raw_data_t, SmlData},
+    common::{c_field_t, raw_data_t, RawData, SmlData},
     prelude::{Code, Field, Precision, RawError},
     tmq::Assignment,
     RawBlock,
@@ -38,7 +39,7 @@ lazy_static::lazy_static! {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
+#[allow(dead_code, non_snake_case)]
 pub struct ApiEntry {
     lib: Arc<Library>,
     version: String,
@@ -136,6 +137,28 @@ pub struct ApiEntry {
         unsafe extern "C" fn(res: *mut TAOS_RES, num: *mut i32, data: *mut *mut c_void) -> c_int,
     >,
 
+    // int taos_get_table_vgId(TAOS *taos, const char *db, const char *table, int *vgId)
+    #[allow(non_snake_case)]
+    taos_get_table_vgId: Option<
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            db: *const c_char,
+            table: *const c_char,
+            vgId: *mut i32,
+        ) -> c_int,
+    >,
+
+    // int taos_get_tables_vgId(TAOS *taos, const char *db, const char *table[], int tableNum, int *vgId);
+    #[allow(non_snake_case)]
+    taos_get_tables_vgId: Option<
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            db: *const c_char,
+            table: *const *const c_char,
+            tableNum: c_int,
+            vgId: *mut i32,
+        ) -> c_int,
+    >,
     // stmt
     pub(crate) stmt: StmtApi,
     //  tmq
@@ -283,14 +306,14 @@ impl TmqConfApi {
         (self.tmq_conf_set)(conf, key.as_ptr(), value.as_ptr()).ok(k, v)
     }
 
-    // pub(crate) unsafe fn auto_commit_cb(
-    //     &self,
-    //     conf: *mut tmq_conf_t,
-    //     cb: tmq_commit_cb,
-    //     param: *mut c_void,
-    // ) {
-    //     (self.tmq_conf_set_auto_commit_cb)(conf, cb, param)
-    // }
+    pub(crate) unsafe fn auto_commit_cb(
+        &self,
+        conf: *mut tmq_conf_t,
+        cb: tmq_commit_cb,
+        param: *mut c_void,
+    ) {
+        (self.tmq_conf_set_auto_commit_cb)(conf, cb, param)
+    }
 
     pub(crate) unsafe fn consumer(&self, conf: *mut tmq_conf_t) -> Result<*mut tmq_t, RawError> {
         let mut err = [0; 256];
@@ -313,9 +336,11 @@ pub(crate) struct TmqApi {
     tmq_get_table_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
     tmq_get_db_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
     tmq_get_json_meta: unsafe extern "C" fn(res: *mut TAOS_RES) -> *mut c_char,
+    tmq_free_json_meta: unsafe extern "C" fn(json: *mut c_char),
     tmq_get_topic_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
     tmq_get_vgroup_id: unsafe extern "C" fn(res: *mut TAOS_RES) -> i32,
     tmq_get_raw: unsafe extern "C" fn(res: *mut TAOS_RES, raw: *mut raw_data_t) -> i32,
+    tmq_free_raw: unsafe extern "C" fn(raw: raw_data_t) -> i32,
 
     pub(crate) tmq_subscribe:
         unsafe extern "C" fn(tmq: *mut tmq_t, topics: *mut tmq_list_t) -> tmq_resp_err_t,
@@ -335,6 +360,26 @@ pub(crate) struct TmqApi {
         param: *mut c_void,
     ),
 
+    pub(crate) tmq_commit_offset_sync: Option<
+        unsafe extern "C" fn(
+            tmq: *mut tmq_t,
+            topic_name: *const c_char,
+            vgroup_id: i32,
+            offset: i64,
+        ) -> tmq_resp_err_t,
+    >,
+
+    pub(crate) tmq_commit_offset_async: Option<
+        unsafe extern "C" fn(
+            tmq: *mut tmq_t,
+            topic_name: *const c_char,
+            vgroup_id: i32,
+            offset: i64,
+            cb: tmq_commit_cb,
+            param: *mut c_void,
+        ),
+    >,
+
     pub(crate) tmq_get_topic_assignment: Option<
         unsafe extern "C" fn(
             tmq: *mut tmq_t,
@@ -343,6 +388,7 @@ pub(crate) struct TmqApi {
             num_of_assignment: *mut i32,
         ) -> tmq_resp_err_t,
     >,
+    pub(crate) tmq_free_assignment: Option<unsafe extern "C" fn(assignment: *mut Assignment)>,
 
     pub(crate) tmq_offset_seek: Option<
         unsafe extern "C" fn(
@@ -350,6 +396,22 @@ pub(crate) struct TmqApi {
             topic_name: *const c_char,
             vgroup_id: i32,
             offset: i64,
+        ) -> tmq_resp_err_t,
+    >,
+
+    pub(crate) tmq_committed: Option<
+        unsafe extern "C" fn(
+            tmq: *mut tmq_t,
+            topic_name: *const c_char,
+            vgroup_id: i32,
+        ) -> tmq_resp_err_t,
+    >,
+
+    pub(crate) tmq_position: Option<
+        unsafe extern "C" fn(
+            tmq: *mut tmq_t,
+            topic_name: *const c_char,
+            vgroup_id: i32,
         ) -> tmq_resp_err_t,
     >,
 
@@ -370,17 +432,18 @@ pub(crate) struct StmtApi {
     pub(crate) taos_stmt_prepare:
         unsafe extern "C" fn(stmt: *mut TAOS_STMT, sql: *const c_char, length: c_ulong) -> c_int,
 
-    pub(crate) taos_stmt_set_tbname_tags:
+    pub(crate) taos_stmt_set_tbname_tags: Option<
         unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char, tags: *mut c_void) -> c_int,
+    >,
 
     pub(crate) taos_stmt_set_tbname:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int,
+        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int>,
 
     pub(crate) taos_stmt_set_tags:
         Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT, tags: *mut c_void) -> c_int>,
 
     pub(crate) taos_stmt_set_sub_tbname:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int,
+        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int>,
 
     pub(crate) taos_stmt_is_insert:
         unsafe extern "C" fn(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int,
@@ -399,25 +462,28 @@ pub(crate) struct StmtApi {
         unsafe extern "C" fn(stmt: *mut TAOS_STMT, bind: *const c_void) -> c_int,
 
     pub(crate) taos_stmt_bind_param_batch:
-        unsafe extern "C" fn(stmt: *mut TAOS_STMT, bind: *const TaosMultiBind) -> c_int,
+        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT, bind: *const TaosMultiBind) -> c_int>,
 
-    pub(crate) taos_stmt_bind_single_param_batch: unsafe extern "C" fn(
-        stmt: *mut TAOS_STMT,
-        bind: *const TaosMultiBind,
-        colIdx: c_int,
-    ) -> c_int,
+    pub(crate) taos_stmt_bind_single_param_batch: Option<
+        unsafe extern "C" fn(
+            stmt: *mut TAOS_STMT,
+            bind: *const TaosMultiBind,
+            colIdx: c_int,
+        ) -> c_int,
+    >,
 
     pub(crate) taos_stmt_add_batch: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
 
     pub(crate) taos_stmt_execute: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
 
-    pub(crate) taos_stmt_affected_rows: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
+    pub(crate) taos_stmt_affected_rows: Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int>,
 
     pub(crate) taos_stmt_use_result: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> *mut TAOS_RES,
 
     pub(crate) taos_stmt_close: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> c_int,
 
-    pub(crate) taos_stmt_errstr: unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> *const c_char,
+    pub(crate) taos_stmt_errstr:
+        Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> *const c_char>,
 }
 const fn default_lib_name() -> &'static str {
     if cfg!(target_os = "windows") {
@@ -442,6 +508,7 @@ impl ApiEntry {
         Self::dlopen(path)
     }
 
+    #[allow(non_snake_case)]
     pub fn dlopen<S>(path: S) -> Result<Self, dlopen2::Error>
     where
         S: AsRef<Path>,
@@ -515,30 +582,35 @@ impl ApiEntry {
                 taos_write_raw_block_with_fields,
                 taos_write_raw_block_with_fields_with_reqid,
                 taos_get_raw_block,
-                taos_result_block
+                taos_result_block,
+                taos_get_table_vgId,
+                taos_get_tables_vgId
             );
 
-            // stmt
+            // stmt 2.0.22.3
             symbol!(
                 taos_stmt_init,
                 taos_stmt_prepare,
-                taos_stmt_set_tbname_tags,
-                taos_stmt_set_tbname,
-                taos_stmt_set_sub_tbname,
                 taos_stmt_is_insert,
                 taos_stmt_num_params,
                 taos_stmt_get_param,
                 taos_stmt_bind_param,
-                taos_stmt_bind_param_batch,
-                taos_stmt_bind_single_param_batch,
                 taos_stmt_add_batch,
                 taos_stmt_execute,
-                taos_stmt_affected_rows,
                 taos_stmt_use_result,
-                taos_stmt_close,
-                taos_stmt_errstr
+                taos_stmt_close
             );
-            optional_symbol!(taos_stmt_set_tags, taos_stmt_init_with_reqid);
+            optional_symbol!(
+                taos_stmt_set_tags,
+                taos_stmt_init_with_reqid,
+                taos_stmt_set_tbname_tags,         // 2.6.0.65
+                taos_stmt_set_tbname,              // 2.6.0.65
+                taos_stmt_set_sub_tbname,          // 2.6.0.65
+                taos_stmt_bind_param_batch,        // 2.6.0.65
+                taos_stmt_bind_single_param_batch, // 2.6.0.65
+                taos_stmt_affected_rows,           // 2.6.0.65
+                taos_stmt_errstr                   // 2.6.0.65
+            );
 
             let stmt = StmtApi {
                 taos_stmt_init,
@@ -568,9 +640,11 @@ impl ApiEntry {
                     tmq_get_table_name,
                     tmq_get_db_name,
                     tmq_get_json_meta,
+                    tmq_free_json_meta,
                     tmq_get_topic_name,
                     tmq_get_vgroup_id,
                     tmq_get_raw,
+                    tmq_free_raw,
                     tmq_conf_new,
                     tmq_conf_destroy,
                     tmq_conf_set,
@@ -590,7 +664,15 @@ impl ApiEntry {
                     tmq_err2str,
                     tmq_consumer_new
                 );
-                optional_symbol!(tmq_get_topic_assignment, tmq_offset_seek);
+                optional_symbol!(
+                    tmq_get_topic_assignment,
+                    tmq_free_assignment,
+                    tmq_offset_seek,
+                    tmq_commit_offset_sync,
+                    tmq_commit_offset_async,
+                    tmq_committed,
+                    tmq_position
+                );
 
                 let conf_api = TmqConfApi {
                     tmq_conf_new,
@@ -612,9 +694,11 @@ impl ApiEntry {
                     tmq_get_table_name,
                     tmq_get_db_name,
                     tmq_get_json_meta,
+                    tmq_free_json_meta,
                     tmq_get_topic_name,
                     tmq_get_vgroup_id,
                     tmq_get_raw,
+                    tmq_free_raw,
                     tmq_subscribe,
                     tmq_unsubscribe,
                     tmq_subscription,
@@ -622,8 +706,13 @@ impl ApiEntry {
                     tmq_consumer_close,
                     tmq_commit_sync,
                     tmq_commit_async,
+                    tmq_commit_offset_sync,
+                    tmq_commit_offset_async,
                     tmq_get_topic_assignment,
+                    tmq_free_assignment,
                     tmq_offset_seek,
+                    tmq_committed,
+                    tmq_position,
                     tmq_err2str,
 
                     conf_api,
@@ -668,6 +757,9 @@ impl ApiEntry {
                 taos_fetch_raw_block_a,
                 taos_get_raw_block,
 
+                taos_get_table_vgId,
+                taos_get_tables_vgId,
+
                 stmt,
                 tmq,
 
@@ -680,6 +772,10 @@ impl ApiEntry {
     }
     pub fn version(&self) -> &str {
         &self.version
+    }
+
+    pub fn is_v20(&self) -> bool {
+        self.version.starts_with("2.0")
     }
 
     pub fn is_v3(&self) -> bool {
@@ -706,6 +802,7 @@ impl ApiEntry {
         }
     }
 
+    #[instrument("connect_with_retries", skip(self, auth), fields(host = auth.host().and_then(|s| s.to_str().ok()), user = ?auth.user().and_then(|s| s.to_str().ok())))]
     pub(super) fn connect_with_retries(
         &self,
         auth: &Auth,
@@ -715,8 +812,11 @@ impl ApiEntry {
             retries = 1;
         }
         loop {
+            let now = std::time::Instant::now();
             let ptr = self.connect(auth);
+            let elapsed = now.elapsed();
             if ptr.is_null() {
+                tracing::trace!(cost = ?elapsed, "connect failed");
                 retries -= 1;
                 let err = self.check(ptr).unwrap_err();
                 if retries <= 0 {
@@ -728,6 +828,7 @@ impl ApiEntry {
                     break Err(err);
                 }
             } else {
+                tracing::trace!(cost = ?elapsed, "connected");
                 break Ok(ptr);
             }
         }
@@ -779,6 +880,63 @@ impl RawTaos {
         self.ptr
     }
 
+    pub fn get_table_vgroup_id(&self, db: &str, table: &str) -> Result<i32, RawError> {
+        if self.c.taos_get_table_vgId.is_none() {
+            return Err(RawError::from_string(
+                "Current version does not support get table vgId",
+            ));
+        }
+        let db = CString::new(db).unwrap();
+        let table = CString::new(table).unwrap();
+        let mut vg_id = 0;
+        let code = unsafe {
+            (self.c.taos_get_table_vgId.unwrap())(
+                self.as_ptr(),
+                db.as_ptr(),
+                table.as_ptr(),
+                &mut vg_id,
+            )
+        };
+        if code == 0 {
+            Ok(vg_id)
+        } else {
+            Err(self.c.check(std::ptr::null_mut()).unwrap_err())
+        }
+    }
+
+    pub fn get_tables_vgroup_ids<T: AsRef<str>>(
+        &self,
+        db: &str,
+        tables: &[T],
+    ) -> Result<Vec<i32>, RawError> {
+        if self.c.taos_get_tables_vgId.is_none() {
+            return Err(RawError::from_string(
+                "Current version does not support get tables vgId",
+            ));
+        }
+        let db = CString::new(db).unwrap();
+        let tables: Vec<_> = tables
+            .iter()
+            .map(|t| CString::new(t.as_ref()).unwrap())
+            .collect();
+        let tables: Vec<_> = tables.iter().map(|t| t.as_ptr()).collect();
+        let mut vg_ids = vec![0; tables.len()];
+        let code = unsafe {
+            (self.c.taos_get_tables_vgId.unwrap())(
+                self.as_ptr(),
+                db.as_ptr(),
+                tables.as_ptr(),
+                tables.len() as i32,
+                vg_ids.as_mut_ptr(),
+            )
+        };
+        if code == 0 {
+            Ok(vg_ids)
+        } else {
+            Err(self.c.check(std::ptr::null_mut()).unwrap_err())
+        }
+    }
+
     #[inline]
     pub fn query<'a, S: IntoCStr<'a>>(&self, sql: S) -> Result<RawRes, RawError> {
         let sql = sql.into_c_str();
@@ -805,9 +963,8 @@ impl RawTaos {
         let sql = sql.into_c_str();
         tracing::trace!("query with sql: {}", sql.to_str().unwrap_or("<...>"));
         if let Some(taos_query_with_req_id) = self.c.taos_query_with_reqid {
-            Ok(RawRes {
-                c: self.c.clone(),
-                ptr: unsafe { (taos_query_with_req_id)(self.as_ptr(), sql.as_ptr(), req_id) },
+            RawRes::from_ptr(self.c.clone(), unsafe {
+                (taos_query_with_req_id)(self.as_ptr(), sql.as_ptr(), req_id)
             })
         } else {
             unimplemented!("2.x does not support req_id")
@@ -816,7 +973,19 @@ impl RawTaos {
 
     #[inline]
     pub fn query_async<'a, S: IntoCStr<'a>>(&self, sql: S) -> QueryFuture<'a> {
-        QueryFuture::new(self.clone(), sql)
+        let sql = if self.c.is_v20() {
+            // remove all backquotes
+            sql.into_c_str()
+                .to_str()
+                .unwrap()
+                .chars()
+                .filter(|c| *c != '`')
+                .collect::<String>()
+                .into_c_str()
+        } else {
+            sql.into_c_str()
+        };
+        QueryFuture::new(self.clone(), sql.into_owned())
     }
 
     #[inline]
@@ -863,24 +1032,44 @@ impl RawTaos {
             .c
             .tmq_write_raw
             .ok_or_else(|| RawError::from_string("2.x does not support write raw meta"))?;
-        let taos_errstr = self.c.taos_errstr;
+        let tmq_err2str = self
+            .c
+            .tmq
+            .ok_or_else(|| RawError::from_string("tmq api is not available"))?
+            .tmq_err2str;
         let mut retries = 2;
+        let now = std::time::Instant::now();
         loop {
-            let code = unsafe { tmq_write_raw(self.as_ptr(), meta) };
-            let code = Code::from(code);
+            tracing::trace!("write raw");
+            let raw_code = unsafe { tmq_write_raw(self.as_ptr(), meta.clone()) };
+            let code = Code::from(raw_code);
             if code.success() {
+                let elapsed = now.elapsed();
+                if elapsed > std::time::Duration::from_secs(30) {
+                    tracing::warn!(tmq.write_raw.cost = ?elapsed, "write raw cost too long");
+                } else {
+                    tracing::trace!(tmq.write_raw.cost = ?elapsed, "write raw success");
+                }
+                tracing::trace!(tmq.write_raw.cost = ?now.elapsed(), "write raw success");
                 return Ok(());
             }
             if code != Code::from(0x2603) {
-                let err = unsafe { taos_errstr(std::ptr::null_mut()) };
+                let err = unsafe { tmq_err2str(tmq_resp_err_t(raw_code)) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                tracing::trace!(error.code = %code, error.message = err, tmq.write_raw.cost = ?now.elapsed(), "write raw failed");
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
                 return Err(taos_query::prelude::RawError::new(code, err));
             }
             tracing::trace!("received error code 0x2603, try once");
             retries -= 1;
             if retries == 0 {
-                let err = unsafe { taos_errstr(std::ptr::null_mut()) };
+                let err = unsafe { tmq_err2str(tmq_resp_err_t(raw_code)) };
                 let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
                 return Err(taos_query::prelude::RawError::new(code, err));
             }
         }
@@ -894,15 +1083,32 @@ impl RawTaos {
             .ok_or_else(|| RawError::new(Code::FAILED, "raw block should have table name"))?;
         let ptr = block.as_raw_bytes().as_ptr();
         if let Some(f) = self.c.taos_write_raw_block_with_fields {
+            let tmq_err2str = self
+                .c
+                .tmq
+                .ok_or_else(|| RawError::from_string("tmq api is not available"))?
+                .tmq_err2str;
             let fields: Vec<_> = block.fields().into_iter().map(|f| f.to_c_field()).collect();
-            err_or!(f(
-                self.as_ptr(),
-                nrows as _,
-                ptr as _,
-                name.into_c_str().as_ptr(),
-                fields.as_ptr() as _,
-                fields.len() as _,
-            ))
+            let code = unsafe {
+                f(
+                    self.as_ptr(),
+                    nrows as _,
+                    ptr as _,
+                    name.into_c_str().as_ptr(),
+                    fields.as_ptr() as _,
+                    fields.len() as _,
+                )
+            };
+            if code == 0 {
+                Ok(())
+            } else {
+                let err = unsafe { tmq_err2str(tmq_resp_err_t(code)) };
+                let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
+                Err(taos_query::prelude::RawError::new(Code::from(code), err))
+            }
         } else if let Some(f) = self.c.taos_write_raw_block {
             err_or!(f(
                 self.as_ptr(),
@@ -928,15 +1134,33 @@ impl RawTaos {
         let ptr = block.as_raw_bytes().as_ptr();
         if let Some(f) = self.c.taos_write_raw_block_with_fields_with_reqid {
             let fields: Vec<_> = block.fields().into_iter().map(|f| f.to_c_field()).collect();
-            err_or!(f(
-                self.as_ptr(),
-                nrows as _,
-                ptr as _,
-                name.into_c_str().as_ptr(),
-                fields.as_ptr() as _,
-                fields.len() as _,
-                req_id
-            ))
+            let code = unsafe {
+                f(
+                    self.as_ptr(),
+                    nrows as _,
+                    ptr as _,
+                    name.into_c_str().as_ptr(),
+                    fields.as_ptr() as _,
+                    fields.len() as _,
+                    req_id,
+                )
+            };
+
+            if code == 0 {
+                Ok(())
+            } else {
+                let tmq_err2str = self
+                    .c
+                    .tmq
+                    .ok_or_else(|| RawError::from_string("tmq api is not available"))?
+                    .tmq_err2str;
+                let err = unsafe { tmq_err2str(tmq_resp_err_t(code)) };
+                let err = unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()) };
+                if err == "success" {
+                    return Err(RawError::from_code(code));
+                }
+                Err(taos_query::prelude::RawError::new(Code::from(code), err))
+            }
         } else if let Some(f) = self.c.taos_write_raw_block_with_reqid {
             err_or!(f(
                 self.as_ptr(),
@@ -1087,6 +1311,7 @@ impl RawRes {
             )
         }
     }
+
     #[inline]
     pub fn with_code(self, code: Code) -> Result<Self, RawError> {
         if code.success() {
@@ -1095,16 +1320,19 @@ impl RawRes {
             Err(RawError::new(code, self.err_as_str()))
         }
     }
+
     #[inline]
     pub fn from_ptr(c: Arc<ApiEntry>, ptr: *mut TAOS_RES) -> Result<Self, RawError> {
         let raw = unsafe { Self::from_ptr_unchecked(c, ptr) };
         let code = raw.errno();
         raw.with_code(code)
     }
+
     #[inline]
     pub unsafe fn from_ptr_unchecked(c: Arc<ApiEntry>, ptr: *mut TAOS_RES) -> RawRes {
         Self { c, ptr }
     }
+
     #[inline]
     pub fn from_ptr_with_code(
         c: Arc<ApiEntry>,
@@ -1273,8 +1501,36 @@ impl RawRes {
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         if self.c.is_v3() {
             self.fetch_raw_block_async_v3(fields, precision, state, cx)
+        } else if self.c.is_v20() {
+            self.fetch_raw_block_async_v20(fields, precision, state, cx)
         } else {
             self.fetch_raw_block_async_v2(fields, precision, state, cx)
+        }
+    }
+
+    pub fn fetch_raw_block_async_v20(
+        &self,
+        fields: &[Field],
+        precision: Precision,
+        _state: &Arc<UnsafeCell<BlockState>>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<RawBlock>, RawError>> {
+        let block = Box::into_raw(Box::new(std::ptr::null_mut()));
+        let res = unsafe { (self.c.taos_fetch_block)(self.as_ptr(), block) };
+        if res > 0 {
+            let block = unsafe { *block };
+            let raw = unsafe {
+                RawBlock::parse_from_ptr_v2(
+                    block as _,
+                    fields,
+                    self.fetch_lengths(),
+                    res as usize,
+                    precision,
+                )
+            };
+            Poll::Ready(Ok(Some(raw)))
+        } else {
+            Poll::Ready(Ok(None))
         }
     }
 
@@ -1339,7 +1595,10 @@ impl RawRes {
                     // success
                     if num_of_rows > 0 {
                         // has a block
-                        let block = (param.1.taos_result_block.unwrap())(res).read() as _;
+                        let block = match param.1.taos_result_block {
+                            Some(f) => (f)(res).read() as _,
+                            None => todo!(),
+                        };
                         state
                             .result
                             .replace(Ok(Some((block, num_of_rows as usize))));
@@ -1507,15 +1766,18 @@ impl RawRes {
         }
     }
     #[inline]
-    pub(crate) fn tmq_get_json_meta(&self) -> CString {
+    pub(crate) fn tmq_get_json_meta(&self) -> String {
         unsafe {
             let meta = (self.c.tmq.as_ref().unwrap().tmq_get_json_meta)(self.as_ptr());
-            CString::from_raw(meta)
+            let meta_cstr = CStr::from_ptr(meta).to_string_lossy().into_owned();
+            (self.c.tmq.as_ref().unwrap().tmq_free_json_meta)(meta);
+            tracing::debug!(json = meta_cstr, "Received TMQ json meta");
+            meta_cstr
         }
     }
 
     #[inline]
-    pub(crate) fn tmq_get_raw(&self) -> raw_data_t {
+    pub(crate) fn tmq_get_raw(&self) -> RawData {
         let mut meta = raw_data_t {
             raw: std::ptr::null_mut(),
             raw_len: 0,
@@ -1523,8 +1785,10 @@ impl RawRes {
         };
         unsafe {
             let _code = (self.c.tmq.as_ref().unwrap().tmq_get_raw)(self.as_ptr(), &mut meta as _);
+            let raw = RawData::from(&meta);
+            (self.c.tmq.as_ref().unwrap().tmq_free_raw)(meta);
+            raw
         }
-        meta
     }
 }
 
@@ -1533,4 +1797,27 @@ impl RawRes {
 pub struct BlockState {
     pub result: Option<Result<Option<(*mut c_void, usize)>, RawError>>,
     pub in_use: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_raw_taos() {
+        let c = Arc::new(ApiEntry::open_default().unwrap());
+        let taos = RawTaos::new(c, 1 as _).unwrap();
+        let raw = raw_data_t {
+            raw: std::ptr::null_mut(),
+            raw_len: 0,
+            raw_type: 2,
+        };
+        let err = taos.write_raw_meta(raw).unwrap_err();
+
+        dbg!(&err);
+        assert!(
+            err.to_string().contains("[0x0118]"),
+            "Error message does not contain the expected substring"
+        );
+    }
 }

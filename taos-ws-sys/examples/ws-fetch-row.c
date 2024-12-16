@@ -11,8 +11,8 @@ int main()
   {
     dsn = "ws://localhost:6041";
   }
-  ws_enable_log();
-  WS_TAOS *taos = ws_connect_with_dsn(dsn);
+  ws_enable_log("debug");
+  WS_TAOS *taos = ws_connect(dsn);
   if (taos == NULL)
   {
     int code = ws_errno(NULL);
@@ -61,8 +61,7 @@ int main()
 
   while (true)
   {
-    WS_ROW row_data = NULL;
-    code = ws_fetch_row(rs, &row_data);
+    WS_ROW row_data = ws_fetch_row(rs);
     if (row_data == NULL)
       break;
     uint8_t ty;
@@ -147,5 +146,15 @@ int main()
       }
     }
     printf("\n");
+  }
+
+  code = ws_errno(rs);
+  if (code != 0)
+  {
+    const char *errstr = ws_errstr(rs);
+    dprintf(2, "Error [%6x]: %s \n", code, errstr);
+    ws_free_result(rs);
+    ws_close(taos);
+    return 0;
   }
 }

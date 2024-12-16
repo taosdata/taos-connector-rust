@@ -1,4 +1,3 @@
-use once_cell::sync::OnceCell;
 use taos_query::common::SmlData;
 use taos_query::prelude::RawResult;
 use taos_query::{common::RawMeta, AsyncQueryable};
@@ -17,22 +16,40 @@ use crate::TaosBuilder;
 #[derive(Debug)]
 pub struct Taos {
     pub(crate) dsn: TaosBuilder,
-    pub(crate) async_client: OnceCell<WsTaos>,
-    pub(crate) async_sml: OnceCell<crate::schemaless::WsTaos>,
+    pub(crate) async_client: WsTaos,
 }
 
 impl Taos {
+    pub(super) async fn from_builder(dsn: TaosBuilder) -> RawResult<Self> {
+        let mut retries = 0;
+        loop {
+            match WsTaos::from_wsinfo(&dsn).await {
+                Ok(client) => {
+                    return Ok(Self {
+                        dsn,
+                        async_client: client,
+                    })
+                }
+                Err(err) => {
+                    if retries >= dsn.conn_retries.0 {
+                        return Err(err);
+                    }
+                    tracing::warn!(remote = dsn.addr, retries, "retrying connection: {}", err);
+                    retries += 1;
+                }
+            }
+        }
+    }
     pub fn version(&self) -> &str {
-        crate::block_in_place_or_global(self.client()).version()
+        self.client().version()
     }
 
-    async fn client(&self) -> &WsTaos {
-        if let Some(ws) = self.async_client.get() {
-            ws
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await.unwrap();
-            self.async_client.get_or_init(|| async_client)
-        }
+    pub fn get_req_id(&self) -> u64 {
+        self.client().get_req_id()
+    }
+
+    fn client(&self) -> &WsTaos {
+        &self.async_client
     }
 }
 
@@ -45,15 +62,7 @@ impl taos_query::AsyncQueryable for Taos {
     type AsyncResultSet = asyn::ResultSet;
 
     async fn query<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<Self::AsyncResultSet> {
-        if let Some(ws) = self.async_client.get() {
-            ws.s_query(sql.as_ref()).await
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_client
-                .get_or_init(|| async_client)
-                .s_query(sql.as_ref())
-                .await
-        }
+        self.client().s_query(sql.as_ref()).await
     }
 
     async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
@@ -61,39 +70,17 @@ impl taos_query::AsyncQueryable for Taos {
         sql: T,
         req_id: u64,
     ) -> RawResult<Self::AsyncResultSet> {
-        if let Some(ws) = self.async_client.get() {
-            ws.s_query_with_req_id(sql.as_ref(), req_id).await
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_client
-                .get_or_init(|| async_client)
-                .s_query_with_req_id(sql.as_ref(), req_id)
-                .await
-        }
+        self.client()
+            .s_query_with_req_id(sql.as_ref(), req_id)
+            .await
     }
 
     async fn write_raw_meta(&self, raw: &RawMeta) -> RawResult<()> {
-        if let Some(ws) = self.async_client.get() {
-            ws.write_meta(raw).await
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_client
-                .get_or_init(|| async_client)
-                .write_meta(raw)
-                .await
-        }
+        self.client().write_meta(raw).await
     }
 
     async fn write_raw_block(&self, block: &taos_query::RawBlock) -> RawResult<()> {
-        if let Some(ws) = self.async_client.get() {
-            ws.write_raw_block(block).await
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_client
-                .get_or_init(|| async_client)
-                .write_raw_block(block)
-                .await
-        }
+        self.client().write_raw_block(block).await
     }
 
     async fn write_raw_block_with_req_id(
@@ -101,24 +88,20 @@ impl taos_query::AsyncQueryable for Taos {
         block: &taos_query::RawBlock,
         req_id: u64,
     ) -> RawResult<()> {
-        if let Some(ws) = self.async_client.get() {
-            ws.write_raw_block_with_req_id(block, req_id).await
-        } else {
-            let async_client = WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_client
-                .get_or_init(|| async_client)
-                .write_raw_block_with_req_id(block, req_id)
-                .await
-        }
+        self.client()
+            .write_raw_block_with_req_id(block, req_id)
+            .await
     }
 
     async fn put(&self, data: &SmlData) -> RawResult<()> {
-        if let Some(ws) = self.async_sml.get() {
-            ws.s_put(data).await
-        } else {
-            let async_sml = crate::schemaless::WsTaos::from_wsinfo(&self.dsn).await?;
-            self.async_sml.get_or_init(|| async_sml).s_put(data).await
-        }
+        self.client().s_put(data).await
+
+        // if let Some(ws) = self.async_sml.get() {
+        //     ws.s_put(data).await
+        // } else {
+        //     let async_sml = crate::schemaless::WsTaos::from_wsinfo(&self.dsn).await?;
+        //     self.async_sml.get_or_init(|| async_sml).s_put(data).await
+        // }
     }
 }
 
@@ -163,6 +146,8 @@ impl taos_query::Queryable for Taos {
 #[cfg(test)]
 mod tests {
     use crate::TaosBuilder;
+    use bytes::Bytes;
+    use taos_query::util::hex::*;
 
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {
@@ -178,31 +163,31 @@ mod tests {
                 format!("create table {db}.stb1(ts timestamp,\
                     b1 bool, c8i1 tinyint, c16i1 smallint, c32i1 int, c64i1 bigint,\
                     c8u1 tinyint unsigned, c16u1 smallint unsigned, c32u1 int unsigned, c64u1 bigint unsigned,\
-                    cb1 binary(100), cn1 nchar(10),
+                    cb1 binary(100), cn1 nchar(10), cvb1 varbinary(50), cg1 geometry(50),
 
                     b2 bool, c8i2 tinyint, c16i2 smallint, c32i2 int, c64i2 bigint,\
                     c8u2 tinyint unsigned, c16u2 smallint unsigned, c32u2 int unsigned, c64u2 bigint unsigned,\
-                    cb2 binary(10), cn2 nchar(16)) tags (jt json)")
+                    cb2 binary(10), cn2 nchar(16), cvb2 varbinary(50), cg2 geometry(50)) tags (jt json)")
             )?,
             0
         );
         assert_eq!(
             client.exec(format!(
                 r#"insert into {db}.tb1 using {db}.stb1 tags('{{"key":"数据"}}')
-                   values(0,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
-                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
-                         (65535,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
-                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
+                 values(0,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思', '\x123456', 'POINT(1 2)',
+                              false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据', '\x654321', 'POINT(3 4)')
+                       (65535,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL, NULL,  NULL,
+                              NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL, NULL,  NULL)"#
             ))?,
             2
         );
         assert_eq!(
             client.exec(format!(
                 r#"insert into {db}.tb2 using {db}.stb1 tags(NULL)
-                   values(1,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思',
-                                false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据')
-                         (65536,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL,
-                                NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL)"#
+                       values(1,    true, -1,  -2,  -3,  -4,   1,   2,   3,   4,   'abc', '涛思', '\x123456', 'POINT(1 2)',
+                                    false,-5,  -6,  -7,  -8,   5,   6,   7,   8,   'def', '数据', '\x654321', 'POINT(3 4)')
+                             (65536,NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL, NULL,  NULL,
+                                    NULL, NULL,NULL,NULL,NULL, NULL,NULL,NULL,NULL, NULL,  NULL, NULL,  NULL)"#
             ))?,
             2
         );
@@ -237,6 +222,11 @@ mod tests {
             cb2: String,
             cn1: String,
             cn2: String,
+
+            cvb1: Bytes,
+            cvb2: Bytes,
+            cg1: Bytes,
+            cg2: Bytes,
         }
 
         use itertools::Itertools;
@@ -269,6 +259,10 @@ mod tests {
                 cb2: "def".to_string(),
                 cn1: "涛思".to_string(),
                 cn2: "数据".to_string(),
+                cvb1: Bytes::from(vec![0x12, 0x34, 0x56]),
+                cvb2: Bytes::from(vec![0x65, 0x43, 0x21]),
+                cg1: hex_string_to_bytes("0101000000000000000000F03F0000000000000040"),
+                cg2: hex_string_to_bytes("010100000000000000000008400000000000001040"),
             }
         );
 
@@ -278,7 +272,10 @@ mod tests {
 
     #[test]
     fn ws_sync() -> anyhow::Result<()> {
+        use bytes::Bytes;
         use taos_query::prelude::sync::*;
+        use taos_query::util::hex::*;
+
         let client = TaosBuilder::from_dsn("ws://localhost:6041/")?.build()?;
         assert_eq!(client.exec("drop database if exists ws_sync")?, 0);
         assert_eq!(client.exec("create database ws_sync keep 36500")?, 0);
@@ -287,19 +284,18 @@ mod tests {
                 "create table ws_sync.tb1(ts timestamp,\
                     c8i1 tinyint, c16i1 smallint, c32i1 int, c64i1 bigint,\
                     c8u1 tinyint unsigned, c16u1 smallint unsigned, c32u1 int unsigned, c64u1 bigint unsigned,\
-                    cb1 binary(100), cn1 nchar(10),
-
+                    cb1 binary(100), cn1 nchar(10), cvb1 varbinary(50), cg1 geometry(50),\
                     c8i2 tinyint, c16i2 smallint, c32i2 int, c64i2 bigint,\
                     c8u2 tinyint unsigned, c16u2 smallint unsigned, c32u2 int unsigned, c64u2 bigint unsigned,\
-                    cb2 binary(10), cn2 nchar(16))"
+                    cb2 binary(10), cn2 nchar(16), cvb2 varbinary(50), cg2 geometry(50))"
             )?,
             0
         );
         assert_eq!(
             client.exec(
-                "insert into ws_sync.tb1 values(65535,\
-                -1,-2,-3,-4, 1,2,3,4, 'abc', '涛思',\
-                -5,-6,-7,-8, 5,6,7,8, 'def', '数据')"
+                r#"insert into ws_sync.tb1 values(65535,
+                -1,-2,-3,-4, 1,2,3,4, 'abc', '涛思', '\x123456', 'POINT(1 2)',
+                -5,-6,-7,-8, 5,6,7,8, 'def', '数据', '\x654321', 'POINT(3 4)')"#
             )?,
             1
         );
@@ -332,6 +328,11 @@ mod tests {
             cb2: String,
             cn1: String,
             cn2: String,
+
+            cvb1: Bytes,
+            cvb2: Bytes,
+            cg1: Bytes,
+            cg2: Bytes,
         }
 
         use itertools::Itertools;
@@ -363,6 +364,10 @@ mod tests {
                 cb2: "def".to_string(),
                 cn1: "涛思".to_string(),
                 cn2: "数据".to_string(),
+                cvb1: Bytes::from(vec![0x12, 0x34, 0x56]),
+                cvb2: Bytes::from(vec![0x65, 0x43, 0x21]),
+                cg1: hex_string_to_bytes("0101000000000000000000F03F0000000000000040"),
+                cg2: hex_string_to_bytes("010100000000000000000008400000000000001040"),
             }
         );
 
@@ -405,15 +410,15 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "async")]
     #[tokio::test]
     async fn test_client() -> anyhow::Result<()> {
         std::env::set_var("RUST_LOG", "debug");
         // pretty_env_logger::init();
         use futures::TryStreamExt;
-        use taos_query::{AsyncFetchable, AsyncQueryable};
+        use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};
 
-        let client = TaosBuilder::from_dsn("ws://localhost:6041/")?.build()?;
+        let client = TaosBuilder::from_dsn("ws://localhost:6041/")?;
+        let client = client.build().await?;
         assert_eq!(
             client
                 .exec("create database if not exists ws_test_client")
@@ -443,11 +448,81 @@ mod tests {
             v: i32,
         }
 
-        let values: Vec<A> = rs.deserialize_stream().try_collect().await?;
+        let values: Vec<A> = rs.deserialize().try_collect().await?;
 
         dbg!(values);
 
         assert_eq!(client.exec("drop database ws_test_client").await?, 0);
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_ws_disconnect_with_mock() {
+        use futures::{SinkExt, StreamExt};
+        use serde_json::json;
+        use taos_query::{AsyncQueryable, AsyncTBuilder};
+        use tokio::sync::{mpsc, oneshot};
+        use tracing::debug;
+        use warp::Filter;
+
+        let (query_tx, query_rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            let builder = TaosBuilder::from_dsn("ws://127.0.0.1:9981/").unwrap();
+            let client = builder.build().await.unwrap();
+            let _ = client.query("select * from meters").await;
+            debug!("query end");
+            let _ = query_tx.send(());
+        });
+
+        let (close_tx, mut close_rx) = mpsc::channel(1);
+        let routes = warp::path("ws").and(warp::ws()).map({
+            move |ws: warp::ws::Ws| {
+                let close = close_tx.clone();
+                ws.on_upgrade(move |ws| async {
+                    let close = close;
+                    let (mut tx, mut rx) = ws.split();
+                    while let Some(msg) = rx.next().await {
+                        let msg = msg.unwrap();
+                        debug!("ws recv msg: {msg:?}");
+                        if msg.is_text() {
+                            let text = msg.to_str().unwrap();
+                            if text.contains("version") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "version msg",
+                                    "action": "version",
+                                    "req_id": 100,
+                                    "version": "3.0"
+                                });
+                                let msg = warp::ws::Message::text(data.to_string());
+                                let _ = tx.send(msg).await;
+                            } else if text.contains("conn") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "conn msg",
+                                    "action": "conn",
+                                    "req_id": 100
+                                });
+                                let msg = warp::ws::Message::text(data.to_string());
+                                let _ = tx.send(msg).await;
+                            } else if text.contains("query") {
+                                let _ = close.send(()).await;
+                                break;
+                            }
+                        }
+                    }
+                })
+            }
+        });
+
+        let (_, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9981), async move {
+                let _ = close_rx.recv().await;
+                debug!("Shutting down...");
+            });
+
+        server.await;
+        let _ = query_rx.await;
     }
 }

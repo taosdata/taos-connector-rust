@@ -1,25 +1,22 @@
-// pub(crate) mod ffi;
-
 use std::{fmt::Debug, str::FromStr, sync::Arc, time::Duration};
-
-// pub(crate) use ffi::*;
 
 use anyhow::Context;
 use itertools::Itertools;
 use taos_query::{
-    common::{raw_data_t, RawMeta},
-    prelude::{tokio::time, RawError, RawResult},
+    common::{raw_data_t, RawData, RawMeta},
+    prelude::{
+        tokio::{self, sync::oneshot, time},
+        RawError, RawResult,
+    },
     tmq::{
         AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
-        IsOffset, MessageSet, Timeout, VGroupId,
+        IsOffset, MessageSet, Timeout, Timing, VGroupId,
     },
     util::Edition,
     Dsn, IntoDsn, RawBlock,
 };
 
 use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t, TaosBuilder};
-
-// use taos_error::Error;
 
 mod raw;
 
@@ -84,11 +81,12 @@ impl taos_query::TBuilder for TmqBuilder {
 
     fn build(&self) -> RawResult<Self::Target> {
         let ptr = self.conf.build()?;
-        let tmq = RawTmq {
-            c: self.lib.clone(),
-            tmq: self.lib.tmq.unwrap(),
+        let tmq = RawTmq::new(
+            self.lib.clone(),
+            self.lib.tmq.unwrap(),
             ptr,
-        };
+            self.timeout.as_raw_timeout(),
+        );
         Ok(Consumer {
             tmq,
             timeout: self.timeout,
@@ -170,11 +168,12 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 
     async fn build(&self) -> RawResult<Self::Target> {
         let ptr = self.conf.build()?;
-        let tmq = RawTmq {
-            c: self.lib.clone(),
-            tmq: self.lib.tmq.unwrap(),
+        let tmq = RawTmq::new(
+            self.lib.clone(),
+            self.lib.tmq.unwrap(),
             ptr,
-        };
+            self.timeout.as_raw_timeout(),
+        );
         Ok(Consumer {
             tmq,
             timeout: self.timeout,
@@ -263,6 +262,16 @@ impl IsOffset for Offset {
             .tmq_vgroup_id()
             .expect("a message should belong to a vgroup")
     }
+
+    #[doc(hidden)]
+    fn offset(&self) -> taos_query::tmq::Offset {
+        todo!()
+    }
+
+    #[doc(hidden)]
+    fn timing(&self) -> Timing {
+        todo!()
+    }
 }
 
 impl Drop for Offset {
@@ -281,13 +290,6 @@ pub struct Consumer {
 unsafe impl Send for Consumer {}
 unsafe impl Sync for Consumer {}
 
-impl Drop for Consumer {
-    fn drop(&mut self) {
-        self.tmq.unsubscribe();
-        self.tmq.close();
-    }
-}
-
 pub struct Messages {
     tmq: RawTmq,
     timeout: Option<Duration>,
@@ -305,44 +307,35 @@ impl Iterator for Messages {
 
 #[derive(Debug)]
 pub struct Meta {
-    raw: RawRes,
+    res: RawRes,
+    raw: RawData,
 }
 
 impl AsyncOnSync for Meta {}
 
 impl IsMeta for Meta {
     fn as_raw_meta(&self) -> RawResult<RawMeta> {
-        let raw = self.raw.tmq_get_raw();
-
-        let mut data = Vec::new();
-
-        data.extend(raw.raw_len.to_le_bytes());
-
-        data.extend(raw.raw_type.to_le_bytes());
-
-        data.extend(unsafe {
-            std::slice::from_raw_parts(raw.raw as *const u8, raw.raw_len as usize)
-        });
-        Ok(RawMeta::new(data.into()))
+        Ok(unsafe { std::mem::transmute(self.raw.clone()) })
     }
 
     fn as_json_meta(&self) -> RawResult<taos_query::common::JsonMeta> {
-        let meta = serde_json::from_slice(self.raw.tmq_get_json_meta().as_bytes())
+        let meta = serde_json::from_slice(self.res.tmq_get_json_meta().as_bytes())
             .map_err(|err| RawError::from_string(err.to_string()))?;
         Ok(meta)
     }
 }
 impl Meta {
-    fn new(raw: RawRes) -> Self {
-        Self { raw }
+    fn new(res: RawRes) -> Self {
+        let raw = res.tmq_get_raw();
+        Self { res, raw }
     }
 
     pub fn to_raw(&self) -> raw_data_t {
-        self.raw.tmq_get_raw()
+        self.raw.as_raw_data_t()
     }
 
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::from_slice(self.raw.tmq_get_json_meta().as_bytes())
+        serde_json::from_slice(self.res.tmq_get_json_meta().as_bytes())
             .expect("meta json should always be valid json format")
     }
 
@@ -418,9 +411,7 @@ impl Iterator for Data {
 
 impl AsConsumer for Consumer {
     type Offset = Offset;
-
     type Meta = Meta;
-
     type Data = Data;
 
     fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
@@ -428,7 +419,7 @@ impl AsConsumer for Consumer {
         topics: I,
     ) -> RawResult<()> {
         let topics = topics.into_iter().map(|item| item.into()).collect_vec();
-        let topics = Topics::from_topics(self.tmq.tmq.list_api, topics)?;
+        let topics = Topics::from_topics(self.tmq.tmq().list_api, topics)?;
         // dbg!(&topics);
         self.tmq.subscribe(&topics)
     }
@@ -464,6 +455,21 @@ impl AsConsumer for Consumer {
         self.tmq.commit_sync(offset.0.clone()).map(|_| ())
     }
 
+    #[doc(hidden)]
+    fn commit_all(&self) -> RawResult<()> {
+        todo!()
+    }
+
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        self.tmq.commit_offset_sync(topic_name, vgroup_id, offset)
+    }
+
+    fn list_topics(&self) -> RawResult<Vec<String>> {
+        let topics = self.tmq.subscription();
+        let topics = topics.to_strings();
+        Ok(topics)
+    }
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.to_strings();
@@ -479,6 +485,14 @@ impl AsConsumer for Consumer {
 
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()> {
         self.tmq.offset_seek(topic, vg_id, offset)
+    }
+
+    fn committed(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        self.tmq.committed(topic, vg_id)
+    }
+
+    fn position(&self, topic: &str, vg_id: VGroupId) -> RawResult<i64> {
+        self.tmq.position(topic, vg_id)
     }
 }
 
@@ -496,8 +510,10 @@ impl AsAsyncConsumer for Consumer {
         &mut self,
         topics: I,
     ) -> RawResult<()> {
-        let topics =
-            Topics::from_topics(self.tmq.tmq.list_api, topics.into_iter().map(|s| s.into()))?;
+        let topics = Topics::from_topics(
+            self.tmq.tmq().list_api,
+            topics.into_iter().map(|s| s.into()),
+        )?;
         let r = self.tmq.subscribe(&topics);
 
         if let Some(offset) = self.dsn.get("offset") {
@@ -524,6 +540,8 @@ impl AsAsyncConsumer for Consumer {
             }
         }
 
+        self.tmq.spawn_thread();
+
         r
     }
 
@@ -536,57 +554,44 @@ impl AsAsyncConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
-        use taos_query::prelude::tokio;
+        let (tx, rx) = oneshot::channel();
+
+        self.tmq
+            .sender()
+            .send_async(tx)
+            .await
+            .map_err(RawError::from_any)?;
+
+        let duration = match timeout {
+            Timeout::Duration(duration) => duration,
+            _ => Duration::MAX,
+        };
+        let sleep = tokio::time::sleep(duration);
+        tokio::pin!(sleep);
+
         tracing::trace!("Waiting for next message");
-        let res = match timeout {
-            Timeout::Never | Timeout::None => {
-                let timeout = Duration::MAX;
-                let sleep = tokio::time::sleep(timeout);
-                tokio::pin!(sleep);
-                tokio::select! {
-                    _ = &mut sleep, if !sleep.is_elapsed() => {
-                       Ok(None)
-                    }
-                    raw = self.tmq.poll_async() => {
-                        let message =    (
-                            Offset(raw.clone()),
-                            match raw.tmq_message_type() {
-                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                                tmq_res_t::TMQ_RES_TABLE_META => {
-                                    taos_query::tmq::MessageSet::Meta(Meta::new(raw))
-                                }
-                                tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
-                            },
-                        );
-                        Ok(Some(message))
-                    }
-                }
+
+        let res = tokio::select! {
+            _ = &mut sleep, if !sleep.is_elapsed() => {
+                tracing::trace!("sleep is elapsed");
+                Ok(None)
             }
-            Timeout::Duration(timeout) => {
-                let sleep = tokio::time::sleep(timeout);
-                tokio::pin!(sleep);
-                tokio::select! {
-                    _ = &mut sleep, if !sleep.is_elapsed() => {
-                       Ok(None)
-                    }
-                    raw = self.tmq.poll_async() => {
-                        let message =    (
-                            Offset(raw.clone()),
-                            match raw.tmq_message_type() {
-                                tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                                tmq_res_t::TMQ_RES_DATA => taos_query::tmq::MessageSet::Data(Data::new(raw)),
-                                tmq_res_t::TMQ_RES_TABLE_META => {
-                                    taos_query::tmq::MessageSet::Meta(Meta::new(raw))
-                                }
-                                tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
-                            },
-                        );
-                        Ok(Some(message))
-                    }
-                }
+            res = rx => {
+                let raw = res.map_err(RawError::from_any)?.map(|raw| {
+                    (
+                        Offset(raw.clone()),
+                        match raw.tmq_message_type() {
+                            tmq_res_t::TMQ_RES_INVALID => unreachable!(),
+                            tmq_res_t::TMQ_RES_DATA => MessageSet::Data(Data::new(raw)),
+                            tmq_res_t::TMQ_RES_TABLE_META => MessageSet::Meta(Meta::new(raw)),
+                            tmq_res_t::TMQ_RES_METADATA => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
+                        },
+                    )
+                });
+                Ok(raw)
             }
         };
+
         match res {
             Ok(res) => {
                 tracing::trace!("Got a new message");
@@ -603,8 +608,31 @@ impl AsAsyncConsumer for Consumer {
         self.tmq.commit(offset.0.clone()).await.map(|_| ())
     }
 
+    #[doc(hidden)]
+    async fn commit_all(&self) -> RawResult<()> {
+        todo!()
+    }
+
+    async fn commit_offset(
+        &self,
+        topic_name: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
+    ) -> RawResult<()> {
+        self.tmq
+            .commit_offset_async(topic_name, vgroup_id, offset)
+            .await
+            .map(|_| ())
+    }
+
     fn default_timeout(&self) -> Timeout {
         self.timeout
+    }
+
+    async fn list_topics(&self) -> RawResult<Vec<String>> {
+        let topics = self.tmq.subscription();
+        let topics = topics.to_strings();
+        Ok(topics)
     }
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
@@ -633,7 +661,16 @@ impl AsAsyncConsumer for Consumer {
     ) -> RawResult<()> {
         self.tmq.offset_seek(topic, vgroup_id, offset)
     }
+
+    async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        self.tmq.committed(topic, vgroup_id)
+    }
+
+    async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        self.tmq.position(topic, vgroup_id)
+    }
 }
+
 #[cfg(test)]
 mod tests {
     use super::TmqBuilder;
@@ -665,9 +702,8 @@ mod tests {
         taos.query(format!("create database {db}2"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -768,9 +804,8 @@ mod tests {
         taos.query(format!("create database {db}2"))?;
         taos.query(format!("use {db}2"))?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build()?;
 
         consumer.subscribe([db])?;
@@ -843,11 +878,11 @@ mod tests {
         taos.query(format!("drop database {db}"))?;
         Ok(())
     }
-    
+
     #[test]
     fn meta() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        let _ = pretty_env_logger::formatted_timed_builder().try_init();
+        // let _ = pretty_env_logger::formatted_timed_builder().try_init();
 
         let taos = TaosBuilder::from_dsn("taos:///")?.build()?;
         let db = "tmq_meta";
@@ -954,7 +989,7 @@ mod tests {
     fn test_tmq_meta_sync() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::LevelFilter::Debug)
+        //     .filter_level(tracing::tracing::LevelFilter::Debug)
         //     .init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
@@ -1018,23 +1053,25 @@ mod tests {
             "alter table `table` drop column new10_new",
             "alter table `table` drop column new2",
             "alter table `table` drop column new1",
-            // kind 9: drop normal table
-            "drop table `table`",
-            // kind 10: drop child table
-            "drop table `tb2`, `tb1`",
-            // kind 11: drop super table
-            "drop table `stb2`",
-            "drop table `stb1`",
+            // ***** we can not drop table, for the table will be checked later by desc tablename
+            // // kind 9: drop normal table
+            // "drop table `table`",
+            // // kind 10: drop child table
+            // "drop table `tb2`, `tb1`",
+            // // kind 11: drop super table
+            // "drop table `stb2`",
+            // "drop table `stb1`",
             "create topic if not exists sys_tmq_meta_sync with meta as database sys_tmq_meta_sync",
         ])?;
-
         taos.exec_many([
             "drop database if exists sys_tmq_meta_sync2",
             "create database if not exists sys_tmq_meta_sync2",
             "use sys_tmq_meta_sync2",
         ])?;
 
-        let builder = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=1000ms")?;
+        let builder = TmqBuilder::from_dsn(
+            "taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
+        )?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["sys_tmq_meta_sync"])?;
 
@@ -1058,57 +1095,60 @@ mod tests {
                     taos.write_raw_meta(&raw)?;
 
                     let json = meta.as_json_meta()?;
-                    match &json {
-                        taos_query::common::JsonMeta::Create(m) => match m {
-                            taos_query::common::MetaCreate::Super {
-                                table_name,
-                                columns: _,
-                                tags: _,
-                            } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
-                            }
-                            taos_query::common::MetaCreate::Child {
-                                table_name,
-                                using: _,
-                                tags: _,
-                                tag_num: _,
-                            } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
-                            }
-                            taos_query::common::MetaCreate::Normal {
-                                table_name,
-                                columns: _,
-                            } => {
-                                let desc = taos.describe(table_name.as_str())?;
-                                dbg!(desc);
-                            }
-                        },
-                        _ => (),
-                    }
+                    for json in json {
+                        match &json {
+                            taos_query::common::MetaUnit::Create(m) => match m {
+                                taos_query::common::MetaCreate::Super {
+                                    table_name,
+                                    columns: _,
+                                    tags: _,
+                                } => {
+                                    let _desc = taos.describe(table_name.as_str())?;
+                                    // dbg!(_desc);
+                                }
+                                taos_query::common::MetaCreate::Child {
+                                    table_name,
+                                    using: _,
+                                    tags: _,
+                                    tag_num: _,
+                                } => {
+                                    let _desc = taos.describe(table_name.as_str())?;
+                                    // dbg!(_desc);
+                                }
+                                taos_query::common::MetaCreate::Normal {
+                                    table_name,
+                                    columns: _,
+                                } => {
+                                    let _desc = taos.describe(table_name.as_str())?;
+                                    // dbg!(_desc);
+                                }
+                            },
+                            _ => (),
+                        }
 
-                    // meta data can be write to an database seamlessly by raw or json (to sql).
-                    let sql = dbg!(json.to_string());
-                    if let Err(err) = taos.exec(sql) {
-                        match err.code() {
-                            Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
-                            Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
-                            Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
-                            Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
-                            Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
-                            Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
-                            Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
-                            Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
-                            Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
-                            Code::DUPLICATED_COLUMN_NAMES => {
-                                tracing::trace!("duplicated column names")
-                            }
-                            Code::NO_COLUMN_CAN_BE_DROPPED => {
-                                tracing::trace!("no column can be dropped")
-                            }
-                            _ => {
-                                panic!("{}", err);
+                        // meta data can be write to an database seamlessly by raw or json (to sql).
+                        let sql = json.to_string();
+                        tracing::debug!("sql: {}", sql);
+                        if let Err(err) = taos.exec(sql) {
+                            match err.code() {
+                                Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                                Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                                Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                                Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
+                                Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
+                                Code::DUPLICATED_COLUMN_NAMES => {
+                                    tracing::trace!("duplicated column names")
+                                }
+                                Code::NO_COLUMN_CAN_BE_DROPPED => {
+                                    tracing::trace!("no column can be dropped")
+                                }
+                                _ => {
+                                    tracing::error!("{}", err);
+                                }
                             }
                         }
                     }
@@ -1136,12 +1176,243 @@ mod tests {
         ])?;
         Ok(())
     }
+
+    #[test]
+    fn test_tmq_committed() -> anyhow::Result<()> {
+        use taos_query::prelude::sync::*;
+        // let _ = pretty_env_logger::formatted_builder()
+        //     .filter_level(tracing::tracing::LevelFilter::Info)
+        //     .try_init();
+
+        let taos = crate::TaosBuilder::from_dsn("taos:///")?.build()?;
+
+        let source = "tmq_source_sync_1";
+        let target = "tmq_target_sync_1";
+
+        taos.exec_many([
+            format!("drop topic if exists {source}").as_str(),
+            format!("drop database if exists {source}").as_str(),
+            format!("create database {source} wal_retention_period 3600").as_str(),
+            format!("create topic {source} with meta as database {source}").as_str(),
+            format!("use {source}").as_str(),
+            "show databases",
+            "select database()",
+            // kind 1: create super table using all types
+            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 json)",
+            "describe stb1",
+            // kind 2: create child table with json tag
+            "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
+            "create table tb1 using stb1 tags(NULL)",
+            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)
+            tb1 values(now, true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            // kind 3: create super table with all types except json (especially for tags)
+            "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
+            t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
+            t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
+            // kind 4: create child table with all types except json
+            "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)",
+            // kind 5: create common table
+            "create table `table` (ts timestamp, v int)",
+            // kind 6: column in super table
+            "alter table stb1 add column new1 bool",
+            "alter table stb1 add column new2 tinyint",
+            "alter table stb1 add column new10 nchar(16)",
+            "alter table stb1 modify column new10 nchar(32)",
+            "alter table stb1 drop column new10",
+            "alter table stb1 drop column new2",
+            "alter table stb1 drop column new1",
+            // kind 7: add tag in super table
+            "alter table `stb2` add tag new1 bool",
+            "alter table `stb2` rename tag new1 new1_new",
+            "alter table `stb2` modify tag t10 nchar(32)",
+            "alter table `stb2` drop tag new1_new",
+            // kind 8: column in common table
+            "alter table `table` add column new1 bool",
+            "alter table `table` add column new2 tinyint",
+            "alter table `table` add column new10 nchar(16)",
+            "alter table `table` modify column new10 nchar(32)",
+            "alter table `table` rename column new10 new10_new",
+            "alter table `table` drop column new10_new",
+            "alter table `table` drop column new2",
+            "alter table `table` drop column new1",
+            // ***** we can not drop table, for the table will be checked later by desc tablename
+            // // kind 9: drop normal table
+            // "drop table `table`",
+            // // kind 10: drop child table
+            // "drop table `tb2`, `tb1`",
+            // // kind 11: drop super table
+            // "drop table `stb2`",
+            // "drop table `stb1`",
+        ])?;
+
+        taos.exec_many([
+            format!("drop database if exists {target}").as_str(),
+            format!("create database if not exists {target} wal_retention_period 3600").as_str(),
+            format!("use {target}").as_str(),
+        ])?;
+
+        let builder = TmqBuilder::from_dsn(
+            "taos://localhost:6030?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
+        )?;
+        let mut consumer = builder.build()?;
+
+        let topics = consumer.list_topics()?;
+        tracing::debug!("topics before subcribe:{:?}", topics);
+
+        consumer.subscribe([source])?;
+
+        let topics = consumer.list_topics()?;
+        tracing::debug!("topics after subcribe:{:?}", topics);
+
+        let iter = consumer.iter_with_timeout(Timeout::from_millis(500));
+
+        for msg in iter {
+            let (offset, message) = msg?;
+            // Offset contains information for topic name, database name and vgroup id,
+            //  similar to kafka topic/partition/offset.
+            let topic: &str = offset.topic();
+            let _database = offset.database();
+            let vgroup_id = offset.vgroup_id();
+
+            // Different to kafka message, TDengine consumer would consume two kind of messages.
+            //
+            // 1. meta
+            // 2. data
+            match message {
+                MessageSet::Meta(meta) => {
+                    let raw = meta.as_raw_meta()?;
+                    taos.write_raw_meta(&raw)?;
+
+                    let metas = meta.as_json_meta()?;
+                    for json in metas {
+                        match &json {
+                            taos_query::common::MetaUnit::Create(m) => match m {
+                                taos_query::common::MetaCreate::Super {
+                                    table_name,
+                                    columns: _,
+                                    tags: _,
+                                } => {
+                                    let desc = taos.describe(table_name.as_str())?;
+                                    tracing::trace!("{:?}", desc);
+                                }
+                                taos_query::common::MetaCreate::Child {
+                                    table_name,
+                                    using: _,
+                                    tags: _,
+                                    tag_num: _,
+                                } => {
+                                    let desc = taos.describe(table_name.as_str())?;
+                                    tracing::trace!("{:?}", desc);
+                                }
+                                taos_query::common::MetaCreate::Normal {
+                                    table_name,
+                                    columns: _,
+                                } => {
+                                    let desc = taos.describe(table_name.as_str())?;
+                                    tracing::trace!("{:?}", desc);
+                                }
+                            },
+                            _ => (),
+                        }
+
+                        // meta data can be write to an database seamlessly by raw or json (to sql).
+                        let sql = json.to_string();
+                        if let Err(err) = taos.exec(sql) {
+                            match err.code() {
+                                Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
+                                Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
+                                Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
+                                Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
+                                Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
+                                Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
+                                Code::DUPLICATED_COLUMN_NAMES => {
+                                    tracing::trace!("duplicated column names")
+                                }
+                                Code::NO_COLUMN_CAN_BE_DROPPED => {
+                                    tracing::trace!("no column can be dropped")
+                                }
+                                _ => {
+                                    tracing::debug!("{}", err);
+                                }
+                            }
+                        }
+                    }
+                }
+                MessageSet::Data(data) => {
+                    // data message may have more than one data block for various tables.
+                    for block in data {
+                        let block = block?;
+                        // let block = block?;
+                        tracing::trace!("{:?}", block.table_name());
+                        tracing::trace!("{:?}", block);
+                    }
+                }
+                _ => (),
+            }
+            let committed = consumer.committed(topic, vgroup_id);
+            tracing::debug!("committed: {:?}", committed);
+
+            let pos = consumer.position(topic, vgroup_id);
+            tracing::debug!("position: {:?}", pos);
+
+            consumer.commit(offset)?;
+        }
+
+        let assignments = consumer.assignments().unwrap();
+        tracing::debug!("assignments: {:?}", assignments);
+
+        for (topic, vec_assignment) in assignments {
+            for assignment in vec_assignment {
+                let vgroup_id = assignment.vgroup_id();
+                let end = assignment.end();
+
+                let committed = consumer.committed(topic.as_str(), vgroup_id);
+                tracing::debug!("committed before: {:?}", committed);
+
+                let _ = consumer.commit_offset(&topic, vgroup_id, end);
+
+                let committed = consumer.committed(topic.as_str(), vgroup_id);
+                tracing::debug!("committed after: {:?}", committed);
+            }
+        }
+
+        let assignments = consumer.assignments().unwrap();
+        tracing::debug!("assignments: {:?}", assignments);
+
+        consumer.unsubscribe();
+
+        taos.exec_many([
+            format!("drop database {target}").as_str(),
+            format!("drop topic {source}").as_str(),
+            format!("drop database {source}").as_str(),
+        ])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod async_tests {
-
     use std::time::Duration;
+
+    use bytes::Bytes;
 
     use super::TmqBuilder;
 
@@ -1150,7 +1421,7 @@ mod async_tests {
         use taos_query::prelude::*;
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
-        let db = "test_write_raw_block_req_id";
+        let db = "test_write_raw_block_req_id_async";
         taos.exec_many([
             format!("drop topic if exists {db}").as_str(),
             format!("drop database if exists {db}").as_str(),
@@ -1165,14 +1436,15 @@ mod async_tests {
 
         ]).await?;
 
-        let builder = TmqBuilder::from_dsn(
-            "taos://localhost:6030/db?group.id=5&experimental.snapshot.enable=false&auto.offset.reset=earliest",
-        )?;
+        let builder =
+            TmqBuilder::from_dsn("taos://localhost:6030/db?group.id=5&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
 
         consumer.subscribe([db]).await?;
 
-        for message in taos_query::tmq::AsConsumer::iter_with_timeout(&consumer, Timeout::from_secs(1)) {
+        for message in
+            taos_query::tmq::AsConsumer::iter_with_timeout(&consumer, Timeout::from_secs(1))
+        {
             let (offset, msg) = message?;
             tracing::debug!("offset: {:?}", offset);
 
@@ -1230,7 +1502,8 @@ mod async_tests {
             format!("drop database {db}2").as_str(),
             format!("drop topic {db}").as_str(),
             format!("drop database {db}").as_str(),
-        ]).await?;
+        ])
+        .await?;
         Ok(())
     }
 
@@ -1240,7 +1513,7 @@ mod async_tests {
         use taos_query::prelude::*;
 
         // pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::LevelFilter::Debug)
+        //     .filter_level(tracing::tracing::LevelFilter::Debug)
         //     .init();
 
         let taos = crate::TaosBuilder::from_dsn("taos:///")?.build().await?;
@@ -1322,7 +1595,8 @@ mod async_tests {
         ])
         .await?;
 
-        let builder = TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms")?;
+        let builder =
+            TmqBuilder::from_dsn("taos:///?group.id=10&timeout=1000ms&auto.offset.reset=earliest")?;
         let mut consumer = builder.build().await?;
         consumer.subscribe(["sys_tmq_meta"]).await?;
 
@@ -1347,35 +1621,48 @@ mod async_tests {
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
                         // dbg!(json);
-                        let sql = dbg!(json.to_string());
-                        if let Err(err) = taos.exec(sql).await {
-                            match err.code() {
-                                Code::TAG_ALREADY_EXIST => tracing::trace!("tag already exists"),
-                                Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
-                                Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
-                                Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
-                                Code::INVALID_COLUMN_NAME => tracing::trace!("invalid column name"),
-                                Code::MODIFIED_ALREADY => tracing::trace!("modified already done"),
-                                Code::TABLE_NOT_EXIST => tracing::trace!("table does not exists"),
-                                Code::STABLE_NOT_EXIST => tracing::trace!("stable does not exists"),
-                                Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
-                                Code::DUPLICATED_COLUMN_NAMES => {
-                                    tracing::trace!("duplicated column names")
-                                }
-                                Code::NO_COLUMN_CAN_BE_DROPPED => {
-                                    tracing::trace!("no column can be dropped")
-                                }
-                                _ => {
-                                    panic!("{}", err);
+                        for meta in json {
+                            let sql = meta.to_string();
+                            tracing::debug!("sql: {}", &sql);
+                            if let Err(err) = taos.exec(sql).await {
+                                match err.code() {
+                                    Code::TAG_ALREADY_EXIST => {
+                                        tracing::trace!("tag already exists")
+                                    }
+                                    Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
+                                    Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
+                                    Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
+                                    Code::INVALID_COLUMN_NAME => {
+                                        tracing::trace!("invalid column name")
+                                    }
+                                    Code::MODIFIED_ALREADY => {
+                                        tracing::trace!("modified already done")
+                                    }
+                                    Code::TABLE_NOT_EXIST => {
+                                        tracing::trace!("table does not exists")
+                                    }
+                                    Code::STABLE_NOT_EXIST => {
+                                        tracing::trace!("stable does not exists")
+                                    }
+                                    Code::INVALID_ROW_BYTES => tracing::trace!("invalid row bytes"),
+                                    Code::DUPLICATED_COLUMN_NAMES => {
+                                        tracing::trace!("duplicated column names")
+                                    }
+                                    Code::NO_COLUMN_CAN_BE_DROPPED => {
+                                        tracing::trace!("no column can be dropped")
+                                    }
+                                    _ => {
+                                        tracing::error!("{}", err);
+                                    }
                                 }
                             }
                         }
                     }
                     MessageSet::Data(mut data) => {
                         // data message may have more than one data block for various tables.
-                        while let Some(data) = data.next().transpose()? {
-                            dbg!(data.table_name());
-                            dbg!(data);
+                        while let Some(_data) = data.next().transpose()? {
+                            // dbg!(data.table_name());
+                            // dbg!(data);
                         }
                     }
                     _ => (),
@@ -1486,8 +1773,7 @@ mod async_tests {
         ])
         .await?;
 
-        // dsn.params.insert("group.id".to_string(), "abc".to_string());
-        dsn.push_str("?group.id=10&timeout=1000ms");
+        dsn.push_str("?group.id=10&timeout=1000ms&auto.offset.reset=earliest");
         let builder = TmqBuilder::from_dsn(&dsn)?;
         let mut consumer = builder.build().await?;
         consumer.subscribe([topic_name]).await?;
@@ -1520,9 +1806,11 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
-                        if let Err(err) = taos.exec(sql).await {
-                            println!("maybe error: {}", err);
+                        for meta in json {
+                            let sql = meta.to_string();
+                            if let Err(err) = taos.exec(sql).await {
+                                println!("maybe error: {}", err);
+                            }
                         }
                     }
                     MessageSet::Data(data) => {
@@ -1540,7 +1828,7 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
+                        let sql = json.iter().next().unwrap().to_string();
                         if let Err(err) = taos.exec(sql).await {
                             println!("maybe error: {}", err);
                         }
@@ -1600,6 +1888,284 @@ mod async_tests {
             format!("drop topic {topic_name}").as_str(),
             format!("drop database {db_name}").as_str(),
             format!("drop database {db2_name}").as_str(),
+        ])
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_tmq_committed() -> anyhow::Result<()> {
+        // let _ = pretty_env_logger::formatted_builder()
+        //     .filter_level(tracing::tracing::LevelFilter::Info)
+        //     .try_init();
+
+        use taos_query::prelude::*;
+        let mut dsn = "tmq://localhost:6030?".to_string();
+        tracing::info!("dsn: {}", dsn);
+
+        let taos = crate::TaosBuilder::from_dsn(&dsn)?.build().await?;
+
+        let source = "tmq_source_1";
+        let target = "tmq_target_1";
+
+        taos.exec_many([
+            format!("drop topic if exists {source}").as_str(),
+            format!("drop database if exists {source}").as_str(),
+            format!("create database {source} wal_retention_period 3600").as_str(),
+            format!("create topic {source} with meta as database {source}").as_str(),
+            format!("use {source}").as_str(),
+            // kind 1: create super table using all types
+            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 json)",
+            // kind 2: create child table with json tag
+            "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
+            "create table tb1 using stb1 tags(NULL)",
+            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)
+            tb1 values(now, true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            // kind 3: create super table with all types except json (especially for tags)
+            "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
+            t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
+            t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
+            // kind 4: create child table with all types except json
+            "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)",
+            // kind 5: create common table
+            "create table `table` (ts timestamp, v int)",
+            // kind 6: column in super table
+            "alter table stb1 add column new1 bool",
+            "alter table stb1 add column new2 tinyint",
+            "alter table stb1 add column new10 nchar(16)",
+            "alter table stb1 modify column new10 nchar(32)",
+            "alter table stb1 drop column new10",
+            "alter table stb1 drop column new2",
+            "alter table stb1 drop column new1",
+            // kind 7: add tag in super table
+            "alter table `stb2` add tag new1 bool",
+            "alter table `stb2` rename tag new1 new1_new",
+            "alter table `stb2` modify tag t10 nchar(32)",
+            "alter table `stb2` drop tag new1_new",
+            // kind 8: column in common table
+            "alter table `table` add column new1 bool",
+            "alter table `table` add column new2 tinyint",
+            "alter table `table` add column new10 nchar(16)",
+            "alter table `table` modify column new10 nchar(32)",
+            "alter table `table` rename column new10 new10_new",
+            "alter table `table` drop column new10_new",
+            "alter table `table` drop column new2",
+            "alter table `table` drop column new1",
+            // ***** we can not drop table, for the table will be checked later by desc tablename
+            // // kind 9: drop normal table
+            // "drop table `table`",
+            // // kind 10: drop child table
+            // "drop table `tb2`, `tb1`",
+            // // kind 11: drop super table
+            // "drop table `stb2`",
+            // "drop table `stb1`",
+        ])
+        .await?;
+
+        taos.exec_many([
+            format!("drop database if exists {target}").as_str(),
+            format!("create database if not exists {target} wal_retention_period 3600").as_str(),
+            format!("use {target}").as_str(),
+        ])
+        .await?;
+
+        dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest");
+        let builder = TmqBuilder::from_dsn(&dsn)?;
+
+        let mut consumer = builder.build().await?;
+
+        let topics = consumer.list_topics().await?;
+        tracing::debug!("topics before subcribe:{:?}", topics);
+
+        consumer.subscribe([source]).await?;
+
+        let topics = consumer.list_topics().await?;
+        tracing::debug!("topics after subcribe:{:?}", topics);
+
+        {
+            let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
+
+            while let Some((offset, message)) = stream.try_next().await? {
+                // Offset contains information for topic name, database name and vgroup id,
+                //  similar to kafka topic/partition/offset.
+                let topic: &str = offset.topic();
+                let database = offset.database();
+                let vgroup_id = offset.vgroup_id();
+                tracing::debug!(
+                    "topic: {}, database: {}, vgroup_id: {}",
+                    topic,
+                    database,
+                    vgroup_id
+                );
+
+                // Different to kafka message, TDengine consumer would consume two kind of messages.
+                //
+                // 1. meta
+                // 2. data
+                match message {
+                    MessageSet::Meta(meta) => {
+                        tracing::debug!("Meta");
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        // meta data can be write to an database seamlessly by raw or json (to sql).
+                        let json = meta.as_json_meta().await?;
+                        for meta in &json {
+                            let sql = meta.to_string();
+                            if let Err(err) = taos.exec(sql).await {
+                                println!("maybe error: {}", err);
+                            }
+                        }
+                    }
+                    MessageSet::Data(data) => {
+                        tracing::debug!("Data");
+                        // data message may have more than one data block for various tables.
+                        while let Some(data) = data.fetch_raw_block().await? {
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
+                        }
+                    }
+                    MessageSet::MetaData(meta, data) => {
+                        tracing::debug!("MetaData");
+                        let raw = meta.as_raw_meta().await?;
+                        taos.write_raw_meta(&raw).await?;
+
+                        // meta data can be write to an database seamlessly by raw or json (to sql).
+                        let json = meta.as_json_meta().await?;
+                        let sql = json.iter().next().unwrap().to_string();
+                        if let Err(err) = taos.exec(sql).await {
+                            println!("maybe error: {}", err);
+                        }
+                        // data message may have more than one data block for various tables.
+                        while let Some(data) = data.fetch_raw_block().await? {
+                            tracing::debug!("table_name: {:?}", data.table_name());
+                            tracing::debug!("data: {:?}", data);
+                        }
+                    }
+                }
+                let committed = consumer.committed(topic, vgroup_id).await;
+                tracing::debug!("committed: {:?} vgroup_id: {}", committed, vgroup_id);
+
+                let pos = consumer.position(topic, vgroup_id).await;
+                tracing::debug!("position: {:?} vgroup_id: {}", pos, vgroup_id);
+
+                consumer.commit(offset).await?;
+            }
+        }
+
+        let assignments = consumer.assignments().await.unwrap();
+        tracing::debug!("assignments: {:?}", assignments);
+
+        // seek offset
+        for topic_vec_assignment in assignments {
+            let topic = &topic_vec_assignment.0;
+            let vec_assignment = topic_vec_assignment.1;
+            for assignment in vec_assignment {
+                let vgroup_id = assignment.vgroup_id();
+                let current = assignment.current_offset();
+                let begin = assignment.begin();
+                let end = assignment.end();
+                tracing::debug!(
+                    "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
+                    topic,
+                    vgroup_id,
+                    current,
+                    begin,
+                    end
+                );
+
+                let committed = consumer.committed(topic, vgroup_id).await;
+                tracing::debug!(
+                    "before commit_offset committed: {:?} vgroup_id: {}",
+                    committed,
+                    vgroup_id
+                );
+
+                let pos = consumer.position(topic, vgroup_id).await;
+                tracing::debug!(
+                    "before commit_offset position: {:?} vgroup_id: {}",
+                    pos,
+                    vgroup_id
+                );
+
+                let res = consumer.commit_offset(topic, vgroup_id, end).await;
+
+                let committed = consumer.committed(topic, vgroup_id).await;
+                tracing::debug!(
+                    "after commit_offset committed: {:?} vgroup_id: {}",
+                    committed,
+                    vgroup_id
+                );
+
+                let pos = consumer.position(topic, vgroup_id).await;
+                tracing::debug!(
+                    "after commit_offset position: {:?} vgroup_id: {}",
+                    pos,
+                    vgroup_id
+                );
+
+                if res.is_err() {
+                    tracing::error!("seek offset error: {:?}", res);
+                    let a = consumer.assignments().await.unwrap();
+                    tracing::error!("assignments: {:?}", a);
+                }
+
+                // commit offset out of range, expect error
+
+                let res = consumer.commit_offset(topic, vgroup_id, end + 1).await;
+
+                let committed = consumer.committed(topic, vgroup_id).await;
+                tracing::info!(
+                    "after commit_offset committed: {:?} vgroup_id: {}",
+                    committed,
+                    vgroup_id
+                );
+
+                let pos = consumer.position(topic, vgroup_id).await;
+                tracing::info!(
+                    "after commit_offset position: {:?} vgroup_id: {}",
+                    pos,
+                    vgroup_id
+                );
+
+                if res.is_err() {
+                    tracing::error!("seek offset error: {:?}", res);
+                    let a = consumer.assignments().await.unwrap();
+                    tracing::error!("assignments: {:?}", a);
+                }
+            }
+
+            let topic_assignment = consumer.topic_assignment(topic).await;
+            tracing::debug!("topic assignment: {:?}", topic_assignment);
+        }
+
+        // after seek offset
+        let assignments = consumer.assignments().await.unwrap();
+        tracing::debug!("after seek offset assignments: {:?}", assignments);
+
+        consumer.unsubscribe().await;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        taos.exec_many([
+            format!("drop database {target}").as_str(),
+            format!("drop topic {source}").as_str(),
+            format!("drop database {source}").as_str(),
         ])
         .await?;
         Ok(())
@@ -1692,8 +2258,7 @@ mod async_tests {
         ])
         .await?;
 
-        // dsn.params.insert("group.id".to_string(), "abc".to_string());
-        dsn.push_str("&group.id=10&timeout=1000ms");
+        dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest");
         let builder = TmqBuilder::from_dsn(&dsn)?;
         // dbg!(&builder.dsn);
         let mut consumer = builder.build().await?;
@@ -1727,9 +2292,11 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
-                        if let Err(err) = taos.exec(sql).await {
-                            println!("maybe error: {}", err);
+                        for meta in json {
+                            let sql = meta.to_string();
+                            if let Err(err) = taos.exec(sql).await {
+                                println!("maybe error: {}", err);
+                            }
                         }
                     }
                     MessageSet::Data(data) => {
@@ -1747,9 +2314,11 @@ mod async_tests {
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
-                        let sql = json.to_string();
-                        if let Err(err) = taos.exec(sql).await {
-                            println!("maybe error: {}", err);
+                        for meta in json {
+                            let sql = meta.to_string();
+                            if let Err(err) = taos.exec(sql).await {
+                                println!("maybe error: {}", err);
+                            }
                         }
                         // data message may have more than one data block for various tables.
                         while let Some(data) = data.fetch_raw_block().await? {
@@ -1809,6 +2378,445 @@ mod async_tests {
             "drop database ws_abc1",
         ])
         .await?;
+        Ok(())
+    }
+
+    async fn prepare(taos: crate::Taos) -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let inserted = taos.exec_many([
+            // create child table
+            "CREATE TABLE `d0` USING `meters` TAGS(0, 'California.LosAngles')",
+            // insert into child table
+            "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32, '\\x123456')",
+            // insert with NULL values
+            //"INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL, NULL)",
+            // insert and automatically create table with tags if not exists
+            "INSERT INTO `d1` USING `meters` TAGS(1, 'California.SanFrancisco') values(now - 9s, 10.1, 119, 0.33, '\\x123456')",
+            // insert many records in a single sql
+            "INSERT INTO `d1` values (now-8s, 10, 120, 0.33, '\\x123456') (now - 6s, 10, 119, 0.34, '\\x123456') (now - 4s, 11.2, 118, 0.322, '\\x123456')",
+        ]).await?;
+        assert_eq!(inserted, 5);
+        Ok(())
+    }
+
+    // Query options 2, use deserialization with serde.
+    #[derive(Debug, serde::Deserialize)]
+    #[allow(dead_code)]
+    struct Record {
+        // deserialize timestamp to String
+        ts: String,
+        // float to f32
+        current: Option<f32>,
+        // int to i32
+        voltage: Option<i32>,
+        phase: Option<f32>,
+        cvb1: Option<Bytes>,
+    }
+
+    #[tokio::test]
+    async fn test_tmq_records() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+        let mut dsn = "tmq://localhost:6030?offset=10:20,11:40".to_string();
+        tracing::info!("dsn: {}", dsn);
+        let db = "test_tmq_records";
+
+        let taos = crate::TaosBuilder::from_dsn(&dsn)?.build().await?;
+        taos.exec_many([
+            format!("DROP TOPIC IF EXISTS tmq_meters"),
+            format!("DROP DATABASE IF EXISTS `{db}`"),
+            format!("CREATE DATABASE `{db}` WAL_RETENTION_PERIOD 3600"),
+            format!("USE `{db}`"),
+            // create super table
+            format!("CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT, cvb1 varbinary(50)) TAGS (`groupid` INT, `location` BINARY(24))"),
+            // create topic for subscription
+            format!("CREATE TOPIC tmq_meters AS SELECT * FROM `meters`")
+        ])
+        .await?;
+
+        let task = tokio::spawn(prepare(taos));
+        task.await??;
+
+        dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest");
+        let builder = crate::TmqBuilder::from_dsn(&dsn)?;
+        // dbg!(&builder.dsn);
+        let mut consumer = builder.build().await?;
+        consumer.subscribe(["tmq_meters"]).await?;
+
+        consumer
+            .stream()
+            .try_for_each(|(offset, message)| async {
+                let topic = offset.topic();
+                // the vgroup id, like partition id in kafka.
+                let vgroup_id = offset.vgroup_id();
+
+                let assignments = consumer.assignments().await;
+                println!(
+                    "* in vgroup id {vgroup_id} of topic {topic}, assignments: {assignments:?}\n"
+                );
+
+                if let Some(data) = message.into_data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        let records: Vec<Record> = block.deserialize().try_collect()?;
+                        println!("** read {} records: {:#?}\n", records.len(), records);
+                        assert_eq!(
+                            records[records.len() - 1].cvb1,
+                            Some(Bytes::from(vec![0x12, 0x34, 0x56]))
+                        );
+                    }
+                }
+                consumer.commit(offset).await?;
+                Ok(())
+            })
+            .await?;
+
+        consumer.unsubscribe().await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_recv_timeout() -> anyhow::Result<()> {
+        use std::str::FromStr;
+
+        use itertools::Itertools;
+        use taos_query::{
+            prelude::TryStreamExt,
+            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
+            AsyncQueryable, AsyncTBuilder, Dsn,
+        };
+
+        use crate::TaosBuilder;
+
+        let _ = pretty_env_logger::try_init();
+
+        let dsn = "taos://localhost:6030";
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let db = "test_recv_timeout";
+        let topic = "tmq_meters_202411260917";
+
+        taos.exec_many([
+            format!("DROP TOPIC IF EXISTS {topic}"),
+            format!("DROP DATABASE IF EXISTS `{db}`"),
+            format!("CREATE DATABASE `{db}`"),
+            format!("USE `{db}`"),
+            "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) TAGS (`groupid` INT, `location` BINARY(20))".into(),
+            format!("CREATE TOPIC {topic} with META AS DATABASE {db}")
+        ]).await?;
+
+        let inserted = taos.exec_many([
+            "CREATE TABLE `d0` USING `meters` TAGS(0, 'Los Angles')",
+            "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32)",
+            "INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL)",
+            "INSERT INTO `d1` USING `meters` TAGS(1, 'San Francisco') values(now - 9s, 10.1, 119, 0.33)",
+            "INSERT INTO `d1` values (now-8s, 10, 120, 0.33) (now - 6s, 10, 119, 0.34) (now - 4s, 11.2, 118, 0.322)",
+        ]).await?;
+        assert_eq!(inserted, 6);
+
+        let mut dsn = Dsn::from_str("tmq://localhost:6030")?;
+        dsn.params.insert("group.id".into(), "test".into());
+        dsn.params.insert("timeout".into(), "1s".into());
+        dsn.params
+            .insert("auto.offset.reset".into(), "earliest".into());
+
+        let mut consumer = TmqBuilder::from_dsn(dsn)?.build().await?;
+        consumer.subscribe([topic]).await?;
+
+        {
+            let mut stream = consumer.stream();
+            let mut cnt = 0;
+            while let Some((offset, message)) = stream.try_next().await? {
+                tracing::debug!(
+                    "topic: {}, database: {}, vgroup_id: {}",
+                    offset.topic(),
+                    offset.database(),
+                    offset.vgroup_id()
+                );
+
+                if let Some(data) = message.into_data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        let table_name = block.table_name().unwrap();
+                        let records: Vec<Record> = block.deserialize().try_collect()?;
+                        cnt += records.len();
+                        tracing::debug!(
+                            "table_name: {}, got {} records: {:#?}",
+                            table_name,
+                            records.len(),
+                            records
+                        );
+                    }
+                }
+
+                consumer.commit(offset).await?;
+            }
+
+            assert_eq!(inserted, cnt);
+        }
+
+        consumer.unsubscribe().await;
+
+        taos.exec_many(vec![
+            format!("DROP TOPIC {topic}"),
+            format!("DROP DATABASE {db}"),
+        ])
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_no_auto_commit() -> anyhow::Result<()> {
+        use std::str::FromStr;
+
+        use itertools::Itertools;
+        use taos_query::{
+            prelude::TryStreamExt,
+            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
+            AsyncQueryable, AsyncTBuilder, Dsn,
+        };
+        use tracing::debug;
+
+        use crate::TaosBuilder;
+
+        std::env::set_var("RUST_LOG", "TRACE");
+        let _ = pretty_env_logger::formatted_timed_builder()
+            .parse_default_env()
+            .try_init();
+
+        let dsn = "taos://localhost:6030";
+        let builder = TaosBuilder::from_dsn(dsn)?;
+        let taos = builder.build().await?;
+        let db = "tmq_ts5679";
+
+        taos.exec_many([
+            "DROP TOPIC IF EXISTS tmq_ts5679".into(),
+            format!("DROP DATABASE IF EXISTS `{db}`"),
+            format!("CREATE DATABASE `{db}` vgroups 1"),
+            format!("USE `{db}`"),
+            "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) TAGS (`groupid` INT, `location` BINARY(20))".into(),
+            format!("CREATE TOPIC tmq_ts5679 with META AS DATABASE {db}")
+        ]).await?;
+
+        let inserted = taos.exec_many([
+            "CREATE TABLE `d0` USING `meters` TAGS(0, 'Los Angles')",
+            "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32)",
+            "INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL)",
+            "INSERT INTO `d1` USING `meters` TAGS(1, 'San Francisco') values(now - 9s, 10.1, 119, 0.33)",
+            "INSERT INTO `d1` values (now-8s, 10, 120, 0.33) (now - 6s, 10, 119, 0.34) (now - 4s, 11.2, 118, 0.322)",
+        ]).await?;
+        assert_eq!(inserted, 6);
+
+        let mut dsn = Dsn::from_str("tmq://localhost:6030")?;
+        dsn.params.insert("group.id".into(), "test".into());
+        dsn.params.insert("timeout".into(), "1s".into());
+        dsn.params
+            .insert("auto.offset.reset".into(), "earliest".into());
+
+        let builder = TmqBuilder::from_dsn(dsn)?;
+        let mut consumer = builder.build().await?;
+        consumer.subscribe(["tmq_ts5679"]).await?;
+
+        let mut vgroup_id = 0;
+        {
+            let mut stream = consumer.stream();
+            let mut cnt = 0;
+            while let Some((offset, message)) = stream.try_next().await? {
+                debug!(
+                    "topic: {}, database: {}, vgroup_id: {}",
+                    offset.topic(),
+                    offset.database(),
+                    offset.vgroup_id()
+                );
+                vgroup_id = offset.vgroup_id();
+
+                if let Some(data) = message.into_data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        let table_name = block.table_name().unwrap();
+                        let records: Vec<Record> = block.deserialize().try_collect()?;
+                        cnt += records.len();
+                        debug!(
+                            "table_name: {}, got {} records: {:#?}",
+                            table_name,
+                            records.len(),
+                            records
+                        );
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+
+            assert_eq!(inserted, cnt);
+        }
+
+        let committed = consumer.committed("tmq_ts5679", vgroup_id).await;
+        let err = committed.expect_err("No committed info");
+        assert_eq!(
+            err.to_string(),
+            "[0x4011] Internal error: `get committed failed: No committed info`"
+        );
+
+        consumer.unsubscribe().await;
+
+        taos.exec_many([
+            "DROP TOPIC IF EXISTS tmq_ts5679",
+            "DROP DATABASE IF EXISTS `tmq_ts5679`",
+        ])
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_auto_commit() -> anyhow::Result<()> {
+        use std::str::FromStr;
+
+        use itertools::Itertools;
+        use taos_query::{
+            prelude::TryStreamExt,
+            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
+            AsyncQueryable, AsyncTBuilder, Dsn,
+        };
+        use tracing::debug;
+
+        use crate::TaosBuilder;
+
+        std::env::set_var("RUST_LOG", "TRACE");
+        let _ = pretty_env_logger::formatted_timed_builder()
+            .parse_default_env()
+            .try_init();
+
+        let dsn = "taos://localhost:6030";
+        let builder = TaosBuilder::from_dsn(dsn)?;
+        let taos = builder.build().await?;
+        let db = "tmq_ts5679_auto_commit";
+
+        taos.exec_many([
+            "DROP TOPIC IF EXISTS tmq_ts5679_auto_commit".into(),
+            format!("DROP DATABASE IF EXISTS `{db}`"),
+            format!("CREATE DATABASE `{db}` vgroups 1"),
+            format!("USE `{db}`"),
+            "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) TAGS (`groupid` INT, `location` BINARY(20))".into(),
+            format!("CREATE TOPIC tmq_ts5679_auto_commit with META AS DATABASE {db}")
+        ]).await?;
+
+        let inserted = taos.exec_many([
+            "CREATE TABLE `d0` USING `meters` TAGS(0, 'Los Angles')",
+            "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32)",
+            "INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL)",
+            "INSERT INTO `d1` USING `meters` TAGS(1, 'San Francisco') values(now - 9s, 10.1, 119, 0.33)",
+            "INSERT INTO `d1` values (now-8s, 10, 120, 0.33) (now - 6s, 10, 119, 0.34) (now - 4s, 11.2, 118, 0.322)",
+        ]).await?;
+        assert_eq!(inserted, 6);
+
+        let mut dsn = Dsn::from_str("tmq://localhost:6030")?;
+        dsn.params.insert("group.id".into(), "test".into());
+        dsn.params.insert("timeout".into(), "1s".into());
+        dsn.params
+            .insert("auto.offset.reset".into(), "earliest".into());
+        dsn.params
+            .insert("enable.auto.commit".into(), "true".into());
+        dsn.params
+            .insert("auto.commit.interval.ms".into(), "1000".into());
+
+        let builder = TmqBuilder::from_dsn(dsn)?;
+        let mut consumer = builder.build().await?;
+        consumer.subscribe(["tmq_ts5679_auto_commit"]).await?;
+
+        let mut vgroup_id = 0;
+        {
+            let mut stream = consumer.stream();
+            let mut cnt = 0;
+            while let Some((offset, message)) = stream.try_next().await? {
+                debug!(
+                    "topic: {}, database: {}, vgroup_id: {}",
+                    offset.topic(),
+                    offset.database(),
+                    offset.vgroup_id()
+                );
+                vgroup_id = offset.vgroup_id();
+
+                if let Some(data) = message.into_data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        let table_name = block.table_name().unwrap();
+                        let records: Vec<Record> = block.deserialize().try_collect()?;
+                        cnt += records.len();
+                        debug!(
+                            "table_name: {}, got {} records: {:#?}",
+                            table_name,
+                            records.len(),
+                            records
+                        );
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+
+            assert_eq!(inserted, cnt);
+        }
+
+        let committed = consumer
+            .committed("tmq_ts5679_auto_commit", vgroup_id)
+            .await;
+        let offset = committed.expect("With committed info");
+        assert!(offset > 0);
+
+        consumer.unsubscribe().await;
+
+        taos.exec_many([
+            "DROP TOPIC IF EXISTS tmq_ts5679_auto_commit",
+            "DROP DATABASE IF EXISTS `tmq_ts5679_auto_commit`",
+        ])
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_tmq_poll() -> anyhow::Result<()> {
+        use taos_query::{
+            prelude::{AsAsyncConsumer, AsyncQueryable, AsyncTBuilder, TryStreamExt},
+            tmq::Timeout,
+        };
+
+        use crate::{TaosBuilder, TmqBuilder};
+
+        let pool = TaosBuilder::from_dsn("taos:///")?.pool()?;
+        let conn = pool.get().await?;
+        conn.exec_many([
+            "drop topic if exists tmq_poll_topic",
+            "drop database if exists tmq_poll_db",
+            "create database if not exists tmq_poll_db",
+            "create topic if not exists tmq_poll_topic with meta as database tmq_poll_db",
+            "create table if not exists tmq_poll_db.t0 (ts timestamp, c1 int, c2 double)",
+            "insert into tmq_poll_db.t0 values(now, 1, 0.12)",
+        ])
+        .await?;
+
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis();
+        let tmq = TmqBuilder::from_dsn(format!(
+            "taos:///tmq_poll_db?group.id={ms}&timeout=5s&enable.auto.commit=false"
+        ))?;
+
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["tmq_poll_topic"]).await?;
+
+        {
+            let mut stream = consumer.stream_with_timeout(Timeout::from_millis(200));
+            while let Ok(Some(msg)) = stream.try_next().await {
+                println!("msg: {msg:?}");
+            }
+        }
+
+        consumer.unsubscribe().await;
+
+        conn.exec_many(["drop topic tmq_poll_topic", "drop database tmq_poll_db"])
+            .await?;
+
         Ok(())
     }
 }

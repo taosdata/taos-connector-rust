@@ -18,6 +18,10 @@ header = """
 #ifndef TDENGINE_TAOS_WS_H
 #define TDENGINE_TAOS_WS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
+
 /**
  * When using libtaosws along with libtaos, include `taos.h` in front of `taosws.h`, eg.
  *
@@ -71,5 +75,17 @@ header = """
 """
 
 trailer = """
+#ifdef __cplusplus
+} // extern "C"
+#endif // __cplusplus
+
 #endif
 """
+
+[export]
+include = [
+    "ws_tmq_conf_res_t",
+    "ws_tmq_res_t",
+    "WS_TSDB_SML_PROTOCOL_TYPE",
+    "WS_TSDB_SML_TIMESTAMP_TYPE",
+]

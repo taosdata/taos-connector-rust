@@ -37,19 +37,21 @@ pub struct tmq_t {
     _unused: [u8; 0],
 }
 
+#[derive(Debug)]
+pub(crate) struct SafeTmqT(pub(crate) *mut tmq_t);
+
+unsafe impl Send for SafeTmqT {}
+unsafe impl Sync for SafeTmqT {}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct tmq_conf_t {
     _unused: [u8; 0],
 }
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct tmq_list_t {
-    _unused: [u8; 0],
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct tmq_message_t {
     _unused: [u8; 0],
 }
 
@@ -68,7 +70,20 @@ impl tmq_conf_res_t {
             Self::Invalid => Err(RawError::from_string(format!(
                 "Invalid key value pair ({k}, {v})"
             ))),
-            Self::Unknown => Err(RawError::from_string(format!("Unknown key {k}"))),
+            Self::Unknown => {
+                if k == "msg.enable.batchmeta" {
+                    tracing::warn!(
+                        "Ignore unsupported `msg.enable.batchmeta` setting, fallback to builtin settings"
+                    );
+                    return Ok(());
+                }
+                tracing::warn!(
+                    consumer.conf.key = k,
+                    consumer.conf.value = v,
+                    "Unknown key {k}"
+                );
+                Err(RawError::from_string(format!("Unknown key {k}")))
+            }
         }
     }
 }

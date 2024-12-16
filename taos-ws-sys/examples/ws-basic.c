@@ -12,8 +12,8 @@ int main()
     {
         dsn = "ws://localhost:6041";
     }
-    ws_enable_log();
-    WS_TAOS *taos = ws_connect_with_dsn(dsn);
+    ws_enable_log("debug");
+    WS_TAOS *taos = ws_connect(dsn);
 
     const char *version = ws_get_server_info(taos);
     dprintf(2, "Server version: %s\n", version);

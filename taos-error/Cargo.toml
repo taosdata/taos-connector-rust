@@ -11,8 +11,8 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-derive_more = "0.99"
-mdsn = {path = "../mdsn", version = "0.2.22" }
+derive_more = { version = "1", features = ["deref", "deref_mut", "display", "from", "into"] }
+mdsn = {path = "../mdsn", version = "0.2.25" }
 serde = {version = "1", features = ["derive"], optional = true}
 thiserror = "1.0.47"
 anyhow = { version = "1", features = ["backtrace"] }

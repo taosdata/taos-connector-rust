@@ -1,9 +1,12 @@
 //! This is the common query traits/types for TDengine connectors.
 //!
-#![cfg_attr(nightly, feature(const_slice_index))]
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::type_complexity)]
 
+use async_trait::async_trait;
+pub use mdsn::{value_is_true, Address, Dsn, DsnError, IntoDsn};
+pub use serde::de::value::Error as DeError;
+use std::time::Duration;
 use std::{
     collections::BTreeMap,
     fmt::{Debug, Display},
@@ -11,16 +14,11 @@ use std::{
     rc::Rc,
 };
 
-use async_trait::async_trait;
-pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
-pub use serde::de::value::Error as DeError;
-
 mod error;
 
 pub mod common;
 mod de;
 pub mod helpers;
-mod insert;
 
 mod iter;
 pub mod util;
@@ -56,7 +54,13 @@ pub fn global_tokio_runtime() -> &'static tokio::runtime::Runtime {
 }
 
 pub fn block_in_place_or_global<F: std::future::Future>(fut: F) -> F::Output {
-    global_tokio_runtime().block_on(fut)
+    use tokio::runtime::Handle;
+    use tokio::task;
+
+    match Handle::try_current() {
+        Ok(handle) => task::block_in_place(move || handle.block_on(fut)),
+        Err(_) => global_tokio_runtime().block_on(fut),
+    }
 }
 
 pub enum CodecOpts {
@@ -254,8 +258,12 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
     #[inline]
     fn default_pool_config(&self) -> deadpool::managed::PoolConfig {
         deadpool::managed::PoolConfig {
-            max_size: 500,
-            timeouts: deadpool::managed::Timeouts::default(),
+            max_size: 5000,
+            timeouts: deadpool::managed::Timeouts {
+                wait: None,
+                create: Some(Duration::from_secs(30)),
+                recycle: None,
+            },
             queue_mode: deadpool::managed::QueueMode::Fifo,
         }
     }
@@ -370,7 +378,7 @@ impl<T: AsyncTBuilder> deadpool::managed::Manager for Manager<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fmt::Display, sync::atomic::AtomicUsize};
+    use std::sync::atomic::AtomicUsize;
 
     use super::*;
     #[derive(Debug)]
@@ -401,6 +409,7 @@ mod tests {
     }
 
     impl<'q> crate::Fetchable for MyResultSet {
+        #[allow(static_mut_refs)]
         fn fields(&self) -> &[Field] {
             static mut F: Option<Vec<Field>> = None;
             unsafe { F.get_or_insert(vec![Field::new("a", Ty::TinyInt, 1)]) };
@@ -421,6 +430,7 @@ mod tests {
 
         fn update_summary(&mut self, _rows: usize) {}
 
+        #[allow(static_mut_refs)]
         fn fetch_raw_block(&mut self) -> RawResult<Option<RawBlock>> {
             static mut B: AtomicUsize = AtomicUsize::new(4);
             unsafe {

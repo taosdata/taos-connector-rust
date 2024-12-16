@@ -4,11 +4,11 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    common::{JsonMeta, RawData, RawMeta},
-    RawBlock, RawResult,
+    common::{RawData, RawMeta},
+    JsonMeta, RawBlock, RawResult,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Timeout {
     /// Wait forever.
     Never,
@@ -36,7 +36,7 @@ impl Timeout {
     }
     pub fn as_raw_timeout(&self) -> i64 {
         match self {
-            Timeout::Never => -1,
+            Timeout::Never => i64::MAX,
             Timeout::None => 0,
             Timeout::Duration(t) => t.as_millis() as _,
         }
@@ -51,12 +51,38 @@ impl Timeout {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum TimeoutError {
     #[error("empty timeout value")]
     Empty,
     #[error("invalid timeout expression `{0}`: {1}")]
     Invalid(String, String),
+}
+
+fn parse_duration(s: &str) -> Result<Duration, TimeoutError> {
+    let s = s.trim();
+    let (value, unit) = s.split_at(s.find(|c: char| !c.is_digit(10)).unwrap_or(s.len()));
+
+    let value: u64 = value
+        .parse()
+        .map_err(|_| TimeoutError::Invalid(s.to_string(), "Invalid format".to_string()))?;
+
+    let duration = match unit.trim() {
+        "us" => Duration::from_micros(value),
+        "ms" => Duration::from_millis(value),
+        "sec" | "s" | "" => Duration::from_secs(value),
+        "min" | "m" => Duration::from_secs(value * 60),
+        "hr" | "h" => Duration::from_secs(value * 60 * 60),
+        "day" | "d" => Duration::from_secs(value * 60 * 60 * 24),
+        _ => {
+            return Err(TimeoutError::Invalid(
+                s.to_string(),
+                "Invalid unit".to_string(),
+            ))
+        }
+    };
+
+    Ok(duration)
 }
 
 impl FromStr for Timeout {
@@ -69,9 +95,7 @@ impl FromStr for Timeout {
         match s.to_lowercase().as_str() {
             "never" => Ok(Timeout::Never),
             "none" => Ok(Timeout::None),
-            _ => parse_duration::parse(s)
-                .map(Timeout::Duration)
-                .map_err(|err| TimeoutError::Invalid(s.to_string(), err.to_string())),
+            _ => parse_duration(s).map(Timeout::Duration).map_err(Into::into),
         }
     }
 }
@@ -202,6 +226,8 @@ pub trait AsyncMessage {
 }
 
 pub type VGroupId = i32;
+pub type Offset = i64;
+pub type Timing = i64;
 
 /// Extract offset information.
 pub trait IsOffset {
@@ -213,6 +239,12 @@ pub trait IsOffset {
 
     /// VGroup id for current message.
     fn vgroup_id(&self) -> VGroupId;
+
+    /// offset of current message.
+    fn offset(&self) -> Offset;
+
+    /// timing cost for current message.
+    fn timing(&self) -> Timing;
 }
 
 #[repr(C)]
@@ -298,14 +330,23 @@ pub trait AsConsumer: Sized {
     }
 
     fn commit(&self, offset: Self::Offset) -> RawResult<()>;
+    fn commit_all(&self) -> RawResult<()>;
+
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()>;
 
     fn unsubscribe(self) {
         drop(self)
     }
 
+    fn list_topics(&self) -> RawResult<Vec<String>>;
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>>;
 
     fn offset_seek(&mut self, topic: &str, vg_id: VGroupId, offset: i64) -> RawResult<()>;
+
+    fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
+
+    fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
 }
 
 pub struct MessageSetsIter<'a, C> {
@@ -376,10 +417,20 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     }
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()>;
+    async fn commit_all(&self) -> RawResult<()>;
+
+    async fn commit_offset(
+        &self,
+        topic_name: &str,
+        vgroup_id: VGroupId,
+        offset: i64,
+    ) -> RawResult<()>;
 
     async fn unsubscribe(self) {
         drop(self)
     }
+
+    async fn list_topics(&self) -> RawResult<Vec<String>>;
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>>;
 
@@ -387,6 +438,10 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
 
     async fn offset_seek(&mut self, topic: &str, vgroup_id: VGroupId, offset: i64)
         -> RawResult<()>;
+
+    async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
+
+    async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64>;
 }
 
 /// Marker trait to impl sync on async impl.
@@ -424,6 +479,20 @@ where
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit(self, offset))
     }
 
+    fn commit_all(&self) -> RawResult<()> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit_all(self))
+    }
+
+    fn commit_offset(&self, topic_name: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::commit_offset(
+            self, topic_name, vgroup_id, offset,
+        ))
+    }
+
+    fn list_topics(&self) -> RawResult<Vec<String>> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::list_topics(self))
+    }
+
     fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::assignments(self))
     }
@@ -432,6 +501,14 @@ where
         crate::block_in_place_or_global(<C as AsAsyncConsumer>::offset_seek(
             self, topic, vg_id, offset,
         ))
+    }
+
+    fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::committed(self, topic, vgroup_id))
+    }
+
+    fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
+        crate::block_in_place_or_global(<C as AsAsyncConsumer>::position(self, topic, vgroup_id))
     }
 }
 
@@ -470,3 +547,52 @@ where
 //         <C as AsConsumer>::commit(self, offset)
 //     }
 // }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_duration() {
+        // valid cases
+        assert_eq!(parse_duration("100us"), Ok(Duration::from_micros(100)));
+        assert_eq!(parse_duration("200ms"), Ok(Duration::from_millis(200)));
+        assert_eq!(parse_duration("3s"), Ok(Duration::from_secs(3)));
+        assert_eq!(parse_duration("4sec"), Ok(Duration::from_secs(4)));
+        assert_eq!(parse_duration("5m"), Ok(Duration::from_secs(5 * 60)));
+        assert_eq!(parse_duration("6min"), Ok(Duration::from_secs(6 * 60)));
+        assert_eq!(parse_duration("7h"), Ok(Duration::from_secs(7 * 60 * 60)));
+        assert_eq!(parse_duration("8hr"), Ok(Duration::from_secs(8 * 60 * 60)));
+        assert_eq!(
+            parse_duration("9d"),
+            Ok(Duration::from_secs(9 * 60 * 60 * 24))
+        );
+        assert_eq!(
+            parse_duration("10day"),
+            Ok(Duration::from_secs(10 * 60 * 60 * 24))
+        );
+        assert_eq!(parse_duration("11"), Ok(Duration::from_secs(11)));
+
+        // invalid cases
+        assert_eq!(
+            parse_duration("5.3"),
+            Err(TimeoutError::Invalid(
+                "5.3".to_string(),
+                "Invalid unit".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_duration("abc"),
+            Err(TimeoutError::Invalid(
+                "abc".to_string(),
+                "Invalid format".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_duration("100xy"),
+            Err(TimeoutError::Invalid(
+                "100xy".to_string(),
+                "Invalid unit".to_string()
+            ))
+        );
+    }
+}

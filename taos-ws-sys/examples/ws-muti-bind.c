@@ -58,7 +58,7 @@ void insert_data(WS_TAOS *taos)
     // init
     WS_STMT *stmt = ws_stmt_init(taos);
     // prepare
-    const char *sql = "INSERT INTO ? USING meters TAGS(?, ?) values(?, ?, ?, ?)";
+    const char *sql = "INSERT INTO ? USING meters TAGS(?, ?) values(?, ?, ?, ?, ?, ?)";
     int code = ws_stmt_prepare(stmt, sql, strlen(sql));
     check_error_code(stmt, code, "failed to execute ws_stmt_prepare");
     // bind table name and tags
@@ -85,7 +85,7 @@ void insert_data(WS_TAOS *taos)
     check_error_code(stmt, code, "failed to execute ws_stmt_set_tbname_tags");
 
     // insert two rows with multi binds
-    WS_MULTI_BIND params[4];
+    WS_MULTI_BIND params[6];
     // values to bind
     int8_t data_count = 10;
     int64_t ts[] = {
@@ -98,8 +98,7 @@ void insert_data(WS_TAOS *taos)
         1648432614749,
         1648432615249,
         1648432615749,
-        1648432616249
-    };
+        1648432616249};
     float current[] = {
         10.3,
         12.6,
@@ -110,8 +109,7 @@ void insert_data(WS_TAOS *taos)
         11.5,
         13.7,
         12.0,
-        10.1
-    };
+        10.1};
     int voltage[] = {
         219,
         218,
@@ -122,8 +120,7 @@ void insert_data(WS_TAOS *taos)
         215,
         219,
         220,
-        222
-    };
+        222};
     float phase[] = {
         0.31,
         0.33,
@@ -134,20 +131,36 @@ void insert_data(WS_TAOS *taos)
         0.34,
         0.32,
         0.29,
-        0.30
-    };
-    
+        0.30};
+
+    char loc2[] = {'a', 'b', 0, 'c', 'd', 0, 'e', 'f', 0, 'g', 'h', 0, 'i', 'j', 0, 'a', 'b', 0, 'c', 'd', 0, 'e', 'f', 0, 'g', 'h', 0, 'i', 'j', 0};
+    char loc3[1000] = {0};
+    int nchar_len = strlen("一二三四五六七八");
+    for (int i = 0; i < data_count; i++)
+    {
+        char *p = loc3 + i * (nchar_len + 10);
+        strcpy(p, "一二三四五六七八");
+    }
+
     char is_null[data_count];
     memset(is_null, 0, sizeof(is_null));
     // length array
     int32_t int64Len[data_count];
-    memset(int64Len, sizeof(int64_t), sizeof(int64Len));
-
+    for (int i = 0; i < data_count; i++)
+    {
+        int64Len[i] = sizeof(int64_t);
+    }
     int32_t floatLen[data_count];
-    memset(floatLen, sizeof(float), sizeof(floatLen));
+    for (int i = 0; i < data_count; i++)
+    {
+        floatLen[i] = sizeof(float);
+    }
 
     int32_t intLen[data_count];
-    memset(intLen, sizeof(int), sizeof(intLen));
+    for (int i = 0; i < data_count; i++)
+    {
+        int64Len[i] = sizeof(int);
+    }
 
     params[0].buffer_type = TSDB_DATA_TYPE_TIMESTAMP;
     params[0].buffer_length = sizeof(int64_t);
@@ -177,7 +190,33 @@ void insert_data(WS_TAOS *taos)
     params[3].is_null = is_null;
     params[3].num = data_count;
 
-    code = ws_stmt_bind_param_batch(stmt, params, 4); // bind batch
+    int32_t varcharLen[data_count];
+    for (int i = 0; i < data_count; i++)
+    {
+        varcharLen[i] = 2;
+    }
+
+    params[4].buffer_type = TSDB_DATA_TYPE_VARCHAR;
+    params[4].buffer_length = 3;
+    params[4].buffer = loc2;
+    params[4].length = varcharLen;
+    params[4].is_null = is_null;
+    params[4].num = data_count;
+
+    int32_t ncharLen[data_count];
+    for (int i = 0; i < data_count; i++)
+    {
+        ncharLen[i] = nchar_len;
+    }
+
+    params[5].buffer_type = TSDB_DATA_TYPE_NCHAR;
+    params[5].buffer_length = nchar_len + 10;
+    params[5].buffer = loc3;
+    params[5].length = ncharLen;
+    params[5].is_null = is_null;
+    params[5].num = data_count;
+
+    code = ws_stmt_bind_param_batch(stmt, params, 6); // bind batch
     check_error_code(stmt, code, "failed to execute taos_stmt_bind_param_batch");
     code = ws_stmt_add_batch(stmt); // add batch
     check_error_code(stmt, code, "failed to execute taos_stmt_add_batch");
@@ -195,7 +234,7 @@ void insert_data(WS_TAOS *taos)
 
 int main()
 {
-    WS_TAOS *taos = ws_connect_with_dsn("ws://localhost:6041");
+    WS_TAOS *taos = ws_connect("ws://localhost:6041");
     if (taos == NULL)
     {
         printf("failed to connect to server\n");
@@ -205,7 +244,7 @@ int main()
     execute_sql(taos, "CREATE DATABASE power");
     execute_sql(taos, "USE power");
     execute_sql(taos,
-                "CREATE STABLE meters (ts TIMESTAMP, current FLOAT, voltage INT, phase FLOAT) TAGS (location BINARY(64), "
+                "CREATE STABLE meters (ts TIMESTAMP, current FLOAT, voltage INT, phase FLOAT, loc2 VARCHAR(20), loc3 NCHAR(50)) TAGS (location BINARY(64), "
                 "groupId INT)");
     insert_data(taos);
     ws_close(taos);

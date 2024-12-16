@@ -3,15 +3,137 @@ name: Coverage
 on:
   push:
 
+  workflow_dispatch:
+    inputs:
+      tdengine_branch:
+        description: 'TDengine branch'
+        required: true
+        type: string
+
 env:
   TOOLS_BUILD_TYPE: Release
   TAOS_SUPPORT_VNODES: "256"
 
 jobs:
+  build-tdengine:
+    runs-on: ubuntu-latest
+    outputs:
+      commit_id: ${{ steps.get_commit_id.outputs.commit_id }}
+    steps:
+      - name: checkout TDengine by push
+        if: github.event_name == 'push'
+        uses: actions/checkout@v3
+        with:
+          repository: "taosdata/TDengine"
+          path: "TDengine"
+          ref: "main"
+
+      - name: checkout TDengine manually
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v3
+        with:
+          repository: "taosdata/TDengine"
+          path: "TDengine"
+          ref: ${{ inputs.tdengine_branch }}
+
+      - name: get_commit_id
+        id: get_commit_id
+        run: |
+          cd TDengine
+          echo "commit_id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Cache server by push
+        if: github.event_name == 'push'
+        id: cache-server-push
+        uses: actions/cache@v3
+        with:
+          path: server.tar.gz
+          key: ${{ runner.os }}-build-main-${{ steps.get_commit_id.outputs.commit_id }}
+
+      - name: Cache server manually
+        if: github.event_name == 'workflow_dispatch'
+        id: cache-server-manually
+        uses: actions/cache@v3
+        with:
+          path: server.tar.gz
+          key: ${{ runner.os }}-build-${{ inputs.tdengine_branch }}-${{ steps.get_commit_id.outputs.commit_id }}
+
+      - name: prepare install
+        if: >
+          (github.event_name == 'workflow_dispatch' && steps.cache-server-manually.outputs.cache-hit != 'true') ||
+          (github.event_name == 'push' && steps.cache-server-push.outputs.cache-hit != 'true')
+        run: sudo apt install -y libgeos-dev
+
+      - name: install TDengine
+        if: >
+          (github.event_name == 'workflow_dispatch' && steps.cache-server-manually.outputs.cache-hit != 'true') ||
+          (github.event_name == 'push' && steps.cache-server-push.outputs.cache-hit != 'true')
+        run: |
+          cd TDengine
+          mkdir debug
+          cd debug
+          cmake .. -DBUILD_TEST=off -DBUILD_HTTP=false -DVERNUMBER=3.9.9.9  -DBUILD_DEPENDENCY_TESTS=false
+          make -j 8
+
+      - name: package
+        if: >
+          (github.event_name == 'workflow_dispatch' && steps.cache-server-manually.outputs.cache-hit != 'true') ||
+          (github.event_name == 'push' && steps.cache-server-push.outputs.cache-hit != 'true')
+        run: |
+          mkdir -p ./release
+          cp ./TDengine/debug/build/bin/taos ./release/
+          cp ./TDengine/debug/build/bin/taosd ./release/
+          cp ./TDengine/debug/build/bin/taosadapter ./release/
+          cp ./TDengine/debug/build/lib/libtaos.so.3.9.9.9 ./release/
+          cp ./TDengine/debug/build/lib/librocksdb.so.8.1.1 ./release/ ||:
+          cp ./TDengine/include/client/taos.h ./release/
+          cat >./release/install.sh<<EOF 
+          chmod +x ./taos
+          chmod +x ./taosd
+          chmod +x ./taosadapter
+          cp ./taos /bin/
+          cp ./taosd /bin/
+          cp ./taosadapter /bin/
+          cp ./libtaos.so.3.9.9.9 /usr/lib
+          cp ./librocksdb.so.8.1.1 /usr/lib
+          ln -sf /usr/lib/libtaos.so.3.9.9.9 /usr/lib/libtaos.so.1
+          ln -sf /usr/lib/libtaos.so.1 /usr/lib/libtaos.so
+          ln -sf /usr/lib/librocksdb.so.8.1.1 /usr/lib/librocksdb.so.8 ||:
+          ln -sf /usr/lib/librocksdb.so.8 /usr/lib/librocksdb.so ||:
+          cp ./taos.h /usr/include
+          EOF
+          tar -zcvf server.tar.gz ./release
+
   coverage:
     runs-on: ubuntu-latest
+    needs: build-tdengine
 
     steps:
+      - name: get cache server by push
+        if: github.event_name == 'push'
+        id: get-cache-server-push
+        uses: actions/cache@v3
+        with:
+          path: server.tar.gz
+          key: ${{ runner.os }}-build-main-${{ needs.build-tdengine.outputs.commit_id }}
+          restore-keys: |
+            ${{ runner.os }}-build-main-
+
+      - name: get cache server manually
+        if: github.event_name == 'workflow_dispatch'
+        id: get-cache-server-manually
+        uses: actions/cache@v3
+        with:
+          path: server.tar.gz
+          key: ${{ runner.os }}-build-${{ inputs.tdengine_branch }}-${{ needs.build-tdengine.outputs.commit_id }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ inputs.tdengine_branch }}-
+
+      - name: install TDengine
+        run: |
+          tar -zxvf server.tar.gz
+          cd release && sudo sh install.sh
+
       - uses: actions/checkout@v3
 
       - name: Set up Rust
@@ -19,7 +141,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           components: rustfmt, clippy, llvm-tools-preview
-          toolchain: nightly
+          toolchain: stable
           default: true
 
       - name: Install cargo-llvm-cov
@@ -46,51 +168,22 @@ jobs:
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
 
-      - name: Determine TDengine branch
-        uses: haya14busa/action-cond@v1
-        id: determine-branch
-        with:
-          cond: ${{ github.base_ref == 'main' }}
-          if_true: 'main'  
-          if_false: 'main' 
-
-      - name: Checkout tdengine
-        uses: actions/checkout@v2
-        with:
-          repository: "taosdata/TDengine"
-          path: "TDengine"
-          ref: ${{ steps.determine-branch.outputs.value }}
-
-      # - uses: actions/cache@v3
-      #   with:
-      #     path: |
-      #       TDengine/release/
-      #       TDengine/debug/
-      #       TDengine/contrib/cJson
-      #       TDengine/contrib/cpp-stub
-      #       TDengine/contrib/googletest
-      #       TDengine/contrib/libuv
-      #       TDengine/contrib/lz4
-      #       TDengine/contrib/zlib
-      #       TDengine/contrib/rocksdb
-      #     key: ${{ runner.os }}-TDengine-build-main
-
-      - name: Build & Install TDengine
-        env:
-          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+      - name: Copy taos.cfg
         run: |
-          cd TDengine
-          [ -d debug ] || mkdir debug
-          cd debug
-          cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=false
-          make -j4
-          sudo make install
-          nohup sudo sh -c 'TAOS_SUPPORT_VNODES=256 taosd' > /dev/null 2>&1 &
-          sleep 5
-          nohup sudo taosadapter > /dev/null 2>&1 &
+          sudo mkdir -p /etc/taos
+          sudo cp ./.github/workflows/taos.cfg /etc/taos/taos.cfg
+
+      - name: Start TDengine
+        run: |
+          mkdir -p /tmp/taos/v3/log /tmp/taos/v3/data
+
+          taosd &
+          TAOS_ADAPTER_LOG_PATH=/tmp/taos/v3/log taosadapter &
+
+          sleep 1
 
       - name: Generate code coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: RUST_BACKTRACE=1 cargo llvm-cov -j 2 --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3

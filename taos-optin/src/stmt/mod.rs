@@ -193,9 +193,12 @@ impl RawStmt {
     #[inline]
     pub fn err_as_str(&self) -> String {
         unsafe {
-            CStr::from_ptr((self.api.taos_stmt_errstr)(self.as_ptr()))
-                .to_string_lossy()
-                .to_string()
+            match self.api.taos_stmt_errstr {
+                Some(f) => CStr::from_ptr(f(self.as_ptr()))
+                    .to_string_lossy()
+                    .to_string(),
+                None => todo!(),
+            }
         }
     }
 
@@ -250,7 +253,10 @@ impl RawStmt {
     pub fn set_tbname<'c>(&mut self, name: impl IntoCStr<'c>) -> RawResult<()> {
         let name = name.into_c_str();
         let res = self.ok(unsafe {
-            (self.api.taos_stmt_set_tbname)(self.as_ptr(), name.into_c_str().as_ptr())
+            match self.api.taos_stmt_set_tbname {
+                Some(f) => f(self.as_ptr(), name.into_c_str().as_ptr()),
+                None => todo!(),
+            }
         });
         if !self.is_v3() {
             self.tbname = Some(name.into_owned());
@@ -271,11 +277,14 @@ impl RawStmt {
             self.ok(unsafe { (self.api.taos_stmt_set_tags.unwrap())(self.as_ptr(), tags as _) })
         } else {
             self.ok(unsafe {
-                (self.api.taos_stmt_set_tbname_tags)(
-                    self.as_ptr(),
-                    self.tbname.as_deref().unwrap().as_ptr(),
-                    tags as _,
-                )
+                match self.api.taos_stmt_set_tbname_tags {
+                    Some(f) => f(
+                        self.as_ptr(),
+                        self.tbname.as_deref().unwrap().as_ptr(),
+                        tags as _,
+                    ),
+                    None => todo!(),
+                }
             })
         }
     }
@@ -293,7 +302,12 @@ impl RawStmt {
 
     #[inline]
     pub fn affected_rows(&self) -> i32 {
-        unsafe { (self.api.taos_stmt_affected_rows)(self.as_ptr()) }
+        unsafe {
+            match self.api.taos_stmt_affected_rows {
+                Some(f) => f(self.as_ptr()),
+                None => todo!(),
+            }
+        }
     }
 
     #[inline]
@@ -345,10 +359,10 @@ impl RawStmt {
 
     #[inline]
     pub fn bind_param_batch(&mut self, bind: &[TaosMultiBind]) -> RawResult<()> {
-        err_or!(
-            self,
-            (self.api.taos_stmt_bind_param_batch)(self.as_ptr(), bind.as_ptr())
-        )
+        match self.api.taos_stmt_bind_param_batch {
+            Some(f) => err_or!(self, f(self.as_ptr(), bind.as_ptr())),
+            None => todo!(),
+        }
     }
 
     // #[inline]
@@ -363,6 +377,8 @@ impl RawStmt {
 mod tests {
 
     use crate::{Stmt, TaosBuilder};
+    use bytes::Bytes;
+    use taos_query::util::hex::*;
 
     #[test]
     fn test_tbname_tags() -> anyhow::Result<()> {
@@ -486,10 +502,10 @@ mod tests {
             "use test_bindable",
             "create table tb1 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,
             c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, c9 bigint unsigned,
-            c10 float, c11 double, c12 varchar(100), c13 nchar(100))",
+            c10 float, c11 double, c12 varchar(100), c13 nchar(100), c14 varbinary(50), c15 geometry(50))",
         ])?;
         let mut stmt = Stmt::init(&taos)?;
-        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
+        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
         let params = vec![
             ColumnView::from_millis_timestamp(vec![0]),
             ColumnView::from_bools(vec![true]),
@@ -505,6 +521,11 @@ mod tests {
             ColumnView::from_doubles(vec![0.]),
             ColumnView::from_varchar(vec!["ABC"]),
             ColumnView::from_nchar(vec!["涛思数据"]),
+            ColumnView::from_bytes(vec![hex_string_to_bytes("123456").to_vec()]),
+            ColumnView::from_geobytes(vec![hex_string_to_bytes(
+                "0101000000000000000000F03F0000000000000040",
+            )
+            .to_vec()]),
         ];
         let rows = stmt.bind(&params)?.add_batch()?.execute()?;
         assert_eq!(rows, 1);
@@ -524,6 +545,8 @@ mod tests {
             f64,
             String,
             String,
+            Bytes,
+            Bytes,
         )> = taos
             .query("select * from tb1")?
             .deserialize()
@@ -531,6 +554,11 @@ mod tests {
         let row = &rows[0];
         assert_eq!(row.12, "ABC");
         assert_eq!(row.13, "涛思数据");
+        assert_eq!(row.14, hex_string_to_bytes("123456"));
+        assert_eq!(
+            row.15,
+            hex_string_to_bytes("0101000000000000000000F03F0000000000000040")
+        );
         taos.query("drop database test_bindable")?;
 
         Ok(())
@@ -616,7 +644,8 @@ mod async_tests {
         .await?;
         let req_id = 1000;
         let mut stmt = Stmt::init_with_req_id(&taos, req_id).await?;
-        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").await?;
+        stmt.prepare("insert into tb1 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .await?;
         let params = vec![
             ColumnView::from_millis_timestamp(vec![0]),
             ColumnView::from_bools(vec![true]),
@@ -633,7 +662,13 @@ mod async_tests {
             ColumnView::from_varchar(vec!["ABC"]),
             ColumnView::from_nchar(vec!["涛思数据"]),
         ];
-        let rows = stmt.bind(&params).await?.add_batch().await?.execute().await?;
+        let rows = stmt
+            .bind(&params)
+            .await?
+            .add_batch()
+            .await?
+            .execute()
+            .await?;
         assert_eq!(rows, 1);
 
         let rows: Vec<(

@@ -87,14 +87,14 @@ impl Dsn {
                 (?P<driver>[\w.-]+)(\+(?P<protocol>[^@/?\#]+))?: # abc
                 (
                     # url-like dsn
-                    //((?P<username>[\w\-_%.]+)?(:(?P<password>[^@/?\#]+))?@)? # for authorization
-                        (((?P<protocol2>[\w.-]+)\()?
+                    //((?P<username>[\w\s\-_%.]+)?(:(?P<password>[^@/?\#]+))?@)? # for authorization
+                        (((?P<protocol2>[\w\s.-]+)\()?
                             (?P<addr>[\w\-_%.:]*(:\d{0,5})?(,[\w\-:_.]*(:\d{0,5})?)*)?  # for addresses
                         \)?)?
-                        (/(?P<subject>[\w %$@./-]+)?)?                             # for subject
+                        (/(?P<subject>[\w\s%$@.,/-]+)?)?                             # for subject
                     | # or
                     # path-like dsn
-                    (?P<path>([\\/.~]$|/\s*\w+[\w\s %$@*:.\\\-/]*|[\.~\w\s]?[\w\s %$@*:.\\\-/]+))
+                    (?P<path>([\\/.~]$|/\s*\w+[\w\s %$@*:,.\\\-/ _\(\)\[\]{}（）【】｛｝]*|[\.~\w\s]?[\w\s %$@*:,.\\\-/ _\(\)\[\]{}（）【】｛｝]+))
                 ) # abc
                 (\?(?P<params>(?s:.)*))?").unwrap();
         }
@@ -633,6 +633,44 @@ impl FromStr for Dsn {
     }
 }
 
+/// Returns if a dsn param value is true or false.
+///
+/// - Empty means true.
+/// - 1/t/true/yes/on/enable/enabled are true.
+/// - All others are false.
+///
+/// # Examples
+///
+/// ```rust
+/// use mdsn::value_is_true;
+///
+/// for s in ["", "1", "true", "t", "yes", "y", "on", "enable", "enabled"] {
+///     assert_eq!(value_is_true(s), true);
+/// }
+/// for s in ["0", "false", "f", "no", "n", "disable", "disabled", "any-other-str"] {
+///     assert_eq!(value_is_true(s), false);
+/// }
+/// ```
+pub fn value_is_true(s: impl AsRef<str>) -> bool {
+    matches!(
+        s.as_ref(),
+        "" | "1"
+            | "true"
+            | "t"
+            | "yes"
+            | "y"
+            | "on"
+            | "enable"
+            | "enabled"
+            | "T"
+            | "YES"
+            | "TRUE"
+            | "ON"
+            | "ENABLE"
+            | "ENABLED"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -776,6 +814,29 @@ mod tests {
             }
         );
         assert_eq!(dsn.to_string(), s);
+
+        let s = "taos://root@localhost:1234port";
+        let e = Dsn::from_str(s).expect_err("port error");
+        assert_eq!(
+            e.to_string(),
+            "invalid addresses: localhost:1234port, error: invalid digit found in string"
+        );
+
+        let s = "taos://root@localhost:";
+        let dsn = Dsn::from_str(s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                addresses: vec![Address {
+                    host: Some("localhost".to_string()),
+                    port: Some(0),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }
+        );
     }
     #[test]
     fn username_with_host() {
@@ -840,6 +901,19 @@ mod tests {
 
     #[test]
     fn username_with_multi_addresses() {
+        let s = "taos://root@host1:6030,,,,/db1";
+        let dsn = Dsn::from_str(s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                subject: Some("db1".to_string()),
+                addresses: vec![Address::new("host1", 6030)],
+                ..Default::default()
+            }
+        );
+
         let s = "taos://root@host1.domain:6030,host2.domain:6031";
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(
@@ -1037,6 +1111,37 @@ mod tests {
     }
 
     #[test]
+    fn path_special_chars() {
+        // support `Chinese characters`, `uppercase and lowercase letters`, `digits`, `spaces`, `%`, `$`, `@`, `.`, `-`, `_`, `(`, `)`, `[`, `]`, `{`, `}`, `（`, `）`, `【`, `】`, `｛`, `｝`
+        let s = "csv:./files/1718243049903/文件Aa1 %$@.-_()[]{}（）【】｛｝.csv";
+        let dsn = Dsn::from_str(s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "csv".to_string(),
+                path: Some(
+                    "./files/1718243049903/文件Aa1 %$@.-_()[]{}（）【】｛｝.csv".to_string()
+                ),
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), s);
+
+        // do not support other characters which are not in the list above(such as `&` .etc)
+        let s = "csv:./files/1718243049903/文件Aa1 %$@.-_()[]{}（）【】｛｝&.csv";
+        let dsn = Dsn::from_str(s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "csv".to_string(),
+                path: Some("./files/1718243049903/文件Aa1 %$@.-_()[]{}（）【】｛｝".to_string()),
+                ..Default::default()
+            }
+        );
+        assert_ne!(dsn.to_string(), s);
+    }
+
+    #[test]
     fn params() {
         let s = r#"taos://?abc=abc"#;
         let dsn = Dsn::from_str(s).unwrap();
@@ -1063,6 +1168,20 @@ mod tests {
             }
         );
         assert_eq!(dsn.to_string(), s);
+
+        let s = r#"taos://root@localhost?a%20b"#;
+        let dsn = Dsn::from_str(s).unwrap();
+        assert_eq!(
+            dsn,
+            Dsn {
+                driver: "taos".to_string(),
+                username: Some("root".to_string()),
+                addresses: vec![Address::from_host("localhost")],
+                params: (BTreeMap::from_iter(vec![("a b".to_string(), "".to_string())])),
+                ..Default::default()
+            }
+        );
+        assert_eq!(dsn.to_string(), "taos://root@localhost?a b=");
     }
 
     #[test]
@@ -1150,5 +1269,88 @@ mod tests {
         let dsn = Dsn::from_str(&format!("csv:./a b.csv?param=1")).unwrap();
         dbg!(&dsn);
         assert_eq!(dsn.path.unwrap(), "./a b.csv");
+    }
+
+    #[test]
+    fn unix_multiple_path() {
+        let dsn = Dsn::from_str(&format!("csv:./a b.csv,c d .csv?param=1")).unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.path.unwrap(), "./a b.csv,c d .csv");
+    }
+
+    #[test]
+    fn unit_path_with_utf8() {
+        let dsn = Dsn::from_str(&format!("csv:./文件 Aa1.csv?param=1")).unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.path.unwrap(), "./文件 Aa1.csv");
+    }
+
+    #[test]
+    fn with_space() {
+        let dsn = Dsn::from_str("pi:///Met1 ABC").unwrap();
+        assert_eq!(dsn.subject, Some("Met1 ABC".to_string()));
+
+        let dsn = Dsn::from_str("pi://u ser:pa ss@host:80/Met1 ABC").unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.subject, Some("Met1 ABC".to_string()));
+        assert_eq!(dsn.username, Some("u ser".to_string()));
+        assert_eq!(dsn.password, Some("pa ss".to_string()));
+    }
+
+    #[test]
+    fn test_protocols() {
+        let err = Dsn::from_str("taos+ws://https(127.0.0.1:6030)").expect_err("invalid protocol");
+        assert_eq!(err.to_string(), "invalid protocol ");
+    }
+
+    #[test]
+    fn test_address() {
+        let addr = Address::from_str("").unwrap();
+        assert!(addr.is_empty());
+        assert_eq!(addr.to_string(), "");
+        let addr = Address::from_str("192.168.1.32").unwrap();
+        assert!(!addr.is_empty());
+        assert_eq!(addr.host.expect("host set").as_str(), "192.168.1.32");
+
+        let addr = Address::from_str("192.168.1.32:0").unwrap();
+        assert!(!addr.is_empty());
+        assert_eq!(addr.host.expect("host set").as_str(), "192.168.1.32");
+        assert_eq!(addr.port.expect("port set"), 0);
+
+        let addr = Address::from_str("/path/to/file%20name").unwrap();
+        assert_eq!(addr.path.as_ref().expect("path set"), "/path/to/file name");
+        assert!(addr.host.is_none());
+        assert!(addr.port.is_none());
+        assert!(!addr.is_empty());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_address_panic() {
+        let addr = Address {
+            host: Some("localhost".to_string()),
+            port: Some(6030),
+            path: Some("/path/to/file".to_string()),
+        };
+        addr.to_string();
+    }
+
+    #[test]
+    fn test_value_is_true() {
+        for s in ["", "1", "true", "t", "yes", "y", "on", "enable", "enabled"] {
+            assert_eq!(value_is_true(s), true);
+        }
+        for s in [
+            "0",
+            "false",
+            "f",
+            "no",
+            "n",
+            "disable",
+            "disabled",
+            "any-other-str",
+        ] {
+            assert_eq!(value_is_true(s), false);
+        }
     }
 }
