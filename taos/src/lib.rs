@@ -24,6 +24,7 @@ pub use stmt::Stmt;
 mod stmt2;
 #[cfg(all(feature = "ws", feature = "optin"))]
 pub use stmt2::Stmt2;
+pub use stmt2::Stmt2BindData;
 
 #[cfg(all(feature = "ws", feature = "optin"))]
 mod tmq;

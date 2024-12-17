@@ -1,4 +1,5 @@
-use taos_query::{stmt2::Stmt2BindData, RawResult};
+pub use taos_query::stmt2::Stmt2BindData;
+use taos_query::RawResult;
 use taos_ws::Stmt2 as WsStmt2;
 
 use crate::{ResultSet, ResultSetInner, TaosInner};
