@@ -3,20 +3,21 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use chrono::Local;
 use flume::{Receiver, Sender};
 use rand::Rng;
-use taos::{AsyncQueryable, AsyncTBuilder, ColumnView, Stmt, Stmt2, TaosBuilder};
-use taos_query::stmt::AsyncBindable;
-use taos_query::stmt2::Stmt2BindData;
+use taos::{AsyncBindable, AsyncQueryable, AsyncTBuilder, ColumnView, Stmt, TaosBuilder};
 
+// Scenario: 10,000 subtables, each subtable has 10,000 records, a total of 100 million records.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let subtable_cnt = 100_0000;
-    let data_cnt = 1_0000_0000;
+    // 10,000 subtables
+    let subtable_cnt = 10000;
+    // 10,000 records per subtable
+    let record_cnt = 10000;
 
     let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
         .build()
         .await?;
 
-    let db = "db_202412131806";
+    let db = "db_202412171129";
 
     taos.exec_many([
         &format!("drop database if exists {db}"),
@@ -26,173 +27,117 @@ async fn main() -> anyhow::Result<()> {
     ])
     .await?;
 
-    create_subtables(db, subtable_cnt).await;
+    create_subtables(db, subtable_cnt).await?;
 
     let thread_cnt = 4;
-    let mut txs = vec![];
-    let mut rxs = vec![];
+    let mut senders = vec![];
+    let mut receivers = vec![];
+
     for _ in 0..thread_cnt {
-        let (tx, rx) = flume::bounded(64);
-        txs.push(tx);
-        rxs.push(rx);
+        let (sender, receiver) = flume::bounded(64);
+        senders.push(sender);
+        receivers.push(receiver);
     }
 
-    generate_datas(txs, data_cnt, subtable_cnt).await;
+    produce_data(senders, subtable_cnt, record_cnt).await;
 
-    stmt2_exec(rxs, db).await;
+    consume_data(db, receivers).await;
 
     taos.exec(format!("drop database {db}")).await?;
 
     Ok(())
 }
 
-async fn create_subtables(db: &str, subtable_cnt: usize) {
-    println!("create subtables start");
+async fn create_subtables(db: &str, subtable_cnt: usize) -> anyhow::Result<()> {
+    println!("Start creating subtables");
 
     let start = Instant::now();
-    let batch_cnt = 1_0000;
-    let thread_cnt = 10;
-    let thread_subtable_cnt = subtable_cnt / thread_cnt;
 
-    let mut tasks = vec![];
-
-    for i in (0..subtable_cnt).step_by(thread_subtable_cnt) {
-        let db = db.to_owned();
-        let task = tokio::spawn(async move {
-            let start = Instant::now();
-            println!("thread[{}] create subtables start", i / 10_0000);
-
-            let taos = TaosBuilder::from_dsn("ws://localhost:6041")
-                .unwrap()
-                .build()
-                .await
-                .unwrap();
-
-            taos.exec(format!("use {db}")).await.unwrap();
-
-            for j in (0..thread_subtable_cnt).step_by(batch_cnt) {
-                // creata table d0 using s0 tags(0) d1 using s0 tags(0) ...
-                let mut sql = String::with_capacity(25 * batch_cnt);
-                sql.push_str("create table ");
-                for k in 0..batch_cnt {
-                    sql.push_str(&format!("d{} using s0 tags(0) ", i + j + k));
-                }
-                taos.exec(sql).await.unwrap();
-            }
-
-            println!(
-                "thread[{}] create subtables done, elapsed = {:?}",
-                i / 10_0000,
-                start.elapsed()
-            );
-        });
-
-        tasks.push(task);
+    let mut sql = String::with_capacity(25 * subtable_cnt);
+    sql.push_str("create table ");
+    for i in 0..subtable_cnt {
+        sql.push_str(&format!("d{} using s0 tags(0) ", i));
     }
 
-    for task in tasks {
-        task.await.unwrap();
-    }
+    let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+        .build()
+        .await?;
 
-    println!("create subtables done, elapsed = {:?}\n", start.elapsed());
+    taos.exec_many(vec![format!("use {db}"), sql]).await?;
+
+    println!("End creating subtables, elapsed = {:?}\n", start.elapsed());
+
+    Ok(())
 }
 
-async fn generate_datas(
-    txs: Vec<Sender<Vec<(String, Vec<ColumnView>)>>>,
-    data_cnt: usize,
+async fn produce_data(
+    senders: Vec<Sender<(String, Vec<ColumnView>)>>,
     subtable_cnt: usize,
+    record_cnt: usize,
 ) {
-    let now = Local::now();
-    println!("generate datas start, start = {now}");
+    let thread_cnt = senders.len();
+    let thread_subtable_cnt = subtable_cnt / thread_cnt;
 
-    let start = Instant::now();
-
-    let batch_cnt = 1_0000;
-    // let bind_datas_cnt = data_cnt / batch_cnt;
-
-    let thread_cnt = 4;
-    // let thread_bind_data_cnt = bind_datas_cnt / thread_cnt;
-    // let thread_loop_cnt = data_cnt / thread_cnt / subtable_cnt;
-
-    // let mut tasks = Vec::with_capacity(thread_cnt);
-
-    for i in 0..thread_cnt {
-        let sender = txs[i % txs.len()].clone();
+    for i in (0..subtable_cnt).step_by(thread_subtable_cnt) {
+        let sender = senders[i].clone();
         tokio::spawn(async move {
-            let sender = sender;
-            println!("thread[{i}] generate datas start");
-            let start = Instant::now();
+            println!("Thread[{}] starts producing data", i / thread_subtable_cnt);
 
             let mut rng = rand::thread_rng();
-            // let mut bind_datas = Vec::with_capacity(thread_bind_data_cnt);
 
-            for _ in 0..25 {
+            for j in 0..thread_subtable_cnt {
+                let mut tss = Vec::with_capacity(record_cnt);
+                let mut c1s = Vec::with_capacity(record_cnt);
+                let mut c2s = Vec::with_capacity(record_cnt);
+                let mut c3s = Vec::with_capacity(record_cnt);
+
                 let ts = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_millis() as i64;
 
-                for k in (0..subtable_cnt).step_by(batch_cnt) {
-                    let mut datas = Vec::with_capacity(batch_cnt);
-                    for l in 0..batch_cnt {
-                        let c1 = rng.gen::<i32>();
-                        let c2: f32 = rng.gen_range(0.0..1000_0000.);
-                        let c2 = (c2 * 100.0).round() / 100.0;
-                        let c3: f32 = rng.gen_range(0.0..1000_0000.);
-                        let c3 = (c3 * 100.0).round() / 100.0;
+                for k in 0..record_cnt {
+                    let ts = ts + k as i64;
+                    let c1 = rng.gen::<i32>();
+                    let c2: f32 = rng.gen_range(0.0..1000_0000.);
+                    let c2 = (c2 * 100.0).round() / 100.0;
+                    let c3: f32 = rng.gen_range(0.0..1000_0000.);
+                    let c3 = (c3 * 100.0).round() / 100.0;
 
-                        let cols = vec![
-                            ColumnView::from_millis_timestamp(vec![ts]),
-                            ColumnView::from_ints(vec![c1]),
-                            ColumnView::from_floats(vec![c2]),
-                            ColumnView::from_floats(vec![c3]),
-                        ];
-
-                        let tbname = format!("d{}", k + l);
-                        // println!("tbname = {tbname}");
-                        // let data = Stmt2BindData::new(Some(tbname), None, Some(cols));
-                        let data = (tbname, cols);
-                        datas.push(data);
-                    }
-
-                    // bind_datas.push(datas);
-                    sender.send(datas).unwrap();
+                    tss.push(ts);
+                    c1s.push(c1);
+                    c2s.push(c2);
+                    c3s.push(c3);
                 }
+
+                let tbname = format!("d{}", i + j);
+                let cols = vec![
+                    ColumnView::from_millis_timestamp(tss),
+                    ColumnView::from_ints(c1s),
+                    ColumnView::from_floats(c2s),
+                    ColumnView::from_floats(c3s),
+                ];
+
+                sender.send((tbname, cols)).unwrap();
             }
 
-            println!(
-                "thread[{i}] generate datas done, elapsed = {:?}",
-                start.elapsed()
-            );
-
-            // bind_datas
+            println!("Thread[{}] ends producing data", i / thread_subtable_cnt);
         });
-
-        // tasks.push(task);
     }
-
-    // let mut bind_datas = Vec::with_capacity(bind_datas_cnt);
-    // for task in tasks {
-    //     bind_datas.extend(task.await.unwrap());
-    // }
-
-    // println!("generate {} datas", bind_datas.len());
-    println!("generate datas done, elapsed = {:?}\n", start.elapsed());
-
-    // bind_datas
 }
 
-async fn stmt2_exec(mut rxs: Vec<Receiver<Vec<(String, Vec<ColumnView>)>>>, db: &str) {
+async fn consume_data(db: &str, mut receivers: Vec<Receiver<(String, Vec<ColumnView>)>>) {
     let now = Local::now();
-    println!("stmt2 exec start, start = {now}");
-    let start = Instant::now();
+    let time = now.format("%Y-%m-%d %H:%M:%S").to_string();
+    println!("Start consuming data, time = {time}");
 
+    let start = Instant::now();
     let mut tasks = vec![];
 
-    // 4 threads
-    for i in 0..rxs.len() {
-        let rx = rxs.pop().unwrap();
+    for i in 0..receivers.len() {
         let db = db.to_owned();
+        let receiver = receivers.pop().unwrap();
+
         let task = tokio::spawn(async move {
             let taos = TaosBuilder::from_dsn("ws://localhost:6041")
                 .unwrap()
@@ -207,32 +152,28 @@ async fn stmt2_exec(mut rxs: Vec<Receiver<Vec<(String, Vec<ColumnView>)>>>, db: 
             let sql = "insert into s0 (tbname, ts, c1, c2, c3) values(?, ?, ?, ?, ?)";
             stmt.prepare(sql).await.unwrap();
 
-            let start = Instant::now();
-            println!("thread[{i}] stmt2 exec start");
+            println!("Thread[{i}] starts consuming data");
 
-            while let Ok(datas) = rx.recv() {
-                for (tbname, cols) in datas {
-                    stmt.set_tbname(&tbname).await.unwrap();
-                    stmt.bind(&cols).await.unwrap();
-                    stmt.add_batch().await.unwrap();
-                }
+            let start = Instant::now();
+
+            while let Ok((tbname, cols)) = receiver.recv_async().await {
+                stmt.set_tbname(&tbname).await.unwrap();
+                stmt.bind(&cols).await.unwrap();
                 stmt.execute().await.unwrap();
             }
 
             println!(
-                "thread[{i}] stmt2 exec done, elapsed = {:?}",
+                "Thread[{i}] ends consuming data, elapsed = {:?}",
                 start.elapsed()
             );
         });
 
         tasks.push(task);
-
-        // println!("Stmt2 exec took {:?}", elapsed.unwrap());
     }
 
     for task in tasks {
         task.await.unwrap();
     }
 
-    println!("stmt2 exec done, elapsed = {:?}", start.elapsed());
+    println!("End consuming data, elapsed = {:?}", start.elapsed());
 }
