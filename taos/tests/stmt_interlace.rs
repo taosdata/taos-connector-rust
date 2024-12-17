@@ -1,27 +1,22 @@
-use std::{
-    os::unix::thread,
-    time::{Instant, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::Local;
 use flume::{Receiver, Sender};
 use rand::Rng;
-use taos::{AsyncQueryable, AsyncTBuilder, ColumnView, Stmt2, TaosBuilder};
-use taos_query::stmt2::{AsyncBindable, Stmt2BindData};
+use taos::{AsyncQueryable, AsyncTBuilder, ColumnView, Stmt, Stmt2, TaosBuilder};
+use taos_query::stmt::AsyncBindable;
+use taos_query::stmt2::Stmt2BindData;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+#[tokio::test]
+async fn test_stmt_interlace() -> anyhow::Result<()> {
     let subtable_cnt = 100_0000;
     let data_cnt = 1_0000_0000;
-
-    // let subtable_cnt = 10_0000;
-    // let data_cnt = 1_000_0000;
 
     let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
         .build()
         .await?;
 
-    let db = "db_202412121942";
+    let db = "db_202412131806";
 
     taos.exec_many([
         &format!("drop database if exists {db}"),
@@ -103,7 +98,7 @@ async fn create_subtables(db: &str, subtable_cnt: usize) {
 }
 
 async fn generate_datas(
-    txs: Vec<Sender<Vec<Stmt2BindData>>>,
+    txs: Vec<Sender<Vec<(String, Vec<ColumnView>)>>>,
     data_cnt: usize,
     subtable_cnt: usize,
 ) {
@@ -155,7 +150,8 @@ async fn generate_datas(
 
                         let tbname = format!("d{}", k + l);
                         // println!("tbname = {tbname}");
-                        let data = Stmt2BindData::new(Some(tbname), None, Some(cols));
+                        // let data = Stmt2BindData::new(Some(tbname), None, Some(cols));
+                        let data = (tbname, cols);
                         datas.push(data);
                     }
 
@@ -186,7 +182,7 @@ async fn generate_datas(
     // bind_datas
 }
 
-async fn stmt2_exec(mut rxs: Vec<Receiver<Vec<Stmt2BindData>>>, db: &str) {
+async fn stmt2_exec(mut rxs: Vec<Receiver<Vec<(String, Vec<ColumnView>)>>>, db: &str) {
     let now = Local::now();
     println!("stmt2 exec start, start = {now}");
     let start = Instant::now();
@@ -206,21 +202,21 @@ async fn stmt2_exec(mut rxs: Vec<Receiver<Vec<Stmt2BindData>>>, db: &str) {
 
             taos.exec(format!("use {db}")).await.unwrap();
 
-            let mut stmt2 = Stmt2::init(&taos).await.unwrap();
+            let mut stmt = Stmt::init(&taos).await.unwrap();
 
             let sql = "insert into s0 (tbname, ts, c1, c2, c3) values(?, ?, ?, ?, ?)";
-            stmt2.prepare(sql).await.unwrap();
+            stmt.prepare(sql).await.unwrap();
 
             let start = Instant::now();
             println!("thread[{i}] stmt2 exec start");
 
             while let Ok(datas) = rx.recv() {
-                if let Err(err) = stmt2.bind(&datas).await {
-                    eprintln!("thread[{i}] bind data failed, err = {err:?}");
+                for (tbname, cols) in datas {
+                    stmt.set_tbname(&tbname).await.unwrap();
+                    stmt.bind(&cols).await.unwrap();
+                    stmt.add_batch().await.unwrap();
                 }
-
-                let affacted = stmt2.exec().await.unwrap();
-                assert_eq!(affacted, 10000);
+                stmt.execute().await.unwrap();
             }
 
             println!(
@@ -240,65 +236,3 @@ async fn stmt2_exec(mut rxs: Vec<Receiver<Vec<Stmt2BindData>>>, db: &str) {
 
     println!("stmt2 exec done, elapsed = {:?}", start.elapsed());
 }
-
-// async fn stmt2_exec(rxs: Vec<Receiver<Vec<Stmt2BindData>>>, db: &str) -> anyhow::Result<()> {
-//     let now = Local::now();
-//     println!("stmt2 exec start, start = {now}");
-
-//     let start = Instant::now();
-
-//     let thread_cnt = 10;
-//     let chunk_size = datas.len() / thread_cnt;
-
-//     let mut tasks = vec![];
-
-//     for (i, chunk) in datas.chunks(chunk_size).enumerate() {
-//         let chunk = chunk.to_vec();
-//         let db = db.to_owned();
-
-//         let task = tokio::spawn(async move {
-//             let taos = TaosBuilder::from_dsn("ws://localhost:6041")
-//                 .unwrap()
-//                 .build()
-//                 .await
-//                 .unwrap();
-
-//             taos.exec(format!("use {db}")).await.unwrap();
-
-//             let start = Instant::now();
-//             println!("thread[{i}] stmt2 exec start");
-
-//             let mut stmt2 = Stmt2::init(&taos).await.unwrap();
-
-//             let sql = "insert into s0 (tbname, ts, c1, c2, c3) values(?, ?, ?, ?, ?)";
-//             stmt2.prepare(sql).await.unwrap();
-
-//             for data in chunk {
-//                 if let Err(err) = stmt2.bind(&data).await {
-//                     eprintln!("thread[{i}] bind data failed, err = {err:?}");
-//                 }
-
-//                 let affacted = stmt2.exec().await.unwrap();
-//                 assert_eq!(affacted, 10000);
-//             }
-
-//             let elapsed = start.elapsed();
-//             println!("thread[{i}] stmt2 exec done, elapsed = {elapsed:?}");
-//             elapsed
-//         });
-
-//         tasks.push(task);
-//     }
-
-//     let durations: Vec<_> = futures::future::join_all(tasks)
-//         .await
-//         .into_iter()
-//         .filter_map(|res| res.ok())
-//         .collect();
-
-//     let elapsed = durations.iter().max();
-//     println!("Stmt2 exec took {:?}", elapsed.unwrap());
-//     println!("stmt2 exec done, elapsed = {:?}", start.elapsed());
-
-//     Ok(())
-// }

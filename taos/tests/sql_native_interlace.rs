@@ -4,7 +4,8 @@ use chrono::Local;
 use rand::Rng;
 use taos::sync::*;
 
-fn main() -> anyhow::Result<()> {
+#[test]
+fn test_sql_native_interlace() -> anyhow::Result<()> {
     let subtable_cnt = 100_0000;
     let data_cnt = 1_0000_0000;
 

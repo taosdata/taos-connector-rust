@@ -6,8 +6,8 @@ use rand::Rng;
 use taos::{AsyncBindable, AsyncQueryable, AsyncTBuilder, ColumnView, Stmt, TaosBuilder};
 
 // Scenario: 10,000 subtables, each subtable has 10,000 records, a total of 100 million records.
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+#[tokio::test]
+async fn test_stmt() -> anyhow::Result<()> {
     // 10,000 subtables
     let subtable_cnt = 10000;
     // 10,000 records per subtable
@@ -65,7 +65,7 @@ async fn create_subtables(db: &str, subtable_cnt: usize) -> anyhow::Result<()> {
 
     taos.exec_many(vec![format!("use {db}"), sql]).await?;
 
-    println!("End creating subtables, elapsed = {:?}\n", start.elapsed());
+    println!("End creating subtables, elapsed = {:?}", start.elapsed());
 
     Ok(())
 }
