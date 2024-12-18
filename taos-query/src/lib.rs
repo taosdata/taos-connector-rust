@@ -3,16 +3,15 @@
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::type_complexity)]
 
-use async_trait::async_trait;
-pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
-pub use serde::de::value::Error as DeError;
+use std::collections::BTreeMap;
+use std::fmt::{Debug, Display};
+use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
 use std::time::Duration;
-use std::{
-    collections::BTreeMap,
-    fmt::{Debug, Display},
-    ops::{Deref, DerefMut},
-    rc::Rc,
-};
+
+use async_trait::async_trait;
+pub use mdsn::{value_is_true, Address, Dsn, DsnError, IntoDsn};
+pub use serde::de::value::Error as DeError;
 
 mod error;
 
@@ -23,10 +22,9 @@ pub mod helpers;
 mod iter;
 pub mod util;
 
+pub use common::RawBlock;
 use common::*;
 pub use iter::*;
-
-pub use common::RawBlock;
 
 pub mod stmt;
 pub mod stmt2;
@@ -37,7 +35,6 @@ pub mod prelude;
 
 pub use prelude::sync::{Fetchable, Queryable};
 pub use prelude::{AsyncFetchable, AsyncQueryable};
-
 pub use taos_error::Error as RawError;
 use util::Edition;
 pub type RawResult<T> = std::result::Result<T, RawError>;
@@ -315,6 +312,7 @@ impl<T: TBuilder> Manager<T> {
     pub fn new(builder: T) -> Self {
         Self { manager: builder }
     }
+
     /// Build a connection manager from a DSN.
     #[inline]
     pub fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<(Self, BTreeMap<String, String>)> {

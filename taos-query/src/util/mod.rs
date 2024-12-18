@@ -19,9 +19,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 pub use inline_bytes::InlineBytes;
 pub use inline_json::InlineJson;
 pub use inline_nchar::InlineNChar;
-pub use inline_str::InlineStr;
-
 pub use inline_read::AsyncInlinableRead;
+pub use inline_str::InlineStr;
 pub use inline_write::AsyncInlinableWrite;
 
 pub use req_id::generate_req_id;
@@ -35,23 +34,23 @@ pub struct Edition {
 }
 
 impl Edition {
-    pub fn new(edition: impl Into<String>, expired: bool) -> Self {
+    pub fn new<T: Into<String>>(edition: T, expired: bool) -> Self {
         Self {
             edition: edition.into(),
             expired,
         }
     }
+
     pub fn is_enterprise_edition(&self) -> bool {
-        match (self.edition.as_str(), self.expired) {
-            ("cloud", _) => true,
-            ("official" | "trial", false) => true,
-            _ => false,
-        }
+        matches!(
+            (self.edition.as_str(), self.expired),
+            ("cloud", _) | ("official" | "trial", false)
+        )
     }
+
     pub fn assert_enterprise_edition(&self) -> RawResult<()> {
         match (self.edition.as_str(), self.expired) {
-            ("cloud", _) => Ok(()),
-            ("official" | "trial", false) => Ok(()),
+            ("cloud", _) | ("official" | "trial", false) => Ok(()),
             ("official" | "trial", true) => {
                 Err(RawError::from_string("your edition is expired".to_string()))
             }
@@ -228,7 +227,6 @@ pub trait InlinableRead: Read {
     /// | len: N bytes | data: len - N bytes |
     /// +--------------+-----------------+
     /// ```
-    ///
     fn read_len_with_data<const N: usize>(&mut self) -> std::io::Result<Vec<u8>> {
         let len = self.read_len_with_width::<N>()?;
         let mut buf = Vec::with_capacity(len);
@@ -237,6 +235,7 @@ pub trait InlinableRead: Read {
         self.read_exact(&mut buf[N..])?;
         Ok(buf)
     }
+
     #[inline]
     /// Read inlined bytes with specific length width `N`.
     ///

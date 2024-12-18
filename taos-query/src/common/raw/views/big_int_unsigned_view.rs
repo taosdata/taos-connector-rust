@@ -1,10 +1,13 @@
 use std::ffi::c_void;
 
-use bytes::Bytes;
-
 use crate::common::{BorrowedValue, Ty};
 
 use super::{IsColumnView, NullBits, NullsIter};
+use crate::common::{BorrowedValue, Ty};
+
+type Item = u64;
+type View = UBigIntView;
+const ITEM_SIZE: usize = std::mem::size_of::<Item>();
 
 #[derive(Debug, Clone)]
 pub struct UBigIntView {
@@ -12,16 +15,12 @@ pub struct UBigIntView {
     pub(crate) data: Bytes,
 }
 
-type Item = u64;
-type View = UBigIntView;
-const ITEM_SIZE: usize = std::mem::size_of::<Item>();
-
 impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::UBigInt
     }
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter(iter.map(|v| v.to_u64()))
+        iter.map(|v| v.to_u64()).collect()
     }
 }
 
@@ -36,12 +35,12 @@ impl std::ops::Add for &View {
     type Output = View;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -147,8 +146,7 @@ impl UBigIntView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(BorrowedValue::UBigInt)
-            .unwrap_or(BorrowedValue::Null(Ty::UBigInt))
+            .map_or(BorrowedValue::Null(Ty::UBigInt), BorrowedValue::UBigInt)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -206,12 +204,12 @@ impl UBigIntView {
     }
 
     pub fn concat(&self, rhs: &View) -> View {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -229,7 +227,7 @@ pub struct UBigIntViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for UBigIntViewIter<'a> {
+impl Iterator for UBigIntViewIter<'_> {
     type Item = Option<Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -253,7 +251,7 @@ impl<'a> Iterator for UBigIntViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for UBigIntViewIter<'a> {
+impl ExactSizeIterator for UBigIntViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

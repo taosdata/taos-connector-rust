@@ -1,36 +1,29 @@
 // use dlopen2::wrapper::{Container, WrapperApi};
 // use dlopen2::symbor::{Library, PtrOrNull, Ref, SymBorApi, Symbol};
+use std::borrow::Cow;
+use std::cell::UnsafeCell;
+use std::collections::HashMap;
+use std::ffi::{c_char, c_int, c_ulong, c_void, CStr, CString};
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex, Weak};
+use std::task::{Context, Poll, Waker};
+
 use dlopen2::raw::Library;
-use std::{
-    borrow::Cow,
-    cell::UnsafeCell,
-    collections::HashMap,
-    ffi::{c_char, c_int, c_ulong, c_void, CStr, CString},
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex, Weak},
-    task::{Context, Poll, Waker},
-};
+use taos_query::common::{c_field_t, raw_data_t, RawData, SmlData};
+use taos_query::prelude::{Code, Field, Precision, RawError};
+use taos_query::tmq::Assignment;
+use taos_query::RawBlock;
 use tracing::instrument;
 
-use taos_query::{
-    common::{c_field_t, raw_data_t, RawData, SmlData},
-    prelude::{Code, Field, Precision, RawError},
-    tmq::Assignment,
-    RawBlock,
-};
-
-use crate::{
-    err_or,
-    into_c_str::IntoCStr,
-    types::{
-        from_raw_fields, taos_async_fetch_cb, taos_async_query_cb, tmq_commit_cb, tmq_conf_res_t,
-        tmq_conf_t, tmq_list_t, tmq_res_t, tmq_resp_err_t, tmq_t, TaosMultiBind, TAOS, TAOS_RES,
-        TAOS_ROW, TAOS_STMT, TSDB_OPTION,
-    },
-    Auth,
-};
-
 use self::query_future::QueryFuture;
+use crate::into_c_str::IntoCStr;
+use crate::types::{
+    from_raw_fields, taos_async_fetch_cb, taos_async_query_cb, tmq_commit_cb, tmq_conf_res_t,
+    tmq_conf_t, tmq_list_t, tmq_res_t, tmq_resp_err_t, tmq_t, TaosMultiBind, TAOS, TAOS_RES,
+    TAOS_ROW, TAOS_STMT, TSDB_OPTION,
+};
+use crate::{err_or, Auth};
 
 mod query_future;
 
@@ -214,9 +207,9 @@ pub struct ApiEntry {
     >,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TmqListApi {
-    pub tmq_list_new: unsafe extern "C" fn() -> *mut tmq_list_t,
+#[derive(Clone, Copy, Debug)]
+pub struct TmqListApi {
+    tmq_list_new: unsafe extern "C" fn() -> *mut tmq_list_t,
     tmq_list_append: unsafe extern "C" fn(arg1: *mut tmq_list_t, arg2: *const c_char) -> i32,
     tmq_list_destroy: unsafe extern "C" fn(list: *mut tmq_list_t),
     tmq_list_get_size: unsafe extern "C" fn(list: *const tmq_list_t) -> i32,
@@ -224,25 +217,26 @@ pub(crate) struct TmqListApi {
 }
 
 impl TmqListApi {
-    pub(crate) unsafe fn new(&self) -> *mut tmq_list_t {
+    pub(crate) unsafe fn new_list(&self) -> *mut tmq_list_t {
         (self.tmq_list_new)()
     }
-    pub(crate) unsafe fn destroy(&self, list: *mut tmq_list_t) {
-        (self.tmq_list_destroy)(list)
+
+    pub(crate) unsafe fn destroy_list(&self, list: *mut tmq_list_t) {
+        (self.tmq_list_destroy)(list);
     }
 
-    pub(crate) unsafe fn from_c_str_iter<'a, T: IntoCStr<'a>>(
+    pub(crate) unsafe fn new_list_from_cstr<'a, T: IntoCStr<'a>>(
         &self,
         iter: impl IntoIterator<Item = T>,
     ) -> Result<*mut tmq_list_t, RawError> {
-        let list = self.new();
+        let list = self.new_list();
         for item in iter {
-            self.append(list, item)?;
+            self.append_list(list, item)?;
         }
         Ok(list)
     }
 
-    pub(crate) fn append<'a>(
+    pub(crate) fn append_list<'a>(
         &self,
         list: *mut tmq_list_t,
         item: impl IntoCStr<'a>,
@@ -255,18 +249,19 @@ impl TmqListApi {
         }
     }
 
-    pub(crate) fn len(&self, list: *mut tmq_list_t) -> i32 {
+    pub(crate) fn list_len(&self, list: *mut tmq_list_t) -> i32 {
         unsafe { (self.tmq_list_get_size)(list) }
     }
+
     pub(crate) fn as_c_str_slice(&self, list: *mut tmq_list_t) -> &[*mut c_char] {
-        let len = self.len(list) as usize;
+        let len = self.list_len(list) as usize;
         let data = unsafe { (self.tmq_list_to_c_array)(list) };
         unsafe { std::slice::from_raw_parts(data, len) }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct TmqConfApi {
+pub struct TmqConfApi {
     tmq_conf_new: unsafe extern "C" fn() -> *mut tmq_conf_t,
 
     tmq_conf_destroy: unsafe extern "C" fn(conf: *mut tmq_conf_t),
@@ -289,13 +284,15 @@ pub(crate) struct TmqConfApi {
 }
 
 impl TmqConfApi {
-    pub(crate) unsafe fn new(&self) -> *mut tmq_conf_t {
+    pub(crate) unsafe fn new_conf(&self) -> *mut tmq_conf_t {
         (self.tmq_conf_new)()
     }
-    pub(crate) unsafe fn destroy(&self, conf: *mut tmq_conf_t) {
-        (self.tmq_conf_destroy)(conf)
+
+    pub(crate) unsafe fn destroy_conf(&self, conf: *mut tmq_conf_t) {
+        (self.tmq_conf_destroy)(conf);
     }
-    pub(crate) unsafe fn set(
+
+    pub(crate) unsafe fn set_conf(
         &self,
         conf: *mut tmq_conf_t,
         k: &str,
@@ -306,16 +303,19 @@ impl TmqConfApi {
         (self.tmq_conf_set)(conf, key.as_ptr(), value.as_ptr()).ok(k, v)
     }
 
-    // pub(crate) unsafe fn auto_commit_cb(
-    //     &self,
-    //     conf: *mut tmq_conf_t,
-    //     cb: tmq_commit_cb,
-    //     param: *mut c_void,
-    // ) {
-    //     (self.tmq_conf_set_auto_commit_cb)(conf, cb, param)
-    // }
+    pub(crate) unsafe fn auto_commit_cb(
+        &self,
+        conf: *mut tmq_conf_t,
+        cb: tmq_commit_cb,
+        param: *mut c_void,
+    ) {
+        (self.tmq_conf_set_auto_commit_cb)(conf, cb, param);
+    }
 
-    pub(crate) unsafe fn consumer(&self, conf: *mut tmq_conf_t) -> Result<*mut tmq_t, RawError> {
+    pub(crate) unsafe fn new_consumer(
+        &self,
+        conf: *mut tmq_conf_t,
+    ) -> Result<*mut tmq_t, RawError> {
         let mut err = [0; 256];
         let tmq = (self.tmq_consumer_new)(conf, err.as_mut_ptr() as _, 255);
         if err[0] != 0 {
@@ -330,8 +330,8 @@ impl TmqConfApi {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TmqApi {
+#[derive(Clone, Copy, Debug)]
+pub struct TmqApi {
     tmq_get_res_type: unsafe extern "C" fn(res: *mut TAOS_RES) -> tmq_res_t,
     tmq_get_table_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
     tmq_get_db_name: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
@@ -421,9 +421,9 @@ pub(crate) struct TmqApi {
     pub(crate) list_api: TmqListApi,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
-pub(crate) struct StmtApi {
+pub struct StmtApi {
     pub(crate) taos_stmt_init: unsafe extern "C" fn(taos: *mut TAOS) -> *mut TAOS_STMT,
 
     pub(crate) taos_stmt_init_with_reqid:
@@ -485,6 +485,7 @@ pub(crate) struct StmtApi {
     pub(crate) taos_stmt_errstr:
         Option<unsafe extern "C" fn(stmt: *mut TAOS_STMT) -> *const c_char>,
 }
+
 const fn default_lib_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "taos.dll"
@@ -523,13 +524,12 @@ impl ApiEntry {
         } else {
             path.to_path_buf()
         };
-        // let path =
+
         let mut guard = RAW_LIBRARIES.lock().unwrap();
         let lib = if let Some(lib) = guard.get(&path) {
             lib.clone()
         } else {
             let lib = Library::open(path.as_os_str())?;
-
             let lib = Arc::new(lib);
             guard.insert(path, lib.clone());
             lib
@@ -770,6 +770,7 @@ impl ApiEntry {
             })
         }
     }
+
     pub fn version(&self) -> &str {
         &self.version
     }
@@ -819,18 +820,16 @@ impl ApiEntry {
                 tracing::trace!(cost = ?elapsed, "connect failed");
                 retries -= 1;
                 let err = self.check(ptr).unwrap_err();
-                if retries <= 0 {
+                if retries == 0 {
                     break Err(err);
                 }
                 if err.code() == 0x000B {
                     continue;
-                } else {
-                    break Err(err);
                 }
-            } else {
-                tracing::trace!(cost = ?elapsed, "connected");
-                break Ok(ptr);
+                break Err(err);
             }
+            tracing::trace!(cost = ?elapsed, "connected");
+            break Ok(ptr);
         }
     }
 
@@ -948,7 +947,7 @@ impl RawTaos {
             return Err(RawError::new_with_context(
                 code,
                 str.to_string(),
-                format!("Query with sql: {:?}", sql),
+                format!("Query with sql: {sql:?}"),
             ));
         }
         RawRes::from_ptr(self.c.clone(), ptr)
@@ -1176,9 +1175,9 @@ impl RawTaos {
 
     #[inline]
     pub fn put(&self, sml: &SmlData) -> Result<(), RawError> {
-        let data = sml.data().join("\n").to_string();
-        tracing::trace!("sml insert with data: {}", data.clone());
-        let length = data.clone().len() as i32;
+        let data = sml.data().join("\n");
+        tracing::trace!("sml insert with data: {}", data);
+        let length = data.len() as i32;
         let mut total_rows: i32 = 0;
         let res;
 
@@ -1385,9 +1384,7 @@ impl RawRes {
     #[inline]
     pub fn fetch_block(&self) -> Result<Option<(TAOS_ROW, i32, *const i32)>, RawError> {
         let block = Box::into_raw(Box::new(std::ptr::null_mut()));
-        // let mut num = 0;
         let num = unsafe { (self.c.taos_fetch_block)(self.as_ptr(), block) };
-        // taos_fetch_block(res, rows)
         if num > 0 {
             Ok(Some(unsafe { (*block, num, self.fetch_lengths_raw()) }))
         } else {
@@ -1496,7 +1493,7 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &Arc<UnsafeCell<BlockState>>,
+        state: &Rc<UnsafeCell<BlockState>>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         if self.c.is_v3() {
@@ -1512,7 +1509,7 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        _state: &Arc<UnsafeCell<BlockState>>,
+        _state: &Rc<UnsafeCell<BlockState>>,
         _cx: &mut Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let block = Box::into_raw(Box::new(std::ptr::null_mut()));
@@ -1538,8 +1535,8 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &Arc<UnsafeCell<BlockState>>,
-        cx: &mut Context<'_>,
+        state: &Rc<UnsafeCell<BlockState>>,
+        cx: &Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
         if current.in_use {
@@ -1562,7 +1559,7 @@ impl RawRes {
                             precision,
                         )
                     };
-                    raw.with_field_names(fields.iter().map(|f| f.name()));
+                    raw.with_field_names(fields.iter().map(Field::name));
                     raw
                 })
             });
@@ -1607,14 +1604,14 @@ impl RawRes {
                         state.result.replace(Ok(None));
                     }
                 }
-                param.2.wake()
+                param.2.wake();
             }
             unsafe {
                 (self.c.taos_fetch_rows_a)(
                     self.as_ptr(),
                     taos_optin_fetch_rows_callback as _,
                     Box::into_raw(param) as *mut _ as _,
-                )
+                );
             };
             Poll::Pending
         }
@@ -1624,8 +1621,8 @@ impl RawRes {
         &self,
         fields: &[Field],
         precision: Precision,
-        state: &Arc<UnsafeCell<BlockState>>,
-        cx: &mut Context<'_>,
+        state: &Rc<UnsafeCell<BlockState>>,
+        cx: &Context<'_>,
     ) -> Poll<Result<Option<RawBlock>, RawError>> {
         let current = unsafe { &mut *state.get() };
         // Do not do anything until callback received.
@@ -1639,14 +1636,14 @@ impl RawRes {
                     debug_assert!(rows > 0);
                     // has next block.
                     let mut raw = unsafe { RawBlock::parse_from_ptr(ptr as _, precision) };
-                    raw.with_field_names(fields.iter().map(|f| f.name()));
+                    raw.with_field_names(fields.iter().map(Field::name));
                     raw
                 })
             });
             Poll::Ready(item)
         } else {
             current.in_use = true;
-            let param = Box::new((Arc::downgrade(state), self.c.clone(), cx.waker().clone()));
+            let param = Box::new((Rc::downgrade(state), self.c.clone(), cx.waker().clone()));
             #[no_mangle]
             unsafe extern "C" fn taos_optin_fetch_raw_block_callback(
                 param: *mut c_void,
@@ -1680,7 +1677,7 @@ impl RawRes {
                             state.result.replace(Ok(None));
                         }
                     }
-                    param.2.wake()
+                    param.2.wake();
                 }
             }
             unsafe {
@@ -1688,7 +1685,7 @@ impl RawRes {
                     self.as_ptr(),
                     taos_optin_fetch_raw_block_callback as _,
                     Box::into_raw(param) as *mut _ as _,
-                )
+                );
             };
             Poll::Pending
         }

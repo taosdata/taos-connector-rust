@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
-use serde_with::NoneAsEmptyString;
+use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::common::{Precision, Ty};
 use taos_query::prelude::RawError;
 
@@ -108,11 +107,11 @@ impl WsSend {
             | WsSend::Stmt2Result { req_id, .. }
             | WsSend::Stmt2Close { req_id, .. } => *req_id,
             WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
-            WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
             WsSend::Fetch(args) | WsSend::FetchBlock(args) | WsSend::FreeResult(args) => {
                 args.req_id
             }
-            _ => unreachable!(),
+            WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
+            WsSend::Version => unreachable!(),
         }
     }
 }
@@ -359,7 +358,7 @@ impl<'de> Deserialize<'de> for BindType {
     }
 }
 
-pub(crate) trait ToMessage: Serialize {
+pub trait ToMessage: Serialize {
     fn to_msg(&self) -> tokio_tungstenite::tungstenite::Message {
         tokio_tungstenite::tungstenite::Message::Text(serde_json::to_string(self).unwrap())
     }

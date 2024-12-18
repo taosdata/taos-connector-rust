@@ -4,6 +4,7 @@ use std::io::Write;
 use std::mem::transmute;
 use std::ops::ControlFlow;
 use std::pin::Pin;
+// use std::io::Write;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::Poll;
@@ -30,8 +31,10 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{instrument, trace, Instrument};
 
-use super::{infra::*, TaosBuilder};
+use super::infra::*;
+use super::TaosBuilder;
 
+// type WsSender = flume::Sender<WsMessage<bytes::Bytes>>;
 type WsSender = flume::Sender<Message>;
 
 type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
@@ -157,6 +160,8 @@ pub(crate) struct QueryMetrics {
     pub(crate) time_cost_in_flume: Duration,
 }
 
+type BlockFuture = Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>;
+
 pub struct ResultSet {
     pub(crate) sender: WsQuerySender,
     pub(crate) args: WsResArgs,
@@ -166,8 +171,7 @@ pub struct ResultSet {
     pub(crate) precision: Precision,
     pub(crate) summary: (usize, usize),
     pub(crate) timing: Duration,
-    pub(crate) block_future:
-        Option<Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>>,
+    pub(crate) block_future: Option<BlockFuture>,
     pub(crate) closer: Option<oneshot::Sender<()>>,
     pub(crate) completed: bool,
     pub(crate) metrics: QueryMetrics,
@@ -185,7 +189,7 @@ impl Debug for ResultSet {
             .field("fields_count", &self.fields_count)
             .field("affected_rows", &self.affected_rows)
             .field("precision", &self.precision)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -195,7 +199,7 @@ impl Drop for ResultSet {
         let (sender, closer, args, completed) = (
             self.sender.clone(),
             self.closer.take(),
-            self.args.clone(),
+            self.args,
             self.completed,
         );
         let clean = move || {
@@ -283,15 +287,15 @@ impl Error {
             Error::IoError(_) => Code::new(WS_ERROR_NO::IO_ERROR as _),
             Error::TungsteniteError(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
-            // Error::RecvTimeout(_) => Code::new(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT as _),
             Error::FlumeSendError(_) => Code::new(WS_ERROR_NO::CONN_CLOSED as _),
             _ => Code::FAILED,
         }
     }
+
     pub fn errstr(&self) -> String {
         match self {
-            Error::TaosError(error) => error.message().to_string(),
-            _ => format!("{}", self),
+            Error::TaosError(error) => error.message(),
+            _ => format!("{self}"),
         }
     }
 }
@@ -351,7 +355,6 @@ async fn read_queries(
                     WsRecvData::Fetch(fetch) => {
                         let id = fetch.id;
                         if fetch.completed {
-                            let ws2 = ws2.clone();
                             tokio::spawn(async move {
                                 let _ = ws2
                                     .send_async(
@@ -360,7 +363,6 @@ async fn read_queries(
                                     .await;
                             });
                         }
-                        // dbg!(&queries_sender);
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
                             let _ = sender.send(ok.map(|_| data));
                         } else {
@@ -422,11 +424,11 @@ async fn read_queries(
                     let offset = if is_v3 { 16 } else { 8 };
 
                     let mut slice = block.as_slice();
-                    let mut is_block_new: bool = false;
+                    let mut is_block_new = false;
 
                     let timing = if is_v3 {
                         let timing = slice.read_u64().unwrap();
-                        if timing == std::u64::MAX {
+                        if timing == u64::MAX {
                             is_block_new = true;
                             Duration::ZERO
                         } else {
@@ -445,12 +447,11 @@ async fn read_queries(
                         let block_message = slice.read_inlined_str::<4>().unwrap();
                         let _result_id = slice.read_u64().unwrap();
                         let finished = slice.read_u8().unwrap() == 1;
-                        let result_block: Vec<u8>;
-                        if finished {
-                            result_block = Vec::<u8>::new();
+                        let result_block = if finished {
+                            Vec::new()
                         } else {
-                            result_block = slice.read_inlined_bytes::<4>().unwrap();
-                        }
+                            slice.read_inlined_bytes::<4>().unwrap()
+                        };
                         if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
                             sender
                                 .send(Ok(WsRecvData::BlockNew {
@@ -460,7 +461,7 @@ async fn read_queries(
                                     block_code,
                                     block_message,
                                     finished,
-                                    raw: result_block.to_vec(),
+                                    raw: result_block,
                                 }))
                                 .unwrap();
                         } else {
@@ -534,18 +535,14 @@ async fn read_queries(
                     let _ = ws2.send_async(Message::Pong(data)).await;
                 });
             }
-            Message::Pong(_) => {
-                // do nothing
-                tracing::trace!("received pong message, do nothing");
-            }
-            _ => {
-                // do nothing
+            Message::Pong(_) => tracing::trace!("received pong message, do nothing"),
+            Message::Frame(_) => {
                 tracing::warn!("received (unexpected) frame message, do nothing");
                 tracing::trace!("* frame data: {frame:?}");
             }
         }
 
-        return ControlFlow::Continue(());
+        ControlFlow::Continue(())
     };
     loop {
         tokio::select! {
@@ -618,11 +615,7 @@ pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
 }
 
 pub fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
-    match compare_versions(v1, v2) {
-        std::cmp::Ordering::Less => false,
-        std::cmp::Ordering::Equal => true,
-        std::cmp::Ordering::Greater => true,
-    }
+    !matches!(compare_versions(v1, v2), std::cmp::Ordering::Less)
 }
 
 pub fn is_support_binary_sql(v1: &str) -> bool {
@@ -635,8 +628,7 @@ impl WsTaos {
     /// ```text
     /// ws://localhost:6041/
     /// ```
-    ///
-    pub async fn from_dsn(dsn: impl IntoDsn) -> RawResult<Self> {
+    pub async fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
         let info = TaosBuilder::from_dsn(dsn)?;
         Self::from_wsinfo(&info).await
@@ -735,12 +727,11 @@ impl WsTaos {
                     sender
                         .send(Message::Pong(bytes))
                         .await
-                        .map_err(|err| RawError::from_any(err))?;
+                        .map_err(RawError::from_any)?;
                 }
                 _ => {
                     return Err(RawError::from_string(format!(
-                        "unexpected message on login: {:?}",
-                        message
+                        "unexpected message on login: {message:?}"
                     )));
                 }
             }
@@ -771,7 +762,7 @@ impl WsTaos {
                             tracing::error!("Write websocket ping error: {}", err);
                             break;
                         }
-                        let _ = sender.flush();
+                        let _ = sender.flush().await;
                     }
                     _ = rx.changed() => {
                         let _ = sender.close().await;
@@ -811,7 +802,6 @@ impl WsTaos {
             is_v3,
             close_listener,
         ));
-        let ws_cloned = ws.clone();
 
         Ok(Self {
             close_signal: tx,
@@ -820,8 +810,8 @@ impl WsTaos {
                     version,
                     is_support_binary_sql,
                 },
-                req_id: Default::default(),
-                sender: ws_cloned,
+                req_id: Arc::default(),
+                sender: ws,
                 queries: queries2_cloned,
                 results,
             },
@@ -845,7 +835,7 @@ impl WsTaos {
 
         let h = self
             .sender
-            .send_recv(WsSend::Binary(meta.into()))
+            .send_recv(WsSend::Binary(meta))
             .in_current_span();
         tokio::pin!(h);
         let mut interval = time::interval(Duration::from_secs(60));
@@ -905,7 +895,7 @@ impl WsTaos {
             let len = meta.len();
             tracing::trace!("write block with req_id: {req_id}, raw data len: {len}",);
 
-            match self.sender.send_recv(WsSend::Binary(meta.into())).await? {
+            match self.sender.send_recv(WsSend::Binary(meta)).await? {
                 WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
                 _ => Err(RawError::from_string("write raw block error"))?,
             }
@@ -935,7 +925,7 @@ impl WsTaos {
 
             match time::timeout(
                 Duration::from_secs(60),
-                self.sender.send_recv(WsSend::Binary(meta.into())),
+                self.sender.send_recv(WsSend::Binary(meta)),
             )
             .in_current_span()
             .await
@@ -954,16 +944,14 @@ impl WsTaos {
 
     pub async fn s_query(&self, sql: &str) -> RawResult<ResultSet> {
         let req_id = self.sender.req_id();
-        return self
-            .s_query_with_req_id(sql, req_id)
+        self.s_query_with_req_id(sql, req_id)
             .in_current_span()
-            .await;
+            .await
     }
 
     #[instrument(skip(self))]
     pub async fn s_query_with_req_id(&self, sql: &str, req_id: u64) -> RawResult<ResultSet> {
-        let req;
-        if self.is_support_binary_sql() {
+        let req = if self.is_support_binary_sql() {
             let mut req_vec = Vec::with_capacity(sql.len() + 30);
             req_vec.write_u64_le(req_id).map_err(Error::from)?;
             req_vec.write_u64_le(0).map_err(Error::from)?; //ResultID, uesless here
@@ -974,17 +962,14 @@ impl WsTaos {
                 .map_err(Error::from)?; //SQL length
             req_vec.write_all(sql.as_bytes()).map_err(Error::from)?;
 
-            req = self
-                .sender
-                .send_recv(WsSend::Binary(req_vec.into()))
-                .await?;
+            self.sender.send_recv(WsSend::Binary(req_vec)).await?
         } else {
             let action = WsSend::Query {
                 req_id,
                 sql: sql.to_string(),
             };
-            req = self.sender.send_recv(action).await?;
-        }
+            self.sender.send_recv(action).await?
+        };
 
         let resp = match req {
             WsRecvData::Query(resp) => resp,
@@ -1060,7 +1045,7 @@ impl WsTaos {
                                     metrics.time_cost_in_fetch += now.elapsed();
                                     let mut raw = RawBlock::parse_from_raw_block(raw, precision);
                                     raw.with_field_names(&names);
-                                    if let Err(_) = tx.send_async(Ok((raw, timing))).await {
+                                    if tx.send_async(Ok((raw, timing))).await.is_err() {
                                         break;
                                     }
                                 }
@@ -1075,14 +1060,14 @@ impl WsTaos {
                                     );
 
                                     raw.with_field_names(&names);
-                                    if let Err(_) = tx.send_async(Ok((raw, timing))).await {
+                                    if tx.send_async(Ok((raw, timing))).await.is_err() {
                                         break;
                                     }
                                 }
                                 Ok(_) => {}
                                 Err(err) => {
                                     metrics.time_cost_in_fetch += now.elapsed();
-                                    if let Err(_) = tx.send_async(Err(err)).await {
+                                    if tx.send_async(Err(err)).await.is_err() {
                                         break;
                                     }
                                 }
@@ -1109,7 +1094,7 @@ impl WsTaos {
                 block_future: None,
                 closer: Some(closer),
                 completed: false,
-                metrics: Default::default(),
+                metrics: QueryMetrics::default(),
                 blocks_buffer,
             })
         } else {
@@ -1128,7 +1113,7 @@ impl WsTaos {
                 block_future: None,
                 closer: Some(closer),
                 completed: true,
-                metrics: Default::default(),
+                metrics: QueryMetrics::default(),
                 blocks_buffer: None,
             })
         }
@@ -1150,7 +1135,7 @@ impl WsTaos {
         let action = WsSend::Insert {
             protocol: sml.protocol() as u8,
             precision: sml.precision().into(),
-            data: sml.data().join("\n").to_string(),
+            data: sml.data().join("\n"),
             ttl: sml.ttl(),
             req_id: sml.req_id(),
         };
@@ -1270,10 +1255,10 @@ impl ResultSet {
             Ok(Ok((raw, timing))) => {
                 self.timing = timing;
                 self.metrics.time_cost_in_flume += now.elapsed();
-                return Ok(Some(raw));
+                Ok(Some(raw))
             }
-            Ok(Err(err)) => return Err(err),
-            Err(_) => return Ok(None),
+            Ok(Err(err)) => Err(err),
+            Err(_) => Ok(None),
         }
     }
 
@@ -1418,9 +1403,10 @@ impl AsyncQueryable for WsTaos {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use flume::unbounded;
     use futures::TryStreamExt;
+
+    use super::*;
 
     #[test]
     fn test_errno() {
@@ -1441,9 +1427,9 @@ mod tests {
         let version_b: &str = "3.3.3.0";
         let version_c: &str = "2.6.0";
 
-        assert_eq!(is_support_binary_sql(version_a), false);
-        assert_eq!(is_support_binary_sql(version_b), true);
-        assert_eq!(is_support_binary_sql(version_c), false);
+        assert!(!is_support_binary_sql(version_a));
+        assert!(is_support_binary_sql(version_b));
+        assert!(!is_support_binary_sql(version_c));
 
         Ok(())
     }

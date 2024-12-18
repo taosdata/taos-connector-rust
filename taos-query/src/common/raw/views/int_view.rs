@@ -1,10 +1,10 @@
 use std::ffi::c_void;
 
-use bytes::Bytes;
-
 use crate::common::{BorrowedValue, Ty};
 
 use super::{IsColumnView, NullBits, NullsIter};
+
+use bytes::Bytes;
 
 type Item = i32;
 type View = IntView;
@@ -20,8 +20,9 @@ impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::Int
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter(iter.map(|v| v.to_i32()))
+        iter.map(|v| v.to_i32()).collect()
     }
 }
 
@@ -36,12 +37,12 @@ impl std::ops::Add for &View {
     type Output = View;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -153,8 +154,7 @@ impl IntView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(BorrowedValue::Int)
-            .unwrap_or(BorrowedValue::Null(Ty::Int))
+            .map_or(BorrowedValue::Null(Ty::Int), BorrowedValue::Int)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -207,12 +207,12 @@ impl IntView {
     }
 
     pub fn concat(&self, rhs: &View) -> View {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -230,7 +230,7 @@ pub struct IntViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for IntViewIter<'a> {
+impl Iterator for IntViewIter<'_> {
     type Item = Option<Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -254,7 +254,7 @@ impl<'a> Iterator for IntViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for IntViewIter<'a> {
+impl ExactSizeIterator for IntViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

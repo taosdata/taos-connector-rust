@@ -9,8 +9,9 @@ enum TaosBuilderInner {
     Native(crate::sys::TaosBuilder),
     Ws(taos_ws::TaosBuilder),
 }
+
 #[derive(Debug)]
-pub(super) enum TaosInner {
+pub enum TaosInner {
     Native(crate::sys::Taos),
     Ws(taos_ws::Taos),
 }
@@ -19,8 +20,10 @@ pub(super) enum ResultSetInner {
     Native(crate::sys::ResultSet),
     Ws(taos_ws::ResultSet),
 }
+
 #[derive(Debug)]
 pub struct TaosBuilder(TaosBuilderInner);
+
 #[derive(Debug)]
 pub struct Taos(pub(super) TaosInner);
 
@@ -49,7 +52,6 @@ impl taos_query::TBuilder for TaosBuilder {
         if dsn.params.contains_key("token") {
             dsn.protocol = Some("ws".to_string());
         }
-        // dbg!(&dsn);
         use taos_query::TBuilder;
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(
@@ -75,13 +77,13 @@ impl taos_query::TBuilder for TaosBuilder {
                 TaosInner::Native(taos) => {
                     Ok(<sys::TaosBuilder as taos_query::TBuilder>::ping(b, taos)?)
                 }
-                _ => unreachable!(),
+                TaosInner::Ws(_) => unreachable!(),
             },
             TaosBuilderInner::Ws(b) => match &mut conn.0 {
                 TaosInner::Ws(taos) => Ok(<taos_ws::TaosBuilder as taos_query::TBuilder>::ping(
                     b, taos,
                 )?),
-                _ => unreachable!(),
+                TaosInner::Native(_) => unreachable!(),
             },
         }
     }
@@ -171,11 +173,11 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         match &self.0 {
             TaosBuilderInner::Native(b) => match &mut conn.0 {
                 TaosInner::Native(taos) => Ok(b.ping(taos).await?),
-                _ => unreachable!(),
+                TaosInner::Ws(_) => unreachable!(),
             },
             TaosBuilderInner::Ws(b) => match &mut conn.0 {
                 TaosInner::Ws(taos) => Ok(b.ping(taos).await?),
-                _ => unreachable!(),
+                TaosInner::Native(_) => unreachable!(),
             },
         }
     }
@@ -260,10 +262,10 @@ impl AsyncFetchable for ResultSet {
     fn update_summary(&mut self, nrows: usize) {
         match &mut self.0 {
             ResultSetInner::Native(rs) => {
-                <crate::sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
+                <crate::sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows);
             }
             ResultSetInner::Ws(rs) => {
-                <taos_ws::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
+                <taos_ws::ResultSet as AsyncFetchable>::update_summary(rs, nrows);
             }
         }
     }
@@ -318,10 +320,10 @@ impl taos_query::Fetchable for ResultSet {
     fn update_summary(&mut self, nrows: usize) {
         match &mut self.0 {
             ResultSetInner::Native(rs) => {
-                <crate::sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
+                <crate::sys::ResultSet as AsyncFetchable>::update_summary(rs, nrows);
             }
             ResultSetInner::Ws(rs) => {
-                <taos_ws::ResultSet as AsyncFetchable>::update_summary(rs, nrows)
+                <taos_ws::ResultSet as AsyncFetchable>::update_summary(rs, nrows);
             }
         }
     }
@@ -393,9 +395,9 @@ impl AsyncQueryable for Taos {
             if let Err(err) = ok {
                 if err.to_string().contains("0x032C") {
                     tokio::time::sleep(Duration::from_millis(100)).await;
-                } else {
-                    break Err(err);
+                    continue;
                 }
+                break Err(err);
             }
             break Ok(());
         }
@@ -523,10 +525,8 @@ mod tests {
 
     use std::str::FromStr;
 
-    use taos_query::common::SchemalessPrecision;
-    use taos_query::common::SchemalessProtocol;
-    use taos_query::common::SmlDataBuilder;
-    use taos_query::{common::Timestamp, RawResult, TBuilder};
+    use taos_query::common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder, Timestamp};
+    use taos_query::{RawResult, TBuilder};
 
     use super::TaosBuilder;
 
@@ -1148,8 +1148,9 @@ mod tests {
 
     #[test]
     fn test_ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
-        use crate::TmqBuilder;
         use taos_query::prelude::sync::*;
+
+        use crate::TmqBuilder;
 
         std::env::set_var("RUST_LOG", "taos=trace");
         // pretty_env_logger::init();
@@ -1252,14 +1253,10 @@ mod tests {
 #[cfg(test)]
 mod async_tests {
     use anyhow::Context;
-    use taos_query::common::SchemalessPrecision;
-    use taos_query::common::SchemalessProtocol;
-    use taos_query::common::SmlDataBuilder;
+    use taos_query::common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder};
     use taos_query::RawResult;
 
-    use crate::AsyncQueryable;
-    use crate::AsyncTBuilder;
-    use crate::TaosBuilder;
+    use crate::{AsyncQueryable, AsyncTBuilder, TaosBuilder};
 
     #[tokio::test()]
     #[ignore]
@@ -1684,7 +1681,7 @@ mod async_tests {
 
         let sql = // create child table
         r#"create table if not exists `subtable00000000001` using `tb0001` (`varchar`,`aid`,`bid`) tags("涛思数据-涛思数据-涛思数据-涛思数据-涛思数据-涛思数据-涛思数据-涛思数据",1,2)"#;
-        match taos.exec_with_req_id(&sql, 0).await {
+        match taos.exec_with_req_id(sql, 0).await {
             Err(e) => {
                 dbg!(&e);
                 assert_eq!(e.code(), 0x2653);

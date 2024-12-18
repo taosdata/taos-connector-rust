@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
-use taos_query::common::SmlData;
+use taos_query::common::{RawMeta, SmlData};
 use taos_query::prelude::RawResult;
-use taos_query::{common::RawMeta, AsyncQueryable};
+use taos_query::AsyncQueryable;
 
 pub mod asyn;
 pub(crate) mod infra;
 // pub mod sync;
 
-pub use asyn::Error;
-pub use asyn::ResultSet;
 pub(crate) use asyn::WsTaos;
+pub use asyn::{Error, ResultSet};
 pub(crate) use infra::WsConnReq;
 
 use crate::TaosBuilder;
@@ -148,9 +147,10 @@ impl taos_query::Queryable for Taos {
 
 #[cfg(test)]
 mod tests {
-    use crate::TaosBuilder;
     use bytes::Bytes;
     use taos_query::util::hex::*;
+
+    use crate::TaosBuilder;
 
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {

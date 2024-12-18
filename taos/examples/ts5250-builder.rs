@@ -1,9 +1,6 @@
-use std::{
-    ops::Deref,
-    time::{Duration, Instant},
-};
+use std::ops::Deref;
+use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local};
 use sync::MessageSet;
 use taos::*;
 
@@ -43,8 +40,8 @@ async fn main() -> anyhow::Result<()> {
      */
 
     // subscribe
-    let group = chrono::Local::now().timestamp_nanos();
-    let tmq = TmqBuilder::from_dsn(&format!(
+    let group = chrono::Local::now().timestamp_nanos_opt().unwrap();
+    let tmq = TmqBuilder::from_dsn(format!(
         "taos://localhost:6030/ts5250?group.id={group}&experimental.snapshot.enable=true&auto.offset.reset=earliest",
     ))?;
     println!("group id: {}", group);
@@ -54,14 +51,13 @@ async fn main() -> anyhow::Result<()> {
     // let assignment = consumer.assignments().await;
     // println!("assignments: {:?}", assignment);
 
-    let mut blocks_cost = Duration::ZERO;
+    let blocks_cost = Duration::ZERO;
     {
         let mut stream = consumer.stream();
         println!("start consuming");
 
         let begin = Instant::now();
 
-        let mut count = 0;
         let mut mid = 0;
         while let Some((offset, message)) = stream.try_next().await? {
             println!("{mid} offset: {:?}", offset);
@@ -72,21 +68,21 @@ async fn main() -> anyhow::Result<()> {
                     let raw = meta.as_raw_meta().await?;
                     let bytes = raw.as_bytes();
                     let path = format!("raw_{}.bin", mid);
-                    std::fs::write(path, &bytes.deref())?;
+                    std::fs::write(path, bytes.deref())?;
                 }
                 MessageSet::Data(data) => {
                     println!("{mid} data: {:?}", data);
                     let raw = data.as_raw_data().await?;
                     let bytes = raw.as_bytes();
                     let path = format!("raw_{}.bin", mid);
-                    std::fs::write(path, &bytes.deref())?;
+                    std::fs::write(path, bytes.deref())?;
                 }
-                MessageSet::MetaData(meta, data) => {
+                MessageSet::MetaData(meta, ..) => {
                     println!("{mid} meta data: {:?}", meta);
                     let raw = meta.as_raw_meta().await?;
                     let bytes = raw.as_bytes();
                     let path = format!("raw_{}.bin", mid);
-                    std::fs::write(path, &bytes.deref())?;
+                    std::fs::write(path, bytes.deref())?;
                 }
             }
             mid += 1;

@@ -1,35 +1,6 @@
 //! TMQ consumer.
 //!
-use anyhow::bail;
-use futures::{SinkExt, StreamExt};
-use itertools::Itertools;
-// use scc::HashMap;
-use dashmap::DashMap as HashMap;
-
-use taos_query::common::{JsonMeta, RawMeta};
-use taos_query::prelude::{Code, RawError};
-use taos_query::tmq::{
-    AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsData, IsOffset,
-    MessageSet, SyncOnAsync, Timeout, VGroupId,
-};
-use taos_query::util::{Edition, InlinableRead};
-use taos_query::RawResult;
-use taos_query::{DeError, DsnError, IntoDsn, RawBlock, TBuilder};
-use thiserror::Error;
-use tracing::warn;
-
-use tokio::sync::{oneshot, watch, Mutex};
-
-use tokio::time;
-use tokio_tungstenite::tungstenite::protocol::Message;
-use tokio_tungstenite::tungstenite::Error as WsError;
-
-use crate::query::asyn::is_support_binary_sql;
-use crate::query::asyn::WS_ERROR_NO;
-use crate::query::infra::{ToMessage, WsConnReq, WsRecv, WsRecvData, WsSend};
-
-use crate::TaosBuilder;
-use messages::*;
+mod messages;
 
 use std::collections::VecDeque;
 use std::fmt::Debug;
@@ -38,7 +9,29 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-mod messages;
+use anyhow::bail;
+use dashmap::DashMap as HashMap;
+use futures::{SinkExt, StreamExt};
+use itertools::Itertools;
+use messages::*;
+use taos_query::common::{Field, JsonMeta, RawMeta};
+use taos_query::prelude::{Code, RawError};
+use taos_query::tmq::{
+    AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsData, IsOffset,
+    MessageSet, SyncOnAsync, Timeout, VGroupId,
+};
+use taos_query::util::{Edition, InlinableRead};
+use taos_query::{DeError, DsnError, IntoDsn, RawBlock, RawResult, TBuilder};
+use thiserror::Error;
+use tokio::sync::{oneshot, watch, Mutex};
+use tokio::time;
+use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::tungstenite::Error as WsError;
+use tracing::warn;
+
+use crate::query::asyn::{is_support_binary_sql, WS_ERROR_NO};
+use crate::query::infra::{ToMessage, WsConnReq, WsRecv, WsRecvData, WsSend};
+use crate::TaosBuilder;
 
 type WsSender = tokio::sync::mpsc::Sender<Message>;
 type WsTmqAgent = Arc<HashMap<ReqId, oneshot::Sender<RawResult<TmqRecvData>>>>;
@@ -201,7 +194,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
     }
 
     async fn server_version(&self) -> RawResult<&str> {
-        match self.server_version.get().map(|x| x.as_str()) {
+        match self.server_version.get().map(String::as_str) {
             Some(v) => Ok(v),
             None => {
                 use taos_query::prelude::AsyncQueryable;
@@ -214,7 +207,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
                 }
                 self.server_version
                     .get()
-                    .map(|x| x.as_str())
+                    .map(String::as_str)
                     .ok_or_else(|| RawError::from_string("Server version is unknown"))
             }
         }
@@ -233,7 +226,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         // Ensure server is ready.
         taos.exec("select server_version()").await?;
 
-        match self
+        if self
             .info
             .addr
             .matches(".cloud.tdengine.com")
@@ -246,11 +239,8 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
                 .next()
                 .is_some()
         {
-            true => {
-                let edition = Edition::new("cloud", false);
-                return Ok(edition);
-            }
-            false => (),
+            let edition = Edition::new("cloud", false);
+            return Ok(edition);
         }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
@@ -294,16 +284,14 @@ impl WsMessageBase {
             self.fetch_raw_block_old().await
         }
     }
-    async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
-        let mut raw_blocks_ref_mut = self.raw_blocks.lock().await;
-        let raw_blocks_option = &mut *raw_blocks_ref_mut;
 
+    async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
+        let raw_blocks_option = &mut *self.raw_blocks.lock().await;
         if let Some(raw_blocks) = raw_blocks_option {
             if !raw_blocks.is_empty() {
                 return Ok(raw_blocks.pop_front());
-            } else {
-                return Ok(None);
             }
+            return Ok(None);
         }
 
         let req_id = self.sender.req_id();
@@ -317,12 +305,12 @@ impl WsMessageBase {
         if let TmqRecvData::Bytes(bytes) = data {
             let raw = RawBlock::parse_from_multi_raw_block(bytes)
                 .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
-            if raw.len() > 0 {
+            if !raw.is_empty() {
                 raw_blocks_option.replace(raw);
                 return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
             }
         }
-        return Ok(None);
+        Ok(None)
     }
     async fn fetch_raw_block_old(&self) -> RawResult<Option<RawBlock>> {
         let req_id = self.sender.req_id();
@@ -349,15 +337,7 @@ impl WsMessageBase {
         let data = self.sender.send_recv(msg).await?;
         if let TmqRecvData::Bytes(bytes) = data {
             let mut raw = RawBlock::parse_from_raw_block(bytes, fetch.precision);
-
-            // for row in 0..raw.nrows() {
-            //     for col in 0..raw.ncols() {
-            //         tracing::trace!("at ({}, {})", row, col);
-            //         let v = unsafe { raw.get_ref_unchecked(row, col) };
-            //         println!("({}, {}): {:?}", row, col, v);
-            //     }
-            // }
-            raw.with_field_names(fetch.fields().iter().map(|f| f.name()));
+            raw.with_field_names(fetch.fields().iter().map(Field::name));
             if let Some(name) = fetch.table_name {
                 raw.with_table_name(name);
             }
@@ -573,7 +553,6 @@ impl Consumer {
             };
 
             let data = self.sender.send_recv(action).await?;
-
             match data {
                 TmqRecvData::Poll(TmqPoll {
                     message_id,
@@ -621,17 +600,14 @@ impl Consumer {
                                 ),
                             )),
                             MessageType::Invalid => unreachable!(),
-                            // _ => unreachable!(),
                         };
-                    } else {
-                        // tokio::time::sleep(Duration::from_millis(500)).await;
-                        continue;
                     }
                 }
                 _ => unreachable!(),
             }
         }
     }
+
     pub(crate) async fn poll_timeout(
         &self,
         timeout: Duration,
@@ -652,9 +628,7 @@ impl Consumer {
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
     type Offset = Offset;
-
     type Meta = Meta;
-
     type Data = Data;
 
     async fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
@@ -665,7 +639,7 @@ impl AsAsyncConsumer for Consumer {
         let req_id = self.sender.req_id();
         let action = TmqSend::Subscribe {
             req_id,
-            req: self.tmq_conf.clone(),
+            req: Box::new(self.tmq_conf.clone()),
             topics: self.topics.clone(),
             conn: self.conn.clone(),
         };
@@ -680,7 +654,7 @@ impl AsAsyncConsumer for Consumer {
                 // subscribe conf error -2.
                 let action = TmqSend::Subscribe {
                     req_id: self.sender.req_id(),
-                    req: self.tmq_conf.clone().disable_batch_meta(),
+                    req: Box::new(self.tmq_conf.clone().disable_batch_meta()),
                     topics: self.topics.clone(),
                     conn: self.conn.clone(),
                 };
@@ -971,7 +945,7 @@ impl AsConsumer for Consumer {
     }
 
     fn unsubscribe(self) {
-        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::unsubscribe(self))
+        taos_query::block_in_place_or_global(<Consumer as AsAsyncConsumer>::unsubscribe(self));
     }
 }
 
@@ -989,14 +963,13 @@ impl TmqBuilder {
         let auto_commit = dsn
             .params
             .get("enable.auto.commit")
-            .map(|s| {
+            .map_or("false".to_string(), |s| {
                 if s.is_empty() {
                     "false".to_string()
                 } else {
                     s.to_string()
                 }
-            })
-            .unwrap_or("false".to_string());
+            });
         let auto_commit_interval_ms = dsn.params.get("auto.commit.interval.ms").and_then(|s| {
             if s.is_empty() {
                 None
@@ -1281,33 +1254,30 @@ impl TmqBuilder {
                                                         }
                                                     }
                                                 }
-                                                if let Err(err) = sender.send(ok.map(|_|recv)) {
-                                                    if let Ok(data) = err {
-                                                        tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data);
-                                                        if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
-                                                            if !have_message {
-                                                                polling_mutex2.store(false, Ordering::Release);
-                                                                continue;
+                                                if let Err(Ok(data)) = sender.send(ok.map(|_|recv)) {
+                                                    tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data);
+                                                    if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
+                                                        if !have_message {
+                                                            polling_mutex2.store(false, Ordering::Release);
+                                                            continue;
+                                                        }
+                                                    }
+
+                                                    if let Err(err) = cache_tx.send(data) {
+                                                        tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
+
+                                                        let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                        for k in keys {
+                                                            if let Some((_, sender)) = queries_sender.remove(&k) {
+                                                                let _ = sender.send(Err(RawError::new(
+                                                                    WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                                    "Consumer messages lost",
+                                                                )));
                                                             }
                                                         }
-
-                                                        if let Err(err) = cache_tx.send(data) {
-                                                            tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
-
-                                                            let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                                            for k in keys {
-                                                                if let Some((_, sender)) = queries_sender.remove(&k) {
-                                                                    let _ = sender.send(Err(RawError::new(
-                                                                        WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                                        format!("Consumer messages lost"),
-                                                                    )));
-                                                                }
-                                                            }
-                                                            break 'ws;
-                                                        } else {
-                                                            polling_mutex2.store(true, Ordering::Release);
-                                                        };
+                                                        break 'ws;
                                                     }
+                                                    polling_mutex2.store(true, Ordering::Release);
                                                 }
                                             }  else {
                                                 if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &recv {
@@ -1324,14 +1294,13 @@ impl TmqBuilder {
                                                         if let Some((_, sender)) = queries_sender.remove(&k) {
                                                             let _ = sender.send(Err(RawError::new(
                                                                 WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                                format!("Consumer messages lost"),
+                                                                "Consumer messages lost",
                                                             )));
                                                         }
                                                     }
                                                     break 'ws;
-                                                } else {
-                                                    polling_mutex2.store(true, Ordering::Release);
                                                 }
+                                                polling_mutex2.store(true, Ordering::Release);
                                             }
                                         },
                                         TmqRecvData::FetchJsonMeta { data }=> {
@@ -1345,7 +1314,7 @@ impl TmqBuilder {
                                                 tracing::warn!("poll message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::FetchRaw { meta: _ }=> {
+                                        TmqRecvData::FetchRaw { .. }=> {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 if let Err(err) = sender.send(ok.map(|_|recv)) {
@@ -1375,7 +1344,7 @@ impl TmqBuilder {
                                                 tracing::warn!("poll message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::FetchBlock{ data: _ }=> {
+                                        TmqRecvData::FetchBlock{ .. }=> {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                                 let _ = sender.send(Err(RawError::new(
                                                     WS_ERROR_NO::WEBSOCKET_ERROR.as_code(),
@@ -1438,12 +1407,10 @@ impl TmqBuilder {
                                     use taos_query::util::InlinableRead;
 
                                     let timing = slice.read_u64().unwrap();
-                                    let req_id: u64;
                                     let part: Vec<u8>;
-                                    if timing != std::u64::MAX{
+                                    if timing != u64::MAX{
                                         let offset = 16;
                                         part = slice[offset..].to_vec();
-                                        req_id = slice.read_u64().unwrap();
                                     } else {
                                         // new version
                                         let offset = 26;
@@ -1451,12 +1418,12 @@ impl TmqBuilder {
                                         let _action = slice.read_u64().unwrap();
                                         let _version = slice.read_u16().unwrap();
                                         let _time = slice.read_u64().unwrap();
-                                        req_id = slice.read_u64().unwrap();
                                     }
+                                    let req_id = slice.read_u64().unwrap();
 
                                     if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                         tracing::trace!("send data to fetches with id {}", req_id);
-                                        if let Err(_) = sender.send(Ok(TmqRecvData::Bytes(part.into()))) {
+                                        if sender.send(Ok(TmqRecvData::Bytes(part.into()))).is_err() {
                                             tracing::warn!(req_id, kind = "binary", "req_id {req_id} not detected, message might be lost");
                                         }
                                     } else {
@@ -1468,7 +1435,7 @@ impl TmqBuilder {
 
                                     let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
                                     let err = if let Some(close) = close {
-                                        format!("WebSocket internal error: {}", close)
+                                        format!("WebSocket internal error: {close}")
                                     } else {
                                         "WebSocket internal error, connection is reset by server".to_string()
                                     };
@@ -1518,27 +1485,23 @@ impl TmqBuilder {
             }
             tracing::trace!("Consuming done in {:?}", instant.elapsed());
         });
-        // let (ws, mut _msg_recv) = tokio::sync::mpsc::channel(100);
-        let ws_cloned = ws.clone();
-        let consumer = Consumer {
+
+        Ok(Consumer {
             conn: self.info.to_conn_request(),
             tmq_conf: self.conf.clone(),
             sender: WsTmqSender {
                 req_id: Arc::new(AtomicU64::new(1)),
                 queries,
-                sender: ws_cloned,
+                sender: ws,
                 timeout: Timeout::Duration(Duration::MAX),
             },
-            // fetches,
             close_signal: tx,
             timeout: self.timeout,
             topics: vec![],
             support_fetch_raw: is_support_binary_sql(&version),
             polling_mutex,
             cache: cache_rx,
-        };
-
-        Ok(consumer)
+        })
     }
 }
 
@@ -1628,8 +1591,8 @@ impl WsTmqError {
     }
     pub fn errstr(&self) -> String {
         match self {
-            WsTmqError::TaosError(error) => error.message().to_string(),
-            _ => format!("{}", self),
+            WsTmqError::TaosError(error) => error.message(),
+            _ => format!("{self}"),
         }
     }
 }
@@ -1658,8 +1621,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_tmq_meta_batch() -> anyhow::Result<()> {
-        use taos_query::prelude::AsyncTBuilder;
-        use taos_query::prelude::*;
+        use taos_query::prelude::{AsyncTBuilder, *};
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
@@ -2515,6 +2477,7 @@ mod tests {
     #[tokio::test]
     async fn test_consumer_cloud_conn() -> anyhow::Result<()> {
         use std::env;
+
         use taos_query::prelude::*;
 
         std::env::set_var("RUST_LOG", "trace");

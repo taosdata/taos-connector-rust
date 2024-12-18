@@ -1,10 +1,10 @@
 use std::ffi::c_void;
 
-use bytes::Bytes;
-
 use crate::common::{BorrowedValue, Ty};
 
 use super::{IsColumnView, NullBits, NullsIter};
+
+use bytes::Bytes;
 
 type Item = u32;
 type View = UIntView;
@@ -20,8 +20,9 @@ impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::UInt
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter(iter.map(|v| v.to_u32()))
+        iter.map(|v| v.to_u32()).collect()
     }
 }
 
@@ -36,12 +37,12 @@ impl std::ops::Add for &View {
     type Output = View;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -147,8 +148,7 @@ impl UIntView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(BorrowedValue::UInt)
-            .unwrap_or(BorrowedValue::Null(Ty::UInt))
+            .map_or(BorrowedValue::Null(Ty::UInt), BorrowedValue::UInt)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -201,12 +201,12 @@ impl UIntView {
     }
 
     pub fn concat(&self, rhs: &View) -> View {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -224,7 +224,7 @@ pub struct UIntViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for UIntViewIter<'a> {
+impl Iterator for UIntViewIter<'_> {
     type Item = Option<Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -248,7 +248,7 @@ impl<'a> Iterator for UIntViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for UIntViewIter<'a> {
+impl ExactSizeIterator for UIntViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

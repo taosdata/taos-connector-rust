@@ -1,9 +1,12 @@
-use std::{borrow::Cow, fmt::Display, str::Utf8Error};
+use std::borrow::Cow;
+use std::fmt::Display;
+use std::str::Utf8Error;
 
-use super::{Timestamp, Ty};
 use bytes::Bytes;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
+
+use super::{Timestamp, Ty};
 
 #[derive(Debug, Clone)]
 pub enum BorrowedValue<'b> {
@@ -86,7 +89,7 @@ macro_rules! borrowed_value_to_float {
     };
 }
 
-impl<'b> BorrowedValue<'b> {
+impl BorrowedValue<'_> {
     /// The data type of this value.
     pub const fn ty(&self) -> Ty {
         use BorrowedValue::*;
@@ -154,7 +157,7 @@ impl<'b> BorrowedValue<'b> {
             Float(v) => format!("{v}"),
             Double(v) => format!("{v}"),
             VarChar(v) => format!("\"{}\"", v.escape_debug()),
-            Timestamp(v) => format!("{}", v.to_string()),
+            Timestamp(v) => format!("{v}"),
             NChar(v) => format!("\"{}\"", v.escape_debug()),
             UTinyInt(v) => format!("{v}"),
             USmallInt(v) => format!("{v}"),
@@ -173,6 +176,7 @@ impl<'b> BorrowedValue<'b> {
     pub const fn is_null(&self) -> bool {
         matches!(self, BorrowedValue::Null(_))
     }
+
     /// Only VarChar, NChar, Json could be treated as [&str].
     fn strict_as_str(&self) -> &str {
         use BorrowedValue::*;
@@ -184,12 +188,13 @@ impl<'b> BorrowedValue<'b> {
             _ => panic!("expect str but only varchar/binary/nchar is supported"),
         }
     }
+
     pub fn to_string(&self) -> Result<String, Utf8Error> {
         use BorrowedValue::*;
         match self {
             Null(_) => Ok(String::new()),
             Bool(v) => Ok(format!("{v}")),
-            VarChar(v) => Ok(v.to_string()),
+            VarChar(v) => Ok((*v).to_string()),
             Json(v) => Ok(unsafe { std::str::from_utf8_unchecked(v) }.to_string()),
             NChar(v) => Ok(v.to_string()),
             TinyInt(v) => Ok(format!("{v}")),
@@ -222,7 +227,7 @@ impl<'b> BorrowedValue<'b> {
             UBigInt(v) => Value::UBigInt(*v),
             Float(v) => Value::Float(*v),
             Double(v) => Value::Double(*v),
-            VarChar(v) => Value::VarChar(v.to_string()),
+            VarChar(v) => Value::VarChar((*v).to_string()),
             Timestamp(v) => Value::Timestamp(*v),
             Json(v) => {
                 Value::Json(serde_json::from_slice(v).expect("json should always be deserialized"))
@@ -251,7 +256,7 @@ impl<'b> BorrowedValue<'b> {
             UBigInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             Float(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v as f64).unwrap()),
             Double(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v).unwrap()),
-            VarChar(v) => serde_json::Value::String(v.to_string()),
+            VarChar(v) => serde_json::Value::String((*v).to_string()),
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => serde_json::from_slice(v).expect("json should always be deserialized"),
             NChar(str) => serde_json::Value::String(str.to_string()),
@@ -306,26 +311,23 @@ impl<'b> BorrowedValue<'b> {
             BorrowedValue::VarChar(s) => match *s {
                 "" => None,
                 "false" | "f" | "F" | "FALSE" | "False" => Some(false),
-                "true" | "t" | "T" | "TRUE" | "True" => Some(true),
                 _ => Some(true),
             },
-            BorrowedValue::Timestamp(_) => Some(true),
+            BorrowedValue::Timestamp(_) | BorrowedValue::Json(_) => Some(true),
             BorrowedValue::NChar(s) => match s.as_ref() {
                 "" => None,
                 "false" | "f" | "F" | "FALSE" | "False" => Some(false),
-                "true" | "t" | "T" | "TRUE" | "True" => Some(true),
                 _ => Some(true),
             },
             BorrowedValue::UTinyInt(v) => Some(*v != 0),
             BorrowedValue::USmallInt(v) => Some(*v != 0),
             BorrowedValue::UInt(v) => Some(*v != 0),
             BorrowedValue::UBigInt(v) => Some(*v != 0),
-            BorrowedValue::Json(_) => Some(true),
-            BorrowedValue::VarBinary(_) => todo!(),
-            BorrowedValue::Decimal(_) => todo!(),
-            BorrowedValue::Blob(_) => todo!(),
-            BorrowedValue::MediumBlob(_) => todo!(),
-            BorrowedValue::Geometry(_) => todo!(),
+            BorrowedValue::VarBinary(_)
+            | BorrowedValue::Decimal(_)
+            | BorrowedValue::Blob(_)
+            | BorrowedValue::MediumBlob(_)
+            | BorrowedValue::Geometry(_) => todo!(),
         }
     }
 
@@ -391,8 +393,9 @@ impl<'b> BorrowedValue<'b> {
     #[allow(dead_code)]
     pub(crate) fn to_bytes(&self) -> Option<Bytes> {
         match self {
-            BorrowedValue::VarBinary(v) => Some(Bytes::from(v.to_vec())),
-            BorrowedValue::Geometry(v) => Some(Bytes::from(v.to_vec())),
+            BorrowedValue::VarBinary(v) | BorrowedValue::Geometry(v) => {
+                Some(Bytes::from(v.to_vec()))
+            }
             _ => None,
         }
     }
@@ -406,7 +409,7 @@ impl<'b> BorrowedValue<'b> {
     }
 }
 
-impl<'b> Display for BorrowedValue<'b> {
+impl Display for BorrowedValue<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use BorrowedValue::*;
         match self {
@@ -426,16 +429,13 @@ impl<'b> Display for BorrowedValue<'b> {
             UInt(v) => f.write_fmt(format_args!("{v}")),
             UBigInt(v) => f.write_fmt(format_args!("{v}")),
             Json(v) => f.write_fmt(format_args!("{}", v.as_ref().escape_ascii())),
-            VarBinary(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
-            Decimal(_) => todo!(),
-            Blob(_) => todo!(),
-            MediumBlob(_) => todo!(),
-            Geometry(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
+            VarBinary(v) | Geometry(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
+            Decimal(_) | Blob(_) | MediumBlob(_) => todo!(),
         }
     }
 }
 
-unsafe impl<'b> Send for BorrowedValue<'b> {}
+unsafe impl Send for BorrowedValue<'_> {}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub enum Value {
@@ -474,19 +474,15 @@ impl Display for Value {
             BigInt(v) => f.write_fmt(format_args!("{v}")),
             Float(v) => f.write_fmt(format_args!("{v}")),
             Double(v) => f.write_fmt(format_args!("{v}")),
-            VarChar(v) => f.write_fmt(format_args!("{v}")),
+            VarChar(v) | NChar(v) => f.write_fmt(format_args!("{v}")),
             Timestamp(v) => f.write_fmt(format_args!("{v}")),
-            NChar(v) => f.write_fmt(format_args!("{v}")),
             UTinyInt(v) => f.write_fmt(format_args!("{v}")),
             USmallInt(v) => f.write_fmt(format_args!("{v}")),
             UInt(v) => f.write_fmt(format_args!("{v}")),
             UBigInt(v) => f.write_fmt(format_args!("{v}")),
             Json(v) => f.write_fmt(format_args!("{v}")),
-            VarBinary(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
-            Decimal(_) => todo!(),
-            Blob(_) => todo!(),
-            MediumBlob(_) => todo!(),
-            Geometry(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
+            VarBinary(v) | Geometry(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
+            Decimal(_) | Blob(_) | MediumBlob(_) => todo!(),
         }
     }
 }
@@ -555,8 +551,7 @@ impl Value {
     pub fn strict_as_str(&self) -> &str {
         use Value::*;
         match self {
-            VarChar(v) => v.as_str(),
-            NChar(v) => v.as_str(),
+            VarChar(v) | NChar(v) => v.as_str(),
             Json(v) => v.as_str().expect("invalid str type"),
             Null(_) => "Null",
             Timestamp(_) => panic!("expect str but value is timestamp"),
@@ -575,14 +570,13 @@ impl Value {
             BigInt(v) => format!("{v}"),
             Float(v) => format!("{v}"),
             Double(v) => format!("{v}"),
-            VarChar(v) => format!("\"{}\"", v.escape_debug()),
+            VarChar(v) | NChar(v) => format!("\"{}\"", v.escape_debug()),
             Timestamp(v) => format!("{}", v.as_raw_i64()),
-            NChar(v) => format!("\"{}\"", v.escape_debug()),
             UTinyInt(v) => format!("{v}"),
             USmallInt(v) => format!("{v}"),
             UInt(v) => format!("{v}"),
             UBigInt(v) => format!("{v}"),
-            Json(v) => format!("\"{}\"", v),
+            Json(v) => format!("\"{v}\""),
             VarBinary(_) => todo!(),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
@@ -602,14 +596,13 @@ impl Value {
             BigInt(v) => format!("{v}"),
             Float(v) => format!("{v}"),
             Double(v) => format!("{v}"),
-            VarChar(v) => format!("\"{}\"", v.escape_debug()),
-            Timestamp(v) => format!("\"{}\"", v.to_string()),
-            NChar(v) => format!("\"{}\"", v.escape_debug()),
+            VarChar(v) | NChar(v) => format!("\"{}\"", v.escape_debug()),
+            Timestamp(v) => format!("\"{v}\""),
             UTinyInt(v) => format!("{v}"),
             USmallInt(v) => format!("{v}"),
             UInt(v) => format!("{v}"),
             UBigInt(v) => format!("{v}"),
-            Json(v) => format!("\"{}\"", v),
+            Json(v) => format!("\"{v}\""),
             VarBinary(_) => todo!(),
             Decimal(_) => todo!(),
             Blob(_) => todo!(),
@@ -623,9 +616,8 @@ impl Value {
         match self {
             Null(_) => Ok(String::new()),
             Bool(v) => Ok(format!("{v}")),
-            VarChar(v) => Ok(v.to_string()),
+            VarChar(v) | NChar(v) => Ok(v.to_string()),
             Json(v) => Ok(v.to_string()),
-            NChar(v) => Ok(v.to_string()),
             TinyInt(v) => Ok(format!("{v}")),
             SmallInt(v) => Ok(format!("{v}")),
             Int(v) => Ok(format!("{v}")),
@@ -661,22 +653,20 @@ impl Value {
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => v.clone(),
             NChar(str) => serde_json::Value::String(str.to_string()),
-            Decimal(v) => serde_json::Value::String(format!("{:?}", v)),
-            Blob(v) => serde_json::Value::String(format!("{:?}", v)),
-            MediumBlob(v) => serde_json::Value::String(format!("{:?}", v)),
-            VarBinary(v) => serde_json::Value::String(format!("{:?}", v.to_vec())),
-            Geometry(v) => serde_json::Value::String(format!("{:?}", v.to_vec())),
+            Decimal(v) => serde_json::Value::String(format!("{v:?}")),
+            Blob(v) | MediumBlob(v) => serde_json::Value::String(format!("{v:?}")),
+            VarBinary(v) | Geometry(v) => serde_json::Value::String(format!("{:?}", v.to_vec())),
         }
     }
 }
 
-impl<'b> PartialEq<&Value> for BorrowedValue<'b> {
+impl PartialEq<&Value> for BorrowedValue<'_> {
     fn eq(&self, other: &&Value) -> bool {
         self == *other
     }
 }
 
-impl<'b> PartialEq<Value> for BorrowedValue<'b> {
+impl PartialEq<Value> for BorrowedValue<'_> {
     fn eq(&self, other: &Value) -> bool {
         match (self, other) {
             (Self::Null(l0), Value::Null(r0)) => l0 == r0,
@@ -695,11 +685,12 @@ impl<'b> PartialEq<Value> for BorrowedValue<'b> {
             (Self::UInt(l0), Value::UInt(r0)) => l0 == r0,
             (Self::UBigInt(l0), Value::UBigInt(r0)) => l0 == r0,
             (Self::Json(l0), Value::Json(r0)) => l0.as_ref() == serde_json::to_vec(r0).unwrap(),
-            (Self::VarBinary(l0), Value::VarBinary(r0)) => l0.as_ref() == r0.as_ref(),
+            (Self::VarBinary(l0), Value::VarBinary(r0))
+            | (Self::Geometry(l0), Value::Geometry(r0)) => l0.as_ref() == r0.as_ref(),
             (Self::Decimal(l0), Value::Decimal(r0)) => l0 == r0,
-            (Self::Blob(l0), Value::Blob(r0)) => l0 == r0,
-            (Self::MediumBlob(l0), Value::MediumBlob(r0)) => l0 == r0,
-            (Self::Geometry(l0), Value::Geometry(r0)) => l0.as_ref() == r0.as_ref(),
+            (Self::Blob(l0), Value::Blob(r0)) | (Self::MediumBlob(l0), Value::MediumBlob(r0)) => {
+                l0 == r0
+            }
             _ => false,
         }
     }
@@ -726,11 +717,11 @@ impl<'b> PartialEq<BorrowedValue<'b>> for Value {
             (BorrowedValue::Json(l0), Value::Json(r0)) => {
                 l0.as_ref() == serde_json::to_vec(r0).unwrap()
             }
-            (BorrowedValue::VarBinary(l0), Value::VarBinary(r0)) => l0.as_ref() == r0.as_ref(),
+            (BorrowedValue::VarBinary(l0), Value::VarBinary(r0))
+            | (BorrowedValue::Geometry(l0), Value::Geometry(r0)) => l0.as_ref() == r0.as_ref(),
             (BorrowedValue::Decimal(l0), Value::Decimal(r0)) => l0 == r0,
-            (BorrowedValue::Blob(l0), Value::Blob(r0)) => l0 == r0,
-            (BorrowedValue::MediumBlob(l0), Value::MediumBlob(r0)) => l0 == r0,
-            (BorrowedValue::Geometry(l0), Value::Geometry(r0)) => l0.as_ref() == r0.as_ref(),
+            (BorrowedValue::Blob(l0), Value::Blob(r0))
+            | (BorrowedValue::MediumBlob(l0), Value::MediumBlob(r0)) => l0 == r0,
             _ => false,
         }
     }
@@ -770,9 +761,8 @@ mod de;
 
 #[cfg(test)]
 mod tests {
-    use crate::common::Precision;
-
     use super::*;
+    use crate::common::Precision;
 
     #[test]
     fn test_borrowed_value_to_native() {
