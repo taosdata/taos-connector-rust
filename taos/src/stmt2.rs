@@ -11,7 +11,7 @@ enum Stmt2Inner {
 #[derive(Debug)]
 pub struct Stmt2(Stmt2Inner);
 
-impl taos_query::stmt2::Bindable<super::Taos> for Stmt2 {
+impl taos_query::stmt2::Stmt2Bindable<super::Taos> for Stmt2 {
     fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
             TaosInner::Native(_) => todo!(),
@@ -64,7 +64,7 @@ impl taos_query::stmt2::Bindable<super::Taos> for Stmt2 {
 }
 
 #[async_trait::async_trait]
-impl taos_query::stmt2::AsyncBindable<super::Taos> for Stmt2 {
+impl taos_query::stmt2::Stmt2AsyncBindable<super::Taos> for Stmt2 {
     async fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
             TaosInner::Native(_) => todo!(),
@@ -122,7 +122,7 @@ impl taos_query::stmt2::AsyncBindable<super::Taos> for Stmt2 {
 mod tests {
     use serde::Deserialize;
     use taos_query::common::ColumnView;
-    use taos_query::stmt2::{Bindable, Stmt2BindData};
+    use taos_query::stmt2::{Stmt2BindData, Stmt2Bindable};
     use taos_query::{Queryable, TBuilder};
 
     use crate::sync::*;
@@ -148,7 +148,7 @@ mod tests {
         let mut stmt2 = Stmt2::init(&taos)?;
         stmt2.prepare("insert into t0 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_bools(vec![true]),
             ColumnView::from_tiny_ints(vec![None]),
@@ -233,7 +233,7 @@ mod tests {
         let mut stmt2 = Stmt2::init(&taos)?;
         stmt2.prepare("insert into t0 values(?, ?)")?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_millis_timestamp(vec![
                 1726803356466,
                 1726803357466,
@@ -259,7 +259,7 @@ mod tests {
             .deserialize()
             .try_collect()?;
 
-        assert_eq!(rows.len(), views[0].len());
+        assert_eq!(rows.len(), 4);
 
         assert_eq!(rows[0].ts, 1726803356466);
         assert_eq!(rows[1].ts, 1726803357466);
@@ -297,7 +297,7 @@ mod tests {
         let mut stmt2 = Stmt2::init(&taos)?;
         stmt2.prepare("select * from t0 where c8 > ? and c10 > ? and c12 = ?")?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_ints(vec![0]),
             ColumnView::from_floats(vec![0f32]),
             ColumnView::from_varchar(vec!["hello"]),
@@ -370,7 +370,7 @@ mod tests {
         let mut stmt2 = Stmt2::init(&taos)?;
         stmt2.prepare("select * from t0 where c1 > ?")?;
 
-        let views = &[ColumnView::from_ints(vec![100])];
+        let views = vec![ColumnView::from_ints(vec![100])];
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data])?.exec()?;
         assert_eq!(affected, 0);
@@ -401,7 +401,7 @@ mod tests {
 mod async_tests {
     use serde::Deserialize;
     use taos_query::common::ColumnView;
-    use taos_query::stmt2::{AsyncBindable, Stmt2BindData};
+    use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BindData};
     use taos_query::{AsyncQueryable, AsyncTBuilder};
 
     use crate::*;
@@ -429,7 +429,7 @@ mod async_tests {
             .prepare("insert into t0 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .await?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_bools(vec![true]),
             ColumnView::from_tiny_ints(vec![None]),
@@ -517,7 +517,7 @@ mod async_tests {
         let mut stmt2 = Stmt2::init(&taos).await?;
         stmt2.prepare("insert into t0 values(?, ?)").await?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_millis_timestamp(vec![
                 1726803356466,
                 1726803357466,
@@ -545,7 +545,7 @@ mod async_tests {
             .try_collect()
             .await?;
 
-        assert_eq!(rows.len(), views[0].len());
+        assert_eq!(rows.len(), 4);
 
         assert_eq!(rows[0].ts, 1726803356466);
         assert_eq!(rows[1].ts, 1726803357466);
@@ -586,7 +586,7 @@ mod async_tests {
             .prepare("select * from t0 where c8 > ? and c10 > ? and c12 = ?")
             .await?;
 
-        let views = &[
+        let views = vec![
             ColumnView::from_ints(vec![0]),
             ColumnView::from_floats(vec![0f32]),
             ColumnView::from_varchar(vec!["hello"]),
@@ -660,7 +660,7 @@ mod async_tests {
         let mut stmt2 = Stmt2::init(&taos).await?;
         stmt2.prepare("select * from t0 where c1 > ?").await?;
 
-        let views = &[ColumnView::from_ints(vec![100])];
+        let views = vec![ColumnView::from_ints(vec![100])];
         let data = Stmt2BindData::new(None, None, Some(views));
         let affected = stmt2.bind(&[data]).await?.exec().await?;
         assert_eq!(affected, 0);
