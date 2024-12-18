@@ -1,5 +1,4 @@
-pub use taos_query::stmt2::Stmt2BindData;
-use taos_query::RawResult;
+use taos_query::{stmt2::Stmt2BindData, RawResult};
 use taos_ws::Stmt2 as WsStmt2;
 
 use crate::{ResultSet, ResultSetInner, TaosInner};
@@ -12,7 +11,7 @@ enum Stmt2Inner {
 #[derive(Debug)]
 pub struct Stmt2(Stmt2Inner);
 
-impl taos_query::stmt2::Bindable<super::Taos> for Stmt2 {
+impl taos_query::stmt2::Stmt2Bindable<super::Taos> for Stmt2 {
     fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
             TaosInner::Native(_) => todo!(),
@@ -65,7 +64,7 @@ impl taos_query::stmt2::Bindable<super::Taos> for Stmt2 {
 }
 
 #[async_trait::async_trait]
-impl taos_query::stmt2::AsyncBindable<super::Taos> for Stmt2 {
+impl taos_query::stmt2::Stmt2AsyncBindable<super::Taos> for Stmt2 {
     async fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
             TaosInner::Native(_) => todo!(),
@@ -123,7 +122,7 @@ impl taos_query::stmt2::AsyncBindable<super::Taos> for Stmt2 {
 mod tests {
     use serde::Deserialize;
     use taos_query::common::ColumnView;
-    use taos_query::stmt2::{Bindable, Stmt2BindData};
+    use taos_query::stmt2::{Stmt2BindData, Stmt2Bindable};
     use taos_query::{Queryable, TBuilder};
 
     use crate::sync::*;
@@ -402,7 +401,7 @@ mod tests {
 mod async_tests {
     use serde::Deserialize;
     use taos_query::common::ColumnView;
-    use taos_query::stmt2::{AsyncBindable, Stmt2BindData};
+    use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BindData};
     use taos_query::{AsyncQueryable, AsyncTBuilder};
 
     use crate::*;

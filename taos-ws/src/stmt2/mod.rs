@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use futures::channel::oneshot;
 use taos_query::common::{Field, Precision};
 use taos_query::prelude::RawResult;
-use taos_query::stmt2::{AsyncBindable, Bindable, Stmt2BindData};
+use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BindData, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable};
 use tracing::Instrument;
@@ -207,7 +207,7 @@ impl Drop for Stmt2 {
     }
 }
 
-impl Bindable<super::Taos> for Stmt2 {
+impl Stmt2Bindable<super::Taos> for Stmt2 {
     fn init(taos: &super::Taos) -> RawResult<Self> {
         let mut stmt2 = Self::new(taos.client());
         block_in_place_or_global(stmt2.init())?;
@@ -238,7 +238,7 @@ impl Bindable<super::Taos> for Stmt2 {
 }
 
 #[async_trait::async_trait]
-impl AsyncBindable<super::Taos> for Stmt2 {
+impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
     async fn init(taos: &super::Taos) -> RawResult<Self> {
         let mut stmt2 = Self::new(taos.client());
         stmt2.init().await?;

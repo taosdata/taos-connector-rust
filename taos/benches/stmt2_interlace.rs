@@ -3,8 +3,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use chrono::Local;
 use flume::{Receiver, Sender};
 use rand::Rng;
-use taos::{AsyncQueryable, AsyncTBuilder, ColumnView, Stmt2, Stmt2BindData, TaosBuilder};
-use taos_query::stmt2::AsyncBindable;
+use taos::{
+    AsyncQueryable, AsyncTBuilder, ColumnView, Stmt2, Stmt2AsyncBindable, Stmt2BindData,
+    TaosBuilder,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -1,6 +1,6 @@
 use crate::{AsyncQueryable, ColumnView, Queryable, RawResult, Value};
 
-pub trait Bindable<Q>
+pub trait Stmt2Bindable<Q>
 where
     Q: Queryable,
     Self: Sized,
@@ -19,7 +19,7 @@ where
 }
 
 #[async_trait::async_trait]
-pub trait AsyncBindable<Q>
+pub trait Stmt2AsyncBindable<Q>
 where
     Q: AsyncQueryable,
     Self: Sized,
