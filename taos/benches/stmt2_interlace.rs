@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{
+    ops::Add,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
 use chrono::Local;
 use flume::{Receiver, Sender};
@@ -51,8 +54,6 @@ async fn main() -> anyhow::Result<()> {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     consume_data(db, receivers).await;
-
-    taos.exec(format!("drop database {db}")).await?;
 
     Ok(())
 }
@@ -119,7 +120,8 @@ async fn produce_data(
                 let ts = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
-                    .as_millis() as i64;
+                    .as_millis()
+                    .add((i * 200) as u128) as i64;
 
                 for j in (0..subtable_cnt).step_by(batch_cnt) {
                     let mut datas = Vec::with_capacity(batch_cnt);

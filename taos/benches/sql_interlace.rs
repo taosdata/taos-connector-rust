@@ -1,4 +1,7 @@
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::{
+    ops::Add,
+    time::{Instant, SystemTime, UNIX_EPOCH},
+};
 
 use chrono::Local;
 use rand::Rng;
@@ -7,7 +10,7 @@ use taos::{AsyncQueryable, AsyncTBuilder, TaosBuilder};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!(
-        "SQL WS: interlace=1, one million subtables, each with one hundred records, \
+        "SQL: interlace=1, one million subtables, each with one hundred records, \
         a total of one hundred million records."
     );
 
@@ -35,8 +38,6 @@ async fn main() -> anyhow::Result<()> {
     let sqls = produce_sqls(subtable_cnt, record_cnt).await;
 
     consume_sqls(db, sqls).await;
-
-    taos.exec(format!("drop database {db}")).await?;
 
     Ok(())
 }
@@ -103,7 +104,8 @@ async fn produce_sqls(subtable_cnt: usize, record_cnt: usize) -> Vec<String> {
                 let ts = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
-                    .as_millis() as i64;
+                    .as_millis()
+                    .add((i * 200) as u128) as i64;
 
                 for j in (0..subtable_cnt).step_by(batch_cnt) {
                     // insert into d0 values() d1 values() ...

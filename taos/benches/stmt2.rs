@@ -52,8 +52,6 @@ async fn main() -> anyhow::Result<()> {
 
     consume_data(db, receivers).await;
 
-    taos.exec(format!("drop database {db}")).await?;
-
     Ok(())
 }
 

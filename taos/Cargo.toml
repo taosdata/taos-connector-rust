@@ -53,11 +53,11 @@ name = "query"
 
 [[bench]]
 harness = false
-name = "stmt"
+name = "sql"
 
 [[bench]]
 harness = false
-name = "stmt_interlace"
+name = "stmt"
 
 [[bench]]
 harness = false
@@ -65,19 +65,15 @@ name = "stmt2"
 
 [[bench]]
 harness = false
+name = "sql_interlace"
+
+[[bench]]
+harness = false
+name = "stmt_interlace"
+
+[[bench]]
+harness = false
 name = "stmt2_interlace"
-
-[[bench]]
-harness = false
-name = "sql"
-
-[[bench]]
-harness = false
-name = "sql_ws_interlace"
-
-[[bench]]
-harness = false
-name = "sql_native_interlace"
 
 [features]
 deadpool = ["taos-query/deadpool"]

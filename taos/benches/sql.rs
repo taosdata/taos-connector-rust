@@ -49,8 +49,6 @@ async fn main() -> anyhow::Result<()> {
 
     consume_sqls(db, receivers).await;
 
-    taos.exec(format!("drop database {db}")).await?;
-
     Ok(())
 }
 
@@ -114,13 +112,13 @@ async fn produce_sqls(senders: Vec<Sender<String>>, subtable_cnt: usize, record_
                 let mut sql = String::with_capacity(100 * batch_cnt);
                 sql.push_str("insert into ");
 
-                let ts = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as i64;
-
                 for k in 0..batch_subtable_cnt {
                     sql.push_str(&format!("d{} values ", i + j + k));
+
+                    let ts = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as i64;
 
                     for l in 0..record_cnt {
                         let ts = ts + l as i64;
