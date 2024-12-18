@@ -221,7 +221,12 @@ pub unsafe extern "C" fn ws_stmt_get_tag_fields(
 
                 *fieldNum = fields_vec.len() as _;
 
-                *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
+                if fields_vec.is_empty() {
+                    *fields = std::ptr::null_mut();
+                } else {
+                    *fields = Box::into_raw(fields_vec.into_boxed_slice()) as _;
+                }
+
                 clear_error_info();
                 stmt.error = None;
                 0
@@ -1531,6 +1536,7 @@ mod tests {
             ws_close(taos);
         }
     }
+
     #[test]
     fn stmt_num_params_and_get_param() {
         use crate::*;
@@ -1798,6 +1804,41 @@ mod tests {
             ws_stmt_close(stmt);
 
             ws_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_ws_stmt_get_tag_fields() {
+        unsafe {
+            let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
+            assert!(!taos.is_null());
+
+            macro_rules! exec {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let res = ws_query(taos, sql);
+                    let code = ws_errno(res);
+                    assert!(code == 0);
+                    ws_free_result(res);
+                };
+            }
+
+            exec!(b"drop database if exists db_202412051738\0");
+            exec!(b"create database db_202412051738\0");
+            exec!(b"create table db_202412051738.ctb (ts timestamp, c1 int)\0");
+
+            let stmt = ws_stmt_init(taos);
+            assert!(!stmt.is_null());
+
+            let sql = "insert into db_202412051738.ctb values(?, ?)";
+            let code = ws_stmt_prepare(stmt, sql.as_ptr() as _, sql.len() as _);
+            assert!(code == 0);
+
+            let mut fields = std::ptr::null_mut();
+            let mut field_num = 0;
+            let code = ws_stmt_get_tag_fields(stmt, &mut field_num, &mut fields);
+            assert!(code != 0);
+            assert!(fields.is_null());
         }
     }
 }
