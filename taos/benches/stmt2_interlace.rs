@@ -124,9 +124,9 @@ async fn produce_data(
 
                     for k in 0..batch_cnt {
                         let c1 = rng.gen::<i32>();
-                        let c2: f32 = rng.gen_range(0.0..1000_0000.);
+                        let c2: f32 = rng.gen_range(0.0..10000000.);
                         let c2 = (c2 * 100.0).round() / 100.0;
-                        let c3: f32 = rng.gen_range(0.0..1000_0000.);
+                        let c3: f32 = rng.gen_range(0.0..10000000.);
                         let c3 = (c3 * 100.0).round() / 100.0;
 
                         let tbname = format!("d{}", j + k);
@@ -179,7 +179,7 @@ async fn consume_data(db: &str, mut receivers: Vec<Receiver<Vec<Stmt2BindData>>>
             println!("Consumer thread[{i}] starts consuming data");
 
             let start = Instant::now();
-            while let Ok(datas) = receiver.recv() {
+            while let Ok(datas) = receiver.recv_async().await {
                 stmt2.bind(&datas).await.unwrap();
                 stmt2.exec().await.unwrap();
             }

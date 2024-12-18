@@ -73,10 +73,6 @@ name = "sql"
 
 [[bench]]
 harness = false
-name = "sql2"
-
-[[bench]]
-harness = false
 name = "sql_ws_interlace"
 
 [[bench]]

@@ -107,9 +107,9 @@ async fn produce_data(
     let thread_subtable_cnt = subtable_cnt / thread_cnt;
 
     for i in (0..subtable_cnt).step_by(thread_subtable_cnt) {
-        let sender = senders[i / thread_subtable_cnt].clone();
+        let idx = i / thread_subtable_cnt;
+        let sender = senders[idx].clone();
         tokio::spawn(async move {
-            let idx = i / thread_subtable_cnt;
             println!("Producer thread[{idx}] starts producing data");
 
             let mut rng = rand::thread_rng();
@@ -131,9 +131,9 @@ async fn produce_data(
                     for l in 0..record_cnt {
                         let ts = ts + l as i64;
                         let c1 = rng.gen::<i32>();
-                        let c2: f32 = rng.gen_range(0.0..1000_0000.);
+                        let c2: f32 = rng.gen_range(0.0..10000000.);
                         let c2 = (c2 * 100.0).round() / 100.0;
-                        let c3: f32 = rng.gen_range(0.0..1000_0000.);
+                        let c3: f32 = rng.gen_range(0.0..10000000.);
                         let c3 = (c3 * 100.0).round() / 100.0;
 
                         tss.push(ts);

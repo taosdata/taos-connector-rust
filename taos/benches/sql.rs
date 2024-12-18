@@ -1,6 +1,7 @@
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::Local;
+use flume::{Receiver, Sender};
 use rand::Rng;
 use taos::{AsyncQueryable, AsyncTBuilder, TaosBuilder};
 
@@ -20,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .await?;
 
-    let db = "db_202412172303";
+    let db = "db_202412172304";
 
     taos.exec_many([
         &format!("drop database if exists {db}"),
@@ -32,9 +33,21 @@ async fn main() -> anyhow::Result<()> {
 
     create_subtables(db, subtable_cnt).await;
 
-    let sqls = produce_sqls(subtable_cnt, record_cnt).await;
+    let thread_cnt = 4;
+    let mut senders = vec![];
+    let mut receivers = vec![];
 
-    consume_sqls(db, sqls).await;
+    for _ in 0..thread_cnt {
+        let (sender, receiver) = flume::bounded(64);
+        senders.push(sender);
+        receivers.push(receiver);
+    }
+
+    produce_sqls(senders, subtable_cnt, record_cnt).await;
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    consume_sqls(db, receivers).await;
 
     taos.exec(format!("drop database {db}")).await?;
 
@@ -83,20 +96,19 @@ async fn create_subtables(db: &str, subtable_cnt: usize) {
     println!("Creating subtables end, elapsed = {:?}", start.elapsed());
 }
 
-async fn produce_sqls(subtable_cnt: usize, record_cnt: usize) -> Vec<String> {
-    println!("Producing sqls start");
-
-    let start = Instant::now();
+async fn produce_sqls(senders: Vec<Sender<String>>, subtable_cnt: usize, record_cnt: usize) {
     let batch_cnt = 10000;
     let batch_subtable_cnt = batch_cnt / record_cnt;
-    let thread_cnt = 10;
+    let thread_cnt = senders.len();
     let thread_subtable_cnt = subtable_cnt / thread_cnt;
-    let mut handles = Vec::with_capacity(thread_cnt);
 
     for i in (0..subtable_cnt).step_by(thread_subtable_cnt) {
-        let handle = tokio::spawn(async move {
+        let idx = i / thread_subtable_cnt;
+        let sender = senders[idx].clone();
+        tokio::spawn(async move {
+            println!("Producer thread[{idx}] starts producing data");
+
             let mut rng = rand::thread_rng();
-            let mut sqls = Vec::with_capacity(thread_subtable_cnt * record_cnt);
 
             for j in (0..thread_subtable_cnt).step_by(batch_subtable_cnt) {
                 let mut sql = String::with_capacity(100 * batch_cnt);
@@ -113,47 +125,33 @@ async fn produce_sqls(subtable_cnt: usize, record_cnt: usize) -> Vec<String> {
                     for l in 0..record_cnt {
                         let ts = ts + l as i64;
                         let c1: i32 = rng.gen();
-                        let c2: f32 = rng.gen_range(0.0..1000_0000.);
+                        let c2: f32 = rng.gen_range(0.0..10000000.);
                         let c2: f32 = (c2 * 100.0).round() / 100.0;
-                        let c3: f32 = rng.gen_range(0.0..1000_0000.);
+                        let c3: f32 = rng.gen_range(0.0..10000000.);
                         let c3: f32 = (c3 * 100.0).round() / 100.0;
                         sql.push_str(&format!("({ts},{c1},{c2},{c3}),"));
                     }
                 }
 
-                sqls.push(sql);
+                sender.send(sql).unwrap();
             }
 
-            sqls
+            println!("Producer thread[{idx}] ends producing data");
         });
-
-        handles.push(handle);
     }
-
-    let mut sqls = Vec::with_capacity(subtable_cnt * record_cnt);
-    for handle in handles {
-        sqls.extend(handle.await.unwrap());
-    }
-
-    println!("Producing {} sqls", sqls.len());
-    println!("Producing sqls end, elapsed = {:?}", start.elapsed());
-
-    sqls
 }
 
-async fn consume_sqls(db: &str, sqls: Vec<String>) {
+async fn consume_sqls(db: &str, mut receivers: Vec<Receiver<String>>) {
     let now = Local::now();
     let time = now.format("%Y-%m-%d %H:%M:%S").to_string();
     println!("Consuming sqls start, time = {time}");
 
     let start = Instant::now();
-    let thread_cnt = 4;
-    let thread_sql_cnt = sqls.len() / thread_cnt;
     let mut tasks = vec![];
 
-    for (i, sqls) in sqls.chunks(thread_sql_cnt).enumerate() {
+    for i in 0..receivers.len() {
         let db = db.to_owned();
-        let sqls = sqls.to_vec();
+        let receiver = receivers.pop().unwrap();
 
         let task = tokio::spawn(async move {
             let taos = TaosBuilder::from_dsn("ws://localhost:6041")
@@ -167,7 +165,7 @@ async fn consume_sqls(db: &str, sqls: Vec<String>) {
             println!("Consumer thread[{i}] starts consuming data");
 
             let start = Instant::now();
-            for sql in sqls {
+            while let Ok(sql) = receiver.recv_async().await {
                 taos.exec(sql).await.unwrap();
             }
 
