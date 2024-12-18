@@ -3,7 +3,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use chrono::Local;
 use flume::{Receiver, Sender};
 use rand::Rng;
-use taos::{AsyncBindable, AsyncQueryable, AsyncTBuilder, ColumnView, Stmt, TaosBuilder};
+use taos::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -48,6 +48,8 @@ async fn main() -> anyhow::Result<()> {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     consume_data(db, receivers).await;
+
+    check_count(&taos, subtable_cnt * record_cnt).await?;
 
     Ok(())
 }
@@ -211,4 +213,23 @@ async fn consume_data(db: &str, mut receivers: Vec<Receiver<Vec<(String, Vec<Col
     }
 
     println!("Consuming data end, elapsed = {:?}\n", start.elapsed());
+}
+
+async fn check_count(taos: &Taos, cnt: usize) -> anyhow::Result<()> {
+    #[derive(Debug, serde::Deserialize)]
+    struct Record {
+        cnt: usize,
+    }
+
+    let res: Vec<Record> = taos
+        .query("select count(*) as cnt from s0")
+        .await?
+        .deserialize()
+        .try_collect()
+        .await?;
+
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0].cnt, cnt);
+
+    Ok(())
 }

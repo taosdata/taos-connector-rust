@@ -5,7 +5,7 @@ use std::{
 
 use chrono::Local;
 use rand::Rng;
-use taos::{AsyncQueryable, AsyncTBuilder, TaosBuilder};
+use taos::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -38,6 +38,8 @@ async fn main() -> anyhow::Result<()> {
     let sqls = produce_sqls(subtable_cnt, record_cnt).await;
 
     consume_sqls(db, sqls).await;
+
+    check_count(&taos, subtable_cnt * record_cnt).await?;
 
     Ok(())
 }
@@ -187,4 +189,23 @@ async fn consume_sqls(db: &str, sqls: Vec<String>) {
     }
 
     println!("Consuming data end, elapsed = {:?}\n", start.elapsed());
+}
+
+async fn check_count(taos: &Taos, cnt: usize) -> anyhow::Result<()> {
+    #[derive(Debug, serde::Deserialize)]
+    struct Record {
+        cnt: usize,
+    }
+
+    let res: Vec<Record> = taos
+        .query("select count(*) as cnt from s0")
+        .await?
+        .deserialize()
+        .try_collect()
+        .await?;
+
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0].cnt, cnt);
+
+    Ok(())
 }
