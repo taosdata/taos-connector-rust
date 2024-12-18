@@ -328,7 +328,7 @@ impl Dsn {
                         }
                     })
                     .map(percent_decode);
-                let port = cap.get(3).map(|m| m.as_str().parse::<u16>().unwrap());
+                let port = cap.get(3).and_then(|m| m.as_str().parse::<u16>().ok());
 
                 match (host, port) {
                     (Some(host), Some(port)) => Ok(Some(Address::new(host, port))),
@@ -1770,5 +1770,22 @@ mod tests {
         let dsn = Dsn::from_str("kafka://").unwrap();
         assert!(dsn.addresses.is_empty());
         assert!(dsn.subject.is_none());
+    }
+    #[test]
+    fn taosx_dsn_mqtt() {
+        let dsn = Dsn::from_str("mqtt://127.0.0.1:1884").unwrap();
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "127.0.0.1");
+        assert_eq!(dsn.addresses[0].port.unwrap(), 1884);
+
+        let dsn = Dsn::from_str("mqtt://127.0.0.1:").unwrap();
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "127.0.0.1");
+        assert!(dsn.addresses[0].port.is_none());
+
+        let dsn = Dsn::from_str("mqtt://:1883").unwrap();
+        assert!(dsn.addresses[0].host.is_none());
+        assert_eq!(dsn.addresses[0].port.unwrap(), 1883);
+
+        let dsn = Dsn::from_str("mqtt://:").unwrap();
+        assert!(dsn.addresses.is_empty());
     }
 }
