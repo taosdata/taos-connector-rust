@@ -1,7 +1,5 @@
-use std::{
-    ops::Add,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+use std::ops::Add;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::Local;
 use flume::{Receiver, Sender};

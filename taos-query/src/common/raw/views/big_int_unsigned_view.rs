@@ -1,6 +1,6 @@
 use std::ffi::c_void;
 
-use crate::common::{BorrowedValue, Ty};
+use bytes::Bytes;
 
 use super::{IsColumnView, NullBits, NullsIter};
 use crate::common::{BorrowedValue, Ty};

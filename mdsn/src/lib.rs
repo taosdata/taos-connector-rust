@@ -1555,6 +1555,9 @@ mod tests {
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(dsn.path.unwrap(), "/!@#$%^&*()-_+=[]{}:;><?|~,");
         assert_eq!(dsn.params.get("params").unwrap(), "./@abc.txt");
-        assert_eq!(dsn.params.get("b").unwrap(), "!@#$%^*()-_+=[]{}:;><中文汉字£¢§®");
+        assert_eq!(
+            dsn.params.get("b").unwrap(),
+            "!@#$%^*()-_+=[]{}:;><中文汉字£¢§®"
+        );
     }
 }

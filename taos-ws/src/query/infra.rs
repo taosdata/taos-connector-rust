@@ -107,10 +107,10 @@ impl WsSend {
             | WsSend::Stmt2Result { req_id, .. }
             | WsSend::Stmt2Close { req_id, .. } => *req_id,
             WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
+            WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
             WsSend::Fetch(args) | WsSend::FetchBlock(args) | WsSend::FreeResult(args) => {
                 args.req_id
             }
-            WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
             WsSend::Version => unreachable!(),
         }
     }
@@ -118,12 +118,6 @@ impl WsSend {
 
 unsafe impl Send for WsSend {}
 unsafe impl Sync for WsSend {}
-
-// #[derive(Debug, Serialize)]
-// pub struct WsFetchArgs {
-//     req_id: ReqId,
-//     id: ResId,
-// }
 
 #[serde_as]
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -368,15 +362,10 @@ impl ToMessage for WsSend {}
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        query::{
-            infra::{WsRecv, WsSend},
-            WsConnReq,
-        },
-        TaosBuilder,
-    };
-
     use super::BindType;
+    use crate::query::infra::{WsRecv, WsSend};
+    use crate::query::WsConnReq;
+    use crate::TaosBuilder;
 
     #[test]
     fn test_serde_send() {

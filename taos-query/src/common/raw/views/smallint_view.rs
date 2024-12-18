@@ -1,8 +1,9 @@
 use std::ffi::c_void;
 
-use crate::common::{BorrowedValue, Ty};
+use bytes::Bytes;
 
 use super::{IsColumnView, NullBits, NullsIter};
+use crate::common::{BorrowedValue, Ty};
 
 type Item = i16;
 type View = SmallIntView;
@@ -31,6 +32,7 @@ impl std::ops::Add for View {
         &self + &rhs
     }
 }
+
 impl std::ops::Add for &View {
     type Output = View;
 

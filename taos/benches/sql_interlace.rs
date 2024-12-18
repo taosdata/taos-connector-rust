@@ -1,7 +1,5 @@
-use std::{
-    ops::Add,
-    time::{Instant, SystemTime, UNIX_EPOCH},
-};
+use std::ops::Add;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::Local;
 use rand::Rng;

@@ -4,7 +4,6 @@ use std::io::Write;
 use std::mem::transmute;
 use std::ops::ControlFlow;
 use std::pin::Pin;
-// use std::io::Write;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::Poll;
@@ -34,7 +33,6 @@ use tracing::{instrument, trace, Instrument};
 use super::infra::*;
 use super::TaosBuilder;
 
-// type WsSender = flume::Sender<WsMessage<bytes::Bytes>>;
 type WsSender = flume::Sender<Message>;
 
 type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
@@ -49,12 +47,6 @@ struct Version {
     version: String,
     is_support_binary_sql: bool,
 }
-
-// impl Version {
-//     pub fn is_v3(&self) -> bool {
-//         !self.0.starts_with("2")
-//     }
-// }
 
 #[derive(Debug, Clone)]
 pub(crate) struct WsQuerySender {

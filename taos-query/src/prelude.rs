@@ -37,21 +37,18 @@ pub mod sync {
     pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
     #[cfg(feature = "r2d2")]
     pub use r2d2::ManageConnection;
-    use std::borrow::Cow;
+    pub use serde::de::value::Error as DeError;
+    use serde::de::DeserializeOwned;
 
     pub use super::_priv::*;
-
+    use crate::common::*;
+    use crate::helpers::*;
     pub use crate::stmt::Bindable;
     pub use crate::stmt2::{Stmt2BindData, Stmt2Bindable};
     pub use crate::tmq::{AsConsumer, IsData, IsMeta};
-
-    use serde::de::DeserializeOwned;
-
-    pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
-    pub use serde::de::value::Error as DeError;
-
-    use crate::common::*;
-    use crate::helpers::*;
+    #[cfg(feature = "r2d2")]
+    pub use crate::{Pool, PoolBuilder};
+    pub use crate::{RawResult, TBuilder};
 
     pub struct IRowsIter<'a, T>
     where
@@ -314,6 +311,7 @@ mod r#async {
     use crate::helpers::*;
     pub use crate::stmt::AsyncBindable;
     pub use crate::stmt2::{Stmt2AsyncBindable, Stmt2BindData};
+    pub use crate::util::{AsyncInlinable, AsyncInlinableRead, AsyncInlinableWrite};
     pub use crate::RawResult;
 
     pub struct AsyncBlocks<'a, T> {

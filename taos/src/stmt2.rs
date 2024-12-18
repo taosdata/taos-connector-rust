@@ -1,4 +1,5 @@
-use taos_query::{stmt2::Stmt2BindData, RawResult};
+use taos_query::stmt2::Stmt2BindData;
+use taos_query::RawResult;
 use taos_ws::Stmt2 as WsStmt2;
 
 use crate::{ResultSet, ResultSetInner, TaosInner};
@@ -125,10 +126,9 @@ mod tests {
     use taos_query::stmt2::{Stmt2BindData, Stmt2Bindable};
     use taos_query::{Queryable, TBuilder};
 
+    use super::Stmt2;
     use crate::sync::*;
     use crate::TaosBuilder;
-
-    use super::Stmt2;
 
     #[test]
     fn test_stmt2_insert_single_row() -> anyhow::Result<()> {
@@ -404,9 +404,8 @@ mod async_tests {
     use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BindData};
     use taos_query::{AsyncQueryable, AsyncTBuilder};
 
-    use crate::*;
-
     use super::Stmt2;
+    use crate::*;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_stmt2_insert_single_row() -> anyhow::Result<()> {

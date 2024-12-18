@@ -509,9 +509,9 @@ mod tests {
     use bytes::Bytes;
     use taos_query::common::{ColumnView, Timestamp, Ty, Value};
 
-    use crate::{query::infra::BindType, stmt2::Stmt2Field};
-
     use super::{bind_datas_to_bytes, Stmt2BindData};
+    use crate::query::infra::BindType;
+    use crate::stmt2::Stmt2Field;
 
     #[test]
     fn test_bind_datas_to_bytes_with_tbnames() -> anyhow::Result<()> {
