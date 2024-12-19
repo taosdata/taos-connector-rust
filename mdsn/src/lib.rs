@@ -529,6 +529,7 @@ impl Dsn {
                 static ref ADDR_PREFIX_REGEX: Regex = Regex::new(r"^(?P<addr>[\w\-_%.:]*(:\d{0,5})?(,[\w\-:_.]*(:\d{0,5})?)*)").unwrap();
                 static ref URL_PARAMS_REGEX: Regex = Regex::new(r"^(?P<main>.*)(\?(?P<params>[^?]+))$").unwrap();
                 static ref ENDS_WITH_ADDR_REGEX: Regex = Regex::new(r"@[\w\-_%.]+(:\d{1,5})?(,[\w\-_%.]+(:\d{1,5})?)*$").unwrap();
+                static ref PARAM_WITH_AT_REGEX: Regex = Regex::new(r"\?.*=\S+$").unwrap();
             }
             let dsn = Dsn {
                 driver,
@@ -536,57 +537,6 @@ impl Dsn {
                 path: None,
                 ..Default::default()
             };
-
-            if ADDR_PREFIX_REGEX.is_match(main) {
-                // 192.168.1.1:3000
-                // 192.168.1.1:3000?param=?!#$%^&*()_+=[]{}
-                // 192.168.1.1:3000/path
-                // 192.168.1.1:3000/path?param=?!#$%^&*()_+=[]{}
-                // 192.168.1.1:3000/path/nest
-                // 192.168.1.1:3000/path/nest?param=?!#$%^&*()_+=[]{}
-                // 192.168.1.1:3000,192.168.1.1:3000/path/nest?param=?!#$%^&*()_+=[]{}
-            }
-
-            let at = if ENDS_WITH_ADDR_REGEX.is_match(main) {
-                None
-            } else {
-                let question_pos = main
-                    .bytes()
-                    .enumerate()
-                    .rev()
-                    .filter(|(_, v)| *v == b'?')
-                    .map(|(at, _v)| at)
-                    .collect_vec();
-
-                if question_pos.is_empty() {
-                    None
-                } else {
-                    Some(question_pos)
-                }
-            };
-            // let (main, params, sep_at) = if ENDS_WITH_ADDR_REGEX.is_match(main) {
-            //     (main, None, 0)
-            // } else if let Some(at) = main
-            //     .bytes()
-            //     .enumerate()
-            //     .rev()
-            //     .find(|(_, v)| *v == b'?')
-            //     .map(|(at, _v)| at)
-            // {
-            //     let (main, params) = main.split_at(at);
-            //     let params = params
-            //         .strip_prefix('?')
-            //         .expect("split_at.1 must contain ?")
-            //         .trim();
-            //     if params.is_empty() {
-            //         (main, None, at)
-            //     } else {
-            //         (main, Some(params), at)
-            //     }
-            // } else {
-            //     (main, None, 0)
-            // };
-
             fn try_parse_url(dsn: &Dsn, main: &str, at: Option<usize>) -> Result<Dsn, DsnError> {
                 let mut dsn = dsn.clone();
                 let (main, params) = if let Some(at) = at {
@@ -652,6 +602,55 @@ impl Dsn {
                 }
                 Ok(dsn)
             }
+
+            fn get_question_position(main: &str) -> Option<Vec<usize>> {
+                let question_pos = main
+                    .bytes()
+                    .enumerate()
+                    .rev()
+                    .filter(|(_, v)| *v == b'?')
+                    .map(|(at, _v)| at)
+                    .collect_vec();
+
+                if question_pos.is_empty() {
+                    None
+                } else {
+                    Some(question_pos)
+                }
+            }
+            let at = if !main.starts_with('?') && ENDS_WITH_ADDR_REGEX.is_match(main) {
+                let res = try_parse_url(&dsn, main, None);
+                if res.is_err() {
+                    get_question_position(main)
+                } else {
+                    None
+                }
+            } else {
+                get_question_position(main)
+            };
+            // let (main, params, sep_at) = if ENDS_WITH_ADDR_REGEX.is_match(main) {
+            //     (main, None, 0)
+            // } else if let Some(at) = main
+            //     .bytes()
+            //     .enumerate()
+            //     .rev()
+            //     .find(|(_, v)| *v == b'?')
+            //     .map(|(at, _v)| at)
+            // {
+            //     let (main, params) = main.split_at(at);
+            //     let params = params
+            //         .strip_prefix('?')
+            //         .expect("split_at.1 must contain ?")
+            //         .trim();
+            //     if params.is_empty() {
+            //         (main, None, at)
+            //     } else {
+            //         (main, Some(params), at)
+            //     }
+            // } else {
+            //     (main, None, 0)
+            // };
+
             if let Some(pos) = at {
                 for (i, at) in pos.iter().enumerate() {
                     let res = try_parse_url(&dsn, main, Some(*at));
@@ -1744,6 +1743,21 @@ mod tests {
             dsn.get("certificate").unwrap(),
             "@./tests/opc/certificate.crt"
         );
+
+        let dsn = "opcua://?certificate=@abc".into_dsn().unwrap();
+        dbg!(&dsn);
+        assert!(dsn.subject.is_none());
+        assert!(dsn.addresses.is_empty());
+        assert_eq!(dsn.get("certificate").unwrap(), "@abc");
+
+        let dsn = "opcua://192.168.1.13:9092/abc/path?certificate=@abc"
+            .into_dsn()
+            .unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "192.168.1.13");
+        assert_eq!(dsn.addresses[0].port.unwrap(), 9092);
+        assert_eq!(dsn.subject.as_deref().unwrap(), "abc/path");
+        assert_eq!(dsn.get("certificate").unwrap(), "@abc");
     }
 
     #[test]
