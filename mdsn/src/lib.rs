@@ -336,7 +336,7 @@ impl Dsn {
                         if host.contains("/") {
                             Ok(Some(Address::from_path(host)))
                         } else {
-                            Ok(Some(Address::from_host(host)))
+                            Ok(Some(Address::new(host, 0)))
                         }
                     }
                     (host, port) => Ok(Some(Address {
@@ -1779,7 +1779,7 @@ mod tests {
 
         let dsn = Dsn::from_str("mqtt://127.0.0.1:").unwrap();
         assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "127.0.0.1");
-        assert!(dsn.addresses[0].port.is_none());
+        assert_eq!(dsn.addresses[0].port.unwrap(), 0);
 
         let dsn = Dsn::from_str("mqtt://:1883").unwrap();
         assert!(dsn.addresses[0].host.is_none());
