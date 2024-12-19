@@ -5,6 +5,8 @@ use chrono::Local;
 use rand::Rng;
 use taos::*;
 
+const DSN: &str = "ws://localhost:6041";
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!(
@@ -17,12 +19,9 @@ async fn main() -> anyhow::Result<()> {
     // One hundred records per subtable
     let record_cnt = 100;
 
-    let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
-        .build()
-        .await?;
-
     let db = "db_202412112135";
 
+    let taos = TaosBuilder::from_dsn(DSN)?.build().await?;
     taos.exec_many([
         &format!("drop database if exists {db}"),
         &format!("create database {db} vgroups 10"),
@@ -55,12 +54,7 @@ async fn create_subtables(db: &str, subtable_cnt: usize) {
         let db = db.to_owned();
 
         let task = tokio::spawn(async move {
-            let taos = TaosBuilder::from_dsn("ws://localhost:6041")
-                .unwrap()
-                .build()
-                .await
-                .unwrap();
-
+            let taos = TaosBuilder::from_dsn(DSN).unwrap().build().await.unwrap();
             taos.exec(format!("use {db}")).await.unwrap();
 
             for j in (0..thread_subtable_cnt).step_by(batch_cnt) {
@@ -158,12 +152,7 @@ async fn consume_sqls(db: &str, sqls: Vec<String>) {
         let sqls = sqls.to_vec();
 
         let task = tokio::spawn(async move {
-            let taos = TaosBuilder::from_dsn("ws://localhost:6041")
-                .unwrap()
-                .build()
-                .await
-                .unwrap();
-
+            let taos = TaosBuilder::from_dsn(DSN).unwrap().build().await.unwrap();
             taos.exec(format!("use {db}")).await.unwrap();
 
             println!("Consumer thread[{i}] starts consuming data");
