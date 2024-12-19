@@ -10,6 +10,7 @@ use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable};
 use tracing::Instrument;
 
+use crate::query::asyn::QueryMetrics;
 use crate::query::infra::{Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
 use crate::query::WsTaos;
 use crate::{ResultSet, Taos};
@@ -54,7 +55,7 @@ impl Stmt2 {
         unreachable!()
     }
 
-    async fn prepare<S: AsRef<str>>(&mut self, sql: S) -> RawResult<()> {
+    async fn prepare<S: AsRef<str> + Send>(&mut self, sql: S) -> RawResult<()> {
         let req = WsSend::Stmt2Prepare {
             req_id: generate_req_id(),
             stmt_id: self.stmt_id.unwrap(),
@@ -77,7 +78,7 @@ impl Stmt2 {
         unreachable!()
     }
 
-    async fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<()> {
+    async fn bind(&self, datas: &[Stmt2BindData]) -> RawResult<()> {
         let bytes = bind::bind_datas_to_bytes(
             datas,
             generate_req_id(),
@@ -192,7 +193,7 @@ impl Stmt2 {
                 block_future: None,
                 closer: Some(close_tx),
                 completed: false,
-                metrics: Default::default(),
+                metrics: QueryMetrics::default(),
                 blocks_buffer: Some(raw_block_rx),
             });
         }
@@ -220,7 +221,7 @@ impl Stmt2Bindable<super::Taos> for Stmt2 {
     }
 
     fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<&mut Self> {
-        block_in_place_or_global(self.bind(datas))?;
+        block_in_place_or_global(Stmt2::bind(self, datas))?;
         Ok(self)
     }
 
@@ -251,7 +252,7 @@ impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
     }
 
     async fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<&mut Self> {
-        self.bind(datas).await?;
+        Stmt2::bind(self, datas).await?;
         Ok(self)
     }
 

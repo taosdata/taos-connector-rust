@@ -39,7 +39,8 @@ fn murmur_hash3_32(key: &[u8]) -> u32 {
 
     let mut h1: u32 = 0x12345678;
     let mut blocks = key.chunks_exact(4);
-    while let Some(block) = blocks.next() {
+    for block in blocks.by_ref() {
+        assert!(block.len() == 4);
         let mut k1 = u32::from_le_bytes([block[0], block[1], block[2], block[3]]);
         k1 = k1.wrapping_mul(C1);
         k1 = k1.rotate_left(15);

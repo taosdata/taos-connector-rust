@@ -212,13 +212,10 @@ fn get_tag_data_len(tag: &Value) -> usize {
     use Value::*;
     match tag {
         Null(_) => 0,
-        VarChar(v) => v.len(),
+        VarChar(v) | NChar(v) => v.len(),
+        Blob(v) | MediumBlob(v) => v.len(),
+        VarBinary(v) | Geometry(v) => v.len(),
         Json(v) => serde_json::to_vec(v).unwrap().len(),
-        NChar(v) => v.len(),
-        Blob(v) => v.len(),
-        MediumBlob(v) => v.len(),
-        VarBinary(v) => v.len(),
-        Geometry(v) => v.len(),
         _ => tag.ty().fixed_length(),
     }
 }
@@ -397,8 +394,8 @@ fn write_col(bytes: &mut [u8], col: &ColumnView) -> usize {
 
     if is_null {
         // Write IsNull
-        for i in TC_DATA_IS_NULL_POS..TC_DATA_IS_NULL_POS + num {
-            bytes[i] = 1;
+        for b in bytes.iter_mut().skip(TC_DATA_IS_NULL_POS).take(num) {
+            *b = 1;
         }
     } else {
         // Write IsNull, Length and Buffer

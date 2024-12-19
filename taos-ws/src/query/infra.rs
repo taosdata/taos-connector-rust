@@ -5,15 +5,15 @@ use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::common::{Precision, Ty};
 use taos_query::prelude::RawError;
 
-pub(crate) type ReqId = u64;
-pub(crate) type StmtId = u64;
+pub type ReqId = u64;
+pub type StmtId = u64;
 
 /// Type for result ID.
-pub(crate) type ResId = u64;
+pub type ResId = u64;
 
 #[serde_as]
 #[derive(Debug, Serialize, Default, Clone)]
-pub(crate) struct WsConnReq {
+pub struct WsConnReq {
     pub(crate) user: Option<String>,
     pub(crate) password: Option<String>,
     #[serde_as(as = "NoneAsEmptyString")]
@@ -32,15 +32,10 @@ impl WsConnReq {
             mode: None,
         }
     }
-
-    // pub fn with_database(mut self, db: impl Into<String>) -> Self {
-    //     self.db = Some(db.into());
-    //     self
-    // }
 }
 
 #[derive(Debug, Serialize, Clone, Copy)]
-pub(crate) struct WsResArgs {
+pub struct WsResArgs {
     pub req_id: ReqId,
     pub id: ResId,
 }
@@ -48,9 +43,8 @@ pub(crate) struct WsResArgs {
 #[derive(Debug, Serialize)]
 #[serde(tag = "action", content = "args")]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum WsSend {
+pub enum WsSend {
     Version,
-    // Pong(Vec<u8>),
     Conn {
         req_id: ReqId,
         #[serde(flatten)]
@@ -122,7 +116,7 @@ unsafe impl Sync for WsSend {}
 #[serde_as]
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
-pub(crate) struct WsQueryResp {
+pub struct WsQueryResp {
     pub id: ResId,
     pub is_update: bool,
     pub affected_rows: usize,
@@ -138,7 +132,7 @@ pub(crate) struct WsQueryResp {
 #[serde_as]
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(default)]
-pub(crate) struct InsertResp {
+pub struct InsertResp {
     #[serde_as(as = "serde_with::DurationNanoSeconds")]
     pub timing: Duration,
 }
@@ -146,7 +140,7 @@ pub(crate) struct InsertResp {
 #[serde_as]
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(default)]
-pub(crate) struct WsFetchResp {
+pub struct WsFetchResp {
     pub id: ResId,
     pub completed: bool,
     pub lengths: Option<Vec<u32>>,
@@ -157,7 +151,7 @@ pub(crate) struct WsFetchResp {
 
 #[serde_as]
 #[derive(Debug, Deserialize)]
-pub(crate) struct WsRecv {
+pub struct WsRecv {
     pub code: i32,
     #[serde_as(as = "NoneAsEmptyString")]
     pub message: Option<String>,
@@ -174,12 +168,10 @@ impl WsRecv {
             self.data,
             if self.code == 0 {
                 Ok(())
+            } else if self.message.as_deref() == Some("success") {
+                Err(RawError::from_code(self.code))
             } else {
-                if self.message.as_deref() == Some("success") {
-                    Err(RawError::from_code(self.code))
-                } else {
-                    Err(RawError::new(self.code, self.message.unwrap_or_default()))
-                }
+                Err(RawError::new(self.code, self.message.unwrap_or_default()))
             },
         )
     }
@@ -190,7 +182,7 @@ impl WsRecv {
 #[serde_as]
 #[serde(tag = "action")]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum WsRecvData {
+pub enum WsRecvData {
     Conn,
     Version {
         version: String,
@@ -291,7 +283,7 @@ pub(crate) enum WsRecvData {
 
 #[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize)]
-pub(crate) struct Stmt2Field {
+pub struct Stmt2Field {
     pub name: String,
     pub field_type: i8,
     pub precision: u8,
@@ -300,8 +292,8 @@ pub(crate) struct Stmt2Field {
     pub bind_type: BindType,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum BindType {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BindType {
     Column,
     Tag,
     TableName,
@@ -314,7 +306,7 @@ impl<'de> Deserialize<'de> for BindType {
     {
         struct BindTypeVisitor;
 
-        impl<'de> serde::de::Visitor<'de> for BindTypeVisitor {
+        impl serde::de::Visitor<'_> for BindTypeVisitor {
             type Value = BindType;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -329,7 +321,7 @@ impl<'de> Deserialize<'de> for BindType {
                     1 => BindType::Column,
                     2 => BindType::Tag,
                     4 => BindType::TableName,
-                    _ => return Err(E::custom(format!("Invalid bind type: {}", v))),
+                    _ => return Err(E::custom(format!("Invalid bind type: {v}"))),
                 })
             }
 

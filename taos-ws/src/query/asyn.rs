@@ -400,7 +400,7 @@ async fn read_queries(
                             let _ = sender.send(ok.map(|_| data));
                         }
                         None => {
-                            tracing::warn!("req_id {req_id} not detected, message might be lost")
+                            tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     },
                     // Block type is for binary.

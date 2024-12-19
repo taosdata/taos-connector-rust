@@ -16,7 +16,7 @@ pub enum TaosInner {
     Ws(taos_ws::Taos),
 }
 
-pub(super) enum ResultSetInner {
+pub enum ResultSetInner {
     Native(crate::sys::ResultSet),
     Ws(taos_ws::ResultSet),
 }
