@@ -13,7 +13,7 @@ pub fn hex_string_to_bytes(s: &str) -> Bytes {
 pub fn bytes_to_hex_string(bytes: Bytes) -> String {
     bytes
         .iter()
-        .map(|byte| format!("{:02x}", byte))
+        .map(|byte| format!("{byte:02x}"))
         .collect::<Vec<String>>()
         .join("")
 }

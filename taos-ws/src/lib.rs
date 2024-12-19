@@ -1,12 +1,14 @@
 #![recursion_limit = "256"]
 use std::fmt::{Debug, Display};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use once_cell::sync::OnceCell;
-use tracing::warn;
-
 use taos_query::prelude::Code;
 use taos_query::util::Edition;
 use taos_query::{DsnError, IntoDsn, RawResult};
+use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
+use tracing::warn;
 
 pub mod stmt;
 pub use stmt::Stmt;
@@ -16,17 +18,12 @@ pub mod consumer;
 pub use consumer::{Consumer, Offset, TmqBuilder};
 
 pub mod query;
-pub use query::ResultSet;
-pub use query::Taos;
-
-use query::Error as QueryError;
-use query::WsConnReq;
-
+use query::{Error as QueryError, WsConnReq};
+pub use query::{ResultSet, Taos};
 pub(crate) use taos_query::block_in_place_or_global;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::MaybeTlsStream;
-use tokio_tungstenite::{connect_async_with_config, WebSocketStream};
+use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
@@ -42,14 +39,15 @@ impl Default for Retries {
         Self(5)
     }
 }
-#[derive(Debug, Clone)]
+
+#[derive(Clone, Debug)]
 pub struct TaosBuilder {
-    scheme: &'static str, // ws or wss
+    // scheme: &'static str, // ws or wss
+    https: Arc<AtomicBool>,
     addr: String,
     auth: WsAuth,
     database: Option<String>,
     server_version: OnceCell<String>,
-    // timeout: Duration,
     conn_mode: Option<u32>,
     compression: bool,
     conn_retries: Retries,
@@ -127,8 +125,7 @@ impl taos_query::TBuilder for TaosBuilder {
             use taos_query::prelude::sync::Queryable;
             let v: String = Queryable::query_one(&conn, "select server_version()")?.unwrap();
             Ok(match self.server_version.try_insert(v) {
-                Ok(v) => v.as_str(),
-                Err((v, _)) => v.as_str(),
+                Ok(v) | Err((v, _)) => v.as_str(),
             })
         }
     }
@@ -237,8 +234,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
                 .await?
                 .unwrap();
             Ok(match self.server_version.try_insert(v) {
-                Ok(v) => v.as_str(),
-                Err((v, _)) => v.as_str(),
+                Ok(v) | Err((v, _)) => v.as_str(),
             })
         }
     }
@@ -249,11 +245,10 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         // Ensue server is ready.
         taos.exec("select server_version()").await?;
 
-        match self.addr.matches(".cloud.tdengine.com").next().is_some()
+        if self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
         {
-            true => return Ok(true),
-            false => (),
+            return Ok(true);
         }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
@@ -289,14 +284,11 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         // Ensure server is ready.
         taos.exec("select server_version()").await?;
 
-        match self.addr.matches(".cloud.tdengine.com").next().is_some()
+        if self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
         {
-            true => {
-                let edition = Edition::new("cloud", false);
-                return Ok(edition);
-            }
-            false => (),
+            let edition = Edition::new("cloud", false);
+            return Ok(edition);
         }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
@@ -327,15 +319,25 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 }
 
 impl TaosBuilder {
-    pub fn from_dsn(dsn: impl IntoDsn) -> RawResult<Self> {
+    fn scheme(&self) -> &'static str {
+        if self.https.load(Ordering::SeqCst) {
+            "wss"
+        } else {
+            "ws"
+        }
+    }
+    fn set_https(&self, https: bool) {
+        self.https.store(https, Ordering::SeqCst);
+    }
+
+    pub fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
-        let scheme = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
-            ("ws" | "http", _) => "ws",
-            ("wss" | "https", _) => "wss",
-            ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => "ws",
-            ("taos" | "taosws" | "tmq", Some("wss" | "https")) => "wss",
+        let https = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
+            ("ws" | "http", _) | ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => false,
+            ("wss" | "https", _) | ("taos" | "taosws" | "tmq", Some("wss" | "https")) => true,
             _ => Err(DsnError::InvalidDriver(dsn.to_string()))?,
         };
+        let https = Arc::new(AtomicBool::new(https));
 
         let conn_mode = match dsn.params.get("conn_mode") {
             Some(s) => match s.parse::<u32>() {
@@ -370,25 +372,17 @@ impl TaosBuilder {
             })
             .unwrap_or(false);
 
-        let conn_retries = dsn.remove("conn_retries").map_or_else(
-            || Retries::default(),
-            |s| Retries(s.parse::<u32>().unwrap_or(5)),
-        );
-
-        // let timeout = dsn
-        //     .params
-        //     .remove("timeout")
-        //     .and_then(|s| parse_duration::parse(&s).ok())
-        //     .unwrap_or(Duration::from_secs(60 * 5)); // default to 5m
+        let conn_retries = dsn
+            .remove("conn_retries")
+            .map_or_else(Retries::default, |s| Retries(s.parse::<u32>().unwrap_or(5)));
 
         if let Some(token) = token {
             Ok(TaosBuilder {
-                scheme,
+                https,
                 addr,
                 auth: WsAuth::Token(token),
                 database: dsn.subject,
                 server_version: OnceCell::new(),
-                // timeout,
                 conn_mode,
                 compression,
                 conn_retries,
@@ -397,51 +391,56 @@ impl TaosBuilder {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
             let password = dsn.password.unwrap_or_else(|| "taosdata".to_string());
             Ok(TaosBuilder {
-                scheme,
+                https,
                 addr,
                 auth: WsAuth::Plain(username, password),
                 database: dsn.subject,
                 server_version: OnceCell::new(),
-                // timeout,
                 conn_mode,
                 compression,
                 conn_retries,
             })
         }
     }
+
     pub(crate) fn to_query_url(&self) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/rest/ws?token={}", self.scheme, self.addr, token)
+                format!("{}://{}/rest/ws?token={}", self.scheme(), self.addr, token)
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme, self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme(), self.addr),
         }
     }
 
     pub(crate) fn to_stmt_url(&self) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/rest/stmt?token={}", self.scheme, self.addr, token)
+                format!(
+                    "{}://{}/rest/stmt?token={}",
+                    self.scheme(),
+                    self.addr,
+                    token
+                )
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/stmt", self.scheme, self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/stmt", self.scheme(), self.addr),
         }
     }
 
     pub(crate) fn to_tmq_url(&self) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/rest/tmq?token={}", self.scheme, self.addr, token)
+                format!("{}://{}/rest/tmq?token={}", self.scheme(), self.addr, token)
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/tmq", self.scheme, self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/tmq", self.scheme(), self.addr),
         }
     }
 
     pub(crate) fn to_ws_url(&self) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/ws?token={}", self.scheme, self.addr, token)
+                format!("{}://{}/ws?token={}", self.scheme(), self.addr, token)
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme, self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme(), self.addr),
         }
     }
 
@@ -455,13 +454,13 @@ impl TaosBuilder {
             WsAuth::Token(_token) => WsConnReq {
                 user: Some("root".to_string()),
                 password: Some("taosdata".to_string()),
-                db: self.database.as_ref().map(Clone::clone),
+                db: self.database.clone(),
                 mode,
             },
             WsAuth::Plain(user, pass) => WsConnReq {
                 user: Some(user.to_string()),
                 password: Some(pass.to_string()),
-                db: self.database.as_ref().map(Clone::clone),
+                db: self.database.clone(),
                 mode,
             },
         }
@@ -473,9 +472,10 @@ impl TaosBuilder {
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         self.build_stream_opt(url, true).await
     }
+
     pub(crate) async fn build_stream_opt(
         &self,
-        url: String,
+        mut url: String,
         use_global_endpoint: bool,
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         let mut config = WebSocketConfig::default();
@@ -485,7 +485,7 @@ impl TaosBuilder {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "deflate")] {
                     tracing::debug!(url, "Enable compression");
-                    config.compression = Some(Default::default());
+                    config.compression = Some(DeflateConfig::default());
                 } else {
                     tracing::warn!("WebSocket compression is not supported unless with `deflate` feature");
                 }
@@ -493,7 +493,7 @@ impl TaosBuilder {
         }
 
         let mut retries = 0;
-        let ws_url = self.to_ws_url();
+        let mut ws_url = self.to_ws_url();
         loop {
             match connect_async_with_config(
                 if use_global_endpoint {
@@ -511,7 +511,12 @@ impl TaosBuilder {
                 }
                 Err(err) => {
                     let err_string = err.to_string();
-                    if err_string.contains("401 Unauthorized") {
+                    if err_string.contains("307") {
+                        tracing::debug!(error = err_string, "Redirecting to HTTPS link");
+                        self.set_https(true);
+                        url = url.replace("ws://", "wss://");
+                        ws_url = self.to_ws_url();
+                    } else if err_string.contains("401 Unauthorized") {
                         return Err(QueryError::Unauthorized(self.to_ws_url()).into());
                     } else if err.to_string().contains("404 Not Found")
                         || err.to_string().contains("400")
@@ -553,20 +558,20 @@ impl TaosBuilder {
 #[cfg(test)]
 mod lib_tests {
 
-    use crate::{
-        query::infra::{ToMessage, WsRecv, WsSend},
-        *,
-    };
-    use futures::{SinkExt, StreamExt};
     use std::time::Duration;
+
+    use futures::{SinkExt, StreamExt};
     use tracing::*;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    #[cfg(feature = "rustls")]
+    use crate::query::infra::{ToMessage, WsRecv, WsSend};
+    use crate::*;
+
+    #[cfg(feature = "_with_crypto_provider")]
     #[tokio::test]
     async fn test_build_stream() -> Result<(), anyhow::Error> {
         let _subscriber = tracing_subscriber::fmt::fmt()
-            .with_max_level(Level::INFO)
+            .with_max_level(Level::TRACE)
             .with_file(true)
             .with_line_number(true)
             .finish();

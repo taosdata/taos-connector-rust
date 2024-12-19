@@ -1,13 +1,9 @@
-use std::{
-    fmt,
-    ops::{Deref, DerefMut},
-    str::FromStr,
-};
+use std::fmt;
+use std::ops::{Deref, DerefMut};
+use std::str::FromStr;
 
-use serde::{
-    de::{self, MapAccess, SeqAccess, Visitor},
-    Deserialize, Deserializer, Serialize,
-};
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::common::Ty;
 
@@ -42,11 +38,12 @@ macro_rules! disabled_or_empty {
     };
     () => {};
 }
+
 impl CompressOptions {
-    pub fn new(
-        encode: impl Into<String>,
-        compress: impl Into<String>,
-        level: impl Into<String>,
+    pub fn new<T: Into<String>, U: Into<String>, V: Into<String>>(
+        encode: T,
+        compress: U,
+        level: V,
     ) -> Self {
         Self {
             encode: encode.into(),
@@ -160,7 +157,7 @@ impl Described {
     }
 
     /// Create a new column description without primary-key/compression feature.
-    pub fn new(field: impl Into<String>, ty: Ty, length: impl Into<Option<usize>>) -> Self {
+    pub fn new<T: Into<String>, U: Into<Option<usize>>>(field: T, ty: Ty, length: U) -> Self {
         let field = field.into();
         let length = length.into();
         let length = length.unwrap_or_else(|| {
@@ -207,8 +204,7 @@ impl Deref for ColumnMeta {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            ColumnMeta::Column(v) => v,
-            ColumnMeta::Tag(v) => v,
+            ColumnMeta::Column(v) | ColumnMeta::Tag(v) => v,
         }
     }
 }
@@ -216,8 +212,7 @@ impl Deref for ColumnMeta {
 impl DerefMut for ColumnMeta {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
-            ColumnMeta::Column(v) => v,
-            ColumnMeta::Tag(v) => v,
+            ColumnMeta::Column(v) | ColumnMeta::Tag(v) => v,
         }
     }
 }
@@ -253,7 +248,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
             {
                 struct FieldVisitor;
 
-                impl<'de> Visitor<'de> for FieldVisitor {
+                impl Visitor<'_> for FieldVisitor {
                     type Value = Meta;
 
                     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -408,7 +403,6 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let field = field.ok_or_else(|| de::Error::missing_field("field"))?;
                 let ty = ty.ok_or_else(|| de::Error::missing_field("type"))?;
                 let length = length.ok_or_else(|| de::Error::missing_field("length"))?;
-                let note = note.map(|s| s.to_string());
                 let compression = if let (Some(encode), Some(compress), Some(level)) =
                     (encode, compress, level)
                 {
@@ -453,12 +447,14 @@ impl ColumnMeta {
             ColumnMeta::Column(desc) | ColumnMeta::Tag(desc) => desc.length,
         }
     }
+
     pub fn note(&self) -> &str {
         match self {
+            ColumnMeta::Column(_) => "",
             ColumnMeta::Tag(_) => "TAG",
-            _ => "",
         }
     }
+
     pub fn is_tag(&self) -> bool {
         matches!(self, ColumnMeta::Tag(_))
     }

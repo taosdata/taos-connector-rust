@@ -1,5 +1,6 @@
-use anyhow::Result;
 use std::str::FromStr;
+
+use anyhow::Result;
 use taos::*;
 
 #[tokio::main]

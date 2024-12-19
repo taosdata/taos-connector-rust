@@ -1,10 +1,8 @@
 #![cfg_attr(nightly, feature(error_generic_member_access))]
-use std::{
-    any::Any,
-    borrow::Cow,
-    fmt::{self, Debug, Display},
-    str::FromStr,
-};
+use std::any::Any;
+use std::borrow::Cow;
+use std::fmt::{self, Debug, Display};
+use std::str::FromStr;
 
 use mdsn::DsnError;
 use source::Inner;
@@ -69,19 +67,19 @@ impl Debug for Error {
                 write!(f, "[{:#06X}] ", self.code)?;
             }
             if let Some(context) = &self.context {
-                f.write_fmt(format_args!("{}", context))?;
+                f.write_fmt(format_args!("{context}"))?;
                 writeln!(f)?;
                 writeln!(f)?;
                 writeln!(f, "Caused by:")?;
 
                 let chain = self.source.chain();
                 for (idx, source) in chain.enumerate() {
-                    writeln!(f, "{:4}: {}", idx, source)?;
+                    writeln!(f, "{idx:4}: {source}")?;
                 }
             } else {
                 let mut chain = self.source.chain();
                 if let Some(context) = chain.next() {
-                    f.write_fmt(format_args!("{}", context))?;
+                    f.write_fmt(format_args!("{context}"))?;
                 }
 
                 if self.source.deep() {
@@ -89,7 +87,7 @@ impl Debug for Error {
                     writeln!(f)?;
                     writeln!(f, "Caused by:")?;
                     for (idx, source) in chain.enumerate() {
-                        writeln!(f, "{:4}: {}", idx, source)?;
+                        writeln!(f, "{idx:4}: {source}")?;
                     }
                 }
             }
@@ -114,7 +112,7 @@ impl Display for Error {
         }
         // Error context
         if let Some(context) = self.context.as_deref() {
-            write!(f, "{}", context)?;
+            write!(f, "{context}")?;
 
             if self.source.is_empty() {
                 return Ok(());
@@ -166,10 +164,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
     #[inline(always)]
-    pub fn new_with_context(
-        code: impl Into<Code>,
-        err: impl Into<String>,
-        context: impl Into<String>,
+    pub fn new_with_context<T: Into<Code>, U: Into<String>, V: Into<String>>(
+        code: T,
+        err: U,
+        context: V,
     ) -> Self {
         Self {
             code: code.into(),
@@ -177,8 +175,9 @@ impl Error {
             source: err.into().into(),
         }
     }
+
     #[inline]
-    pub fn new(code: impl Into<Code>, err: impl Into<String>) -> Self {
+    pub fn new<T: Into<Code>, U: Into<String>>(code: T, err: U) -> Self {
         Self {
             code: code.into(),
             context: None,
@@ -187,7 +186,7 @@ impl Error {
     }
 
     #[inline]
-    pub fn context(mut self, context: impl Into<String>) -> Self {
+    pub fn context<T: Into<String>>(mut self, context: T) -> Self {
         self.context = Some(match self.context {
             Some(pre) => format!("{}: {}", context.into(), pre),
             None => context.into(),
@@ -211,7 +210,7 @@ impl Error {
     }
 
     #[inline(always)]
-    pub fn from_code(code: impl Into<Code>) -> Self {
+    pub fn from_code<T: Into<Code>>(code: T) -> Self {
         let code = code.into();
         if let Some(str) = code._priv_err_str() {
             Self::new(code, str)
@@ -225,22 +224,20 @@ impl Error {
     }
 
     #[inline]
-    pub fn from_string(err: impl Into<Cow<'static, str>>) -> Self {
+    pub fn from_string<T: Into<Cow<'static, str>>>(err: T) -> Self {
         anyhow::format_err!("{}", err.into()).into()
     }
 
     #[inline]
-    pub fn from_any(err: impl Into<anyhow::Error>) -> Self {
+    pub fn from_any<T: Into<anyhow::Error>>(err: T) -> Self {
         err.into().into()
     }
 
     #[inline]
-    pub fn any(err: impl Into<anyhow::Error> + 'static) -> Self {
+    pub fn any<T: Into<anyhow::Error> + 'static>(err: T) -> Self {
         if err.type_id() == std::any::TypeId::of::<Self>() {
-            // let err = Box::new(&err as &dyn Any);
             let err = &err as &dyn Any;
             let err = err.downcast_ref::<Self>().unwrap();
-            dbg!(err);
             return Self {
                 code: err.code,
                 context: err.context.clone(),
@@ -256,7 +253,7 @@ impl Error {
     }
 
     #[inline]
-    pub fn with_code(mut self, code: impl Into<Code>) -> Self {
+    pub fn with_code<T: Into<Code>>(mut self, code: T) -> Self {
         self.code = code.into();
         self
     }
@@ -436,7 +433,7 @@ impl FromStr for Error {
 impl serde::de::Error for Error {
     #[inline]
     fn custom<T: fmt::Display>(msg: T) -> Error {
-        Error::from_string(format!("{}", msg))
+        Error::from_string(format!("{msg}"))
     }
 }
 

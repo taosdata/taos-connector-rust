@@ -1,9 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use taos::*;
 use tokio::runtime::Runtime;
 
-async fn insert(taos: &Taos, tables: &[&str], ts: i64, records: usize) {
+async fn insert(taos: &Taos, tables: &[&str], _ts: i64, records: usize) {
     static mut TS: i64 = 1691726395000;
     for table in tables {
         for val in 0..records {
@@ -15,6 +14,7 @@ async fn insert(taos: &Taos, tables: &[&str], ts: i64, records: usize) {
     }
     unsafe { TS += records as i64 };
 }
+
 fn bench_query(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
     let f = async move {
@@ -27,7 +27,6 @@ fn bench_query(c: &mut Criterion) {
         taos.exec(format!("create database if not exists {db}"))
             .await
             .unwrap();
-        let stable = "stb1";
         taos.exec("use db1").await.unwrap();
         taos.exec("create stable if not exists stb1 (ts timestamp, val int) tags(t1 int)")
             .await
@@ -39,7 +38,6 @@ fn bench_query(c: &mut Criterion) {
     let taos = runtime.block_on(f);
     let p = (runtime, taos);
     for records in [1, 10, 20, 30, 40, 50, 75, 100] {
-        // c.bench_function("fib 20", |b| b.iter(|| fibonacci(black_box(20))));
         c.bench_with_input(
             BenchmarkId::new("insert", format!("native-{}", records)),
             &p,
@@ -62,7 +60,6 @@ fn bench_query(c: &mut Criterion) {
         taos.exec(format!("create database if not exists {db}"))
             .await
             .unwrap();
-        let stable = "stb1";
         taos.exec("use db1").await.unwrap();
         taos.exec("create stable if not exists stb1 (ts timestamp, val int) tags(t1 int)")
             .await
@@ -74,7 +71,6 @@ fn bench_query(c: &mut Criterion) {
     let taos = runtime.block_on(f);
     let p = (runtime, taos);
     for records in [1, 10, 20, 30, 40, 50, 75, 100] {
-        // c.bench_function("fib 20", |b| b.iter(|| fibonacci(black_box(20))));
         c.bench_with_input(
             BenchmarkId::new("insert", format!("ws-{}", records)),
             &p,
@@ -93,4 +89,5 @@ criterion_group! {
     config = Criterion::default().nresamples(20).sample_size(20);
     targets= bench_query
 }
+
 criterion_main!(benches);

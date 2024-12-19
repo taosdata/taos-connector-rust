@@ -1,10 +1,9 @@
 use std::ffi::c_void;
 
-use crate::common::{BorrowedValue, Ty};
+use bytes::Bytes;
 
 use super::{IsColumnView, NullBits, NullsIter};
-
-use bytes::Bytes;
+use crate::common::{BorrowedValue, Ty};
 
 type Item = i8;
 type View = TinyIntView;
@@ -20,10 +19,12 @@ impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::USmallInt
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter(iter.map(|v| v.to_i8()))
+        iter.map(|v| v.to_i8()).collect()
     }
 }
+
 impl TinyIntView {
     /// Rows
     pub fn len(&self) -> usize {
@@ -101,8 +102,7 @@ impl TinyIntView {
 
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(BorrowedValue::TinyInt)
-            .unwrap_or(BorrowedValue::Null(Ty::TinyInt))
+            .map_or(BorrowedValue::Null(Ty::TinyInt), BorrowedValue::TinyInt)
     }
 
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -159,12 +159,12 @@ impl TinyIntView {
     }
 
     pub fn concat(&self, rhs: &View) -> View {
-        let nulls = NullBits::from_iter(
-            self.nulls
-                .iter()
-                .take(self.len())
-                .chain(rhs.nulls.iter().take(rhs.len())),
-        );
+        let nulls = self
+            .nulls
+            .iter()
+            .take(self.len())
+            .chain(rhs.nulls.iter().take(rhs.len()))
+            .collect();
         let data: Bytes = self
             .data
             .as_ref()
@@ -182,7 +182,7 @@ pub struct TinyIntViewIter<'a> {
     row: usize,
 }
 
-impl<'a> Iterator for TinyIntViewIter<'a> {
+impl Iterator for TinyIntViewIter<'_> {
     type Item = Option<Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -206,7 +206,7 @@ impl<'a> Iterator for TinyIntViewIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for TinyIntViewIter<'a> {
+impl ExactSizeIterator for TinyIntViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

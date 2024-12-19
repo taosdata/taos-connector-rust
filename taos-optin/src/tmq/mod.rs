@@ -1,22 +1,24 @@
-use std::{fmt::Debug, str::FromStr, sync::Arc, time::Duration};
+use std::fmt::Debug;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use itertools::Itertools;
-use taos_query::{
-    common::{raw_data_t, RawData, RawMeta},
-    prelude::{
-        tokio::{self, sync::oneshot, time},
-        RawError, RawResult,
-    },
-    tmq::{
-        AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta,
-        IsOffset, MessageSet, Timeout, Timing, VGroupId,
-    },
-    util::Edition,
-    Dsn, IntoDsn, RawBlock,
+use taos_query::common::{raw_data_t, RawData, RawMeta};
+use taos_query::prelude::tokio::sync::oneshot;
+use taos_query::prelude::tokio::{self, time};
+use taos_query::prelude::{RawError, RawResult};
+use taos_query::tmq::{
+    AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta, IsOffset,
+    MessageSet, Timeout, Timing, VGroupId,
 };
+use taos_query::util::Edition;
+use taos_query::{Dsn, IntoDsn, RawBlock};
 
-use crate::{raw::ApiEntry, raw::RawRes, types::tmq_res_t, TaosBuilder};
+use crate::raw::{ApiEntry, RawRes};
+use crate::types::tmq_res_t;
+use crate::TaosBuilder;
 
 mod raw;
 
@@ -46,11 +48,11 @@ impl taos_query::TBuilder for TmqBuilder {
     fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let mut dsn = dsn
             .into_dsn()
-            .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
+            .map_err(|e| RawError::from_string(format!("Parse dsn error: {e}")))?;
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
-            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::dlopen(path).map_err(taos_query::RawError::any)?
         } else {
-            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::open_default().map_err(taos_query::RawError::any)?
         };
         let conf = Conf::from_dsn(&dsn, lib.tmq.unwrap().conf_api)?;
         let timeout = if let Some(timeout) = dsn.params.remove("timeout") {
@@ -83,7 +85,7 @@ impl taos_query::TBuilder for TmqBuilder {
         let ptr = self.conf.build()?;
         let tmq = RawTmq::new(
             self.lib.clone(),
-            self.lib.tmq.unwrap(),
+            Arc::new(self.lib.tmq.unwrap()),
             ptr,
             self.timeout.as_raw_timeout(),
         );
@@ -133,11 +135,11 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
     fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let mut dsn = dsn
             .into_dsn()
-            .map_err(|e| RawError::from_string(format!("Parse dsn error: {}", e)))?;
+            .map_err(|e| RawError::from_string(format!("Parse dsn error: {e}")))?;
         let lib = if let Some(path) = dsn.params.remove("libraryPath") {
-            ApiEntry::dlopen(path).map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::dlopen(path).map_err(taos_query::RawError::any)?
         } else {
-            ApiEntry::open_default().map_err(|err| taos_query::RawError::any(err))?
+            ApiEntry::open_default().map_err(taos_query::RawError::any)?
         };
         let conf = Conf::from_dsn(&dsn, lib.tmq.unwrap().conf_api)?;
         let timeout = if let Some(timeout) = dsn.params.remove("timeout") {
@@ -170,7 +172,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         let ptr = self.conf.build()?;
         let tmq = RawTmq::new(
             self.lib.clone(),
-            self.lib.tmq.unwrap(),
+            Arc::new(self.lib.tmq.unwrap()),
             ptr,
             self.timeout.as_raw_timeout(),
         );
@@ -300,7 +302,7 @@ impl Iterator for Messages {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.tmq
-            .poll_timeout(self.timeout.map(|t| t.as_millis() as i64).unwrap_or(-1))
+            .poll_timeout(self.timeout.map_or(-1, |t| t.as_millis() as i64))
             .map(|raw| (Offset(raw.clone()), MessageSet::from(raw)))
     }
 }
@@ -357,7 +359,7 @@ impl Data {
 #[async_trait::async_trait]
 impl IsAsyncData for Data {
     async fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
-        Ok(self.raw.tmq_get_raw().into())
+        Ok(self.raw.tmq_get_raw())
     }
 
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
@@ -367,17 +369,13 @@ impl IsAsyncData for Data {
 
 impl IsData for Data {
     fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
-        Ok(self.raw.tmq_get_raw().into())
+        Ok(self.raw.tmq_get_raw())
     }
 
     fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
         Ok(self.raw.fetch_raw_message())
     }
 }
-// pub enum MessageSet {
-//     Meta(Meta),
-//     Data(Data),
-// }
 
 impl From<RawRes> for MessageSet<Meta, Data> {
     fn from(raw: RawRes) -> Self {
@@ -398,17 +396,6 @@ impl Iterator for Data {
     }
 }
 
-// impl Iterator for MessageSet {
-//     type Item = RawBlock;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         match self {
-//             MessageSet::Meta(data) => None,
-//             MessageSet::Data(data) => data.raw.fetch_raw_message(data.precision),
-//         }
-//     }
-// }
-
 impl AsConsumer for Consumer {
     type Offset = Offset;
     type Meta = Meta;
@@ -420,7 +407,6 @@ impl AsConsumer for Consumer {
     ) -> RawResult<()> {
         let topics = topics.into_iter().map(|item| item.into()).collect_vec();
         let topics = Topics::from_topics(self.tmq.tmq().list_api, topics)?;
-        // dbg!(&topics);
         self.tmq.subscribe(&topics)
     }
 
@@ -496,8 +482,6 @@ impl AsConsumer for Consumer {
     }
 }
 
-// impl AsyncOnSync for Consumer {}
-
 #[async_trait::async_trait]
 impl AsAsyncConsumer for Consumer {
     type Offset = Offset;
@@ -517,7 +501,6 @@ impl AsAsyncConsumer for Consumer {
         let r = self.tmq.subscribe(&topics);
 
         if let Some(offset) = self.dsn.get("offset") {
-            // dbg!(offset);
             let offsets = offset
                 .split(',')
                 .map(|s| {
@@ -638,7 +621,6 @@ impl AsAsyncConsumer for Consumer {
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
         let topics = self.tmq.subscription();
         let topics = topics.to_strings();
-        // tracing::info!("topics: {:?}", topics);
         let ret: Vec<(String, Vec<Assignment>)> = topics
             .into_iter()
             .map(|topic| {
@@ -674,7 +656,6 @@ impl AsAsyncConsumer for Consumer {
 #[cfg(test)]
 mod tests {
     use super::TmqBuilder;
-
     use crate::TaosBuilder;
 
     #[test]
@@ -1096,8 +1077,8 @@ mod tests {
 
                     let json = meta.as_json_meta()?;
                     for json in json {
-                        match &json {
-                            taos_query::common::MetaUnit::Create(m) => match m {
+                        if let taos_query::common::MetaUnit::Create(m) = &json {
+                            match m {
                                 taos_query::common::MetaCreate::Super {
                                     table_name,
                                     columns: _,
@@ -1122,8 +1103,7 @@ mod tests {
                                     let _desc = taos.describe(table_name.as_str())?;
                                     // dbg!(_desc);
                                 }
-                            },
-                            _ => (),
+                            }
                         }
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
@@ -1300,8 +1280,8 @@ mod tests {
 
                     let metas = meta.as_json_meta()?;
                     for json in metas {
-                        match &json {
-                            taos_query::common::MetaUnit::Create(m) => match m {
+                        if let taos_query::common::MetaUnit::Create(m) = &json {
+                            match m {
                                 taos_query::common::MetaCreate::Super {
                                     table_name,
                                     columns: _,
@@ -1326,8 +1306,7 @@ mod tests {
                                     let desc = taos.describe(table_name.as_str())?;
                                     tracing::trace!("{:?}", desc);
                                 }
-                            },
-                            _ => (),
+                            }
                         }
 
                         // meta data can be write to an database seamlessly by raw or json (to sql).
@@ -2425,14 +2404,14 @@ mod async_tests {
 
         let taos = crate::TaosBuilder::from_dsn(&dsn)?.build().await?;
         taos.exec_many([
-            format!("DROP TOPIC IF EXISTS tmq_meters"),
+            "DROP TOPIC IF EXISTS tmq_meters".to_string(),
             format!("DROP DATABASE IF EXISTS `{db}`"),
             format!("CREATE DATABASE `{db}` WAL_RETENTION_PERIOD 3600"),
             format!("USE `{db}`"),
             // create super table
-            format!("CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT, cvb1 varbinary(50)) TAGS (`groupid` INT, `location` BINARY(24))"),
+            "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT, cvb1 varbinary(50)) TAGS (`groupid` INT, `location` BINARY(24))".to_string(),
             // create topic for subscription
-            format!("CREATE TOPIC tmq_meters AS SELECT * FROM `meters`")
+            "CREATE TOPIC tmq_meters AS SELECT * FROM `meters`".to_string()
         ])
         .await?;
 
@@ -2482,11 +2461,9 @@ mod async_tests {
         use std::str::FromStr;
 
         use itertools::Itertools;
-        use taos_query::{
-            prelude::TryStreamExt,
-            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
-            AsyncQueryable, AsyncTBuilder, Dsn,
-        };
+        use taos_query::prelude::TryStreamExt;
+        use taos_query::tmq::{AsAsyncConsumer, IsAsyncData, IsOffset};
+        use taos_query::{AsyncQueryable, AsyncTBuilder, Dsn};
 
         use crate::TaosBuilder;
 
@@ -2572,11 +2549,9 @@ mod async_tests {
         use std::str::FromStr;
 
         use itertools::Itertools;
-        use taos_query::{
-            prelude::TryStreamExt,
-            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
-            AsyncQueryable, AsyncTBuilder, Dsn,
-        };
+        use taos_query::prelude::TryStreamExt;
+        use taos_query::tmq::{AsAsyncConsumer, IsAsyncData, IsOffset};
+        use taos_query::{AsyncQueryable, AsyncTBuilder, Dsn};
         use tracing::debug;
 
         use crate::TaosBuilder;
@@ -2674,11 +2649,9 @@ mod async_tests {
         use std::str::FromStr;
 
         use itertools::Itertools;
-        use taos_query::{
-            prelude::TryStreamExt,
-            tmq::{AsAsyncConsumer, IsAsyncData, IsOffset},
-            AsyncQueryable, AsyncTBuilder, Dsn,
-        };
+        use taos_query::prelude::TryStreamExt;
+        use taos_query::tmq::{AsAsyncConsumer, IsAsyncData, IsOffset};
+        use taos_query::{AsyncQueryable, AsyncTBuilder, Dsn};
         use tracing::debug;
 
         use crate::TaosBuilder;
@@ -2776,10 +2749,8 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_tmq_poll() -> anyhow::Result<()> {
-        use taos_query::{
-            prelude::{AsAsyncConsumer, AsyncQueryable, AsyncTBuilder, TryStreamExt},
-            tmq::Timeout,
-        };
+        use taos_query::prelude::{AsAsyncConsumer, AsyncQueryable, AsyncTBuilder, TryStreamExt};
+        use taos_query::tmq::Timeout;
 
         use crate::{TaosBuilder, TmqBuilder};
 
