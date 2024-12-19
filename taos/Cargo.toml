@@ -35,8 +35,10 @@ async-trait = "0.1.68"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 criterion = { version = "0.5", features = ["html_reports", "stable"] }
+flume = "0.11"
 itertools = "0.13.0"
 pretty_env_logger = "0.5.0"
+rand = "0.8.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
@@ -49,6 +51,30 @@ name = "benchmark"
 harness = false
 name = "query"
 
+[[bench]]
+harness = false
+name = "sql"
+
+[[bench]]
+harness = false
+name = "stmt"
+
+[[bench]]
+harness = false
+name = "stmt2"
+
+[[bench]]
+harness = false
+name = "sql_interlace"
+
+[[bench]]
+harness = false
+name = "stmt_interlace"
+
+[[bench]]
+harness = false
+name = "stmt2_interlace"
+
 [features]
 deadpool = ["taos-query/deadpool"]
 default = ["ws-rustls", "optin", "deadpool"]
@@ -59,6 +85,14 @@ ws = ["taos-ws"]
 ws-native-tls = ["ws", "taos-ws/native-tls"]
 ws-native-tls-vendored = ["ws", "taos-ws/native-tls-vendored"]
 ws-rustls = ["ws", "taos-ws/rustls"]
-ws-rustls-ring-crypto-provider = ["ws", "taos-ws/rustls", "taos-ws/rustls-ring-crypto-provider"]
-ws-rustls-aws-lc-crypto-provider = ["ws", "taos-ws/rustls", "taos-ws/rustls-aws-lc-crypto-provider"]
+ws-rustls-ring-crypto-provider = [
+    "ws",
+    "taos-ws/rustls",
+    "taos-ws/rustls-ring-crypto-provider",
+]
+ws-rustls-aws-lc-crypto-provider = [
+    "ws",
+    "taos-ws/rustls",
+    "taos-ws/rustls-aws-lc-crypto-provider",
+]
 deflate = ["ws", "taos-ws/deflate"]

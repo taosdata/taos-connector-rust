@@ -7,13 +7,18 @@ pub type TaosPool = taos_query::prelude::Pool<TaosBuilder>;
 pub mod sync {
     pub use taos_query::prelude::sync::*;
 
-    pub use super::{Consumer, MessageSet, Offset, Stmt, Taos, TaosBuilder, TmqBuilder};
+    pub use super::{Consumer, MessageSet, Offset, Stmt, Stmt2, Taos, TaosBuilder, TmqBuilder};
 }
 
 #[cfg(all(feature = "ws", feature = "optin"))]
 mod stmt;
 #[cfg(all(feature = "ws", feature = "optin"))]
 pub use stmt::Stmt;
+
+#[cfg(all(feature = "ws", feature = "optin"))]
+mod stmt2;
+#[cfg(all(feature = "ws", feature = "optin"))]
+pub use stmt2::Stmt2;
 
 #[cfg(all(feature = "ws", feature = "optin"))]
 mod tmq;

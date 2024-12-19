@@ -43,7 +43,6 @@ rustflags = [
     "-Wclippy::unnecessary_struct_initialization",
     "-Wclippy::unused_peekable",
     "-Wclippy::unused_rounding",
-    "-Wclippy::useless_let_if_seq",
     "-Wclippy::while_float",
 
     # Pedantic Group

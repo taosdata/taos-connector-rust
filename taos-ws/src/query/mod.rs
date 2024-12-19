@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use taos_query::common::{RawMeta, SmlData};
 use taos_query::prelude::RawResult;
 use taos_query::AsyncQueryable;
@@ -15,7 +17,7 @@ use crate::TaosBuilder;
 #[derive(Debug)]
 pub struct Taos {
     pub(crate) dsn: TaosBuilder,
-    pub(crate) async_client: WsTaos,
+    pub(crate) async_client: Arc<WsTaos>,
 }
 
 impl Taos {
@@ -26,7 +28,7 @@ impl Taos {
                 Ok(client) => {
                     return Ok(Self {
                         dsn,
-                        async_client: client,
+                        async_client: Arc::new(client),
                     })
                 }
                 Err(err) => {
@@ -39,16 +41,17 @@ impl Taos {
             }
         }
     }
+
     pub fn version(&self) -> &str {
-        self.client().version()
+        self.async_client.version()
     }
 
     pub fn get_req_id(&self) -> u64 {
-        self.client().get_req_id()
+        self.async_client.get_req_id()
     }
 
-    fn client(&self) -> &WsTaos {
-        &self.async_client
+    pub(crate) fn client(&self) -> Arc<WsTaos> {
+        self.async_client.clone()
     }
 }
 
