@@ -1,5 +1,7 @@
 #![recursion_limit = "256"]
 use std::fmt::{Debug, Display};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use once_cell::sync::OnceCell;
 use taos_query::prelude::Code;
@@ -43,7 +45,8 @@ impl Default for Retries {
 
 #[derive(Clone, Debug)]
 pub struct TaosBuilder {
-    scheme: &'static str, // ws or wss
+    // scheme: &'static str, // ws or wss
+    https: Arc<AtomicBool>,
     addr: String,
     auth: WsAuth,
     database: Option<String>,
@@ -319,13 +322,25 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 }
 
 impl TaosBuilder {
+    fn scheme(&self) -> &'static str {
+        if self.https.load(Ordering::SeqCst) {
+            "wss"
+        } else {
+            "ws"
+        }
+    }
+    fn set_https(&self, https: bool) {
+        self.https.store(https, Ordering::SeqCst);
+    }
+
     pub fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
-        let scheme = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
-            ("ws" | "http", _) | ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => "ws",
-            ("wss" | "https", _) | ("taos" | "taosws" | "tmq", Some("wss" | "https")) => "wss",
+        let https = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
+            ("ws" | "http", _) | ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => false,
+            ("wss" | "https", _) | ("taos" | "taosws" | "tmq", Some("wss" | "https")) => true,
             _ => Err(DsnError::InvalidDriver(dsn.to_string()))?,
         };
+        let https = Arc::new(AtomicBool::new(https));
 
         let conn_mode = match dsn.params.get("conn_mode") {
             Some(s) => match s.parse::<u32>() {
@@ -366,7 +381,7 @@ impl TaosBuilder {
 
         if let Some(token) = token {
             Ok(TaosBuilder {
-                scheme,
+                https,
                 addr,
                 auth: WsAuth::Token(token),
                 database: dsn.subject,
@@ -379,7 +394,7 @@ impl TaosBuilder {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
             let password = dsn.password.unwrap_or_else(|| "taosdata".to_string());
             Ok(TaosBuilder {
-                scheme,
+                https,
                 addr,
                 auth: WsAuth::Plain(username, password),
                 database: dsn.subject,
@@ -394,36 +409,41 @@ impl TaosBuilder {
     pub(crate) fn to_query_url(&self) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/rest/ws?token={}", self.scheme, self.addr, token)
+                format!("{}://{}/rest/ws?token={}", self.scheme(), self.addr, token)
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme, self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme(), self.addr),
         }
     }
 
     pub(crate) fn to_stmt_url(&self) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/rest/stmt?token={}", self.scheme, self.addr, token)
+                format!(
+                    "{}://{}/rest/stmt?token={}",
+                    self.scheme(),
+                    self.addr,
+                    token
+                )
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/stmt", self.scheme, self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/stmt", self.scheme(), self.addr),
         }
     }
 
     pub(crate) fn to_tmq_url(&self) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/rest/tmq?token={}", self.scheme, self.addr, token)
+                format!("{}://{}/rest/tmq?token={}", self.scheme(), self.addr, token)
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/tmq", self.scheme, self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/tmq", self.scheme(), self.addr),
         }
     }
 
     pub(crate) fn to_ws_url(&self) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/ws?token={}", self.scheme, self.addr, token)
+                format!("{}://{}/ws?token={}", self.scheme(), self.addr, token)
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme, self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme(), self.addr),
         }
     }
 
@@ -458,7 +478,7 @@ impl TaosBuilder {
 
     pub(crate) async fn build_stream_opt(
         &self,
-        url: String,
+        mut url: String,
         use_global_endpoint: bool,
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         let mut config = WebSocketConfig::default();
@@ -476,7 +496,7 @@ impl TaosBuilder {
         }
 
         let mut retries = 0;
-        let ws_url = self.to_ws_url();
+        let mut ws_url = self.to_ws_url();
         loop {
             match connect_async_with_config(
                 if use_global_endpoint {
@@ -494,7 +514,12 @@ impl TaosBuilder {
                 }
                 Err(err) => {
                     let err_string = err.to_string();
-                    if err_string.contains("401 Unauthorized") {
+                    if err_string.contains("307") {
+                        tracing::debug!(error = err_string, "Redirecting to HTTPS link");
+                        self.set_https(true);
+                        url = url.replace("ws://", "wss://");
+                        ws_url = self.to_ws_url();
+                    } else if err_string.contains("401 Unauthorized") {
                         return Err(QueryError::Unauthorized(self.to_ws_url()).into());
                     } else if err.to_string().contains("404 Not Found")
                         || err.to_string().contains("400")
@@ -545,11 +570,11 @@ mod lib_tests {
     use crate::query::infra::{ToMessage, WsRecv, WsSend};
     use crate::*;
 
-    #[cfg(feature = "rustls")]
+    #[cfg(feature = "_with_crypto_provider")]
     #[tokio::test]
     async fn test_build_stream() -> Result<(), anyhow::Error> {
         let _subscriber = tracing_subscriber::fmt::fmt()
-            .with_max_level(Level::INFO)
+            .with_max_level(Level::TRACE)
             .with_file(true)
             .with_line_number(true)
             .finish();

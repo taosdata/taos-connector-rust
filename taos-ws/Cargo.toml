@@ -64,11 +64,14 @@ sync = []
 tmq = []
 deflate = ["tokio-tungstenite/deflate", "tokio-tungstenite/rustls-dangerous"]
 
+_with_crypto_provider = []
 rustls-aws-lc-crypto-provider = [
     "rustls",
+    "_with_crypto_provider",
     "tokio-tungstenite/rustls-aws-lc-crypto-provider",
 ]
 rustls-ring-crypto-provider = [
     "rustls",
+    "_with_crypto_provider",
     "tokio-tungstenite/rustls-ring-crypto-provider",
 ]

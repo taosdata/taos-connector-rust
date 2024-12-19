@@ -309,6 +309,49 @@ impl Dsn {
             decode(&encoded).map(|s| s.to_string()).unwrap_or(encoded)
         }
         type ParsedAddr = (Option<String>, Option<String>, Option<String>, Vec<Address>);
+        fn parse_single_addr(addr: &str) -> Result<Option<Address>, DsnError> {
+            lazy_static::lazy_static! {
+                static ref AT_SINGLE_ADDR_WITH_PORT_REGEX: Regex = Regex::new(r"^([\w\-_%.]*)(:(\d{0,5}))?$").unwrap();
+            }
+            if addr.is_empty() {
+                return Ok(None);
+            }
+            if let Some(cap) = AT_SINGLE_ADDR_WITH_PORT_REGEX.captures(addr) {
+                let host = cap
+                    .get(1)
+                    .and_then(|s| {
+                        let s = s.as_str();
+                        if s.is_empty() {
+                            None
+                        } else {
+                            Some(s.to_string())
+                        }
+                    })
+                    .map(percent_decode);
+                let port = cap.get(3).and_then(|m| m.as_str().parse::<u16>().ok());
+
+                match (host, port) {
+                    (Some(host), Some(port)) => Ok(Some(Address::new(host, port))),
+                    (Some(host), None) => {
+                        if host.contains("/") {
+                            Ok(Some(Address::from_path(host)))
+                        } else {
+                            Ok(Some(Address::from_host(host)))
+                        }
+                    }
+                    (host, port) => Ok(Some(Address {
+                        host,
+                        port,
+                        ..Default::default()
+                    })),
+                }
+            } else {
+                Err(DsnError::InvalidAddresses(
+                    addr.to_string(),
+                    "incorrect host:port format".to_string(),
+                ))
+            }
+        }
         fn parse_addr(main: &str) -> Result<ParsedAddr, DsnError> {
             if main.trim().is_empty() {
                 return Ok((None, None, None, vec![]));
@@ -414,111 +457,214 @@ impl Dsn {
                 Ok((protocol, username, password, addrs))
             } else {
                 lazy_static::lazy_static! {
-                    static ref AT_SINGLE_ADDR_WITH_PORT_REGEX: Regex = Regex::new(r"^([\w\-_%.]+)(:(\d{0,5}))?$").unwrap();
-                    static ref AT_MULTI_ADDR_WITH_PORT_REGEX: Regex = Regex::new(r"^(?P<host>[\w\-_%.]+)(:(?P<port>\d{0,5}))?[,(?P<addr2>(?P<host2>[\w\-_%.]+)(:(?P<port2>\d{0,5}))?)]*$").unwrap();
+                    static ref AT_MULTI_ADDR_WITH_PORT_REGEX: Regex = Regex::new(r"^(?P<host>[\w\-_%.]*)(:(?P<port>\d{0,5}))?[,(?P<addr2>(?P<host2>[\w\-_%.]*)(:(?P<port2>\d{0,5}))?)]*$").unwrap();
                 }
-                if let Some(cap) = AT_SINGLE_ADDR_WITH_PORT_REGEX.captures(main) {
-                    let host = cap
-                        .get(1)
-                        .map(|m| m.as_str().to_string())
-                        .map(percent_decode);
-                    let port = cap.get(3).map(|m| m.as_str().parse::<u16>().unwrap());
-                    match (host, port) {
-                        (Some(host), Some(port)) => {
-                            Ok((protocol, None, None, vec![Address::new(host, port)]))
+                if main == ":" {
+                    return Ok((protocol, None, None, vec![]));
+                }
+                match parse_single_addr(main) {
+                    Ok(Some(addr)) => Ok((protocol, None, None, vec![addr])),
+                    Ok(None) => Ok((protocol, None, None, Vec::new())),
+                    Err(err) => {
+                        if AT_MULTI_ADDR_WITH_PORT_REGEX.is_match(main) {
+                            Ok((
+                                protocol,
+                                None,
+                                None,
+                                main.split(',')
+                                    .map(|s| s.trim())
+                                    .map(parse_single_addr)
+                                    // .filter(|v| !v.is_ok_and(|s| s.is_none()))
+                                    .filter_map_ok(|v| v)
+                                    .try_collect()?,
+                            ))
+                        } else {
+                            Err(err)
                         }
-                        (Some(host), None) => {
-                            if host.contains("/") {
-                                Ok((protocol, None, None, vec![Address::from_path(host)]))
-                            } else {
-                                Ok((protocol, None, None, vec![Address::from_host(host)]))
-                            }
-                        }
-                        _ => Err(DsnError::InvalidFormat(main.to_string())),
                     }
-                } else {
-                    Err(DsnError::InvalidFormat(main.to_string()))
                 }
+                // if let Some(cap) = AT_SINGLE_ADDR_WITH_PORT_REGEX.captures(dbg!(main)) {
+                //     let host = cap
+                //         .get(1)
+                //         .map(|m| m.as_str().to_string())
+                //         .map(percent_decode);
+                //     let port = cap.get(3).map(|m| m.as_str().parse::<u16>().unwrap());
+                //     match (host, port) {
+                //         (Some(host), Some(port)) => {
+                //             Ok((protocol, None, None, vec![Address::new(host, port)]))
+                //         }
+                //         (Some(host), None) => {
+                //             if host.contains("/") {
+                //                 Ok((protocol, None, None, vec![Address::from_path(host)]))
+                //             } else {
+                //                 Ok((protocol, None, None, vec![Address::from_host(host)]))
+                //             }
+                //         }
+                //         (host, port) => Ok((
+                //             protocol,
+                //             None,
+                //             None,
+                //             vec![Address {
+                //                 host,
+                //                 port,
+                //                 ..Default::default()
+                //             }],
+                //         )),
+                //     }
+                // } else if main == ":" {
+                //     Ok((protocol, None, None, vec![]))
+                // } else if AT_MULTI_ADDR_WITH_PORT_REGEX.is_match(main) {
+                //     main.split(',').map(|s| s.trim()).map(|)
+                //     let _ = dbg!(&cap);
+                //     Ok((protocol, None, None, vec![]))
+                // } else {
+                //     Err(DsnError::InvalidFormat(main.to_string()))
+                // }
             }
         }
         if conf.starts_with("//") {
             let main = conf.strip_prefix("//").expect("strip prefix");
 
             lazy_static::lazy_static! {
+                static ref ADDR_PREFIX_REGEX: Regex = Regex::new(r"^(?P<addr>[\w\-_%.:]*(:\d{0,5})?(,[\w\-:_.]*(:\d{0,5})?)*)").unwrap();
                 static ref URL_PARAMS_REGEX: Regex = Regex::new(r"^(?P<main>.*)(\?(?P<params>[^?]+))$").unwrap();
                 static ref ENDS_WITH_ADDR_REGEX: Regex = Regex::new(r"@[\w\-_%.]+(:\d{1,5})?(,[\w\-_%.]+(:\d{1,5})?)*$").unwrap();
+                static ref PARAM_WITH_AT_REGEX: Regex = Regex::new(r"\?.*=\S+$").unwrap();
             }
-            let mut dsn = Dsn {
+            let dsn = Dsn {
                 driver,
                 protocol,
                 path: None,
                 ..Default::default()
             };
-
-            let (main, params) = if ENDS_WITH_ADDR_REGEX.is_match(main) {
-                (main, None)
-            } else if let Some(v) = main
-                .bytes()
-                .enumerate()
-                .rev()
-                .find(|(_, v)| *v == b'?')
-                .map(|(at, _v)| at)
-            {
-                let (main, params) = main.split_at(v);
-                let params = params
-                    .strip_prefix('?')
-                    .expect("split_at.1 must contain ?")
-                    .trim();
-                if params.is_empty() {
-                    (main, None)
-                } else {
-                    (main, Some(params))
-                }
-            } else {
-                (main, None)
-            };
-            if let Some(p) = params {
-                for p in p.split('&') {
-                    if p.contains('=') {
-                        if let Some((k, v)) = p.split_once('=') {
-                            let k = urlencoding::decode(k)?;
-                            let v = urlencoding::decode(v)?;
-                            dsn.params.insert(k.to_string(), v.to_string());
-                        }
+            fn try_parse_url(dsn: &Dsn, main: &str, at: Option<usize>) -> Result<Dsn, DsnError> {
+                let mut dsn = dsn.clone();
+                let (main, params) = if let Some(at) = at {
+                    let (main, params) = main.split_at(at);
+                    let params = params
+                        .strip_prefix('?')
+                        .expect("split_at.1 must contain ?")
+                        .trim();
+                    if params.is_empty() {
+                        (main, None)
                     } else {
-                        let p = urlencoding::decode(p)?;
-                        dsn.params.insert(p.to_string(), String::new());
+                        (main, Some(params))
                     }
-                }
-            }
-
-            if let Some((addr, subject)) = main.split_once('/') {
-                let (addr, subject) = (addr.trim(), subject.trim());
-                let (protocol, username, password, addresses) = parse_addr(addr)?;
-                let subject = if subject.is_empty() {
-                    None
                 } else {
-                    Some(subject.to_string())
+                    (main, None)
                 };
 
-                if protocol.is_some() {
-                    dsn.protocol = protocol;
+                if let Some(p) = params {
+                    for p in p.split('&') {
+                        if p.contains('=') {
+                            if let Some((k, v)) = p.split_once('=') {
+                                let k = urlencoding::decode(k)?;
+                                let v = urlencoding::decode(v)?;
+                                dsn.params.insert(k.to_string(), v.to_string());
+                            }
+                        } else {
+                            let p = urlencoding::decode(p)?;
+                            dsn.params.insert(p.to_string(), String::new());
+                        }
+                    }
                 }
-                dsn.subject = subject;
-                dsn.username = username.map(percent_decode);
-                dsn.password = password.map(percent_decode);
-                dsn.addresses = addresses;
-            } else {
-                let (protocol, username, password, addresses) = parse_addr(main)?;
 
-                if protocol.is_some() {
-                    dsn.protocol = protocol;
+                if let Some((addr, subject)) = main.split_once('/') {
+                    let (addr, subject) = (addr.trim(), subject.trim());
+                    let (protocol, username, password, addresses) = parse_addr(addr)?;
+                    let subject = if subject.is_empty() {
+                        None
+                    } else {
+                        if subject.contains("?") {
+                            return Err(DsnError::InvalidSpecialCharacterFormat(
+                                "Subject contains '?' mark".to_string(),
+                            ));
+                        }
+                        Some(subject.to_string())
+                    };
+
+                    if protocol.is_some() {
+                        dsn.protocol = protocol;
+                    }
+                    dsn.subject = subject;
+                    dsn.username = username.map(percent_decode);
+                    dsn.password = password.map(percent_decode);
+                    dsn.addresses = addresses;
+                } else {
+                    let (protocol, username, password, addresses) = parse_addr(main)?;
+
+                    if protocol.is_some() {
+                        dsn.protocol = protocol;
+                    }
+                    dsn.username = username.map(percent_decode);
+                    dsn.password = password.map(percent_decode);
+                    dsn.addresses = addresses;
                 }
-                dsn.username = username.map(percent_decode);
-                dsn.password = password.map(percent_decode);
-                dsn.addresses = addresses;
+                Ok(dsn)
             }
-            Ok(dsn)
+
+            fn get_question_position(main: &str) -> Option<Vec<usize>> {
+                let question_pos = main
+                    .bytes()
+                    .enumerate()
+                    .rev()
+                    .filter(|(_, v)| *v == b'?')
+                    .map(|(at, _v)| at)
+                    .collect_vec();
+
+                if question_pos.is_empty() {
+                    None
+                } else {
+                    Some(question_pos)
+                }
+            }
+            let at = if !main.starts_with('?') && ENDS_WITH_ADDR_REGEX.is_match(main) {
+                let res = try_parse_url(&dsn, main, None);
+                if res.is_err() {
+                    get_question_position(main)
+                } else {
+                    None
+                }
+            } else {
+                get_question_position(main)
+            };
+            // let (main, params, sep_at) = if ENDS_WITH_ADDR_REGEX.is_match(main) {
+            //     (main, None, 0)
+            // } else if let Some(at) = main
+            //     .bytes()
+            //     .enumerate()
+            //     .rev()
+            //     .find(|(_, v)| *v == b'?')
+            //     .map(|(at, _v)| at)
+            // {
+            //     let (main, params) = main.split_at(at);
+            //     let params = params
+            //         .strip_prefix('?')
+            //         .expect("split_at.1 must contain ?")
+            //         .trim();
+            //     if params.is_empty() {
+            //         (main, None, at)
+            //     } else {
+            //         (main, Some(params), at)
+            //     }
+            // } else {
+            //     (main, None, 0)
+            // };
+
+            if let Some(pos) = at {
+                for (i, at) in pos.iter().enumerate() {
+                    let res = try_parse_url(&dsn, main, Some(*at));
+                    if res.is_ok() {
+                        return res;
+                    }
+                    if res.is_err() && i == pos.len() - 1 {
+                        return res;
+                    }
+                }
+                Err(DsnError::InvalidFormat(input.to_string()))
+            } else {
+                try_parse_url(&dsn, main, None)
+            }
         } else {
             // path-like dsn
             lazy_static::lazy_static! {
@@ -1541,6 +1687,12 @@ mod tests {
         let s = "taos://root:!@#$%^&*()-_+=[]{}:;><?|~,@localhost:6030";
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(dsn.password.unwrap(), "!@#$%^&*()-_+=[]{}:;><?|~,");
+        let s = "taos://root:Ab1!#$%^&*()-_+=[]{}:;><?|~,@localhost:6030";
+        let dsn = Dsn::from_str(s).unwrap();
+        assert_eq!(dsn.password.unwrap(), "Ab1!#$%^&*()-_+=[]{}:;><?|~,");
+        let s = "taos://root:Ab1@#$%^&*()_+@localhost:6030/test?mode=all";
+        let dsn = Dsn::from_str(s).unwrap();
+        assert_eq!(dsn.password.unwrap(), "Ab1@#$%^&*()_+");
     }
     #[test]
     fn path_with_special_chars() {
@@ -1559,5 +1711,95 @@ mod tests {
             dsn.params.get("b").unwrap(),
             "!@#$%^*()-_+=[]{}:;><中文汉字£¢§®"
         );
+    }
+
+    #[test]
+    fn taosx_dsn_opc() {
+        let dsn = format!(
+            "opcua://{}?node_id_pattern={}&browse_name_pattern={}",
+            "192.168.2.16:53530/OPCUA/SimulationServer", "^(?!.*_Error).+$", "^(?!.*_Error).+$"
+        )
+        .into_dsn()
+        .unwrap();
+        assert_eq!(dsn.driver, "opcua");
+        assert_eq!(dsn.addresses.len(), 1);
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "192.168.2.16");
+        assert_eq!(dsn.addresses[0].port.unwrap(), 53530);
+        assert_eq!(dsn.subject.as_deref().unwrap(), "OPCUA/SimulationServer");
+        assert_eq!(
+            dsn.params.get("node_id_pattern").unwrap(),
+            "^(?!.*_Error).+$"
+        );
+        assert_eq!(
+            dsn.params.get("browse_name_pattern").unwrap(),
+            "^(?!.*_Error).+$"
+        );
+
+        let dsn = "opcua://?certificate=@./tests/opc/certificate.crt"
+            .into_dsn()
+            .unwrap();
+        assert!(dsn.subject.is_none());
+        assert_eq!(
+            dsn.get("certificate").unwrap(),
+            "@./tests/opc/certificate.crt"
+        );
+
+        let dsn = "opcua://?certificate=@abc".into_dsn().unwrap();
+        dbg!(&dsn);
+        assert!(dsn.subject.is_none());
+        assert!(dsn.addresses.is_empty());
+        assert_eq!(dsn.get("certificate").unwrap(), "@abc");
+
+        let dsn = "opcua://192.168.1.13:9092/abc/path?certificate=@abc"
+            .into_dsn()
+            .unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "192.168.1.13");
+        assert_eq!(dsn.addresses[0].port.unwrap(), 9092);
+        assert_eq!(dsn.subject.as_deref().unwrap(), "abc/path");
+        assert_eq!(dsn.get("certificate").unwrap(), "@abc");
+    }
+
+    #[test]
+    fn taosx_dsn_kafka() {
+        let dsn = Dsn::from_str("kafka://localhost:9092").unwrap();
+        assert_eq!(dsn.addresses.len(), 1);
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "localhost");
+        let dsn = Dsn::from_str("kafka://localhost:9092,192.168.1.92:9092").unwrap();
+        assert_eq!(dsn.addresses.len(), 2);
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "localhost");
+        assert_eq!(dsn.addresses[1].host.as_deref().unwrap(), "192.168.1.92");
+        let dsn = Dsn::from_str("kafka://:9092,:9092").unwrap();
+        assert_eq!(dsn.addresses.len(), 2);
+        assert_eq!(dsn.addresses[0].port.unwrap(), 9092);
+        assert_eq!(dsn.addresses[1].port.unwrap(), 9092);
+        let dsn = Dsn::from_str("kafka://:9092").unwrap();
+        assert_eq!(dsn.addresses.len(), 1);
+        assert_eq!(dsn.addresses[0].port.unwrap(), 9092);
+
+        let dsn = Dsn::from_str("kafka://:?topics=tp1,tp2").unwrap();
+        assert_eq!(dsn.get("topics").unwrap(), "tp1,tp2");
+        assert!(dsn.addresses.is_empty());
+        assert!(dsn.subject.is_none());
+        let dsn = Dsn::from_str("kafka://").unwrap();
+        assert!(dsn.addresses.is_empty());
+        assert!(dsn.subject.is_none());
+    }
+    #[test]
+    fn taosx_dsn_mqtt() {
+        let dsn = Dsn::from_str("mqtt://127.0.0.1:1884").unwrap();
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "127.0.0.1");
+        assert_eq!(dsn.addresses[0].port.unwrap(), 1884);
+
+        let dsn = Dsn::from_str("mqtt://127.0.0.1:").unwrap();
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "127.0.0.1");
+        assert!(dsn.addresses[0].port.is_none());
+
+        let dsn = Dsn::from_str("mqtt://:1883").unwrap();
+        assert!(dsn.addresses[0].host.is_none());
+        assert_eq!(dsn.addresses[0].port.unwrap(), 1883);
+
+        let dsn = Dsn::from_str("mqtt://:").unwrap();
+        assert!(dsn.addresses.is_empty());
     }
 }
