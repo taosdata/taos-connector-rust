@@ -19,7 +19,12 @@ async fn main() -> anyhow::Result<()> {
     // One thousand records per subtable
     let record_cnt = 1000;
 
-    let db = "db_202412171129";
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+
+    let db = &format!("db_{}", ts);
 
     let taos = TaosBuilder::from_dsn(DSN)?.build().await?;
     taos.exec_many([
@@ -49,6 +54,8 @@ async fn main() -> anyhow::Result<()> {
     consume_data(db, receivers).await;
 
     check_count(&taos, subtable_cnt * record_cnt).await?;
+
+    taos.exec(format!("drop database {db}")).await?;
 
     Ok(())
 }
