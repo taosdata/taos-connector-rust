@@ -251,26 +251,6 @@ impl ExactSizeIterator for BoolViewIter<'_> {
     }
 }
 
-impl<A: Into<Option<bool>>> FromIterator<A> for BoolView {
-    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
-        let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
-            .into_iter()
-            .map(|v| match v.into() {
-                Some(v) => (false, v),
-                None => (true, false),
-            })
-            .unzip();
-        Self {
-            nulls: NullBits::from_iter(nulls),
-            data: Bytes::from({
-                let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
-                std::mem::forget(values);
-                unsafe { Vec::from_raw_parts(ptr as *mut u8, len, cap) }
-            }),
-        }
-    }
-}
-
 #[test]
 fn test_bool_slice() {
     let data = [true, false, false, true];

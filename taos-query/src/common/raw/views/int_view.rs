@@ -259,40 +259,59 @@ impl ExactSizeIterator for IntViewIter<'_> {
     }
 }
 
-impl<A: Into<Option<Item>>> FromIterator<A> for View {
-    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
-        let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
-            .into_iter()
-            .map(|v| match v.into() {
-                Some(v) => (false, v),
-                None => (true, Item::default()),
-            })
-            .unzip();
-        Self {
-            nulls: NullBits::from_iter(nulls),
-            data: Bytes::from({
-                let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
-                std::mem::forget(values);
-                unsafe { Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE) }
-            }),
+#[cfg(test)]
+mod tests {
+    use byteorder::{BigEndian, ByteOrder};
+
+    use crate::views::int_view::{Item, View, ITEM_SIZE};
+
+    #[test]
+    fn test_slice() {
+        let data = [0, 1, Item::MIN, Item::MAX];
+        let view = View::from_iter(data);
+        dbg!(&view);
+        let slice = view.slice(1..3);
+        dbg!(&slice);
+
+        let data = [None, Some(Item::MIN), Some(Item::MAX), None];
+        let view = View::from_iter(data);
+        dbg!(&view);
+        let range = 1..4;
+        let slice = view.slice(range.clone()).unwrap();
+        for (v, i) in slice.iter().zip(range) {
+            assert_eq!(v, data[i]);
         }
     }
-}
 
-#[test]
-fn test_slice() {
-    let data = [0, 1, Item::MIN, Item::MAX];
-    let view = View::from_iter(data);
-    dbg!(&view);
-    let slice = view.slice(1..3);
-    dbg!(&slice);
+    #[cfg(target_endian = "little")]
+    #[test]
+    fn test_from_iterator() {
+        let data = [0x12345678];
+        let view = View::from_iter(data);
+        let bytes = view.data;
+        assert_eq!(bytes.to_vec(), vec![0x78, 0x56, 0x34, 0x12]);
+    }
 
-    let data = [None, Some(Item::MIN), Some(Item::MAX), None];
-    let view = View::from_iter(data);
-    dbg!(&view);
-    let range = 1..4;
-    let slice = view.slice(range.clone()).unwrap();
-    for (v, i) in slice.iter().zip(range) {
-        assert_eq!(v, data[i]);
+    #[cfg(target_endian = "little")]
+    #[test]
+    fn test_from_iterator_mock_big_endian() {
+        let mut bytes = [0u8; 16];
+        BigEndian::write_i32(&mut bytes, 0x12345678);
+        BigEndian::write_i32(&mut bytes[4..], 0x78563412);
+        BigEndian::write_i32(&mut bytes[8..], 0x12131415);
+        BigEndian::write_i32(&mut bytes[12..], 0x51413121);
+
+        for i in (0..bytes.len()).step_by(ITEM_SIZE) {
+            let j = i + ITEM_SIZE;
+            let val = Item::from_be_bytes(bytes[i..j].try_into().unwrap());
+            bytes[i..j].copy_from_slice(&val.to_le_bytes());
+        }
+
+        let expect = vec![
+            0x78, 0x56, 0x34, 0x12, 0x12, 0x34, 0x56, 0x78, 0x15, 0x14, 0x13, 0x12, 0x21, 0x31,
+            0x41, 0x51,
+        ];
+
+        assert_eq!(bytes.to_vec(), expect);
     }
 }
