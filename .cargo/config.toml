@@ -7,6 +7,7 @@ rustflags = [
     "-Aclippy::missing_safety_doc",
 
     # Suspicious Group
+    "-Aclippy::incompatible_msrv",
     "-Aclippy::missing_transmute_annotations",
 
     # Cargo Group

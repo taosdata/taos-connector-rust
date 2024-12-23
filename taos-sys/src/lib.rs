@@ -37,6 +37,7 @@ pub extern "C" fn taos_cleanup() {
     todo!()
 }
 
+#[allow(clippy::just_underscores_and_digits)]
 #[no_mangle]
 pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
     todo!()
