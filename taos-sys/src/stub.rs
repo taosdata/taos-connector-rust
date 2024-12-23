@@ -2,12 +2,18 @@
 
 use std::ffi::{c_char, c_int, c_ulong, c_void};
 
-use crate::{
-    query::{__taos_async_fn_t, TAOS_FIELD},
-    stmt::TAOS_FIELD_E,
-    tmq::tmq_t,
-    TAOS, TAOS_RES,
-};
+use crate::query::{__taos_async_fn_t, TAOS_FIELD};
+use crate::stmt::TAOS_FIELD_E;
+use crate::tmq::tmq_t;
+use crate::{TAOS, TAOS_RES};
+
+#[no_mangle]
+pub extern "C" fn taos_init() -> c_int {
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn taos_cleanup() {}
 
 #[no_mangle]
 pub extern "C" fn taos_connect_auth(

@@ -27,16 +27,6 @@ pub enum TSDB_OPTION {
     TSDB_MAX_OPTIONS = 7,
 }
 
-#[no_mangle]
-pub extern "C" fn taos_init() -> c_int {
-    todo!()
-}
-
-#[no_mangle]
-pub extern "C" fn taos_cleanup() {
-    todo!()
-}
-
 #[allow(clippy::just_underscores_and_digits)]
 #[no_mangle]
 pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
