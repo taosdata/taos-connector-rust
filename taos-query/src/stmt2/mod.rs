@@ -9,13 +9,13 @@ where
 
     fn prepare(&mut self, sql: &str) -> RawResult<&mut Self>;
 
-    fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<&mut Self>;
+    fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self>;
 
     fn exec(&mut self) -> RawResult<usize>;
 
     fn affected_rows(&self) -> usize;
 
-    fn result(&self) -> RawResult<Q::ResultSet>;
+    fn result_set(&self) -> RawResult<Q::ResultSet>;
 }
 
 #[async_trait::async_trait]
@@ -28,23 +28,23 @@ where
 
     async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self>;
 
-    async fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<&mut Self>;
+    async fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self>;
 
     async fn exec(&mut self) -> RawResult<usize>;
 
     async fn affected_rows(&self) -> usize;
 
-    async fn result(&self) -> RawResult<Q::AsyncResultSet>;
+    async fn result_set(&self) -> RawResult<Q::AsyncResultSet>;
 }
 
 #[derive(Clone, Debug)]
-pub struct Stmt2BindData {
+pub struct Stmt2BindParam {
     table_name: Option<String>,
     tags: Option<Vec<Value>>,
     columns: Option<Vec<ColumnView>>,
 }
 
-impl Stmt2BindData {
+impl Stmt2BindParam {
     pub fn new(
         table_name: Option<String>,
         tags: Option<Vec<Value>>,

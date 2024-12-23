@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use futures::channel::oneshot;
 use taos_query::common::{Field, Precision};
 use taos_query::prelude::RawResult;
-use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BindData, Stmt2Bindable};
+use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable};
 use tracing::Instrument;
@@ -78,9 +78,9 @@ impl Stmt2 {
         unreachable!()
     }
 
-    async fn bind(&self, datas: &[Stmt2BindData]) -> RawResult<()> {
-        let bytes = bind::bind_datas_to_bytes(
-            datas,
+    async fn bind(&self, params: &[Stmt2BindParam]) -> RawResult<()> {
+        let bytes = bind::bind_params_to_bytes(
+            params,
             generate_req_id(),
             self.stmt_id.unwrap(),
             self.is_insert.unwrap(),
@@ -122,7 +122,7 @@ impl Stmt2 {
         }
     }
 
-    async fn result(&self) -> RawResult<ResultSet> {
+    async fn result_set(&self) -> RawResult<ResultSet> {
         if self.is_insert.unwrap_or(false) {
             return Err("Only query can use result".into());
         }
@@ -220,8 +220,8 @@ impl Stmt2Bindable<super::Taos> for Stmt2 {
         Ok(self)
     }
 
-    fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<&mut Self> {
-        block_in_place_or_global(Stmt2::bind(self, datas))?;
+    fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
+        block_in_place_or_global(Stmt2::bind(self, params))?;
         Ok(self)
     }
 
@@ -233,8 +233,8 @@ impl Stmt2Bindable<super::Taos> for Stmt2 {
         self.affected_rows
     }
 
-    fn result(&self) -> RawResult<<Taos as Queryable>::ResultSet> {
-        block_in_place_or_global(self.result())
+    fn result_set(&self) -> RawResult<<Taos as Queryable>::ResultSet> {
+        block_in_place_or_global(self.result_set())
     }
 }
 
@@ -251,8 +251,8 @@ impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
         Ok(self)
     }
 
-    async fn bind(&mut self, datas: &[Stmt2BindData]) -> RawResult<&mut Self> {
-        Stmt2::bind(self, datas).await?;
+    async fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
+        Stmt2::bind(self, params).await?;
         Ok(self)
     }
 
@@ -264,8 +264,8 @@ impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
         self.affected_rows
     }
 
-    async fn result(&self) -> RawResult<<Taos as AsyncQueryable>::AsyncResultSet> {
-        self.result().await
+    async fn result_set(&self) -> RawResult<<Taos as AsyncQueryable>::AsyncResultSet> {
+        self.result_set().await
     }
 }
 
@@ -274,7 +274,7 @@ mod tests {
     use futures::TryStreamExt;
     use serde::Deserialize;
     use taos_query::common::{ColumnView, Ty, Value};
-    use taos_query::stmt2::Stmt2BindData;
+    use taos_query::stmt2::Stmt2BindParam;
     use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};
 
     use crate::stmt2::Stmt2;
@@ -302,7 +302,7 @@ mod tests {
             .prepare("insert into t0 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .await?;
 
-        let views = vec![
+        let cols = vec![
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_bools(vec![true]),
             ColumnView::from_tiny_ints(vec![None]),
@@ -319,8 +319,8 @@ mod tests {
             ColumnView::from_nchar(vec!["中文"]),
         ];
 
-        let data = Stmt2BindData::new(None, None, Some(views));
-        stmt2.bind(&[data]).await?;
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
 
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 1);
@@ -392,7 +392,7 @@ mod tests {
         stmt2.init().await?;
         stmt2.prepare("insert into t0 values(?, ?)").await?;
 
-        let views = vec![
+        let cols = vec![
             ColumnView::from_millis_timestamp(vec![
                 1726803356466,
                 1726803357466,
@@ -402,8 +402,8 @@ mod tests {
             ColumnView::from_ints(vec![99, 100, 101, 102]),
         ];
 
-        let data = Stmt2BindData::new(None, None, Some(views));
-        stmt2.bind(&[data]).await?;
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
 
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 4);
@@ -463,14 +463,14 @@ mod tests {
             .prepare("select * from t0 where c8 > ? and c10 > ? and c12 = ?")
             .await?;
 
-        let views = vec![
+        let cols = vec![
             ColumnView::from_ints(vec![0]),
             ColumnView::from_floats(vec![0f32]),
             ColumnView::from_varchar(vec!["hello"]),
         ];
 
-        let data = Stmt2BindData::new(None, None, Some(views));
-        stmt2.bind(&[data]).await?;
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
 
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 0);
@@ -493,10 +493,17 @@ mod tests {
             c13: String,
         }
 
-        let rows: Vec<Row> = stmt2.result().await?.deserialize().try_collect().await?;
+        let rows: Vec<Row> = stmt2
+            .result_set()
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
         assert_eq!(rows.len(), 1);
 
         let row = &rows[0];
+
         assert_eq!(row.ts, 1726803356466);
         assert_eq!(row.c1, true);
         assert_eq!(row.c2, None);
@@ -539,9 +546,9 @@ mod tests {
         stmt2.init().await?;
         stmt2.prepare("select * from t0 where c1 > ?").await?;
 
-        let views = vec![ColumnView::from_ints(vec![100])];
-        let data = Stmt2BindData::new(None, None, Some(views));
-        stmt2.bind(&[data]).await?;
+        let cols = vec![ColumnView::from_ints(vec![100])];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
 
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 0);
@@ -552,7 +559,13 @@ mod tests {
             c1: i32,
         }
 
-        let rows: Vec<Row> = stmt2.result().await?.deserialize().try_collect().await?;
+        let rows: Vec<Row> = stmt2
+            .result_set()
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
         assert_eq!(rows.len(), 2);
 
         assert_eq!(rows[0].ts, 1726803358466);
@@ -588,13 +601,13 @@ mod tests {
 
         let tbname = "d0";
         let tags = vec![Value::Int(100)];
-        let views = vec![
+        let cols = vec![
             ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
             ColumnView::from_ints(vec![100, 200]),
         ];
-        let data = Stmt2BindData::new(Some(tbname.to_owned()), Some(tags), Some(views));
+        let param = Stmt2BindParam::new(Some(tbname.to_owned()), Some(tags), Some(cols));
 
-        stmt2.bind(&[data]).await?;
+        stmt2.bind(&[param]).await?;
 
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 2);
@@ -673,13 +686,13 @@ mod tests {
 
         let tbname = "d0";
         let tags = vec![Value::Int(100)];
-        let views = vec![
+        let cols = vec![
             ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
             ColumnView::from_ints(vec![100, 200]),
         ];
-        let data = Stmt2BindData::new(Some(tbname.to_owned()), Some(tags), Some(views));
+        let param = Stmt2BindParam::new(Some(tbname.to_owned()), Some(tags), Some(cols));
 
-        stmt2.bind(&[data]).await?;
+        stmt2.bind(&[param]).await?;
 
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 2);
@@ -754,7 +767,7 @@ mod tests {
         stmt2.init().await?;
         stmt2.prepare("insert into t0 values(?, ?)").await?;
 
-        let res = stmt2.result().await;
+        let res = stmt2.result_set().await;
         assert!(res.is_err());
 
         Ok(())

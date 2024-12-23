@@ -98,7 +98,7 @@ async fn create_subtables(db: &str, subtable_cnt: usize) {
 }
 
 async fn produce_data(
-    senders: Vec<Sender<Vec<Stmt2BindData>>>,
+    senders: Vec<Sender<Vec<Stmt2BindParam>>>,
     subtable_cnt: usize,
     record_cnt: usize,
 ) {
@@ -116,7 +116,7 @@ async fn produce_data(
             let mut rng = rand::thread_rng();
 
             for j in (0..thread_subtable_cnt).step_by(batch_subtable_cnt) {
-                let mut datas = Vec::with_capacity(batch_subtable_cnt);
+                let mut params = Vec::with_capacity(batch_subtable_cnt);
 
                 for k in 0..batch_subtable_cnt {
                     let mut tss = Vec::with_capacity(record_cnt);
@@ -151,11 +151,11 @@ async fn produce_data(
                         ColumnView::from_floats(c3s),
                     ];
 
-                    let data = Stmt2BindData::new(Some(tbname), None, Some(cols));
-                    datas.push(data);
+                    let param = Stmt2BindParam::new(Some(tbname), None, Some(cols));
+                    params.push(param);
                 }
 
-                sender.send(datas).unwrap();
+                sender.send(params).unwrap();
             }
 
             println!("Producer thread[{idx}] ends producing data");
@@ -163,7 +163,7 @@ async fn produce_data(
     }
 }
 
-async fn consume_data(db: &str, mut receivers: Vec<Receiver<Vec<Stmt2BindData>>>) {
+async fn consume_data(db: &str, mut receivers: Vec<Receiver<Vec<Stmt2BindParam>>>) {
     let now = Local::now();
     let time = now.format("%Y-%m-%d %H:%M:%S").to_string();
     println!("Consuming data start, time = {time}");
@@ -187,8 +187,8 @@ async fn consume_data(db: &str, mut receivers: Vec<Receiver<Vec<Stmt2BindData>>>
             println!("Consumer thread[{i}] starts consuming data");
 
             let start = Instant::now();
-            while let Ok(datas) = receiver.recv_async().await {
-                stmt2.bind(&datas).await.unwrap();
+            while let Ok(params) = receiver.recv_async().await {
+                stmt2.bind(&params).await.unwrap();
                 stmt2.exec().await.unwrap();
             }
 

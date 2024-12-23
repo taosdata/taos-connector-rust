@@ -1,6 +1,6 @@
 use byteorder::{ByteOrder, LittleEndian};
 use taos_query::common::{BorrowedValue, ColumnView, Value};
-use taos_query::stmt2::Stmt2BindData;
+use taos_query::stmt2::Stmt2BindParam;
 use taos_query::RawResult;
 
 use crate::query::infra::{BindType, ReqId, Stmt2Field, StmtId};
@@ -31,23 +31,23 @@ const ACTION: u64 = 9;
 const VERSION: u16 = 1;
 const COL_IDX: i32 = -1;
 
-pub(super) fn bind_datas_to_bytes(
-    datas: &[Stmt2BindData],
+pub(super) fn bind_params_to_bytes(
+    params: &[Stmt2BindParam],
     req_id: ReqId,
     stmt_id: StmtId,
     is_insert: bool,
     fields: Option<&Vec<Stmt2Field>>,
     fields_count: usize,
 ) -> RawResult<Vec<u8>> {
-    if datas.is_empty() {
-        return Err("No datas to bind".into());
+    if params.is_empty() {
+        return Err("No params to bind".into());
     }
 
     let mut need_tbnames = false;
     let mut need_tags = false;
     let mut need_cols = false;
 
-    let table_cnt = datas.len();
+    let table_cnt = params.len();
     let mut tag_cnt = 0;
     let mut col_cnt = 0;
 
@@ -82,21 +82,21 @@ pub(super) fn bind_datas_to_bytes(
     let mut tbname_lens = vec![];
     let mut tbname_buf_len = 0;
     if need_tbnames {
-        tbname_lens = get_tbname_lens(datas)?;
+        tbname_lens = get_tbname_lens(params)?;
         tbname_buf_len = tbname_lens.iter().map(|&x| x as usize).sum();
     }
 
     let mut tag_lens = vec![];
     let mut tag_buf_len = 0;
     if need_tags {
-        tag_lens = get_tag_lens(datas, tag_cnt)?;
+        tag_lens = get_tag_lens(params, tag_cnt)?;
         tag_buf_len = tag_lens.iter().map(|&x| x as usize).sum();
     }
 
     let mut col_lens = vec![];
     let mut col_buf_len = 0;
     if need_cols {
-        col_lens = get_col_lens(datas, col_cnt)?;
+        col_lens = get_col_lens(params, col_cnt)?;
         col_buf_len = col_lens.iter().map(|&x| x as usize).sum();
     }
 
@@ -121,45 +121,45 @@ pub(super) fn bind_datas_to_bytes(
 
     if need_tbnames {
         LittleEndian::write_u32(&mut bytes[TABLE_NAMES_OFFSET_POS..], DATA_POS as _);
-        write_tbnames(&mut bytes[DATA_POS..], datas, &tbname_lens);
+        write_tbnames(&mut bytes[DATA_POS..], params, &tbname_lens);
     }
 
     if need_tags {
         let tags_offset = DATA_POS + tbname_total_len;
         LittleEndian::write_u32(&mut bytes[TAGS_OFFSET_POS..], tags_offset as _);
-        write_tags(&mut bytes[tags_offset..], datas, &tag_lens);
+        write_tags(&mut bytes[tags_offset..], params, &tag_lens);
     }
 
     if need_cols {
         let cols_offset = DATA_POS + tbname_total_len + tag_total_len;
         LittleEndian::write_u32(&mut bytes[COLS_OFFSET_POS..], cols_offset as _);
-        write_cols(&mut bytes[cols_offset..], datas, &col_lens);
+        write_cols(&mut bytes[cols_offset..], params, &col_lens);
     }
 
     Ok(data)
 }
 
-fn get_tbname_lens(datas: &[Stmt2BindData]) -> RawResult<Vec<u16>> {
-    let mut tbname_lens = vec![0u16; datas.len()];
-    for (i, data) in datas.iter().enumerate() {
-        if data.table_name().map_or(true, |s| s.is_empty()) {
+fn get_tbname_lens(params: &[Stmt2BindParam]) -> RawResult<Vec<u16>> {
+    let mut tbname_lens = vec![0u16; params.len()];
+    for (i, param) in params.iter().enumerate() {
+        if param.table_name().map_or(true, |s| s.is_empty()) {
             return Err("table name is empty".into());
         }
-        let tbname = data.table_name().unwrap();
+        let tbname = param.table_name().unwrap();
         // Add 1 because the table name ends with '\0'
         tbname_lens[i] = (tbname.len() + 1) as _;
     }
     Ok(tbname_lens)
 }
 
-fn get_tag_lens(datas: &[Stmt2BindData], tag_cnt: usize) -> RawResult<Vec<u32>> {
-    let mut tag_lens = vec![0u32; datas.len()];
-    for (i, data) in datas.iter().enumerate() {
-        if data.tags().is_none() {
+fn get_tag_lens(params: &[Stmt2BindParam], tag_cnt: usize) -> RawResult<Vec<u32>> {
+    let mut tag_lens = vec![0u32; params.len()];
+    for (i, param) in params.iter().enumerate() {
+        if param.tags().is_none() {
             return Err("tags is empty".into());
         }
 
-        let tags = data.tags().unwrap();
+        let tags = param.tags().unwrap();
         if tags.len() != tag_cnt {
             return Err("tags len mismatch".into());
         }
@@ -175,14 +175,14 @@ fn get_tag_lens(datas: &[Stmt2BindData], tag_cnt: usize) -> RawResult<Vec<u32>> 
     Ok(tag_lens)
 }
 
-fn get_col_lens(datas: &[Stmt2BindData], col_cnt: usize) -> RawResult<Vec<u32>> {
-    let mut col_lens = vec![0u32; datas.len()];
-    for (i, data) in datas.iter().enumerate() {
-        if data.columns().is_none() {
+fn get_col_lens(params: &[Stmt2BindParam], col_cnt: usize) -> RawResult<Vec<u32>> {
+    let mut col_lens = vec![0u32; params.len()];
+    for (i, param) in params.iter().enumerate() {
+        if param.columns().is_none() {
             return Err("columns is empty".into());
         }
 
-        let cols = data.columns().unwrap();
+        let cols = param.columns().unwrap();
         if cols.len() != col_cnt {
             return Err("columns len mismatch".into());
         }
@@ -267,7 +267,7 @@ fn write_fixed_headers(bytes: &mut [u8], req_id: ReqId, stmt_id: StmtId) {
     LittleEndian::write_i32(&mut bytes[COL_IDX_POS..], COL_IDX);
 }
 
-fn write_tbnames(bytes: &mut [u8], datas: &[Stmt2BindData], tbname_lens: &[u16]) {
+fn write_tbnames(bytes: &mut [u8], params: &[Stmt2BindParam], tbname_lens: &[u16]) {
     // Write TableNameLength
     let mut offset = 0;
     for len in tbname_lens {
@@ -276,8 +276,8 @@ fn write_tbnames(bytes: &mut [u8], datas: &[Stmt2BindData], tbname_lens: &[u16])
     }
 
     // Write TableNameBuffer
-    for data in datas {
-        let tbname = data.table_name().unwrap();
+    for param in params {
+        let tbname = param.table_name().unwrap();
         let len = tbname.len();
         bytes[offset..offset + len].copy_from_slice(tbname.as_bytes());
         // Add 1 because the table name end with '\0'
@@ -285,7 +285,7 @@ fn write_tbnames(bytes: &mut [u8], datas: &[Stmt2BindData], tbname_lens: &[u16])
     }
 }
 
-fn write_tags(bytes: &mut [u8], datas: &[Stmt2BindData], tag_lens: &[u32]) {
+fn write_tags(bytes: &mut [u8], params: &[Stmt2BindParam], tag_lens: &[u32]) {
     // Write TagsDataLength
     let mut offset = 0;
     for len in tag_lens {
@@ -294,8 +294,8 @@ fn write_tags(bytes: &mut [u8], datas: &[Stmt2BindData], tag_lens: &[u32]) {
     }
 
     // Write TagsBuffer
-    for data in datas {
-        for tag in data.tags().unwrap() {
+    for param in params {
+        for tag in param.tags().unwrap() {
             offset += write_tag(&mut bytes[offset..], tag);
         }
     }
@@ -367,7 +367,7 @@ fn write_tag(bytes: &mut [u8], tag: &Value) -> usize {
     total_len
 }
 
-fn write_cols(bytes: &mut [u8], datas: &[Stmt2BindData], col_lens: &[u32]) {
+fn write_cols(bytes: &mut [u8], params: &[Stmt2BindParam], col_lens: &[u32]) {
     // Write ColDataLength
     let mut offset = 0;
     for len in col_lens {
@@ -376,8 +376,8 @@ fn write_cols(bytes: &mut [u8], datas: &[Stmt2BindData], col_lens: &[u32]) {
     }
 
     // Write ColBuffer
-    for data in datas {
-        let cols = data.columns().unwrap();
+    for param in params {
+        let cols = param.columns().unwrap();
         for col in cols {
             offset += write_col(&mut bytes[offset..], col);
         }
@@ -506,16 +506,16 @@ mod tests {
     use bytes::Bytes;
     use taos_query::common::{ColumnView, Timestamp, Ty, Value};
 
-    use super::{bind_datas_to_bytes, Stmt2BindData};
+    use super::{bind_params_to_bytes, Stmt2BindParam};
     use crate::query::infra::BindType;
     use crate::stmt2::Stmt2Field;
 
     #[test]
-    fn test_bind_datas_to_bytes_with_tbnames() -> anyhow::Result<()> {
-        let data1 = Stmt2BindData::new(Some("test1".to_owned()), None, None);
-        let data2 = Stmt2BindData::new(Some("test2".to_owned()), None, None);
-        let data3 = Stmt2BindData::new(Some("test3".to_owned()), None, None);
-        let datas = [data1, data2, data3];
+    fn test_bind_params_to_bytes_with_tbnames() -> anyhow::Result<()> {
+        let param1 = Stmt2BindParam::new(Some("test1".to_owned()), None, None);
+        let param2 = Stmt2BindParam::new(Some("test2".to_owned()), None, None);
+        let param3 = Stmt2BindParam::new(Some("test3".to_owned()), None, None);
+        let params = [param1, param2, param3];
 
         let fields = vec![Stmt2Field {
             name: "".to_string(),
@@ -526,7 +526,7 @@ mod tests {
             bind_type: BindType::TableName,
         }];
 
-        let res = bind_datas_to_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
+        let res = bind_params_to_bytes(&params, 100, 200, true, Some(&fields), 0)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -563,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_to_bytes_with_tags() -> anyhow::Result<()> {
+    fn test_bind_params_to_bytes_with_tags() -> anyhow::Result<()> {
         let tags = vec![
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
@@ -587,8 +587,8 @@ mod tests {
             ])),
         ];
 
-        let data = Stmt2BindData::new(None, Some(tags), None);
-        let datas = [data];
+        let param = Stmt2BindParam::new(None, Some(tags), None);
+        let params = [param];
 
         let fields = vec![
             Stmt2Field {
@@ -729,7 +729,7 @@ mod tests {
             },
         ];
 
-        let res = bind_datas_to_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
+        let res = bind_params_to_bytes(&params, 100, 200, true, Some(&fields), 0)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -919,7 +919,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_to_bytes_with_null_tags() -> anyhow::Result<()> {
+    fn test_bind_params_to_bytes_with_null_tags() -> anyhow::Result<()> {
         let tags = vec![
             Value::Null(Ty::Timestamp),
             Value::Null(Ty::Bool),
@@ -940,8 +940,8 @@ mod tests {
             Value::Null(Ty::Geometry),
         ];
 
-        let data = Stmt2BindData::new(None, Some(tags), None);
-        let datas = [data];
+        let param = Stmt2BindParam::new(None, Some(tags), None);
+        let params = [param];
 
         let fields = vec![
             Stmt2Field {
@@ -1082,7 +1082,7 @@ mod tests {
             },
         ];
 
-        let res = bind_datas_to_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
+        let res = bind_params_to_bytes(&params, 100, 200, true, Some(&fields), 0)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -1255,7 +1255,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_to_bytes_with_tbnames_and_tags() -> anyhow::Result<()> {
+    fn test_bind_params_to_bytes_with_tbnames_and_tags() -> anyhow::Result<()> {
         let tags1 = vec![
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
@@ -1279,7 +1279,7 @@ mod tests {
             ])),
         ];
 
-        let data1 = Stmt2BindData::new(Some("test1".to_owned()), Some(tags1), None);
+        let param1 = Stmt2BindParam::new(Some("test1".to_owned()), Some(tags1), None);
 
         let tags2 = vec![
             Value::Null(Ty::Timestamp),
@@ -1301,7 +1301,7 @@ mod tests {
             Value::Null(Ty::Geometry),
         ];
 
-        let data2 = Stmt2BindData::new(Some("testnil".to_owned()), Some(tags2), None);
+        let param2 = Stmt2BindParam::new(Some("testnil".to_owned()), Some(tags2), None);
 
         let tags3 = vec![
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
@@ -1326,9 +1326,9 @@ mod tests {
             ])),
         ];
 
-        let data3 = Stmt2BindData::new(Some("test2".to_owned()), Some(tags3), None);
+        let param3 = Stmt2BindParam::new(Some("test2".to_owned()), Some(tags3), None);
 
-        let datas = [data1, data2, data3];
+        let params = [param1, param2, param3];
 
         let fields = vec![
             Stmt2Field {
@@ -1477,7 +1477,7 @@ mod tests {
             },
         ];
 
-        let res = bind_datas_to_bytes(&datas, 100, 200, true, Some(&fields), 0)?;
+        let res = bind_params_to_bytes(&params, 100, 200, true, Some(&fields), 0)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -1980,7 +1980,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_to_bytes_with_cols() -> anyhow::Result<()> {
+    fn test_bind_params_to_bytes_with_cols() -> anyhow::Result<()> {
         let cols = vec![
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_bools(vec![true]),
@@ -2004,8 +2004,8 @@ mod tests {
         ];
 
         let fields_cnt = cols.len();
-        let data = Stmt2BindData::new(None, None, Some(cols));
-        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, fields_cnt)?;
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        let res = bind_params_to_bytes(&[param], 100, 200, false, None, fields_cnt)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -2189,7 +2189,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_to_bytes_with_null_cols() -> anyhow::Result<()> {
+    fn test_bind_params_to_bytes_with_null_cols() -> anyhow::Result<()> {
         let cols = vec![
             ColumnView::null(5, Ty::Timestamp),
             ColumnView::null(5, Ty::Bool),
@@ -2210,8 +2210,8 @@ mod tests {
         ];
 
         let fields_cnt = cols.len();
-        let data = Stmt2BindData::new(None, None, Some(cols));
-        let res = bind_datas_to_bytes(&[data], 100, 200, false, None, fields_cnt)?;
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        let res = bind_params_to_bytes(&[param], 100, 200, false, None, fields_cnt)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -2395,7 +2395,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_datas_to_bytes_with_tbnames_tags_and_cols() -> anyhow::Result<()> {
+    fn test_bind_params_to_bytes_with_tbnames_tags_and_cols() -> anyhow::Result<()> {
         let tags = vec![
             Value::Timestamp(Timestamp::Milliseconds(1726803356466)),
             Value::Bool(true),
@@ -2456,7 +2456,7 @@ mod tests {
             ]),
         ];
 
-        let data = Stmt2BindData::new(Some("test1".to_owned()), Some(tags), Some(cols));
+        let param = Stmt2BindParam::new(Some("test1".to_owned()), Some(tags), Some(cols));
 
         let fields = vec![
             Stmt2Field {
@@ -2733,7 +2733,7 @@ mod tests {
             },
         ];
 
-        let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0)?;
+        let res = bind_params_to_bytes(&[param], 100, 200, true, Some(&fields), 0)?;
 
         #[rustfmt::skip]
         let expected = [
@@ -3095,27 +3095,27 @@ mod tests {
     }
 
     #[test]
-    #[should_panic = "No datas to bind"]
-    fn test_bind_datas_to_bytes_without_datas() {
-        let _ = bind_datas_to_bytes(&[], 100, 200, true, None, 0).unwrap();
+    #[should_panic = "No params to bind"]
+    fn test_bind_params_to_bytes_without_params() {
+        let _ = bind_params_to_bytes(&[], 100, 200, true, None, 0).unwrap();
     }
 
     #[test]
-    fn test_bind_datas_to_bytes_without_fields() {
+    fn test_bind_params_to_bytes_without_fields() {
         let fields = vec![];
         let test_cases = vec![None, Some(&fields)];
         for fields in test_cases {
-            let data = Stmt2BindData::new(None, None, None);
-            let res = bind_datas_to_bytes(&[data], 100, 200, true, fields, 0);
+            let param = Stmt2BindParam::new(None, None, None);
+            let res = bind_params_to_bytes(&[param], 100, 200, true, fields, 0);
             assert!(res.is_err());
         }
     }
 
     #[test]
-    fn test_bind_datas_to_bytes_without_tbnames() {
+    fn test_bind_params_to_bytes_without_tbnames() {
         let test_cases = vec![None, Some(String::new())];
         for tbname in test_cases {
-            let data = Stmt2BindData::new(tbname, None, None);
+            let param = Stmt2BindParam::new(tbname, None, None);
 
             let fields = vec![Stmt2Field {
                 name: "".to_string(),
@@ -3126,15 +3126,15 @@ mod tests {
                 bind_type: BindType::TableName,
             }];
 
-            let res = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0);
+            let res = bind_params_to_bytes(&[param], 100, 200, true, Some(&fields), 0);
             assert!(res.is_err());
         }
     }
 
     #[test]
     #[should_panic = "tags is empty"]
-    fn test_bind_datas_to_bytes_without_tags() {
-        let data = Stmt2BindData::new(None, None, None);
+    fn test_bind_params_to_bytes_without_tags() {
+        let param = Stmt2BindParam::new(None, None, None);
 
         let fields = vec![Stmt2Field {
             name: "".to_string(),
@@ -3145,14 +3145,14 @@ mod tests {
             bind_type: BindType::Tag,
         }];
 
-        let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
+        let _ = bind_params_to_bytes(&[param], 100, 200, true, Some(&fields), 0).unwrap();
     }
 
     #[test]
     #[should_panic = "tags len mismatch"]
-    fn test_bind_datas_to_bytes_tags_len_mismatch() {
+    fn test_bind_params_to_bytes_tags_len_mismatch() {
         let tags = vec![Value::Int(1)];
-        let data = Stmt2BindData::new(None, Some(tags), None);
+        let param = Stmt2BindParam::new(None, Some(tags), None);
 
         let fields = vec![
             Stmt2Field {
@@ -3173,13 +3173,13 @@ mod tests {
             },
         ];
 
-        let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
+        let _ = bind_params_to_bytes(&[param], 100, 200, true, Some(&fields), 0).unwrap();
     }
 
     #[test]
     #[should_panic = "columns is empty"]
-    fn test_bind_datas_to_bytes_without_cols() {
-        let data = Stmt2BindData::new(None, None, None);
+    fn test_bind_params_to_bytes_without_cols() {
+        let param = Stmt2BindParam::new(None, None, None);
 
         let fields = vec![Stmt2Field {
             name: "".to_string(),
@@ -3190,14 +3190,14 @@ mod tests {
             bind_type: BindType::Column,
         }];
 
-        let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
+        let _ = bind_params_to_bytes(&[param], 100, 200, true, Some(&fields), 0).unwrap();
     }
 
     #[test]
     #[should_panic = "columns len mismatch"]
-    fn test_bind_datas_to_bytes_cols_len_mismatch() {
+    fn test_bind_params_to_bytes_cols_len_mismatch() {
         let cols = vec![ColumnView::from_ints(vec![1])];
-        let data = Stmt2BindData::new(None, None, Some(cols));
+        let param = Stmt2BindParam::new(None, None, Some(cols));
 
         let fields = vec![
             Stmt2Field {
@@ -3218,14 +3218,14 @@ mod tests {
             },
         ];
 
-        let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
+        let _ = bind_params_to_bytes(&[param], 100, 200, true, Some(&fields), 0).unwrap();
     }
 
     #[test]
     #[should_panic = "column does not support json type"]
-    fn test_bind_datas_to_bypes_with_json_col() {
+    fn test_bind_params_to_bypes_with_json_col() {
         let cols = vec![ColumnView::from_json(vec!["{\"key\":\"value\"}"])];
-        let data = Stmt2BindData::new(None, None, Some(cols));
+        let param = Stmt2BindParam::new(None, None, Some(cols));
 
         let fields = vec![Stmt2Field {
             name: "".to_string(),
@@ -3236,6 +3236,6 @@ mod tests {
             bind_type: BindType::Column,
         }];
 
-        let _ = bind_datas_to_bytes(&[data], 100, 200, true, Some(&fields), 0).unwrap();
+        let _ = bind_params_to_bytes(&[param], 100, 200, true, Some(&fields), 0).unwrap();
     }
 }
