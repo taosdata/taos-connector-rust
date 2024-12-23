@@ -1,18 +1,17 @@
-use std::{borrow::Cow, ffi::c_void, fmt::Debug};
-
-use super::{IsColumnView, Offsets};
-use crate::{
-    common::{BorrowedValue, Ty},
-    prelude::InlinableWrite,
-    util::InlineBytes,
-};
+use std::borrow::Cow;
+use std::ffi::c_void;
+use std::fmt::Debug;
 
 use bytes::Bytes;
 use itertools::Itertools;
 
+use super::{IsColumnView, Offsets};
+use crate::common::{BorrowedValue, Ty};
+use crate::prelude::InlinableWrite;
+use crate::util::InlineBytes;
+
 #[derive(Debug, Clone)]
 pub struct GeometryView {
-    // version: Version,
     pub(crate) offsets: Offsets,
     pub(crate) data: Bytes,
 }
@@ -21,6 +20,7 @@ impl IsColumnView for GeometryView {
     fn ty(&self) -> Ty {
         Ty::Geometry
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         Self::from_iter::<Bytes, _, _, _>(iter.map(|v| v.to_bytes()).collect_vec())
     }
@@ -70,8 +70,9 @@ impl GeometryView {
 
     pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map(|s| BorrowedValue::Geometry(Cow::Borrowed(s.as_bytes())))
-            .unwrap_or(BorrowedValue::Null(Ty::Geometry))
+            .map_or(BorrowedValue::Null(Ty::Geometry), |s| {
+                BorrowedValue::Geometry(Cow::Borrowed(s.as_bytes()))
+            })
     }
 
     pub(crate) unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
@@ -119,13 +120,6 @@ impl GeometryView {
             })
             .collect()
     }
-    // pub fn iter_as_bytes(&self) -> impl Iterator<Item = Option<&[u8]>> {
-    //     (0..self.len()).map(|row| unsafe { self.get_unchecked(row) }.map(|s| s.as_bytes()))
-    // }
-
-    // pub fn to_bytes_vec(&self) -> Vec<Option<&[u8]>> {
-    //     self.iter_as_bytes().collect_vec()
-    // }
 
     /// Write column data as raw bytes.
     pub(crate) fn write_raw_into<W: std::io::Write>(&self, mut wtr: W) -> std::io::Result<usize> {
@@ -176,7 +170,6 @@ impl GeometryView {
                 offsets.push(-1);
             }
         }
-        // dbg!(&offsets);
         let offsets_bytes = unsafe {
             Vec::from_raw_parts(
                 offsets.as_mut_ptr() as *mut u8,
@@ -220,14 +213,14 @@ impl<'a> Iterator for GeometryIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for GeometryIter<'a> {}
+impl ExactSizeIterator for GeometryIter<'_> {}
 
 pub struct GeometryNullsIter<'a> {
     view: &'a GeometryView,
     row: usize,
 }
 
-impl<'a> Iterator for GeometryNullsIter<'a> {
+impl Iterator for GeometryNullsIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -241,7 +234,7 @@ impl<'a> Iterator for GeometryNullsIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for GeometryNullsIter<'a> {
+impl ExactSizeIterator for GeometryNullsIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
     }

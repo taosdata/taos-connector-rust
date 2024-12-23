@@ -1,8 +1,6 @@
-use std::{
-    ops::Deref,
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use anyhow::bail;
 use clap::Parser;
@@ -98,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
                     let bytes = raw.as_bytes();
                     println!("{mid},meta,{}", bytes.len());
                     let path = args.raw_dir.join(format!("raw_{}_meta.bin", mid));
-                    std::fs::write(path, &bytes.deref())?;
+                    std::fs::write(path, bytes.deref())?;
                 }
                 MessageSet::Data(data) => {
                     // println!("{mid} data: {:?}", data);
@@ -128,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                     let path = args.raw_dir.join(format!("raw_{}_data.bin", mid));
-                    std::fs::write(path, &bytes.deref())?;
+                    std::fs::write(path, bytes.deref())?;
                 }
                 MessageSet::MetaData(meta, data) => {
                     if args.no_metadata {
@@ -160,7 +158,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                     let path = args.raw_dir.join(format!("raw_{}_metadata.bin", mid));
-                    std::fs::write(path, &bytes.deref())?;
+                    std::fs::write(path, bytes.deref())?;
                 }
             }
             mid += 1;

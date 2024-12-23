@@ -1,4 +1,5 @@
-use std::{io::Read, time::Instant};
+use std::io::Read;
+use std::time::Instant;
 
 use clap::Parser;
 use taos::*;
@@ -151,7 +152,7 @@ async fn main() -> anyhow::Result<()> {
                 eprintln!("{}: press enter to write raw data from {:?}", idx, path);
                 std::io::stdin().read_line(&mut String::new())?;
             }
-            let mut file = std::fs::File::open(&path)?;
+            let mut file = std::fs::File::open(path)?;
             let mut buf = Vec::new();
             file.read_to_end(&mut buf)?;
             let size = buf.len();

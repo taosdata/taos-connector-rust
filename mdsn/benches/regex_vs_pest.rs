@@ -18,6 +18,7 @@ fn bench_regex(b: &mut Bencher) {
         }
     });
 }
+
 #[bench]
 fn bench_pest(b: &mut Bencher) {
     b.iter(|| {

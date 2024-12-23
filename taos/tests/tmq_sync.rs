@@ -1,4 +1,6 @@
-use std::{str::FromStr, time::Duration};
+use std::str::FromStr;
+use std::time::Duration;
+
 use taos::sync::*;
 
 // #[test]
