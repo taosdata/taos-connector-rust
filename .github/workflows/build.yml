@@ -27,7 +27,7 @@ jobs:
 
       - name: Set up Rust
         id: setup-rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy
 
