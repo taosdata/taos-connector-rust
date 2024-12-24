@@ -3,7 +3,7 @@ use std::path::Path;
 use std::{env, fs};
 
 use syn::visit::Visit;
-use syn::ItemFn;
+use syn::{ItemConst, ItemFn, Visibility};
 
 fn main() -> Result<(), Box<dyn Error>> {
     write_header("taos.h", "src/native", "cbindgen_native.toml")?;
@@ -41,9 +41,10 @@ fn write_header(header: &str, dir: &str, cfg: &str) -> Result<(), Box<dyn Error>
 fn exclude_extern_c_fns(path: &Path, exclude_path: &Path) -> Result<Vec<String>, Box<dyn Error>> {
     let mut visitor = ExternCVisitor {
         extern_c_fns: Vec::new(),
+        pub_consts: Vec::new(),
     };
     parse_rs_files(path, exclude_path, &mut visitor)?;
-    Ok(visitor.extern_c_fns)
+    Ok([visitor.extern_c_fns, visitor.pub_consts].concat())
 }
 
 fn parse_rs_files(
@@ -73,6 +74,7 @@ fn parse_rs_files(
 
 struct ExternCVisitor {
     extern_c_fns: Vec<String>,
+    pub_consts: Vec<String>,
 }
 
 impl<'ast> Visit<'ast> for ExternCVisitor {
@@ -83,5 +85,12 @@ impl<'ast> Visit<'ast> for ExternCVisitor {
             }
         }
         syn::visit::visit_item_fn(self, node);
+    }
+
+    fn visit_item_const(&mut self, node: &'ast ItemConst) {
+        if let Visibility::Public(_) = &node.vis {
+            self.pub_consts.push(node.ident.to_string());
+        }
+        syn::visit::visit_item_const(self, node);
     }
 }
