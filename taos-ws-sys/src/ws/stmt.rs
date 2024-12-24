@@ -2,12 +2,11 @@ use std::ffi::c_void;
 use std::fmt::Debug;
 use std::os::raw::*;
 
-use taos_error::Code;
 use taos_query::common::Value;
 use taos_query::prelude::Itertools;
 use taos_query::stmt::Bindable;
 use taos_ws::stmt::{StmtField as WsStmtField, WsFieldsable};
-use taos_ws::{Stmt, Taos};
+use taos_ws::Stmt;
 
 use super::*;
 
