@@ -619,6 +619,12 @@ impl WsTaos {
     }
 
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        tracing::info!("connect: {ts}");
+
         let ws = info.build_stream(info.to_query_url()).await?;
 
         let req_id = 0;
@@ -737,7 +743,15 @@ impl WsTaos {
         let close_listener = rx.clone();
 
         tokio::spawn(async move {
+            let ts = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_nanos();
+            tracing::info!("consume: {ts}");
+
             let mut interval = time::interval(Duration::from_secs(53));
+
+            let mut flag = true;
 
             loop {
                 tokio::select! {
@@ -756,6 +770,15 @@ impl WsTaos {
                     msg = msg_recv.recv_async() => {
                         match msg {
                             Ok(msg) => {
+                                if flag {
+                                    let ts = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap()
+                                        .as_nanos();
+                                    tracing::info!("first send req: {ts}");
+                                    flag = false;
+                                }
+
                                 if let Err(err) = sender.send(msg).await {
                                     tracing::error!("Write websocket error: {}", err);
                                     let mut keys = Vec::new();

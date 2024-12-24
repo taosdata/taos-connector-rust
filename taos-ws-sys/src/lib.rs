@@ -964,6 +964,12 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
 #[no_mangle]
 /// Same to taos_close. This should always be called after everything done with the connection.
 pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) -> i32 {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    tracing::info!("close: {ts}");
+
     if !taos.is_null() {
         tracing::trace!("close connection {taos:p}");
         let client = Box::from_raw(taos as *mut Taos);
@@ -1045,6 +1051,8 @@ pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) -> i32 {
     }
 }
 
+static mut TOTAL_TIME: u128 = 0;
+
 #[no_mangle]
 /// Query a sql with timeout.
 ///
@@ -1054,8 +1062,14 @@ pub unsafe extern "C" fn ws_query_timeout(
     sql: *const c_char,
     seconds: u32,
 ) -> *mut WS_RES {
+    let start = std::time::Instant::now();
+
     let res: WsMaybeError<WsResultSet> =
         query_with_sql_timeout(taos, sql, Duration::from_secs(seconds as _)).into();
+
+    TOTAL_TIME += start.elapsed().as_nanos();
+    tracing::info!("query total time: {TOTAL_TIME}");
+
     Box::into_raw(Box::new(res)) as _
 }
 
