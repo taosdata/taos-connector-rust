@@ -32,6 +32,27 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
     todo!()
 }
 
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub enum TSDB_OPTION_CONNECTION {
+    TSDB_OPTION_CONNECTION_CLEAR = -1,
+    TSDB_OPTION_CONNECTION_CHARSET = 0,
+    TSDB_OPTION_CONNECTION_TIMEZONE = 1,
+    TSDB_OPTION_CONNECTION_USER_IP = 2,
+    TSDB_OPTION_CONNECTION_USER_APP = 3,
+    TSDB_MAX_OPTIONS_CONNECTION = 4,
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn taos_options_connection(
+    taos: *mut TAOS,
+    option: TSDB_OPTION_CONNECTION,
+    arg: *const c_void,
+    ...
+) -> c_int {
+    todo!()
+}
+
 #[no_mangle]
 pub extern "C" fn taos_connect(
     ip: *const c_char,
