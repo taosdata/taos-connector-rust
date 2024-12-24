@@ -2,13 +2,14 @@ use std::ffi::c_void;
 use std::fmt::Debug;
 use std::os::raw::*;
 
+use taos_error::Code;
 use taos_query::common::Value;
 use taos_query::prelude::Itertools;
 use taos_query::stmt::Bindable;
 use taos_ws::stmt::{StmtField as WsStmtField, WsFieldsable};
-use taos_ws::Stmt;
+use taos_ws::{Stmt, Taos};
 
-use crate::*;
+use super::*;
 
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -712,7 +713,7 @@ pub unsafe extern "C" fn ws_stmt_bind_param_batch(
             if let Err(e) = stmt
                 .safe_deref_mut()
                 .ok_or_else(|| RawError::from_string("stmt ptr should not be null"))
-                .and_then(|s| crate::block_in_place_or_global(s.stmt_bind(columns)))
+                .and_then(|s| taos_query::block_in_place_or_global(s.stmt_bind(columns)))
             {
                 let errno = e.code();
                 stmt.error = Some(WsError::new(errno, &e.to_string()));
@@ -876,7 +877,6 @@ mod tests {
 
     #[test]
     fn stmt_common() {
-        use crate::*;
         init_env();
         unsafe {
             let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
@@ -941,7 +941,6 @@ mod tests {
 
     #[test]
     fn stmt_child() {
-        use crate::*;
         init_env();
         unsafe {
             let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
@@ -1009,7 +1008,6 @@ mod tests {
 
     #[test]
     fn stmt_tiny_int_null() {
-        use crate::*;
         init_env();
         unsafe {
             let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
@@ -1115,7 +1113,6 @@ mod tests {
 
     #[test]
     fn stmt_with_tags() {
-        use crate::*;
         init_env();
         unsafe {
             let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
@@ -1182,7 +1179,6 @@ mod tests {
 
     #[test]
     fn test_stmt_affected_rows() {
-        use crate::*;
         init_env();
         unsafe {
             let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
@@ -1311,7 +1307,6 @@ mod tests {
 
     #[test]
     fn stmt_with_sub_table() {
-        use crate::*;
         init_env();
         unsafe {
             let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
@@ -1377,8 +1372,6 @@ mod tests {
 
     #[test]
     fn get_tag_and_col_fields() {
-        use crate::*;
-        // init_env();
         unsafe {
             let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {
@@ -1539,7 +1532,6 @@ mod tests {
 
     #[test]
     fn stmt_num_params_and_get_param() {
-        use crate::*;
         init_env();
         unsafe {
             let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
@@ -1646,8 +1638,6 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_stmt_api_false_usage() {
-        use crate::*;
-        // init_env();
         unsafe {
             let taos = ws_connect(b"ws://localhost:6041\0" as *const u8 as _);
             if taos.is_null() {

@@ -1,6 +1,6 @@
 use std::ffi::{c_char, c_int, c_void};
 
-use crate::TAOS_RES;
+use super::TAOS_RES;
 
 pub const TSDB_CLIENT_ID_LEN: usize = 256;
 pub const TSDB_CGROUP_LEN: usize = 193;

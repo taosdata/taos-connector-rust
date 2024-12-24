@@ -1,6 +1,6 @@
 use std::ffi::{c_char, c_int, c_void};
 
-use crate::{TAOS, TAOS_RES};
+use super::{TAOS, TAOS_RES};
 
 #[allow(non_camel_case_types)]
 pub type TAOS_ROW = *mut *mut c_void;

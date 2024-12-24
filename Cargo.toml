@@ -1,15 +1,15 @@
 [workspace]
 members = [
   "mdsn",
+  "taos",
   "taos-error",
-  "taos-query",
   "taos-macros",
   "taos-optin",
+  "taos-query",
   "taos-ws",
   "taos-ws-sys",
-  "taos",
-  "taos-sys",
 ]
+
 resolver = "2"
 
 [workspace.package]

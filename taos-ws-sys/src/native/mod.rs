@@ -1,5 +1,4 @@
 #![allow(unused_variables)]
-#![feature(c_variadic)]
 
 use std::ffi::{c_char, c_int, c_void};
 

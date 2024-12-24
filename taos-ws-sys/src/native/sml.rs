@@ -1,6 +1,6 @@
 use std::ffi::{c_char, c_int};
 
-use crate::{TAOS, TAOS_RES};
+use super::{TAOS, TAOS_RES};
 
 #[no_mangle]
 #[allow(non_snake_case)]
