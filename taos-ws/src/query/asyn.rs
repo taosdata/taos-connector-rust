@@ -623,7 +623,7 @@ impl WsTaos {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        tracing::info!("connect: {ts}");
+        tracing::error!("connect: {ts}");
 
         let ws = info.build_stream(info.to_query_url()).await?;
 
@@ -747,7 +747,7 @@ impl WsTaos {
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap()
                                     .as_nanos();
-            tracing::info!("consume: {ts}");
+            tracing::error!("consume: {ts}");
 
             let mut interval = time::interval(Duration::from_secs(53));
 
@@ -775,7 +775,7 @@ impl WsTaos {
                                         .duration_since(std::time::UNIX_EPOCH)
                                         .unwrap()
                                         .as_nanos();
-                                    tracing::info!("first send req: {ts}");
+                                    tracing::error!("first send req: {ts}");
                                     flag = false;
                                 }
 

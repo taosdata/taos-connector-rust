@@ -932,7 +932,7 @@ pub extern "C" fn ws_data_type(r#type: i32) -> *const c_char {
 pub unsafe extern "C" fn ws_connect(dsn: *const c_char) -> *mut WS_TAOS {
     static ONCE_INIT: std::sync::Once = std::sync::Once::new();
 
-    let log_level = "info";
+    let log_level = "error";
     ONCE_INIT.call_once(|| {
         let mut builder = pretty_env_logger::formatted_timed_builder();
         builder.format_timestamp_nanos();
@@ -979,7 +979,7 @@ pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) -> i32 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    tracing::info!("close: {ts}");
+    tracing::error!("close: {ts}");
 
     if !taos.is_null() {
         tracing::trace!("close connection {taos:p}");
@@ -1079,7 +1079,7 @@ pub unsafe extern "C" fn ws_query_timeout(
         query_with_sql_timeout(taos, sql, Duration::from_secs(seconds as _)).into();
 
     TOTAL_TIME += start.elapsed().as_nanos();
-    tracing::info!("query total time: {TOTAL_TIME}");
+    tracing::error!("query total time: {TOTAL_TIME}");
 
     Box::into_raw(Box::new(res)) as _
 }
