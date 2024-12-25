@@ -16,7 +16,7 @@ pub enum TaosInner {
     Ws(taos_ws::Taos),
 }
 
-enum ResultSetInner {
+pub enum ResultSetInner {
     Native(crate::sys::ResultSet),
     Ws(taos_ws::ResultSet),
 }
@@ -38,7 +38,7 @@ impl Taos {
         matches!(&self.0, TaosInner::Ws(_))
     }
 }
-pub struct ResultSet(ResultSetInner);
+pub struct ResultSet(pub(super) ResultSetInner);
 
 impl taos_query::TBuilder for TaosBuilder {
     type Target = Taos;

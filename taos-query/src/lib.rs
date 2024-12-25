@@ -27,6 +27,8 @@ use common::*;
 pub use iter::*;
 
 pub mod stmt;
+pub mod stmt2;
+
 pub mod tmq;
 
 pub mod prelude;

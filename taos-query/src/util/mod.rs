@@ -7,6 +7,8 @@ pub mod hex;
 mod inline_read;
 mod inline_write;
 
+pub mod req_id;
+
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 
@@ -16,6 +18,7 @@ pub use inline_nchar::InlineNChar;
 pub use inline_read::AsyncInlinableRead;
 pub use inline_str::InlineStr;
 pub use inline_write::AsyncInlinableWrite;
+pub use req_id::generate_req_id;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{RawError, RawResult};

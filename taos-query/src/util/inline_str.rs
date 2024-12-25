@@ -1,6 +1,5 @@
 use std::fmt;
 
-// use super::{Inlinable, AsyncInlinable};
 use tokio::io::*;
 
 #[repr(C)]
@@ -9,10 +8,10 @@ pub struct InlineStr<T = u16> {
     len: T,
     data: [u8; 0],
 }
+
 macro_rules! _impl_inline_str {
     ($($ty:ty) *) => {
         $(
-
             impl fmt::Debug for InlineStr<$ty> {
                 #[inline]
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -83,6 +82,7 @@ macro_rules! _impl_inline_str {
                 pub const fn as_ptr(&self) -> *const u8 {
                     self.data.as_ptr()
                 }
+
                 #[inline]
                 pub fn as_mut_ptr(&mut self) -> *mut u8 {
                     self.data.as_mut_ptr()
@@ -125,6 +125,7 @@ macro_rules! _impl_inline_str {
         )*
     };
 }
+
 _impl_inline_str!(u8 u16 u32 u64 usize);
 
 macro_rules! _impl_test_inline_str {

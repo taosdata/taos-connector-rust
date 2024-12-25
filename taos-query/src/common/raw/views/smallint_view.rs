@@ -32,6 +32,7 @@ impl std::ops::Add for View {
         &self + &rhs
     }
 }
+
 impl std::ops::Add for &View {
     type Output = View;
 
@@ -254,26 +255,6 @@ impl Iterator for SmallIntViewIter<'_> {
 impl ExactSizeIterator for SmallIntViewIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
-    }
-}
-
-impl<A: Into<Option<Item>>> FromIterator<A> for View {
-    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
-        let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
-            .into_iter()
-            .map(|v| match v.into() {
-                Some(v) => (false, v),
-                None => (true, Item::default()),
-            })
-            .unzip();
-        Self {
-            nulls: NullBits::from_iter(nulls),
-            data: Bytes::from({
-                let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
-                std::mem::forget(values);
-                unsafe { Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE) }
-            }),
-        }
     }
 }
 
