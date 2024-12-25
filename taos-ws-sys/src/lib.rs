@@ -930,6 +930,16 @@ pub extern "C" fn ws_data_type(r#type: i32) -> *const c_char {
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn ws_connect(dsn: *const c_char) -> *mut WS_TAOS {
+    static ONCE_INIT: std::sync::Once = std::sync::Once::new();
+
+    let log_level = "info";
+    ONCE_INIT.call_once(|| {
+        let mut builder = pretty_env_logger::formatted_timed_builder();
+        builder.format_timestamp_nanos();
+        builder.parse_filters(log_level);
+        builder.init();
+    });
+
     match connect_with_dsn(dsn) {
         Ok(client) => Box::into_raw(Box::new(client)) as _,
         Err(err) => {
