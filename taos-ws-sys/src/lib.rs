@@ -882,16 +882,17 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
 pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
     static ONCE_INIT: std::sync::Once = std::sync::Once::new();
 
-    let log_level = if log_level.is_null() {
-        "info"
-    } else if let Ok(log_level_str) = CStr::from_ptr(log_level).to_str() {
-        log_level_str
-    } else {
-        return set_error_and_get_code(WsError::new(
-            Code::INVALID_PARA,
-            "log_level is not a valid string",
-        ));
-    };
+    // let log_level = if log_level.is_null() {
+    //     "info"
+    // } else if let Ok(log_level_str) = CStr::from_ptr(log_level).to_str() {
+    //     log_level_str
+    // } else {
+    //     return set_error_and_get_code(WsError::new(
+    //         Code::INVALID_PARA,
+    //         "log_level is not a valid string",
+    //     ));
+    // };
+    let log_level = "info";
 
     ONCE_INIT.call_once(|| {
         let mut builder = pretty_env_logger::formatted_timed_builder();
