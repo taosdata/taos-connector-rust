@@ -105,6 +105,7 @@ impl taos_query::TBuilder for TaosBuilder {
     fn client_version() -> &'static str {
         "0"
     }
+
     fn ping(&self, taos: &mut Self::Target) -> RawResult<()> {
         taos_query::Queryable::exec(taos, "select server_version()").map(|_| ())
     }

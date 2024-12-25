@@ -177,9 +177,7 @@ pub mod sync {
     }
 
     /// The synchronous query trait for TDengine connection.
-    pub trait Queryable // where
-    //     Self::ResultSet: Iterator<Item = Result<RawData>>,
-    {
+    pub trait Queryable {
         type ResultSet: Fetchable;
 
         fn query<T: AsRef<str>>(&self, sql: T) -> RawResult<Self::ResultSet>;
