@@ -127,17 +127,22 @@ impl PartialEq<i32> for Code {
     }
 }
 
-#[test]
-fn test_code() {
-    let c: i32 = Code::new(0).into();
-    assert_eq!(c, 0);
-    let c = Code::from(0).to_string();
-    assert_eq!(c, "0x0000");
-    dbg!(Code::from(0x200));
+#[cfg(test)]
+mod tests {
+    use super::Code;
 
-    let c: i8 = Code::new(0).into();
-    let mut c: Code = c.into();
+    #[test]
+    fn test_code() {
+        let c: i32 = Code::new(0).into();
+        assert_eq!(c, 0);
+        let c = Code::from(0).to_string();
+        assert_eq!(c, "0x0000");
+        dbg!(Code::from(0x200));
 
-    let _: &i32 = &c;
-    let _: &mut i32 = &mut c;
+        let c: i8 = Code::new(0).into();
+        let mut c: Code = c.into();
+
+        let _: &i32 = &c;
+        let _: &mut i32 = &mut c;
+    }
 }

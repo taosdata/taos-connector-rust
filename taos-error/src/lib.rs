@@ -38,8 +38,8 @@ mod source;
 /// ```
 ///
 /// # Display representations
-#[derive(Error)]
 #[must_use]
+#[derive(Error)]
 pub struct Error {
     /// Error code, will be displayed when code is not 0xFFFF.
     code: Code,

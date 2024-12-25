@@ -1074,8 +1074,7 @@ impl TmqBuilder {
             .info
             .build_stream_opt(self.info.to_tmq_url(), false)
             .await?;
-        // let (ws, _) = taos_query::block_in_place_or_global(connect_async(url))?;
-        // let (ws, _) = connect_async(&url).await.map_err(WsTmqError::from)?;
+
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
