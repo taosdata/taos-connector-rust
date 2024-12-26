@@ -6,7 +6,7 @@ use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 use std::sync::OnceLock;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use cargo_metadata::MetadataCommand;
@@ -20,6 +20,7 @@ use taos_query::util::{hex, InlineBytes, InlineNChar, InlineStr};
 use taos_query::{block_in_place_or_global, DsnError, Fetchable, Queryable, TBuilder};
 use taos_ws::consumer::Offset;
 pub use taos_ws::query::asyn::WS_ERROR_NO;
+use taos_ws::query::asyn::{QT, SEND_TIME};
 use taos_ws::query::{Error, ResultSet, Taos};
 use taos_ws::TaosBuilder;
 
@@ -866,7 +867,7 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     } else {
         let mut taos = builder.build()?;
 
-        builder.ping(&mut taos)?;
+        // builder.ping(&mut taos)?;
         Ok(taos)
     }
 }
@@ -940,13 +941,25 @@ pub unsafe extern "C" fn ws_connect(dsn: *const c_char) -> *mut WS_TAOS {
         builder.init();
     });
 
-    match connect_with_dsn(dsn) {
+    if CONNECT_START.is_none() {
+        CONNECT_START = Some(Instant::now());
+    }
+
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    tracing::error!("connect start: {:?}", ts);
+
+    let client = match connect_with_dsn(dsn) {
         Ok(client) => Box::into_raw(Box::new(client)) as _,
         Err(err) => {
             set_error_and_get_code(err);
             std::ptr::null_mut()
         }
-    }
+    };
+
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    tracing::error!("connect end: {:?}", ts);
+
+    client
 }
 
 #[no_mangle]
@@ -972,14 +985,22 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
     version_info.as_ptr()
 }
 
+static mut CONNECT_START: Option<Instant> = None;
+
+static mut QUERY_TIME: Duration = Duration::ZERO;
+static mut FREE_TIME: Duration = Duration::ZERO;
+
 #[no_mangle]
 /// Same to taos_close. This should always be called after everything done with the connection.
 pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) -> i32 {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    tracing::error!("close: {ts}");
+    CONNECT_START.take().map(|start| {
+        let elapsed = start.elapsed();
+        tracing::error!("connect time: {:?}", elapsed);
+    });
+
+    tracing::error!("query time: {:?}", QUERY_TIME);
+    tracing::error!("send time: {:?}", SEND_TIME);
+    tracing::error!("send recv time: {:?}", QT.send_recv_duration());
 
     if !taos.is_null() {
         tracing::trace!("close connection {taos:p}");
@@ -1062,8 +1083,6 @@ pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) -> i32 {
     }
 }
 
-static mut TOTAL_TIME: u128 = 0;
-
 #[no_mangle]
 /// Query a sql with timeout.
 ///
@@ -1073,14 +1092,20 @@ pub unsafe extern "C" fn ws_query_timeout(
     sql: *const c_char,
     seconds: u32,
 ) -> *mut WS_RES {
-    let start = std::time::Instant::now();
-
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    tracing::error!("query start: {:?}", ts);
+    let start = Instant::now();
     let res: WsMaybeError<WsResultSet> =
         query_with_sql_timeout(taos, sql, Duration::from_secs(seconds as _)).into();
-
-    TOTAL_TIME += start.elapsed().as_nanos();
-    tracing::error!("query total time: {TOTAL_TIME}");
-
+    QUERY_TIME += start.elapsed();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    tracing::error!("query end: {:?}", ts);
     Box::into_raw(Box::new(res)) as _
 }
 
@@ -1352,9 +1377,11 @@ pub unsafe extern "C" fn ws_num_fields(rs: *const WS_RES) -> i32 {
 #[no_mangle]
 /// Same to taos_free_result. Every websocket result-set object should be freed with this method.
 pub unsafe extern "C" fn ws_free_result(rs: *mut WS_RES) -> i32 {
+    let start = Instant::now();
     if !rs.is_null() {
         let _ = Box::from_raw(rs as *mut WsMaybeError<WsResultSet>);
     }
+    FREE_TIME += start.elapsed();
     Code::SUCCESS.into()
 }
 

@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::Poll;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::bail;
 use futures::stream::SplitStream;
@@ -531,6 +531,12 @@ async fn read_queries(
     loop {
         tokio::select! {
             res = reader.try_next() => {
+                let ts = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
+                tracing::error!("recv: {ts:?}");
+                unsafe {QT.recv();}
                 match res {
                     Ok(frame) => {
                         if let Some(frame) = frame {
@@ -606,6 +612,95 @@ pub fn is_support_binary_sql(v1: &str) -> bool {
     is_greater_than_or_equal_to(v1, "3.3.2.0")
 }
 
+pub struct QueryTime {
+    pub query_start: Option<Instant>,
+    pub query_ws_send_duration: Duration,
+    pub query_ws_send_start: Option<Instant>,
+    pub query_ws_recv_duration: Duration,
+    pub query_handle_start: Option<Instant>,
+    pub query_handle_duration: Duration,
+    pub send_start: Option<Instant>,
+    pub send_recv_duration: Duration,
+}
+
+impl QueryTime {
+    pub const fn new() -> Self {
+        Self {
+            query_start: None,
+            query_ws_send_duration: Duration::ZERO,
+            query_ws_send_start: None,
+            query_ws_recv_duration: Duration::ZERO,
+            query_handle_start: None,
+            query_handle_duration: Duration::ZERO,
+            send_start: None,
+            send_recv_duration: Duration::ZERO,
+        }
+    }
+
+    pub fn with_send_start(&mut self, start: Instant) {
+        self.send_start = Some(start);
+    }
+
+    pub fn recv(&mut self) {
+        self.send_start.take().map(|start| {
+            self.send_recv_duration += start.elapsed();
+        });
+    }
+
+    pub fn send_recv_duration(&self) -> Duration {
+        self.send_recv_duration
+    }
+
+    // pub fn with_query_start(&mut self, start: Instant) {
+    //     self.query_start = Some(start);
+    // }
+
+    // pub fn query_ws_send(&mut self) {
+    //     if self.query_start.is_none() {
+    //         return;
+    //     }
+    //     self.query_ws_send_duration += self.query_start.unwrap().elapsed();
+    // }
+
+    // pub fn query_ws_send_duration(&self) -> Duration {
+    //     self.query_ws_send_duration
+    // }
+
+    // pub fn with_query_ws_send_start(&mut self, start: Instant) {
+    //     self.query_ws_send_start = Some(start);
+    // }
+
+    // pub fn query_ws_recv(&mut self) {
+    //     if self.query_ws_send_start.is_none() {
+    //         return;
+    //     }
+    //     self.query_ws_recv_duration += self.query_ws_send_start.unwrap().elapsed();
+    // }
+
+    // pub fn query_ws_recv_duration(&self) -> Duration {
+    //     self.query_ws_recv_duration
+    // }
+
+    // pub fn with_query_handle_start(&mut self, start: Instant) {
+    //     self.query_handle_start = Some(start);
+    // }
+
+    // pub fn query_handle(&mut self) {
+    //     if self.query_handle_start.is_none() {
+    //         return;
+    //     }
+    //     self.query_handle_duration += self.query_handle_start.unwrap().elapsed();
+    // }
+
+    // pub fn query_handle_duration(&self) -> Duration {
+    //     self.query_handle_duration
+    // }
+}
+
+pub static mut QT: QueryTime = QueryTime::new();
+
+pub static mut SEND_TIME: Duration = Duration::ZERO;
+
 impl WsTaos {
     /// Build TDengine websocket client from dsn.
     ///
@@ -619,12 +714,6 @@ impl WsTaos {
     }
 
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        tracing::error!("connect: {ts}");
-
         let ws = info.build_stream(info.to_query_url()).await?;
 
         let req_id = 0;
@@ -743,15 +832,7 @@ impl WsTaos {
         let close_listener = rx.clone();
 
         tokio::spawn(async move {
-            let ts = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_nanos();
-            tracing::error!("consume: {ts}");
-
             let mut interval = time::interval(Duration::from_secs(53));
-
-            let mut flag = true;
 
             loop {
                 tokio::select! {
@@ -770,15 +851,10 @@ impl WsTaos {
                     msg = msg_recv.recv_async() => {
                         match msg {
                             Ok(msg) => {
-                                if flag {
-                                    let ts = std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_nanos();
-                                    tracing::error!("first send req: {ts}");
-                                    flag = false;
-                                }
-
+                                let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+                                tracing::error!("query send: {ts:?}");
+                                let start = Instant::now();
+                                unsafe {QT.with_send_start(start);}
                                 if let Err(err) = sender.send(msg).await {
                                     tracing::error!("Write websocket error: {}", err);
                                     let mut keys = Vec::new();
@@ -789,6 +865,11 @@ impl WsTaos {
                                         }
                                     }
                                     break;
+                                }
+                                let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+                                tracing::error!("query send end: {ts:?}");
+                                unsafe {
+                                    SEND_TIME += start.elapsed();
                                 }
                             }
                             Err(_) => {
