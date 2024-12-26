@@ -27,6 +27,16 @@ pub extern "C" fn taos_connect_auth(
 }
 
 #[no_mangle]
+pub extern "C" fn taos_connect_dsn(
+    dsn: *const c_char,
+    user: *const c_char,
+    pass: *const c_char,
+    db: *const c_char,
+) -> *mut TAOS {
+    todo!("taos_connect_dsn");
+}
+
+#[no_mangle]
 pub extern "C" fn taos_connect_dsn_auth(
     dsn: *const c_char,
     user: *const c_char,
