@@ -2749,8 +2749,6 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_tmq_poll() -> anyhow::Result<()> {
-        pretty_env_logger::env_logger::init();
-
         use taos_query::prelude::{AsAsyncConsumer, AsyncQueryable, AsyncTBuilder, TryStreamExt};
         use taos_query::tmq::Timeout;
 
@@ -2772,7 +2770,7 @@ mod async_tests {
             .duration_since(std::time::UNIX_EPOCH)?
             .as_millis();
         let tmq = TmqBuilder::from_dsn(format!(
-            "taos:///tmq_poll_db?group.id={ms}&timeout=10s&enable.auto.commit=false"
+            "taos:///tmq_poll_db?group.id={ms}&timeout=10s&auto.offset.reset=earliest"
         ))?;
 
         let mut consumer = tmq.build().await?;
