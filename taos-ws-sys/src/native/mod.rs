@@ -1,10 +1,11 @@
 #![allow(unused_variables)]
 
 use std::ffi::{c_char, c_int, c_void, CStr};
-use std::ptr::null_mut;
+use std::ptr::{null, null_mut};
 
 use error::set_err_and_get_code;
 use taos_error::{Code, Error};
+use taos_query::common::Ty;
 use taos_query::TBuilder;
 use taos_ws::{Taos, TaosBuilder};
 
@@ -145,12 +146,22 @@ fn connect(
 
 #[no_mangle]
 pub extern "C" fn taos_close(taos: *mut TAOS) {
-    todo!()
+    if taos.is_null() {
+        set_err_and_get_code(Error::new(Code::INVALID_PARA, "taos is null"));
+        return;
+    }
+
+    unsafe {
+        let _ = Box::from_raw(taos as *mut Taos);
+    }
 }
 
 #[no_mangle]
 pub extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
-    todo!()
+    match Ty::from_u8_option(r#type as _) {
+        Some(ty) => ty.tsdb_name(),
+        None => null(),
+    }
 }
 
 #[cfg(test)]
@@ -170,9 +181,11 @@ mod tests {
             6041,
         );
         assert!(!taos.is_null());
+        taos_close(taos);
 
         let taos = taos_connect(null(), null(), null(), null(), 0);
         assert!(!taos.is_null());
+        taos_close(taos);
 
         let invalid_utf8 = CString::new([0xff, 0xfe, 0xfd]).unwrap();
         let invalid_utf8_ptr = invalid_utf8.as_ptr();
@@ -188,5 +201,21 @@ mod tests {
 
         let taos = taos_connect(null(), null(), null(), invalid_utf8_ptr, 0);
         assert!(taos.is_null());
+    }
+
+    #[test]
+    fn test_taos_data_type() {
+        unsafe {
+            let type_null_ptr = taos_data_type(0);
+            let type_null = CStr::from_ptr(type_null_ptr);
+            assert_eq!(type_null, c"TSDB_DATA_TYPE_NULL");
+
+            let type_geo_ptr = taos_data_type(20);
+            let type_geo = CStr::from_ptr(type_geo_ptr);
+            assert_eq!(type_geo, c"TSDB_DATA_TYPE_GEOMETRY");
+
+            let type_invalid = taos_data_type(100);
+            assert_eq!(type_invalid, null(),);
+        }
     }
 }
