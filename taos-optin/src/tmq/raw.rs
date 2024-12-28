@@ -342,7 +342,7 @@ pub(super) mod tmq {
             let safe_tmq = SafeTmqT(self.as_ptr());
             let tmq_api = self.tmq_api.clone();
             let api = self.api.clone();
-            let timeout = self.timeout.min(2000);
+            let timeout = self.timeout;
             let stop_signal = self.stop_signal.clone();
 
             let handle = std::thread::spawn(move || {
@@ -363,21 +363,31 @@ pub(super) mod tmq {
                                 continue;
                             }
 
-                            tracing::trace!(
-                                "Calling C func `tmq_consumer_poll` with ptr: {:?}, timeout: {}",
-                                safe_tmq.0,
-                                timeout
-                            );
+                            let mut timeout = timeout;
+                            let mut res = std::ptr::null_mut();
 
-                            let start_time = std::time::Instant::now();
-                            let res = unsafe { (tmq_api.tmq_consumer_poll)(safe_tmq.0, timeout) };
-                            tracing::trace!("C func `tmq_consumer_poll` returned a ptr: {res:?}");
+                            while timeout > 0 {
+                                let time = timeout.min(2000);
+                                timeout -= time;
+
+                                tracing::trace!(
+                                    "Calling C func `tmq_consumer_poll` with ptr: {:?}, timeout: {}",
+                                    safe_tmq.0,
+                                    time
+                                );
+                                let r = unsafe { (tmq_api.tmq_consumer_poll)(safe_tmq.0, time) };
+                                tracing::trace!("C func `tmq_consumer_poll` returned a ptr: {r:?}");
+
+                                if !r.is_null() {
+                                    res = r;
+                                    break;
+                                }
+                            }
 
                             if res.is_null() {
                                 if sender.send(None).is_err() {
                                     tracing::trace!("Receiver has been closed");
                                 }
-                                tracing::trace!(elapsed = ?start_time.elapsed(), "Result is null, poll next message.");
                                 continue;
                             }
 
@@ -386,7 +396,6 @@ pub(super) mod tmq {
                                 tracing::trace!("Receiver has been closed, cached res: {res:?}");
                                 cache = res;
                             }
-                            tracing::trace!(elapsed = ?start_time.elapsed(), "Processed result, poll next message.");
                         }
                         Err(_) => {
                             tracing::trace!("Sender has been closed, exit thread.");
