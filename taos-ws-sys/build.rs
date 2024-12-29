@@ -32,7 +32,7 @@ fn write_header(header: &str, dir: &str, cfg: &str) -> Result<(), Box<dyn Error>
         .with_crate(crate_dir)
         .with_config(config)
         .generate()
-        .expect(&format!("Failed to generate {header}"))
+        .unwrap_or_else(|err| panic!("Failed to generate {header}, err: {err}"))
         .write_to_file(bindings);
 
     Ok(())

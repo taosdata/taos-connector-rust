@@ -1,15 +1,18 @@
 #![allow(unused_variables)]
 
-use std::ffi::{c_char, c_int, c_void, CStr};
+use std::ffi::{c_char, c_int, c_void, CStr, VaList};
 use std::ptr::{null, null_mut};
+use std::sync::RwLock;
 
 use error::set_err_and_get_code;
+use once_cell::sync::Lazy;
 use taos_error::{Code, Error};
 use taos_query::common::Ty;
 use taos_query::TBuilder;
 use taos_ws::{Taos, TaosBuilder};
+use tracing::trace;
 
-mod error;
+pub mod error;
 pub mod query;
 pub mod sml;
 pub mod stmt;
@@ -22,46 +25,6 @@ pub type TAOS = c_void;
 pub type TAOS_RES = c_void;
 
 type Result<T> = std::result::Result<T, Error>;
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-pub enum TSDB_OPTION {
-    TSDB_OPTION_LOCALE = 0,
-    TSDB_OPTION_CHARSET = 1,
-    TSDB_OPTION_TIMEZONE = 2,
-    TSDB_OPTION_CONFIGDIR = 3,
-    TSDB_OPTION_SHELL_ACTIVITY_TIMER = 4,
-    TSDB_OPTION_USE_ADAPTER = 5,
-    TSDB_OPTION_DRIVER = 6,
-    TSDB_MAX_OPTIONS = 7,
-}
-
-#[allow(clippy::just_underscores_and_digits)]
-#[no_mangle]
-pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
-    todo!()
-}
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-pub enum TSDB_OPTION_CONNECTION {
-    TSDB_OPTION_CONNECTION_CLEAR = -1,
-    TSDB_OPTION_CONNECTION_CHARSET = 0,
-    TSDB_OPTION_CONNECTION_TIMEZONE = 1,
-    TSDB_OPTION_CONNECTION_USER_IP = 2,
-    TSDB_OPTION_CONNECTION_USER_APP = 3,
-    TSDB_MAX_OPTIONS_CONNECTION = 4,
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_options_connection(
-    taos: *mut TAOS,
-    option: TSDB_OPTION_CONNECTION,
-    arg: *const c_void,
-    ...
-) -> c_int {
-    todo!()
-}
 
 #[no_mangle]
 pub extern "C" fn taos_connect(
@@ -156,12 +119,83 @@ pub extern "C" fn taos_close(taos: *mut TAOS) {
     }
 }
 
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub enum TSDB_OPTION {
+    TSDB_OPTION_LOCALE = 0,
+    TSDB_OPTION_CHARSET = 1,
+    TSDB_OPTION_TIMEZONE = 2,
+    TSDB_OPTION_CONFIGDIR = 3,
+    TSDB_OPTION_SHELL_ACTIVITY_TIMER = 4,
+    TSDB_OPTION_USE_ADAPTER = 5,
+    TSDB_OPTION_DRIVER = 6,
+    TSDB_MAX_OPTIONS = 7,
+}
+
+static PARAMS: Lazy<RwLock<String>> = Lazy::new(|| RwLock::new(String::new()));
+
+// todo
+#[allow(clippy::just_underscores_and_digits)]
+#[no_mangle]
+pub unsafe extern "C" fn taos_options(
+    option: TSDB_OPTION,
+    arg: *const c_void,
+    mut varargs: VaList,
+) -> c_int {
+    let mut params = Vec::new();
+
+    loop {
+        let key_ptr: *const c_char = varargs.arg();
+        if key_ptr.is_null() {
+            break;
+        }
+
+        let key = match CStr::from_ptr(key_ptr).to_str() {
+            Ok(key) => key,
+            Err(_) => return set_err_and_get_code(Error::new(Code::INVALID_PARA, "Invalid key")),
+        };
+
+        let value_ptr: *const c_char = varargs.arg();
+        if value_ptr.is_null() {
+            break;
+        }
+
+        let value = match CStr::from_ptr(value_ptr).to_str() {
+            Ok(value) => value,
+            Err(_) => return set_err_and_get_code(Error::new(Code::INVALID_PARA, "Invalid value")),
+        };
+
+        params.push(format!("{key}={value}"));
+    }
+
+    trace!("dsn params: {:?}", params);
+
+    *PARAMS.write().unwrap() = params.join("&");
+
+    Code::SUCCESS.into()
+}
+
 #[no_mangle]
 pub extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
     match Ty::from_u8_option(r#type as _) {
         Some(ty) => ty.tsdb_name(),
         None => null(),
     }
+}
+
+#[no_mangle]
+pub extern "C" fn init_log() {
+    use std::sync::Once;
+
+    static ONCE_INIT: Once = Once::new();
+    ONCE_INIT.call_once(|| {
+        let mut builder = pretty_env_logger::formatted_timed_builder();
+        builder.format_timestamp_nanos();
+        builder.parse_filters("trace");
+        builder.init();
+    });
+
+    trace!("init log");
 }
 
 #[cfg(test)]
