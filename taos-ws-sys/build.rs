@@ -57,7 +57,7 @@ fn parse_rs_files(
     }
 
     if path.is_file() {
-        if path.extension().map_or(false, |ext| ext == "rs") {
+        if path.extension().is_some_and(|ext| ext == "rs") {
             let content = fs::read_to_string(path)?;
             let file = syn::parse_file(&content)?;
             visitor.visit_file(&file);
