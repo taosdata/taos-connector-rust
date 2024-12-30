@@ -27,6 +27,7 @@ pub mod helpers;
 mod iter;
 pub mod prelude;
 pub mod stmt;
+pub mod stmt2;
 pub mod tmq;
 pub mod util;
 

@@ -293,26 +293,6 @@ impl TimestampMillisecondView {
     }
 }
 
-impl<A: Into<Option<Item>>> FromIterator<A> for TimestampMillisecondView {
-    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
-        let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
-            .into_iter()
-            .map(|v| match v.into() {
-                Some(v) => (false, v),
-                None => (true, Item::default()),
-            })
-            .unzip();
-        Self(View {
-            nulls: NullBits::from_iter(nulls),
-            data: Bytes::from({
-                let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
-                std::mem::forget(values);
-                unsafe { Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE) }
-            }),
-            precision: Precision::Millisecond,
-        })
-    }
-}
 pub struct TimestampMicrosecondView(View);
 impl TimestampMicrosecondView {
     pub fn into_inner(self) -> View {
@@ -320,26 +300,6 @@ impl TimestampMicrosecondView {
     }
 }
 
-impl<A: Into<Option<Item>>> FromIterator<A> for TimestampMicrosecondView {
-    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
-        let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
-            .into_iter()
-            .map(|v| match v.into() {
-                Some(v) => (false, v),
-                None => (true, Item::default()),
-            })
-            .unzip();
-        Self(View {
-            nulls: NullBits::from_iter(nulls),
-            data: Bytes::from({
-                let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
-                std::mem::forget(values);
-                unsafe { Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE) }
-            }),
-            precision: Precision::Microsecond,
-        })
-    }
-}
 pub struct TimestampNanosecondView(View);
 impl TimestampNanosecondView {
     pub fn into_inner(self) -> View {
@@ -347,26 +307,56 @@ impl TimestampNanosecondView {
     }
 }
 
-impl<A: Into<Option<Item>>> FromIterator<A> for TimestampNanosecondView {
-    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
-        let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
-            .into_iter()
-            .map(|v| match v.into() {
-                Some(v) => (false, v),
-                None => (true, Item::default()),
-            })
-            .unzip();
-        Self(View {
-            nulls: NullBits::from_iter(nulls),
-            data: Bytes::from({
-                let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
-                std::mem::forget(values);
-                unsafe { Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE) }
-            }),
-            precision: Precision::Nanosecond,
-        })
-    }
+macro_rules! _impl_from_iter {
+    ($(($view:ident, $precision:expr)),+ $(,)?) => {
+        $(
+            impl<A: Into<Option<Item>>> FromIterator<A> for $view {
+                fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
+                    let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
+                        .into_iter()
+                        .map(|v| match v.into() {
+                            Some(v) => (false, v),
+                            None => (true, Item::default()),
+                        })
+                        .unzip();
+
+                    Self (View{
+                        nulls: NullBits::from_iter(nulls),
+                        data: bytes::Bytes::from({
+                            let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
+                            std::mem::forget(values);
+
+                            #[cfg(target_endian = "little")]
+                            unsafe {
+                                Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE)
+                            }
+
+                            #[cfg(target_endian = "big")]
+                            {
+                                let mut bytes = unsafe {
+                                    Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE)
+                                };
+                                for i in (0..bytes.len()).step_by(ITEM_SIZE) {
+                                    let j = i + ITEM_SIZE;
+                                    let val = Item::from_ne_bytes(&bytes[i..j].try_into().expect("slice with incorrect length"));
+                                    bytes[i..j].copy_from_slice(&val.to_le_bytes());
+                                }
+                                bytes
+                            }
+                        }),
+                        precision: $precision,
+                    })
+                }
+            }
+        )+
+    };
 }
+
+_impl_from_iter!(
+    (TimestampMillisecondView, Precision::Millisecond),
+    (TimestampMicrosecondView, Precision::Microsecond),
+    (TimestampNanosecondView, Precision::Nanosecond),
+);
 
 #[test]
 fn test_slice() {

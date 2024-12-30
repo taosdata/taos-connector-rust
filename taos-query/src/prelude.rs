@@ -44,6 +44,7 @@ pub mod sync {
     use crate::common::*;
     use crate::helpers::*;
     pub use crate::stmt::Bindable;
+    pub use crate::stmt2::{Stmt2BindParam, Stmt2Bindable};
     pub use crate::tmq::{AsConsumer, IsData, IsMeta};
     #[cfg(feature = "r2d2")]
     pub use crate::{Pool, PoolBuilder};
@@ -307,6 +308,7 @@ mod r#async {
     use crate::common::*;
     use crate::helpers::*;
     pub use crate::stmt::AsyncBindable;
+    pub use crate::stmt2::{Stmt2AsyncBindable, Stmt2BindParam};
     pub use crate::util::{AsyncInlinable, AsyncInlinableRead, AsyncInlinableWrite};
     pub use crate::RawResult;
 
