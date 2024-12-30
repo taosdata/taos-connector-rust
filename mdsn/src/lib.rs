@@ -1666,7 +1666,8 @@ mod tests {
     }
     #[test]
     fn at_question_position_mix() {
-        let s = "taos:/!@#$%^&*()-_+=[]{}:;><|~,?params=./@abc.txt&b=!@#$%^*()-_+=[]{}:;><中文汉字£¢§®";
+        let s =
+            "taos:/!@#$%^&*()-_+=[]{}:;><|~,?params=./@abc.txt&b=!@#$%^*()-_+=[]{}:;><中文汉字£¢§®";
         let dsn = Dsn::from_str(s).unwrap();
         assert_eq!(dsn.path.unwrap(), "/!@#$%^&*()-_+=[]{}:;><|~,");
         assert_eq!(dsn.params.get("params").unwrap(), "./@abc.txt");
