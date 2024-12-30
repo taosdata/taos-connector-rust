@@ -14,10 +14,16 @@ int main()
     }
     WS_TAOS *taos = ws_connect(dsn);
 
-    for (int i = 0; i < 50; i++)
+    long long ts = 1735220484412;
+    for (int i = 0; i < 10000; i++)
     {
-        // printf("query start\n");
-        WS_RES *res = ws_query_timeout(taos, "insert into t0 values(now, 1)", 1);
+        // printf("query start\n"
+        ts += i;
+        // char sql[60];
+        // sprintf(sql, "insert into test.t0 values(%lld, 1)", ts);
+        char sql[60];
+        sprintf(sql, "insert into test.t1 values(%lld,1,1.1,2.2)", ts);
+        WS_RES *res = ws_query_timeout(taos, sql, 1);
         // printf("query end\n");
         if (res == NULL)
         {
@@ -35,9 +41,7 @@ int main()
         }
     }
 
-    printf("close start\n");
     int code1 = ws_close(taos);
-    printf("close end\n");
     if (code1 != 0)
     {
         printf("Close connection failed[%d]", code1);

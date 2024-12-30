@@ -531,12 +531,10 @@ async fn read_queries(
     loop {
         tokio::select! {
             res = reader.try_next() => {
-                let ts = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos();
-                tracing::error!("recv: {ts:?}");
-                unsafe {QT.recv();}
+                unsafe {
+                    QT.recv();
+                    QT.new_recv();
+                }
                 match res {
                     Ok(frame) => {
                         if let Some(frame) = frame {
@@ -621,6 +619,8 @@ pub struct QueryTime {
     pub query_handle_duration: Duration,
     pub send_start: Option<Instant>,
     pub send_recv_duration: Duration,
+    pub new_send_start: u128,
+    pub new_send_recv_duration: u128,
 }
 
 impl QueryTime {
@@ -634,7 +634,29 @@ impl QueryTime {
             query_handle_duration: Duration::ZERO,
             send_start: None,
             send_recv_duration: Duration::ZERO,
+            new_send_start: 0,
+            new_send_recv_duration: 0,
         }
+    }
+
+    pub fn with_new_send_start(&mut self, start: u128) {
+        self.new_send_start = start;
+    }
+
+    pub fn new_recv(&mut self) {
+        if self.new_send_start == 0 {
+            return;
+        }
+        self.new_send_recv_duration += SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            - self.new_send_start;
+        self.new_send_start = 0;
+    }
+
+    pub fn new_send_recv_duration(&self) -> u128 {
+        self.new_send_recv_duration
     }
 
     pub fn with_send_start(&mut self, start: Instant) {
@@ -700,6 +722,7 @@ impl QueryTime {
 pub static mut QT: QueryTime = QueryTime::new();
 
 pub static mut SEND_TIME: Duration = Duration::ZERO;
+pub static mut send_time: u128 = 0;
 
 impl WsTaos {
     /// Build TDengine websocket client from dsn.
@@ -851,10 +874,12 @@ impl WsTaos {
                     msg = msg_recv.recv_async() => {
                         match msg {
                             Ok(msg) => {
-                                let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-                                tracing::error!("query send: {ts:?}");
-                                let start = Instant::now();
-                                unsafe {QT.with_send_start(start);}
+                                let now = Instant::now();
+                                let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+                                unsafe {
+                                    QT.with_send_start(now);
+                                    QT.with_new_send_start(start);
+                                }
                                 if let Err(err) = sender.send(msg).await {
                                     tracing::error!("Write websocket error: {}", err);
                                     let mut keys = Vec::new();
@@ -866,17 +891,16 @@ impl WsTaos {
                                     }
                                     break;
                                 }
-                                let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-                                tracing::error!("query send end: {ts:?}");
+                                unsafe { SEND_TIME += now.elapsed(); }
+                                let end = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
                                 unsafe {
-                                    SEND_TIME += start.elapsed();
+                                    send_time += end - start;
                                 }
                             }
                             Err(_) => {
                                 break;
                             }
                         }
-                        // dbg!(&msg);
                     }
                 }
             }

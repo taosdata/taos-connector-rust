@@ -20,7 +20,7 @@ use taos_query::util::{hex, InlineBytes, InlineNChar, InlineStr};
 use taos_query::{block_in_place_or_global, DsnError, Fetchable, Queryable, TBuilder};
 use taos_ws::consumer::Offset;
 pub use taos_ws::query::asyn::WS_ERROR_NO;
-use taos_ws::query::asyn::{QT, SEND_TIME};
+use taos_ws::query::asyn::{send_time, QueryTime, QT, SEND_TIME};
 use taos_ws::query::{Error, ResultSet, Taos};
 use taos_ws::TaosBuilder;
 
@@ -941,12 +941,21 @@ pub unsafe extern "C" fn ws_connect(dsn: *const c_char) -> *mut WS_TAOS {
         builder.init();
     });
 
-    if CONNECT_START.is_none() {
-        CONNECT_START = Some(Instant::now());
-    }
+    tracing::error!("connect");
 
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    tracing::error!("connect start: {:?}", ts);
+    CONNECT_START = Some(Instant::now());
+    connect_start = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+
+    QUERY_TIME = Duration::ZERO;
+    query_time = 0;
+
+    SEND_TIME = Duration::ZERO;
+    send_time = 0;
+
+    QT = QueryTime::new();
 
     let client = match connect_with_dsn(dsn) {
         Ok(client) => Box::into_raw(Box::new(client)) as _,
@@ -955,10 +964,6 @@ pub unsafe extern "C" fn ws_connect(dsn: *const c_char) -> *mut WS_TAOS {
             std::ptr::null_mut()
         }
     };
-
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    tracing::error!("connect end: {:?}", ts);
-
     client
 }
 
@@ -986,21 +991,33 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
 }
 
 static mut CONNECT_START: Option<Instant> = None;
+static mut connect_start: u128 = 0;
 
 static mut QUERY_TIME: Duration = Duration::ZERO;
+static mut query_time: u128 = 0;
+
 static mut FREE_TIME: Duration = Duration::ZERO;
 
 #[no_mangle]
 /// Same to taos_close. This should always be called after everything done with the connection.
 pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) -> i32 {
-    CONNECT_START.take().map(|start| {
-        let elapsed = start.elapsed();
-        tracing::error!("connect time: {:?}", elapsed);
-    });
+    let elapsed = CONNECT_START.unwrap().elapsed();
+    let connect_end = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
 
+    tracing::error!("query cnt: {}", QUERY_CNT);
+
+    tracing::error!("connect time: {:?}", elapsed);
     tracing::error!("query time: {:?}", QUERY_TIME);
     tracing::error!("send time: {:?}", SEND_TIME);
     tracing::error!("send recv time: {:?}", QT.send_recv_duration());
+
+    tracing::error!("new connect time: {:?}", connect_end - connect_start);
+    tracing::error!("new query time: {:?}", query_time);
+    tracing::error!("new send time: {:?}", send_time);
+    tracing::error!("new send recv time: {:?}", QT.new_send_recv_duration());
 
     if !taos.is_null() {
         tracing::trace!("close connection {taos:p}");
@@ -1083,6 +1100,8 @@ pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) -> i32 {
     }
 }
 
+static mut QUERY_CNT: u64 = 0;
+
 #[no_mangle]
 /// Query a sql with timeout.
 ///
@@ -1092,20 +1111,24 @@ pub unsafe extern "C" fn ws_query_timeout(
     sql: *const c_char,
     seconds: u32,
 ) -> *mut WS_RES {
-    let ts = SystemTime::now()
+    QUERY_CNT += 1;
+    let now = Instant::now();
+    let start = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    tracing::error!("query start: {:?}", ts);
-    let start = Instant::now();
+    // tracing::error!("query start: {:?}", start);
+
     let res: WsMaybeError<WsResultSet> =
         query_with_sql_timeout(taos, sql, Duration::from_secs(seconds as _)).into();
-    QUERY_TIME += start.elapsed();
-    let ts = SystemTime::now()
+
+    QUERY_TIME += now.elapsed();
+    let end = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    tracing::error!("query end: {:?}", ts);
+    query_time += end - start;
+    // tracing::error!("query end: {:?}", end);
     Box::into_raw(Box::new(res)) as _
 }
 
