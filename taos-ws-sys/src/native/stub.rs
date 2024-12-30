@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use std::ffi::{c_char, c_int, c_ulong, c_void, VaList};
+use std::ffi::{c_char, c_int, c_ulong, c_void};
 
 use super::query::{__taos_async_fn_t, TAOS_FIELD};
 use super::stmt::TAOS_FIELD_E;
@@ -31,7 +31,7 @@ pub unsafe extern "C" fn taos_options_connection(
     taos: *mut TAOS,
     option: TSDB_OPTION_CONNECTION,
     arg: *const c_void,
-    varargs: VaList,
+    varargs: ...
 ) -> c_int {
     todo!()
 }

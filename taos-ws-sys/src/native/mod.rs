@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use std::ffi::{c_char, c_int, c_void, CStr, VaList};
+use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr::{null, null_mut};
 use std::sync::RwLock;
 
@@ -134,13 +134,12 @@ pub enum TSDB_OPTION {
 
 static PARAMS: Lazy<RwLock<String>> = Lazy::new(|| RwLock::new(String::new()));
 
-// todo
 #[allow(clippy::just_underscores_and_digits)]
 #[no_mangle]
 pub unsafe extern "C" fn taos_options(
     option: TSDB_OPTION,
     arg: *const c_void,
-    mut varargs: VaList,
+    mut varargs: ...
 ) -> c_int {
     let mut params = Vec::new();
 
