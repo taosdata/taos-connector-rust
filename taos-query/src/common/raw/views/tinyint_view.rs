@@ -212,26 +212,6 @@ impl ExactSizeIterator for TinyIntViewIter<'_> {
     }
 }
 
-impl<A: Into<Option<Item>>> FromIterator<A> for View {
-    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
-        let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
-            .into_iter()
-            .map(|v| match v.into() {
-                Some(v) => (false, v),
-                None => (true, Item::default()),
-            })
-            .unzip();
-        Self {
-            nulls: NullBits::from_iter(nulls),
-            data: Bytes::from({
-                let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
-                std::mem::forget(values);
-                unsafe { Vec::from_raw_parts(ptr as *mut u8, len * ITEM_SIZE, cap * ITEM_SIZE) }
-            }),
-        }
-    }
-}
-
 #[test]
 fn test_slice() {
     let data = [0, 1, Item::MIN, Item::MAX];

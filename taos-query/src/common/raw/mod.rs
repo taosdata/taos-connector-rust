@@ -241,18 +241,6 @@ impl RawBlock {
             unsafe { (v as *const u64).read_unaligned() == 0x7FFFFF0000000000 }
         }
 
-        // const BOOL_NULL: u8 = 0x2;
-        // const TINY_INT_NULL: i8 = i8::MIN;
-        // const SMALL_INT_NULL: i16 = i16::MIN;
-        // const INT_NULL: i32 = i32::MIN;
-        // const BIG_INT_NULL: i64 = i64::MIN;
-        // const FLOAT_NULL: f32 = 0x7FF00000i32 as f32;
-        // const DOUBLE_NULL: f64 = 0x7FFFFF0000000000i64 as f64;
-        // const U_TINY_INT_NULL: u8 = u8::MAX;
-        // const U_SMALL_INT_NULL: u16 = u16::MAX;
-        // const U_INT_NULL: u32 = u32::MAX;
-        // const U_BIG_INT_NULL: u64 = u64::MAX;
-
         let layout = Rc::new(RefCell::new(Layout::INLINE_DEFAULT.with_schema_changed()));
 
         let bytes = bytes.into();
@@ -273,8 +261,7 @@ impl RawBlock {
 
         for (i, (field, length)) in fields.iter().zip(lengths).enumerate() {
             macro_rules! _primitive_view {
-                ($ty:ident, $prim:ty) => {
-                    {
+                ($ty:ident, $prim:ty) => {{
                     debug_assert_eq!(field.bytes(), *length);
                     // column start
                     let start = offset;
@@ -283,31 +270,17 @@ impl RawBlock {
                     // byte slice from start to end: `[start, end)`.
                     let data = bytes.slice(start..offset);
                     let nulls = NullBits::from_iter((0..rows).map(|row| unsafe {
-                        paste::paste!{ [<$ty:snake _is_null>] (
+                        paste::paste! { [<$ty:snake _is_null>] (
                             data
                                 .as_ptr()
                                 .offset(row as isize * std::mem::size_of::<$prim>() as isize)
                                 as *const $prim,
                         ) }
                     }));
-                    // value as target type
-                    // let value_slice = unsafe {
-                    //     std::slice::from_raw_parts(
-                    //         transmute::<*const u8, *const $prim>(data.as_ptr()),
-                    //         rows,
-                    //     )
-                    // };
+
                     // Set data lengths for v3-compatible block.
                     data_lengths[i] = data.len() as u32;
 
-                    // generate nulls bitmap.
-                    // let nulls = NullsMut::from_bools(
-                    //     value_slice
-                    //         .iter()
-                    //         .map(|v| paste::paste!{ [<$ty:snake _is_null>](v as _) })
-                    //         // .map(|b| *b as u64 == paste::paste! { [<$ty:snake:upper _NULL>] }),
-                    // )
-                    // .into_nulls();
                     // build column view
                     let column = paste::paste! { ColumnView::$ty([<$ty View>] { nulls, data }) };
                     columns.push(column);
@@ -831,10 +804,6 @@ impl RawBlock {
         self.columns.get_unchecked(col).get_ref_unchecked(row)
     }
 
-    // unsafe fn get_col_unchecked(&self, col: usize) -> &ColumnView {
-    //     self.columns.get_unchecked(col)
-    // }
-
     pub fn to_values(&self) -> Vec<Vec<Value>> {
         self.rows().map(RowView::into_values).collect_vec()
     }
@@ -858,13 +827,6 @@ impl RawBlock {
     pub fn pretty_format(&self) -> PrettyBlock {
         PrettyBlock::new(self)
     }
-
-    // pub fn fields_iter(&self) -> impl Iterator<Item = Field> + '_ {
-    //     self.schemas()
-    //         .iter()
-    //         .zip(self.field_names())
-    //         .map(|(schema, name)| Field::new(name, schema.ty, schema.len))
-    // }
 
     pub fn to_create(&self) -> Option<MetaCreate> {
         self.table_name().map(|table_name| MetaCreate::Normal {
@@ -1029,6 +991,7 @@ impl crate::prelude::sync::Inlinable for InlineBlock {
         Ok(self.0.len())
     }
 }
+
 #[async_trait::async_trait]
 impl crate::prelude::AsyncInlinable for InlineBlock {
     async fn read_inlined<R: tokio::io::AsyncRead + Send + Unpin>(

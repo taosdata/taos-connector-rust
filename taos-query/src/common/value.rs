@@ -437,7 +437,6 @@ impl Display for BorrowedValue<'_> {
 
 unsafe impl Send for BorrowedValue<'_> {}
 
-// #[derive(Debug, Clone)]
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub enum Value {
     Null(Ty),    // 0
