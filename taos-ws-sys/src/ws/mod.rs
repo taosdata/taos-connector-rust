@@ -152,7 +152,6 @@ impl<T> Drop for WsMaybeError<T> {
     fn drop(&mut self) {
         if !self.data.is_null() {
             tracing::trace!("dropping obj {}", self.type_id);
-            // let _ = unsafe { self.data.read() };
             let _ = unsafe { Box::from_raw(self.data) };
         }
     }
@@ -348,6 +347,7 @@ impl WS_FIELD_V2 {
     pub fn name(&self) -> &CStr {
         unsafe { CStr::from_ptr(self.name.as_ptr() as _) }
     }
+
     pub fn r#type(&self) -> Ty {
         self.r#type.into()
     }
@@ -386,6 +386,7 @@ impl WS_FIELD {
     pub fn name(&self) -> &CStr {
         unsafe { CStr::from_ptr(self.name.as_ptr() as _) }
     }
+
     pub fn r#type(&self) -> Ty {
         self.r#type.into()
     }
@@ -569,6 +570,7 @@ impl WsResultSetTrait for WsResultSet {
             WsResultSet::Schemaless(rs) => rs.tmq_get_topic_name(),
         }
     }
+
     fn tmq_get_db_name(&self) -> *const c_char {
         match self {
             WsResultSet::Sql(rs) => rs.tmq_get_db_name(),
@@ -576,6 +578,7 @@ impl WsResultSetTrait for WsResultSet {
             WsResultSet::Schemaless(rs) => rs.tmq_get_db_name(),
         }
     }
+
     fn tmq_get_table_name(&self) -> *const c_char {
         match self {
             WsResultSet::Sql(rs) => rs.tmq_get_table_name(),
@@ -599,6 +602,7 @@ impl WsResultSetTrait for WsResultSet {
             WsResultSet::Schemaless(rs) => rs.tmq_get_vgroup_offset(),
         }
     }
+
     fn tmq_get_vgroup_id(&self) -> i32 {
         match self {
             WsResultSet::Sql(rs) => rs.tmq_get_vgroup_id(),
@@ -646,6 +650,7 @@ impl WsResultSetTrait for WsResultSet {
             WsResultSet::Schemaless(rs) => rs.get_fields(),
         }
     }
+
     fn get_fields_v2(&mut self) -> *const WS_FIELD_V2 {
         match self {
             WsResultSet::Sql(rs) => rs.get_fields_v2(),
@@ -989,9 +994,9 @@ unsafe fn query_with_sql(
 ) -> WsResult<WsResultSet> {
     let client = (taos as *mut Taos)
         .as_mut()
-        .ok_or(WsError::new(Code::INVALID_PARA, "client pointer it null"))?;
+        .ok_or(WsError::new(Code::INVALID_PARA, "client pointer is null"))?;
 
-    let sql = CStr::from_ptr(sql as _).to_str()?;
+    let sql = CStr::from_ptr(sql).to_str()?;
     let rs = client.query_with_req_id(sql, req_id)?;
     Ok(WsResultSet::Sql(WsSqlResultSet::new(rs)))
 }
@@ -1141,7 +1146,7 @@ pub unsafe extern "C" fn ws_select_db(taos: *mut WS_TAOS, db: *const c_char) -> 
         }
     };
 
-    let db = CStr::from_ptr(db as _).to_str();
+    let db = CStr::from_ptr(db).to_str();
     let db = match db {
         Ok(t) => t,
         Err(_) => {

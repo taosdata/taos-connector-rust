@@ -11,33 +11,29 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 
 use bytes::Bytes;
+pub use data::*;
+use derive_builder::Builder;
 use itertools::Itertools;
+use layout::Layout;
+pub use meta::*;
 use rayon::prelude::*;
+pub use rows::*;
 use serde::Deserialize;
 use taos_error::Error;
+pub use views::ColumnView;
+use views::*;
 
 use crate::common::{BorrowedValue, Field, Precision, Ty, Value};
 
 pub mod layout;
 pub mod meta;
-
-mod data;
-
-use layout::Layout;
-
 #[allow(clippy::missing_safety_doc)]
 #[allow(clippy::should_implement_trait)]
 pub mod views;
 
-pub use data::*;
-pub use meta::*;
-pub use views::ColumnView;
-use views::*;
-
+mod data;
 mod de;
 mod rows;
-use derive_builder::Builder;
-pub use rows::*;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(1))]
@@ -79,6 +75,7 @@ impl Header {
     fn nrows(&self) -> usize {
         self.nrows as _
     }
+
     fn ncols(&self) -> usize {
         self.ncols as _
     }
