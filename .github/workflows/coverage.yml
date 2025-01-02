@@ -38,6 +38,7 @@ jobs:
       - name: Get commit ID
         id: get_commit_id
         run: |
+          date
           cd TDengine
           echo "commit_id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
@@ -181,3 +182,5 @@ jobs:
           files: lcov.info
           fail_ci_if_error: true
           verbose: true
+        env:
+          CODECOV_EXPIRED_DISABLED: true
