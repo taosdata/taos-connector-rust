@@ -1,6 +1,15 @@
-use std::ffi::{c_char, c_int, c_void};
+use std::ffi::{c_char, c_int, c_void, CStr};
+use std::time::Duration;
 
-use super::{TAOS, TAOS_RES};
+use taos_error::{Code, Error};
+use taos_query::common::{Precision, Ty};
+use taos_query::util::generate_req_id;
+use taos_query::{Queryable, RawBlock as Block};
+use taos_ws::{Offset, ResultSet, Taos};
+
+use crate::native::{Result, TAOS, TAOS_RES};
+
+pub mod query;
 
 #[allow(non_camel_case_types)]
 pub type TAOS_ROW = *mut *mut c_void;
@@ -9,6 +18,7 @@ pub type TAOS_ROW = *mut *mut c_void;
 pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
 
 #[repr(C)]
+#[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub struct TAOS_FIELD {
     pub name: [c_char; 65],
@@ -18,7 +28,7 @@ pub struct TAOS_FIELD {
 
 #[no_mangle]
 pub extern "C" fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES {
-    todo!()
+    taos_query_with_reqid(taos, sql, generate_req_id() as _)
 }
 
 #[no_mangle]
@@ -29,6 +39,25 @@ pub extern "C" fn taos_query_with_reqid(
     reqId: i64,
 ) -> *mut TAOS_RES {
     todo!()
+}
+
+// enum WsResultSet {
+//     Sql,
+//     Schemaless,
+//     Tmq,
+// }
+
+unsafe fn query(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> Result<()> {
+    let client = (taos as *mut Taos)
+        .as_mut()
+        .ok_or(Error::new(Code::INVALID_PARA, "taos is null"))?;
+
+    // let sql = CStr::from_ptr(sql).to_str()?;
+    // let rs = client.query_with_req_id(sql.unwrap(), req_id);
+    // Ok(WsResultSet::Sql(WsSqlResultSet::new(rs)))
+    // Ok(WsResultSet::Sql)
+    // Ok(())
+    Ok(())
 }
 
 #[no_mangle]

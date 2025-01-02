@@ -2,10 +2,10 @@
 
 use std::ffi::{c_char, c_int, c_ulong, c_void};
 
-use super::query::{__taos_async_fn_t, TAOS_FIELD};
 use super::stmt::TAOS_FIELD_E;
 use super::tmq::tmq_t;
 use super::{TAOS, TAOS_RES};
+use crate::native::query::{__taos_async_fn_t, TAOS_FIELD};
 
 #[no_mangle]
 pub extern "C" fn taos_init() -> c_int {

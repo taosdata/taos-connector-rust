@@ -13,6 +13,7 @@ use tracing::trace;
 
 pub mod error;
 pub mod query;
+pub mod result_set;
 pub mod sml;
 pub mod stmt;
 pub mod stub;
@@ -165,19 +166,18 @@ pub extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn init_log() {
-    use std::sync::Once;
+#[ctor::ctor]
+fn init_logger() {
+    use tracing_subscriber::EnvFilter;
 
-    static ONCE_INIT: Once = Once::new();
-    ONCE_INIT.call_once(|| {
-        let mut builder = pretty_env_logger::formatted_timed_builder();
-        builder.format_timestamp_nanos();
-        builder.parse_filters("trace");
-        builder.init();
-    });
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
 
-    trace!("init log");
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_file(true)
+        .with_line_number(true)
+        .with_target(false)
+        .init();
 }
 
 #[cfg(test)]
