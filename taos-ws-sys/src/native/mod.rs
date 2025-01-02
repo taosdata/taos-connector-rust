@@ -1,7 +1,6 @@
 #![allow(unused_variables)]
 
 use std::ffi::{c_char, c_int, c_void, CStr};
-use std::ptr::{null, null_mut};
 use std::sync::RwLock;
 
 use error::{set_err_and_get_code, Error};
@@ -38,7 +37,7 @@ pub unsafe extern "C" fn taos_connect(
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
         Err(err) => {
             set_err_and_get_code(err);
-            null_mut()
+            std::ptr::null_mut()
         }
     }
 }
@@ -162,7 +161,7 @@ pub unsafe extern "C" fn taos_options(
 pub extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
     match Ty::from_u8_option(r#type as _) {
         Some(ty) => ty.tsdb_name(),
-        None => null(),
+        None => std::ptr::null(),
     }
 }
 

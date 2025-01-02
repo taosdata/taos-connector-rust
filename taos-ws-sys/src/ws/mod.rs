@@ -425,7 +425,7 @@ impl From<&Field> for WS_FIELD {
 pub struct ROW {
     /// Data is used to hold the row data
     data: Vec<*const c_void>,
-    /// current row to get
+    /// Current row to get
     current_row: usize,
 }
 
