@@ -321,7 +321,13 @@ async fn read_queries(
         match frame {
             Message::Text(text) => {
                 tracing::trace!("received json response: {text}",);
-                let v: WsRecv = serde_json::from_str(&text).unwrap();
+                // 如果text 序列化失败，打印日志，继续处理下一个消息
+                let v = serde_json::from_str::<WsRecv>(&text);
+                if let Err(err) = v {
+                    tracing::error!("failed to deserialize json text: {text}, error: {err:?}");
+                    return ControlFlow::Continue(());
+                }
+                let v = v.unwrap();
                 let queries_sender = queries_sender.clone();
                 let ws2 = ws2.clone();
                 let (req_id, data, ok) = v.ok();
