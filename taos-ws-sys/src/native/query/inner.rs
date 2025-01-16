@@ -83,13 +83,13 @@ impl ResultSetOperations for QueryResultSet {
         self.rs.num_of_fields() as _
     }
 
-    fn get_fields(&mut self) -> *const TAOS_FIELD {
+    fn get_fields(&mut self) -> *mut TAOS_FIELD {
         if self.fields.len() != self.rs.num_of_fields() {
             self.fields.clear();
             self.fields
                 .extend(self.rs.fields().iter().map(TAOS_FIELD::from));
         }
-        self.fields.as_ptr()
+        self.fields.as_mut_ptr()
     }
 
     unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {

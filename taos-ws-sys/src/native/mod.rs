@@ -209,7 +209,7 @@ pub trait ResultSetOperations {
 
     fn num_of_fields(&self) -> i32;
 
-    fn get_fields(&mut self) -> *const TAOS_FIELD;
+    fn get_fields(&mut self) -> *mut TAOS_FIELD;
 
     unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error>;
 
@@ -288,7 +288,7 @@ impl ResultSetOperations for ResultSet {
         }
     }
 
-    fn get_fields(&mut self) -> *const TAOS_FIELD {
+    fn get_fields(&mut self) -> *mut TAOS_FIELD {
         match self {
             ResultSet::Query(rs) => rs.get_fields(),
         }
