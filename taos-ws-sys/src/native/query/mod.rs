@@ -76,12 +76,12 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
 
     let rs = match (res as *mut TaosMaybeError<ResultSet>).as_mut() {
         Some(rs) => rs,
-        None => return handle_error(Code::INVALID_PARA, "Res is null"),
+        None => return handle_error(Code::INVALID_PARA, "res is null"),
     };
 
     let rs = match rs.deref_mut() {
         Some(rs) => rs,
-        None => return handle_error(Code::INVALID_PARA, "Data is null"),
+        None => return handle_error(Code::INVALID_PARA, "data is null"),
     };
 
     match rs.fetch_row() {
@@ -94,8 +94,14 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
-    todo!()
+pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
+    match (res as *mut TaosMaybeError<ResultSet>)
+        .as_mut()
+        .and_then(|rs| rs.deref_mut())
+    {
+        Some(rs) => rs.precision() as _,
+        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null")),
+    }
 }
 
 #[no_mangle]
@@ -293,6 +299,8 @@ pub extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
 mod tests {
     use std::ptr;
 
+    use taos_query::common::Precision;
+
     use super::*;
     use crate::native::taos_connect;
 
@@ -327,6 +335,16 @@ mod tests {
             assert!(!res.is_null());
             let row = taos_fetch_row(res);
             assert!(!row.is_null());
+        }
+    }
+
+    #[test]
+    fn test_taos_result_precision() {
+        unsafe {
+            let taos = connect();
+            let res = taos_query(taos, c"select * from test.t0".as_ptr());
+            assert!(!res.is_null());
+            let _: Precision = taos_result_precision(res).into();
         }
     }
 }
