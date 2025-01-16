@@ -5,11 +5,12 @@ use std::ptr;
 use std::sync::RwLock;
 use std::time::Duration;
 
-use error::{set_err_and_get_code, Error};
+use error::{set_err_and_get_code, TaosError};
 use once_cell::sync::Lazy;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
 use taos_query::TBuilder;
+use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tracing::trace;
 
@@ -27,7 +28,7 @@ pub type TAOS = c_void;
 #[allow(non_camel_case_types)]
 pub type TAOS_RES = c_void;
 
-type TaosResult<T> = Result<T, Error>;
+type TaosResult<T> = Result<T, TaosError>;
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_connect(
@@ -97,7 +98,7 @@ unsafe fn connect(
 #[no_mangle]
 pub extern "C" fn taos_close(taos: *mut TAOS) {
     if taos.is_null() {
-        set_err_and_get_code(Error::new(Code::INVALID_PARA, "taos is null"));
+        set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
         return;
     }
 
@@ -138,7 +139,9 @@ pub unsafe extern "C" fn taos_options(
 
         let key = match CStr::from_ptr(key_ptr).to_str() {
             Ok(key) => key,
-            Err(_) => return set_err_and_get_code(Error::new(Code::INVALID_PARA, "Invalid key")),
+            Err(_) => {
+                return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "Invalid key"))
+            }
         };
 
         let value_ptr: *const c_char = varargs.arg();
@@ -148,7 +151,9 @@ pub unsafe extern "C" fn taos_options(
 
         let value = match CStr::from_ptr(value_ptr).to_str() {
             Ok(value) => value,
-            Err(_) => return set_err_and_get_code(Error::new(Code::INVALID_PARA, "Invalid value")),
+            Err(_) => {
+                return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "Invalid value"))
+            }
         };
 
         params.push(format!("{key}={value}"));

@@ -1,12 +1,13 @@
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
 
+use taos_error::Code;
 use taos_query::common::Field;
 use taos_query::util::generate_req_id;
 use tracing::trace;
 
-use crate::native::error::MaybeError;
-use crate::native::{ResultSet, TAOS, TAOS_RES};
+use crate::native::error::{set_err_and_get_code, TaosError, TaosMaybeError};
+use crate::native::{ResultSet, ResultSetOperations, TAOS, TAOS_RES};
 
 mod inner;
 
@@ -59,14 +60,37 @@ pub unsafe extern "C" fn taos_query_with_reqid(
     reqId: i64,
 ) -> *mut TAOS_RES {
     trace!(taos=?taos, req_id=reqId,"query sql={:?}", CStr::from_ptr(sql));
-    let res: MaybeError<ResultSet> = inner::query(taos, sql, reqId as u64).into();
+    let res: TaosMaybeError<ResultSet> = inner::query(taos, sql, reqId as u64).into();
     trace!(res=?res, "query done");
     Box::into_raw(Box::new(res)) as _
 }
 
 #[no_mangle]
-pub extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
-    todo!()
+pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
+    trace!(res=?res, "fetch row");
+
+    fn handle_error(code: Code, msg: &str) -> TAOS_ROW {
+        set_err_and_get_code(TaosError::new(code, msg));
+        ptr::null_mut()
+    }
+
+    let rs = match (res as *mut TaosMaybeError<ResultSet>).as_mut() {
+        Some(rs) => rs,
+        None => return handle_error(Code::INVALID_PARA, "Res is null"),
+    };
+
+    let rs = match rs.deref_mut() {
+        Some(rs) => rs,
+        None => return handle_error(Code::INVALID_PARA, "Data is null"),
+    };
+
+    match rs.fetch_row() {
+        Ok(row) => {
+            trace!(row=?row, "fetch row done");
+            row
+        }
+        Err(err) => handle_error(err.errno(), &err.errstr()),
+    }
 }
 
 #[no_mangle]

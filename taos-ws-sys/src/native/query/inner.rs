@@ -5,10 +5,11 @@ use std::time::Duration;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
 use taos_query::{Fetchable, Queryable, RawBlock as Block};
+use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
 use tracing::trace;
 
-use crate::native::error::Error;
+use crate::native::error::TaosError;
 use crate::native::query::{TAOS_FIELD, TAOS_ROW};
 use crate::native::{ResultSet, ResultSetOperations, TaosResult, TAOS};
 
@@ -155,7 +156,7 @@ impl ResultSetOperations for QueryResultSet {
 pub unsafe fn query(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> TaosResult<ResultSet> {
     let client = (taos as *mut Taos)
         .as_mut()
-        .ok_or(Error::new(Code::INVALID_PARA, "client pointer is null"))?;
+        .ok_or(TaosError::new(Code::INVALID_PARA, "client pointer is null"))?;
     let sql = CStr::from_ptr(sql).to_str()?;
     let rs = client.query_with_req_id(sql, req_id)?;
     Ok(ResultSet::Query(QueryResultSet::new(rs)))

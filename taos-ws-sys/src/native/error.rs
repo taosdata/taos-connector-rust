@@ -13,9 +13,9 @@ pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
         return errno();
     }
 
-    match (res as *mut MaybeError<()>)
+    match (res as *mut TaosMaybeError<()>)
         .as_ref()
-        .and_then(MaybeError::errno)
+        .and_then(TaosMaybeError::errno)
     {
         Some(errno) => format_errno(errno),
         _ => Code::SUCCESS.into(),
@@ -31,9 +31,9 @@ pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
         return errstr();
     }
 
-    match (res as *mut MaybeError<()>)
+    match (res as *mut TaosMaybeError<()>)
         .as_ref()
-        .and_then(MaybeError::errstr)
+        .and_then(TaosMaybeError::errstr)
     {
         Some(err) => err,
         _ => EMPTY.as_ptr(),
@@ -48,7 +48,7 @@ thread_local! {
     static ERRSTR: RefCell<[u8; MAX_ERRSTR_LEN]> = const { RefCell::new([0; MAX_ERRSTR_LEN]) };
 }
 
-pub fn set_err_and_get_code(err: Error) -> i32 {
+pub fn set_err_and_get_code(err: TaosError) -> i32 {
     ERRNO.with(|errno| {
         let code: u32 = err.code.into();
         *errno.borrow_mut() = (code | 0x80000000) as i32;
@@ -81,13 +81,13 @@ pub fn format_errno(errno: i32) -> i32 {
 }
 
 #[derive(Debug)]
-pub struct MaybeError<T> {
-    err: Option<Error>,
+pub struct TaosMaybeError<T> {
+    err: Option<TaosError>,
     data: *mut T,
     type_id: &'static str,
 }
 
-impl<T> MaybeError<T> {
+impl<T> TaosMaybeError<T> {
     pub fn errno(&self) -> Option<i32> {
         self.err.as_ref().map(|err| err.code.into())
     }
@@ -105,7 +105,7 @@ impl<T> MaybeError<T> {
     }
 }
 
-impl<T> Drop for MaybeError<T> {
+impl<T> Drop for TaosMaybeError<T> {
     fn drop(&mut self) {
         if !self.data.is_null() {
             trace!(self.type_id, "drop MaybeError");
@@ -114,7 +114,7 @@ impl<T> Drop for MaybeError<T> {
     }
 }
 
-impl<T> From<T> for MaybeError<T> {
+impl<T> From<T> for TaosMaybeError<T> {
     fn from(value: T) -> Self {
         Self {
             err: None,
@@ -124,7 +124,7 @@ impl<T> From<T> for MaybeError<T> {
     }
 }
 
-impl<T> From<Box<T>> for MaybeError<T> {
+impl<T> From<Box<T>> for TaosMaybeError<T> {
     fn from(value: Box<T>) -> Self {
         Self {
             err: None,
@@ -134,9 +134,9 @@ impl<T> From<Box<T>> for MaybeError<T> {
     }
 }
 
-impl<T, E> From<Result<T, E>> for MaybeError<T>
+impl<T, E> From<Result<T, E>> for TaosMaybeError<T>
 where
-    E: Into<Error>,
+    E: Into<TaosError>,
 {
     fn from(value: Result<T, E>) -> Self {
         match value {
@@ -154,9 +154,9 @@ where
     }
 }
 
-impl<T, E> From<Result<Box<T>, E>> for MaybeError<T>
+impl<T, E> From<Result<Box<T>, E>> for TaosMaybeError<T>
 where
-    E: Into<Error>,
+    E: Into<TaosError>,
 {
     fn from(value: Result<Box<T>, E>) -> Self {
         match value {
@@ -175,13 +175,13 @@ where
 }
 
 #[derive(Debug)]
-pub struct Error {
+pub struct TaosError {
     code: Code,
     message: CString,
     source: Option<Box<dyn std::error::Error>>,
 }
 
-impl Error {
+impl TaosError {
     pub fn new(code: Code, message: &str) -> Self {
         Self {
             code,
@@ -191,8 +191,8 @@ impl Error {
     }
 }
 
-impl From<&Error> for Error {
-    fn from(err: &Error) -> Self {
+impl From<&TaosError> for TaosError {
+    fn from(err: &TaosError) -> Self {
         Self {
             code: err.code,
             message: err.message.clone(),
@@ -201,19 +201,19 @@ impl From<&Error> for Error {
     }
 }
 
-impl std::fmt::Display for Error {
+impl std::fmt::Display for TaosError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{:#06X}] {}", self.code, self.message.to_str().unwrap())
     }
 }
 
-impl std::error::Error for Error {
+impl std::error::Error for TaosError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.source.as_ref().map(|e| e.as_ref())
     }
 }
 
-impl From<Box<dyn std::error::Error>> for Error {
+impl From<Box<dyn std::error::Error>> for TaosError {
     fn from(err: Box<dyn std::error::Error>) -> Self {
         Self {
             code: Code::FAILED,
@@ -223,7 +223,7 @@ impl From<Box<dyn std::error::Error>> for Error {
     }
 }
 
-impl From<std::str::Utf8Error> for Error {
+impl From<std::str::Utf8Error> for TaosError {
     fn from(err: std::str::Utf8Error) -> Self {
         Self {
             code: Code::FAILED,
@@ -233,7 +233,7 @@ impl From<std::str::Utf8Error> for Error {
     }
 }
 
-impl From<std::string::FromUtf8Error> for Error {
+impl From<std::string::FromUtf8Error> for TaosError {
     fn from(err: std::string::FromUtf8Error) -> Self {
         Self {
             code: Code::FAILED,
@@ -243,7 +243,7 @@ impl From<std::string::FromUtf8Error> for Error {
     }
 }
 
-impl From<taos_query::DsnError> for Error {
+impl From<taos_query::DsnError> for TaosError {
     fn from(err: taos_query::DsnError) -> Self {
         use taos_ws::query::asyn::WS_ERROR_NO;
         Self {
@@ -254,7 +254,7 @@ impl From<taos_query::DsnError> for Error {
     }
 }
 
-impl From<taos_query::common::SmlDataBuilderError> for Error {
+impl From<taos_query::common::SmlDataBuilderError> for TaosError {
     fn from(err: taos_query::common::SmlDataBuilderError) -> Self {
         Self {
             code: Code::FAILED,
@@ -264,7 +264,7 @@ impl From<taos_query::common::SmlDataBuilderError> for Error {
     }
 }
 
-impl From<taos_ws::Error> for Error {
+impl From<taos_ws::Error> for TaosError {
     fn from(e: taos_ws::Error) -> Self {
         Self {
             code: e.errno(),
@@ -274,7 +274,7 @@ impl From<taos_ws::Error> for Error {
     }
 }
 
-impl From<taos_ws::query::Error> for Error {
+impl From<taos_ws::query::Error> for TaosError {
     fn from(err: taos_ws::query::Error) -> Self {
         Self {
             code: err.errno(),
@@ -284,7 +284,7 @@ impl From<taos_ws::query::Error> for Error {
     }
 }
 
-impl From<taos_error::Error> for Error {
+impl From<taos_error::Error> for TaosError {
     fn from(err: taos_error::Error) -> Self {
         Self {
             code: err.code(),
@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn test_set_err_and_get_code() {
         unsafe {
-            let err = Error::new(Code::SUCCESS, "test error");
+            let err = TaosError::new(Code::SUCCESS, "test error");
             let code = set_err_and_get_code(err);
             assert_eq!(code as u32, 0x80000000);
 
