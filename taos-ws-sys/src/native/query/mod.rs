@@ -152,8 +152,18 @@ pub unsafe extern "C" fn taos_affected_rows(res: *mut TAOS_RES) -> c_int {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
-    todo!()
+pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
+    trace!(res=?res, "taos_affected_rows64");
+    match (res as *mut TaosMaybeError<ResultSet>)
+        .as_ref()
+        .and_then(|rs| rs.deref())
+    {
+        Some(rs) => {
+            trace!(rs=?rs, "taos_affected_rows64 done");
+            rs.affected_rows64() as _
+        }
+        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null")) as _,
+    }
 }
 
 #[no_mangle]
@@ -414,6 +424,17 @@ mod tests {
             let res = taos_query(taos, c"select * from test.t0".as_ptr());
             assert!(!res.is_null());
             let rows = taos_affected_rows(res);
+            assert_eq!(rows, 0);
+        }
+    }
+
+    #[test]
+    fn test_taos_affected_rows64() {
+        unsafe {
+            let taos = connect();
+            let res = taos_query(taos, c"select * from test.t0".as_ptr());
+            assert!(!res.is_null());
+            let rows = taos_affected_rows64(res);
             assert_eq!(rows, 0);
         }
     }
