@@ -296,8 +296,7 @@ mod tests {
     use super::*;
     use crate::native::taos_connect;
 
-    #[test]
-    fn test_taos_query() {
+    fn connect() -> *mut TAOS {
         unsafe {
             let taos = taos_connect(
                 c"localhost".as_ptr(),
@@ -306,9 +305,28 @@ mod tests {
                 ptr::null(),
                 6041,
             );
+            assert!(!taos.is_null());
+            taos
+        }
+    }
 
-            let res = taos_query(taos, c"select * from test".as_ptr());
+    #[test]
+    fn test_taos_query() {
+        unsafe {
+            let taos = connect();
+            let res = taos_query(taos, c"select * from test.t0".as_ptr());
             assert!(!res.is_null());
+        }
+    }
+
+    #[test]
+    fn test_taos_fetch_row() {
+        unsafe {
+            let taos = connect();
+            let res = taos_query(taos, c"select * from test.t0".as_ptr());
+            assert!(!res.is_null());
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
         }
     }
 }
