@@ -1,19 +1,22 @@
 #![allow(unused_variables)]
 
 use std::ffi::{c_char, c_int, c_void, CStr};
+use std::ptr;
 use std::sync::RwLock;
+use std::time::Duration;
 
 use error::{set_err_and_get_code, Error};
 use once_cell::sync::Lazy;
 use taos_error::Code;
-use taos_query::common::Ty;
+use taos_query::common::{Precision, Ty};
 use taos_query::TBuilder;
-use taos_ws::{Taos, TaosBuilder};
+use taos_ws::{Offset, Taos, TaosBuilder};
 use tracing::trace;
+
+use crate::native::query::{QueryResultSet, TAOS_FIELD, TAOS_ROW};
 
 pub mod error;
 pub mod query;
-pub mod result_set;
 pub mod sml;
 pub mod stmt;
 pub mod stub;
@@ -24,7 +27,7 @@ pub type TAOS = c_void;
 #[allow(non_camel_case_types)]
 pub type TAOS_RES = c_void;
 
-type Result<T> = std::result::Result<T, Error>;
+type TaosResult<T> = Result<T, Error>;
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_connect(
@@ -38,7 +41,7 @@ pub unsafe extern "C" fn taos_connect(
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
         Err(err) => {
             set_err_and_get_code(err);
-            std::ptr::null_mut()
+            ptr::null_mut()
         }
     }
 }
@@ -49,7 +52,7 @@ unsafe fn connect(
     pass: *const c_char,
     db: *const c_char,
     mut port: u16,
-) -> Result<Taos> {
+) -> TaosResult<Taos> {
     const DEFAULT_IP: &str = "localhost";
     const DEFAULT_PORT: u16 = 6041;
     const DEFAULT_USER: &str = "root";
@@ -151,7 +154,7 @@ pub unsafe extern "C" fn taos_options(
         params.push(format!("{key}={value}"));
     }
 
-    trace!("dsn params: {:?}", params);
+    trace!(params=?params, "dsn");
 
     *PARAMS.write().unwrap() = params.join("&");
 
@@ -162,7 +165,7 @@ pub unsafe extern "C" fn taos_options(
 pub extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
     match Ty::from_u8_option(r#type as _) {
         Some(ty) => ty.tsdb_name(),
-        None => std::ptr::null(),
+        None => ptr::null(),
     }
 }
 
@@ -180,10 +183,147 @@ fn init_logger() {
         .init();
 }
 
+pub trait ResultSetOperations {
+    fn tmq_get_topic_name(&self) -> *const c_char;
+
+    fn tmq_get_db_name(&self) -> *const c_char;
+
+    fn tmq_get_table_name(&self) -> *const c_char;
+
+    fn tmq_get_vgroup_offset(&self) -> i64;
+
+    fn tmq_get_vgroup_id(&self) -> i32;
+
+    fn tmq_get_offset(&self) -> Offset;
+
+    fn precision(&self) -> Precision;
+
+    fn affected_rows(&self) -> i32;
+
+    fn affected_rows64(&self) -> i64;
+
+    fn num_of_fields(&self) -> i32;
+
+    fn get_fields(&mut self) -> *const TAOS_FIELD;
+
+    unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error>;
+
+    unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error>;
+
+    unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void);
+
+    fn take_timing(&mut self) -> Duration;
+
+    fn stop_query(&mut self);
+}
+
+#[derive(Debug)]
+pub enum ResultSet {
+    Query(QueryResultSet),
+}
+
+impl ResultSetOperations for ResultSet {
+    fn tmq_get_topic_name(&self) -> *const c_char {
+        match self {
+            ResultSet::Query(rs) => rs.tmq_get_topic_name(),
+        }
+    }
+
+    fn tmq_get_db_name(&self) -> *const c_char {
+        match self {
+            ResultSet::Query(rs) => rs.tmq_get_db_name(),
+        }
+    }
+
+    fn tmq_get_table_name(&self) -> *const c_char {
+        match self {
+            ResultSet::Query(rs) => rs.tmq_get_table_name(),
+        }
+    }
+
+    fn tmq_get_offset(&self) -> Offset {
+        match self {
+            ResultSet::Query(rs) => rs.tmq_get_offset(),
+        }
+    }
+
+    fn tmq_get_vgroup_offset(&self) -> i64 {
+        match self {
+            ResultSet::Query(rs) => rs.tmq_get_vgroup_offset(),
+        }
+    }
+
+    fn tmq_get_vgroup_id(&self) -> i32 {
+        match self {
+            ResultSet::Query(rs) => rs.tmq_get_vgroup_id(),
+        }
+    }
+
+    fn precision(&self) -> Precision {
+        match self {
+            ResultSet::Query(rs) => rs.precision(),
+        }
+    }
+
+    fn affected_rows(&self) -> i32 {
+        match self {
+            ResultSet::Query(rs) => rs.affected_rows(),
+        }
+    }
+
+    fn affected_rows64(&self) -> i64 {
+        match self {
+            ResultSet::Query(rs) => rs.affected_rows64(),
+        }
+    }
+
+    fn num_of_fields(&self) -> i32 {
+        match self {
+            ResultSet::Query(rs) => rs.num_of_fields(),
+        }
+    }
+
+    fn get_fields(&mut self) -> *const TAOS_FIELD {
+        match self {
+            ResultSet::Query(rs) => rs.get_fields(),
+        }
+    }
+
+    unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
+        match self {
+            ResultSet::Query(rs) => rs.fetch_block(ptr, rows),
+        }
+    }
+
+    unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error> {
+        match self {
+            ResultSet::Query(rs) => rs.fetch_row(),
+        }
+    }
+
+    unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
+        match self {
+            ResultSet::Query(rs) => rs.get_raw_value(row, col),
+        }
+    }
+
+    fn take_timing(&mut self) -> Duration {
+        match self {
+            ResultSet::Query(rs) => rs.take_timing(),
+        }
+    }
+
+    fn stop_query(&mut self) {
+        match self {
+            ResultSet::Query(rs) => rs.stop_query(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::CString;
-    use std::ptr::null;
+    use std::ptr;
 
     use super::*;
 
@@ -194,29 +334,29 @@ mod tests {
                 c"localhost".as_ptr(),
                 c"root".as_ptr(),
                 c"taosdata".as_ptr(),
-                null(),
+                ptr::null(),
                 6041,
             );
             assert!(!taos.is_null());
             taos_close(taos);
 
-            let taos = taos_connect(null(), null(), null(), null(), 0);
+            let taos = taos_connect(ptr::null(), ptr::null(), ptr::null(), ptr::null(), 0);
             assert!(!taos.is_null());
             taos_close(taos);
 
             let invalid_utf8 = CString::new([0xff, 0xfe, 0xfd]).unwrap();
             let invalid_utf8_ptr = invalid_utf8.as_ptr();
 
-            let taos = taos_connect(invalid_utf8_ptr, null(), null(), null(), 0);
+            let taos = taos_connect(invalid_utf8_ptr, ptr::null(), ptr::null(), ptr::null(), 0);
             assert!(taos.is_null());
 
-            let taos = taos_connect(null(), invalid_utf8_ptr, null(), null(), 0);
+            let taos = taos_connect(ptr::null(), invalid_utf8_ptr, ptr::null(), ptr::null(), 0);
             assert!(taos.is_null());
 
-            let taos = taos_connect(null(), null(), invalid_utf8_ptr, null(), 0);
+            let taos = taos_connect(ptr::null(), ptr::null(), invalid_utf8_ptr, ptr::null(), 0);
             assert!(taos.is_null());
 
-            let taos = taos_connect(null(), null(), null(), invalid_utf8_ptr, 0);
+            let taos = taos_connect(ptr::null(), ptr::null(), ptr::null(), invalid_utf8_ptr, 0);
             assert!(taos.is_null());
         }
     }
@@ -233,7 +373,7 @@ mod tests {
             assert_eq!(type_geo, c"TSDB_DATA_TYPE_GEOMETRY");
 
             let type_invalid = taos_data_type(100);
-            assert_eq!(type_invalid, null(),);
+            assert_eq!(type_invalid, ptr::null(),);
         }
     }
 }

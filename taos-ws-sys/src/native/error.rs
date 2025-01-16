@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::ffi::{c_char, c_int, CStr, CString};
+use std::ptr;
 
 use taos_error::Code;
 use tracing::trace;
@@ -107,7 +108,7 @@ impl<T> MaybeError<T> {
 impl<T> Drop for MaybeError<T> {
     fn drop(&mut self) {
         if !self.data.is_null() {
-            trace!("Dropping MaybeError, type_id: {}", self.type_id);
+            trace!(self.type_id, "drop MaybeError");
             let _ = unsafe { Box::from_raw(self.data) };
         }
     }
@@ -146,7 +147,7 @@ where
             },
             Err(err) => Self {
                 err: Some(err.into()),
-                data: std::ptr::null_mut(),
+                data: ptr::null_mut(),
                 type_id: std::any::type_name::<T>(),
             },
         }
@@ -166,7 +167,7 @@ where
             },
             Err(err) => Self {
                 err: Some(err.into()),
-                data: std::ptr::null_mut(),
+                data: ptr::null_mut(),
                 type_id: std::any::type_name::<T>(),
             },
         }
@@ -296,7 +297,7 @@ impl From<taos_error::Error> for Error {
 #[cfg(test)]
 mod tests {
     use std::ffi::CStr;
-    use std::ptr::null_mut;
+    use std::ptr;
 
     use super::*;
 
@@ -307,10 +308,10 @@ mod tests {
             let code = set_err_and_get_code(err);
             assert_eq!(code as u32, 0x80000000);
 
-            let code = taos_errno(null_mut());
+            let code = taos_errno(ptr::null_mut());
             assert_eq!(code as u32, 0x80000000);
 
-            let errstr_ptr = taos_errstr(null_mut());
+            let errstr_ptr = taos_errstr(ptr::null_mut());
             let errstr = CStr::from_ptr(errstr_ptr);
             assert_eq!(errstr, c"test error");
         }

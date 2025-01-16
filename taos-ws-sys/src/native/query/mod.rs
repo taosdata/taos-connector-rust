@@ -1,15 +1,16 @@
 use std::ffi::{c_char, c_int, c_void, CStr};
-use std::time::Duration;
+use std::ptr;
 
-use taos_error::{Code, Error};
-use taos_query::common::{Precision, Ty};
+use taos_query::common::Field;
 use taos_query::util::generate_req_id;
-use taos_query::{Queryable, RawBlock as Block};
-use taos_ws::{Offset, ResultSet, Taos};
+use tracing::trace;
 
-use crate::native::{Result, TAOS, TAOS_RES};
+use crate::native::error::MaybeError;
+use crate::native::{ResultSet, TAOS, TAOS_RES};
 
-pub mod query;
+mod inner;
+
+pub use inner::QueryResultSet;
 
 #[allow(non_camel_case_types)]
 pub type TAOS_ROW = *mut *mut c_void;
@@ -26,38 +27,41 @@ pub struct TAOS_FIELD {
     pub bytes: i32,
 }
 
+impl From<&Field> for TAOS_FIELD {
+    fn from(field: &Field) -> Self {
+        let mut name = [0 as c_char; 65];
+        let field_name = field.name();
+        unsafe {
+            ptr::copy_nonoverlapping(
+                field_name.as_ptr(),
+                name.as_mut_ptr() as _,
+                field_name.len(),
+            );
+        };
+        Self {
+            name,
+            r#type: field.ty() as i8,
+            bytes: field.bytes() as i32,
+        }
+    }
+}
+
 #[no_mangle]
-pub extern "C" fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES {
+pub unsafe extern "C" fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES {
     taos_query_with_reqid(taos, sql, generate_req_id() as _)
 }
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn taos_query_with_reqid(
+pub unsafe extern "C" fn taos_query_with_reqid(
     taos: *mut TAOS,
     sql: *const c_char,
     reqId: i64,
 ) -> *mut TAOS_RES {
-    todo!()
-}
-
-// enum WsResultSet {
-//     Sql,
-//     Schemaless,
-//     Tmq,
-// }
-
-unsafe fn query(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> Result<()> {
-    let client = (taos as *mut Taos)
-        .as_mut()
-        .ok_or(Error::new(Code::INVALID_PARA, "taos is null"))?;
-
-    // let sql = CStr::from_ptr(sql).to_str()?;
-    // let rs = client.query_with_req_id(sql.unwrap(), req_id);
-    // Ok(WsResultSet::Sql(WsSqlResultSet::new(rs)))
-    // Ok(WsResultSet::Sql)
-    // Ok(())
-    Ok(())
+    trace!(taos=?taos, req_id=reqId,"query sql={:?}", CStr::from_ptr(sql));
+    let res: MaybeError<ResultSet> = inner::query(taos, sql, reqId as u64).into();
+    trace!(res=?res, "query done");
+    Box::into_raw(Box::new(res)) as _
 }
 
 #[no_mangle]
@@ -259,4 +263,28 @@ pub extern "C" fn taos_fetch_raw_block_a(
 #[no_mangle]
 pub extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
     todo!()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ptr;
+
+    use super::*;
+    use crate::native::taos_connect;
+
+    #[test]
+    fn test_taos_query() {
+        unsafe {
+            let taos = taos_connect(
+                c"localhost".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                ptr::null(),
+                6041,
+            );
+
+            let res = taos_query(taos, c"select * from test".as_ptr());
+            assert!(!res.is_null());
+        }
+    }
 }
