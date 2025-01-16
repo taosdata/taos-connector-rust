@@ -59,15 +59,15 @@ pub unsafe extern "C" fn taos_query_with_reqid(
     sql: *const c_char,
     reqId: i64,
 ) -> *mut TAOS_RES {
-    trace!(taos=?taos, req_id=reqId,"query sql={:?}", CStr::from_ptr(sql));
+    trace!(taos=?taos, req_id=reqId,"taos_query_with_reqid sql={:?}", CStr::from_ptr(sql));
     let res: TaosMaybeError<ResultSet> = inner::query(taos, sql, reqId as u64).into();
-    trace!(res=?res, "query done");
+    trace!(res=?res, "taos_query_with_reqid done");
     Box::into_raw(Box::new(res)) as _
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
-    trace!(res=?res, "fetch row");
+    trace!(res=?res, "taos_fetch_row");
 
     fn handle_error(code: Code, msg: &str) -> TAOS_ROW {
         set_err_and_get_code(TaosError::new(code, msg));
@@ -86,7 +86,7 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
 
     match rs.fetch_row() {
         Ok(row) => {
-            trace!(row=?row, "fetch row done");
+            trace!(row=?row, "taos_fetch_row done");
             row
         }
         Err(err) => handle_error(err.errno(), &err.errstr()),
@@ -95,18 +95,25 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
+    trace!(res=?res, "taos_result_precision");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
         .and_then(|rs| rs.deref_mut())
     {
-        Some(rs) => rs.precision() as _,
+        Some(rs) => {
+            trace!(rs=?rs, "taos_result_precision done");
+            rs.precision() as _
+        }
         None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null")),
     }
 }
 
 #[no_mangle]
-pub extern "C" fn taos_free_result(res: *mut TAOS_RES) {
-    todo!()
+pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
+    trace!(res=?res, "taos_free_result");
+    if !res.is_null() {
+        let _ = Box::from_raw(res as *mut TaosMaybeError<ResultSet>);
+    }
 }
 
 #[no_mangle]
@@ -345,6 +352,16 @@ mod tests {
             let res = taos_query(taos, c"select * from test.t0".as_ptr());
             assert!(!res.is_null());
             let _: Precision = taos_result_precision(res).into();
+        }
+    }
+
+    #[test]
+    fn test_taos_free_result() {
+        unsafe {
+            let taos = connect();
+            let res = taos_query(taos, c"select * from test.t0".as_ptr());
+            assert!(!res.is_null());
+            taos_free_result(res);
         }
     }
 }
