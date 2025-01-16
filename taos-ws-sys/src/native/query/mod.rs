@@ -4,6 +4,8 @@ use std::ptr;
 use taos_error::Code;
 use taos_query::common::Field;
 use taos_query::util::generate_req_id;
+use taos_query::Queryable;
+use taos_ws::Taos;
 use tracing::trace;
 
 use crate::native::error::{set_err_and_get_code, TaosError, TaosMaybeError};
@@ -185,8 +187,25 @@ pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIEL
 }
 
 #[no_mangle]
-pub extern "C" fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c_int {
-    todo!()
+pub unsafe extern "C" fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c_int {
+    trace!(taos=?taos, "taos_select_db db={:?}", CStr::from_ptr(db));
+
+    let taos = match (taos as *mut Taos).as_mut() {
+        Some(taos) => taos,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null")),
+    };
+
+    let db = match CStr::from_ptr(db).to_str() {
+        Ok(db) => db,
+        Err(_) => {
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "db is null"));
+        }
+    };
+
+    match taos.query(format!("use {db}")) {
+        Ok(_) => Code::SUCCESS.into(),
+        Err(err) => set_err_and_get_code(TaosError::from(err)),
+    }
 }
 
 #[no_mangle]
@@ -460,6 +479,15 @@ mod tests {
             assert!(!res.is_null());
             let fields = taos_fetch_fields(res);
             assert!(!fields.is_null());
+        }
+    }
+
+    #[test]
+    fn test_taos_select_db() {
+        unsafe {
+            let taos = connect();
+            let res = taos_select_db(taos, c"test".as_ptr());
+            assert_eq!(res, 0);
         }
     }
 }
