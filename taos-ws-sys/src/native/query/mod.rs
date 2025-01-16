@@ -132,8 +132,8 @@ pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_num_fields(res: *mut TAOS_RES) -> c_int {
-    todo!()
+pub unsafe extern "C" fn taos_num_fields(res: *mut TAOS_RES) -> c_int {
+    taos_field_count(res)
 }
 
 #[no_mangle]
@@ -383,6 +383,17 @@ mod tests {
             assert!(!res.is_null());
             let count = taos_field_count(res);
             assert_eq!(count, 2);
+        }
+    }
+
+    #[test]
+    fn test_taos_num_fields() {
+        unsafe {
+            let taos = connect();
+            let res = taos_query(taos, c"select * from test.t0".as_ptr());
+            assert!(!res.is_null());
+            let num = taos_num_fields(res);
+            assert_eq!(num, 2);
         }
     }
 }
