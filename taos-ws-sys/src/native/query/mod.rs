@@ -216,6 +216,17 @@ pub unsafe extern "C" fn taos_print_row(
     fields: *mut TAOS_FIELD,
     num_fields: c_int,
 ) -> c_int {
+    taos_print_row_with_size(str, i32::MAX as _, row, fields, num_fields)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn taos_print_row_with_size(
+    str: *mut c_char,
+    size: u32,
+    row: TAOS_ROW,
+    fields: *mut TAOS_FIELD,
+    num_fields: c_int,
+) -> c_int {
     unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &str) -> i32 {
         if content.len() > *size {
             return -1;
@@ -226,7 +237,7 @@ pub unsafe extern "C" fn taos_print_row(
         content.len() as _
     }
 
-    trace!(str=?str, row=?row, fields=?fields, num_fields, "taos_print_row");
+    trace!(str=?str, size, row=?row, fields=?fields, num_fields, "taos_print_row_with_size");
 
     if str.is_null() || row.is_null() || fields.is_null() || num_fields <= 0 {
         return Code::SUCCESS.into();
@@ -236,7 +247,7 @@ pub unsafe extern "C" fn taos_print_row(
     let fields = slice::from_raw_parts(fields, num_fields as usize);
 
     let mut len: usize = 0;
-    let mut size = (i32::MAX - 1) as usize;
+    let mut size = (size - 1) as usize;
 
     for i in 0..num_fields as usize {
         if i > 0 && size > 0 {
@@ -307,20 +318,13 @@ pub unsafe extern "C" fn taos_print_row(
 
     *str.add(len as usize) = 0;
 
-    trace!(len, "taos_print_row done str={:?}", CStr::from_ptr(str));
+    trace!(
+        len,
+        "taos_print_row_with_size done str={:?}",
+        CStr::from_ptr(str)
+    );
 
     len as _
-}
-
-#[no_mangle]
-pub extern "C" fn taos_print_row_with_size(
-    str: *mut c_char,
-    size: u32,
-    row: TAOS_ROW,
-    fields: *mut TAOS_FIELD,
-    num_fields: c_int,
-) -> c_int {
-    todo!()
 }
 
 #[no_mangle]
