@@ -7,7 +7,6 @@ use taos_query::common::{Precision, Ty};
 use taos_query::{Fetchable, Queryable, RawBlock as Block};
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
-use tracing::trace;
 
 use crate::native::error::TaosError;
 use crate::native::query::{TAOS_FIELD, TAOS_ROW};
@@ -96,8 +95,7 @@ impl ResultSetOperations for QueryResultSet {
         self.fields.as_mut_ptr()
     }
 
-    unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
-        trace!(ptr=?ptr, rows=?rows, "fetch block");
+    unsafe fn fetch_block(&mut self, ptr: *mut *mut c_void, rows: *mut i32) -> Result<(), Error> {
         self.block = self.rs.fetch_raw_block()?;
         if let Some(block) = self.block.as_ref() {
             *ptr = block.as_raw_bytes().as_ptr() as _;
@@ -105,7 +103,6 @@ impl ResultSetOperations for QueryResultSet {
         } else {
             *rows = 0;
         }
-        trace!(ptr=?ptr, rows=*rows, "fetch block done");
         Ok(())
     }
 
@@ -132,15 +129,12 @@ impl ResultSetOperations for QueryResultSet {
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
-        trace!("try to get raw value at ({row}, {col})");
         match self.block.as_ref() {
             Some(block) => {
                 if row < block.nrows() && col < block.ncols() {
                     let res = block.get_raw_value_unchecked(row, col);
-                    trace!(res=?res, "get raw value at ({row}, {col})");
                     res
                 } else {
-                    trace!("out of range at ({row}, {col}), return null");
                     (Ty::Null, 0, ptr::null())
                 }
             }

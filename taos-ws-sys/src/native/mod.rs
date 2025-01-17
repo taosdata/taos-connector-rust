@@ -211,7 +211,7 @@ pub trait ResultSetOperations {
 
     fn get_fields(&mut self) -> *mut TAOS_FIELD;
 
-    unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error>;
+    unsafe fn fetch_block(&mut self, ptr: *mut *mut c_void, rows: *mut i32) -> Result<(), Error>;
 
     unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error>;
 
@@ -294,7 +294,7 @@ impl ResultSetOperations for ResultSet {
         }
     }
 
-    unsafe fn fetch_block(&mut self, ptr: *mut *const c_void, rows: *mut i32) -> Result<(), Error> {
+    unsafe fn fetch_block(&mut self, ptr: *mut *mut c_void, rows: *mut i32) -> Result<(), Error> {
         match self {
             ResultSet::Query(rs) => rs.fetch_block(ptr, rows),
         }

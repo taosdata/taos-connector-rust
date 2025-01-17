@@ -399,12 +399,36 @@ pub extern "C" fn taos_fetch_block_s(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn taos_fetch_raw_block(
+pub unsafe extern "C" fn taos_fetch_raw_block(
     res: *mut TAOS_RES,
     numOfRows: *mut c_int,
     pData: *mut *mut c_void,
 ) -> c_int {
-    todo!()
+    unsafe fn handle_error(message: &str, rows: *mut i32) -> i32 {
+        *rows = 0;
+        set_err_and_get_code(TaosError::new(Code::FAILED, message))
+    }
+
+    trace!(res=?res, num_of_rows=?numOfRows, p_data=?pData, "taos_fetch_raw_block");
+
+    match (res as *mut TaosMaybeError<ResultSet>).as_mut() {
+        Some(maybe_err) => match maybe_err.deref_mut() {
+            Some(rs) => match rs.fetch_block(pData, numOfRows) {
+                Ok(()) => {
+                    trace!(rs=?rs, "taos_fetch_raw_block done");
+                    Code::SUCCESS.into()
+                }
+                Err(err) => {
+                    set_err_and_get_code(TaosError::new(err.errno(), &err.errstr()));
+                    let code = err.errno();
+                    maybe_err.with_err(Some(err.into()));
+                    code.into()
+                }
+            },
+            None => handle_error("data is null", numOfRows),
+        },
+        None => handle_error("res is null", numOfRows),
+    }
 }
 
 #[no_mangle]
@@ -647,7 +671,7 @@ mod tests {
             assert!(!res.is_null());
             taos_stop_query(res);
             let errno = taos_errno(ptr::null_mut());
-            assert!(errno == 0);
+            assert_eq!(errno, 0);
         }
     }
 
@@ -688,6 +712,22 @@ mod tests {
 
             let is_update = taos_is_update_query(ptr::null_mut());
             assert!(is_update);
+        }
+    }
+
+    #[test]
+    fn test_taos_fetch_raw_block() {
+        unsafe {
+            let taos = connect();
+            let res = taos_query(taos, c"select * from test.t0".as_ptr());
+            assert!(!res.is_null());
+
+            let mut rows = 0;
+            let mut data = ptr::null_mut();
+            let code = taos_fetch_raw_block(res, &mut rows, &mut data);
+            assert_eq!(code, 0);
+            assert_eq!(rows, 1);
+            assert!(!data.is_null());
         }
     }
 }

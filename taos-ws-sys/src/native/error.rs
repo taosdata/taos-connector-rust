@@ -88,6 +88,10 @@ pub struct TaosMaybeError<T> {
 }
 
 impl<T> TaosMaybeError<T> {
+    pub fn with_err(&mut self, err: Option<TaosError>) {
+        self.err = err;
+    }
+
     pub fn errno(&self) -> Option<i32> {
         self.err.as_ref().map(|err| err.code.into())
     }
