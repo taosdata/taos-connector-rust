@@ -517,13 +517,57 @@ pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_get_current_db(
+pub unsafe extern "C" fn taos_get_current_db(
     taos: *mut TAOS,
     database: *mut c_char,
     len: c_int,
     required: *mut c_int,
 ) -> c_int {
-    todo!()
+    trace!(taos=?taos, database=?database, len, required=?required, "taos_get_current_db");
+
+    if taos.is_null() {
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
+    }
+
+    let res = taos_query(taos, c"SELECT DATABASE()".as_ptr());
+    if res.is_null() {
+        return set_err_and_get_code(TaosError::new(Code::FAILED, "query failed"));
+    }
+
+    let mut rows = 0;
+    let mut data = ptr::null_mut();
+    let mut code = taos_fetch_raw_block(res, &mut rows, &mut data);
+    if code != 0 {
+        return code;
+    }
+
+    let mut len_actual = 0;
+    let mut db = ptr::null();
+    if let Some(rs) = (res as *mut TaosMaybeError<ResultSet>)
+        .as_mut()
+        .and_then(|rs| rs.deref_mut())
+    {
+        (_, len_actual, db) = rs.get_raw_value(0, 0);
+    }
+
+    if db.is_null() {
+        return set_err_and_get_code(TaosError::new(Code::FAILED, "get value failed"));
+    }
+
+    if len_actual < len as u32 {
+        ptr::copy_nonoverlapping(db as _, database, len_actual as _);
+    } else {
+        ptr::copy_nonoverlapping(db as _, database, len as _);
+        *required = len_actual as _;
+        code = -1;
+    }
+
+    trace!(
+        "taos_get_current_db done database={:?}",
+        CStr::from_ptr(database)
+    );
+
+    code
 }
 
 #[no_mangle]
@@ -573,7 +617,7 @@ mod tests {
     use taos_query::common::Precision;
 
     use super::*;
-    use crate::native::error::taos_errno;
+    use crate::native::error::{taos_errno, taos_errstr};
     use crate::native::taos_connect;
 
     fn connect() -> *mut TAOS {
@@ -800,6 +844,38 @@ mod tests {
             assert!(!client_info.is_null());
             let client_info = CStr::from_ptr(client_info).to_str().unwrap();
             println!("client_info: {client_info}");
+        }
+    }
+
+    #[test]
+    fn test_taos_get_current_db() {
+        unsafe {
+            let taos = taos_connect(
+                c"localhost".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                c"test".as_ptr(),
+                6041,
+            );
+            assert!(!taos.is_null());
+            let mut db = vec![0 as c_char; 1024];
+            let mut required = 0;
+            let code = taos_get_current_db(taos, db.as_mut_ptr(), db.len() as _, &mut required);
+            assert_eq!(code, 0);
+            println!("db: {:?}", CStr::from_ptr(db.as_ptr()));
+        }
+    }
+
+    #[test]
+    fn test_taos_get_current_db_without_db() {
+        unsafe {
+            let taos = connect();
+            let mut db = vec![0 as c_char; 1024];
+            let mut required = 0;
+            let code = taos_get_current_db(taos, db.as_mut_ptr(), db.len() as _, &mut required);
+            assert!(code != 0);
+            let errstr = taos_errstr(ptr::null_mut());
+            println!("errstr: {:?}", CStr::from_ptr(errstr));
         }
     }
 }
