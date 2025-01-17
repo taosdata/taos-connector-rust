@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use std::{ptr, slice};
 
 use bytes::Bytes;
+use cargo_metadata::MetadataCommand;
 use taos_error::Code;
 use taos_query::common::{Field, Ty};
 use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr};
@@ -460,14 +461,14 @@ pub extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
 pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char {
     trace!(taos=?taos, "taos_get_server_info");
 
-    static VERSION: OnceLock<CString> = OnceLock::new();
+    static SERVER_INFO: OnceLock<CString> = OnceLock::new();
 
     if taos.is_null() {
         set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
         return ptr::null();
     }
 
-    let version = VERSION.get_or_init(|| {
+    let server_info = SERVER_INFO.get_or_init(|| {
         if let Some(taos) = (taos as *mut Taos).as_mut() {
             CString::new(taos.version()).unwrap()
         } else {
@@ -475,14 +476,44 @@ pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char 
         }
     });
 
-    trace!(version=?version, "taos_get_server_info done");
+    trace!(server_info=?server_info, "taos_get_server_info done");
 
-    version.as_ptr()
+    server_info.as_ptr()
 }
 
 #[no_mangle]
-pub extern "C" fn taos_get_client_info() -> *const c_char {
-    todo!()
+pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
+    trace!("taos_get_client_info");
+
+    static CLIENT_INFO: OnceLock<CString> = OnceLock::new();
+
+    let metadata = match MetadataCommand::new().no_deps().exec().ok() {
+        Some(md) => md,
+        None => {
+            set_err_and_get_code(TaosError::new(Code::FAILED, "MetadataCommand error"));
+            return ptr::null();
+        }
+    };
+
+    let package = match metadata
+        .packages
+        .into_iter()
+        .find(|pkg| pkg.name == "taos-ws-sys")
+    {
+        Some(pkg) => pkg,
+        None => {
+            set_err_and_get_code(TaosError::new(Code::FAILED, "find package error"));
+            return ptr::null();
+        }
+    };
+
+    let version = package.version.to_string();
+    let client_info = CString::new(version).unwrap();
+
+    trace!(client_info=?client_info, "taos_get_client_info done");
+
+    CLIENT_INFO.set(client_info).unwrap();
+    CLIENT_INFO.get().unwrap().as_ptr()
 }
 
 #[no_mangle]
@@ -759,6 +790,16 @@ mod tests {
             assert!(!server_info.is_null());
             let server_info = CStr::from_ptr(server_info).to_str().unwrap();
             println!("server_info: {server_info}");
+        }
+    }
+
+    #[test]
+    fn test_taos_get_client_info() {
+        unsafe {
+            let client_info = taos_get_client_info();
+            assert!(!client_info.is_null());
+            let client_info = CStr::from_ptr(client_info).to_str().unwrap();
+            println!("client_info: {client_info}");
         }
     }
 }
