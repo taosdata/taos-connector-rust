@@ -371,8 +371,15 @@ pub extern "C" fn taos_is_null_by_column(
 }
 
 #[no_mangle]
-pub extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
-    todo!()
+pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
+    trace!(res=?res, "taos_is_update_query");
+    match (res as *mut TaosMaybeError<ResultSet>)
+        .as_ref()
+        .and_then(|rs| rs.deref())
+    {
+        Some(rs) => rs.num_of_fields() == 0,
+        None => true,
+    }
 }
 
 #[no_mangle]
@@ -661,6 +668,26 @@ mod tests {
 
             let is_null = taos_is_null(ptr::null_mut(), 0, 0);
             assert!(is_null);
+        }
+    }
+
+    #[test]
+    fn test_taos_is_update_query() {
+        unsafe {
+            let taos = connect();
+
+            let res = taos_query(taos, c"use test.t0".as_ptr());
+            assert!(!res.is_null());
+            let is_update = taos_is_update_query(res);
+            assert!(is_update);
+
+            let res = taos_query(taos, c"select * from test.t0".as_ptr());
+            assert!(!res.is_null());
+            let is_update = taos_is_update_query(res);
+            assert!(!is_update);
+
+            let is_update = taos_is_update_query(ptr::null_mut());
+            assert!(is_update);
         }
     }
 }
