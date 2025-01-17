@@ -345,8 +345,18 @@ pub unsafe extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) -> bool {
-    todo!()
+pub unsafe extern "C" fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) -> bool {
+    trace!(res=?res, row, col, "taos_is_null");
+    match (res as *mut TaosMaybeError<ResultSet>)
+        .as_ref()
+        .and_then(|rs| rs.deref())
+    {
+        Some(ResultSet::Query(rs)) => match rs.block() {
+            Some(block) => block.is_null(row as _, col as _),
+            None => true,
+        },
+        None => true,
+    }
 }
 
 #[no_mangle]
@@ -631,6 +641,26 @@ mod tests {
             taos_stop_query(res);
             let errno = taos_errno(ptr::null_mut());
             assert!(errno == 0);
+        }
+    }
+
+    #[test]
+    fn test_taos_is_null() {
+        unsafe {
+            let taos = connect();
+            let res = taos_query(taos, c"select * from test.t0".as_ptr());
+            assert!(!res.is_null());
+
+            let is_null = taos_is_null(res, 0, 0);
+            assert!(is_null);
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+            let is_null = taos_is_null(res, 0, 0);
+            assert!(!is_null);
+
+            let is_null = taos_is_null(ptr::null_mut(), 0, 0);
+            assert!(is_null);
         }
     }
 }

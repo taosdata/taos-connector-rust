@@ -40,6 +40,10 @@ impl QueryResultSet {
             },
         }
     }
+
+    pub fn block(&self) -> Option<&Block> {
+        self.block.as_ref()
+    }
 }
 
 impl ResultSetOperations for QueryResultSet {
