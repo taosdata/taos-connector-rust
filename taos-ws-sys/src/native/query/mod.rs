@@ -328,8 +328,20 @@ pub unsafe extern "C" fn taos_print_row_with_size(
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
-    todo!()
+pub unsafe extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
+    trace!(res=?res, "taos_stop_query");
+    match (res as *mut TaosMaybeError<ResultSet>)
+        .as_mut()
+        .and_then(|rs| rs.deref_mut())
+    {
+        Some(rs) => {
+            trace!(rs=?rs, "taos_stop_query done");
+            rs.stop_query();
+        }
+        None => {
+            let _ = set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null"));
+        }
+    }
 }
 
 #[no_mangle]
@@ -469,6 +481,7 @@ mod tests {
     use taos_query::common::Precision;
 
     use super::*;
+    use crate::native::error::taos_errno;
     use crate::native::taos_connect;
 
     fn connect() -> *mut TAOS {
@@ -606,6 +619,18 @@ mod tests {
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
             assert!(len > 0);
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+        }
+    }
+
+    #[test]
+    fn test_taos_stop_query() {
+        unsafe {
+            let taos = connect();
+            let res = taos_query(taos, c"select * from test.t0".as_ptr());
+            assert!(!res.is_null());
+            taos_stop_query(res);
+            let errno = taos_errno(ptr::null_mut());
+            assert!(errno == 0);
         }
     }
 }
