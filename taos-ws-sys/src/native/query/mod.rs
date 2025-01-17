@@ -1,4 +1,5 @@
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::sync::OnceLock;
 use std::{ptr, slice};
 
 use bytes::Bytes;
@@ -456,8 +457,27 @@ pub extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char {
-    todo!()
+pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char {
+    trace!(taos=?taos, "taos_get_server_info");
+
+    static VERSION: OnceLock<CString> = OnceLock::new();
+
+    if taos.is_null() {
+        set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
+        return ptr::null();
+    }
+
+    let version = VERSION.get_or_init(|| {
+        if let Some(taos) = (taos as *mut Taos).as_mut() {
+            CString::new(taos.version()).unwrap()
+        } else {
+            CString::new("").unwrap()
+        }
+    });
+
+    trace!(version=?version, "taos_get_server_info done");
+
+    version.as_ptr()
 }
 
 #[no_mangle]
@@ -728,6 +748,17 @@ mod tests {
             assert_eq!(code, 0);
             assert_eq!(rows, 1);
             assert!(!data.is_null());
+        }
+    }
+
+    #[test]
+    fn test_taos_get_server_info() {
+        unsafe {
+            let taos = connect();
+            let server_info = taos_get_server_info(taos);
+            assert!(!server_info.is_null());
+            let server_info = CStr::from_ptr(server_info).to_str().unwrap();
+            println!("server_info: {server_info}");
         }
     }
 }
