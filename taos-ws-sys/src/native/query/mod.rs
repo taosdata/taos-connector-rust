@@ -1,9 +1,10 @@
-use std::ffi::{c_char, c_int, c_void, CStr};
-use std::ptr;
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::{ptr, slice};
 
+use bytes::Bytes;
 use taos_error::Code;
-use taos_query::common::Field;
-use taos_query::util::generate_req_id;
+use taos_query::common::{Field, Ty};
+use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr};
 use taos_query::Queryable;
 use taos_ws::Taos;
 use tracing::trace;
@@ -69,12 +70,12 @@ pub unsafe extern "C" fn taos_query_with_reqid(
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
-    trace!(res=?res, "taos_fetch_row");
-
     fn handle_error(code: Code, msg: &str) -> TAOS_ROW {
         set_err_and_get_code(TaosError::new(code, msg));
         ptr::null_mut()
     }
+
+    trace!(res=?res, "taos_fetch_row");
 
     let rs = match (res as *mut TaosMaybeError<ResultSet>).as_mut() {
         Some(rs) => rs,
@@ -209,13 +210,106 @@ pub unsafe extern "C" fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c
 }
 
 #[no_mangle]
-pub extern "C" fn taos_print_row(
+pub unsafe extern "C" fn taos_print_row(
     str: *mut c_char,
     row: TAOS_ROW,
     fields: *mut TAOS_FIELD,
     num_fields: c_int,
 ) -> c_int {
-    todo!()
+    unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &str) -> i32 {
+        if content.len() > *size {
+            return -1;
+        }
+        let cstr = CString::new(content).unwrap();
+        ptr::copy_nonoverlapping(cstr.as_ptr(), str, content.len());
+        *size -= content.len();
+        content.len() as _
+    }
+
+    trace!(str=?str, row=?row, fields=?fields, num_fields, "taos_print_row");
+
+    if str.is_null() || row.is_null() || fields.is_null() || num_fields <= 0 {
+        return Code::SUCCESS.into();
+    }
+
+    let row = slice::from_raw_parts(row, num_fields as usize);
+    let fields = slice::from_raw_parts(fields, num_fields as usize);
+
+    let mut len: usize = 0;
+    let mut size = (i32::MAX - 1) as usize;
+
+    for i in 0..num_fields as usize {
+        if i > 0 && size > 0 {
+            *str.add(len) = ' ' as c_char;
+            len += 1;
+            size -= 1;
+        }
+
+        let write_len = if row[i].is_null() {
+            write_to_cstr(&mut size, str.add(len as usize), "NULL")
+        } else {
+            macro_rules! read_and_write {
+                ($ty:ty) => {{
+                    let value = ptr::read_unaligned(row[i] as *const $ty);
+                    write_to_cstr(
+                        &mut size,
+                        str.add(len as usize),
+                        format!("{value}").as_str(),
+                    )
+                }};
+            }
+
+            match Ty::from(fields[i].r#type) {
+                Ty::TinyInt => read_and_write!(i8),
+                Ty::UTinyInt => read_and_write!(u8),
+                Ty::SmallInt => read_and_write!(i16),
+                Ty::USmallInt => read_and_write!(u16),
+                Ty::Int => read_and_write!(i32),
+                Ty::UInt => read_and_write!(u32),
+                Ty::BigInt | Ty::Timestamp => read_and_write!(i64),
+                Ty::UBigInt => read_and_write!(u64),
+                Ty::Float => read_and_write!(f32),
+                Ty::Double => read_and_write!(f64),
+                Ty::Bool => {
+                    let value = ptr::read_unaligned(row[i] as *const bool);
+                    write_to_cstr(
+                        &mut size,
+                        str.add(len as usize),
+                        format!("{}", value as i32).as_str(),
+                    )
+                }
+                Ty::VarBinary | Ty::Geometry => {
+                    let data = row[i].offset(-2) as *const InlineBytes;
+                    let data = Bytes::from((&*data).as_bytes());
+                    write_to_cstr(
+                        &mut size,
+                        str.add(len as usize),
+                        &hex::bytes_to_hex_string(data),
+                    )
+                }
+                Ty::VarChar => {
+                    let data = row[i].offset(-2) as *const InlineStr;
+                    write_to_cstr(&mut size, str.add(len as usize), (&*data).as_str())
+                }
+                Ty::NChar => {
+                    let data = row[i].offset(-2) as *const InlineNChar;
+                    write_to_cstr(&mut size, str.add(len as usize), &(&*data).to_string())
+                }
+                _ => 0,
+            }
+        };
+
+        if write_len == -1 {
+            break;
+        }
+        len += write_len as usize;
+    }
+
+    *str.add(len as usize) = 0;
+
+    trace!(len, "taos_print_row done str={:?}", CStr::from_ptr(str));
+
+    len as _
 }
 
 #[no_mangle]
@@ -488,6 +582,26 @@ mod tests {
             let taos = connect();
             let res = taos_select_db(taos, c"test".as_ptr());
             assert_eq!(res, 0);
+        }
+    }
+
+    #[test]
+    fn test_taos_print_row() {
+        unsafe {
+            let taos = connect();
+            let res = taos_query(taos, c"select * from test.t0".as_ptr());
+            assert!(!res.is_null());
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert!(len > 0);
+            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
         }
     }
 }
