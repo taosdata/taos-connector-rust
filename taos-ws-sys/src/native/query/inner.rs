@@ -152,10 +152,10 @@ impl ResultSetOperations for QueryResultSet {
 }
 
 pub unsafe fn query(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> TaosResult<ResultSet> {
-    let client = (taos as *mut Taos)
+    let taos = (taos as *mut Taos)
         .as_mut()
-        .ok_or(TaosError::new(Code::INVALID_PARA, "client pointer is null"))?;
+        .ok_or(TaosError::new(Code::INVALID_PARA, "taos is null"))?;
     let sql = CStr::from_ptr(sql).to_str()?;
-    let rs = client.query_with_req_id(sql, req_id)?;
+    let rs = taos.query_with_req_id(sql, req_id)?;
     Ok(ResultSet::Query(QueryResultSet::new(rs)))
 }

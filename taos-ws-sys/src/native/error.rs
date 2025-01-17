@@ -18,7 +18,7 @@ pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
         .and_then(TaosMaybeError::errno)
     {
         Some(errno) => format_errno(errno),
-        _ => Code::SUCCESS.into(),
+        None => Code::SUCCESS.into(),
     }
 }
 
@@ -36,7 +36,7 @@ pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
         .and_then(TaosMaybeError::errstr)
     {
         Some(err) => err,
-        _ => EMPTY.as_ptr(),
+        None => EMPTY.as_ptr(),
     }
 }
 
