@@ -193,6 +193,10 @@ impl TaosError {
             source: None,
         }
     }
+
+    pub fn code(&self) -> Code {
+        self.code
+    }
 }
 
 impl From<&TaosError> for TaosError {

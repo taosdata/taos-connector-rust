@@ -357,7 +357,7 @@ pub unsafe extern "C" fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) ->
             Some(block) => block.is_null(row as _, col as _),
             None => true,
         },
-        None => true,
+        _ => true,
     }
 }
 
@@ -618,12 +618,12 @@ mod tests {
 
     use super::*;
     use crate::native::error::{taos_errno, taos_errstr};
-    use crate::native::taos_connect;
+    use crate::native::{taos_connect, test_connect, test_exec, test_exec_many};
 
     #[test]
     fn test_taos_query() {
-        let taos = connect();
-        exec_many(
+        let taos = test_connect();
+        test_exec_many(
             taos,
             &[
                 "drop database if exists test_1737102397",
@@ -647,8 +647,8 @@ mod tests {
     #[test]
     fn test_taos_fetch_row() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102398",
@@ -666,15 +666,15 @@ mod tests {
             assert!(!row.is_null());
 
             taos_free_result(res);
-            exec(taos, "drop database test_1737102398");
+            test_exec(taos, "drop database test_1737102398");
         }
     }
 
     #[test]
     fn test_taos_result_precision() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102399",
@@ -692,15 +692,15 @@ mod tests {
             assert_eq!(precision, Precision::Millisecond);
 
             taos_free_result(res);
-            exec(taos, "drop database test_1737102399");
+            test_exec(taos, "drop database test_1737102399");
         }
     }
 
     #[test]
     fn test_taos_field_count() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102400",
@@ -718,15 +718,15 @@ mod tests {
             assert_eq!(count, 2);
 
             taos_free_result(res);
-            exec(taos, "drop database test_1737102400");
+            test_exec(taos, "drop database test_1737102400");
         }
     }
 
     #[test]
     fn test_taos_num_fields() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102401",
@@ -744,15 +744,15 @@ mod tests {
             assert_eq!(num, 2);
 
             taos_free_result(res);
-            exec(taos, "drop database test_1737102401");
+            test_exec(taos, "drop database test_1737102401");
         }
     }
 
     #[test]
     fn test_taos_affected_rows() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102402",
@@ -779,15 +779,15 @@ mod tests {
 
             taos_free_result(res);
 
-            exec(taos, "drop database test_1737102402");
+            test_exec(taos, "drop database test_1737102402");
         }
     }
 
     #[test]
     fn test_taos_affected_rows64() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102403",
@@ -814,15 +814,15 @@ mod tests {
 
             taos_free_result(res);
 
-            exec(taos, "drop database test_1737102403");
+            test_exec(taos, "drop database test_1737102403");
         }
     }
 
     #[test]
     fn test_taos_fetch_fields() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102404",
@@ -840,15 +840,15 @@ mod tests {
             assert!(!fields.is_null());
 
             taos_free_result(res);
-            exec(taos, "drop database test_1737102404");
+            test_exec(taos, "drop database test_1737102404");
         }
     }
 
     #[test]
     fn test_taos_select_db() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102405",
@@ -859,7 +859,7 @@ mod tests {
             let res = taos_select_db(taos, c"test_1737102405".as_ptr());
             assert_eq!(res, 0);
 
-            exec_many(
+            test_exec_many(
                 taos,
                 &[
                     "create table t0 (ts timestamp, c1 int)",
@@ -873,8 +873,8 @@ mod tests {
     #[test]
     fn test_taos_print_row() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102406",
@@ -903,15 +903,15 @@ mod tests {
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
 
             taos_free_result(res);
-            exec(taos, "drop database test_1737102406");
+            test_exec(taos, "drop database test_1737102406");
         }
     }
 
     #[test]
     fn test_taos_stop_query() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102407",
@@ -930,15 +930,15 @@ mod tests {
             assert_eq!(errno, 0);
 
             taos_free_result(res);
-            exec(taos, "drop database test_1737102407");
+            test_exec(taos, "drop database test_1737102407");
         }
     }
 
     #[test]
     fn test_taos_is_null() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102408",
@@ -965,15 +965,15 @@ mod tests {
             assert!(is_null);
 
             taos_free_result(res);
-            exec(taos, "drop database test_1737102408");
+            test_exec(taos, "drop database test_1737102408");
         }
     }
 
     #[test]
     fn test_taos_is_update_query() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102409",
@@ -1003,15 +1003,15 @@ mod tests {
             let is_update = taos_is_update_query(ptr::null_mut());
             assert!(is_update);
 
-            exec(taos, "drop database test_1737102409");
+            test_exec(taos, "drop database test_1737102409");
         }
     }
 
     #[test]
     fn test_taos_fetch_raw_block() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102410",
@@ -1033,14 +1033,14 @@ mod tests {
             assert!(!data.is_null());
 
             taos_free_result(res);
-            exec(taos, "drop database test_1737102410");
+            test_exec(taos, "drop database test_1737102410");
         }
     }
 
     #[test]
     fn test_taos_get_server_info() {
         unsafe {
-            let taos = connect();
+            let taos = test_connect();
             let server_info = taos_get_server_info(taos);
             assert!(!server_info.is_null());
             let server_info = CStr::from_ptr(server_info).to_str().unwrap();
@@ -1061,8 +1061,8 @@ mod tests {
     #[test]
     fn test_taos_get_current_db() {
         unsafe {
-            let taos = connect();
-            exec_many(
+            let taos = test_connect();
+            test_exec_many(
                 taos,
                 &[
                     "drop database if exists test_1737102411",
@@ -1090,54 +1090,13 @@ mod tests {
     #[test]
     fn test_taos_get_current_db_without_db() {
         unsafe {
-            let taos = connect();
+            let taos = test_connect();
             let mut db = vec![0 as c_char; 1024];
             let mut required = 0;
             let code = taos_get_current_db(taos, db.as_mut_ptr(), db.len() as _, &mut required);
             assert!(code != 0);
             let errstr = taos_errstr(ptr::null_mut());
             println!("errstr: {:?}", CStr::from_ptr(errstr));
-        }
-    }
-
-    fn connect() -> *mut TAOS {
-        unsafe {
-            let taos = taos_connect(
-                c"localhost".as_ptr(),
-                c"root".as_ptr(),
-                c"taosdata".as_ptr(),
-                ptr::null(),
-                6041,
-            );
-            assert!(!taos.is_null());
-            taos
-        }
-    }
-
-    fn exec<S: AsRef<str>>(taos: *mut TAOS, sql: S) {
-        let sql = CString::new(sql.as_ref()).unwrap();
-        unsafe {
-            let res = taos_query(taos, sql.as_ptr());
-            assert!(!res.is_null());
-
-            let errno = taos_errno(res);
-            if errno != 0 {
-                let errstr = taos_errstr(res);
-                println!("errno: {}, errstr: {:?}", errno, CStr::from_ptr(errstr));
-            }
-            assert_eq!(errno, 0);
-
-            taos_free_result(res);
-        }
-    }
-
-    fn exec_many<T, S>(taos: *mut TAOS, sqls: S)
-    where
-        T: AsRef<str>,
-        S: IntoIterator<Item = T>,
-    {
-        for sql in sqls {
-            exec(taos, sql);
         }
     }
 }

@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use error::{set_err_and_get_code, TaosError};
 use once_cell::sync::Lazy;
+use sml::SchemalessResultSet;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
 use taos_query::TBuilder;
@@ -225,103 +226,164 @@ pub trait ResultSetOperations {
 #[derive(Debug)]
 pub enum ResultSet {
     Query(QueryResultSet),
+    Schemaless(SchemalessResultSet),
 }
 
 impl ResultSetOperations for ResultSet {
     fn tmq_get_topic_name(&self) -> *const c_char {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_topic_name(),
+            ResultSet::Schemaless(rs) => rs.tmq_get_topic_name(),
         }
     }
 
     fn tmq_get_db_name(&self) -> *const c_char {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_db_name(),
+            ResultSet::Schemaless(rs) => rs.tmq_get_db_name(),
         }
     }
 
     fn tmq_get_table_name(&self) -> *const c_char {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_table_name(),
+            ResultSet::Schemaless(rs) => rs.tmq_get_table_name(),
         }
     }
 
     fn tmq_get_offset(&self) -> Offset {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_offset(),
+            ResultSet::Schemaless(rs) => rs.tmq_get_offset(),
         }
     }
 
     fn tmq_get_vgroup_offset(&self) -> i64 {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_vgroup_offset(),
+            ResultSet::Schemaless(rs) => rs.tmq_get_vgroup_offset(),
         }
     }
 
     fn tmq_get_vgroup_id(&self) -> i32 {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_vgroup_id(),
+            ResultSet::Schemaless(rs) => rs.tmq_get_vgroup_id(),
         }
     }
 
     fn precision(&self) -> Precision {
         match self {
             ResultSet::Query(rs) => rs.precision(),
+            ResultSet::Schemaless(rs) => rs.precision(),
         }
     }
 
     fn affected_rows(&self) -> i32 {
         match self {
             ResultSet::Query(rs) => rs.affected_rows(),
+            ResultSet::Schemaless(rs) => rs.affected_rows(),
         }
     }
 
     fn affected_rows64(&self) -> i64 {
         match self {
             ResultSet::Query(rs) => rs.affected_rows64(),
+            ResultSet::Schemaless(rs) => rs.affected_rows64(),
         }
     }
 
     fn num_of_fields(&self) -> i32 {
         match self {
             ResultSet::Query(rs) => rs.num_of_fields(),
+            ResultSet::Schemaless(rs) => rs.num_of_fields(),
         }
     }
 
     fn get_fields(&mut self) -> *mut TAOS_FIELD {
         match self {
             ResultSet::Query(rs) => rs.get_fields(),
+            ResultSet::Schemaless(rs) => rs.get_fields(),
         }
     }
 
     unsafe fn fetch_block(&mut self, ptr: *mut *mut c_void, rows: *mut i32) -> Result<(), Error> {
         match self {
             ResultSet::Query(rs) => rs.fetch_block(ptr, rows),
+            ResultSet::Schemaless(rs) => rs.fetch_block(ptr, rows),
         }
     }
 
     unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error> {
         match self {
             ResultSet::Query(rs) => rs.fetch_row(),
+            ResultSet::Schemaless(rs) => rs.fetch_row(),
         }
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
         match self {
             ResultSet::Query(rs) => rs.get_raw_value(row, col),
+            ResultSet::Schemaless(rs) => rs.get_raw_value(row, col),
         }
     }
 
     fn take_timing(&mut self) -> Duration {
         match self {
             ResultSet::Query(rs) => rs.take_timing(),
+            ResultSet::Schemaless(rs) => rs.take_timing(),
         }
     }
 
     fn stop_query(&mut self) {
         match self {
             ResultSet::Query(rs) => rs.stop_query(),
+            ResultSet::Schemaless(rs) => rs.stop_query(),
         }
+    }
+}
+
+#[cfg(test)]
+fn test_connect() -> *mut TAOS {
+    unsafe {
+        let taos = taos_connect(
+            c"localhost".as_ptr(),
+            c"root".as_ptr(),
+            c"taosdata".as_ptr(),
+            ptr::null(),
+            6041,
+        );
+        assert!(!taos.is_null());
+        taos
+    }
+}
+
+#[cfg(test)]
+fn test_exec<S: AsRef<str>>(taos: *mut TAOS, sql: S) {
+    let sql = std::ffi::CString::new(sql.as_ref()).unwrap();
+    unsafe {
+        let res = query::taos_query(taos, sql.as_ptr());
+        assert!(!res.is_null());
+
+        let errno = error::taos_errno(res);
+        if errno != 0 {
+            let errstr = error::taos_errstr(res);
+            println!("errno: {}, errstr: {:?}", errno, CStr::from_ptr(errstr));
+        }
+        assert_eq!(errno, 0);
+
+        query::taos_free_result(res);
+    }
+}
+
+#[cfg(test)]
+fn test_exec_many<T, S>(taos: *mut TAOS, sqls: S)
+where
+    T: AsRef<str>,
+    S: IntoIterator<Item = T>,
+{
+    for sql in sqls {
+        test_exec(taos, sql);
     }
 }
 
