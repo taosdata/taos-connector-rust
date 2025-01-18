@@ -689,7 +689,7 @@ mod tests {
             assert!(!res.is_null());
 
             let precision: Precision = taos_result_precision(res).into();
-            assert_eq!(precision, Precision::Microsecond);
+            assert_eq!(precision, Precision::Millisecond);
 
             taos_free_result(res);
             exec(taos, "drop database test_1737102399");
