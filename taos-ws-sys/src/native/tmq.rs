@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void};
 
-use super::TAOS_RES;
+use crate::native::error::TaosMaybeError;
+use crate::native::TAOS_RES;
 
 pub const TSDB_CLIENT_ID_LEN: usize = 256;
 pub const TSDB_CGROUP_LEN: usize = 193;
@@ -432,9 +434,13 @@ pub enum tmq_res_t {
     TMQ_RES_METADATA = 3,
 }
 
+#[allow(non_camel_case_types)]
+pub type _tmq_conf_t = c_void;
+
 #[no_mangle]
-pub extern "C" fn tmq_conf_new() -> *mut tmq_conf_t {
-    todo!()
+pub extern "C" fn tmq_conf_new() -> *mut _tmq_conf_t {
+    let tmq_conf: TaosMaybeError<TmqConf> = TmqConf::new().into();
+    Box::into_raw(Box::new(tmq_conf)) as _
 }
 
 #[no_mangle]
@@ -632,4 +638,28 @@ pub extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
 #[no_mangle]
 pub extern "C" fn tmq_err2str(code: i32) -> *const c_char {
     todo!()
+}
+
+#[allow(dead_code)]
+struct TmqConf {
+    conf: HashMap<String, String>,
+}
+
+impl TmqConf {
+    fn new() -> Self {
+        Self {
+            conf: HashMap::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tmq_conf_new() {
+        let tmq_conf = tmq_conf_new();
+        assert!(!tmq_conf.is_null());
+    }
 }
