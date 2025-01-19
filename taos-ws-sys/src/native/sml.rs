@@ -127,7 +127,7 @@ pub extern "C" fn taos_schemaless_insert_ttl_with_reqid(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn taos_schemaless_insert_raw_ttl(
+pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl(
     taos: *mut TAOS,
     lines: *mut c_char,
     len: c_int,
@@ -136,7 +136,16 @@ pub extern "C" fn taos_schemaless_insert_raw_ttl(
     precision: c_int,
     ttl: i32,
 ) -> *mut TAOS_RES {
-    todo!();
+    taos_schemaless_insert_raw_ttl_with_reqid(
+        taos,
+        lines,
+        len,
+        totalRows,
+        protocol,
+        precision,
+        ttl,
+        generate_req_id() as i64,
+    )
 }
 
 #[no_mangle]
@@ -370,6 +379,17 @@ mod tests {
                 protocol,
                 precision,
                 generate_req_id() as i64,
+            );
+            assert!(!res.is_null());
+
+            let res = taos_schemaless_insert_raw_ttl(
+                taos,
+                lines as _,
+                len,
+                &mut total_rows as _,
+                protocol,
+                precision,
+                ttl,
             );
             assert!(!res.is_null());
 
