@@ -84,7 +84,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn taos_schemaless_insert_raw_with_reqid(
+pub unsafe extern "C" fn taos_schemaless_insert_raw_with_reqid(
     taos: *mut TAOS,
     lines: *mut c_char,
     len: c_int,
@@ -93,7 +93,9 @@ pub extern "C" fn taos_schemaless_insert_raw_with_reqid(
     precision: c_int,
     reqid: i64,
 ) -> *mut TAOS_RES {
-    todo!();
+    taos_schemaless_insert_raw_ttl_with_reqid(
+        taos, lines, len, totalRows, protocol, precision, 0, reqid,
+    )
 }
 
 #[no_mangle]
@@ -349,7 +351,6 @@ mod tests {
             let protocol = TSDB_SML_PROTOCOL_TYPE::TSDB_SML_LINE_PROTOCOL as i32;
             let precision = TSDB_SML_TIMESTAMP_TYPE::TSDB_SML_TIMESTAMP_MILLI_SECONDS as i32;
             let ttl = 0;
-            let reqid = generate_req_id() as i64;
 
             let res = taos_schemaless_insert_raw(
                 taos,
@@ -359,36 +360,18 @@ mod tests {
                 protocol,
                 precision,
             );
-
             assert!(!res.is_null());
 
-            test_exec(taos, "drop database test_1737291333");
-        }
-    }
-
-    #[test]
-    fn test_taos_schemaless_insert_raw_ttl_with_reqid() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
+            let res = taos_schemaless_insert_raw_with_reqid(
                 taos,
-                &[
-                    "drop database if exists test_1737208937",
-                    "create database test_1737208937",
-                    "use test_1737208937",
-                ],
+                lines as _,
+                len,
+                &mut total_rows as _,
+                protocol,
+                precision,
+                generate_req_id() as i64,
             );
-
-            let data = "meters,groupid=2,location=California.SanFrancisco current=10.3000002f64,voltage=219i32,phase=0.31f64 1626006833639";
-            let len = data.len() as i32;
-            let lines = CString::new(data).unwrap();
-            let lines = lines.as_ptr();
-
-            let mut total_rows = 0;
-            let protocol = TSDB_SML_PROTOCOL_TYPE::TSDB_SML_LINE_PROTOCOL as i32;
-            let precision = TSDB_SML_TIMESTAMP_TYPE::TSDB_SML_TIMESTAMP_MILLI_SECONDS as i32;
-            let ttl = 0;
-            let reqid = generate_req_id() as i64;
+            assert!(!res.is_null());
 
             let res = taos_schemaless_insert_raw_ttl_with_reqid(
                 taos,
@@ -398,12 +381,11 @@ mod tests {
                 protocol,
                 precision,
                 ttl,
-                reqid,
+                generate_req_id() as i64,
             );
-
             assert!(!res.is_null());
 
-            test_exec(taos, "drop database test_1737208937");
+            test_exec(taos, "drop database test_1737291333");
         }
     }
 }
