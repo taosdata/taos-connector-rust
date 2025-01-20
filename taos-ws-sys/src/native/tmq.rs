@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::{mem, ptr};
 
 use taos_error::Code;
+use taos_query::tmq::AsConsumer;
 use taos_query::{Dsn, TBuilder};
 use taos_ws::{Consumer, TmqBuilder};
 use tracing::trace;
@@ -448,6 +449,9 @@ pub type _tmq_conf_t = c_void;
 #[allow(non_camel_case_types)]
 pub type _tmq_list_t = c_void;
 
+#[allow(non_camel_case_types)]
+pub type _tmq_t = c_void;
+
 #[no_mangle]
 pub extern "C" fn tmq_conf_new() -> *mut _tmq_conf_t {
     trace!("tmq_conf_new");
@@ -581,7 +585,7 @@ pub unsafe extern "C" fn tmq_consumer_new(
     conf: *mut _tmq_conf_t,
     errstr: *mut c_char,
     errstrLen: i32,
-) -> *mut tmq_t {
+) -> *mut _tmq_t {
     trace!(conf=?conf, errstr=?errstr, errstr_len=errstrLen, "tmq_consumer_new");
     match _tmq_consumer_new(conf) {
         Ok(tmq) => {
@@ -603,8 +607,51 @@ pub unsafe extern "C" fn tmq_consumer_new(
 }
 
 #[no_mangle]
-pub extern "C" fn tmq_subscribe(tmq: *mut tmq_t, topic_list: *const tmq_list_t) -> i32 {
-    todo!()
+pub unsafe extern "C" fn tmq_subscribe(tmq: *mut _tmq_t, topic_list: *const _tmq_list_t) -> i32 {
+    trace!("tmq_subscribe, tmq={tmq:?}, topic_list={topic_list:?}");
+
+    if tmq.is_null() || topic_list.is_null() {
+        trace!("tmq_subscribe failed, err: tmq or topic_list is null");
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    let tmq_list = match (topic_list as *const TaosMaybeError<TmqList>)
+        .as_ref()
+        .and_then(|list| list.deref())
+    {
+        Some(tmq_list) => tmq_list,
+        None => {
+            trace!("tmq_subscribe failed, err: topic_list as *const TaosMaybeError<TmqList>");
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    match (tmq as *mut TaosMaybeError<Tmq>)
+        .as_mut()
+        .and_then(|tmq| tmq.deref_mut())
+    {
+        Some(tmq) => {
+            if let Some(consumer) = &mut tmq.consumer {
+                match consumer.subscribe(&tmq_list.topics) {
+                    Ok(_) => {
+                        trace!("tmq_subscribe done");
+                        Code::SUCCESS.into()
+                    }
+                    Err(err) => {
+                        trace!("tmq_subscribe failed, err: {:?}", err.message());
+                        set_err_and_get_code(TaosError::new(Code::FAILED, &err.message()))
+                    }
+                }
+            } else {
+                trace!("tmq_subscribe failed, err: invalid consumer");
+                set_err_and_get_code(TaosError::new(Code::FAILED, "invalid consumer"))
+            }
+        }
+        None => {
+            trace!("tmq_subscribe failed, err: tmq as *mut TaosMaybeError<Tmq>");
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "tmq is null"))
+        }
+    }
 }
 
 #[no_mangle]
@@ -877,6 +924,7 @@ unsafe fn _tmq_consumer_new(conf: *mut _tmq_conf_t) -> TaosResult<Tmq> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::native::{test_connect, test_exec_many};
 
     #[test]
     fn test_tmq_conf() {
@@ -916,6 +964,23 @@ mod tests {
     #[test]
     fn test_consumer() {
         unsafe {
+            let db = "test_1737357704";
+            let topic = "topic_1737357513";
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    &format!("drop topic if exists {topic}"),
+                    &format!("drop database if exists {db}"),
+                    &format!("create database {db}"),
+                    &format!("use {db}"),
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (now, 1)",
+                    &format!("create topic {topic} as select * from t0"),
+                ],
+            );
+
             let conf = tmq_conf_new();
             assert!(!conf.is_null());
 
@@ -927,6 +992,24 @@ mod tests {
             let mut errstr = [0; 256];
             let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
             assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = CString::from_str(topic).unwrap();
+            let errno = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(errno, 0);
+
+            let errno = tmq_subscribe(consumer, list);
+            assert_eq!(errno, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            // test_exec_many(
+            //     taos,
+            //     &[format!("drop topic {topic}"), format!("drop database {db}")],
+            // );
         }
     }
 }
