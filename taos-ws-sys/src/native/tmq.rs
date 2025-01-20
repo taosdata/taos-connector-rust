@@ -735,8 +735,24 @@ pub extern "C" fn tmq_consumer_close(tmq: *mut _tmq_t) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn tmq_commit_sync(tmq: *mut tmq_t, msg: *const TAOS_RES) -> i32 {
-    todo!()
+pub unsafe extern "C" fn tmq_commit_sync(tmq: *mut _tmq_t, msg: *const TAOS_RES) -> i32 {
+    trace!("tmq_commit_sync start, tmq: {tmq:?}, msg: {msg:?}");
+
+    if tmq.is_null() {
+        error!("tmq_commit_sync failed, err: tmq is null");
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "tmq is null"));
+    }
+
+    match _tmq_commit_sync(tmq, msg) {
+        Ok(_) => {
+            trace!("tmq_commit_sync done");
+            Code::SUCCESS.into()
+        }
+        Err(err) => {
+            error!("tmq_commit_sync failed, err: {err:?}");
+            set_err_and_get_code(err)
+        }
+    }
 }
 
 #[no_mangle]
@@ -1166,6 +1182,40 @@ unsafe fn _tmq_consumer_poll(tmq: *mut _tmq_t, timeout: i64) -> TaosResult<Optio
     }
 }
 
+unsafe fn _tmq_commit_sync(tmq: *mut _tmq_t, res: *const TAOS_RES) -> TaosResult<()> {
+    let offset = (res as *const TaosMaybeError<ResultSet>)
+        .as_ref()
+        .and_then(|rs| rs.deref())
+        .map(ResultSetOperations::tmq_get_offset);
+
+    trace!("_tmq_commit_sync, offset: {offset:?}");
+
+    let tmq = match (tmq as *mut TaosMaybeError<Tmq>)
+        .as_mut()
+        .and_then(|tmq| tmq.deref_mut())
+    {
+        Some(tmq) => tmq,
+        None => return Err(TaosError::new(Code::INVALID_PARA, "tmq is null")),
+    };
+
+    if tmq.consumer.is_none() {
+        return Err(TaosError::new(Code::FAILED, "invalid consumer"));
+    }
+
+    let consumer = tmq.consumer.as_mut().unwrap();
+
+    match offset {
+        Some(offset) => match consumer.commit(offset) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(TaosError::new(err.code(), &err.message())),
+        },
+        None => match consumer.commit_all() {
+            Ok(_) => Ok(()),
+            Err(err) => Err(TaosError::new(err.code(), &err.message())),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1234,6 +1284,11 @@ mod tests {
             let res = tmq_conf_set(conf, key, value);
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
             let mut errstr = [0; 256];
             let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
             assert!(!consumer.is_null());
@@ -1251,7 +1306,11 @@ mod tests {
             tmq_conf_destroy(conf);
             tmq_list_destroy(list);
 
-            let _ = tmq_consumer_poll(consumer, 500);
+            let res = tmq_consumer_poll(consumer, 1000);
+            if !res.is_null() {
+                let errno = tmq_commit_sync(consumer, res);
+                assert_eq!(errno, 0);
+            }
 
             let errno = tmq_unsubscribe(consumer);
             assert_eq!(errno, 0);
