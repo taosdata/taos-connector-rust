@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::ffi::{c_char, c_int, c_void, CStr};
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::str::FromStr;
+use std::{mem, ptr};
 
 use taos_error::Code;
 use tracing::trace;
@@ -542,8 +543,34 @@ pub unsafe extern "C" fn tmq_list_get_size(list: *const _tmq_list_t) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *mut c_char {
-    todo!()
+pub unsafe extern "C" fn tmq_list_to_c_array(list: *const _tmq_list_t) -> *mut *mut c_char {
+    trace!(list=?list, "tmq_list_to_c_array");
+
+    if list.is_null() {
+        return ptr::null_mut();
+    }
+
+    match (list as *const TaosMaybeError<TmqList>)
+        .as_ref()
+        .and_then(|list| list.deref())
+    {
+        Some(list) => {
+            if !list.topics.is_empty() {
+                let mut array: Vec<*mut c_char> = list
+                    .topics
+                    .iter()
+                    .map(|s| CString::new(&**s).unwrap().into_raw())
+                    .collect();
+
+                let ptr = array.as_mut_ptr();
+                mem::forget(array);
+                ptr
+            } else {
+                ptr::null_mut()
+            }
+        }
+        None => ptr::null_mut(),
+    }
 }
 
 #[no_mangle]
@@ -820,6 +847,9 @@ mod tests {
 
             let size = tmq_list_get_size(tmq_list);
             assert_eq!(size, 1);
+
+            let array = tmq_list_to_c_array(tmq_list);
+            assert!(!array.is_null());
 
             tmq_list_destroy(tmq_list);
         }
