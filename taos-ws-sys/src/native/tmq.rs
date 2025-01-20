@@ -5,7 +5,7 @@ use std::str::FromStr;
 use taos_error::Code;
 use tracing::trace;
 
-use crate::native::error::{TaosError, TaosMaybeError};
+use crate::native::error::{format_errno, set_err_and_get_code, TaosError, TaosMaybeError};
 use crate::native::{TaosResult, TAOS_RES};
 
 pub const TSDB_CLIENT_ID_LEN: usize = 256;
@@ -442,6 +442,9 @@ pub enum tmq_res_t {
 #[allow(non_camel_case_types)]
 pub type _tmq_conf_t = c_void;
 
+#[allow(non_camel_case_types)]
+pub type _tmq_list_t = c_void;
+
 #[no_mangle]
 pub extern "C" fn tmq_conf_new() -> *mut _tmq_conf_t {
     trace!("tmq_conf_new");
@@ -492,7 +495,7 @@ pub extern "C" fn tmq_conf_set_auto_commit_cb(
 }
 
 #[no_mangle]
-pub extern "C" fn tmq_list_new() -> *mut tmq_list_t {
+pub extern "C" fn tmq_list_new() -> *mut _tmq_list_t {
     trace!("tmq_list_new");
     let tmq_list: TaosMaybeError<TmqList> = TmqList::new().into();
     trace!(tmq_list=?tmq_list, "tmq_list_new done");
@@ -500,8 +503,19 @@ pub extern "C" fn tmq_list_new() -> *mut tmq_list_t {
 }
 
 #[no_mangle]
-pub extern "C" fn tmq_list_append(list: *mut tmq_list_t, value: *const c_char) -> i32 {
-    todo!()
+pub unsafe extern "C" fn tmq_list_append(list: *mut _tmq_list_t, value: *const c_char) -> i32 {
+    trace!(list=?list, value=?value, "tmq_list_append");
+
+    if list.is_null() || value.is_null() {
+        return format_errno(Code::OBJECT_IS_NULL.into());
+    }
+
+    trace!("tmq_list_append value={:?}", CStr::from_ptr(value));
+
+    match _tmq_list_append(list, value) {
+        Ok(_) => Code::SUCCESS.into(),
+        Err(err) => set_err_and_get_code(err),
+    }
 }
 
 #[no_mangle]
@@ -743,6 +757,26 @@ unsafe fn _tmq_conf_set(
     }
 }
 
+unsafe fn _tmq_list_append(list: *mut _tmq_list_t, value: *const c_char) -> TaosResult<()> {
+    let topic = CStr::from_ptr(value).to_str()?.to_string();
+    match (list as *mut TaosMaybeError<TmqList>)
+        .as_mut()
+        .and_then(|list| list.deref_mut())
+    {
+        Some(list) => {
+            if !list.topics.is_empty() {
+                return Err(TaosError::new(
+                    Code::TMQ_TOPIC_APPEND_ERR,
+                    "only one topic is supported",
+                ));
+            }
+            list.topics.push(topic);
+            Ok(())
+        }
+        None => Err(TaosError::new(Code::FAILED, "conf is null")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ptr;
@@ -781,5 +815,15 @@ mod tests {
     fn test_tmq_list_new() {
         let tmq_list = tmq_list_new();
         assert!(!tmq_list.is_null());
+    }
+
+    #[test]
+    fn test_tmq_list_append() {
+        let tmq_list = tmq_list_new();
+        assert!(!tmq_list.is_null());
+
+        let value = c"topic".as_ptr();
+        let res = unsafe { tmq_list_append(tmq_list, value) };
+        assert_eq!(res, 0);
     }
 }
