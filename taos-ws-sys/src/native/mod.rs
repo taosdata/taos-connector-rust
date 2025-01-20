@@ -7,15 +7,15 @@ use std::time::Duration;
 
 use error::{set_err_and_get_code, TaosError};
 use once_cell::sync::Lazy;
+use query::QueryResultSet;
 use sml::SchemalessResultSet;
 use taos_error::Code;
-use taos_query::common::{Precision, Ty};
+use taos_query::common::{Field, Precision, Ty};
 use taos_query::TBuilder;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
+use tmq::TmqResultSet;
 use tracing::trace;
-
-use crate::native::query::{QueryResultSet, TAOS_FIELD, TAOS_ROW};
 
 pub mod error;
 pub mod query;
@@ -27,9 +27,41 @@ pub mod tmq;
 pub type TAOS = c_void;
 
 #[allow(non_camel_case_types)]
+pub type TAOS_ROW = *mut *mut c_void;
+
+#[allow(non_camel_case_types)]
 pub type TAOS_RES = c_void;
 
 type TaosResult<T> = Result<T, TaosError>;
+
+#[repr(C)]
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_FIELD {
+    pub name: [c_char; 65],
+    pub r#type: i8,
+    pub bytes: i32,
+}
+
+impl From<&Field> for TAOS_FIELD {
+    fn from(field: &Field) -> Self {
+        let mut name = [0 as c_char; 65];
+        let field_name = field.name();
+        unsafe {
+            ptr::copy_nonoverlapping(
+                field_name.as_ptr(),
+                name.as_mut_ptr() as _,
+                field_name.len(),
+            );
+        };
+
+        Self {
+            name,
+            r#type: field.ty() as i8,
+            bytes: field.bytes() as i32,
+        }
+    }
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_connect(
@@ -189,6 +221,18 @@ pub extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
 //         .init();
 // }
 
+#[derive(Debug)]
+struct Row {
+    data: Vec<*const c_void>,
+    current_row: usize,
+}
+
+impl Row {
+    fn new(data: Vec<*const c_void>, current_row: usize) -> Self {
+        Self { data, current_row }
+    }
+}
+
 pub trait ResultSetOperations {
     fn tmq_get_topic_name(&self) -> *const c_char;
 
@@ -227,6 +271,7 @@ pub trait ResultSetOperations {
 pub enum ResultSet {
     Query(QueryResultSet),
     Schemaless(SchemalessResultSet),
+    Tmq(TmqResultSet),
 }
 
 impl ResultSetOperations for ResultSet {
@@ -234,6 +279,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_topic_name(),
             ResultSet::Schemaless(rs) => rs.tmq_get_topic_name(),
+            ResultSet::Tmq(rs) => rs.tmq_get_topic_name(),
         }
     }
 
@@ -241,6 +287,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_db_name(),
             ResultSet::Schemaless(rs) => rs.tmq_get_db_name(),
+            ResultSet::Tmq(rs) => rs.tmq_get_db_name(),
         }
     }
 
@@ -248,6 +295,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_table_name(),
             ResultSet::Schemaless(rs) => rs.tmq_get_table_name(),
+            ResultSet::Tmq(rs) => rs.tmq_get_table_name(),
         }
     }
 
@@ -255,6 +303,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_offset(),
             ResultSet::Schemaless(rs) => rs.tmq_get_offset(),
+            ResultSet::Tmq(rs) => rs.tmq_get_offset(),
         }
     }
 
@@ -262,6 +311,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_vgroup_offset(),
             ResultSet::Schemaless(rs) => rs.tmq_get_vgroup_offset(),
+            ResultSet::Tmq(rs) => rs.tmq_get_vgroup_offset(),
         }
     }
 
@@ -269,6 +319,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.tmq_get_vgroup_id(),
             ResultSet::Schemaless(rs) => rs.tmq_get_vgroup_id(),
+            ResultSet::Tmq(rs) => rs.tmq_get_vgroup_id(),
         }
     }
 
@@ -276,6 +327,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.precision(),
             ResultSet::Schemaless(rs) => rs.precision(),
+            ResultSet::Tmq(rs) => rs.precision(),
         }
     }
 
@@ -283,6 +335,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.affected_rows(),
             ResultSet::Schemaless(rs) => rs.affected_rows(),
+            ResultSet::Tmq(rs) => rs.affected_rows(),
         }
     }
 
@@ -290,6 +343,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.affected_rows64(),
             ResultSet::Schemaless(rs) => rs.affected_rows64(),
+            ResultSet::Tmq(rs) => rs.affected_rows64(),
         }
     }
 
@@ -297,6 +351,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.num_of_fields(),
             ResultSet::Schemaless(rs) => rs.num_of_fields(),
+            ResultSet::Tmq(rs) => rs.num_of_fields(),
         }
     }
 
@@ -304,6 +359,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.get_fields(),
             ResultSet::Schemaless(rs) => rs.get_fields(),
+            ResultSet::Tmq(rs) => rs.get_fields(),
         }
     }
 
@@ -311,6 +367,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.fetch_block(ptr, rows),
             ResultSet::Schemaless(rs) => rs.fetch_block(ptr, rows),
+            ResultSet::Tmq(rs) => rs.fetch_block(ptr, rows),
         }
     }
 
@@ -318,6 +375,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.fetch_row(),
             ResultSet::Schemaless(rs) => rs.fetch_row(),
+            ResultSet::Tmq(rs) => rs.fetch_row(),
         }
     }
 
@@ -325,6 +383,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.get_raw_value(row, col),
             ResultSet::Schemaless(rs) => rs.get_raw_value(row, col),
+            ResultSet::Tmq(rs) => rs.get_raw_value(row, col),
         }
     }
 
@@ -332,6 +391,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.take_timing(),
             ResultSet::Schemaless(rs) => rs.take_timing(),
+            ResultSet::Tmq(rs) => rs.take_timing(),
         }
     }
 
@@ -339,6 +399,7 @@ impl ResultSetOperations for ResultSet {
         match self {
             ResultSet::Query(rs) => rs.stop_query(),
             ResultSet::Schemaless(rs) => rs.stop_query(),
+            ResultSet::Tmq(rs) => rs.stop_query(),
         }
     }
 }

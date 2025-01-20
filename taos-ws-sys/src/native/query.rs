@@ -6,7 +6,7 @@ use std::{ptr, slice};
 use bytes::Bytes;
 use cargo_metadata::MetadataCommand;
 use taos_error::Code;
-use taos_query::common::{Field, Precision, Ty};
+use taos_query::common::{Precision, Ty};
 use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr};
 use taos_query::{Fetchable, Queryable, RawBlock as Block};
 use taos_ws::query::Error;
@@ -14,41 +14,12 @@ use taos_ws::{Offset, Taos};
 use tracing::trace;
 
 use crate::native::error::{set_err_and_get_code, TaosError, TaosMaybeError};
-use crate::native::{ResultSet, ResultSetOperations, TaosResult, TAOS, TAOS_RES};
-
-#[allow(non_camel_case_types)]
-pub type TAOS_ROW = *mut *mut c_void;
+use crate::native::{
+    ResultSet, ResultSetOperations, Row, TaosResult, TAOS, TAOS_FIELD, TAOS_RES, TAOS_ROW,
+};
 
 #[allow(non_camel_case_types)]
 pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
-
-#[repr(C)]
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_FIELD {
-    pub name: [c_char; 65],
-    pub r#type: i8,
-    pub bytes: i32,
-}
-
-impl From<&Field> for TAOS_FIELD {
-    fn from(field: &Field) -> Self {
-        let mut name = [0 as c_char; 65];
-        let field_name = field.name();
-        unsafe {
-            ptr::copy_nonoverlapping(
-                field_name.as_ptr(),
-                name.as_mut_ptr() as _,
-                field_name.len(),
-            );
-        };
-        Self {
-            name,
-            r#type: field.ty() as i8,
-            bytes: field.bytes() as i32,
-        }
-    }
-}
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES {
@@ -609,17 +580,11 @@ pub extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
 }
 
 #[derive(Debug)]
-pub struct ROW {
-    data: Vec<*const c_void>,
-    current_row: usize,
-}
-
-#[derive(Debug)]
 pub struct QueryResultSet {
     rs: taos_ws::ResultSet,
     block: Option<Block>,
     fields: Vec<TAOS_FIELD>,
-    row: ROW,
+    row: Row,
 }
 
 impl QueryResultSet {
@@ -629,7 +594,7 @@ impl QueryResultSet {
             rs,
             block: None,
             fields: Vec::new(),
-            row: ROW {
+            row: Row {
                 data: vec![ptr::null(); num_of_fields],
                 current_row: 0,
             },
@@ -721,17 +686,12 @@ impl ResultSetOperations for QueryResultSet {
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
-        match self.block.as_ref() {
-            Some(block) => {
-                if row < block.nrows() && col < block.ncols() {
-                    let res = block.get_raw_value_unchecked(row, col);
-                    res
-                } else {
-                    (Ty::Null, 0, ptr::null())
-                }
+        if let Some(block) = &self.block {
+            if row < block.nrows() && col < block.ncols() {
+                return block.get_raw_value_unchecked(row, col);
             }
-            None => (Ty::Null, 0, ptr::null()),
         }
+        (Ty::Null, 0, ptr::null())
     }
 
     fn take_timing(&mut self) -> Duration {

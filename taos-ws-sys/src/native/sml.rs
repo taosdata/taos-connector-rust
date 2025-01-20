@@ -11,8 +11,9 @@ use taos_ws::{Offset, Taos};
 use tracing::trace;
 
 use crate::native::error::{set_err_and_get_code, TaosError, TaosMaybeError};
-use crate::native::query::TAOS_FIELD;
-use crate::native::{ResultSet, ResultSetOperations, TaosResult, TAOS, TAOS_RES, TAOS_ROW};
+use crate::native::{
+    ResultSet, ResultSetOperations, TaosResult, TAOS, TAOS_FIELD, TAOS_RES, TAOS_ROW,
+};
 
 #[repr(C)]
 #[allow(non_camel_case_types)]

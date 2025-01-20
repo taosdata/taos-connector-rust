@@ -1,16 +1,22 @@
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::str::FromStr;
+use std::time::Duration;
 use std::{mem, ptr};
 
 use taos_error::Code;
-use taos_query::tmq::AsConsumer;
+use taos_query::common::{Precision, RawBlock as Block, Ty};
+use taos_query::tmq::{self, AsConsumer, IsData, IsOffset};
 use taos_query::{Dsn, TBuilder};
-use taos_ws::{Consumer, TmqBuilder};
+use taos_ws::consumer::Data;
+use taos_ws::query::Error;
+use taos_ws::{Consumer, Offset, TmqBuilder};
 use tracing::{error, trace};
 
 use crate::native::error::{format_errno, set_err_and_get_code, TaosError, TaosMaybeError};
-use crate::native::{TaosResult, TAOS_RES};
+use crate::native::{
+    ResultSet, ResultSetOperations, Row, TaosResult, TAOS_FIELD, TAOS_RES, TAOS_ROW,
+};
 
 pub const TSDB_CLIENT_ID_LEN: usize = 256;
 pub const TSDB_CGROUP_LEN: usize = 193;
@@ -608,7 +614,7 @@ pub unsafe extern "C" fn tmq_consumer_new(
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_subscribe(tmq: *mut _tmq_t, topic_list: *const _tmq_list_t) -> i32 {
-    trace!("tmq_subscribe, tmq: {tmq:?}, topic_list: {topic_list:?}");
+    trace!("tmq_subscribe start, tmq: {tmq:?}, topic_list: {topic_list:?}");
 
     if tmq.is_null() || topic_list.is_null() {
         error!("tmq_subscribe failed, err: tmq or topic_list is null");
@@ -656,7 +662,7 @@ pub unsafe extern "C" fn tmq_subscribe(tmq: *mut _tmq_t, topic_list: *const _tmq
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_unsubscribe(tmq: *mut _tmq_t) -> i32 {
-    trace!("tmq_unsubscribe, tmq: {tmq:?}");
+    trace!("tmq_unsubscribe start, tmq: {tmq:?}");
 
     if tmq.is_null() {
         error!("tmq_unsubscribe failed, err: tmq is null");
@@ -687,8 +693,31 @@ pub extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq_list_t
 }
 
 #[no_mangle]
-pub extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mut TAOS_RES {
-    todo!()
+pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut _tmq_t, timeout: i64) -> *mut TAOS_RES {
+    trace!("tmq_consumer_poll start, tmq: {tmq:?}, timeout: {timeout}");
+
+    if tmq.is_null() {
+        error!("tmq_consumer_poll failed, err: tmq is null");
+        set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "tmq is null"));
+        return ptr::null_mut();
+    }
+
+    match _tmq_consumer_poll(tmq, timeout) {
+        Ok(Some(rs)) => {
+            let rs: TaosMaybeError<ResultSet> = rs.into();
+            trace!("tmq_consumer_poll done, rs: {rs:?}");
+            Box::into_raw(Box::new(rs)) as _
+        }
+        Ok(None) => {
+            trace!("tmq_consumer_poll done, no ResultSet");
+            ptr::null_mut()
+        }
+        Err(err) => {
+            error!("tmq_consumer_poll failed, err: {err:?}");
+            set_err_and_get_code(err);
+            ptr::null_mut()
+        }
+    }
 }
 
 #[no_mangle]
@@ -808,6 +837,152 @@ pub extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
 #[no_mangle]
 pub extern "C" fn tmq_err2str(code: i32) -> *const c_char {
     todo!()
+}
+
+#[derive(Debug)]
+pub struct TmqResultSet {
+    block: Option<Block>,
+    fields: Vec<TAOS_FIELD>,
+    num_of_fields: i32,
+    precision: Precision,
+    offset: Offset,
+    row: Row,
+    data: Data,
+    table_name: Option<CString>,
+    topic_name: Option<CString>,
+    db_name: Option<CString>,
+}
+
+impl TmqResultSet {
+    fn new(block: Block, offset: Offset, data: Data) -> Self {
+        let mut fields = Vec::new();
+        fields.extend(block.fields().iter().map(TAOS_FIELD::from));
+
+        let num_of_fields = block.ncols();
+        let row_data = vec![ptr::null(); num_of_fields];
+        let precision = block.precision();
+        let table_name = block.table_name().and_then(|name| CString::new(name).ok());
+        let topic_name = CString::new(offset.topic()).ok();
+        let db_name = CString::new(offset.database()).ok();
+
+        Self {
+            block: Some(block),
+            fields,
+            num_of_fields: num_of_fields as i32,
+            precision,
+            offset,
+            row: Row::new(row_data, 0),
+            data,
+            table_name,
+            topic_name,
+            db_name,
+        }
+    }
+}
+
+impl ResultSetOperations for TmqResultSet {
+    fn tmq_get_topic_name(&self) -> *const c_char {
+        match self.topic_name {
+            Some(ref name) => name.as_ptr(),
+            None => ptr::null(),
+        }
+    }
+
+    fn tmq_get_db_name(&self) -> *const c_char {
+        match self.db_name {
+            Some(ref name) => name.as_ptr(),
+            None => ptr::null(),
+        }
+    }
+
+    fn tmq_get_table_name(&self) -> *const c_char {
+        match self.table_name {
+            Some(ref name) => name.as_ptr(),
+            None => ptr::null(),
+        }
+    }
+
+    fn tmq_get_offset(&self) -> Offset {
+        self.offset.clone()
+    }
+
+    fn tmq_get_vgroup_offset(&self) -> i64 {
+        self.offset.offset()
+    }
+
+    fn tmq_get_vgroup_id(&self) -> i32 {
+        self.offset.vgroup_id()
+    }
+
+    fn precision(&self) -> Precision {
+        self.precision
+    }
+
+    fn affected_rows(&self) -> i32 {
+        0
+    }
+
+    fn affected_rows64(&self) -> i64 {
+        0
+    }
+
+    fn num_of_fields(&self) -> i32 {
+        self.num_of_fields
+    }
+
+    fn get_fields(&mut self) -> *mut TAOS_FIELD {
+        self.fields.as_mut_ptr()
+    }
+
+    unsafe fn fetch_block(&mut self, ptr: *mut *mut c_void, rows: *mut i32) -> Result<(), Error> {
+        self.block = self.data.fetch_raw_block()?;
+        if let Some(block) = self.block.as_ref() {
+            *ptr = block.as_raw_bytes().as_ptr() as _;
+            *rows = block.nrows() as _;
+        } else {
+            *rows = 0;
+        }
+        Ok(())
+    }
+
+    unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error> {
+        if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
+            self.block = self.data.fetch_raw_block()?;
+            self.row.current_row = 0;
+        }
+
+        match self.block.as_ref() {
+            Some(block) => {
+                if block.nrows() == 0 {
+                    return Ok(ptr::null_mut());
+                }
+
+                for col in 0..block.ncols() {
+                    let value = block.get_raw_value_unchecked(self.row.current_row, col);
+                    self.row.data[col] = value.2;
+                }
+
+                self.row.current_row += 1;
+                Ok(self.row.data.as_ptr() as _)
+            }
+            None => Ok(ptr::null_mut()),
+        }
+    }
+
+    unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
+        if let Some(block) = &self.block {
+            if row < block.nrows() && col < block.ncols() {
+                return block.get_raw_value_unchecked(row, col);
+            }
+        }
+        (Ty::Null, 0, ptr::null())
+    }
+
+    fn take_timing(&mut self) -> Duration {
+        Duration::from_millis(self.offset.timing() as u64)
+    }
+
+    fn stop_query(&mut self) {}
 }
 
 #[derive(Debug)]
@@ -943,6 +1118,45 @@ unsafe fn _tmq_consumer_new(conf: *mut _tmq_conf_t) -> TaosResult<Tmq> {
     Ok(Tmq::new(consumer))
 }
 
+unsafe fn _tmq_consumer_poll(tmq: *mut _tmq_t, timeout: i64) -> TaosResult<Option<ResultSet>> {
+    let timeout = match timeout {
+        0 => tmq::Timeout::Never,
+        n if n < 0 => tmq::Timeout::from_millis(1000),
+        _ => tmq::Timeout::from_millis(timeout as u64),
+    };
+
+    match (tmq as *mut TaosMaybeError<Tmq>)
+        .as_mut()
+        .and_then(|tmq| tmq.deref_mut())
+    {
+        Some(tmq) => match &tmq.consumer {
+            Some(consumer) => {
+                let res = consumer.recv_timeout(timeout)?;
+                match res {
+                    Some((offset, message_set)) => {
+                        if message_set.has_meta() {
+                            return Err(TaosError::new(
+                                Code::FAILED,
+                                "message has meta, only support topic created with select sql",
+                            ));
+                        }
+                        let data = message_set.into_data().unwrap();
+                        match data.fetch_raw_block()? {
+                            Some(block) => {
+                                Ok(Some(ResultSet::Tmq(TmqResultSet::new(block, offset, data))))
+                            }
+                            None => Ok(None),
+                        }
+                    }
+                    None => Ok(None),
+                }
+            }
+            None => Err(TaosError::new(Code::FAILED, "invalid consumer")),
+        },
+        None => Err(TaosError::new(Code::INVALID_PARA, "tmq is null")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1012,8 +1226,8 @@ mod tests {
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
             let mut errstr = [0; 256];
-            let tmq = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
-            assert!(!tmq.is_null());
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
 
             let list = tmq_list_new();
             assert!(!list.is_null());
@@ -1022,13 +1236,15 @@ mod tests {
             let errno = tmq_list_append(list, value.as_ptr());
             assert_eq!(errno, 0);
 
-            let errno = tmq_subscribe(tmq, list);
+            let errno = tmq_subscribe(consumer, list);
             assert_eq!(errno, 0);
 
             tmq_conf_destroy(conf);
             tmq_list_destroy(list);
 
-            let errno = tmq_unsubscribe(tmq);
+            let _ = tmq_consumer_poll(consumer, 500);
+
+            let errno = tmq_unsubscribe(consumer);
             assert_eq!(errno, 0);
 
             test_exec_many(
