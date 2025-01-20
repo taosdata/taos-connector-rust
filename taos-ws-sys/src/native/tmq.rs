@@ -493,7 +493,10 @@ pub extern "C" fn tmq_conf_set_auto_commit_cb(
 
 #[no_mangle]
 pub extern "C" fn tmq_list_new() -> *mut tmq_list_t {
-    todo!()
+    trace!("tmq_list_new");
+    let tmq_list: TaosMaybeError<TmqList> = TmqList::new().into();
+    trace!(tmq_list=?tmq_list, "tmq_list_new done");
+    Box::into_raw(Box::new(tmq_list)) as _
 }
 
 #[no_mangle]
@@ -665,7 +668,6 @@ pub extern "C" fn tmq_err2str(code: i32) -> *const c_char {
     todo!()
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 struct TmqConf {
     conf: HashMap<String, String>,
@@ -676,6 +678,18 @@ impl TmqConf {
         Self {
             conf: HashMap::new(),
         }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+struct TmqList {
+    topics: Vec<String>,
+}
+
+impl TmqList {
+    fn new() -> Self {
+        Self { topics: Vec::new() }
     }
 }
 
@@ -761,5 +775,11 @@ mod tests {
 
             tmq_conf_destroy(ptr::null_mut());
         }
+    }
+
+    #[test]
+    fn test_tmq_list_new() {
+        let tmq_list = tmq_list_new();
+        assert!(!tmq_list.is_null());
     }
 }
