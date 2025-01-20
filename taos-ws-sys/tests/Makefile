@@ -14,3 +14,7 @@ endif
 test_native:
 	gcc -g test_native.c $(LINK_FLAGS) -o $(DEBUG_PATH)/test_native
 	./$(DEBUG_PATH)/test_native
+
+test_tmq:
+	gcc -g test_tmq.c $(LINK_FLAGS) -o $(DEBUG_PATH)/test_tmq
+	./$(DEBUG_PATH)/test_tmq
