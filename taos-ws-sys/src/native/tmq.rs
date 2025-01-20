@@ -4,6 +4,8 @@ use std::str::FromStr;
 use std::{mem, ptr};
 
 use taos_error::Code;
+use taos_query::{Dsn, TBuilder};
+use taos_ws::{Consumer, TmqBuilder};
 use tracing::trace;
 
 use crate::native::error::{format_errno, set_err_and_get_code, TaosError, TaosMaybeError};
@@ -575,12 +577,29 @@ pub unsafe extern "C" fn tmq_list_to_c_array(list: *const _tmq_list_t) -> *mut *
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn tmq_consumer_new(
-    conf: *mut tmq_conf_t,
+pub unsafe extern "C" fn tmq_consumer_new(
+    conf: *mut _tmq_conf_t,
     errstr: *mut c_char,
     errstrLen: i32,
 ) -> *mut tmq_t {
-    todo!()
+    trace!(conf=?conf, errstr=?errstr, errstr_len=errstrLen, "tmq_consumer_new");
+    match _tmq_consumer_new(conf) {
+        Ok(tmq) => {
+            let tmq: TaosMaybeError<Tmq> = tmq.into();
+            Box::into_raw(Box::new(tmq)) as _
+        }
+        Err(err) => {
+            trace!(err=?err, "tmq_consumer_new failed");
+            if errstrLen > 0 && !errstr.is_null() {
+                let message = CString::new(err.to_string()).unwrap();
+                let count = message.to_bytes().len().min(errstrLen as usize - 1);
+                ptr::copy(message.as_ptr(), errstr, count);
+                *errstr.add(count) = 0;
+            }
+            set_err_and_get_code(err);
+            ptr::null_mut()
+        }
+    }
 }
 
 #[no_mangle]
@@ -724,25 +743,14 @@ pub extern "C" fn tmq_err2str(code: i32) -> *const c_char {
 
 #[derive(Debug)]
 struct TmqConf {
-    conf: HashMap<String, String>,
+    map: HashMap<String, String>,
 }
 
 impl TmqConf {
     fn new() -> Self {
         Self {
-            conf: HashMap::new(),
+            map: HashMap::new(),
         }
-    }
-}
-
-#[derive(Debug)]
-struct TmqList {
-    topics: Vec<String>,
-}
-
-impl TmqList {
-    fn new() -> Self {
-        Self { topics: Vec::new() }
     }
 }
 
@@ -789,10 +797,21 @@ unsafe fn _tmq_conf_set(
                 }
             }
             trace!(key, value, "tmq_conf_set done");
-            tmq_conf.conf.insert(key, value);
+            tmq_conf.map.insert(key, value);
             Ok(())
         }
         None => Err(TaosError::new(Code::OBJECT_IS_NULL, "conf is null")),
+    }
+}
+
+#[derive(Debug)]
+struct TmqList {
+    topics: Vec<String>,
+}
+
+impl TmqList {
+    fn new() -> Self {
+        Self { topics: Vec::new() }
     }
 }
 
@@ -814,6 +833,45 @@ unsafe fn _tmq_list_append(list: *mut _tmq_list_t, value: *const c_char) -> Taos
         }
         None => Err(TaosError::new(Code::FAILED, "conf is null")),
     }
+}
+
+struct Tmq {
+    consumer: Option<Consumer>,
+}
+
+impl Tmq {
+    fn new(consumer: Consumer) -> Self {
+        Self {
+            consumer: Some(consumer),
+        }
+    }
+}
+
+impl Drop for Tmq {
+    fn drop(&mut self) {
+        if self.consumer.is_some() {
+            let _ = self.consumer.take();
+        }
+    }
+}
+
+unsafe fn _tmq_consumer_new(conf: *mut _tmq_conf_t) -> TaosResult<Tmq> {
+    let mut dsn = Dsn::from_str("taos://localhost:6041")?;
+
+    match (conf as *mut TaosMaybeError<TmqConf>)
+        .as_mut()
+        .and_then(|conf| conf.deref_mut())
+    {
+        Some(conf) => {
+            for (key, value) in conf.map.iter() {
+                dsn.params.insert(key.clone(), value.clone());
+            }
+        }
+        None => return Err(TaosError::new(Code::FAILED, "conf is null")),
+    }
+
+    let consumer = TmqBuilder::from_dsn(&dsn)?.build()?;
+    Ok(Tmq::new(consumer))
 }
 
 #[cfg(test)]
@@ -852,6 +910,23 @@ mod tests {
             assert!(!array.is_null());
 
             tmq_list_destroy(tmq_list);
+        }
+    }
+
+    #[test]
+    fn test_consumer() {
+        unsafe {
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
         }
     }
 }
