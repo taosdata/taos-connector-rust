@@ -475,8 +475,11 @@ pub unsafe extern "C" fn tmq_conf_set(
 }
 
 #[no_mangle]
-pub extern "C" fn tmq_conf_destroy(conf: *mut tmq_conf_t) {
-    todo!()
+pub unsafe extern "C" fn tmq_conf_destroy(conf: *mut _tmq_conf_t) {
+    trace!(conf=?conf, "tmq_conf_destroy");
+    if !conf.is_null() {
+        let _ = Box::from_raw(conf as *mut TaosMaybeError<TmqConf>);
+    }
 }
 
 #[no_mangle]
@@ -728,6 +731,8 @@ unsafe fn _tmq_conf_set(
 
 #[cfg(test)]
 mod tests {
+    use std::ptr;
+
     use super::*;
 
     #[test]
@@ -745,5 +750,16 @@ mod tests {
         let value = c"test".as_ptr() as *const c_char;
         let res = unsafe { tmq_conf_set(tmq_conf, key, value) };
         assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+    }
+
+    #[test]
+    fn test_tmq_conf_destroy() {
+        unsafe {
+            let tmq_conf = tmq_conf_new();
+            assert!(!tmq_conf.is_null());
+            tmq_conf_destroy(tmq_conf);
+
+            tmq_conf_destroy(ptr::null_mut());
+        }
     }
 }
