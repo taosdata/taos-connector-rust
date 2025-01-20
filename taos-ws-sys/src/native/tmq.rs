@@ -478,10 +478,10 @@ pub unsafe extern "C" fn tmq_conf_set(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn tmq_conf_destroy(conf: *mut _tmq_conf_t) {
+pub extern "C" fn tmq_conf_destroy(conf: *mut _tmq_conf_t) {
     trace!(conf=?conf, "tmq_conf_destroy");
     if !conf.is_null() {
-        let _ = Box::from_raw(conf as *mut TaosMaybeError<TmqConf>);
+        let _ = unsafe { Box::from_raw(conf as *mut TaosMaybeError<TmqConf>) };
     }
 }
 
@@ -519,8 +519,10 @@ pub unsafe extern "C" fn tmq_list_append(list: *mut _tmq_list_t, value: *const c
 }
 
 #[no_mangle]
-pub extern "C" fn tmq_list_destroy(list: *mut tmq_list_t) {
-    todo!()
+pub extern "C" fn tmq_list_destroy(list: *mut _tmq_list_t) {
+    if !list.is_null() {
+        let _ = unsafe { Box::from_raw(list as *mut TaosMaybeError<TmqList>) };
+    }
 }
 
 #[no_mangle]
@@ -779,51 +781,34 @@ unsafe fn _tmq_list_append(list: *mut _tmq_list_t, value: *const c_char) -> Taos
 
 #[cfg(test)]
 mod tests {
-    use std::ptr;
-
     use super::*;
 
     #[test]
-    fn test_tmq_conf_new() {
-        let tmq_conf = tmq_conf_new();
-        assert!(!tmq_conf.is_null());
-    }
-
-    #[test]
-    fn test_tmq_conf_set() {
-        let tmq_conf = tmq_conf_new();
-        assert!(!tmq_conf.is_null());
-
-        let key = c"group.id".as_ptr() as *const c_char;
-        let value = c"test".as_ptr() as *const c_char;
-        let res = unsafe { tmq_conf_set(tmq_conf, key, value) };
-        assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
-    }
-
-    #[test]
-    fn test_tmq_conf_destroy() {
+    fn test_tmq_conf() {
         unsafe {
             let tmq_conf = tmq_conf_new();
             assert!(!tmq_conf.is_null());
-            tmq_conf_destroy(tmq_conf);
 
-            tmq_conf_destroy(ptr::null_mut());
+            let key = c"group.id".as_ptr() as *const c_char;
+            let value = c"test".as_ptr() as *const c_char;
+            let res = tmq_conf_set(tmq_conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            tmq_conf_destroy(tmq_conf);
         }
     }
 
     #[test]
-    fn test_tmq_list_new() {
-        let tmq_list = tmq_list_new();
-        assert!(!tmq_list.is_null());
-    }
+    fn test_tmq_list() {
+        unsafe {
+            let tmq_list = tmq_list_new();
+            assert!(!tmq_list.is_null());
 
-    #[test]
-    fn test_tmq_list_append() {
-        let tmq_list = tmq_list_new();
-        assert!(!tmq_list.is_null());
+            let value = c"topic".as_ptr();
+            let res = tmq_list_append(tmq_list, value);
+            assert_eq!(res, 0);
 
-        let value = c"topic".as_ptr();
-        let res = unsafe { tmq_list_append(tmq_list, value) };
-        assert_eq!(res, 0);
+            tmq_list_destroy(tmq_list);
+        }
     }
 }
