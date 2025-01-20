@@ -765,15 +765,65 @@ pub extern "C" fn tmq_commit_async(
     todo!()
 }
 
+// TODO: test case
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn tmq_commit_offset_sync(
+pub unsafe extern "C" fn tmq_commit_offset_sync(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
     vgId: i32,
     offset: i64,
 ) -> i32 {
-    todo!()
+    trace!("tmq_commit_offset_sync start, tmq: {tmq:?}, p_topic_name: {pTopicName:?}, vg_id: {vgId}, offset: {offset}");
+
+    if tmq.is_null() {
+        error!("tmq_commit_offset_sync failed, err: tmq is null");
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "tmq is null"));
+    }
+
+    let may_err = match (tmq as *mut TaosMaybeError<Tmq>).as_mut() {
+        Some(may_err) => may_err,
+        None => {
+            error!("tmq_commit_offset_sync failed, err: invalid tmq");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid tmq"));
+        }
+    };
+
+    let tmq = match may_err.deref_mut() {
+        Some(tmq) => tmq,
+        None => {
+            error!("tmq_commit_offset_sync failed, err: invalid data");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid data"));
+        }
+    };
+
+    let consumer = match &mut tmq.consumer {
+        Some(consumer) => consumer,
+        None => {
+            error!("tmq_commit_offset_sync failed, err: invalid consumer");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid consumer"));
+        }
+    };
+
+    let topic_name = match CStr::from_ptr(pTopicName).to_str() {
+        Ok(name) => name,
+        Err(_) => {
+            error!("tmq_commit_offset_sync failed, err: invalid topic name");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid topic name"));
+        }
+    };
+
+    match consumer.commit_offset(topic_name, vgId, offset) {
+        Ok(_) => {
+            trace!("tmq_commit_offset_sync done");
+            Code::SUCCESS.into()
+        }
+        Err(err) => {
+            error!("tmq_commit_offset_sync failed, err: {err:?}");
+            may_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            set_err_and_get_code(TaosError::new(err.code(), &err.message()))
+        }
+    }
 }
 
 #[no_mangle]
@@ -1307,10 +1357,8 @@ mod tests {
             tmq_list_destroy(list);
 
             let res = tmq_consumer_poll(consumer, 1000);
-            if !res.is_null() {
-                let errno = tmq_commit_sync(consumer, res);
-                assert_eq!(errno, 0);
-            }
+            let errno = tmq_commit_sync(consumer, res);
+            assert_eq!(errno, 0);
 
             let errno = tmq_unsubscribe(consumer);
             assert_eq!(errno, 0);
