@@ -839,15 +839,61 @@ pub extern "C" fn tmq_commit_offset_async(
     todo!()
 }
 
+// TODO: test case
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn tmq_get_topic_assignment(
+pub unsafe extern "C" fn tmq_get_topic_assignment(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
     assignment: *mut *mut tmq_topic_assignment,
     numOfAssignment: *mut i32,
 ) -> i32 {
-    todo!()
+    trace!(
+        "tmq_get_topic_assignment start, tmq: {:?}, p_topic_name: {:?}, assignment: {:?}, num_of_assignment: {}",
+        tmq, CStr::from_ptr(pTopicName), assignment, *numOfAssignment
+    );
+
+    match (tmq as *mut TaosMaybeError<Tmq>)
+        .as_mut()
+        .and_then(|tmq| tmq.deref_mut())
+    {
+        Some(tmq) => match &mut tmq.consumer {
+            Some(consumer) => match consumer.assignments() {
+                Some(assigns) => {
+                    if assigns.is_empty() {
+                        *assignment = ptr::null_mut();
+                        *numOfAssignment = 0;
+                    } else {
+                        let (_, assigns) = assigns.first().unwrap().clone();
+                        *numOfAssignment = assigns.len() as _;
+                        *assignment = Box::into_raw(assigns.into_boxed_slice()) as _;
+                    }
+
+                    trace!(
+                        "tmq_get_topic_assignment done, assignment: {:?}, num_of_assignment: {}",
+                        *assignment,
+                        *numOfAssignment
+                    );
+
+                    Code::SUCCESS.into()
+                }
+                None => {
+                    *assignment = ptr::null_mut();
+                    *numOfAssignment = 0;
+                    trace!("tmq_get_topic_assignment done, no assignment");
+                    Code::SUCCESS.into()
+                }
+            },
+            None => {
+                error!("tmq_get_topic_assignment failed, err: invalid consumer");
+                set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid consumer"))
+            }
+        },
+        None => {
+            error!("tmq_get_topic_assignment failed, err: invalid tmq");
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid tmq"))
+        }
+    }
 }
 
 #[no_mangle]
