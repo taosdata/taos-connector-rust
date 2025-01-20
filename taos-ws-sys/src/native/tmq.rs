@@ -721,8 +721,17 @@ pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut _tmq_t, timeout: i64) -> *m
 }
 
 #[no_mangle]
-pub extern "C" fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
-    todo!()
+pub extern "C" fn tmq_consumer_close(tmq: *mut _tmq_t) -> i32 {
+    trace!("tmq_consumer_close start, tmq: {tmq:?}");
+
+    if tmq.is_null() {
+        error!("tmq_consumer_close failed, err: tmq is null");
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    let _ = unsafe { Box::from_raw(tmq as *mut TaosMaybeError<Tmq>) };
+    trace!("tmq_consumer_close done");
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
@@ -1245,6 +1254,9 @@ mod tests {
             let _ = tmq_consumer_poll(consumer, 500);
 
             let errno = tmq_unsubscribe(consumer);
+            assert_eq!(errno, 0);
+
+            let errno = tmq_consumer_close(consumer);
             assert_eq!(errno, 0);
 
             test_exec_many(
