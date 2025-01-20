@@ -520,14 +520,25 @@ pub unsafe extern "C" fn tmq_list_append(list: *mut _tmq_list_t, value: *const c
 
 #[no_mangle]
 pub extern "C" fn tmq_list_destroy(list: *mut _tmq_list_t) {
+    trace!(list=?list, "tmq_list_destroy");
     if !list.is_null() {
         let _ = unsafe { Box::from_raw(list as *mut TaosMaybeError<TmqList>) };
     }
 }
 
 #[no_mangle]
-pub extern "C" fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
-    todo!()
+pub unsafe extern "C" fn tmq_list_get_size(list: *const _tmq_list_t) -> i32 {
+    trace!(list=?list, "tmq_list_get_size");
+    match (list as *mut TaosMaybeError<TmqList>)
+        .as_mut()
+        .and_then(|list| list.deref_mut())
+    {
+        Some(list) => {
+            trace!(list=?list, "tmq_list_get_size done");
+            list.topics.len() as i32
+        }
+        None => set_err_and_get_code(TaosError::new(Code::FAILED, "list is null")),
+    }
 }
 
 #[no_mangle]
@@ -697,7 +708,6 @@ impl TmqConf {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 struct TmqList {
     topics: Vec<String>,
@@ -807,6 +817,9 @@ mod tests {
             let value = c"topic".as_ptr();
             let res = tmq_list_append(tmq_list, value);
             assert_eq!(res, 0);
+
+            let size = tmq_list_get_size(tmq_list);
+            assert_eq!(size, 1);
 
             tmq_list_destroy(tmq_list);
         }
