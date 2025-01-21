@@ -1234,9 +1234,29 @@ pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
     }
 }
 
+// TODO: test case
 #[no_mangle]
-pub extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
-    todo!()
+pub unsafe extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
+    trace!("tmq_get_vgroup_offset start, res: {res:?}");
+
+    if res.is_null() {
+        trace!("tmq_get_vgroup_offset done, res is null");
+        return format_errno(Code::INVALID_PARA.into()) as _;
+    }
+
+    match (res as *const TaosMaybeError<ResultSet>)
+        .as_ref()
+        .and_then(|rs| rs.deref())
+    {
+        Some(rs) => {
+            trace!("tmq_get_vgroup_offset done, rs: {rs:?}");
+            rs.tmq_get_vgroup_offset()
+        }
+        None => {
+            error!("tmq_get_vgroup_offset failed, err: invalid res");
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid res")) as _
+        }
+    }
 }
 
 #[no_mangle]
