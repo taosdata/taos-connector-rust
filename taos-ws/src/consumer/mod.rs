@@ -809,7 +809,6 @@ impl AsAsyncConsumer for Consumer {
         let recv = self.sender.send_recv(action).await.ok();
         match recv {
             Some(TmqRecvData::Assignment(TopicAssignment { assignment, timing })) => {
-                // assert_eq!(topic, topic);
                 tracing::trace!("timing: {:?}", timing);
                 tracing::trace!("assignment: {:?}", assignment);
                 assignment
