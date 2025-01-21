@@ -1374,7 +1374,7 @@ mod tests {
     }
 
     #[test]
-    fn test_consumer() {
+    fn test_tmq_subscribe() {
         unsafe {
             let db = "test_1737357704";
             let topic = "topic_1737357513";
