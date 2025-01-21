@@ -925,13 +925,68 @@ pub extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn tmq_offset_seek(
-    tmq: *mut tmq_t,
+pub unsafe extern "C" fn tmq_offset_seek(
+    tmq: *mut _tmq_t,
     pTopicName: *const c_char,
     vgId: i32,
     offset: i64,
 ) -> i32 {
-    todo!()
+    trace!(
+        "tmq_offset_seek start, tmq: {:?}, p_topic_name: {:?}, vg_id: {}, offset: {}",
+        tmq,
+        CStr::from_ptr(pTopicName),
+        vgId,
+        offset
+    );
+
+    if tmq.is_null() {
+        error!("tmq_offset_seek failed, err: tmq is null");
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "tmq is null"));
+    }
+
+    let may_err = match (tmq as *mut TaosMaybeError<Tmq>).as_mut() {
+        Some(may_err) => may_err,
+        None => {
+            error!("tmq_offset_seek failed, err: invalid tmq");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid tmq"));
+        }
+    };
+
+    let tmq = match may_err.deref_mut() {
+        Some(tmq) => tmq,
+        None => {
+            error!("tmq_offset_seek failed, err: invalid data");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid data"));
+        }
+    };
+
+    let consumer = match &mut tmq.consumer {
+        Some(consumer) => consumer,
+        None => {
+            error!("tmq_offset_seek failed, err: invalid consumer");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid consumer"));
+        }
+    };
+
+    let topic_name = match CStr::from_ptr(pTopicName).to_str() {
+        Ok(name) => name,
+        Err(_) => {
+            error!("tmq_offset_seek failed, err: invalid topic name");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid topic name"));
+        }
+    };
+
+    match consumer.offset_seek(topic_name, vgId, offset) {
+        Ok(_) => {
+            trace!("tmq_offset_seek done");
+            Code::SUCCESS.into()
+        }
+        Err(err) => {
+            error!("tmq_offset_seek failed, err: {err:?}");
+            may_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            set_err_and_get_code(TaosError::new(err.code(), &err.message()))
+        }
+    }
 }
 
 #[no_mangle]
@@ -1336,6 +1391,9 @@ unsafe fn _tmq_commit_sync(tmq: *mut _tmq_t, res: *const TAOS_RES) -> TaosResult
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::native::query::{
+        taos_fetch_fields, taos_fetch_row, taos_num_fields, taos_print_row,
+    };
     use crate::native::{test_connect, test_exec_many};
 
     #[test]
@@ -1504,6 +1562,108 @@ mod tests {
             println!("assignment: {assignment:?}, num_of_assignment: {num_of_assignment}");
 
             tmq_free_assignment(assignment);
+
+            let errno = tmq_unsubscribe(consumer);
+            assert_eq!(errno, 0);
+
+            let errno = tmq_consumer_close(consumer);
+            assert_eq!(errno, 0);
+
+            test_exec_many(
+                taos,
+                &[format!("drop topic {topic}"), format!("drop database {db}")],
+            );
+        }
+    }
+
+    #[test]
+    fn test_tmq_offset_seek() {
+        unsafe {
+            let db = "test_1737440249";
+            let topic = "topic_1737440249";
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    &format!("drop topic if exists {topic}"),
+                    &format!("drop database if exists {db}"),
+                    &format!("create database {db}"),
+                    &format!("use {db}"),
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (now, 1)",
+                    &format!("create topic {topic} as select * from t0"),
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let value = CString::from_str(topic).unwrap();
+            let errno = tmq_list_append(list, value.as_ptr());
+            assert_eq!(errno, 0);
+
+            let errno = tmq_subscribe(consumer, list);
+            assert_eq!(errno, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            let topic_name = CString::from_str(topic).unwrap();
+            let mut assignment = ptr::null_mut();
+            let mut num_of_assignment = 0;
+
+            let errno = tmq_get_topic_assignment(
+                consumer,
+                topic_name.as_ptr(),
+                &mut assignment,
+                &mut num_of_assignment,
+            );
+            assert_eq!(errno, 0);
+
+            let (_, (len, cap)) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
+            let assigns = Vec::from_raw_parts(assignment, len, cap);
+
+            for assign in assigns {
+                let errno =
+                    tmq_offset_seek(consumer, topic_name.as_ptr(), assign.vgId, assign.begin);
+                assert_eq!(errno, 0);
+            }
+
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                if res.is_null() {
+                    break;
+                }
+
+                let row = taos_fetch_row(res);
+                assert!(!row.is_null());
+
+                let fields = taos_fetch_fields(res);
+                assert!(!fields.is_null());
+
+                let num_fields = taos_num_fields(res);
+                assert_eq!(num_fields, 2);
+
+                let mut str = vec![0 as c_char; 1024];
+                let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+                println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
+                let errno = tmq_commit_sync(consumer, res);
+                assert_eq!(errno, 0);
+            }
 
             let errno = tmq_unsubscribe(consumer);
             assert_eq!(errno, 0);
