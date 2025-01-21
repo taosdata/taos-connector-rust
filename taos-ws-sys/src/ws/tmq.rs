@@ -13,7 +13,7 @@ use taos_ws::consumer::{Data, Offset};
 use taos_ws::query::Error;
 use taos_ws::{Consumer, TmqBuilder};
 
-use crate::*;
+use super::*;
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
@@ -1071,7 +1071,6 @@ mod tests {
 
     #[test]
     fn tmq_conf() {
-        use crate::*;
         init_env();
         unsafe {
             let taos = ws_connect(b"http://localhost:6041\0" as *const u8 as _);
