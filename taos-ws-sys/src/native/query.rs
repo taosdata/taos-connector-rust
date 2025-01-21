@@ -228,7 +228,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
         }
 
         let write_len = if row[i].is_null() {
-            write_to_cstr(&mut size, str.add(len as usize), "NULL")
+            write_to_cstr(&mut size, str.add(len), "NULL")
         } else {
             macro_rules! read_and_write {
                 ($ty:ty) => {{
@@ -256,26 +256,22 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                     let value = ptr::read_unaligned(row[i] as *const bool);
                     write_to_cstr(
                         &mut size,
-                        str.add(len as usize),
+                        str.add(len),
                         format!("{}", value as i32).as_str(),
                     )
                 }
                 Ty::VarBinary | Ty::Geometry => {
                     let data = row[i].offset(-2) as *const InlineBytes;
-                    let data = Bytes::from((&*data).as_bytes());
-                    write_to_cstr(
-                        &mut size,
-                        str.add(len as usize),
-                        &hex::bytes_to_hex_string(data),
-                    )
+                    let data = Bytes::from((*data).as_bytes());
+                    write_to_cstr(&mut size, str.add(len), &hex::bytes_to_hex_string(data))
                 }
                 Ty::VarChar => {
                     let data = row[i].offset(-2) as *const InlineStr;
-                    write_to_cstr(&mut size, str.add(len as usize), (&*data).as_str())
+                    write_to_cstr(&mut size, str.add(len), (*data).as_str())
                 }
                 Ty::NChar => {
                     let data = row[i].offset(-2) as *const InlineNChar;
-                    write_to_cstr(&mut size, str.add(len as usize), &(&*data).to_string())
+                    write_to_cstr(&mut size, str.add(len), &(*data).to_string())
                 }
                 _ => 0,
             }
@@ -287,7 +283,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
         len += write_len as usize;
     }
 
-    *str.add(len as usize) = 0;
+    *str.add(len) = 0;
 
     trace!(
         len,

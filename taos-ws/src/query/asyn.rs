@@ -711,9 +711,7 @@ impl WsTaos {
                             ok?;
                             break;
                         }
-                        WsRecvData::Version { .. } => {
-                            continue;
-                        }
+                        WsRecvData::Version { .. } => {}
                         data => {
                             return Err(RawError::from_string(format!(
                                 "Unexpected login result: {data:?}"

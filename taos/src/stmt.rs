@@ -16,14 +16,10 @@ pub struct Stmt(StmtInner);
 impl taos_query::stmt::Bindable<super::Taos> for Stmt {
     fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
-            crate::TaosInner::Native(taos) => NativeStmt::init(taos)
-                .map(StmtInner::Native)
-                .map(Stmt)
-                .map_err(Into::into),
-            crate::TaosInner::Ws(taos) => WsStmt::init(taos)
-                .map(StmtInner::Ws)
-                .map(Stmt)
-                .map_err(Into::into),
+            crate::TaosInner::Native(taos) => {
+                NativeStmt::init(taos).map(StmtInner::Native).map(Stmt)
+            }
+            crate::TaosInner::Ws(taos) => WsStmt::init(taos).map(StmtInner::Ws).map(Stmt),
         }
     }
 
@@ -31,12 +27,10 @@ impl taos_query::stmt::Bindable<super::Taos> for Stmt {
         match &taos.0 {
             crate::TaosInner::Native(taos) => NativeStmt::init_with_req_id(taos, req_id)
                 .map(StmtInner::Native)
-                .map(Stmt)
-                .map_err(Into::into),
+                .map(Stmt),
             crate::TaosInner::Ws(taos) => WsStmt::init_with_req_id(taos, req_id)
                 .map(StmtInner::Ws)
-                .map(Stmt)
-                .map_err(Into::into),
+                .map(Stmt),
         }
     }
 
@@ -122,13 +116,8 @@ impl taos_query::prelude::AsyncBindable<super::Taos> for Stmt {
             crate::TaosInner::Native(taos) => NativeStmt::init(taos)
                 .await
                 .map(StmtInner::Native)
-                .map(Stmt)
-                .map_err(Into::into),
-            crate::TaosInner::Ws(taos) => WsStmt::init(taos)
-                .await
-                .map(StmtInner::Ws)
-                .map(Stmt)
-                .map_err(Into::into),
+                .map(Stmt),
+            crate::TaosInner::Ws(taos) => WsStmt::init(taos).await.map(StmtInner::Ws).map(Stmt),
         }
     }
 
@@ -137,13 +126,11 @@ impl taos_query::prelude::AsyncBindable<super::Taos> for Stmt {
             crate::TaosInner::Native(taos) => NativeStmt::init_with_req_id(taos, req_id)
                 .await
                 .map(StmtInner::Native)
-                .map(Stmt)
-                .map_err(Into::into),
+                .map(Stmt),
             crate::TaosInner::Ws(taos) => WsStmt::init_with_req_id(taos, req_id)
                 .await
                 .map(StmtInner::Ws)
-                .map(Stmt)
-                .map_err(Into::into),
+                .map(Stmt),
         }
     }
 
