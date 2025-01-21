@@ -991,8 +991,68 @@ pub unsafe extern "C" fn tmq_offset_seek(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn tmq_position(tmq: *mut tmq_t, pTopicName: *const c_char, vgId: i32) -> i64 {
-    todo!()
+pub unsafe extern "C" fn tmq_position(
+    tmq: *mut _tmq_t,
+    pTopicName: *const c_char,
+    vgId: i32,
+) -> i64 {
+    trace!(
+        "tmq_position start, tmq: {:?}, p_topic_name: {:?}, vg_id: {}",
+        tmq,
+        CStr::from_ptr(pTopicName),
+        vgId
+    );
+
+    if tmq.is_null() {
+        error!("tmq_position failed, err: tmq is null");
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "tmq is null")) as _;
+    }
+
+    let may_err = match (tmq as *mut TaosMaybeError<Tmq>).as_mut() {
+        Some(may_err) => may_err,
+        None => {
+            error!("tmq_position failed, err: invalid tmq");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid tmq")) as _;
+        }
+    };
+
+    let tmq = match may_err.deref_mut() {
+        Some(tmq) => tmq,
+        None => {
+            error!("tmq_position failed, err: invalid data");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid data")) as _;
+        }
+    };
+
+    let consumer = match &mut tmq.consumer {
+        Some(consumer) => consumer,
+        None => {
+            error!("tmq_position failed, err: invalid consumer");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid consumer"))
+                as _;
+        }
+    };
+
+    let topic_name = match CStr::from_ptr(pTopicName).to_str() {
+        Ok(name) => name,
+        Err(_) => {
+            error!("tmq_position failed, err: invalid topic name");
+            return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid topic name"))
+                as _;
+        }
+    };
+
+    match consumer.position(topic_name, vgId) {
+        Ok(offset) => {
+            trace!("tmq_position done, offset: {offset}");
+            offset
+        }
+        Err(err) => {
+            error!("tmq_position failed, err: {err:?}");
+            may_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            set_err_and_get_code(TaosError::new(err.code(), &err.message())) as _
+        }
+    }
 }
 
 #[no_mangle]
@@ -1637,6 +1697,9 @@ mod tests {
             let assigns = Vec::from_raw_parts(assignment, len, cap);
 
             for assign in assigns {
+                let offset = tmq_position(consumer, topic_name.as_ptr(), assign.vgId);
+                assert!(offset >= 0);
+
                 let errno =
                     tmq_offset_seek(consumer, topic_name.as_ptr(), assign.vgId, assign.begin);
                 assert_eq!(errno, 0);
