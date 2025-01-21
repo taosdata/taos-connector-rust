@@ -1122,9 +1122,29 @@ pub unsafe extern "C" fn tmq_committed(
     }
 }
 
+// TODO: test case
 #[no_mangle]
-pub extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
-    todo!()
+pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
+    trace!("tmq_get_table_name start, res: {res:?}");
+
+    if res.is_null() {
+        trace!("tmq_get_table_name done, res is null");
+        return ptr::null();
+    }
+
+    match (res as *const TaosMaybeError<ResultSet>)
+        .as_ref()
+        .and_then(|rs| rs.deref())
+    {
+        Some(rs) => {
+            trace!("tmq_get_table_name done, rs: {rs:?}");
+            rs.tmq_get_table_name()
+        }
+        None => {
+            error!("tmq_get_table_name failed, err: invalid res");
+            ptr::null()
+        }
+    }
 }
 
 #[no_mangle]
