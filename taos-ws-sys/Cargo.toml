@@ -13,6 +13,7 @@ anyhow = "1"
 bytes = "1.1.0"
 cargo_metadata = "0.18.1"
 ctor = "0.2.9"
+dashmap = "6.1.0"
 futures = { version = "0.3", features = ["executor"] }
 once_cell = "1.20.2"
 pretty_env_logger = "0.5.0"

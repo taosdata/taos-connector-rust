@@ -4,6 +4,8 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::{mem, ptr};
 
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
 use taos_error::Code;
 use taos_query::common::{Precision, RawBlock as Block, Ty};
 use taos_query::tmq::{self, AsConsumer, IsData, IsOffset};
@@ -433,6 +435,7 @@ pub struct tmq_list_t {
 #[repr(C)]
 #[allow(non_snake_case)]
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct tmq_topic_assignment {
     pub vgId: i32,
     pub currentOffset: i64,
@@ -769,7 +772,7 @@ pub extern "C" fn tmq_commit_async(
 #[no_mangle]
 #[allow(non_snake_case)]
 pub unsafe extern "C" fn tmq_commit_offset_sync(
-    tmq: *mut tmq_t,
+    tmq: *mut _tmq_t,
     pTopicName: *const c_char,
     vgId: i32,
     offset: i64,
@@ -839,11 +842,12 @@ pub extern "C" fn tmq_commit_offset_async(
     todo!()
 }
 
-// TODO: test case
+static TOPIC_ASSIGNMETN_MAP: Lazy<DashMap<usize, (usize, usize)>> = Lazy::new(DashMap::new);
+
 #[no_mangle]
 #[allow(non_snake_case)]
 pub unsafe extern "C" fn tmq_get_topic_assignment(
-    tmq: *mut tmq_t,
+    tmq: *mut _tmq_t,
     pTopicName: *const c_char,
     assignment: *mut *mut tmq_topic_assignment,
     numOfAssignment: *mut i32,
@@ -865,8 +869,15 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
                         *numOfAssignment = 0;
                     } else {
                         let (_, assigns) = assigns.first().unwrap().clone();
-                        *numOfAssignment = assigns.len() as _;
+                        let len = assigns.len();
+                        let cap = assigns.capacity();
+
+                        trace!("tmq_get_topic_assignment, assigns: {assigns:?}, len: {len}, cap: {cap}");
+
+                        *numOfAssignment = len as _;
                         *assignment = Box::into_raw(assigns.into_boxed_slice()) as _;
+
+                        TOPIC_ASSIGNMETN_MAP.insert(*assignment as usize, (len, cap));
                     }
 
                     trace!(
@@ -899,7 +910,17 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
 #[no_mangle]
 #[allow(non_snake_case)]
 pub extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
-    todo!()
+    trace!("tmq_free_assignment start, p_assignment: {pAssignment:?}");
+    if pAssignment.is_null() {
+        trace!("tmq_free_assignment done, p_assignment is null");
+        return;
+    }
+
+    let (_, (len, cap)) = TOPIC_ASSIGNMETN_MAP
+        .remove(&(pAssignment as usize))
+        .unwrap();
+    let assigns = unsafe { Vec::from_raw_parts(pAssignment, len, cap) };
+    trace!("tmq_free_assignment done, assigns: {assigns:?}, len: {len}, cap: {cap}");
 }
 
 #[no_mangle]
@@ -1405,6 +1426,84 @@ mod tests {
             let res = tmq_consumer_poll(consumer, 1000);
             let errno = tmq_commit_sync(consumer, res);
             assert_eq!(errno, 0);
+
+            let errno = tmq_unsubscribe(consumer);
+            assert_eq!(errno, 0);
+
+            let errno = tmq_consumer_close(consumer);
+            assert_eq!(errno, 0);
+
+            test_exec_many(
+                taos,
+                &[format!("drop topic {topic}"), format!("drop database {db}")],
+            );
+        }
+    }
+
+    #[test]
+    fn test_tmq_get_topic_assignment() {
+        unsafe {
+            let db = "test_1737423087";
+            let topic = "topic_1737423043";
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    &format!("drop topic if exists {topic}"),
+                    &format!("drop database if exists {db}"),
+                    &format!("create database {db}"),
+                    &format!("use {db}"),
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (now, 1)",
+                    &format!("create topic {topic} as select * from t0"),
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let value = CString::from_str(topic).unwrap();
+            let errno = tmq_list_append(list, value.as_ptr());
+            assert_eq!(errno, 0);
+
+            let errno = tmq_subscribe(consumer, list);
+            assert_eq!(errno, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            let topic_name = CString::from_str(topic).unwrap();
+            let mut assignment = ptr::null_mut();
+            let mut num_of_assignment = 0;
+
+            let errno = tmq_get_topic_assignment(
+                consumer,
+                topic_name.as_ptr(),
+                &mut assignment,
+                &mut num_of_assignment,
+            );
+            assert_eq!(errno, 0);
+            println!("assignment: {assignment:?}, num_of_assignment: {num_of_assignment}");
+
+            tmq_free_assignment(assignment);
 
             let errno = tmq_unsubscribe(consumer);
             assert_eq!(errno, 0);
