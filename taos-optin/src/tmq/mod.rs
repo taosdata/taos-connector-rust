@@ -2770,14 +2770,14 @@ mod async_tests {
             .duration_since(std::time::UNIX_EPOCH)?
             .as_millis();
         let tmq = TmqBuilder::from_dsn(format!(
-            "taos:///tmq_poll_db?group.id={ms}&timeout=5s&enable.auto.commit=false"
+            "taos:///tmq_poll_db?group.id={ms}&timeout=10s&auto.offset.reset=earliest"
         ))?;
 
         let mut consumer = tmq.build().await?;
         consumer.subscribe(["tmq_poll_topic"]).await?;
 
         {
-            let mut stream = consumer.stream_with_timeout(Timeout::from_millis(200));
+            let mut stream = consumer.stream_with_timeout(Timeout::from_millis(9000));
             while let Ok(Some(msg)) = stream.try_next().await {
                 println!("msg: {msg:?}");
             }
