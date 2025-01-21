@@ -1147,9 +1147,16 @@ pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char
     }
 }
 
+// TODO: test case
 #[no_mangle]
 pub extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
-    todo!()
+    trace!("tmq_get_res_type start, res: {res:?}");
+    if res.is_null() {
+        trace!("tmq_get_res_type done, res is null");
+        return tmq_res_t::TMQ_RES_INVALID;
+    }
+    trace!("tmq_get_res_type done, res type: TMQ_RES_DATA");
+    tmq_res_t::TMQ_RES_DATA
 }
 
 #[no_mangle]
