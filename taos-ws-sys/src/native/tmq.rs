@@ -1159,9 +1159,29 @@ pub extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
     tmq_res_t::TMQ_RES_DATA
 }
 
+// TODO: test case
 #[no_mangle]
-pub extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char {
-    todo!()
+pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char {
+    trace!("tmq_get_topic_name start, res: {res:?}");
+
+    if res.is_null() {
+        trace!("tmq_get_topic_name done, res is null");
+        return ptr::null();
+    }
+
+    match (res as *const TaosMaybeError<ResultSet>)
+        .as_ref()
+        .and_then(|rs| rs.deref())
+    {
+        Some(rs) => {
+            trace!("tmq_get_topic_name done, rs: {rs:?}");
+            rs.tmq_get_topic_name()
+        }
+        None => {
+            error!("tmq_get_topic_name failed, err: invalid res");
+            ptr::null()
+        }
+    }
 }
 
 #[no_mangle]
