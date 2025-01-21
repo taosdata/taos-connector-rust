@@ -13,7 +13,7 @@ use taos_query::{Dsn, TBuilder};
 use taos_ws::consumer::Data;
 use taos_ws::query::Error;
 use taos_ws::{Consumer, Offset, TmqBuilder};
-use tracing::{error, trace};
+use tracing::{error, trace, warn};
 
 use crate::native::error::{format_errno, set_err_and_get_code, TaosError, TaosMaybeError};
 use crate::native::{
@@ -1141,7 +1141,7 @@ pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char
             rs.tmq_get_table_name()
         }
         None => {
-            error!("tmq_get_table_name failed, err: invalid res");
+            warn!("tmq_get_table_name failed, err: invalid res");
             ptr::null()
         }
     }
@@ -1178,15 +1178,35 @@ pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char
             rs.tmq_get_topic_name()
         }
         None => {
-            error!("tmq_get_topic_name failed, err: invalid res");
+            warn!("tmq_get_topic_name failed, err: invalid res");
             ptr::null()
         }
     }
 }
 
+// TODO: test case
 #[no_mangle]
-pub extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
-    todo!()
+pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
+    trace!("tmq_get_db_name start, res: {res:?}");
+
+    if res.is_null() {
+        trace!("tmq_get_db_name done, res is null");
+        return ptr::null();
+    }
+
+    match (res as *const TaosMaybeError<ResultSet>)
+        .as_ref()
+        .and_then(|rs| rs.deref())
+    {
+        Some(rs) => {
+            trace!("tmq_get_db_name done, rs: {rs:?}");
+            rs.tmq_get_db_name()
+        }
+        None => {
+            warn!("tmq_get_db_name failed, err: invalid res");
+            ptr::null()
+        }
+    }
 }
 
 #[no_mangle]
