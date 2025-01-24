@@ -82,7 +82,7 @@ cargo build
 
 ### 6.1 运行测试
 
-运行测试前，请在 `/etc/taos/taos.cfg` 文件中添加以下配置：
+运行测试前，请在 `taos.cfg` 文件中添加以下配置：
 
 ```text
 supportVnodes 256
@@ -122,7 +122,7 @@ cargo test
 3. 开发与测试：完成代码修改后，确保所有单元测试都能通过，并为新增功能或修复的 Bug 添加相应的测试用例。
 4. 提交代码：将修改提交到远程分支（例如：`git push origin feature/my_feature`）。
 5. 创建 Pull Request：在 GitHub 上发起 [Pull Request](https://github.com/taosdata/taos-connector-rust/pulls)，具体步骤请参考 [如何创建 Pull Request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request)。
-6. 检查 CI 和代码覆盖率：提交 PR 后，确保 CI 流程通过。您可以在 [Codecov 页面](https://app.codecov.io/gh/taosdata/taos-connector-rust/pulls) 查看对应 PR 的代码覆盖率。
+6. 检查 CI 和代码覆盖率：提交 PR 后，确保 CI 流程通过。您可以在 [Codecov](https://app.codecov.io/gh/taosdata/taos-connector-rust/pulls) 查看对应 PR 的代码覆盖率。
 
 感谢您的贡献！我们期待与您共同完善和优化该项目。
 
