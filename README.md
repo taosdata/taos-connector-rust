@@ -1,241 +1,132 @@
-# The Official Rust Connector for [TDengine]
+<!-- omit in toc -->
+# TDengine Rust Connector
+<!-- omit in toc -->
 
 | Docs.rs                                        | Crates.io Version                                  | Crates.io Downloads                                | CodeCov                                                                                                                                                           |
 | ---------------------------------------------- | -------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ![docs.rs](https://img.shields.io/docsrs/taos) | ![Crates.io](https://img.shields.io/crates/v/taos) | ![Crates.io](https://img.shields.io/crates/d/taos) | [![codecov](https://codecov.io/gh/taosdata/taos-connector-rust/branch/main/graph/badge.svg?token=P11UKNLTVO)](https://codecov.io/gh/taosdata/taos-connector-rust) |
 
-This is the official TDengine connector in Rust.
+English | [简体中文](./README-CN.md)
 
-## Dependencies
+<!-- omit in toc -->
+## Table of Contents
+<!-- omit in toc -->
 
-- [Rust](https://www.rust-lang.org/learn/get-started) of course.
+- [1. Introduction](#1-introduction)
+  - [1.1 Connection Methods](#11-connection-methods)
+  - [1.2 Rust Version Compatibility](#12-rust-version-compatibility)
+  - [1.3 Supported Platforms](#13-supported-platforms)
+- [2. Getting the Driver](#2-getting-the-driver)
+- [3. Documentation](#3-documentation)
+- [4. Prerequisites](#4-prerequisites)
+- [5. Build](#5-build)
+- [6. Testing](#6-testing)
+  - [6.1 Test Execution](#61-test-execution)
+  - [6.2 Test Case Addition](#62-test-case-addition)
+  - [6.3 Performance Testing](#63-performance-testing)
+- [7. Submitting Issues](#7-submitting-issues)
+- [8. Submitting PRs](#8-submitting-prs)
+- [9. References](#9-references)
+- [10. License](#10-license)
 
-if you use the default features, it'll depend on:
+## 1. Introduction
 
-- [TDengine] Client library and headers.
+`taos` is the official Rust language connector of TDengine, through which Rust developers can develop applications that access TDengine databases. It supports data writing, data query, data subscription, schemaless writing, parameter binding and other functions.
 
-## Usage
+### 1.1 Connection Methods
 
-By default, enable both native and websocket client:
+`taos` provides two ways to establish a connection:
+
+- Native connection: Establish a connection directly with the server program taosd through the client driver taosc. When using this connection method, you need to ensure that the client driver taosc and the server taosd version are consistent.
+- WebSocket connection: Establish a connection with taosd through the WebSocket API provided by the taosAdapter component. This method does not rely on the TDengine client driver, supports cross-platform use, is more convenient and flexible, and has performance similar to native connection.
+
+It is recommended to use the WebSocket connection method. For detailed description, please refer to [Connection Methods](https://docs.tdengine.com/developer-guide/connecting-to-tdengine/#connection-methods).
+
+### 1.2 Rust Version Compatibility
+
+Supports Rust 1.70 and above.
+
+### 1.3 Supported Platforms
+
+- The platforms supported by the native connection are consistent with those supported by the TDengine client driver.
+- WebSocket connection supports all platforms that can run Rust.
+
+## 2. Getting the Driver
+
+Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-taos = "*"
+taos = "0.12.3"
 ```
 
-For websocket client only:
+## 3. Documentation
 
-```toml
-[dependencies]
-taos = { version = "*", default-features = false, features = ["ws"] }
+- For development examples, please visit the [Developer Guide](https://docs.tdengine.com/developer-guide/), which includes examples of data writing, data querying, data subscription, schemaless writing, and parameter binding.
+- For more information, please visit the [Reference Manual](https://docs.tdengine.com/tdengine-reference/client-libraries/rust/), which includes version history, data type mapping, sample program summary, API reference, and FAQ.
+
+## 4. Prerequisites
+
+- Rust 1.70 or above has been installed.
+- TDengine has been deployed locally. For specific steps, please refer to [Deploy TDengine](https://docs.tdengine.com/get-started/deploy-from-package/), and taosd and taosAdapter have been started.
+
+## 5. Build
+
+Run the following command in the project directory to build the project:
+
+```sh
+cargo build
 ```
 
-For native only:
+## 6. Testing
 
-```toml
-[dependencies]
-taos = { version = "*", default-features = false, features = ["native"] }
+### 6.1 Test Execution
+
+Before running the test, please add the following configuration to the `taos.cfg` file:
+
+```text
+supportVnodes 256
 ```
 
-### Query
+After completing the configuration, execute the following command in the project directory to run the test:
 
-```rust
-use chrono::{DateTime, Local};
-use taos::*;
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let dsn = "taos://localhost:6030";
-    let builder = TaosBuilder::from_dsn(dsn)?;
-
-    let taos = builder.build()?;
-
-    let db = "query";
-
-    // prepare database
-    taos.exec_many([
-        format!("DROP DATABASE IF EXISTS `{db}`"),
-        format!("CREATE DATABASE `{db}`"),
-        format!("USE `{db}`"),
-    ])
-    .await?;
-
-    let inserted = taos.exec_many([
-        // create super table
-        "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) \
-         TAGS (`groupid` INT, `location` BINARY(16))",
-        // create child table
-        "CREATE TABLE `d0` USING `meters` TAGS(0, 'Los Angles')",
-        // insert into child table
-        "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32)",
-        // insert with NULL values
-        "INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL)",
-        // insert and automatically create table with tags if not exists
-        "INSERT INTO `d1` USING `meters` TAGS(1, 'San Francisco') values(now - 9s, 10.1, 119, 0.33)",
-        // insert many records in a single sql
-        "INSERT INTO `d1` values (now-8s, 10, 120, 0.33) (now - 6s, 10, 119, 0.34) (now - 4s, 11.2, 118, 0.322)",
-    ]).await?;
-
-    assert_eq!(inserted, 6);
-    let mut result = taos.query("select * from `meters`").await?;
-
-    for field in result.fields() {
-        println!("got field: {}", field.name());
-    }
-
-    // Query option 1, use rows stream.
-    let mut rows = result.rows();
-    while let Some(row) = rows.try_next().await? {
-        for (name, value) in row {
-            println!("got value of {}: {}", name, value);
-        }
-    }
-
-    // Query options 2, use deserialization with serde.
-    #[derive(Debug, serde::Deserialize)]
-    #[allow(dead_code)]
-    struct Record {
-        // deserialize timestamp to chrono::DateTime<Local>
-        ts: DateTime<Local>,
-        // float to f32
-        current: Option<f32>,
-        // int to i32
-        voltage: Option<i32>,
-        phase: Option<f32>,
-        groupid: i32,
-        // binary/varchar to String
-        location: String,
-    }
-
-    let records: Vec<Record> = taos
-        .query("select * from `meters`")
-        .await?
-        .deserialize()
-        .try_collect()
-        .await?;
-
-    dbg!(records);
-    Ok(())
-}
+```sh
+cargo test
 ```
 
-### Subscription
+### 6.2 Test Case Addition
 
-```rust
-use std::time::Duration;
+Add test cases in the `#[cfg(test)]` module of the corresponding `.rs` file. For synchronous code, use the `#[test]` macro; for asynchronous code, use the `#[tokio::test]` macro.
 
-use chrono::{DateTime, Local};
-use taos::*;
+### 6.3 Performance Testing
 
-// Query options 2, use deserialization with serde.
-#[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)]
-struct Record {
-    // deserialize timestamp to chrono::DateTime<Local>
-    ts: DateTime<Local>,
-    // float to f32
-    current: Option<f32>,
-    // int to i32
-    voltage: Option<i32>,
-    phase: Option<f32>,
-}
+Performance testing is under development.
 
-async fn prepare(taos: Taos) -> anyhow::Result<()> {
-    let inserted = taos.exec_many([
-        // create child table
-        "CREATE TABLE `d0` USING `meters` TAGS(0, 'Los Angles')",
-        // insert into child table
-        "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32)",
-        // insert with NULL values
-        "INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL)",
-        // insert and automatically create table with tags if not exists
-        "INSERT INTO `d1` USING `meters` TAGS(1, 'San Francisco') values(now - 9s, 10.1, 119, 0.33)",
-        // insert many records in a single sql
-        "INSERT INTO `d1` values (now-8s, 10, 120, 0.33) (now - 6s, 10, 119, 0.34) (now - 4s, 11.2, 118, 0.322)",
-    ]).await?;
-    assert_eq!(inserted, 6);
-    Ok(())
-}
+## 7. Submitting Issues
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // std::env::set_var("RUST_LOG", "debug");
-    pretty_env_logger::init();
-    let dsn = "taos://localhost:6030";
-    let builder = TaosBuilder::from_dsn(dsn)?;
+We welcome the submission of [GitHub Issue](https://github.com/taosdata/taos-connector-rust/issues/new?template=Blank+issue). When submitting, please provide the following information:
 
-    let taos = builder.build()?;
-    let db = "tmq";
+- Description of the problem, whether it must occur, preferably with detailed call stack.
+- Rust connector version.
+- Connection parameters (no username or password required).
+- TDengine server version.
 
-    // prepare database
-    taos.exec_many([
-        format!("DROP TOPIC IF EXISTS tmq_meters"),
-        format!("DROP DATABASE IF EXISTS `{db}`"),
-        format!("CREATE DATABASE `{db}`"),
-        format!("USE `{db}`"),
-        // create super table
-        format!("CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT)\
-                 TAGS (`groupid` INT, `location` BINARY(16))"),
-        // create topic for subscription
-        format!("CREATE TOPIC tmq_meters with META AS DATABASE {db}")
-    ])
-    .await?;
+## 8. Submitting PRs
 
-    let task = tokio::spawn(prepare(taos));
+We welcome developers to contribute to this project. When submitting PRs, please follow these steps:
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+1. Fork this project, refer to ([how to fork a repo](https://docs.github.com/en/get-started/quickstart/fork-a-repo)).
+2. Create a new branch from the main branch with a meaningful branch name (`git checkout -b my_branch`). Do not modify the main branch directly.
+3. Modify the code, ensure all unit tests pass, and add new unit tests to verify the changes.
+4. Push the changes to the remote branch (`git push origin my_branch`).
+5. Create a Pull Request on GitHub ([how to create a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request)).
+6. After submitting the PR, if CI passes, you can find your PR on the [codecov](https://app.codecov.io/gh/taosdata/taos-connector-rust/pulls) page to check the test coverage.
 
-    // subscribe
-    let tmq = TmqBuilder::from_dsn("taos://localhost:6030/?group.id=test")?;
+## 9. References
 
-    let mut consumer = tmq.build()?;
-    consumer.subscribe(["tmq_meters"]).await?;
+- [TDengine Official Website](https://www.tdengine.com/)
+- [TDengine GitHub](https://github.com/taosdata/TDengine)
 
-    {
-        let mut stream = consumer.stream();
+## 10. License
 
-        while let Some((offset, message)) = stream.try_next().await? {
-            // get information from offset
-
-            // the topic
-            let topic = offset.topic();
-            // the vgroup id, like partition id in kafka.
-            let vgroup_id = offset.vgroup_id();
-            println!("* in vgroup id {vgroup_id} of topic {topic}\n");
-
-            if let Some(data) = message.into_data() {
-                while let Some(block) = data.fetch_raw_block().await? {
-                    // one block for one table, get table name if needed
-                    let name = block.table_name();
-                    let records: Vec<Record> = block.deserialize().try_collect()?;
-                    println!(
-                        "** table: {}, got {} records: {:#?}\n",
-                        name.unwrap(),
-                        records.len(),
-                        records
-                    );
-                }
-            }
-            consumer.commit(offset).await?;
-        }
-    }
-
-    consumer.unsubscribe().await;
-
-    task.await??;
-
-    Ok(())
-}
-
-```
-
-## Contribution
-
-Welcome for all contributions.
-
-## License
-
-Keep same with [TDengine].
-
-[TDengine]: https://www.taosdata.com/en/getting-started/
-[r2d2]: https://crates.io/crates/r2d2
+[MIT License](./LICENSE)
