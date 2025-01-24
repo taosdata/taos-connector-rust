@@ -104,27 +104,23 @@ cargo test
 
 ## 7. 提交 Issue
 
-我们欢迎提交 [GitHub Issue](https://github.com/taosdata/taos-connector-rust/issues/new?template=Blank+issue)。提交时请尽量提供以下信息，以便快速定位问题：
+我们欢迎提交 [GitHub Issue](https://github.com/taosdata/taos-connector-rust/issues/new?template=Blank+issue)。提交时请说明下面信息：
 
-- 问题描述：具体问题表现及是否必现，建议附上详细调用堆栈或日志信息。
-- Rust 连接器版本：可通过 `Cargo.toml` 或 `cargo metadata` 获取版本号。
-- 连接参数：提供关键连接参数（无需包含用户名和密码）。
-- TDengine 服务端版本：可通过 `select server_version()` 获取版本信息。
-
-如有其他相关信息（如环境配置、操作系统版本等），请一并补充，以便我们更全面地了解问题。
+- 问题描述，是否必现，最好能包含详细调用堆栈。
+- Rust 连接器版本。
+- 连接参数（不需要用户名密码）。
+- TDengine 服务端版本。
 
 ## 8. 提交 PR
 
-我们欢迎开发者共同参与本项目开发，提交 PR 时请按照以下步骤操作：
+我们欢迎开发者一起开发本项目，提交 PR 时请参考下面步骤：
 
-1. Fork 仓库：请先 Fork 本仓库，具体步骤请参考 [如何 Fork 仓库](https://docs.github.com/en/get-started/quickstart/fork-a-repo)。
-2. 创建新分支：基于 `main` 分支创建一个新分支，并使用有意义的分支名称（例如：`git checkout -b feature/my_feature`）。请勿直接在 main 分支上进行修改。
-3. 开发与测试：完成代码修改后，确保所有单元测试都能通过，并为新增功能或修复的 Bug 添加相应的测试用例。
-4. 提交代码：将修改提交到远程分支（例如：`git push origin feature/my_feature`）。
-5. 创建 Pull Request：在 GitHub 上发起 [Pull Request](https://github.com/taosdata/taos-connector-rust/pulls)，具体步骤请参考 [如何创建 Pull Request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request)。
-6. 检查 CI 和代码覆盖率：提交 PR 后，确保 CI 流程通过。您可以在 [Codecov](https://app.codecov.io/gh/taosdata/taos-connector-rust/pulls) 查看对应 PR 的代码覆盖率。
-
-感谢您的贡献！我们期待与您共同完善和优化该项目。
+1. Fork 本项目，请参考 ([how to fork a repo](https://docs.github.com/en/get-started/quickstart/fork-a-repo))。
+2. 从 main 分支创建一个新分支，请使用有意义的分支名称 (`git checkout -b my_branch`)。注意不要直接在 main 分支上修改。
+3. 修改代码，保证所有单元测试通过，并增加新的单元测试验证修改。
+4. 提交修改到远端分支 (`git push origin my_branch`)。
+5. 在 GitHub 上创建一个 Pull Request ([how to create a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request))。
+6. 提交 PR 后，如果 CI 通过，可以在 [codecov](https://app.codecov.io/gh/taosdata/taos-connector-rust/pulls) 页面找到自己 PR，看单测覆盖率。
 
 ## 9. 引用
 
