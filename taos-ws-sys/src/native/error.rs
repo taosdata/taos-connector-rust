@@ -80,6 +80,15 @@ pub fn format_errno(errno: i32) -> i32 {
     errno
 }
 
+pub fn clear_error_info() {
+    ERRNO.with(|errno| {
+        *errno.borrow_mut() = 0;
+    });
+    ERRSTR.with(|errstr| {
+        errstr.borrow_mut()[0] = 0;
+    });
+}
+
 #[derive(Debug)]
 pub struct TaosMaybeError<T> {
     err: Option<TaosError>,
