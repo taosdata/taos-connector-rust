@@ -1,6 +1,13 @@
 use std::ffi::{c_char, c_int, c_ulong, c_void};
 
+use taos_error::Code;
+use taos_query::stmt::Bindable;
+use taos_query::util::generate_req_id;
+use taos_ws::{Stmt, Taos};
+
 use super::{TAOS, TAOS_RES};
+use crate::native::error::{TaosError, TaosMaybeError};
+use crate::native::TaosResult;
 
 #[allow(non_camel_case_types)]
 pub type TAOS_STMT = c_void;
@@ -37,12 +44,13 @@ pub struct TAOS_FIELD_E {
 
 #[no_mangle]
 pub extern "C" fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT {
-    todo!()
+    taos_stmt_init_with_reqid(taos, generate_req_id() as _)
 }
 
 #[no_mangle]
 pub extern "C" fn taos_stmt_init_with_reqid(taos: *mut TAOS, reqid: i64) -> *mut TAOS_STMT {
-    todo!()
+    let stmt: TaosMaybeError<Stmt> = unsafe { stmt_init(taos, reqid as _).into() };
+    Box::into_raw(Box::new(stmt)) as _
 }
 
 #[no_mangle]
@@ -187,4 +195,24 @@ pub extern "C" fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int {
 #[no_mangle]
 pub extern "C" fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c_int {
     todo!()
+}
+
+unsafe fn stmt_init(taos: *mut TAOS, reqid: u64) -> TaosResult<Stmt> {
+    let taos = (taos as *mut Taos)
+        .as_mut()
+        .ok_or(TaosError::new(Code::FAILED, "taos is null"))?;
+    Ok(Stmt::init_with_req_id(taos, reqid)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::native::test_connect;
+
+    #[test]
+    fn test_stmt() {
+        let taos = test_connect();
+        let stmt = taos_stmt_init(taos);
+        assert!(!stmt.is_null());
+    }
 }
