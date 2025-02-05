@@ -1479,7 +1479,7 @@ impl RawRes {
 
                         Some(raw)
                     }
-                    tmq_res_t::TMQ_RES_TABLE_META => {
+                    _ => {
                         todo!()
                     }
                 }
