@@ -1,9 +1,12 @@
 use std::ffi::{c_char, c_int, c_ulong, c_void, CStr};
+use std::ptr;
 
 use taos_error::{Code, Error as RawError};
 use taos_query::stmt::Bindable;
 use taos_query::util::generate_req_id;
+use taos_ws::stmt::{StmtField as WsStmtField, WsFieldsable};
 use taos_ws::{Stmt, Taos};
+use tracing::error;
 
 use crate::native::error::{
     clear_error_info, format_errno, set_err_and_get_code, TaosError, TaosMaybeError,
@@ -34,6 +37,7 @@ pub struct TAOS_MULTI_BIND {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub struct TAOS_FIELD_E {
     pub name: [c_char; 65],
@@ -41,6 +45,28 @@ pub struct TAOS_FIELD_E {
     pub precision: u8,
     pub scale: u8,
     pub bytes: i32,
+}
+
+impl From<WsStmtField> for TAOS_FIELD_E {
+    fn from(field: WsStmtField) -> Self {
+        let field_name = field.name.as_str();
+        let mut name = [0 as c_char; 65];
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                field_name.as_ptr(),
+                name.as_mut_ptr() as _,
+                field_name.len(),
+            );
+        };
+
+        Self {
+            name,
+            r#type: field.field_type,
+            precision: field.precision,
+            scale: field.scale,
+            bytes: field.bytes,
+        }
+    }
 }
 
 #[no_mangle]
@@ -103,7 +129,8 @@ pub unsafe extern "C" fn taos_stmt_prepare(
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt_set_tbname_tags(
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt_set_tbname_tags(
     stmt: *mut TAOS_STMT,
     name: *const c_char,
     tags: *mut TAOS_MULTI_BIND,
@@ -128,12 +155,42 @@ pub extern "C" fn taos_stmt_set_sub_tbname(stmt: *mut TAOS_STMT, name: *const c_
 
 #[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn taos_stmt_get_tag_fields(
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt_get_tag_fields(
     stmt: *mut TAOS_STMT,
     fieldNum: *mut c_int,
     fields: *mut *mut TAOS_FIELD_E,
 ) -> c_int {
-    todo!()
+    match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
+        Some(stmt) => match stmt
+            .deref_mut()
+            .ok_or_else(|| RawError::from_string("stmt is null"))
+            .and_then(WsFieldsable::get_tag_fields)
+        {
+            Ok(stmt_fields) => {
+                let taos_fields: Vec<TAOS_FIELD_E> =
+                    stmt_fields.into_iter().map(|f| f.into()).collect();
+
+                *fieldNum = taos_fields.len() as _;
+
+                if taos_fields.is_empty() {
+                    *fields = ptr::null_mut();
+                } else {
+                    *fields = Box::into_raw(taos_fields.into_boxed_slice()) as _;
+                }
+
+                clear_error_info();
+                stmt.with_err(None);
+                0
+            }
+            Err(err) => {
+                error!("get_tag_fields error, err: {err:?}");
+                stmt.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
+            }
+        },
+        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    }
 }
 
 #[no_mangle]
@@ -251,16 +308,25 @@ mod tests {
                     "drop database if exists test_1738740951",
                     "create database test_1738740951",
                     "use test_1738740951",
-                    "create table t0 (ts timestamp, c1 int)",
+                    "create table s0 (ts timestamp, c1 int) tags (t1 int)",
                 ],
             );
 
             let stmt = taos_stmt_init(taos);
             assert!(!stmt.is_null());
 
-            let sql = c"insert into t0 values (?, ?)";
+            let sql = c"insert into d0 using s0 tags (1) values (?, ?)";
             let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
             assert_eq!(code, 0);
+
+            let mut field_num = 0;
+            let mut fields = ptr::null_mut();
+            let code = taos_stmt_get_tag_fields(stmt, &mut field_num, &mut fields);
+            assert_eq!(code, 0);
+            assert_eq!(field_num, 1);
+
+            let fields = Vec::from_raw_parts(fields, field_num as _, field_num as _);
+            println!("fields: {fields:?}");
 
             test_exec(taos, "drop database test_1738740951");
         }
