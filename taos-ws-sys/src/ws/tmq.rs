@@ -85,21 +85,12 @@ impl WsTmqResultSet {
         fields.extend(block.fields().iter().map(WS_FIELD::from));
         let precision = block.precision();
         let table_name = match block.table_name() {
-            Some(name) => match CString::new(name) {
-                Ok(name) => Some(name),
-                Err(_) => None,
-            },
+            Some(name) => CString::new(name).ok(),
             None => None,
         };
 
-        let topic_name = match CString::new(offset.topic()) {
-            Ok(name) => Some(name),
-            Err(_) => None,
-        };
-        let db_name = match CString::new(offset.database()) {
-            Ok(name) => Some(name),
-            Err(_) => None,
-        };
+        let topic_name = CString::new(offset.topic()).ok();
+        let db_name = CString::new(offset.database()).ok();
 
         Self {
             block: Some(block),

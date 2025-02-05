@@ -43,13 +43,13 @@ pub struct TAOS_FIELD_E {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT {
+pub unsafe extern "C" fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT {
     taos_stmt_init_with_reqid(taos, generate_req_id() as _)
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt_init_with_reqid(taos: *mut TAOS, reqid: i64) -> *mut TAOS_STMT {
-    let stmt: TaosMaybeError<Stmt> = unsafe { stmt_init(taos, reqid as _).into() };
+pub unsafe extern "C" fn taos_stmt_init_with_reqid(taos: *mut TAOS, reqid: i64) -> *mut TAOS_STMT {
+    let stmt: TaosMaybeError<Stmt> = stmt_init(taos, reqid as _).into();
     Box::into_raw(Box::new(stmt)) as _
 }
 
@@ -211,8 +211,10 @@ mod tests {
 
     #[test]
     fn test_stmt() {
-        let taos = test_connect();
-        let stmt = taos_stmt_init(taos);
-        assert!(!stmt.is_null());
+        unsafe {
+            let taos = test_connect();
+            let stmt = taos_stmt_init(taos);
+            assert!(!stmt.is_null());
+        }
     }
 }

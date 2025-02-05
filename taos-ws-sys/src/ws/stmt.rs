@@ -621,7 +621,7 @@ impl TaosMultiBind {
                 let v = v.as_ref();
                 unsafe {
                     let dst = buffer.as_mut_ptr().add(buffer_length * i);
-                    std::intrinsics::copy_nonoverlapping(v.as_ptr(), dst, v.len());
+                    std::ptr::copy_nonoverlapping(v.as_ptr(), dst, v.len());
                 }
             }
         }
