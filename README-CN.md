@@ -44,8 +44,13 @@
 
 ## 3. 前置条件
 
-- 已安装 Rust 1.70 及以上版本。
-- 本地已部署 TDengine，具体步骤请参考 [部署服务端](https://docs.taosdata.com/get-started/package/)，且已经启动 taosd 与 taosAdapter。
+1. 已安装 Rust 1.70 及以上版本。
+2. 本地已安装 TDengine，具体步骤请参考 [部署服务端](https://docs.taosdata.com/get-started/package/)。
+3. 修改 `/etc/taos/taos.cfg` 配置文件，添加以下配置：
+   ```text
+   supportVnodes 256
+   ```
+4. 启动 taosd 与 taosAdapter。
 
 ## 4. 构建
 
@@ -59,13 +64,7 @@ cargo build
 
 ### 5.1 运行测试
 
-在运行测试之前，请在 `taos.cfg` 文件中添加以下配置：
-
-```text
-supportVnodes 256
-```
-
-完成配置后，在项目目录下执行以下命令运行测试：
+在项目目录下执行以下命令运行测试：
 
 ```bash
 cargo test
