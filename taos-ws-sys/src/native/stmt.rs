@@ -1,6 +1,8 @@
 use std::ffi::{c_char, c_int, c_ulong, c_void, CStr};
 use std::ptr;
 
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
 use taos_error::{Code, Error as RawError};
 use taos_query::common::{Timestamp, Ty, Value};
 use taos_query::prelude::Itertools;
@@ -507,12 +509,16 @@ pub unsafe extern "C" fn taos_stmt_get_tag_fields(
 
     let taos_fields: Vec<TAOS_FIELD_E> =
         stmt_fields.into_iter().map(|field| field.into()).collect();
+    let len = taos_fields.len();
+    let cap = taos_fields.capacity();
 
-    *fieldNum = taos_fields.len() as _;
+    *fieldNum = len as _;
 
     if !taos_fields.is_empty() {
         *fields = Box::into_raw(taos_fields.into_boxed_slice()) as _;
     }
+
+    STMT_FIELDS_MAP.insert(*fields as usize, (len, cap));
 
     maybe_err.with_err(None);
     clear_error_info();
@@ -548,21 +554,31 @@ pub unsafe extern "C" fn taos_stmt_get_col_fields(
 
     let taos_fields: Vec<TAOS_FIELD_E> =
         stmt_fields.into_iter().map(|field| field.into()).collect();
+    let len = taos_fields.len();
+    let cap = taos_fields.capacity();
 
-    *fieldNum = taos_fields.len() as _;
+    *fieldNum = len as _;
 
     if !taos_fields.is_empty() {
         *fields = Box::into_raw(taos_fields.into_boxed_slice()) as _;
     }
+
+    STMT_FIELDS_MAP.insert(*fields as usize, (len, cap));
 
     maybe_err.with_err(None);
     clear_error_info();
     Code::SUCCESS.into()
 }
 
+static STMT_FIELDS_MAP: Lazy<DashMap<usize, (usize, usize)>> = Lazy::new(DashMap::new);
+
 #[no_mangle]
-pub extern "C" fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_FIELD_E) {
-    todo!()
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_FIELD_E) {
+    if !fields.is_null() {
+        let (_, (len, cap)) = STMT_FIELDS_MAP.remove(&(fields as usize)).unwrap();
+        let _ = Vec::from_raw_parts(fields, len, cap);
+    }
 }
 
 #[no_mangle]
@@ -747,11 +763,15 @@ mod tests {
             assert_eq!(code, 0);
             assert_eq!(field_num, 1);
 
+            taos_stmt_reclaim_fields(stmt, fields);
+
             let mut field_num = 0;
             let mut fields = ptr::null_mut();
             let code = taos_stmt_get_col_fields(stmt, &mut field_num, &mut fields);
             assert_eq!(code, 0);
             assert_eq!(field_num, 2);
+
+            taos_stmt_reclaim_fields(stmt, fields);
 
             test_exec(taos, "drop database test_1738740951");
         }
