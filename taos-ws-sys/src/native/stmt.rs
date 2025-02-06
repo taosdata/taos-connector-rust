@@ -614,13 +614,34 @@ pub unsafe extern "C" fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt_get_param(
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt_get_param(
     stmt: *mut TAOS_STMT,
     idx: c_int,
     r#type: *mut c_int,
     bytes: *mut c_int,
 ) -> c_int {
-    todo!()
+    match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
+        Some(maybe_err) => match maybe_err
+            .deref_mut()
+            .ok_or_else(|| RawError::from_string("data is null"))
+            .and_then(|stmt| stmt.s_get_param(idx as _))
+        {
+            Ok(param) => {
+                *r#type = param.data_type as _;
+                *bytes = param.length as _;
+                maybe_err.with_err(None);
+                clear_error_info();
+                Code::SUCCESS.into()
+            }
+            Err(err) => {
+                error!("taos_stmt_get_param failed, err: {err:?}");
+                maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
+            }
+        },
+        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    }
 }
 
 #[no_mangle]
@@ -804,6 +825,13 @@ mod tests {
             let code = taos_stmt_num_params(stmt, &mut nums);
             assert_eq!(code, 0);
             assert_eq!(nums, 2);
+
+            let mut ty = 0;
+            let mut bytes = 0;
+            let code = taos_stmt_get_param(stmt, 1, &mut ty, &mut bytes);
+            assert_eq!(code, 0);
+            assert_eq!(ty, TSDB_DATA_TYPE_INT as i32);
+            assert_eq!(bytes, 4);
 
             test_exec(taos, "drop database test_1738740951");
         }
