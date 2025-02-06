@@ -13,12 +13,32 @@
 [![LinkedIn](https://img.shields.io/badge/Follow_LinkedIn--white?logo=linkedin&style=social)](https://www.linkedin.com/company/tdengine)
 [![StackOverflow](https://img.shields.io/badge/Ask_StackOverflow--white?logo=stackoverflow&style=social&logoColor=orange)](https://stackoverflow.com/questions/tagged/tdengine)
 
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/taosdata/taos-connector-rust/build.yml)](https://github.com/taosdata/taos-connector-rust/actions/workflows/build.yml)
+[![codecov](https://codecov.io/gh/taosdata/taos-connector-rust/branch/main/graph/badge.svg?token=P11UKNLTVO)](https://codecov.io/gh/taosdata/taos-connector-rust)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/taosdata/taos-connector-rust)
+![GitHub License](https://img.shields.io/github/license/taosdata/taos-connector-rust)
+[![Crates.io](https://img.shields.io/crates/v/taos)](https://crates.io/crates/taos)
+<br />
+[![Twitter Follow](https://img.shields.io/twitter/follow/tdenginedb?label=TDengine&style=social)](https://twitter.com/tdenginedb)
+[![YouTube Channel](https://img.shields.io/badge/Subscribe_@tdengine--white?logo=youtube&style=social)](https://www.youtube.com/@tdengine)
+[![Discord Community](https://img.shields.io/badge/Join_Discord--white?logo=discord&style=social)](https://discord.com/invite/VZdSuUg4pS)
+[![LinkedIn](https://img.shields.io/badge/Follow_LinkedIn--white?logo=linkedin&style=social)](https://www.linkedin.com/company/tdengine)
+[![StackOverflow](https://img.shields.io/badge/Ask_StackOverflow--white?logo=stackoverflow&style=social&logoColor=orange)](https://stackoverflow.com/questions/tagged/tdengine)
+
 English | [简体中文](./README-CN.md)
 
 <!-- omit in toc -->
 ## Table of Contents
 
 - [1. Introduction](#1-introduction)
+- [2. Documentation](#2-documentation)
+- [3. Prerequisites](#3-prerequisites)
+- [4. Build](#4-build)
+- [5. Testing](#5-testing)
+  - [5.1 Test Execution](#51-test-execution)
+  - [5.2 Test Case Addition](#52-test-case-addition)
+  - [5.3 Performance Testing](#53-performance-testing)
+- [6. CI/CD](#6-cicd)
 - [2. Documentation](#2-documentation)
 - [3. Prerequisites](#3-prerequisites)
 - [4. Build](#4-build)
@@ -41,7 +61,13 @@ English | [简体中文](./README-CN.md)
 - To use Rust Connector, please check [Developer Guide](https://docs.taosdata.com/develop/), which includes examples of data writing, data querying, data subscription, modeless writing, and parameter binding.
 - For other reference information, please refer to the [Reference Manual](https://docs.taosdata.com/reference/connector/rust/), which includes version history, data type mapping, sample program summary, API reference, and FAQ.
 - This quick guide is mainly for developers who like to contribute/build/test the Rust connector by themselves. To learn about TDengine, you can visit the [official documentation](https://docs.tdengine.com).
+## 2. Documentation
 
+- To use Rust Connector, please check [Developer Guide](https://docs.taosdata.com/develop/), which includes examples of data writing, data querying, data subscription, modeless writing, and parameter binding.
+- For other reference information, please refer to the [Reference Manual](https://docs.taosdata.com/reference/connector/rust/), which includes version history, data type mapping, sample program summary, API reference, and FAQ.
+- This quick guide is mainly for developers who like to contribute/build/test the Rust connector by themselves. To learn about TDengine, you can visit the [official documentation](https://docs.tdengine.com).
+
+## 3. Prerequisites
 ## 3. Prerequisites
 
 1. Rust 1.70 or above has been installed.
@@ -53,15 +79,19 @@ English | [简体中文](./README-CN.md)
 4. Start taosd and taosAdapter.
 
 ## 4. Build
+## 4. Build
 
 Run the following command in the project directory to build the project:
 
+```bash
 ```bash
 cargo build
 ```
 
 ## 5. Testing
+## 5. Testing
 
+### 5.1 Test Execution
 ### 5.1 Test Execution
 
 Run the test by executing the following command in the project directory:
@@ -178,6 +208,11 @@ Performance testing is under development.
 - [Build Workflow](https://github.com/taosdata/taos-connector-rust/actions/workflows/build.yml)
 - [Code Coverage](https://app.codecov.io/gh/taosdata/taos-connector-rust)
 
+## 6. CI/CD
+
+- [Build Workflow](https://github.com/taosdata/taos-connector-rust/actions/workflows/build.yml)
+- [Code Coverage](https://app.codecov.io/gh/taosdata/taos-connector-rust)
+
 ## 7. Submitting Issues
 
 We welcome the submission of [GitHub Issue](https://github.com/taosdata/taos-connector-rust/issues/new?template=Blank+issue). When submitting, please provide the following information:
@@ -196,6 +231,8 @@ We welcome developers to contribute to this project. When submitting PRs, please
 3. Modify the code, ensure all unit tests pass, and add new unit tests to verify the changes.
 4. Push the changes to the remote branch (`git push origin my_branch`).
 5. Create a Pull Request on GitHub ([how to create a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request)).
+6. After submitting the PR, you can find your PR through the [Pull Request](https://github.com/taosdata/taos-connector-rust/pulls). Click on the corresponding link to see if the CI for your PR has passed. If it has passed, it will display "All checks have passed". Regardless of whether the CI passes or not, you can click "Show all checks" -> "Details" to view the detailed test case logs.
+7. After submitting the PR, if CI passes, you can find your PR on the [codecov](https://app.codecov.io/gh/taosdata/taos-connector-rust/pulls) page to check the test coverage.
 6. After submitting the PR, you can find your PR through the [Pull Request](https://github.com/taosdata/taos-connector-rust/pulls). Click on the corresponding link to see if the CI for your PR has passed. If it has passed, it will display "All checks have passed". Regardless of whether the CI passes or not, you can click "Show all checks" -> "Details" to view the detailed test case logs.
 7. After submitting the PR, if CI passes, you can find your PR on the [codecov](https://app.codecov.io/gh/taosdata/taos-connector-rust/pulls) page to check the test coverage.
 

@@ -13,12 +13,32 @@
 [![LinkedIn](https://img.shields.io/badge/Follow_LinkedIn--white?logo=linkedin&style=social)](https://www.linkedin.com/company/tdengine)
 [![StackOverflow](https://img.shields.io/badge/Ask_StackOverflow--white?logo=stackoverflow&style=social&logoColor=orange)](https://stackoverflow.com/questions/tagged/tdengine)
 
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/taosdata/taos-connector-rust/build.yml)](https://github.com/taosdata/taos-connector-rust/actions/workflows/build.yml)
+[![codecov](https://codecov.io/gh/taosdata/taos-connector-rust/branch/main/graph/badge.svg?token=P11UKNLTVO)](https://codecov.io/gh/taosdata/taos-connector-rust)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/taosdata/taos-connector-rust)
+![GitHub License](https://img.shields.io/github/license/taosdata/taos-connector-rust)
+[![Crates.io](https://img.shields.io/crates/v/taos)](https://crates.io/crates/taos)
+<br />
+[![Twitter Follow](https://img.shields.io/twitter/follow/tdenginedb?label=TDengine&style=social)](https://twitter.com/tdenginedb)
+[![YouTube Channel](https://img.shields.io/badge/Subscribe_@tdengine--white?logo=youtube&style=social)](https://www.youtube.com/@tdengine)
+[![Discord Community](https://img.shields.io/badge/Join_Discord--white?logo=discord&style=social)](https://discord.com/invite/VZdSuUg4pS)
+[![LinkedIn](https://img.shields.io/badge/Follow_LinkedIn--white?logo=linkedin&style=social)](https://www.linkedin.com/company/tdengine)
+[![StackOverflow](https://img.shields.io/badge/Ask_StackOverflow--white?logo=stackoverflow&style=social&logoColor=orange)](https://stackoverflow.com/questions/tagged/tdengine)
+
 简体中文 | [English](./README.md)
 
 <!-- omit in toc -->
 ## 目录
 
 - [1. 简介](#1-简介)
+- [2. 文档](#2-文档)
+- [3. 前置条件](#3-前置条件)
+- [4. 构建](#4-构建)
+- [5. 测试](#5-测试)
+  - [5.1 运行测试](#51-运行测试)
+  - [5.2 添加用例](#52-添加用例)
+  - [5.3 性能测试](#53-性能测试)
+- [6. CI/CD](#6-cicd)
 - [2. 文档](#2-文档)
 - [3. 前置条件](#3-前置条件)
 - [4. 构建](#4-构建)
@@ -41,7 +61,13 @@
 - 使用 Rust Connector，请参考 [开发指南](https://docs.taosdata.com/develop/)，其中包括数据写入、数据查询、数据订阅、无模式写入以及参数绑定等示例。
 - 其它参考信息请看 [参考手册](https://docs.taosdata.com/reference/connector/rust/)，其中包括版本历史、数据类型映射、示例程序汇总、API 参考以及常见问题等内容。
 - 本 README 主要是为想自己贡献、编译、测试 Rust Connector 的开发者写的。如果要学习 TDengine，可以浏览 [官方文档](https://docs.taosdata.com/)。
+## 2. 文档
 
+- 使用 Rust Connector，请参考 [开发指南](https://docs.taosdata.com/develop/)，其中包括数据写入、数据查询、数据订阅、无模式写入以及参数绑定等示例。
+- 其它参考信息请看 [参考手册](https://docs.taosdata.com/reference/connector/rust/)，其中包括版本历史、数据类型映射、示例程序汇总、API 参考以及常见问题等内容。
+- 本 README 主要是为想自己贡献、编译、测试 Rust Connector 的开发者写的。如果要学习 TDengine，可以浏览 [官方文档](https://docs.taosdata.com/)。
+
+## 3. 前置条件
 ## 3. 前置条件
 
 1. 已安装 Rust 1.70 及以上版本。
@@ -53,15 +79,19 @@
 4. 启动 taosd 与 taosAdapter。
 
 ## 4. 构建
+## 4. 构建
 
 在项目目录下运行以下命令以构建项目：
 
+```bash
 ```bash
 cargo build
 ```
 
 ## 5. 测试
+## 5. 测试
 
+### 5.1 运行测试
 ### 5.1 运行测试
 
 在项目目录下执行以下命令运行测试：
@@ -178,6 +208,11 @@ test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fi
 - [Build Workflow](https://github.com/taosdata/taos-connector-rust/actions/workflows/build.yml)
 - [Code Coverage](https://app.codecov.io/gh/taosdata/taos-connector-rust)
 
+## 6. CI/CD
+
+- [Build Workflow](https://github.com/taosdata/taos-connector-rust/actions/workflows/build.yml)
+- [Code Coverage](https://app.codecov.io/gh/taosdata/taos-connector-rust)
+
 ## 7. 提交 Issue
 
 我们欢迎提交 [GitHub Issue](https://github.com/taosdata/taos-connector-rust/issues/new?template=Blank+issue)。提交时请说明下面信息：
@@ -196,6 +231,8 @@ test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fi
 3. 修改代码，保证所有单元测试通过，并增加新的单元测试验证修改。
 4. 提交修改到远端分支 (`git push origin my_branch`)。
 5. 在 GitHub 上创建一个 Pull Request ([how to create a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request))。
+6. 提交 PR 后，可以通过 [Pull Request](https://github.com/taosdata/taos-connector-rust/pulls) 找到自己的 PR，点击对应链接进去可以看到自己 PR CI 是否通过，如果通过会显示 “All checks have passed”。无论 CI 是否通过，都可以点击 “Show all checks” -> “Details” 来查看详细用例日志。
+7. 提交 PR 后，如果 CI 通过，可以在 [codecov](https://app.codecov.io/gh/taosdata/taos-connector-rust/pulls) 页面找到自己 PR，看单测覆盖率。
 6. 提交 PR 后，可以通过 [Pull Request](https://github.com/taosdata/taos-connector-rust/pulls) 找到自己的 PR，点击对应链接进去可以看到自己 PR CI 是否通过，如果通过会显示 “All checks have passed”。无论 CI 是否通过，都可以点击 “Show all checks” -> “Details” 来查看详细用例日志。
 7. 提交 PR 后，如果 CI 通过，可以在 [codecov](https://app.codecov.io/gh/taosdata/taos-connector-rust/pulls) 页面找到自己 PR，看单测覆盖率。
 
