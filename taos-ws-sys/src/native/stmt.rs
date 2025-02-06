@@ -509,7 +509,10 @@ pub unsafe extern "C" fn taos_stmt_get_tag_fields(
         stmt_fields.into_iter().map(|field| field.into()).collect();
 
     *fieldNum = taos_fields.len() as _;
-    *fields = Box::into_raw(taos_fields.into_boxed_slice()) as _;
+
+    if !taos_fields.is_empty() {
+        *fields = Box::into_raw(taos_fields.into_boxed_slice()) as _;
+    }
 
     maybe_err.with_err(None);
     clear_error_info();
@@ -524,27 +527,37 @@ pub unsafe extern "C" fn taos_stmt_get_col_fields(
     fieldNum: *mut c_int,
     fields: *mut *mut TAOS_FIELD_E,
 ) -> c_int {
-    match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-        Some(maybe_err) => match maybe_err
-            .deref_mut()
-            .ok_or_else(|| RawError::from_string("data is null"))
-            .and_then(WsFieldsable::get_col_fields)
-        {
-            Ok(stmt_fields) => {
-                *fieldNum = stmt_fields.len() as _;
-                *fields = Box::into_raw(stmt_fields.into_boxed_slice()) as _;
-                maybe_err.with_err(None);
-                clear_error_info();
-                Code::SUCCESS.into()
-            }
-            Err(err) => {
-                error!("stmt get col fields error, err: {err:?}");
-                maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-                set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
-            }
-        },
-        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    let maybe_err = match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
+        Some(stmt) => stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let stmt = match maybe_err.deref_mut() {
+        Some(stmt) => stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "data is null")),
+    };
+
+    let stmt_fields = match stmt_get_col_fields(stmt) {
+        Ok(fields) => fields,
+        Err(err) => {
+            error!("stmt get col fields error, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            return set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
+        }
+    };
+
+    let taos_fields: Vec<TAOS_FIELD_E> =
+        stmt_fields.into_iter().map(|field| field.into()).collect();
+
+    *fieldNum = taos_fields.len() as _;
+
+    if !taos_fields.is_empty() {
+        *fields = Box::into_raw(taos_fields.into_boxed_slice()) as _;
     }
+
+    maybe_err.with_err(None);
+    clear_error_info();
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
@@ -578,6 +591,7 @@ pub extern "C" fn taos_stmt_bind_param(stmt: *mut TAOS_STMT, bind: *mut TAOS_MUL
 }
 
 #[no_mangle]
+#[tracing::instrument(level = "trace", ret)]
 pub extern "C" fn taos_stmt_bind_param_batch(
     stmt: *mut TAOS_STMT,
     bind: *mut TAOS_MULTI_BIND,
@@ -643,6 +657,14 @@ fn stmt_get_tag_fields(stmt: &mut Stmt) -> TaosResult<&Vec<StmtField>> {
         stmt.with_tag_fields(fields);
     }
     Ok(stmt.tag_fields().unwrap())
+}
+
+fn stmt_get_col_fields(stmt: &mut Stmt) -> TaosResult<&Vec<StmtField>> {
+    if stmt.col_fields().is_none() {
+        let fields = stmt.get_col_fields()?;
+        stmt.with_col_fields(fields);
+    }
+    Ok(stmt.col_fields().unwrap())
 }
 
 unsafe fn stmt_set_tbname_tags(
@@ -725,8 +747,11 @@ mod tests {
             assert_eq!(code, 0);
             assert_eq!(field_num, 1);
 
-            // let fields = Vec::from_raw_parts(fields, field_num as _, field_num as _);
-            // println!("fields: {fields:?}");
+            let mut field_num = 0;
+            let mut fields = ptr::null_mut();
+            let code = taos_stmt_get_col_fields(stmt, &mut field_num, &mut fields);
+            assert_eq!(code, 0);
+            assert_eq!(field_num, 2);
 
             test_exec(taos, "drop database test_1738740951");
         }
