@@ -66,11 +66,11 @@ impl Bindable<super::Taos> for Stmt {
     }
 
     fn execute(&mut self) -> RawResult<usize> {
-        self.raw.execute().map_err(Into::into)
+        self.raw.execute()
     }
 
     fn result_set(&mut self) -> RawResult<<super::Taos as Queryable>::ResultSet> {
-        self.raw.use_result().map_err(Into::into)
+        self.raw.use_result()
     }
 
     fn affected_rows(&self) -> usize {
@@ -126,11 +126,11 @@ impl AsyncBindable<super::Taos> for Stmt {
     }
 
     async fn execute(&mut self) -> RawResult<usize> {
-        self.raw.execute().map_err(Into::into)
+        self.raw.execute()
     }
 
     async fn result_set(&mut self) -> RawResult<<super::Taos as Queryable>::ResultSet> {
-        self.raw.use_result().map_err(Into::into)
+        self.raw.use_result()
     }
 
     async fn affected_rows(&self) -> usize {

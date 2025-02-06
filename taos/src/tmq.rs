@@ -256,14 +256,10 @@ impl taos_query::tmq::IsAsyncMeta for Meta {
     async fn as_raw_meta(&self) -> RawResult<RawMeta> {
         match &self.0 {
             MetaInner::Native(data) => {
-                <crate::sys::tmq::Meta as taos_query::tmq::IsAsyncMeta>::as_raw_meta(data)
-                    .await
-                    .map_err(Into::into)
+                <crate::sys::tmq::Meta as taos_query::tmq::IsAsyncMeta>::as_raw_meta(data).await
             }
             MetaInner::Ws(data) => {
-                <taos_ws::consumer::Meta as taos_query::tmq::IsAsyncMeta>::as_raw_meta(data)
-                    .await
-                    .map_err(Into::into)
+                <taos_ws::consumer::Meta as taos_query::tmq::IsAsyncMeta>::as_raw_meta(data).await
             }
         }
     }
@@ -271,14 +267,10 @@ impl taos_query::tmq::IsAsyncMeta for Meta {
     async fn as_json_meta(&self) -> RawResult<taos_query::common::JsonMeta> {
         match &self.0 {
             MetaInner::Native(data) => {
-                <crate::sys::tmq::Meta as taos_query::tmq::IsAsyncMeta>::as_json_meta(data)
-                    .await
-                    .map_err(Into::into)
+                <crate::sys::tmq::Meta as taos_query::tmq::IsAsyncMeta>::as_json_meta(data).await
             }
             MetaInner::Ws(data) => {
-                <taos_ws::consumer::Meta as taos_query::tmq::IsAsyncMeta>::as_json_meta(data)
-                    .await
-                    .map_err(Into::into)
+                <taos_ws::consumer::Meta as taos_query::tmq::IsAsyncMeta>::as_json_meta(data).await
             }
         }
     }
@@ -289,14 +281,10 @@ impl taos_query::tmq::IsAsyncData for Data {
     async fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
         match &self.0 {
             DataInner::Native(data) => {
-                <crate::sys::tmq::Data as taos_query::tmq::IsAsyncData>::as_raw_data(data)
-                    .await
-                    .map_err(Into::into)
+                <crate::sys::tmq::Data as taos_query::tmq::IsAsyncData>::as_raw_data(data).await
             }
             DataInner::Ws(data) => {
-                <taos_ws::consumer::Data as taos_query::tmq::IsAsyncData>::as_raw_data(data)
-                    .await
-                    .map_err(Into::into)
+                <taos_ws::consumer::Data as taos_query::tmq::IsAsyncData>::as_raw_data(data).await
             }
         }
     }
@@ -304,14 +292,11 @@ impl taos_query::tmq::IsAsyncData for Data {
     async fn fetch_raw_block(&self) -> RawResult<Option<taos_query::RawBlock>> {
         match &self.0 {
             DataInner::Native(data) => {
-                <crate::sys::tmq::Data as taos_query::tmq::IsAsyncData>::fetch_raw_block(data)
-                    .await
-                    .map_err(Into::into)
+                <crate::sys::tmq::Data as taos_query::tmq::IsAsyncData>::fetch_raw_block(data).await
             }
             DataInner::Ws(data) => {
                 <taos_ws::consumer::Data as taos_query::tmq::IsAsyncData>::fetch_raw_block(data)
                     .await
-                    .map_err(Into::into)
             }
         }
     }
@@ -340,14 +325,10 @@ impl AsAsyncConsumer for Consumer {
     ) -> RawResult<()> {
         match &mut self.0 {
             ConsumerInner::Native(c) => {
-                <crate::sys::Consumer as AsAsyncConsumer>::subscribe(c, topics)
-                    .await
-                    .map_err(Into::into)
+                <crate::sys::Consumer as AsAsyncConsumer>::subscribe(c, topics).await
             }
             ConsumerInner::Ws(c) => {
-                <taos_ws::consumer::Consumer as AsAsyncConsumer>::subscribe(c, topics)
-                    .await
-                    .map_err(Into::into)
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::subscribe(c, topics).await
             }
         }
     }
@@ -371,7 +352,6 @@ impl AsAsyncConsumer for Consumer {
             ConsumerInner::Native(c) => {
                 <crate::sys::Consumer as AsAsyncConsumer>::recv_timeout(c, timeout)
                     .await
-                    .map_err(Into::into)
                     .map(|msg| {
                         msg.map(|(offset, msg)| {
                             (
@@ -395,7 +375,6 @@ impl AsAsyncConsumer for Consumer {
             ConsumerInner::Ws(c) => {
                 <taos_ws::consumer::Consumer as AsAsyncConsumer>::recv_timeout(c, timeout)
                     .await
-                    .map_err(Into::into)
                     .map(|msg| {
                         msg.map(|(offset, msg)| {
                             (
@@ -425,17 +404,13 @@ impl AsAsyncConsumer for Consumer {
         match &self.0 {
             ConsumerInner::Native(c) => match offset.0 {
                 OffsetInner::Native(offset) => {
-                    <crate::sys::Consumer as AsAsyncConsumer>::commit(c, offset)
-                        .await
-                        .map_err(Into::into)
+                    <crate::sys::Consumer as AsAsyncConsumer>::commit(c, offset).await
                 }
                 OffsetInner::Ws(_) => unreachable!(),
             },
             ConsumerInner::Ws(c) => match offset.0 {
                 OffsetInner::Ws(offset) => {
-                    <taos_ws::consumer::Consumer as AsAsyncConsumer>::commit(c, offset)
-                        .await
-                        .map_err(Into::into)
+                    <taos_ws::consumer::Consumer as AsAsyncConsumer>::commit(c, offset).await
                 }
                 OffsetInner::Native(_) => unreachable!(),
             },
@@ -444,41 +419,39 @@ impl AsAsyncConsumer for Consumer {
 
     async fn commit_all(&self) -> RawResult<()> {
         match &self.0 {
-            ConsumerInner::Native(c) => <crate::sys::Consumer as AsAsyncConsumer>::commit_all(c)
-                .await
-                .map_err(Into::into),
-            ConsumerInner::Ws(c) => <taos_ws::consumer::Consumer as AsAsyncConsumer>::commit_all(c)
-                .await
-                .map_err(Into::into),
+            ConsumerInner::Native(c) => {
+                <crate::sys::Consumer as AsAsyncConsumer>::commit_all(c).await
+            }
+            ConsumerInner::Ws(c) => {
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::commit_all(c).await
+            }
         }
     }
 
     async fn commit_offset(&self, topic: &str, vgroup_id: VGroupId, offset: i64) -> RawResult<()> {
         match &self.0 {
-            ConsumerInner::Native(c) => <crate::sys::Consumer as AsAsyncConsumer>::commit_offset(
-                c, topic, vgroup_id, offset,
-            )
-            .await
-            .map_err(Into::into),
+            ConsumerInner::Native(c) => {
+                <crate::sys::Consumer as AsAsyncConsumer>::commit_offset(
+                    c, topic, vgroup_id, offset,
+                )
+                .await
+            }
             ConsumerInner::Ws(c) => {
                 <taos_ws::consumer::Consumer as AsAsyncConsumer>::commit_offset(
                     c, topic, vgroup_id, offset,
                 )
                 .await
-                .map_err(Into::into)
             }
         }
     }
 
     async fn list_topics(&self) -> RawResult<Vec<String>> {
         match &self.0 {
-            ConsumerInner::Native(c) => <crate::sys::Consumer as AsAsyncConsumer>::list_topics(c)
-                .await
-                .map_err(Into::into),
+            ConsumerInner::Native(c) => {
+                <crate::sys::Consumer as AsAsyncConsumer>::list_topics(c).await
+            }
             ConsumerInner::Ws(c) => {
-                <taos_ws::consumer::Consumer as AsAsyncConsumer>::list_topics(c)
-                    .await
-                    .map_err(Into::into)
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::list_topics(c).await
             }
         }
     }
@@ -515,27 +488,24 @@ impl AsAsyncConsumer for Consumer {
             ConsumerInner::Native(c) => {
                 <crate::sys::Consumer as AsAsyncConsumer>::offset_seek(c, topic, vgroup_id, offset)
                     .await
-                    .map_err(Into::into)
             }
-            ConsumerInner::Ws(c) => <taos_ws::consumer::Consumer as AsAsyncConsumer>::offset_seek(
-                c, topic, vgroup_id, offset,
-            )
-            .await
-            .map_err(Into::into),
+            ConsumerInner::Ws(c) => {
+                <taos_ws::consumer::Consumer as AsAsyncConsumer>::offset_seek(
+                    c, topic, vgroup_id, offset,
+                )
+                .await
+            }
         }
     }
 
     async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
         match &self.0 {
             ConsumerInner::Native(c) => {
-                <crate::sys::Consumer as AsAsyncConsumer>::committed(c, topic, vgroup_id)
-                    .await
-                    .map_err(Into::into)
+                <crate::sys::Consumer as AsAsyncConsumer>::committed(c, topic, vgroup_id).await
             }
             ConsumerInner::Ws(c) => {
                 <taos_ws::consumer::Consumer as AsAsyncConsumer>::committed(c, topic, vgroup_id)
                     .await
-                    .map_err(Into::into)
             }
         }
     }
@@ -543,14 +513,11 @@ impl AsAsyncConsumer for Consumer {
     async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
         match &self.0 {
             ConsumerInner::Native(c) => {
-                <crate::sys::Consumer as AsAsyncConsumer>::position(c, topic, vgroup_id)
-                    .await
-                    .map_err(Into::into)
+                <crate::sys::Consumer as AsAsyncConsumer>::position(c, topic, vgroup_id).await
             }
             ConsumerInner::Ws(c) => {
                 <taos_ws::consumer::Consumer as AsAsyncConsumer>::position(c, topic, vgroup_id)
                     .await
-                    .map_err(Into::into)
             }
         }
     }
