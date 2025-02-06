@@ -589,8 +589,28 @@ pub unsafe extern "C" fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut 
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_int {
-    todo!()
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_int {
+    match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
+        Some(maybe_err) => match maybe_err
+            .deref_mut()
+            .ok_or_else(|| RawError::from_string("data is null"))
+            .and_then(Stmt::s_num_params)
+        {
+            Ok(num) => {
+                *nums = num as _;
+                maybe_err.with_err(None);
+                clear_error_info();
+                Code::SUCCESS.into()
+            }
+            Err(err) => {
+                error!("taos_stmt_num_params failed, err: {err:?}");
+                maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
+            }
+        },
+        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    }
 }
 
 #[no_mangle]
@@ -779,6 +799,11 @@ mod tests {
             let code = taos_stmt_is_insert(stmt, &mut insert);
             assert_eq!(code, 0);
             assert_eq!(insert, 1);
+
+            let mut nums = 0;
+            let code = taos_stmt_num_params(stmt, &mut nums);
+            assert_eq!(code, 0);
+            assert_eq!(nums, 2);
 
             test_exec(taos, "drop database test_1738740951");
         }
