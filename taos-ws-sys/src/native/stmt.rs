@@ -651,11 +651,43 @@ pub extern "C" fn taos_stmt_bind_param(stmt: *mut TAOS_STMT, bind: *mut TAOS_MUL
 
 #[no_mangle]
 #[tracing::instrument(level = "trace", ret)]
-pub extern "C" fn taos_stmt_bind_param_batch(
+pub unsafe extern "C" fn taos_stmt_bind_param_batch(
     stmt: *mut TAOS_STMT,
     bind: *mut TAOS_MULTI_BIND,
 ) -> c_int {
-    todo!()
+    let maybe_err = match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let stmt = match maybe_err.deref_mut() {
+        Some(stmt) => stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "data is null")),
+    };
+
+    let fields = match stmt_get_col_fields(stmt) {
+        Ok(fields) => fields,
+        Err(err) => {
+            error!("stmt_get_col_fields failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            return set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
+        }
+    };
+
+    let cols = std::slice::from_raw_parts(bind, fields.len())
+        .iter()
+        .map(TAOS_MULTI_BIND::to_json)
+        .collect();
+
+    if let Err(err) = taos_query::block_in_place_or_global(stmt.stmt_bind(cols)) {
+        error!("taos_stmt_bind_param_batch failed, err: {err:?}");
+        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+        return set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
+    }
+
+    maybe_err.with_err(None);
+    clear_error_info();
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
@@ -776,15 +808,12 @@ mod tests {
             assert_eq!(code, 0);
 
             let name = c"d0";
-            let buffer = vec![1];
-            let length = vec![4];
-            let is_null = vec![0];
             let mut tags = vec![TAOS_MULTI_BIND {
                 buffer_type: TSDB_DATA_TYPE_INT as _,
-                buffer: buffer.as_ptr() as _,
+                buffer: vec![1].as_ptr() as _,
                 buffer_length: 4,
-                length: length.as_ptr() as _,
-                is_null: is_null.as_ptr() as _,
+                length: vec![4].as_ptr() as _,
+                is_null: vec![0].as_ptr() as _,
                 num: 1,
             }];
 
@@ -832,6 +861,28 @@ mod tests {
             assert_eq!(code, 0);
             assert_eq!(ty, TSDB_DATA_TYPE_INT as i32);
             assert_eq!(bytes, 4);
+
+            let mut cols = vec![
+                TAOS_MULTI_BIND {
+                    buffer_type: TSDB_DATA_TYPE_TIMESTAMP as _,
+                    buffer: vec![1738851511134i64].as_ptr() as _,
+                    buffer_length: 8,
+                    length: vec![8].as_ptr() as _,
+                    is_null: vec![0].as_ptr() as _,
+                    num: 1,
+                },
+                TAOS_MULTI_BIND {
+                    buffer_type: TSDB_DATA_TYPE_INT as _,
+                    buffer: vec![2].as_ptr() as _,
+                    buffer_length: 4,
+                    length: vec![4].as_ptr() as _,
+                    is_null: vec![0].as_ptr() as _,
+                    num: 1,
+                },
+            ];
+
+            let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
+            assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1738740951");
         }
