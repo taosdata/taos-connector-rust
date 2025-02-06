@@ -1,7 +1,7 @@
 use std::ffi::{c_char, c_int, c_ulong, c_void, CStr};
 use std::ptr;
 
-use taos_error::{Code, Error as RawError};
+use taos_error::Code;
 use taos_query::stmt::Bindable;
 use taos_query::util::generate_req_id;
 use taos_ws::stmt::{StmtField as WsStmtField, WsFieldsable};
@@ -47,8 +47,8 @@ pub struct TAOS_FIELD_E {
     pub bytes: i32,
 }
 
-impl From<WsStmtField> for TAOS_FIELD_E {
-    fn from(field: WsStmtField) -> Self {
+impl From<&WsStmtField> for TAOS_FIELD_E {
+    fn from(field: &WsStmtField) -> Self {
         let field_name = field.name.as_str();
         let mut name = [0 as c_char; 65];
         unsafe {
@@ -97,35 +97,46 @@ pub unsafe extern "C" fn taos_stmt_prepare(
     sql: *const c_char,
     length: c_ulong,
 ) -> c_int {
-    match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-        Some(stmt) => {
-            let sql = if length > 0 {
-                std::str::from_utf8_unchecked(std::slice::from_raw_parts(sql as _, length as _))
-            } else {
-                CStr::from_ptr(sql).to_str().expect(
-                    "taos_stmt_prepare with a sql len 0 means the input should always be valid utf-8",
-                )
-            };
+    let maybe_err = match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
+        Some(stmt) => stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
 
-            if let Some(no) = stmt.errno() {
-                return format_errno(no);
-            }
-
-            if let Err(err) = stmt
-                .deref_mut()
-                .ok_or_else(|| RawError::from_string("stmt is null"))
-                .and_then(|stmt| stmt.prepare(sql))
-            {
-                stmt.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-                set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
-            } else {
-                stmt.with_err(None);
-                clear_error_info();
-                Code::SUCCESS.into()
-            }
-        }
-        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    if let Some(errno) = maybe_err.errno() {
+        return format_errno(errno);
     }
+
+    let stmt = match maybe_err.deref_mut() {
+        Some(stmt) => stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "data is null")),
+    };
+
+    let sql = if length > 0 {
+        std::str::from_utf8_unchecked(std::slice::from_raw_parts(sql as _, length as _))
+    } else {
+        CStr::from_ptr(sql).to_str().expect(
+            "taos_stmt_prepare with a sql len 0 means the input should always be valid utf-8",
+        )
+    };
+
+    if let Err(err) = stmt.prepare(sql) {
+        error!("stmt prepare error, err: {err:?}");
+        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+        return set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
+    }
+
+    match stmt.get_tag_fields() {
+        Ok(fields) => stmt.with_tag_fields(fields),
+        Err(err) => {
+            error!("get_tag_fields error, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            return set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
+        }
+    }
+
+    maybe_err.with_err(None);
+    clear_error_info();
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
@@ -161,36 +172,32 @@ pub unsafe extern "C" fn taos_stmt_get_tag_fields(
     fieldNum: *mut c_int,
     fields: *mut *mut TAOS_FIELD_E,
 ) -> c_int {
-    match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-        Some(stmt) => match stmt
-            .deref_mut()
-            .ok_or_else(|| RawError::from_string("stmt is null"))
-            .and_then(WsFieldsable::get_tag_fields)
-        {
-            Ok(stmt_fields) => {
-                let taos_fields: Vec<TAOS_FIELD_E> =
-                    stmt_fields.into_iter().map(|f| f.into()).collect();
+    let maybe_err = match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
+        Some(stmt) => stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
 
-                *fieldNum = taos_fields.len() as _;
+    let stmt = match maybe_err.deref_mut() {
+        Some(stmt) => stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "data is null")),
+    };
 
-                if taos_fields.is_empty() {
-                    *fields = ptr::null_mut();
-                } else {
-                    *fields = Box::into_raw(taos_fields.into_boxed_slice()) as _;
-                }
+    match stmt.tag_fields() {
+        Some(stmt_fields) => {
+            let taos_fields: Vec<TAOS_FIELD_E> =
+                stmt_fields.into_iter().map(|field| field.into()).collect();
+            *fieldNum = taos_fields.len() as _;
+            *fields = Box::into_raw(taos_fields.into_boxed_slice()) as _;
+        }
+        None => {
+            *fieldNum = 0;
+            *fields = ptr::null_mut();
+        }
+    };
 
-                clear_error_info();
-                stmt.with_err(None);
-                0
-            }
-            Err(err) => {
-                error!("get_tag_fields error, err: {err:?}");
-                stmt.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-                set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
-            }
-        },
-        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    }
+    maybe_err.with_err(None);
+    clear_error_info();
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
