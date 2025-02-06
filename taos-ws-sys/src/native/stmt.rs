@@ -582,8 +582,10 @@ pub unsafe extern "C" fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: 
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int {
-    todo!()
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int {
+    *insert = 1;
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
@@ -772,6 +774,11 @@ mod tests {
             assert_eq!(field_num, 2);
 
             taos_stmt_reclaim_fields(stmt, fields);
+
+            let mut insert = 0;
+            let code = taos_stmt_is_insert(stmt, &mut insert);
+            assert_eq!(code, 0);
+            assert_eq!(insert, 1);
 
             test_exec(taos, "drop database test_1738740951");
         }
