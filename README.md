@@ -44,8 +44,13 @@ English | [简体中文](./README-CN.md)
 
 ## 3. Prerequisites
 
-- Rust 1.70 or above has been installed.
-- TDengine has been deployed locally. For specific steps, please refer to [Deploy TDengine](https://docs.tdengine.com/get-started/deploy-from-package/), and taosd and taosAdapter have been started.
+1. Rust 1.78 or above has been installed. The latest version is recommended.
+2. TDengine has been installed locally. For specific steps, please refer to [Deploy TDengine](https://docs.tdengine.com/get-started/deploy-from-package/).
+3. Modify the `/etc/taos/taos.cfg` configuration file and add the following configuration:
+   ```text
+   supportVnodes 256
+   ```
+4. Start taosd and taosAdapter.
 
 ## 4. Build
 
@@ -59,13 +64,7 @@ cargo build
 
 ### 5.1 Test Execution
 
-Before running the test, please add the following configuration to the `taos.cfg` file:
-
-```text
-supportVnodes 256
-```
-
-After completing the configuration, execute the following command in the project directory to run the test:
+Run the test by executing the following command in the project directory:
 
 ```bash
 cargo test
