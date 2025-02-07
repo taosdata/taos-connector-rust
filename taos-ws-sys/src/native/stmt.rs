@@ -701,8 +701,24 @@ pub extern "C" fn taos_stmt_bind_single_param_batch(
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
-    todo!()
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
+    match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
+        Some(maybe_err) => {
+            if let Err(err) = maybe_err
+                .deref_mut()
+                .ok_or_else(|| RawError::from_string("data is null"))
+                .and_then(|stmt| stmt.add_batch())
+            {
+                error!("taos_stmt_add_batch failed, err: {err:?}");
+                maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
+            } else {
+                Code::SUCCESS.into()
+            }
+        }
+        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    }
 }
 
 #[no_mangle]
@@ -882,6 +898,9 @@ mod tests {
             ];
 
             let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
+            assert_eq!(code, 0);
+
+            let code = taos_stmt_add_batch(stmt);
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1738740951");
