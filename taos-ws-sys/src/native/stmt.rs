@@ -848,8 +848,15 @@ pub unsafe extern "C" fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *mut c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int {
-    todo!()
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int {
+    match (stmt as *mut TaosMaybeError<Stmt>)
+        .as_mut()
+        .and_then(|maybe_err| maybe_err.deref_mut())
+    {
+        Some(stmt) => stmt.affected_rows() as _,
+        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    }
 }
 
 #[no_mangle]
@@ -991,6 +998,9 @@ mod tests {
 
             let errstr = taos_stmt_errstr(stmt);
             assert_eq!(CStr::from_ptr(errstr), c"");
+
+            let affected_rows = taos_stmt_affected_rows(stmt);
+            assert_eq!(affected_rows, 1);
 
             let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
