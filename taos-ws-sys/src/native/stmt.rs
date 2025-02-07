@@ -13,7 +13,7 @@ use taos_ws::{Stmt, Taos};
 use tracing::error;
 
 use crate::native::error::{
-    clear_error_info, format_errno, set_err_and_get_code, TaosError, TaosMaybeError,
+    clear_error_info, format_errno, set_err_and_get_code, taos_errstr, TaosError, TaosMaybeError,
 };
 use crate::native::{TaosResult, TAOS, TAOS_RES};
 
@@ -842,8 +842,9 @@ pub unsafe extern "C" fn taos_stmt_close(stmt: *mut TAOS_STMT) -> c_int {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *mut c_char {
-    todo!()
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *mut c_char {
+    taos_errstr(stmt as _) as _
 }
 
 #[no_mangle]
@@ -987,6 +988,9 @@ mod tests {
 
             let code = taos_stmt_execute(stmt);
             assert_eq!(code, 0);
+
+            let errstr = taos_stmt_errstr(stmt);
+            assert_eq!(CStr::from_ptr(errstr), c"");
 
             let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
