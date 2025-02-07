@@ -289,6 +289,94 @@ impl TAOS_MULTI_BIND {
     }
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
+impl TAOS_MULTI_BIND {
+    fn from_primitives<T: taos_query::common::itypes::IValue>(
+        nulls: &[bool],
+        values: &[T],
+    ) -> Self {
+        Self {
+            buffer_type: T::TY as _,
+            buffer: values.as_ptr() as _,
+            buffer_length: std::mem::size_of::<T>(),
+            length: values.len() as _,
+            is_null: nulls.as_ptr() as _,
+            num: values.len() as _,
+        }
+    }
+
+    fn from_raw_timestamps(nulls: &[bool], values: &[i64]) -> Self {
+        Self {
+            buffer_type: Ty::Timestamp as _,
+            buffer: values.as_ptr() as _,
+            buffer_length: std::mem::size_of::<i64>(),
+            length: values.len() as _,
+            is_null: nulls.as_ptr() as _,
+            num: values.len() as _,
+        }
+    }
+
+    fn from_binary_vec(values: &[Option<impl AsRef<[u8]>>]) -> Self {
+        let mut buf_len = 0;
+        let num = values.len();
+
+        let mut nulls = std::mem::ManuallyDrop::new(Vec::with_capacity(num));
+        nulls.resize(num, false);
+
+        let mut len = std::mem::ManuallyDrop::new(Vec::with_capacity(num));
+        for (i, v) in values.iter().enumerate() {
+            match v {
+                Some(v) => {
+                    let v = v.as_ref();
+                    len.push(v.len() as _);
+                    if v.len() > buf_len {
+                        buf_len = v.len();
+                    }
+                }
+                None => {
+                    len.push(-1);
+                    nulls[i] = true;
+                }
+            }
+        }
+
+        let buf_size = buf_len * values.len();
+        let mut buf = std::mem::ManuallyDrop::new(Vec::with_capacity(buf_size));
+        unsafe { buf.set_len(buf_size) };
+        buf.fill(0);
+
+        for (i, v) in values.iter().enumerate() {
+            if let Some(v) = v {
+                let v = v.as_ref();
+                unsafe {
+                    let dst = buf.as_mut_ptr().add(buf_len * i);
+                    std::ptr::copy_nonoverlapping(v.as_ptr(), dst, v.len());
+                }
+            }
+        }
+
+        Self {
+            buffer_type: Ty::VarChar as _,
+            buffer: buf.as_ptr() as _,
+            buffer_length: buf_len,
+            length: len.as_ptr() as _,
+            is_null: nulls.as_ptr() as _,
+            num: num as _,
+        }
+    }
+
+    fn from_string_vec(values: &[Option<impl AsRef<str>>]) -> Self {
+        let values: Vec<_> = values
+            .iter()
+            .map(|f| f.as_ref().map(|s| s.as_ref().as_bytes()))
+            .collect();
+        let mut bind = Self::from_binary_vec(&values);
+        bind.buffer_type = Ty::NChar as _;
+        bind
+    }
+}
+
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
@@ -722,8 +810,23 @@ pub unsafe extern "C" fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
-    todo!()
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
+    match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
+        Some(maybe_err) => match maybe_err
+            .deref_mut()
+            .ok_or_else(|| RawError::from_string("data is null"))
+            .and_then(Bindable::execute)
+        {
+            Ok(_) => Code::SUCCESS.into(),
+            Err(err) => {
+                error!("taos_stmt_execute failed, err: {err:?}");
+                maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
+            }
+        },
+        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    }
 }
 
 #[no_mangle]
@@ -824,15 +927,7 @@ mod tests {
             assert_eq!(code, 0);
 
             let name = c"d0";
-            let mut tags = vec![TAOS_MULTI_BIND {
-                buffer_type: TSDB_DATA_TYPE_INT as _,
-                buffer: vec![1].as_ptr() as _,
-                buffer_length: 4,
-                length: vec![4].as_ptr() as _,
-                is_null: vec![0].as_ptr() as _,
-                num: 1,
-            }];
-
+            let mut tags = vec![TAOS_MULTI_BIND::from_primitives(&[false], &[99])];
             let code = taos_stmt_set_tbname_tags(stmt, name.as_ptr(), tags.as_mut_ptr());
             assert_eq!(code, 0);
 
@@ -879,28 +974,16 @@ mod tests {
             assert_eq!(bytes, 4);
 
             let mut cols = vec![
-                TAOS_MULTI_BIND {
-                    buffer_type: TSDB_DATA_TYPE_TIMESTAMP as _,
-                    buffer: vec![1738851511134i64].as_ptr() as _,
-                    buffer_length: 8,
-                    length: vec![8].as_ptr() as _,
-                    is_null: vec![0].as_ptr() as _,
-                    num: 1,
-                },
-                TAOS_MULTI_BIND {
-                    buffer_type: TSDB_DATA_TYPE_INT as _,
-                    buffer: vec![2].as_ptr() as _,
-                    buffer_length: 4,
-                    length: vec![4].as_ptr() as _,
-                    is_null: vec![0].as_ptr() as _,
-                    num: 1,
-                },
+                TAOS_MULTI_BIND::from_raw_timestamps(&[false], &[1738910658659i64]),
+                TAOS_MULTI_BIND::from_primitives(&[false], &[20]),
             ];
-
             let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
             assert_eq!(code, 0);
 
             let code = taos_stmt_add_batch(stmt);
+            assert_eq!(code, 0);
+
+            let code = taos_stmt_execute(stmt);
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1738740951");
