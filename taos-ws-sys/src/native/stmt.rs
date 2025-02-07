@@ -835,8 +835,10 @@ pub extern "C" fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS_RES {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt_close(stmt: *mut TAOS_STMT) -> c_int {
-    todo!()
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt_close(stmt: *mut TAOS_STMT) -> c_int {
+    let _ = Box::from_raw(stmt as *mut TaosMaybeError<Stmt>);
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
@@ -984,6 +986,9 @@ mod tests {
             assert_eq!(code, 0);
 
             let code = taos_stmt_execute(stmt);
+            assert_eq!(code, 0);
+
+            let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1738740951");
