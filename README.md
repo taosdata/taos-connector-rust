@@ -44,7 +44,7 @@ English | [简体中文](./README-CN.md)
 
 ## 3. Prerequisites
 
-1. Rust 1.70 or above has been installed.
+1. Rust 1.78 or above has been installed. The latest version is recommended.
 2. TDengine has been installed locally. For specific steps, please refer to [Deploy TDengine](https://docs.tdengine.com/get-started/deploy-from-package/).
 3. Modify the `/etc/taos/taos.cfg` configuration file and add the following configuration:
    ```text

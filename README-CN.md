@@ -44,7 +44,7 @@
 
 ## 3. 前置条件
 
-1. 已安装 Rust 1.70 及以上版本。
+1. 已安装 Rust 1.78 及以上版本，建议使用最新版本。
 2. 本地已安装 TDengine，具体步骤请参考 [部署服务端](https://docs.taosdata.com/get-started/package/)。
 3. 修改 `/etc/taos/taos.cfg` 配置文件，添加以下配置：
    ```text
