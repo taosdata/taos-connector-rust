@@ -509,7 +509,6 @@ impl ApiEntry {
         Self::dlopen(path)
     }
 
-    #[allow(non_snake_case)]
     pub fn dlopen<S>(path: S) -> Result<Self, dlopen2::Error>
     where
         S: AsRef<Path>,
