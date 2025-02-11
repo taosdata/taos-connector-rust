@@ -1,9 +1,7 @@
 #![allow(unused_variables)]
 
-use std::ffi::{c_char, c_int, c_ulong, c_void};
+use std::ffi::{c_char, c_int, c_void};
 
-use crate::native::query::__taos_async_fn_t;
-use crate::native::stmt::TAOS_FIELD_E;
 use crate::native::tmq::tmq_t;
 use crate::native::{TAOS, TAOS_FIELD, TAOS_RES};
 
@@ -189,39 +187,6 @@ pub extern "C" fn taos_set_config(config: *const c_char) -> setConfRet {
     todo!("taos_set_config");
 }
 
-#[allow(non_camel_case_types)]
-pub type TAOS_STMT2 = c_void;
-
-#[repr(C)]
-#[allow(non_snake_case)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_STMT2_OPTION {
-    pub reqid: i64,
-    pub singleStbInsert: bool,
-    pub singleTableBindOnce: bool,
-    pub asyncExecFn: __taos_async_fn_t,
-    pub userdata: *mut c_void,
-}
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_STMT2_BIND {
-    pub buffer_type: i32,
-    pub buffer: *mut c_void,
-    pub length: *mut i32,
-    pub is_null: *mut c_char,
-    pub num: i32,
-}
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_STMT2_BINDV {
-    pub count: i32,
-    pub tbnames: *mut *mut c_char,
-    pub tags: *mut *mut TAOS_STMT2_BIND,
-    pub bind_cols: *mut *mut TAOS_STMT2_BIND,
-}
-
 #[repr(C)]
 #[allow(non_camel_case_types)]
 pub enum TAOS_FIELD_T {
@@ -240,86 +205,6 @@ pub struct TAOS_FIELD_STB {
     pub scale: u8,
     pub bytes: i32,
     pub field_type: u8,
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_init(
-    taos: *mut TAOS,
-    option: *mut TAOS_STMT2_OPTION,
-) -> *mut TAOS_STMT2 {
-    todo!("taos_stmt2_init");
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_prepare(
-    stmt: *mut TAOS_STMT2,
-    sql: *const c_char,
-    length: c_ulong,
-) -> i32 {
-    todo!("taos_stmt2_prepare");
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_bind_param(
-    stmt: *mut TAOS_STMT2,
-    bindv: *mut TAOS_STMT2_BINDV,
-    col_idx: i32,
-) -> i32 {
-    todo!("taos_stmt2_bind_param");
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_exec(stmt: *mut TAOS_STMT2, affected_rows: *mut i32) -> i32 {
-    todo!("taos_stmt2_exec");
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> i32 {
-    todo!("taos_stmt2_close");
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mut i32) -> i32 {
-    todo!("taos_stmt2_is_insert");
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_RES {
-    todo!("taos_stmt2_result");
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_error(stmt: *mut TAOS_STMT2) -> *const c_char {
-    todo!("taos_stmt2_error");
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_get_fields(
-    stmt: *mut TAOS_STMT2,
-    field_type: TAOS_FIELD_T,
-    count: *mut i32,
-    fields: *mut *mut TAOS_FIELD_E,
-) -> i32 {
-    todo!("taos_stmt2_get_fields")
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_get_stb_fields(
-    stmt: *mut TAOS_STMT2,
-    count: *mut i32,
-    fields: *mut *mut TAOS_FIELD_STB,
-) -> i32 {
-    todo!("taos_stmt2_get_stb_fields")
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_free_fields(stmt: *mut TAOS_STMT2, fields: *mut TAOS_FIELD_E) {
-    todo!("taos_stmt2_free_fields")
-}
-
-#[no_mangle]
-pub extern "C" fn taos_stmt2_free_stb_fields(stmt: *mut TAOS_STMT2, fields: *mut TAOS_FIELD_STB) {
-    todo!("taos_stmt2_free_stb_fields")
 }
 
 #[allow(non_camel_case_types)]

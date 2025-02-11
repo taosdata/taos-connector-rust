@@ -21,6 +21,7 @@ pub mod error;
 pub mod query;
 pub mod sml;
 pub mod stmt;
+pub mod stmt2;
 pub mod stub;
 pub mod tmq;
 
@@ -31,6 +32,9 @@ pub type TAOS_ROW = *mut *mut c_void;
 
 #[allow(non_camel_case_types)]
 pub type TAOS_RES = c_void;
+
+#[allow(non_camel_case_types)]
+pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
 
 type TaosResult<T> = Result<T, TaosError>;
 

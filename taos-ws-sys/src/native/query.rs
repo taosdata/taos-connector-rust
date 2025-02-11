@@ -15,11 +15,9 @@ use tracing::trace;
 
 use crate::native::error::{set_err_and_get_code, TaosError, TaosMaybeError};
 use crate::native::{
-    ResultSet, ResultSetOperations, Row, TaosResult, TAOS, TAOS_FIELD, TAOS_RES, TAOS_ROW,
+    ResultSet, ResultSetOperations, Row, TaosResult, __taos_async_fn_t, TAOS, TAOS_FIELD, TAOS_RES,
+    TAOS_ROW,
 };
-
-#[allow(non_camel_case_types)]
-pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES {
