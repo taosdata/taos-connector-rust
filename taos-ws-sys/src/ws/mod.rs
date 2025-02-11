@@ -902,7 +902,7 @@ pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
         let mut builder = pretty_env_logger::formatted_timed_builder();
         builder.format_timestamp_nanos();
         builder.parse_filters(log_level);
-        builder.init();
+        let _ = builder.try_init();
     });
 
     Code::SUCCESS.into()

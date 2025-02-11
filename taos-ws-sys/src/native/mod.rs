@@ -207,19 +207,19 @@ pub extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
     }
 }
 
-// #[ctor::ctor]
-// fn init_logger() {
-//     use tracing_subscriber::EnvFilter;
+#[ctor::ctor]
+fn init_logger() {
+    use tracing_subscriber::EnvFilter;
 
-//     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
 
-//     tracing_subscriber::fmt()
-//         .with_env_filter(env_filter)
-//         .with_file(true)
-//         .with_line_number(true)
-//         .with_target(false)
-//         .init();
-// }
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_file(true)
+        .with_line_number(true)
+        .with_target(false)
+        .init();
+}
 
 #[derive(Debug)]
 struct Row {
