@@ -1,12 +1,15 @@
-use std::ffi::{c_char, c_int, c_ulong, c_void};
+use std::ffi::{c_char, c_int, c_ulong, c_void, CStr};
 
-use taos_error::Code;
+use taos_error::{Code, Error as RawError};
 use taos_query::block_in_place_or_global;
+use taos_query::stmt2::Stmt2Bindable;
 use taos_query::util::generate_req_id;
 use taos_ws::{Stmt2, Taos};
-use tracing::trace;
+use tracing::{error, trace};
 
-use crate::native::error::{TaosError, TaosMaybeError};
+use crate::native::error::{
+    clear_error_info, format_errno, set_err_and_get_code, TaosError, TaosMaybeError,
+};
 use crate::native::{TaosResult, __taos_async_fn_t, TAOS, TAOS_RES};
 
 #[allow(non_camel_case_types)]
@@ -95,12 +98,42 @@ unsafe fn stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> TaosRes
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt2_prepare(
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt2_prepare(
     stmt: *mut TAOS_STMT2,
     sql: *const c_char,
     length: c_ulong,
 ) -> c_int {
-    todo!()
+    match (stmt as *mut TaosMaybeError<Stmt2>).as_mut() {
+        Some(maybe_err) => {
+            let sql = if length > 0 {
+                std::str::from_utf8_unchecked(std::slice::from_raw_parts(sql as _, length as _))
+            } else {
+                CStr::from_ptr(sql).to_str().expect(
+                    "taos_stmt2_prepare with a sql len 0 means the input should always be valid utf-8",
+                )
+            };
+
+            if let Some(errno) = maybe_err.errno() {
+                return format_errno(errno);
+            }
+
+            if let Err(err) = maybe_err
+                .deref_mut()
+                .ok_or_else(|| RawError::from_string("data is null"))
+                .and_then(|stmt2| stmt2.prepare(sql))
+            {
+                error!("stmt2 prepare error, err: {err:?}");
+                maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
+            } else {
+                maybe_err.with_err(None);
+                clear_error_info();
+                Code::SUCCESS.into()
+            }
+        }
+        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    }
 }
 
 #[no_mangle]
@@ -156,12 +189,22 @@ mod tests {
     use std::{mem, ptr};
 
     use super::*;
-    use crate::native::test_connect;
+    use crate::native::{test_connect, test_exec_many};
 
     #[test]
     fn test_stmt2() {
         unsafe {
             let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1739274502",
+                    "create database test_1739274502",
+                    "use test_1739274502",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
             let mut option = TAOS_STMT2_OPTION {
                 reqid: 1001,
                 singleStbInsert: true,
@@ -171,6 +214,11 @@ mod tests {
             };
             let stmt2 = taos_stmt2_init(taos, &mut option);
             assert!(!stmt2.is_null());
+
+            let sql = c"insert into t0 values(?, ?)";
+            let len = sql.to_bytes().len();
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), len as _);
+            assert_eq!(code, 0);
         }
     }
 }
