@@ -29,7 +29,7 @@ pub struct Stmt2 {
 }
 
 impl Stmt2 {
-    fn new(client: Arc<WsTaos>) -> Self {
+    pub fn new(client: Arc<WsTaos>) -> Self {
         Self {
             client,
             stmt_id: None,
@@ -42,10 +42,19 @@ impl Stmt2 {
     }
 
     async fn init(&mut self) -> RawResult<()> {
+        self.init_with_options(generate_req_id(), true, false).await
+    }
+
+    pub async fn init_with_options(
+        &mut self,
+        req_id: u64,
+        single_stb_insert: bool,
+        single_table_bind_once: bool,
+    ) -> RawResult<()> {
         let req = WsSend::Stmt2Init {
-            req_id: generate_req_id(),
-            single_stb_insert: true,
-            single_table_bind_once: false,
+            req_id,
+            single_stb_insert,
+            single_table_bind_once,
         };
         let resp = self.client.send_request(req).await?;
         if let WsRecvData::Stmt2Init { stmt_id, .. } = resp {

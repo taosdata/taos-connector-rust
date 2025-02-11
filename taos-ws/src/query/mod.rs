@@ -50,7 +50,7 @@ impl Taos {
         self.async_client.get_req_id()
     }
 
-    pub(crate) fn client(&self) -> Arc<WsTaos> {
+    pub fn client(&self) -> Arc<WsTaos> {
         self.async_client.clone()
     }
 }
