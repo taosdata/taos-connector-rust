@@ -21,31 +21,6 @@ pub struct raw_data_t {
 
 unsafe impl Send for raw_data_t {}
 
-// impl raw_data_t {
-//     pub fn to_bytes(&self) -> Bytes {
-//         let cap = // raw data len
-//             self.raw_len as usize +
-//             // self.raw_len
-//             std::mem::size_of::<u32>() +
-//             // self.raw_type
-//             std::mem::size_of::<u16>();
-//         let mut data = Vec::with_capacity(cap);
-
-//         // first 4 bytes: raw_len
-//         data.extend(self.raw_len.to_le_bytes());
-
-//         // next 2 bytes: raw_type
-//         data.extend(self.raw_type.to_le_bytes());
-
-//         unsafe {
-//             let ptr = data.as_mut_ptr().add(RAW_PTR_OFFSET);
-//             std::ptr::copy_nonoverlapping(self.raw, ptr as _, self.raw_len as _);
-//             data.set_len(cap);
-//         }
-//         Bytes::from(data)
-//     }
-// }
-
 /// TMQ message raw data container.
 ///
 /// It's a wrapper for raw data from native library, and will be auto free when drop.
@@ -68,27 +43,6 @@ impl RawData {
     pub fn new(raw: raw_data_t, free: unsafe extern "C" fn(raw: raw_data_t) -> i32) -> Self {
         RawData { free, raw }
     }
-}
-
-// #[derive(Debug, Clone)]
-// pub struct RawData(Bytes);
-
-// unsafe impl Send for RawData {}
-// unsafe impl Sync for RawData {}
-
-// // impl From<&raw_data_t> for RawData {
-// //     fn from(raw: &raw_data_t) -> Self {
-// //         RawData(raw.to_bytes())
-// //     }
-// // }
-
-// impl<T: Into<Bytes>> From<T> for RawData {
-//     fn from(bytes: T) -> Self {
-//         RawData(bytes.into())
-//     }
-// }
-
-impl RawData {
     pub fn raw_ptr(&self) -> *const c_void {
         self.raw.raw
     }
@@ -106,8 +60,14 @@ impl RawData {
         self.raw
     }
 
-    pub fn as_bytes(&self) -> Cow<Bytes> {
-        todo!("replace as_bytes")
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let len = self.raw_len() as usize + RAW_PTR_OFFSET;
+
+        let mut vec = Vec::with_capacity(len);
+        vec.extend_from_slice(&self.raw_len().to_le_bytes());
+        vec.extend_from_slice(&self.raw_type().to_le_bytes());
+        vec.extend_from_slice(self.raw_slice());
+        vec        
     }
 }
 
