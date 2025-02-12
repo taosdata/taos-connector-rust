@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::task::{Context, Poll, Waker};
 
 use dlopen2::raw::Library;
-use taos_query::common::{c_field_t, raw_data_t, RawData, SmlData};
+use taos_query::common::{c_field_t, raw_data_t, JsonMeta, RawData, SmlData};
 use taos_query::prelude::{Code, Field, Precision, RawError};
 use taos_query::tmq::Assignment;
 use taos_query::RawBlock;
@@ -1763,13 +1763,25 @@ impl RawRes {
         }
     }
     #[inline]
-    pub(crate) fn tmq_get_json_meta(&self) -> String {
+    pub(crate) fn tmq_get_json_meta(&self) -> Result<JsonMeta, RawError> {
         unsafe {
             let meta = (self.c.tmq.as_ref().unwrap().tmq_get_json_meta)(self.as_ptr());
-            let meta_cstr = CStr::from_ptr(meta).to_string_lossy().into_owned();
-            (self.c.tmq.as_ref().unwrap().tmq_free_json_meta)(meta);
-            tracing::debug!(json = meta_cstr, "Received TMQ json meta");
-            meta_cstr
+            if meta.is_null() {
+                return Err(RawError::from_string("tmq_get_json_meta returns null"));
+            }
+
+            let meta_cstr = CStr::from_ptr(meta);
+            match serde_json::from_slice(meta_cstr.to_bytes()) {
+                Ok(json_meta) => {
+                    tracing::trace!(json = %meta_cstr.to_string_lossy(), "Received TMQ json meta");
+                    (self.c.tmq.as_ref().unwrap().tmq_free_json_meta)(meta);
+                    Ok(json_meta)
+                }
+                Err(err) => {
+                    (self.c.tmq.as_ref().unwrap().tmq_free_json_meta)(meta);
+                    Err(RawError::from_string(err.to_string()))
+                }
+            }
         }
     }
 
@@ -1781,16 +1793,16 @@ impl RawRes {
             raw_type: 0,
         };
         unsafe {
-            let _code = (self.c.tmq.as_ref().unwrap().tmq_get_raw)(self.as_ptr(), &mut meta as _);
-            if _code == 0 {
+            let code = (self.c.tmq.as_ref().unwrap().tmq_get_raw)(self.as_ptr(), &mut meta as _);
+            if code == 0 {
                 return Ok(RawData::new(
                     meta,
                     self.c.tmq.as_ref().unwrap().tmq_free_raw,
                 ));
             } else {
-                let c_str = (self.c.tmq.as_ref().unwrap().tmq_err2str)(tmq_resp_err_t(_code));
+                let c_str = (self.c.tmq.as_ref().unwrap().tmq_err2str)(tmq_resp_err_t(code));
                 let err = CStr::from_ptr(c_str).to_string_lossy().into_owned();
-                Err(RawError::new_with_context(_code, err, "tmq_get_raw error"))
+                Err(RawError::new_with_context(code, err, "tmq_get_raw error"))
             }
         }
     }

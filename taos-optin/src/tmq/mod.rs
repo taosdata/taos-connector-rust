@@ -319,13 +319,10 @@ impl AsyncOnSync for Meta {}
 impl IsMeta for Meta {
     fn as_raw_meta(&self) -> RawResult<RawMeta> {
         self.res.tmq_get_raw()
-        // Ok(unsafe { std::mem::transmute(self.raw.clone()) })
     }
 
     fn as_json_meta(&self) -> RawResult<taos_query::common::JsonMeta> {
-        let meta = serde_json::from_slice(self.res.tmq_get_json_meta().as_bytes())
-            .map_err(|err| RawError::from_string(err.to_string()))?;
-        Ok(meta)
+        self.res.tmq_get_json_meta()
     }
 }
 impl Meta {
@@ -334,17 +331,13 @@ impl Meta {
         Self { res }
     }
 
-    // pub fn to_raw(&self) -> raw_data_t {
-    //     self.raw.as_raw_data_t()
-    // }
-
+    #[cfg(test)]
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::from_slice(self.res.tmq_get_json_meta().as_bytes())
-            .expect("meta json should always be valid json format")
-    }
-
-    pub fn to_sql(&self) -> String {
-        todo!()
+        self.res
+            .tmq_get_json_meta()
+            .ok()
+            .and_then(|v| serde_json::to_value(v).ok())
+            .unwrap_or_else(|| serde_json::Value::Null)
     }
 }
 #[derive(Debug)]
