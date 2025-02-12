@@ -1,7 +1,4 @@
-use std::borrow::Cow;
 use std::ffi::c_void;
-
-use bytes::Bytes;
 
 use crate::util::{Inlinable, InlinableRead};
 
@@ -67,7 +64,7 @@ impl RawData {
         vec.extend_from_slice(&self.raw_len().to_le_bytes());
         vec.extend_from_slice(&self.raw_type().to_le_bytes());
         vec.extend_from_slice(self.raw_slice());
-        vec        
+        vec
     }
 }
 
@@ -93,20 +90,26 @@ impl Inlinable for RawData {
         let ptr = unsafe { std::alloc::alloc(layout) };
         let buf = unsafe { std::slice::from_raw_parts_mut(ptr, len as _) };
 
-        reader.read_exact(buf).inspect_err(|_| unsafe {
-            // free memory if read failed
-            std::alloc::dealloc(ptr, layout);
-        })?;
+        match reader.read_exact(buf) {
+            Ok(_) => {
+                let raw = raw_data_t {
+                    raw: ptr as _,
+                    raw_len: len,
+                    raw_type: meta_type,
+                };
 
-        let raw = raw_data_t {
-            raw: ptr as _,
-            raw_len: len,
-            raw_type: meta_type,
-        };
+                let message = RawData::new(raw, _rust_free_raw);
 
-        let message = RawData::new(raw, _rust_free_raw);
-
-        Ok(message)
+                Ok(message)
+            }
+            Err(e) => {
+                unsafe {
+                    // free memory if read failed
+                    std::alloc::dealloc(ptr, layout);
+                }
+                Err(e)
+            }
+        }
     }
 
     fn write_inlined<W: std::io::Write>(&self, wtr: &mut W) -> std::io::Result<usize> {

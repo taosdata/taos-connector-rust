@@ -1040,7 +1040,7 @@ impl RawTaos {
         let now = std::time::Instant::now();
         loop {
             tracing::trace!("write raw");
-            let raw_code = unsafe { tmq_write_raw(self.as_ptr(), meta.clone()) };
+            let raw_code = unsafe { tmq_write_raw(self.as_ptr(), meta) };
             let code = Code::from(raw_code);
             if code.success() {
                 let elapsed = now.elapsed();
@@ -1799,11 +1799,10 @@ impl RawRes {
                     meta,
                     self.c.tmq.as_ref().unwrap().tmq_free_raw,
                 ));
-            } else {
-                let c_str = (self.c.tmq.as_ref().unwrap().tmq_err2str)(tmq_resp_err_t(code));
-                let err = CStr::from_ptr(c_str).to_string_lossy().into_owned();
-                Err(RawError::new_with_context(code, err, "tmq_get_raw error"))
             }
+            let c_str = (self.c.tmq.as_ref().unwrap().tmq_err2str)(tmq_resp_err_t(code));
+            let err = CStr::from_ptr(c_str).to_string_lossy().into_owned();
+            Err(RawError::new_with_context(code, err, "tmq_get_raw error"))
         }
     }
 }

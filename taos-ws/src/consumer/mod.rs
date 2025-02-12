@@ -372,7 +372,7 @@ impl WsMessageBase {
             // let len = bytes.as_re
             let raw = RawMeta::read_inlined(&mut slice)
                 .await
-                .map_err(|err| RawError::from_string(format!("read raw meta error: {:?}", err)))?;
+                .map_err(|err| RawError::from_string(format!("read raw meta error: {err:?}")))?;
             // let raw = RawMeta::new(bytes.slice(8..)); // first u64 is message type.
             return Ok(raw);
         }
@@ -425,10 +425,7 @@ impl Iterator for Data {
 #[async_trait::async_trait]
 impl IsAsyncData for Data {
     async fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
-        self.0
-            .fetch_raw_meta()
-            .await
-            .map(|raw| unsafe { std::mem::transmute(raw) })
+        self.0.fetch_raw_meta().await
     }
 
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
@@ -439,7 +436,6 @@ impl IsAsyncData for Data {
 impl IsData for Data {
     fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
         taos_query::block_in_place_or_global(self.0.fetch_raw_meta())
-            .map(|raw| unsafe { std::mem::transmute(raw) })
     }
 
     fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {

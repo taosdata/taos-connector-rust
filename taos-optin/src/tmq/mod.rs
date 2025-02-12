@@ -378,7 +378,7 @@ impl From<RawRes> for MessageSet<Meta, Data> {
             tmq_res_t::TMQ_RES_INVALID => unreachable!(),
             tmq_res_t::TMQ_RES_DATA => Self::Data(Data::new(raw)),
             tmq_res_t::TMQ_RES_TABLE_META => Self::Meta(Meta::new(raw)),
-            tmq_res_t::TMQ_RES_METADATA => Self::MetaData(Meta::new(raw.clone()), Data::new(raw)),
+            // tmq_res_t::TMQ_RES_METADATA => Self::MetaData(Meta::new(raw.clone()), Data::new(raw)),
             // TODO: New variant RAWDATA since 3.3.6.0
             _ => Self::MetaData(Meta::new(raw.clone()), Data::new(raw)),
         }
@@ -425,10 +425,10 @@ impl AsConsumer for Consumer {
                     tmq_res_t::TMQ_RES_TABLE_META => {
                         taos_query::tmq::MessageSet::Meta(Meta::new(raw))
                     }
-                    tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(
-                        Meta::new(raw.clone()),
-                        Data::new(raw),
-                    ),
+                    // tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(
+                    //     Meta::new(raw.clone()),
+                    //     Data::new(raw),
+                    // ),
                     // TODO: New variant RAWDATA since 3.3.6.0
                     _ => taos_query::tmq::MessageSet::MetaData(
                         Meta::new(raw.clone()),
@@ -571,7 +571,7 @@ impl AsAsyncConsumer for Consumer {
                             tmq_res_t::TMQ_RES_INVALID => unreachable!(),
                             tmq_res_t::TMQ_RES_DATA => MessageSet::Data(Data::new(raw)),
                             tmq_res_t::TMQ_RES_TABLE_META => MessageSet::Meta(Meta::new(raw)),
-                            tmq_res_t::TMQ_RES_METADATA => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw)),
+                            // tmq_res_t::TMQ_RES_METADATA => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw)),
                             // TODO: New variant RAWDATA since 3.3.6.0
                             _ => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw)),
                         },
