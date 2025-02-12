@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use itertools::Itertools;
-use taos_query::common::{raw_data_t, RawData, RawMeta};
+use taos_query::common::RawMeta;
 use taos_query::prelude::tokio::sync::oneshot;
 use taos_query::prelude::tokio::{self, time};
 use taos_query::prelude::{RawError, RawResult};
@@ -15,6 +15,7 @@ use taos_query::tmq::{
 };
 use taos_query::util::Edition;
 use taos_query::{Dsn, IntoDsn, RawBlock};
+use tracing::instrument;
 
 use crate::raw::{ApiEntry, RawRes};
 use crate::types::tmq_res_t;
@@ -536,6 +537,7 @@ impl AsAsyncConsumer for Consumer {
         r
     }
 
+    #[instrument(skip_all)]
     async fn recv_timeout(
         &self,
         timeout: taos_query::tmq::Timeout,
@@ -545,6 +547,7 @@ impl AsAsyncConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
+        let now = time::Instant::now();
         let (tx, rx) = oneshot::channel();
 
         self.tmq
@@ -585,13 +588,20 @@ impl AsAsyncConsumer for Consumer {
             }
         };
 
+        let elapsed = now.elapsed();
         match res {
             Ok(res) => {
-                tracing::trace!("Got a new message");
+                tracing::trace!(
+                    consumer.recv.elapsed.ms = elapsed.as_millis(),
+                    "Got a new message"
+                );
                 Ok(res)
             }
             Err(err) => {
-                tracing::warn!("Polling message error: {err:?}");
+                tracing::warn!(
+                    consumer.recv.elapsed.ms = elapsed.as_millis(),
+                    "Polling message error: {err:?}"
+                );
                 Err(err)
             }
         }

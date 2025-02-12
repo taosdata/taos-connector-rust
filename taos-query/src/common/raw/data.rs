@@ -49,14 +49,12 @@ unsafe impl Send for raw_data_t {}
 /// TMQ message raw data container.
 ///
 /// It's a wrapper for raw data from native library, and will be auto free when drop.
-#[derive(Debug)]
 pub struct RawData {
     free: unsafe extern "C" fn(raw: raw_data_t) -> i32,
     raw: raw_data_t,
 }
 unsafe impl Send for RawData {}
 unsafe impl Sync for RawData {}
-
 impl Drop for RawData {
     /// Use native free function to free raw_data_t
     fn drop(&mut self) {
@@ -155,7 +153,7 @@ impl Inlinable for RawData {
         wtr.write_all(self.raw_len().to_le_bytes().as_ref())?;
         wtr.write_all(self.raw_type().to_le_bytes().as_ref())?;
         wtr.write_all(self.raw_slice())?;
-        Ok(self.raw_len() as usize + 6)
+        Ok(self.raw_len() as usize + RAW_PTR_OFFSET)
     }
 }
 
@@ -189,7 +187,7 @@ impl crate::util::AsyncInlinable for RawData {
         wtr.write_all(self.raw_len().to_le_bytes().as_ref()).await?;
         wtr.write_all(self.raw_type().to_le_bytes().as_ref())
             .await?;
-        wtr.write_all(self.raw_slice()).await?;
+        // wtr.write_all(self.raw_slice()).await?;
         Ok(self.raw_len() as usize + 6)
     }
 }
