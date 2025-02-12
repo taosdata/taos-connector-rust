@@ -12,56 +12,57 @@ use crate::common::{Field, Ty};
 use crate::helpers::CompressOptions;
 use crate::util::Inlinable;
 
-#[derive(Debug, Clone)]
-pub struct RawMeta(RawData);
+pub type RawMeta = RawData;
+// #[derive(Debug)]
+// pub struct RawMeta(RawData);
 
-impl<T: Into<RawData>> From<T> for RawMeta {
-    fn from(bytes: T) -> Self {
-        RawMeta(bytes.into())
-    }
-}
+// impl<T: Into<RawData>> From<T> for RawMeta {
+//     fn from(bytes: T) -> Self {
+//         RawMeta(bytes.into())
+//     }
+// }
 
-impl Deref for RawMeta {
-    type Target = RawData;
+// impl Deref for RawMeta {
+//     type Target = RawData;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+//     fn deref(&self) -> &Self::Target {
+//         &self.0
+//     }
+// }
 
-impl RawMeta {
-    pub fn new(raw: Bytes) -> Self {
-        RawMeta(raw.into())
-    }
-}
+// impl RawMeta {
+//     pub fn new(raw: Bytes) -> Self {
+//         RawMeta(raw.into())
+//     }
+// }
 
-impl Inlinable for RawMeta {
-    fn read_inlined<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        RawData::read_inlined(reader).map(RawMeta)
-    }
+// impl Inlinable for RawMeta {
+//     fn read_inlined<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+//         RawData::read_inlined(reader).map(RawMeta)
+//     }
 
-    fn write_inlined<W: std::io::Write>(&self, wtr: &mut W) -> std::io::Result<usize> {
-        self.deref().write_inlined(wtr)
-    }
-}
+//     fn write_inlined<W: std::io::Write>(&self, wtr: &mut W) -> std::io::Result<usize> {
+//         self.deref().write_inlined(wtr)
+//     }
+// }
 
-#[async_trait::async_trait]
-impl crate::util::AsyncInlinable for RawMeta {
-    async fn read_inlined<R: tokio::io::AsyncRead + Send + Unpin>(
-        reader: &mut R,
-    ) -> std::io::Result<Self> {
-        <RawData as crate::util::AsyncInlinable>::read_inlined(reader)
-            .await
-            .map(RawMeta)
-    }
+// #[async_trait::async_trait]
+// impl crate::util::AsyncInlinable for RawMeta {
+//     async fn read_inlined<R: tokio::io::AsyncRead + Send + Unpin>(
+//         reader: &mut R,
+//     ) -> std::io::Result<Self> {
+//         <RawData as crate::util::AsyncInlinable>::read_inlined(reader)
+//             .await
+//             .map(RawMeta)
+//     }
 
-    async fn write_inlined<W: tokio::io::AsyncWrite + Send + Unpin>(
-        &self,
-        wtr: &mut W,
-    ) -> std::io::Result<usize> {
-        crate::util::AsyncInlinable::write_inlined(self.deref(), wtr).await
-    }
-}
+//     async fn write_inlined<W: tokio::io::AsyncWrite + Send + Unpin>(
+//         &self,
+//         wtr: &mut W,
+//     ) -> std::io::Result<usize> {
+//         crate::util::AsyncInlinable::write_inlined(self.deref(), wtr).await
+//     }
+// }
 
 // #[derive(Debug, Clone)]
 // pub struct RawMeta {

@@ -310,14 +310,15 @@ impl Iterator for Messages {
 #[derive(Debug)]
 pub struct Meta {
     res: RawRes,
-    raw: RawData,
+    // raw: RawData,
 }
 
 impl AsyncOnSync for Meta {}
 
 impl IsMeta for Meta {
     fn as_raw_meta(&self) -> RawResult<RawMeta> {
-        Ok(unsafe { std::mem::transmute(self.raw.clone()) })
+        self.res.tmq_get_raw()
+        // Ok(unsafe { std::mem::transmute(self.raw.clone()) })
     }
 
     fn as_json_meta(&self) -> RawResult<taos_query::common::JsonMeta> {
@@ -328,13 +329,13 @@ impl IsMeta for Meta {
 }
 impl Meta {
     fn new(res: RawRes) -> Self {
-        let raw = res.tmq_get_raw();
-        Self { res, raw }
+        // let raw = res.tmq_get_raw().expect("get raw message error");
+        Self { res }
     }
 
-    pub fn to_raw(&self) -> raw_data_t {
-        self.raw.as_raw_data_t()
-    }
+    // pub fn to_raw(&self) -> raw_data_t {
+    //     self.raw.as_raw_data_t()
+    // }
 
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::from_slice(self.res.tmq_get_json_meta().as_bytes())
@@ -359,7 +360,7 @@ impl Data {
 #[async_trait::async_trait]
 impl IsAsyncData for Data {
     async fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
-        Ok(self.raw.tmq_get_raw())
+        self.raw.tmq_get_raw()
     }
 
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
@@ -369,7 +370,7 @@ impl IsAsyncData for Data {
 
 impl IsData for Data {
     fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
-        Ok(self.raw.tmq_get_raw())
+        self.raw.tmq_get_raw()
     }
 
     fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {

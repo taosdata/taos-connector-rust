@@ -1774,7 +1774,7 @@ impl RawRes {
     }
 
     #[inline]
-    pub(crate) fn tmq_get_raw(&self) -> RawData {
+    pub(crate) fn tmq_get_raw(&self) -> Result<RawData, RawError> {
         let mut meta = raw_data_t {
             raw: std::ptr::null_mut(),
             raw_len: 0,
@@ -1782,9 +1782,16 @@ impl RawRes {
         };
         unsafe {
             let _code = (self.c.tmq.as_ref().unwrap().tmq_get_raw)(self.as_ptr(), &mut meta as _);
-            let raw = RawData::from(&meta);
-            (self.c.tmq.as_ref().unwrap().tmq_free_raw)(meta);
-            raw
+            if _code == 0 {
+                return Ok(RawData::new(
+                    meta,
+                    self.c.tmq.as_ref().unwrap().tmq_free_raw,
+                ));
+            } else {
+                let c_str = (self.c.tmq.as_ref().unwrap().tmq_err2str)(tmq_resp_err_t(_code));
+                let err = CStr::from_ptr(c_str).to_string_lossy().into_owned();
+                Err(RawError::new_with_context(_code, err, "tmq_get_raw error"))
+            }
         }
     }
 }
