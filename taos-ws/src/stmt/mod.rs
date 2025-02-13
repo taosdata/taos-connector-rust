@@ -212,6 +212,8 @@ pub struct Stmt {
     prepare_result_fetches: Arc<HashMap<StmtId, StmtPrepareResultSender>>,
     prepare_result_receiver: Option<StmtPrepareResultReceiver>,
     is_insert: Option<bool>,
+    tag_fields: Option<Vec<StmtField>>,
+    col_fields: Option<Vec<StmtField>>,
 }
 
 #[repr(C)]
@@ -458,6 +460,8 @@ impl Stmt {
             prepare_result_fetches,
             prepare_result_receiver: None,
             is_insert: None,
+            tag_fields: None,
+            col_fields: None,
         })
     }
 
@@ -756,6 +760,22 @@ impl Stmt {
             taos_query::RawError::from_string("Can't receive stmt get_param response"),
         )??;
         Ok(param)
+    }
+
+    pub fn with_tag_fields(&mut self, tag_fields: Vec<StmtField>) {
+        self.tag_fields = Some(tag_fields);
+    }
+
+    pub fn with_col_fields(&mut self, col_fields: Vec<StmtField>) {
+        self.col_fields = Some(col_fields);
+    }
+
+    pub fn tag_fields(&self) -> Option<&Vec<StmtField>> {
+        self.tag_fields.as_ref()
+    }
+
+    pub fn col_fields(&self) -> Option<&Vec<StmtField>> {
+        self.col_fields.as_ref()
     }
 }
 

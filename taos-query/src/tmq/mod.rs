@@ -96,7 +96,7 @@ impl FromStr for Timeout {
         match s.to_lowercase().as_str() {
             "never" => Ok(Timeout::Never),
             "none" => Ok(Timeout::None),
-            _ => parse_duration(s).map(Timeout::Duration).map_err(Into::into),
+            _ => parse_duration(s).map(Timeout::Duration),
         }
     }
 }
