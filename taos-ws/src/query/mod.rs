@@ -1,18 +1,17 @@
 use std::sync::Arc;
 
+pub(crate) use asyn::WsTaos;
+pub use asyn::{Error, ResultSet};
+pub use infra::BindType;
+pub(crate) use infra::WsConnReq;
 use taos_query::common::{RawMeta, SmlData};
 use taos_query::prelude::RawResult;
 use taos_query::AsyncQueryable;
 
+use crate::TaosBuilder;
+
 pub mod asyn;
 pub(crate) mod infra;
-// pub mod sync;
-
-pub(crate) use asyn::WsTaos;
-pub use asyn::{Error, ResultSet};
-pub(crate) use infra::WsConnReq;
-
-use crate::TaosBuilder;
 
 #[derive(Debug)]
 pub struct Taos {

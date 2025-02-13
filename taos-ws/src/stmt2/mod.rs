@@ -41,10 +41,6 @@ impl Stmt2 {
         }
     }
 
-    async fn init(&mut self) -> RawResult<()> {
-        self.init_with_options(generate_req_id(), true, false).await
-    }
-
     pub async fn init_with_options(
         &mut self,
         req_id: u64,
@@ -62,6 +58,22 @@ impl Stmt2 {
             return Ok(());
         }
         unreachable!()
+    }
+
+    pub fn is_insert(&self) -> Option<bool> {
+        self.is_insert
+    }
+
+    pub fn fields(&self) -> Option<&Vec<Stmt2Field>> {
+        self.fields.as_ref()
+    }
+
+    pub fn fields_count(&self) -> Option<usize> {
+        self.fields_count
+    }
+
+    async fn init(&mut self) -> RawResult<()> {
+        self.init_with_options(generate_req_id(), true, false).await
     }
 
     async fn prepare<S: AsRef<str> + Send>(&mut self, sql: S) -> RawResult<()> {
