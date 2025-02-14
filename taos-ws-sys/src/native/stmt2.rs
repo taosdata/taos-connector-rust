@@ -30,6 +30,7 @@ pub struct TAOS_STMT2_OPTION {
 }
 
 #[repr(C)]
+#[derive(Clone, Debug)]
 #[allow(non_camel_case_types)]
 pub struct TAOS_STMT2_BIND {
     pub buffer_type: c_int,
@@ -95,192 +96,194 @@ impl TAOS_STMT2_BIND {
         let num = self.num as usize;
         let is_nulls = unsafe { slice::from_raw_parts(self.is_null, num) };
         let lens = unsafe { slice::from_raw_parts(self.length, num) };
+        let len = *lens.iter().max().unwrap() as usize;
 
-        let mut len = 0;
-        for l in lens {
-            len = len.max(*l);
-        }
+        trace!("to_column_view, is_nulls: {is_nulls:?}, lens: {lens:?}, max_len: {len}");
 
         match self.ty() {
             Ty::Bool => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const bool, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_bools(vals)
             }
             Ty::TinyInt => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const i8, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_tiny_ints(vals)
             }
             Ty::SmallInt => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const i16, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_small_ints(vals)
             }
             Ty::Int => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const i32, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_ints(vals)
             }
             Ty::BigInt => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const i64, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_big_ints(vals)
             }
             Ty::UTinyInt => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_unsigned_tiny_ints(vals)
             }
             Ty::USmallInt => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u16, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_unsigned_small_ints(vals)
             }
             Ty::UInt => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u32, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_unsigned_ints(vals)
             }
             Ty::UBigInt => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u64, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_unsigned_big_ints(vals)
             }
             Ty::Float => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const f32, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_floats(vals)
             }
             Ty::Double => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const f64, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_doubles(vals)
             }
             Ty::Timestamp => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const i64, num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let val = unsafe { *(self.buffer.add(i) as *const _) };
-                        vals[i] = Some(val);
+                        vals[i] = Some(slice[i]);
                     }
                 }
                 ColumnView::from_millis_timestamp(vals)
             }
             Ty::VarChar => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len * num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let slice = unsafe {
-                            slice::from_raw_parts(self.buffer.add(i) as *const _, len as _)
-                        };
-                        let val = unsafe { str::from_utf8_unchecked(slice) };
-                        vals[i] = Some(val);
+                        let start = i * len;
+                        let end = start + lens[i] as usize;
+                        let bytes = &slice[start..end];
+                        vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
                     }
                 }
                 ColumnView::from_varchar::<&str, _, _, _>(vals)
             }
             Ty::NChar => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len * num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let slice = unsafe {
-                            slice::from_raw_parts(self.buffer.add(i) as *const _, len as _)
-                        };
-                        let val = unsafe { str::from_utf8_unchecked(slice) };
-                        vals[i] = Some(val);
+                        let start = i * len;
+                        let end = start + lens[i] as usize;
+                        let bytes = &slice[start..end];
+                        vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
                     }
                 }
                 ColumnView::from_nchar::<&str, _, _, _>(vals)
             }
             Ty::Json => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len * num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let slice = unsafe {
-                            slice::from_raw_parts(self.buffer.add(i) as *const _, len as _)
-                        };
-                        let val = serde_json::from_slice(slice).unwrap();
-                        vals[i] = Some(val);
+                        let start = i * len;
+                        let end = start + lens[i] as usize;
+                        let bytes = &slice[start..end];
+                        vals[i] = serde_json::from_slice(bytes).unwrap();
                     }
                 }
                 ColumnView::from_json::<&str, _, _, _>(vals)
             }
             Ty::VarBinary => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len * num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let slice = unsafe {
-                            slice::from_raw_parts(self.buffer.add(i) as *const _, len as _)
-                        };
-                        vals[i] = Some(slice);
+                        if is_nulls[i] == 0 {
+                            let start = i * len;
+                            let end = start + lens[i] as usize;
+                            let val = &slice[start..end];
+                            vals[i] = Some(val);
+                        }
                     }
                 }
                 ColumnView::from_bytes::<&[u8], _, _, _>(vals)
             }
             Ty::Geometry => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len * num) };
                 let mut vals = vec![None; num];
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let slice = unsafe {
-                            slice::from_raw_parts(self.buffer.add(i) as *const _, len as _)
-                        };
-                        vals[i] = Some(slice);
+                        let start = i * len;
+                        let end = start + lens[i] as usize;
+                        let val = &slice[start..end];
+                        vals[i] = Some(val);
                     }
                 }
                 ColumnView::from_geobytes::<&[u8], _, _, _>(vals)
@@ -485,6 +488,8 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
     };
 
     let params = bindv.to_bind_params(stmt2);
+    trace!("taos_stmt2_bind_param, params: {params:?}");
+
     if let Err(err) = stmt2.bind(&params) {
         error!("stmt2 bind failed, err: {err:?}");
         maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
@@ -571,7 +576,7 @@ mod tests {
             let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), len as _);
             assert_eq!(code, 0);
 
-            let mut buffer = vec![1739456248];
+            let mut buffer = vec![1739456248i64];
             let mut length = vec![8];
             let mut is_null = vec![0];
             let ts = TAOS_STMT2_BIND {
@@ -579,7 +584,7 @@ mod tests {
                 buffer: buffer.as_mut_ptr() as _,
                 length: length.as_mut_ptr(),
                 is_null: is_null.as_mut_ptr(),
-                num: 1,
+                num: buffer.len() as _,
             };
 
             let mut buffer = vec![2];
@@ -590,7 +595,7 @@ mod tests {
                 buffer: buffer.as_mut_ptr() as _,
                 length: length.as_mut_ptr(),
                 is_null: is_null.as_mut_ptr(),
-                num: 1,
+                num: buffer.len() as _,
             };
 
             let mut col = vec![ts, c1];
@@ -599,6 +604,111 @@ mod tests {
                 count: 1,
                 tbnames: ptr::null_mut(),
                 tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_bind_param() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1739502440",
+                    "create database test_1739502440",
+                    "use test_1739502440",
+                    "create table s0 (ts timestamp, c1 int, c2 varchar(20)) tags (t1 int)",
+                ],
+            );
+
+            let mut option = TAOS_STMT2_OPTION {
+                reqid: 1001,
+                singleStbInsert: true,
+                singleTableBindOnce: false,
+                asyncExecFn: mem::transmute::<*const (), __taos_async_fn_t>(ptr::null()),
+                userdata: ptr::null_mut(),
+            };
+            let stmt2 = taos_stmt2_init(taos, &mut option);
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into ? using s0 tags(?) values(?, ?, ?)";
+            let len = sql.to_bytes().len();
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), len as _);
+            assert_eq!(code, 0);
+
+            let tbname1 = c"d0";
+            let tbname2 = c"d1";
+            let mut tbnames = vec![tbname1.as_ptr() as _, tbname2.as_ptr() as _];
+
+            let mut buffer = vec![1999];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let t1 = TAOS_STMT2_BIND {
+                buffer_type: Ty::Int as _,
+                buffer: buffer.as_mut_ptr() as _,
+                length: length.as_mut_ptr(),
+                is_null: is_null.as_mut_ptr(),
+                num: buffer.len() as _,
+            };
+
+            let mut tag1 = vec![t1];
+            let mut tag2 = tag1.clone();
+            let mut tags = vec![tag1.as_mut_ptr(), tag2.as_mut_ptr()];
+
+            let mut buffer = vec![
+                1739521477831i64,
+                1739521477832,
+                1739521477833,
+                1739521477834,
+            ];
+            let mut length = vec![8, 8, 8, 8];
+            let mut is_null = vec![0, 0, 0, 0];
+            let ts = TAOS_STMT2_BIND {
+                buffer_type: Ty::Timestamp as _,
+                buffer: buffer.as_mut_ptr() as _,
+                length: length.as_mut_ptr(),
+                is_null: is_null.as_mut_ptr(),
+                num: buffer.len() as _,
+            };
+
+            let mut buffer = vec![1, 2, 3, 4];
+            let mut length = vec![4, 4, 4, 4];
+            let mut is_null = vec![0, 0, 0, 0];
+            let c1 = TAOS_STMT2_BIND {
+                buffer_type: Ty::Int as _,
+                buffer: buffer.as_mut_ptr() as _,
+                length: length.as_mut_ptr(),
+                is_null: is_null.as_mut_ptr(),
+                num: buffer.len() as _,
+            };
+
+            let mut buffer = vec![
+                104u8, 101, 108, 108, 111, 0, 0, 0, 0, 0, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0,
+                104, 101, 108, 108, 111, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ];
+            let mut length = vec![5, 5, 10, 0];
+            let mut is_null = vec![0, 0, 0, 1];
+            let c2 = TAOS_STMT2_BIND {
+                buffer_type: Ty::VarChar as _,
+                buffer: buffer.as_mut_ptr() as _,
+                length: length.as_mut_ptr(),
+                is_null: is_null.as_mut_ptr(),
+                num: length.len() as _,
+            };
+
+            let mut col1 = vec![ts, c1, c2];
+            let mut col2 = col1.clone();
+            let mut cols = vec![col1.as_mut_ptr(), col2.as_mut_ptr()];
+
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: tbnames.len() as _,
+                tbnames: tbnames.as_mut_ptr(),
+                tags: tags.as_mut_ptr(),
                 bind_cols: cols.as_mut_ptr(),
             };
 
