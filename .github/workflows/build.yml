@@ -70,6 +70,10 @@ jobs:
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
 
+      - name: Set up Rust
+        id: setup-rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Checkout Rust connector
         env:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
