@@ -126,14 +126,20 @@ impl crate::util::AsyncInlinable for RawData {
         reader: &mut R,
     ) -> std::io::Result<Self> {
         use tokio::io::*;
+
         let len = reader.read_u32_le().await?;
         let meta_type = reader.read_u16_le().await?;
-        let mut vec: Vec<u8> = Vec::with_capacity(len as usize);
-        reader.read_exact(&mut vec).await?;
+        let layout = std::alloc::Layout::from_size_align(len as _, 1).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid raw data length")
+        })?;
+        let ptr = unsafe { std::alloc::alloc(layout) };
+        let buf = unsafe { std::slice::from_raw_parts_mut(ptr, len as _) };
 
-        let ptr = Box::into_raw(vec.into_boxed_slice());
+        // let mut vec: Vec<u8> = Vec::with_capacity(len as usize);
+        reader.read_exact(buf).await?;
+
         let raw = raw_data_t {
-            raw: ptr as _,
+            raw: buf.as_ptr() as _,
             raw_len: len,
             raw_type: meta_type,
         };
