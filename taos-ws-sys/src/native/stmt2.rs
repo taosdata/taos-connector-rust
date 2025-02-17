@@ -224,11 +224,11 @@ impl TAOS_STMT2_BIND {
             Ty::VarChar => {
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len * num) };
                 let mut vals = vec![None; num];
+                let mut idx = 0;
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let start = i * len;
-                        let end = start + lens[i] as usize;
-                        let bytes = &slice[start..end];
+                        let bytes = &slice[idx..idx + lens[i] as usize];
+                        idx += lens[i] as usize;
                         vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
                     }
                 }
@@ -237,11 +237,11 @@ impl TAOS_STMT2_BIND {
             Ty::NChar => {
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len * num) };
                 let mut vals = vec![None; num];
+                let mut idx = 0;
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let start = i * len;
-                        let end = start + lens[i] as usize;
-                        let bytes = &slice[start..end];
+                        let bytes = &slice[idx..idx + lens[i] as usize];
+                        idx += lens[i] as usize;
                         vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
                     }
                 }
@@ -250,11 +250,11 @@ impl TAOS_STMT2_BIND {
             Ty::Json => {
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len * num) };
                 let mut vals = vec![None; num];
+                let mut idx = 0;
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let start = i * len;
-                        let end = start + lens[i] as usize;
-                        let bytes = &slice[start..end];
+                        let bytes = &slice[idx..idx + lens[i] as usize];
+                        idx += lens[i] as usize;
                         vals[i] = serde_json::from_slice(bytes).unwrap();
                     }
                 }
@@ -263,12 +263,12 @@ impl TAOS_STMT2_BIND {
             Ty::VarBinary => {
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len * num) };
                 let mut vals = vec![None; num];
+                let mut idx = 0;
                 for i in 0..num {
                     if is_nulls[i] == 0 {
                         if is_nulls[i] == 0 {
-                            let start = i * len;
-                            let end = start + lens[i] as usize;
-                            let val = &slice[start..end];
+                            let val = &slice[idx..idx + lens[i] as usize];
+                            idx += lens[i] as usize;
                             vals[i] = Some(val);
                         }
                     }
@@ -278,11 +278,11 @@ impl TAOS_STMT2_BIND {
             Ty::Geometry => {
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len * num) };
                 let mut vals = vec![None; num];
+                let mut idx = 0;
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        let start = i * len;
-                        let end = start + lens[i] as usize;
-                        let val = &slice[start..end];
+                        let val = &slice[idx..idx + lens[i] as usize];
+                        idx += lens[i] as usize;
                         vals[i] = Some(val);
                     }
                 }
@@ -688,8 +688,8 @@ mod tests {
             };
 
             let mut buffer = vec![
-                104u8, 101, 108, 108, 111, 0, 0, 0, 0, 0, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0,
-                104, 101, 108, 108, 111, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                104u8, 101, 108, 108, 111, 119, 111, 114, 108, 100, 104, 101, 108, 108, 111, 119,
+                111, 114, 108, 100,
             ];
             let mut length = vec![5, 5, 10, 0];
             let mut is_null = vec![0, 0, 0, 1];
