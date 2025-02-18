@@ -606,8 +606,9 @@ pub unsafe extern "C" fn taos_stmt2_exec(
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
-    todo!()
+pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
+    let _ = Box::from_raw(stmt as *mut TaosMaybeError<TaosStmt2>);
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
@@ -713,6 +714,9 @@ mod tests {
             let code = taos_stmt2_exec(stmt2, &mut affected_rows);
             assert_eq!(code, 0);
             assert_eq!(affected_rows, 1);
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1739274502");
         }
@@ -821,6 +825,9 @@ mod tests {
             let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
             assert_eq!(code, 0);
 
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
             test_exec(taos, "drop database test_1739502440");
         }
     }
@@ -891,6 +898,9 @@ mod tests {
             assert_eq!(code, 0);
 
             std::thread::sleep(std::time::Duration::from_secs(1));
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1739864837");
         }
