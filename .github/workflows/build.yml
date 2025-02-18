@@ -94,7 +94,12 @@ jobs:
         with:
           path: TDengine/tools/taosws-rs/target/
           key: ${{ runner.os }}-cargo-target-${{ steps.setup-rust.outputs.cachekey }}
-
+          
+      - name: Check git and cargo installation
+        run: |
+          which cargo
+          echo "PATH: $PATH"
+          
       - name: Build & Install TDengine
         run: |
           cd TDengine/release/
