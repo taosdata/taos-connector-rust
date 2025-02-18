@@ -136,17 +136,26 @@ impl crate::util::AsyncInlinable for RawData {
         let ptr = unsafe { std::alloc::alloc(layout) };
         let buf = unsafe { std::slice::from_raw_parts_mut(ptr, len as _) };
 
-        // let mut vec: Vec<u8> = Vec::with_capacity(len as usize);
-        reader.read_exact(buf).await?;
+        match reader.read_exact(buf).await {
+            Ok(_) => {
+                let raw = raw_data_t {
+                    raw: buf.as_mut_ptr() as _,
+                    raw_len: len,
+                    raw_type: meta_type,
+                };
 
-        let raw = raw_data_t {
-            raw: buf.as_ptr() as _,
-            raw_len: len,
-            raw_type: meta_type,
-        };
+                let message = RawData::new(raw, _rust_free_raw);
 
-        let message = RawData::new(raw, _rust_free_raw);
-        Ok(message)
+                Ok(message)
+            }
+            Err(e) => {
+                unsafe {
+                    // free memory if read failed
+                    std::alloc::dealloc(buf.as_mut_ptr(), layout);
+                }
+                Err(e)
+            }
+        }
     }
 
     async fn write_inlined<W: tokio::io::AsyncWrite + Send + Unpin>(
