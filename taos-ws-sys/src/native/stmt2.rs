@@ -612,8 +612,27 @@ pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mut c_int) -> c_int {
-    todo!()
+pub unsafe extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mut c_int) -> c_int {
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    let stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    match stmt2.is_insert() {
+        Some(is_insert) => {
+            *insert = is_insert as _;
+            Code::SUCCESS.into()
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::FAILED, "no prepare is called")));
+            set_err_and_get_code(TaosError::new(Code::FAILED, "no prepare is called"))
+        }
+    }
 }
 
 #[no_mangle]
@@ -714,6 +733,11 @@ mod tests {
             let code = taos_stmt2_exec(stmt2, &mut affected_rows);
             assert_eq!(code, 0);
             assert_eq!(affected_rows, 1);
+
+            let mut insert = 0;
+            let code = taos_stmt2_is_insert(stmt2, &mut insert);
+            assert_eq!(code, 0);
+            assert_eq!(insert, 1);
 
             let code = taos_stmt2_close(stmt2);
             assert_eq!(code, 0);
