@@ -1,6 +1,6 @@
 use std::ffi::c_void;
 
-use crate::util::{Inlinable, InlinableRead};
+use crate::util::Inlinable;
 
 const RAW_PTR_OFFSET: usize = std::mem::size_of::<u32>() + std::mem::size_of::<u16>();
 
@@ -81,8 +81,9 @@ extern "C" fn _rust_free_raw(raw: raw_data_t) -> i32 {
 }
 impl Inlinable for RawData {
     fn read_inlined<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        let len = reader.read_u32()?;
-        let meta_type = reader.read_u16()?;
+        use byteorder::{LittleEndian, ReadBytesExt};
+        let len = ReadBytesExt::read_u32::<LittleEndian>(reader)?;
+        let meta_type = ReadBytesExt::read_u16::<LittleEndian>(reader)?;
 
         let layout = std::alloc::Layout::from_size_align(len as _, 1).map_err(|_| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid raw data length")
