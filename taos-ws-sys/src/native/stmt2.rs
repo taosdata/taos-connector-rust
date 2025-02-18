@@ -1,12 +1,14 @@
 use std::ffi::{c_char, c_int, c_ulong, c_void, CStr};
 use std::{ptr, slice, str};
 
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
 use taos_error::{Code, Error as RawError};
 use taos_query::block_in_place_or_global;
 use taos_query::common::{ColumnView, Timestamp, Ty, Value};
 use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
-use taos_ws::query::BindType;
+use taos_ws::query::{BindType, Stmt2Field};
 use taos_ws::{ResultSet, Stmt2, Taos};
 use tracing::{error, trace, Instrument};
 
@@ -400,6 +402,29 @@ pub struct TAOS_FIELD_ALL {
     pub field_type: u8,
 }
 
+impl From<&Stmt2Field> for TAOS_FIELD_ALL {
+    fn from(field: &Stmt2Field) -> Self {
+        let field_name = field.name.as_str();
+        let mut name = [0 as c_char; 65];
+        unsafe {
+            ptr::copy_nonoverlapping(
+                field_name.as_ptr(),
+                name.as_mut_ptr() as _,
+                field_name.len(),
+            );
+        };
+
+        Self {
+            name,
+            r#type: field.field_type,
+            precision: field.precision,
+            scale: field.scale,
+            bytes: field.bytes,
+            field_type: field.bind_type as _,
+        }
+    }
+}
+
 #[no_mangle]
 #[tracing::instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_init(
@@ -629,24 +654,65 @@ pub unsafe extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mu
             Code::SUCCESS.into()
         }
         None => {
-            maybe_err.with_err(Some(TaosError::new(Code::FAILED, "no prepare is called")));
-            set_err_and_get_code(TaosError::new(Code::FAILED, "no prepare is called"))
+            maybe_err.with_err(Some(TaosError::new(Code::FAILED, "prepare is not called")));
+            set_err_and_get_code(TaosError::new(Code::FAILED, "prepare is not called"))
         }
     }
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt2_get_fields(
+pub unsafe extern "C" fn taos_stmt2_get_fields(
     stmt: *mut TAOS_STMT2,
     count: *mut c_int,
     fields: *mut *mut TAOS_FIELD_ALL,
 ) -> c_int {
-    todo!()
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
+        Some(taos_stmt2) => taos_stmt2,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    let stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    if stmt2.is_insert().is_none() {
+        maybe_err.with_err(Some(TaosError::new(Code::FAILED, "prepare is not called")));
+        return set_err_and_get_code(TaosError::new(Code::FAILED, "prepare is not called"));
+    }
+
+    let is_insert = stmt2.is_insert().unwrap();
+    if is_insert {
+        let stmt2_fields = stmt2.fields().unwrap();
+        let field_all: Vec<TAOS_FIELD_ALL> = stmt2_fields.into_iter().map(|f| f.into()).collect();
+        if field_all.is_empty() {
+            *fields = ptr::null_mut();
+        } else {
+            *fields = Box::into_raw(field_all.into_boxed_slice()) as _;
+            STMT2_FIELDS_MAP.insert(*fields as usize, stmt2_fields.len());
+        }
+        *count = stmt2_fields.len() as _;
+    } else {
+        *fields = ptr::null_mut();
+        *count = stmt2.fields_count().unwrap() as _;
+    }
+
+    maybe_err.with_err(None);
+    clear_error_info();
+    Code::SUCCESS.into()
 }
 
+static STMT2_FIELDS_MAP: Lazy<DashMap<usize, usize>> = Lazy::new(DashMap::new);
+
 #[no_mangle]
-pub extern "C" fn taos_stmt2_free_fields(stmt: *mut TAOS_STMT2, fields: *mut TAOS_FIELD_ALL) {
-    todo!()
+pub unsafe extern "C" fn taos_stmt2_free_fields(
+    stmt: *mut TAOS_STMT2,
+    fields: *mut TAOS_FIELD_ALL,
+) {
+    if !fields.is_null() {
+        let (_, len) = STMT2_FIELDS_MAP.remove(&(fields as usize)).unwrap();
+        let _ = Vec::from_raw_parts(fields, len, len);
+    }
 }
 
 #[no_mangle]
@@ -738,6 +804,15 @@ mod tests {
             let code = taos_stmt2_is_insert(stmt2, &mut insert);
             assert_eq!(code, 0);
             assert_eq!(insert, 1);
+
+            let mut count = 0;
+            let mut fields = ptr::null_mut();
+            let code = taos_stmt2_get_fields(stmt2, &mut count, &mut fields);
+            assert_eq!(code, 0);
+            assert_eq!(count, 2);
+            assert!(!fields.is_null());
+
+            taos_stmt2_free_fields(stmt2, fields);
 
             let code = taos_stmt2_close(stmt2);
             assert_eq!(code, 0);
