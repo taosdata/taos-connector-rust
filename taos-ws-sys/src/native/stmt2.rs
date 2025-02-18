@@ -9,13 +9,14 @@ use taos_query::common::{ColumnView, Timestamp, Ty, Value};
 use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_ws::query::{BindType, Stmt2Field};
-use taos_ws::{ResultSet, Stmt2, Taos};
+use taos_ws::{Stmt2, Taos};
 use tracing::{error, trace, Instrument};
 
 use crate::native::error::{
     clear_error_info, format_errno, set_err_and_get_code, taos_errstr, TaosError, TaosMaybeError,
 };
-use crate::native::{TaosResult, __taos_async_fn_t, TAOS, TAOS_RES};
+use crate::native::query::QueryResultSet;
+use crate::native::{ResultSet, TaosResult, __taos_async_fn_t, TAOS, TAOS_RES};
 
 #[allow(non_camel_case_types)]
 pub type TAOS_STMT2 = c_void;
@@ -611,7 +612,7 @@ pub unsafe extern "C" fn taos_stmt2_exec(
 
                 match Stmt2AsyncBindable::result_set(stmt2).await {
                     Ok(res) => {
-                        let res: *mut ResultSet = Box::into_raw(Box::new(res));
+                        let res: *mut taos_ws::ResultSet = Box::into_raw(Box::new(res));
                         cb(userdata.0, res as _, Code::SUCCESS.into());
                     }
                     Err(err) => {
@@ -716,8 +717,37 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_RES {
-    todo!()
+pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_RES {
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
+        Some(taos_stmt2) => taos_stmt2,
+        None => {
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid"));
+            return ptr::null_mut();
+        }
+    };
+
+    let stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+        None => {
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid"));
+            return ptr::null_mut();
+        }
+    };
+
+    match stmt2.result_set() {
+        Ok(rs) => {
+            maybe_err.with_err(None);
+            clear_error_info();
+            let rs: TaosMaybeError<ResultSet> = ResultSet::Query(QueryResultSet::new(rs)).into();
+            Box::into_raw(Box::new(rs)) as _
+        }
+        Err(err) => {
+            error!("stmt2 result set failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
+            ptr::null_mut()
+        }
+    }
 }
 
 #[no_mangle]
@@ -730,6 +760,7 @@ mod tests {
     use std::{mem, ptr};
 
     use super::*;
+    use crate::native::query::*;
     use crate::native::{test_connect, test_exec, test_exec_many};
 
     #[test]
@@ -1002,6 +1033,100 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1739864837");
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_result() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1739876374",
+                    "create database test_1739876374",
+                    "use test_1739876374",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 1)",
+                    "insert into t0 values(1739762261438, 99)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"select * from t0 where c1 > ?";
+            let len = sql.to_bytes().len();
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), len as _);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![0];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = TAOS_STMT2_BIND {
+                buffer_type: Ty::Int as _,
+                buffer: buffer.as_mut_ptr() as _,
+                length: length.as_mut_ptr(),
+                is_null: is_null.as_mut_ptr(),
+                num: buffer.len() as _,
+            };
+
+            let mut col = vec![c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: cols.len() as _,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+            assert_eq!(affected_rows, 0);
+
+            let res = taos_stmt2_result(stmt2);
+            assert!(!res.is_null());
+
+            let affected_rows = taos_affected_rows(res);
+            assert_eq!(affected_rows, 0);
+
+            let precision = taos_result_precision(res);
+            assert_eq!(precision, 0);
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert!(len > 0);
+            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert!(len > 0);
+            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
+            taos_stop_query(res);
+
+            taos_free_result(res);
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1739876374");
         }
     }
 }

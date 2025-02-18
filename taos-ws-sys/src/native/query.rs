@@ -582,7 +582,7 @@ pub struct QueryResultSet {
 }
 
 impl QueryResultSet {
-    fn new(rs: taos_ws::ResultSet) -> Self {
+    pub fn new(rs: taos_ws::ResultSet) -> Self {
         let num_of_fields = rs.num_of_fields();
         Self {
             rs,
