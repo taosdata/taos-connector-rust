@@ -20,7 +20,7 @@ use taos_query::tmq::{
     AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsData, IsOffset,
     MessageSet, SyncOnAsync, Timeout, VGroupId,
 };
-use taos_query::util::{Edition, InlinableRead};
+use taos_query::util::{AsyncInlinable, Edition, InlinableRead};
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, RawResult, TBuilder};
 use thiserror::Error;
 use tokio::sync::{oneshot, watch, Mutex};
@@ -368,7 +368,12 @@ impl WsMessageBase {
         if let TmqRecvData::Bytes(bytes) = data {
             let message_type = bytes.as_ref().read_u64().unwrap();
             debug_assert_eq!(message_type, 3, "should be meta message type");
-            let raw = RawMeta::new(bytes.slice(8..)); // first u64 is message type.
+            let mut slice = &bytes.iter().as_slice()[8..];
+            // let len = bytes.as_re
+            let raw = RawMeta::read_inlined(&mut slice)
+                .await
+                .map_err(|err| RawError::from_string(format!("read raw meta error: {err:?}")))?;
+            // let raw = RawMeta::new(bytes.slice(8..)); // first u64 is message type.
             return Ok(raw);
         }
         unreachable!()
@@ -420,10 +425,7 @@ impl Iterator for Data {
 #[async_trait::async_trait]
 impl IsAsyncData for Data {
     async fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
-        self.0
-            .fetch_raw_meta()
-            .await
-            .map(|raw| unsafe { std::mem::transmute(raw) })
+        self.0.fetch_raw_meta().await
     }
 
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
@@ -434,7 +436,6 @@ impl IsAsyncData for Data {
 impl IsData for Data {
     fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
         taos_query::block_in_place_or_global(self.0.fetch_raw_meta())
-            .map(|raw| unsafe { std::mem::transmute(raw) })
     }
 
     fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {

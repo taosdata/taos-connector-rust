@@ -165,7 +165,7 @@ async fn main() -> anyhow::Result<()> {
                         continue;
                     }
                     let raw = meta.as_raw_meta().await?;
-                    let bytes = raw.as_bytes();
+                    let bytes = raw.to_bytes();
                     println!("{mid},meta,{}", bytes.len());
                     let path = args.raw_dir.join(format!("raw_{}_meta.bin", mid));
                     std::fs::write(path, bytes.deref())?;
@@ -173,7 +173,7 @@ async fn main() -> anyhow::Result<()> {
                 MessageSet::Data(data) => {
                     // println!("{mid} data: {:?}", data);
                     let raw = data.as_raw_data().await?;
-                    let bytes = raw.as_bytes();
+                    let bytes = raw.to_bytes();
                     println!("{mid},data,{}", bytes.len());
 
                     if args.print_block {
@@ -206,7 +206,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                     // println!("{mid} meta data: {:?}", meta);
                     let raw = meta.as_raw_meta().await?;
-                    let bytes = raw.as_bytes();
+                    let bytes = raw.to_bytes();
                     println!("{mid},metadata,{}", bytes.len());
                     if args.print_block {
                         while let Some(block) = data.fetch_raw_block().await? {

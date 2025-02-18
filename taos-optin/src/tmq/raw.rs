@@ -375,8 +375,13 @@ pub(super) mod tmq {
                                     safe_tmq.0,
                                     time
                                 );
+                                let now = std::time::Instant::now();
                                 let r = unsafe { (tmq_api.tmq_consumer_poll)(safe_tmq.0, time) };
-                                tracing::trace!("C func `tmq_consumer_poll` returned a ptr: {r:?}");
+                                let elapsed = now.elapsed();
+                                tracing::trace!(
+                                    tmq.poll.elapsed.ms = elapsed.as_millis(),
+                                    "C func `tmq_consumer_poll` returned a ptr: {r:?}"
+                                );
 
                                 if !r.is_null() {
                                     res = r;
