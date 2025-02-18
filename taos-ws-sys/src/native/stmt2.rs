@@ -11,7 +11,7 @@ use taos_ws::{ResultSet, Stmt2, Taos};
 use tracing::{error, trace, Instrument};
 
 use crate::native::error::{
-    clear_error_info, format_errno, set_err_and_get_code, TaosError, TaosMaybeError,
+    clear_error_info, format_errno, set_err_and_get_code, taos_errstr, TaosError, TaosMaybeError,
 };
 use crate::native::{TaosResult, __taos_async_fn_t, TAOS, TAOS_RES};
 
@@ -655,8 +655,8 @@ pub extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_RES {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_stmt2_error(stmt: *mut TAOS_STMT2) -> *mut c_char {
-    todo!()
+pub unsafe extern "C" fn taos_stmt2_error(stmt: *mut TAOS_STMT2) -> *mut c_char {
+    taos_errstr(stmt as _) as _
 }
 
 #[cfg(test)]
