@@ -1,5 +1,5 @@
 use std::ffi::{c_char, c_int, c_ulong, c_void, CStr};
-use std::{slice, str};
+use std::{ptr, slice, str};
 
 use taos_error::{Code, Error as RawError};
 use taos_query::block_in_place_or_global;
@@ -7,8 +7,8 @@ use taos_query::common::{ColumnView, Timestamp, Ty, Value};
 use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_ws::query::BindType;
-use taos_ws::{Stmt2, Taos};
-use tracing::{error, trace};
+use taos_ws::{ResultSet, Stmt2, Taos};
+use tracing::{error, trace, Instrument};
 
 use crate::native::error::{
     clear_error_info, format_errno, set_err_and_get_code, TaosError, TaosMaybeError,
@@ -19,6 +19,7 @@ use crate::native::{TaosResult, __taos_async_fn_t, TAOS, TAOS_RES};
 pub type TAOS_STMT2 = c_void;
 
 #[repr(C)]
+#[derive(Debug)]
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
 pub struct TAOS_STMT2_OPTION {
@@ -27,6 +28,22 @@ pub struct TAOS_STMT2_OPTION {
     pub singleTableBindOnce: bool,
     pub asyncExecFn: __taos_async_fn_t,
     pub userdata: *mut c_void,
+}
+
+struct TaosStmt2 {
+    stmt2: Stmt2,
+    async_exec_fn: Option<__taos_async_fn_t>,
+    userdata: *mut c_void,
+}
+
+impl TaosStmt2 {
+    fn new(stmt2: Stmt2, async_exec_fn: Option<__taos_async_fn_t>, userdata: *mut c_void) -> Self {
+        Self {
+            stmt2,
+            async_exec_fn,
+            userdata,
+        }
+    }
 }
 
 #[repr(C)]
@@ -389,31 +406,36 @@ pub unsafe extern "C" fn taos_stmt2_init(
     taos: *mut TAOS,
     option: *mut TAOS_STMT2_OPTION,
 ) -> *mut TAOS_STMT2 {
-    let stmt2: TaosMaybeError<Stmt2> = stmt2_init(taos, option).into();
-    Box::into_raw(Box::new(stmt2)) as _
+    let taos_stmt2: TaosMaybeError<TaosStmt2> = stmt2_init(taos, option).into();
+    Box::into_raw(Box::new(taos_stmt2)) as _
 }
 
-unsafe fn stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> TaosResult<Stmt2> {
+unsafe fn stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> TaosResult<TaosStmt2> {
     let taos = (taos as *mut Taos)
         .as_mut()
         .ok_or(TaosError::new(Code::INVALID_PARA, "taos is invalid"))?;
 
     let mut stmt2 = Stmt2::new(taos.client());
 
-    let (req_id, single_stb_insert, single_table_bind_once) = if !option.is_null() {
-        let option = option
-            .as_ref()
-            .ok_or(TaosError::new(Code::INVALID_PARA, "option is invalid"))?;
-        (
-            option.reqid as u64,
-            option.singleStbInsert,
-            option.singleTableBindOnce,
-        )
-    } else {
-        (generate_req_id(), true, false)
-    };
+    let mut req_id = generate_req_id();
+    let mut single_stb_insert = true;
+    let mut single_table_bind_once = false;
+    let mut async_exec_fn = None;
+    let mut userdata = ptr::null_mut();
+    if !option.is_null() {
+        let option = option.as_ref().unwrap();
+        req_id = option.reqid as _;
+        single_stb_insert = option.singleStbInsert;
+        single_table_bind_once = option.singleTableBindOnce;
+        userdata = option.userdata;
+        let exec_fn = option.asyncExecFn as *const ();
+        if !exec_fn.is_null() {
+            async_exec_fn = Some(option.asyncExecFn);
+        }
+    }
 
-    trace!("stmt2_init, req_id: {req_id}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}");
+    trace!("stmt2_init, req_id: {req_id}, single_stb_insert: {single_stb_insert},
+        single_table_bind_once: {single_table_bind_once}, async_exec_fn: {async_exec_fn:?}, userdata: {userdata:?}");
 
     block_in_place_or_global(stmt2.init_with_options(
         req_id,
@@ -421,7 +443,7 @@ unsafe fn stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> TaosRes
         single_table_bind_once,
     ))?;
 
-    Ok(stmt2)
+    Ok(TaosStmt2::new(stmt2, async_exec_fn, userdata))
 }
 
 #[no_mangle]
@@ -431,7 +453,7 @@ pub unsafe extern "C" fn taos_stmt2_prepare(
     sql: *const c_char,
     length: c_ulong,
 ) -> c_int {
-    match (stmt as *mut TaosMaybeError<Stmt2>).as_mut() {
+    match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
         Some(maybe_err) => {
             let sql = if length > 0 {
                 std::str::from_utf8_unchecked(std::slice::from_raw_parts(sql as _, length as _))
@@ -448,7 +470,7 @@ pub unsafe extern "C" fn taos_stmt2_prepare(
             if let Err(err) = maybe_err
                 .deref_mut()
                 .ok_or_else(|| RawError::from_string("data is null"))
-                .and_then(|stmt2| stmt2.prepare(sql))
+                .and_then(|taos_stmt2| taos_stmt2.stmt2.prepare(sql))
             {
                 error!("stmt2 prepare error, err: {err:?}");
                 maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
@@ -470,13 +492,13 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
     bindv: *mut TAOS_STMT2_BINDV,
     col_idx: i32,
 ) -> c_int {
-    let maybe_err = match (stmt as *mut TaosMaybeError<Stmt2>).as_mut() {
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
         Some(maybe_err) => maybe_err,
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
     };
 
     let stmt2 = match maybe_err.deref_mut() {
-        Some(stmt2) => stmt2,
+        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
     };
 
@@ -490,20 +512,97 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
     let params = bindv.to_bind_params(stmt2);
     trace!("taos_stmt2_bind_param, params: {params:?}");
 
-    if let Err(err) = stmt2.bind(&params) {
-        error!("stmt2 bind failed, err: {err:?}");
-        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-        set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
-    } else {
-        maybe_err.with_err(None);
-        clear_error_info();
-        Code::SUCCESS.into()
+    match stmt2.bind(&params) {
+        Ok(_) => {
+            maybe_err.with_err(None);
+            clear_error_info();
+            Code::SUCCESS.into()
+        }
+        Err(err) => {
+            error!("stmt2 bind failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
+        }
     }
 }
 
+#[derive(Debug)]
+pub struct SafePtr<T>(T);
+
+unsafe impl<T> Send for SafePtr<T> {}
+unsafe impl<T> Sync for SafePtr<T> {}
+
 #[no_mangle]
-pub extern "C" fn taos_stmt2_exec(stmt: *mut TAOS_STMT2, affected_rows: *mut c_int) -> c_int {
-    todo!()
+#[tracing::instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt2_exec(
+    stmt: *mut TAOS_STMT2,
+    affected_rows: *mut c_int,
+) -> c_int {
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    let taos_stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => taos_stmt2,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    if taos_stmt2.async_exec_fn.is_none() {
+        match taos_stmt2.stmt2.exec() {
+            Ok(rows) => {
+                *affected_rows = rows as _;
+                maybe_err.with_err(None);
+                clear_error_info();
+                return Code::SUCCESS.into();
+            }
+            Err(err) => {
+                error!("stmt2 sync exec failed, err: {err:?}");
+                maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                return set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
+            }
+        }
+    }
+
+    let stmt2 = SafePtr(&mut taos_stmt2.stmt2 as *mut _);
+    let userdata = SafePtr(taos_stmt2.userdata);
+    let cb = taos_stmt2.async_exec_fn.unwrap();
+
+    block_in_place_or_global(
+        async {
+            tokio::spawn(async move {
+                use taos_query::stmt2::Stmt2AsyncBindable;
+
+                let stmt2 = stmt2;
+                let userdata = userdata;
+
+                let stmt2 = unsafe { &mut *stmt2.0 };
+                if let Err(err) = Stmt2AsyncBindable::exec(stmt2).await {
+                    error!("stmt2 async exec failed, err: {err:?}");
+                    let code = format_errno(err.code().into());
+                    cb(userdata.0, ptr::null_mut(), code as _);
+                    return;
+                }
+
+                match Stmt2AsyncBindable::result_set(stmt2).await {
+                    Ok(res) => {
+                        let res: *mut ResultSet = Box::into_raw(Box::new(res));
+                        cb(userdata.0, res as _, Code::SUCCESS.into());
+                    }
+                    Err(err) => {
+                        error!("stmt2 async exec failed, err: {err:?}");
+                        let code = format_errno(err.code().into());
+                        cb(userdata.0, ptr::null_mut(), code as _);
+                    }
+                }
+            })
+        }
+        .in_current_span(),
+    );
+
+    maybe_err.with_err(None);
+    clear_error_info();
+    return Code::SUCCESS.into();
 }
 
 #[no_mangle]
@@ -545,7 +644,7 @@ mod tests {
     use std::{mem, ptr};
 
     use super::*;
-    use crate::native::{test_connect, test_exec_many};
+    use crate::native::{test_connect, test_exec, test_exec_many};
 
     #[test]
     fn test_stmt2() {
@@ -576,7 +675,7 @@ mod tests {
             let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), len as _);
             assert_eq!(code, 0);
 
-            let mut buffer = vec![1739456248i64];
+            let mut buffer = vec![1739763276172i64];
             let mut length = vec![8];
             let mut is_null = vec![0];
             let ts = TAOS_STMT2_BIND {
@@ -601,7 +700,7 @@ mod tests {
             let mut col = vec![ts, c1];
             let mut cols = vec![col.as_mut_ptr()];
             let mut bindv = TAOS_STMT2_BINDV {
-                count: 1,
+                count: cols.len() as _,
                 tbnames: ptr::null_mut(),
                 tags: ptr::null_mut(),
                 bind_cols: cols.as_mut_ptr(),
@@ -609,6 +708,13 @@ mod tests {
 
             let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
             assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+            assert_eq!(affected_rows, 1);
+
+            test_exec(taos, "drop database test_1739274502");
         }
     }
 
@@ -714,6 +820,79 @@ mod tests {
 
             let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
             assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1739502440");
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_exec() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1739864837",
+                    "create database test_1739864837",
+                    "use test_1739864837",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 2)",
+                ],
+            );
+
+            extern "C" fn fp(userdata: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+                assert_eq!(code, 0);
+                assert!(!res.is_null());
+
+                let userdata = unsafe { CStr::from_ptr(userdata as _) };
+                assert_eq!(userdata, c"hello, world");
+            }
+
+            let userdata = c"hello, world";
+            let mut option = TAOS_STMT2_OPTION {
+                reqid: 1001,
+                singleStbInsert: true,
+                singleTableBindOnce: false,
+                asyncExecFn: fp,
+                userdata: userdata.as_ptr() as _,
+            };
+            let stmt2 = taos_stmt2_init(taos, &mut option);
+            assert!(!stmt2.is_null());
+
+            let sql = c"select * from t0 where c1 > ?";
+            let len = sql.to_bytes().len();
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), len as _);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![1];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = TAOS_STMT2_BIND {
+                buffer_type: Ty::Int as _,
+                buffer: buffer.as_mut_ptr() as _,
+                length: length.as_mut_ptr(),
+                is_null: is_null.as_mut_ptr(),
+                num: buffer.len() as _,
+            };
+
+            let mut col = vec![c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: cols.len() as _,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let code = taos_stmt2_exec(stmt2, ptr::null_mut());
+            assert_eq!(code, 0);
+
+            std::thread::sleep(std::time::Duration::from_secs(1));
+
+            test_exec(taos, "drop database test_1739864837");
         }
     }
 }
