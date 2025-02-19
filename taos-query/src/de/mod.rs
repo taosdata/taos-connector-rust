@@ -12,18 +12,19 @@ use crate::Field;
 /// 'b: field lifetime may go across the whole query.
 pub struct RecordDeserializer<'b, R>
 where
-    R: IntoIterator<Item = (&'b Field, BorrowedValue<'b>)>,
+    R: Iterator<Item = (&'b Field, BorrowedValue<'b>)>,
 {
-    inner: <R as IntoIterator>::IntoIter,
+    inner: R,
     value: Option<BorrowedValue<'b>>,
     _marker: PhantomData<&'b u8>,
 }
 
-impl<'b, R> From<R> for RecordDeserializer<'b, R>
+impl<'b, R, T> From<T> for RecordDeserializer<'b, R>
 where
-    R: IntoIterator<Item = (&'b Field, BorrowedValue<'b>)>,
+    R: Iterator<Item = (&'b Field, BorrowedValue<'b>)>,
+    T: IntoIterator<Item = (&'b Field, BorrowedValue<'b>), IntoIter = R>,
 {
-    fn from(input: R) -> Self {
+    fn from(input: T) -> Self {
         Self {
             inner: input.into_iter(),
             value: None,
@@ -34,16 +35,24 @@ where
 
 impl<'b, R> RecordDeserializer<'b, R>
 where
-    R: IntoIterator<Item = (&'b Field, BorrowedValue<'b>)>,
+    R: Iterator<Item = (&'b Field, BorrowedValue<'b>)>,
 {
     fn next_value(&mut self) -> Option<BorrowedValue<'b>> {
         self.inner.next().map(|(_, v)| v)
     }
 }
 
+// impl<'b, R> RecordDeserializer<'b, R>
+// where
+//     R: Iterator<Item = (&'b Field, BorrowedValue<'b>)>,
+// {
+//     fn cloned(&self) -> RecordDeserializer<'b, std::iter::Cloned<R>> {
+//         RecordDeserializer::from(self.inner.ier().cloned())
+//     }
+// }
 impl<'de, 'b: 'de, R> MapAccess<'de> for RecordDeserializer<'b, R>
 where
-    R: IntoIterator<Item = (&'b Field, BorrowedValue<'b>)>,
+    R: Iterator<Item = (&'b Field, BorrowedValue<'b>)>,
 {
     type Error = Error;
 
@@ -73,7 +82,7 @@ where
 
 impl<'de, 'b: 'de, R> SeqAccess<'de> for RecordDeserializer<'b, R>
 where
-    R: IntoIterator<Item = (&'b Field, BorrowedValue<'b>)>,
+    R: Iterator<Item = (&'b Field, BorrowedValue<'b>)>,
 {
     type Error = Error;
 
@@ -93,25 +102,26 @@ where
 
 impl<'de, 'b: 'de, R> Deserializer<'de> for RecordDeserializer<'b, R>
 where
-    R: IntoIterator<Item = (&'b Field, BorrowedValue<'b>)>,
+    R: Iterator<Item = (&'b Field, BorrowedValue<'b>)>,
 {
     type Error = Error;
 
     // Look at the input data to decide what Serde data model type to
     // deserialize as. Not all data formats are able to support this operation.
     // Formats that support `deserialize_any` are known as self-describing.
-    fn deserialize_any<V>(mut self, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
-        match self.next_value() {
-            Some(v) => v
-                .deserialize_any(visitor)
-                .map_err(<Self::Error as serde::de::Error>::custom),
-            None => Err(<Self::Error as serde::de::Error>::custom(
-                "expect value, not none",
-            )),
-        }
+        visitor.visit_map(self)
+        // match self.next_value() {
+        //     Some(v) => v
+        //         .deserialize_any(visitor)
+        //         .map_err(<Self::Error as serde::de::Error>::custom),
+        //     None => Err(<Self::Error as serde::de::Error>::custom(
+        //         "expect value, not none",
+        //     )),
+        // }
     }
 
     serde::forward_to_deserialize_any! {
@@ -261,5 +271,268 @@ where
         V: Visitor<'de>,
     {
         self.deserialize_map(visitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::Deserialize;
+
+    use crate::common::Ty;
+
+    use super::*;
+
+    #[test]
+    fn test_empty_deserializer() {
+        let fields = vec![];
+        let values = vec![];
+
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            #[derive(Deserialize, PartialEq, Eq, Debug)]
+            struct Record {}
+            let record = Record::deserialize(deserializer).unwrap();
+            assert_eq!(record, Record {});
+        }
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            #[derive(Deserialize, PartialEq, Eq, Debug)]
+            struct Record {
+                a: Option<i32>,
+            }
+            let record = Record::deserialize(deserializer).unwrap();
+            assert_eq!(record, Record { a: None });
+        }
+    }
+    #[test]
+    fn test_borrowed_values_deserializer() {
+        let fields = vec![
+            Field::new("a", Ty::Int, 4),
+            Field::new("b", Ty::VarChar, 128),
+            Field::new("c", Ty::NChar, 128),
+        ];
+        let values = vec![
+            BorrowedValue::Null(Ty::Int),
+            BorrowedValue::Null(Ty::VarChar),
+            BorrowedValue::Null(Ty::NChar),
+        ];
+
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            #[derive(Deserialize, PartialEq, Eq, Debug)]
+            struct Record {
+                a: i32,
+                b: i32,
+                c: i32,
+            }
+            let record = Record::deserialize(deserializer);
+            assert!(record.is_err());
+        }
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            #[derive(Deserialize, PartialEq, Eq, Debug)]
+            struct Record<'a> {
+                a: i32,
+                b: Option<&'a str>,
+                c: Option<&'a str>,
+            }
+            let record = Record::deserialize(deserializer);
+            assert_eq!(
+                record.unwrap_err().to_string(),
+                "invalid type: Option value, expected i32"
+            );
+        }
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            #[derive(Deserialize, PartialEq, Eq, Debug)]
+            struct Record<'a> {
+                a: Option<i32>,
+                b: &'a str,
+                c: Option<&'a str>,
+            }
+            let record = Record::deserialize(deserializer).unwrap();
+            assert_eq!(
+                record,
+                Record {
+                    a: None,
+                    b: "",
+                    c: None
+                }
+            );
+        }
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            #[derive(Deserialize, PartialEq, Eq, Debug)]
+            struct Record<'a> {
+                a: Option<i32>,
+                b: Option<&'a str>,
+                c: Option<&'a str>,
+            }
+            let record = Record::deserialize(deserializer).unwrap();
+            assert_eq!(
+                record,
+                Record {
+                    a: None,
+                    b: None,
+                    c: None
+                }
+            );
+        }
+    }
+    #[test]
+    fn test_record_deserializer() {
+        let fields = vec![
+            Field::new("a", Ty::Int, 4),
+            Field::new("b", Ty::Int, 4),
+            Field::new("c", Ty::Int, 4),
+        ];
+        let values = vec![
+            BorrowedValue::Int(1),
+            BorrowedValue::Int(2),
+            BorrowedValue::Int(3),
+        ];
+
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            #[derive(Deserialize, PartialEq, Eq, Debug)]
+            struct Record {
+                a: i32,
+                b: i32,
+                c: i32,
+            } // New type struct
+            let record = Record::deserialize(deserializer).unwrap();
+            assert_eq!(record, Record { a: 1, b: 2, c: 3 });
+        }
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            #[derive(Deserialize, PartialEq, Eq, Debug)]
+            struct Record; // Unit struct
+            let record = Record::deserialize(deserializer).unwrap();
+            assert_eq!(record, Record);
+        }
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            #[derive(Deserialize, PartialEq, Eq, Debug)]
+            struct Record(serde_json::Value); // Tuple struct
+            let record = Record::deserialize(deserializer).unwrap();
+            assert_eq!(record, Record(serde_json::json!({"a": 1, "b": 2, "c": 3})));
+        }
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            #[derive(Deserialize, PartialEq, Eq, Debug)]
+            struct Record(i32, i32, i32); // Tuple struct
+            let record = Record::deserialize(deserializer).unwrap();
+            assert_eq!(record, Record(1, 2, 3));
+        }
+
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            type Record = (i32, i32, i32);
+            let record = Record::deserialize(deserializer).unwrap();
+            assert_eq!(record, (1, 2, 3));
+        }
+
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            type Record = [i32; 3];
+            let record = Record::deserialize(deserializer).unwrap();
+            assert_eq!(record, [1, 2, 3]);
+        }
+
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+
+            type Record = Vec<i32>;
+            let record = Record::deserialize(deserializer).unwrap();
+            assert_eq!(record, vec![1, 2, 3]);
+        }
+
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+            let value: [crate::common::Value; 3] =
+                serde::Deserialize::deserialize(deserializer).unwrap();
+            dbg!(&value);
+            assert_eq!(
+                value,
+                [
+                    crate::common::Value::Int(1),
+                    crate::common::Value::Int(2),
+                    crate::common::Value::Int(3)
+                ]
+            );
+        }
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+            let value: String = serde::Deserialize::deserialize(deserializer).unwrap();
+            dbg!(&value);
+            assert_eq!(value, "1");
+        }
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+            let value: () = serde::Deserialize::deserialize(deserializer).unwrap();
+            dbg!(&value);
+            assert_eq!(value, ());
+        }
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+            let value: Option<String> = serde::Deserialize::deserialize(deserializer).unwrap();
+            dbg!(&value);
+            assert_eq!(value, Some("1".to_string()));
+        }
+
+        {
+            let iter = fields.iter().zip(values.iter().cloned());
+
+            let deserializer = RecordDeserializer::from(iter);
+            let value = serde_json::Value::deserialize(deserializer).unwrap();
+            dbg!(&value);
+            assert_eq!(value, serde_json::json!({"a": 1, "b": 2, "c": 3}));
+        }
     }
 }
