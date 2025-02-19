@@ -92,7 +92,20 @@ impl TBuilder for TmqBuilder {
     type Target = Consumer;
 
     fn available_params() -> &'static [&'static str] {
-        &["token", "timeout", "group.id", "client.id"]
+        &[
+            "token",
+            "timeout",
+            "group.id",
+            "client.id",
+            "auto.offset.reset",
+            "enable.auto.commit",
+            "auto.commit.interval.ms",
+            "experimental.snapshot.enable",
+            "with.table.name",
+            "msg.enable.batchmeta",
+            "msg.consume.excluded",
+            "msg.consume.rawdata",
+        ]
     }
 
     fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
@@ -1047,6 +1060,14 @@ impl TmqBuilder {
                     s.to_string()
                 }
             });
+        let msg_consume_rawdata = dsn.get("msg.consume.rawdata").map(|s| {
+            let s = s.trim();
+            if s.is_empty() {
+                "1".to_string()
+            } else {
+                s.to_string()
+            }
+        });
         let conf = TmqInit {
             group_id,
             client_id,
@@ -1058,6 +1079,7 @@ impl TmqBuilder {
             offset_seek,
             enable_batch_meta,
             msg_consume_excluded,
+            msg_consume_rawdata,
         };
 
         Ok(Self {

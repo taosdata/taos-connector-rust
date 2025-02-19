@@ -83,6 +83,8 @@ pub struct TmqInit {
     pub enable_batch_meta: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub msg_consume_excluded: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub msg_consume_rawdata: Option<String>,
 }
 
 impl TmqInit {

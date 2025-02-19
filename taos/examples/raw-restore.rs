@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::time::Instant;
 
 use clap::Parser;
