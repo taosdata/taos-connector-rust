@@ -89,6 +89,11 @@ pub fn clear_error_info() {
     });
 }
 
+pub fn clear_err_and_ret_succ() -> i32 {
+    clear_error_info();
+    Code::SUCCESS.into()
+}
+
 #[derive(Debug)]
 pub struct TaosMaybeError<T> {
     err: Option<TaosError>,
