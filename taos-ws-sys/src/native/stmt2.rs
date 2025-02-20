@@ -1048,6 +1048,49 @@ mod tests {
             assert_eq!(code, 0);
             assert_eq!(affected_rows, 8);
 
+            let sql = c"select * from s0 where c4 > ?";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![0];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c4 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let mut col = vec![c4];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: cols.len() as _,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+            assert_eq!(affected_rows, 0);
+
+            let res = taos_stmt2_result(stmt2);
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 33);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert!(len > 0);
+            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
             let code = taos_stmt2_close(stmt2);
             assert_eq!(code, 0);
 
