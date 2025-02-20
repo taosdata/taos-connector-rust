@@ -397,13 +397,13 @@ unsafe fn stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> TaosRes
 
                 (
                     option.reqid as _,
-                    option.singleStbInsert,
+                    option.singleStbInsert, // TODO
                     option.singleTableBindOnce,
                     async_exec_fn,
                     option.userdata,
                 )
             }
-            None => (generate_req_id(), true, false, None, ptr::null_mut()),
+            None => (generate_req_id(), false, false, None, ptr::null_mut()),
         };
 
     trace!(
@@ -439,6 +439,7 @@ pub unsafe extern "C" fn taos_stmt2_prepare(
     }
 
     let sql = if length > 0 {
+        // TODO: check utf-8
         str::from_utf8_unchecked(slice::from_raw_parts(sql as _, length as _))
     } else {
         match CStr::from_ptr(sql).to_str() {
@@ -548,6 +549,7 @@ pub unsafe extern "C" fn taos_stmt2_exec(
     let userdata = SafePtr(taos_stmt2.userdata);
     let async_exec_fn = taos_stmt2.async_exec_fn.unwrap();
 
+    // *TODO: runtime
     block_in_place_or_global(
         async {
             tokio::spawn(async move {
@@ -557,9 +559,12 @@ pub unsafe extern "C" fn taos_stmt2_exec(
                 let userdata = userdata;
 
                 let stmt2 = unsafe { &mut *stmt2.0 };
+                // TODO: add lock
                 if let Err(err) = Stmt2AsyncBindable::exec(stmt2).await {
                     error!("async taos_stmt2_exec exec failed, err: {err:?}");
+                    // *TODO: set code
                     let code = set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
+                    // TODO: spawn blocking
                     async_exec_fn(userdata.0, ptr::null_mut(), code as _);
                     return;
                 }
@@ -650,6 +655,7 @@ pub unsafe extern "C" fn taos_stmt2_get_fields(
         let field_all: Vec<TAOS_FIELD_ALL> = stmt2_fields.into_iter().map(|f| f.into()).collect();
         if !field_all.is_empty() && !fields.is_null() {
             *fields = Box::into_raw(field_all.into_boxed_slice()) as _;
+            // TODO
             STMT2_FIELDS_MAP.insert(*fields as usize, stmt2_fields.len());
         }
         *count = stmt2_fields.len() as _;
@@ -709,6 +715,7 @@ pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_R
         }
         Err(err) => {
             error!("taos_stmt2_result failed, err: {err:?}");
+            // TODO: maybeerr
             set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
             ptr::null_mut()
         }
