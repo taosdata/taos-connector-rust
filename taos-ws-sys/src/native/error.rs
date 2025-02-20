@@ -5,10 +5,9 @@ use std::ptr;
 use taos_error::Code;
 use tracing::trace;
 
-use super::TAOS_RES;
+use crate::TAOS_RES;
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
+pub unsafe fn taos_errno(res: *mut TAOS_RES) -> c_int {
     if res.is_null() {
         return errno();
     }
@@ -22,8 +21,7 @@ pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
+pub unsafe fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
     if res.is_null() {
         if errno() == 0 {
             return EMPTY.as_ptr();

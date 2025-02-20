@@ -15,30 +15,8 @@ use crate::native::{
     ResultSet, ResultSetOperations, TaosResult, TAOS, TAOS_FIELD, TAOS_RES, TAOS_ROW,
 };
 
-#[repr(C)]
-#[allow(non_camel_case_types)]
-pub enum TSDB_SML_PROTOCOL_TYPE {
-    TSDB_SML_UNKNOWN_PROTOCOL = 0,
-    TSDB_SML_LINE_PROTOCOL,
-    TSDB_SML_TELNET_PROTOCOL,
-    TSDB_SML_JSON_PROTOCOL,
-}
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-pub enum TSDB_SML_TIMESTAMP_TYPE {
-    TSDB_SML_TIMESTAMP_NOT_CONFIGURED = 0,
-    TSDB_SML_TIMESTAMP_HOURS,
-    TSDB_SML_TIMESTAMP_MINUTES,
-    TSDB_SML_TIMESTAMP_SECONDS,
-    TSDB_SML_TIMESTAMP_MILLI_SECONDS,
-    TSDB_SML_TIMESTAMP_MICRO_SECONDS,
-    TSDB_SML_TIMESTAMP_NANO_SECONDS,
-}
-
-#[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn taos_schemaless_insert(
+pub fn taos_schemaless_insert(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
     numLines: c_int,
@@ -48,9 +26,8 @@ pub extern "C" fn taos_schemaless_insert(
     todo!();
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn taos_schemaless_insert_with_reqid(
+pub fn taos_schemaless_insert_with_reqid(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
     numLines: c_int,
@@ -61,9 +38,8 @@ pub extern "C" fn taos_schemaless_insert_with_reqid(
     todo!();
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_schemaless_insert_raw(
+pub unsafe fn taos_schemaless_insert_raw(
     taos: *mut TAOS,
     lines: *mut c_char,
     len: c_int,
@@ -83,9 +59,8 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw(
     )
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_schemaless_insert_raw_with_reqid(
+pub unsafe fn taos_schemaless_insert_raw_with_reqid(
     taos: *mut TAOS,
     lines: *mut c_char,
     len: c_int,
@@ -99,9 +74,8 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_with_reqid(
     )
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn taos_schemaless_insert_ttl(
+pub fn taos_schemaless_insert_ttl(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
     numLines: c_int,
@@ -112,9 +86,8 @@ pub extern "C" fn taos_schemaless_insert_ttl(
     todo!();
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn taos_schemaless_insert_ttl_with_reqid(
+pub fn taos_schemaless_insert_ttl_with_reqid(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
     numLines: c_int,
@@ -126,9 +99,8 @@ pub extern "C" fn taos_schemaless_insert_ttl_with_reqid(
     todo!();
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl(
+pub unsafe fn taos_schemaless_insert_raw_ttl(
     taos: *mut TAOS,
     lines: *mut c_char,
     len: c_int,
@@ -149,9 +121,8 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl(
     )
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid(
+pub unsafe fn taos_schemaless_insert_raw_ttl_with_reqid(
     taos: *mut TAOS,
     lines: *mut c_char,
     len: c_int,
@@ -182,9 +153,40 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid(
     }
 }
 
-#[no_mangle]
+unsafe fn schemaless_insert_raw(
+    taos: *mut TAOS,
+    lines: *const c_char,
+    len: c_int,
+    protocol: c_int,
+    precision: c_int,
+    ttl: c_int,
+    reqid: i64,
+) -> TaosResult<ResultSet> {
+    let taos = (taos as *mut Taos)
+        .as_mut()
+        .ok_or(TaosError::new(Code::INVALID_PARA, "taos is null"))?;
+
+    let slice = slice::from_raw_parts(lines as *const u8, len as usize);
+    let data = String::from_utf8(slice.to_vec())?;
+    let sml_data = SmlDataBuilder::default()
+        .protocol(SchemalessProtocol::from(protocol))
+        .precision(SchemalessPrecision::from(precision))
+        .data(vec![data])
+        .ttl(ttl)
+        .req_id(reqid as u64)
+        .build()?;
+
+    taos.put(&sml_data)?;
+
+    Ok(ResultSet::Schemaless(SchemalessResultSet::new(
+        0,
+        Precision::Millisecond,
+        Duration::from_millis(0),
+    )))
+}
+
 #[allow(non_snake_case)]
-pub extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
+pub fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
     taos: *mut TAOS,
     lines: *mut c_char,
     len: c_int,
@@ -198,9 +200,8 @@ pub extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
     todo!();
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub extern "C" fn taos_schemaless_insert_ttl_with_reqid_tbname_key(
+pub fn taos_schemaless_insert_ttl_with_reqid_tbname_key(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
     numLines: c_int,
@@ -298,38 +299,6 @@ impl ResultSetOperations for SchemalessResultSet {
     fn stop_query(&mut self) {}
 }
 
-unsafe fn schemaless_insert_raw(
-    taos: *mut TAOS,
-    lines: *const c_char,
-    len: c_int,
-    protocol: c_int,
-    precision: c_int,
-    ttl: c_int,
-    reqid: i64,
-) -> TaosResult<ResultSet> {
-    let taos = (taos as *mut Taos)
-        .as_mut()
-        .ok_or(TaosError::new(Code::INVALID_PARA, "taos is null"))?;
-
-    let slice = slice::from_raw_parts(lines as *const u8, len as usize);
-    let data = String::from_utf8(slice.to_vec())?;
-    let sml_data = SmlDataBuilder::default()
-        .protocol(SchemalessProtocol::from(protocol))
-        .precision(SchemalessPrecision::from(precision))
-        .data(vec![data])
-        .ttl(ttl)
-        .req_id(reqid as u64)
-        .build()?;
-
-    taos.put(&sml_data)?;
-
-    Ok(ResultSet::Schemaless(SchemalessResultSet::new(
-        0,
-        Precision::Millisecond,
-        Duration::from_millis(0),
-    )))
-}
-
 #[cfg(test)]
 mod tests {
     use std::ffi::CString;
@@ -338,6 +307,7 @@ mod tests {
 
     use super::*;
     use crate::native::{test_connect, test_exec, test_exec_many};
+    use crate::{TSDB_SML_PROTOCOL_TYPE, TSDB_SML_TIMESTAMP_TYPE};
 
     #[test]
     fn test_taos_schemaless_insert_raw() {
