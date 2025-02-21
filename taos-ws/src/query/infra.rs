@@ -292,7 +292,7 @@ pub struct Stmt2Field {
     pub bind_type: BindType,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BindType {
     Column,
     Tag,
