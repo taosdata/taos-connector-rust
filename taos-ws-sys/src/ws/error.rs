@@ -5,7 +5,7 @@ use std::ptr;
 use taos_error::Code;
 use tracing::trace;
 
-use crate::TAOS_RES;
+use crate::taos::TAOS_RES;
 
 pub unsafe fn taos_errno(res: *mut TAOS_RES) -> c_int {
     if res.is_null() {

@@ -10,10 +10,9 @@ use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
 use tracing::trace;
 
-use crate::native::error::{set_err_and_get_code, TaosError, TaosMaybeError};
-use crate::native::{
-    ResultSet, ResultSetOperations, TaosResult, TAOS, TAOS_FIELD, TAOS_RES, TAOS_ROW,
-};
+use crate::taos::{TAOS, TAOS_RES, TAOS_ROW};
+use crate::ws::error::{set_err_and_get_code, TaosError, TaosMaybeError};
+use crate::ws::{ResultSet, ResultSetOperations, TaosResult, TAOS_FIELD};
 
 #[allow(non_snake_case)]
 pub fn taos_schemaless_insert(
@@ -306,8 +305,8 @@ mod tests {
     use taos_query::util::generate_req_id;
 
     use super::*;
-    use crate::native::{test_connect, test_exec, test_exec_many};
-    use crate::{TSDB_SML_PROTOCOL_TYPE, TSDB_SML_TIMESTAMP_TYPE};
+    use crate::taos::sml::{TSDB_SML_PROTOCOL_TYPE, TSDB_SML_TIMESTAMP_TYPE};
+    use crate::ws::{test_connect, test_exec, test_exec_many};
 
     #[test]
     fn test_taos_schemaless_insert_raw() {

@@ -12,10 +12,13 @@ use taos_ws::query::{BindType, Stmt2Field};
 use taos_ws::{Stmt2, Taos};
 use tracing::{error, trace, Instrument};
 
-use crate::native::error::*;
-use crate::native::query::QueryResultSet;
-use crate::native::{ResultSet, TaosResult, __taos_async_fn_t, TAOS, TAOS_RES};
-use crate::{TAOS_FIELD_ALL, TAOS_STMT2, TAOS_STMT2_BIND, TAOS_STMT2_BINDV, TAOS_STMT2_OPTION};
+use crate::taos::stmt2::{
+    TAOS_FIELD_ALL, TAOS_STMT2, TAOS_STMT2_BIND, TAOS_STMT2_BINDV, TAOS_STMT2_OPTION,
+};
+use crate::taos::{__taos_async_fn_t, TAOS, TAOS_RES};
+use crate::ws::error::*;
+use crate::ws::query::QueryResultSet;
+use crate::ws::{ResultSet, TaosResult};
 
 pub unsafe fn taos_stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> *mut TAOS_STMT2 {
     trace!("taos_stmt2_init start, taos: {taos:?}, option: {option:?}");
@@ -667,8 +670,8 @@ mod tests {
     use std::ptr;
 
     use super::*;
-    use crate::native::query::*;
-    use crate::native::{test_connect, test_exec, test_exec_many};
+    use crate::ws::query::*;
+    use crate::ws::{test_connect, test_exec, test_exec_many};
 
     macro_rules! new_bind {
         ($ty:expr, $buffer:ident, $length:ident, $is_null:ident) => {
