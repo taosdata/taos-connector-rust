@@ -74,9 +74,9 @@ pub extern "C" fn taos_init() -> c_int {
 #[instrument(level = "trace", ret)]
 pub extern "C" fn taos_cleanup() {
     if DRIVER.load(Ordering::Relaxed) {
-        stub::taos_cleanup()
+        stub::taos_cleanup();
     } else {
-        (CAPI.basic_api.taos_cleanup)()
+        (CAPI.basic_api.taos_cleanup)();
     }
 }
 
@@ -146,9 +146,9 @@ pub extern "C" fn taos_connect_dsn_auth(
 #[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
     if DRIVER.load(Ordering::Relaxed) {
-        ws::taos_close(taos)
+        ws::taos_close(taos);
     } else {
-        (CAPI.basic_api.taos_close)(taos)
+        (CAPI.basic_api.taos_close)(taos);
     }
 }
 

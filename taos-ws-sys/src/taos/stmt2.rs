@@ -148,9 +148,9 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
     fields: *mut TAOS_FIELD_ALL,
 ) {
     if DRIVER.load(Ordering::Relaxed) {
-        stmt2::taos_stmt2_free_fields(stmt, fields)
+        stmt2::taos_stmt2_free_fields(stmt, fields);
     } else {
-        (CAPI.stmt2_api.taos_stmt2_free_fields)(stmt, fields)
+        (CAPI.stmt2_api.taos_stmt2_free_fields)(stmt, fields);
     }
 }
 

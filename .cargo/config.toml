@@ -128,7 +128,6 @@ rustflags = [
     "-Wclippy::exit",
     "-Wclippy::filetype_is_file",
     "-Wclippy::float_cmp_const",
-    "-Wclippy::fn_to_numeric_cast_any",
     "-Wclippy::get_unwrap",
     "-Wclippy::host_endian_bytes",
     "-Wclippy::impl_trait_in_params",

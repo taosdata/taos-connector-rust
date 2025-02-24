@@ -315,7 +315,7 @@ pub unsafe fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mut c_int) ->
                 Code::FAILED,
                 "taos_stmt2_prepare is not called",
             )));
-            return format_errno(Code::FAILED.into());
+            format_errno(Code::FAILED.into())
         }
     }
 }
@@ -356,7 +356,7 @@ pub unsafe fn taos_stmt2_get_fields(
 
     if stmt2.is_insert().unwrap() {
         let stmt2_fields = stmt2.fields().unwrap();
-        let field_all: Vec<TAOS_FIELD_ALL> = stmt2_fields.into_iter().map(|f| f.into()).collect();
+        let field_all: Vec<TAOS_FIELD_ALL> = stmt2_fields.iter().map(|f| f.into()).collect();
         if !field_all.is_empty() && !fields.is_null() {
             *fields = Box::into_raw(field_all.into_boxed_slice()) as _;
             taos_stmt2.fields_len = Some(stmt2_fields.len());
@@ -607,11 +607,9 @@ impl TAOS_STMT2_BIND {
                 let mut idx = 0;
                 for i in 0..num {
                     if is_nulls[i] == 0 {
-                        if is_nulls[i] == 0 {
-                            let val = &slice[idx..idx + lens[i] as usize];
-                            vals[i] = Some(val);
-                            idx += lens[i] as usize;
-                        }
+                        let val = &slice[idx..idx + lens[i] as usize];
+                        vals[i] = Some(val);
+                        idx += lens[i] as usize;
                     }
                 }
                 ColumnView::from_bytes::<&[u8], _, _, _>(vals)

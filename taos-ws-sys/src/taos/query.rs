@@ -132,9 +132,9 @@ pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
 #[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
     if DRIVER.load(Ordering::Relaxed) {
-        query::taos_free_result(res)
+        query::taos_free_result(res);
     } else {
-        (CAPI.query_api.taos_free_result)(res)
+        (CAPI.query_api.taos_free_result)(res);
     }
 }
 
@@ -233,9 +233,9 @@ pub unsafe extern "C" fn taos_print_row_with_size(
 #[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
     if DRIVER.load(Ordering::Relaxed) {
-        query::taos_stop_query(res)
+        query::taos_stop_query(res);
     } else {
-        (CAPI.query_api.taos_stop_query)(res)
+        (CAPI.query_api.taos_stop_query)(res);
     }
 }
 
@@ -403,9 +403,9 @@ pub extern "C" fn taos_query_a(
     param: *mut c_void,
 ) {
     if DRIVER.load(Ordering::Relaxed) {
-        query::taos_query_a(taos, sql, fp, param)
+        query::taos_query_a(taos, sql, fp, param);
     } else {
-        (CAPI.query_api.taos_query_a)(taos, sql, fp, param)
+        (CAPI.query_api.taos_query_a)(taos, sql, fp, param);
     }
 }
 
@@ -419,9 +419,9 @@ pub extern "C" fn taos_query_a_with_reqid(
     reqid: i64,
 ) {
     if DRIVER.load(Ordering::Relaxed) {
-        query::taos_query_a_with_reqid(taos, sql, fp, param, reqid)
+        query::taos_query_a_with_reqid(taos, sql, fp, param, reqid);
     } else {
-        (CAPI.query_api.taos_query_a_with_reqid)(taos, sql, fp, param, reqid)
+        (CAPI.query_api.taos_query_a_with_reqid)(taos, sql, fp, param, reqid);
     }
 }
 
@@ -429,9 +429,9 @@ pub extern "C" fn taos_query_a_with_reqid(
 #[instrument(level = "trace", ret)]
 pub extern "C" fn taos_fetch_rows_a(res: *mut TAOS_RES, fp: __taos_async_fn_t, param: *mut c_void) {
     if DRIVER.load(Ordering::Relaxed) {
-        query::taos_fetch_rows_a(res, fp, param)
+        query::taos_fetch_rows_a(res, fp, param);
     } else {
-        (CAPI.query_api.taos_fetch_rows_a)(res, fp, param)
+        (CAPI.query_api.taos_fetch_rows_a)(res, fp, param);
     }
 }
 
@@ -443,9 +443,9 @@ pub extern "C" fn taos_fetch_raw_block_a(
     param: *mut c_void,
 ) {
     if DRIVER.load(Ordering::Relaxed) {
-        query::taos_fetch_raw_block_a(res, fp, param)
+        query::taos_fetch_raw_block_a(res, fp, param);
     } else {
-        (CAPI.query_api.taos_fetch_raw_block_a)(res, fp, param)
+        (CAPI.query_api.taos_fetch_raw_block_a)(res, fp, param);
     }
 }
 
@@ -463,9 +463,9 @@ pub extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
 #[instrument(level = "trace", ret)]
 pub extern "C" fn taos_kill_query(taos: *mut TAOS) {
     if DRIVER.load(Ordering::Relaxed) {
-        stub::taos_kill_query(taos)
+        stub::taos_kill_query(taos);
     } else {
-        (CAPI.query_api.taos_kill_query)(taos)
+        (CAPI.query_api.taos_kill_query)(taos);
     }
 }
 
@@ -473,9 +473,9 @@ pub extern "C" fn taos_kill_query(taos: *mut TAOS) {
 #[instrument(level = "trace", ret)]
 pub extern "C" fn taos_reset_current_db(taos: *mut TAOS) {
     if DRIVER.load(Ordering::Relaxed) {
-        stub::taos_reset_current_db(taos)
+        stub::taos_reset_current_db(taos);
     } else {
-        (CAPI.query_api.taos_reset_current_db)(taos)
+        (CAPI.query_api.taos_reset_current_db)(taos);
     }
 }
 
@@ -543,9 +543,9 @@ pub extern "C" fn taos_load_table_info(taos: *mut TAOS, tableNameList: *const c_
 #[instrument(level = "trace", ret)]
 pub extern "C" fn taos_set_hb_quit(quitByKill: i8) {
     if DRIVER.load(Ordering::Relaxed) {
-        stub::taos_set_hb_quit(quitByKill)
+        stub::taos_set_hb_quit(quitByKill);
     } else {
-        (CAPI.query_api.taos_set_hb_quit)(quitByKill)
+        (CAPI.query_api.taos_set_hb_quit)(quitByKill);
     }
 }
 
@@ -622,9 +622,9 @@ pub extern "C" fn taos_fetch_whitelist_a(
     param: *mut c_void,
 ) {
     if DRIVER.load(Ordering::Relaxed) {
-        stub::taos_fetch_whitelist_a(taos, fp, param)
+        stub::taos_fetch_whitelist_a(taos, fp, param);
     } else {
-        (CAPI.query_api.taos_fetch_whitelist_a)(taos, fp, param)
+        (CAPI.query_api.taos_fetch_whitelist_a)(taos, fp, param);
     }
 }
 

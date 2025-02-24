@@ -121,6 +121,7 @@ pub unsafe fn taos_schemaless_insert_raw_ttl(
 }
 
 #[allow(non_snake_case)]
+#[allow(clippy::too_many_arguments)]
 pub unsafe fn taos_schemaless_insert_raw_ttl_with_reqid(
     taos: *mut TAOS,
     lines: *mut c_char,
@@ -185,6 +186,7 @@ unsafe fn schemaless_insert_raw(
 }
 
 #[allow(non_snake_case)]
+#[allow(clippy::too_many_arguments)]
 pub fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
     taos: *mut TAOS,
     lines: *mut c_char,
@@ -200,6 +202,7 @@ pub fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
 }
 
 #[allow(non_snake_case)]
+#[allow(clippy::too_many_arguments)]
 pub fn taos_schemaless_insert_ttl_with_reqid_tbname_key(
     taos: *mut TAOS,
     lines: *mut *mut c_char,

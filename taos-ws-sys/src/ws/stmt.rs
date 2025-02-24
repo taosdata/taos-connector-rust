@@ -235,8 +235,7 @@ pub unsafe fn taos_stmt_get_tag_fields(
         }
     };
 
-    let taos_fields: Vec<TAOS_FIELD_E> =
-        stmt_fields.into_iter().map(|field| field.into()).collect();
+    let taos_fields: Vec<TAOS_FIELD_E> = stmt_fields.iter().map(|field| field.into()).collect();
     let len = taos_fields.len();
     let cap = taos_fields.capacity();
 
@@ -286,8 +285,7 @@ pub unsafe fn taos_stmt_get_col_fields(
         }
     };
 
-    let taos_fields: Vec<TAOS_FIELD_E> =
-        stmt_fields.into_iter().map(|field| field.into()).collect();
+    let taos_fields: Vec<TAOS_FIELD_E> = stmt_fields.iter().map(|field| field.into()).collect();
     let len = taos_fields.len();
     let cap = taos_fields.capacity();
 

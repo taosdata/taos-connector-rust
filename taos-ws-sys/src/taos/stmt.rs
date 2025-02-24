@@ -172,9 +172,9 @@ pub unsafe extern "C" fn taos_stmt_get_col_fields(
 #[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_FIELD_E) {
     if DRIVER.load(Ordering::Relaxed) {
-        stmt::taos_stmt_reclaim_fields(stmt, fields)
+        stmt::taos_stmt_reclaim_fields(stmt, fields);
     } else {
-        (CAPI.stmt_api.taos_stmt_reclaim_fields)(stmt, fields)
+        (CAPI.stmt_api.taos_stmt_reclaim_fields)(stmt, fields);
     }
 }
 

@@ -85,9 +85,9 @@ pub unsafe extern "C" fn tmq_conf_set(
 #[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn tmq_conf_destroy(conf: *mut tmq_conf_t) {
     if DRIVER.load(Ordering::Relaxed) {
-        tmq::tmq_conf_destroy(conf)
+        tmq::tmq_conf_destroy(conf);
     } else {
-        (CAPI.tmq_api.tmq_conf_destroy)(conf)
+        (CAPI.tmq_api.tmq_conf_destroy)(conf);
     }
 }
 
@@ -99,9 +99,9 @@ pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
     param: *mut c_void,
 ) {
     if DRIVER.load(Ordering::Relaxed) {
-        tmq::tmq_conf_set_auto_commit_cb(conf, cb, param)
+        tmq::tmq_conf_set_auto_commit_cb(conf, cb, param);
     } else {
-        (CAPI.tmq_api.tmq_conf_set_auto_commit_cb)(conf, cb, param)
+        (CAPI.tmq_api.tmq_conf_set_auto_commit_cb)(conf, cb, param);
     }
 }
 
@@ -129,9 +129,9 @@ pub unsafe extern "C" fn tmq_list_append(list: *mut tmq_list_t, value: *const c_
 #[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn tmq_list_destroy(list: *mut tmq_list_t) {
     if DRIVER.load(Ordering::Relaxed) {
-        tmq::tmq_list_destroy(list)
+        tmq::tmq_list_destroy(list);
     } else {
-        (CAPI.tmq_api.tmq_list_destroy)(list)
+        (CAPI.tmq_api.tmq_list_destroy)(list);
     }
 }
 
@@ -239,9 +239,9 @@ pub unsafe extern "C" fn tmq_commit_async(
     param: *mut c_void,
 ) {
     if DRIVER.load(Ordering::Relaxed) {
-        tmq::tmq_commit_async(tmq, msg, cb, param)
+        tmq::tmq_commit_async(tmq, msg, cb, param);
     } else {
-        (CAPI.tmq_api.tmq_commit_async)(tmq, msg, cb, param)
+        (CAPI.tmq_api.tmq_commit_async)(tmq, msg, cb, param);
     }
 }
 
@@ -273,9 +273,9 @@ pub unsafe extern "C" fn tmq_commit_offset_async(
     param: *mut c_void,
 ) {
     if DRIVER.load(Ordering::Relaxed) {
-        tmq::tmq_commit_offset_async(tmq, pTopicName, vgId, offset, cb, param)
+        tmq::tmq_commit_offset_async(tmq, pTopicName, vgId, offset, cb, param);
     } else {
-        (CAPI.tmq_api.tmq_commit_offset_async)(tmq, pTopicName, vgId, offset, cb, param)
+        (CAPI.tmq_api.tmq_commit_offset_async)(tmq, pTopicName, vgId, offset, cb, param);
     }
 }
 
@@ -300,9 +300,9 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
 #[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
     if DRIVER.load(Ordering::Relaxed) {
-        tmq::tmq_free_assignment(pAssignment)
+        tmq::tmq_free_assignment(pAssignment);
     } else {
-        (CAPI.tmq_api.tmq_free_assignment)(pAssignment)
+        (CAPI.tmq_api.tmq_free_assignment)(pAssignment);
     }
 }
 
@@ -456,9 +456,9 @@ pub extern "C" fn tmq_write_raw(taos: *mut TAOS, raw: tmq_raw_data) -> i32 {
 #[instrument(level = "trace", ret)]
 pub extern "C" fn tmq_free_raw(raw: tmq_raw_data) {
     if DRIVER.load(Ordering::Relaxed) {
-        stub::tmq_free_raw(raw)
+        stub::tmq_free_raw(raw);
     } else {
-        (CAPI.tmq_api.tmq_free_raw)(raw)
+        (CAPI.tmq_api.tmq_free_raw)(raw);
     }
 }
 
@@ -477,9 +477,9 @@ pub extern "C" fn tmq_get_json_meta(res: *mut TAOS_RES) -> *const c_char {
 #[instrument(level = "trace", ret)]
 pub extern "C" fn tmq_free_json_meta(jsonMeta: *mut c_char) {
     if DRIVER.load(Ordering::Relaxed) {
-        stub::tmq_free_json_meta(jsonMeta)
+        stub::tmq_free_json_meta(jsonMeta);
     } else {
-        (CAPI.tmq_api.tmq_free_json_meta)(jsonMeta)
+        (CAPI.tmq_api.tmq_free_json_meta)(jsonMeta);
     }
 }
 
