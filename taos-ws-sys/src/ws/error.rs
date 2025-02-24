@@ -99,9 +99,16 @@ pub struct TaosMaybeError<T> {
     type_id: &'static str,
 }
 
+unsafe impl<T> Send for TaosMaybeError<T> {}
+unsafe impl<T> Sync for TaosMaybeError<T> {}
+
 impl<T> TaosMaybeError<T> {
     pub fn with_err(&mut self, err: Option<TaosError>) {
         self.err = err;
+    }
+
+    pub fn clear_err(&mut self) {
+        self.err = None;
     }
 
     pub fn errno(&self) -> Option<i32> {
