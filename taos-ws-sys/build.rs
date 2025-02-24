@@ -6,8 +6,8 @@ use syn::visit::Visit;
 use syn::{ItemConst, ItemFn, Visibility};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    write_header("taos.h", "src/native", "cbindgen_native.toml")?;
-    write_header("taosws.h", "src/ws", "cbindgen_ws.toml")?;
+    write_header("taos.h", "src/taos", "cbindgen.toml")?;
+    write_header("taosws.h", "src/old_ws", "cbindgen_old_ws.toml")?;
     Ok(())
 }
 
