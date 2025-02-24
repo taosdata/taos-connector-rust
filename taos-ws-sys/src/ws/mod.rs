@@ -1,7 +1,8 @@
 #![allow(unused_variables)]
 
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use error::{set_err_and_get_code, TaosError};
@@ -15,7 +16,7 @@ use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
 
 use crate::taos::query::TAOS_FIELD;
-use crate::taos::{TAOS, TAOS_ROW};
+use crate::taos::{self, TAOS, TAOS_ROW, TSDB_OPTION};
 
 pub mod error;
 pub mod query;
@@ -122,46 +123,25 @@ pub fn taos_close(taos: *mut TAOS) {
     }
 }
 
-// static PARAMS: Lazy<RwLock<String>> = Lazy::new(|| RwLock::new(String::new()));
+pub unsafe fn taos_options(option: TSDB_OPTION, arg: *const c_void) -> c_int {
+    if option == TSDB_OPTION::TSDB_OPTION_DRIVER {
+        match CStr::from_ptr(arg as _).to_str() {
+            Ok(driver) => {
+                if driver == "native" {
+                    taos::DRIVER.store(false, Ordering::Relaxed);
+                }
+            }
+            Err(_) => {
+                return set_err_and_get_code(TaosError::new(
+                    Code::INVALID_PARA,
+                    "arg is invalid utf-8",
+                ))
+            }
+        }
+    }
 
-// #[allow(clippy::just_underscores_and_digits)]
-// pub unsafe fn taos_options(option: TSDB_OPTION, arg: *const c_void, mut varargs: ...) -> c_int {
-//     let mut params = Vec::new();
-
-//     loop {
-//         let key_ptr: *const c_char = varargs.arg();
-//         if key_ptr.is_null() {
-//             break;
-//         }
-
-//         let key = match CStr::from_ptr(key_ptr).to_str() {
-//             Ok(key) => key,
-//             Err(_) => {
-//                 return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "Invalid key"))
-//             }
-//         };
-
-//         let value_ptr: *const c_char = varargs.arg();
-//         if value_ptr.is_null() {
-//             break;
-//         }
-
-//         let value = match CStr::from_ptr(value_ptr).to_str() {
-//             Ok(value) => value,
-//             Err(_) => {
-//                 return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "Invalid value"))
-//             }
-//         };
-
-//         params.push(format!("{key}={value}"));
-//     }
-
-//     trace!(params=?params, "dsn");
-
-//     *PARAMS.write().unwrap() = params.join("&");
-
-//     Code::SUCCESS.into()
-// }
+    Code::SUCCESS.into()
+}
 
 #[ctor::ctor]
 fn init_logger() {

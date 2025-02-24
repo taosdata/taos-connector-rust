@@ -7,7 +7,7 @@ use crate::taos::query::{
     TSDB_SERVER_STATUS,
 };
 use crate::taos::tmq::{tmq_raw_data, tmq_t};
-use crate::taos::{TAOS, TAOS_RES};
+use crate::taos::{TAOS, TAOS_RES, TSDB_OPTION_CONNECTION};
 use crate::ws::TAOS_FIELD;
 
 pub fn taos_init() -> c_int {
@@ -205,4 +205,12 @@ pub fn taos_check_server_status(
 #[allow(non_snake_case)]
 pub fn getBuildInfo() -> *const c_char {
     todo!("getBuildInfo");
+}
+
+pub fn taos_options_connection(
+    taos: *mut TAOS,
+    option: TSDB_OPTION_CONNECTION,
+    arg: *const c_void,
+) -> c_int {
+    todo!("taos_options_connection")
 }

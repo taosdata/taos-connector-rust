@@ -16,7 +16,8 @@ pub mod stmt;
 pub mod stmt2;
 pub mod tmq;
 
-static DRIVER: AtomicBool = AtomicBool::new(true);
+pub static DRIVER: AtomicBool = AtomicBool::new(true);
+
 static CAPI: Lazy<ApiEntry> = Lazy::new(|| match ApiEntry::open_default() {
     Ok(api) => api,
     Err(err) => panic!("Can't open {} library: {:?}", default_lib_name(), err),
@@ -34,7 +35,7 @@ pub type TAOS_ROW = *mut *mut c_void;
 pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum TSDB_OPTION {
     TSDB_OPTION_LOCALE = 0,
@@ -159,13 +160,11 @@ pub unsafe extern "C" fn taos_options(
     arg: *const c_void,
     varargs: ...
 ) -> c_int {
-    // if DRIVER.load(Ordering::Relaxed) {
-    //     native::taos_options(option, arg, varargs)
-    // } else {
-    //     (CAPI.basic_api.taos_options)(option, arg, varargs)
-    // }
-
-    todo!()
+    if DRIVER.load(Ordering::Relaxed) {
+        ws::taos_options(option, arg)
+    } else {
+        (CAPI.basic_api.taos_options)(option, arg)
+    }
 }
 
 #[no_mangle]
@@ -176,12 +175,9 @@ pub unsafe extern "C" fn taos_options_connection(
     arg: *const c_void,
     varargs: ...
 ) -> c_int {
-    // if DRIVER.load(Ordering::Relaxed) {
-    //     todo!()
-    //     native::taos_options_connection(taos, option, arg, varargs)
-    // } else {
-    //     (CAPI.basic_api.taos_options_connection)(taos, option, arg, varargs)
-    // }
-
-    todo!()
+    if DRIVER.load(Ordering::Relaxed) {
+        stub::taos_options_connection(taos, option, arg)
+    } else {
+        (CAPI.basic_api.taos_options_connection)(taos, option, arg)
+    }
 }

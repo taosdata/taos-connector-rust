@@ -482,3 +482,50 @@ pub extern "C" fn tmq_free_json_meta(jsonMeta: *mut c_char) {
         (CAPI.tmq_api.tmq_free_json_meta)(jsonMeta)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::taos::{taos_options, TSDB_OPTION};
+
+    #[test]
+    fn test_tmq_list() {
+        unsafe {
+            let tmq_list = tmq_list_new();
+            assert!(!tmq_list.is_null());
+
+            let value = c"topic".as_ptr();
+            let res = tmq_list_append(tmq_list, value);
+            assert_eq!(res, 0);
+
+            let size = tmq_list_get_size(tmq_list);
+            assert_eq!(size, 1);
+
+            let array = tmq_list_to_c_array(tmq_list);
+            assert!(!array.is_null());
+
+            tmq_list_destroy(tmq_list);
+        }
+
+        unsafe {
+            let driver = c"native";
+            let code = taos_options(TSDB_OPTION::TSDB_OPTION_DRIVER, driver.as_ptr() as _);
+            assert_eq!(code, 0);
+
+            let tmq_list = tmq_list_new();
+            assert!(!tmq_list.is_null());
+
+            let value = c"topic".as_ptr();
+            let res = tmq_list_append(tmq_list, value);
+            assert_eq!(res, 0);
+
+            let size = tmq_list_get_size(tmq_list);
+            assert_eq!(size, 1);
+
+            let array = tmq_list_to_c_array(tmq_list);
+            assert!(!array.is_null());
+
+            tmq_list_destroy(tmq_list);
+        }
+    }
+}
