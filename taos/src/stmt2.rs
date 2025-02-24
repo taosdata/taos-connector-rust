@@ -16,10 +16,7 @@ impl taos_query::stmt2::Stmt2Bindable<super::Taos> for Stmt2 {
     fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
             TaosInner::Native(_) => todo!(),
-            TaosInner::Ws(taos) => WsStmt2::init(taos)
-                .map(Stmt2Inner::Ws)
-                .map(Stmt2)
-                .map_err(Into::into),
+            TaosInner::Ws(taos) => WsStmt2::init(taos).map(Stmt2Inner::Ws).map(Stmt2),
         }
     }
 
@@ -55,11 +52,7 @@ impl taos_query::stmt2::Stmt2Bindable<super::Taos> for Stmt2 {
 
     fn result_set(&self) -> RawResult<ResultSet> {
         match &self.0 {
-            Stmt2Inner::Ws(stmt2) => stmt2
-                .result_set()
-                .map(ResultSetInner::Ws)
-                .map(ResultSet)
-                .map_err(Into::into),
+            Stmt2Inner::Ws(stmt2) => stmt2.result_set().map(ResultSetInner::Ws).map(ResultSet),
         }
     }
 }
@@ -69,11 +62,7 @@ impl taos_query::stmt2::Stmt2AsyncBindable<super::Taos> for Stmt2 {
     async fn init(taos: &super::Taos) -> RawResult<Self> {
         match &taos.0 {
             TaosInner::Native(_) => todo!(),
-            TaosInner::Ws(taos) => WsStmt2::init(taos)
-                .await
-                .map(Stmt2Inner::Ws)
-                .map(Stmt2)
-                .map_err(Into::into),
+            TaosInner::Ws(taos) => WsStmt2::init(taos).await.map(Stmt2Inner::Ws).map(Stmt2),
         }
     }
 
@@ -113,8 +102,7 @@ impl taos_query::stmt2::Stmt2AsyncBindable<super::Taos> for Stmt2 {
                 .result_set()
                 .await
                 .map(ResultSetInner::Ws)
-                .map(ResultSet)
-                .map_err(Into::into),
+                .map(ResultSet),
         }
     }
 }
