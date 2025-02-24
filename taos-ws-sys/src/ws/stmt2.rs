@@ -1,8 +1,6 @@
 use std::ffi::{c_char, c_int, c_ulong, c_void, CStr};
 use std::{ptr, slice, str};
 
-use dashmap::DashMap;
-use once_cell::sync::Lazy;
 use taos_error::Code;
 use taos_query::common::{ColumnView, Timestamp, Ty, Value};
 use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
@@ -313,13 +311,14 @@ pub unsafe fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mut c_int) ->
             clear_err_and_ret_succ()
         }
         None => {
-            maybe_err.with_err(Some(TaosError::new(Code::FAILED, "prepare is not called")));
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt2_prepare is not called",
+            )));
             return format_errno(Code::FAILED.into());
         }
     }
 }
-
-static STMT2_FIELDS_MAP: Lazy<DashMap<usize, usize>> = Lazy::new(DashMap::new);
 
 pub unsafe fn taos_stmt2_get_fields(
     stmt: *mut TAOS_STMT2,
@@ -333,8 +332,8 @@ pub unsafe fn taos_stmt2_get_fields(
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
     };
 
-    let stmt2 = match maybe_err.deref_mut() {
-        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+    let taos_stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => taos_stmt2,
         None => {
             maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
             return format_errno(Code::INVALID_PARA.into());
@@ -346,8 +345,12 @@ pub unsafe fn taos_stmt2_get_fields(
         return format_errno(Code::INVALID_PARA.into());
     }
 
+    let stmt2 = &mut taos_stmt2.stmt2;
     if stmt2.is_insert().is_none() {
-        maybe_err.with_err(Some(TaosError::new(Code::FAILED, "prepare is not called")));
+        maybe_err.with_err(Some(TaosError::new(
+            Code::FAILED,
+            "taos_stmt2_prepare is not called",
+        )));
         return format_errno(Code::FAILED.into());
     }
 
@@ -356,8 +359,7 @@ pub unsafe fn taos_stmt2_get_fields(
         let field_all: Vec<TAOS_FIELD_ALL> = stmt2_fields.into_iter().map(|f| f.into()).collect();
         if !field_all.is_empty() && !fields.is_null() {
             *fields = Box::into_raw(field_all.into_boxed_slice()) as _;
-            // TODO
-            STMT2_FIELDS_MAP.insert(*fields as usize, stmt2_fields.len());
+            taos_stmt2.fields_len = Some(stmt2_fields.len());
         }
         *count = stmt2_fields.len() as _;
     } else {
@@ -373,27 +375,37 @@ pub unsafe fn taos_stmt2_get_fields(
 pub unsafe fn taos_stmt2_free_fields(stmt: *mut TAOS_STMT2, fields: *mut TAOS_FIELD_ALL) {
     trace!("taos_stmt2_free_fields start, stmt: {stmt:?}, fields: {fields:?}");
 
-    let stmt2 = match (stmt as *mut TaosMaybeError<TaosStmt2>)
-        .as_mut()
-        .and_then(|maybe_err| maybe_err.deref_mut())
-    {
-        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
+        Some(maybe_err) => maybe_err,
         None => {
             set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
             return;
         }
     };
 
-    if stmt2.is_insert().is_none() {
-        set_err_and_get_code(TaosError::new(Code::FAILED, "prepare is not called"));
+    let taos_stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => taos_stmt2,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return;
+        }
+    };
+
+    if taos_stmt2.fields_len.is_none() {
+        maybe_err.with_err(Some(TaosError::new(
+            Code::FAILED,
+            "taos_stmt2_get_fields is not called",
+        )));
         return;
     }
 
-    if stmt2.is_insert().unwrap() && !fields.is_null() {
-        let (_, len) = STMT2_FIELDS_MAP.remove(&(fields as usize)).unwrap();
-        let fields = Vec::from_raw_parts(fields, len, len);
-        trace!("taos_stmt2_free_fields succ, fields: {fields:?}");
-    }
+    let len = taos_stmt2.fields_len.unwrap();
+    let fields = Vec::from_raw_parts(fields, len, len);
+
+    trace!("taos_stmt2_free_fields succ, fields: {fields:?}");
+
+    maybe_err.clear_err();
+    clear_error_info();
 }
 
 pub unsafe fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_RES {
@@ -440,6 +452,7 @@ struct TaosStmt2 {
     stmt2: Stmt2,
     async_exec_fn: Option<__taos_async_fn_t>,
     userdata: *mut c_void,
+    fields_len: Option<usize>,
 }
 
 impl TaosStmt2 {
@@ -448,6 +461,7 @@ impl TaosStmt2 {
             stmt2,
             async_exec_fn,
             userdata,
+            fields_len: None,
         }
     }
 }
@@ -633,7 +647,10 @@ impl TAOS_STMT2_BIND {
 impl TAOS_STMT2_BINDV {
     fn to_bind_params(&self, stmt2: &Stmt2) -> TaosResult<Vec<Stmt2BindParam>> {
         if stmt2.is_insert().is_none() {
-            return Err(TaosError::new(Code::FAILED, "prepare is not called"));
+            return Err(TaosError::new(
+                Code::FAILED,
+                "taos_stmt2_prepare is not called",
+            ));
         }
 
         let cnt = self.count as usize;
