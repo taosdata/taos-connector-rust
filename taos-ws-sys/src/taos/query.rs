@@ -6,6 +6,30 @@ use tracing::instrument;
 use crate::taos::{__taos_async_fn_t, CAPI, DRIVER, TAOS, TAOS_RES, TAOS_ROW};
 use crate::ws::{error, query, stub};
 
+pub const TSDB_DATA_TYPE_NULL: usize = 0;
+pub const TSDB_DATA_TYPE_BOOL: usize = 1;
+pub const TSDB_DATA_TYPE_TINYINT: usize = 2;
+pub const TSDB_DATA_TYPE_SMALLINT: usize = 3;
+pub const TSDB_DATA_TYPE_INT: usize = 4;
+pub const TSDB_DATA_TYPE_BIGINT: usize = 5;
+pub const TSDB_DATA_TYPE_FLOAT: usize = 6;
+pub const TSDB_DATA_TYPE_DOUBLE: usize = 7;
+pub const TSDB_DATA_TYPE_VARCHAR: usize = 8;
+pub const TSDB_DATA_TYPE_TIMESTAMP: usize = 9;
+pub const TSDB_DATA_TYPE_NCHAR: usize = 10;
+pub const TSDB_DATA_TYPE_UTINYINT: usize = 11;
+pub const TSDB_DATA_TYPE_USMALLINT: usize = 12;
+pub const TSDB_DATA_TYPE_UINT: usize = 13;
+pub const TSDB_DATA_TYPE_UBIGINT: usize = 14;
+pub const TSDB_DATA_TYPE_JSON: usize = 15;
+pub const TSDB_DATA_TYPE_VARBINARY: usize = 16;
+pub const TSDB_DATA_TYPE_DECIMAL: usize = 17;
+pub const TSDB_DATA_TYPE_BLOB: usize = 18;
+pub const TSDB_DATA_TYPE_MEDIUMBLOB: usize = 19;
+pub const TSDB_DATA_TYPE_BINARY: usize = TSDB_DATA_TYPE_VARCHAR;
+pub const TSDB_DATA_TYPE_GEOMETRY: usize = 20;
+pub const TSDB_DATA_TYPE_MAX: usize = 21;
+
 #[allow(non_camel_case_types)]
 pub type __taos_notify_fn_t = extern "C" fn(param: *mut c_void, ext: *mut c_void, r#type: c_int);
 

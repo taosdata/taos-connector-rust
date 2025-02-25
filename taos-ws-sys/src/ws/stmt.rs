@@ -19,30 +19,6 @@ use crate::ws::error::{
 };
 use crate::ws::TaosResult;
 
-pub const TSDB_DATA_TYPE_NULL: usize = 0;
-pub const TSDB_DATA_TYPE_BOOL: usize = 1;
-pub const TSDB_DATA_TYPE_TINYINT: usize = 2;
-pub const TSDB_DATA_TYPE_SMALLINT: usize = 3;
-pub const TSDB_DATA_TYPE_INT: usize = 4;
-pub const TSDB_DATA_TYPE_BIGINT: usize = 5;
-pub const TSDB_DATA_TYPE_FLOAT: usize = 6;
-pub const TSDB_DATA_TYPE_DOUBLE: usize = 7;
-pub const TSDB_DATA_TYPE_VARCHAR: usize = 8;
-pub const TSDB_DATA_TYPE_TIMESTAMP: usize = 9;
-pub const TSDB_DATA_TYPE_NCHAR: usize = 10;
-pub const TSDB_DATA_TYPE_UTINYINT: usize = 11;
-pub const TSDB_DATA_TYPE_USMALLINT: usize = 12;
-pub const TSDB_DATA_TYPE_UINT: usize = 13;
-pub const TSDB_DATA_TYPE_UBIGINT: usize = 14;
-pub const TSDB_DATA_TYPE_JSON: usize = 15;
-pub const TSDB_DATA_TYPE_VARBINARY: usize = 16;
-pub const TSDB_DATA_TYPE_DECIMAL: usize = 17;
-pub const TSDB_DATA_TYPE_BLOB: usize = 18;
-pub const TSDB_DATA_TYPE_MEDIUMBLOB: usize = 19;
-pub const TSDB_DATA_TYPE_BINARY: usize = TSDB_DATA_TYPE_VARCHAR;
-pub const TSDB_DATA_TYPE_GEOMETRY: usize = 20;
-pub const TSDB_DATA_TYPE_MAX: usize = 21;
-
 pub unsafe fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT {
     taos_stmt_init_with_reqid(taos, generate_req_id() as _)
 }
@@ -902,7 +878,7 @@ mod tests {
             let mut bytes = 0;
             let code = taos_stmt_get_param(stmt, 1, &mut ty, &mut bytes);
             assert_eq!(code, 0);
-            assert_eq!(ty, TSDB_DATA_TYPE_INT as i32);
+            assert_eq!(ty, Ty::Int as i32);
             assert_eq!(bytes, 4);
 
             let mut cols = vec![
