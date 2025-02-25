@@ -299,12 +299,15 @@ pub struct Messages {
 }
 
 impl Iterator for Messages {
-    type Item = (Offset, MessageSet<Meta, Data>);
+    type Item = RawResult<(Offset, MessageSet<Meta, Data>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.tmq
-            .poll_timeout(self.timeout.map_or(-1, |t| t.as_millis() as i64))
-            .map(|raw| (Offset(raw.clone()), MessageSet::from(raw)))
+        let timeout = self.timeout.map_or(-1, |t| t.as_millis() as _);
+        match self.tmq.poll_timeout(timeout) {
+            Ok(Some(raw)) => Some(Ok((Offset(raw.clone()), MessageSet::from(raw)))),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
     }
 }
 
@@ -416,7 +419,7 @@ impl AsConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
-        Ok(self.tmq.poll_timeout(timeout.as_raw_timeout()).map(|raw| {
+        Ok(self.tmq.poll_timeout(timeout.as_raw_timeout())?.map(|raw| {
             (
                 Offset(raw.clone()),
                 match raw.tmq_message_type() {
@@ -564,7 +567,7 @@ impl AsAsyncConsumer for Consumer {
                 Ok(None)
             }
             res = rx => {
-                let raw = res.map_err(RawError::from_any)?.map(|raw| {
+                let raw = res.map_err(RawError::from_any)??.map(|raw| {
                     (
                         Offset(raw.clone()),
                         match raw.tmq_message_type() {

@@ -218,7 +218,7 @@ pub mod sync {
             self.query(sql)?
                 .deserialize::<O>()
                 .next()
-                .map_or(Ok(None), |v| v.map(Some).map_err(Into::into))
+                .map_or(Ok(None), |v| v.map(Some))
         }
 
         /// Short for `SELECT server_version()` as [String].
@@ -250,10 +250,7 @@ pub mod sync {
         }
 
         fn databases(&self) -> RawResult<Vec<ShowDatabase>> {
-            self.query("show databases")?
-                .deserialize()
-                .try_collect()
-                .map_err(Into::into)
+            self.query("show databases")?.deserialize().try_collect()
         }
 
         /// Topics information by `SELECT * FROM information_schema.ins_topics` sql.
@@ -265,7 +262,6 @@ pub mod sync {
             self.query("SELECT * FROM information_schema.ins_topics")?
                 .deserialize()
                 .try_collect()
-                .map_err(Into::into)
         }
 
         fn describe(&self, table: &str) -> RawResult<Describe> {
@@ -407,9 +403,10 @@ mod r#async {
 
         fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             use futures::stream::*;
-            Pin::get_mut(self).rows.poll_next_unpin(cx).map(|row| {
-                row.map(|row| row.and_then(|mut row| V::deserialize(&mut row).map_err(Into::into)))
-            })
+            Pin::get_mut(self)
+                .rows
+                .poll_next_unpin(cx)
+                .map(|row| row.map(|row| row.and_then(|mut row| V::deserialize(&mut row))))
         }
     }
 
@@ -557,7 +554,7 @@ mod r#async {
                 .await
                 .into_iter()
                 .next()
-                .map_or(Ok(None), |v| v.map(Some).map_err(Into::into))
+                .map_or(Ok(None), |v| v.map(Some))
         }
 
         /// Short for `SELECT server_version()` as [String].
