@@ -6,7 +6,7 @@ use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 use std::sync::OnceLock;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use taos_error::Code;
@@ -19,6 +19,7 @@ use taos_query::util::{hex, InlineBytes, InlineNChar, InlineStr};
 use taos_query::{block_in_place_or_global, DsnError, Fetchable, Queryable, TBuilder};
 use taos_ws::consumer::Offset;
 pub use taos_ws::query::asyn::WS_ERROR_NO;
+use taos_ws::query::asyn::{send_time, QueryTime, QT, SEND_TIME};
 use taos_ws::query::{Error, ResultSet, Taos};
 use taos_ws::TaosBuilder;
 
@@ -865,7 +866,7 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     } else {
         let mut taos = builder.build()?;
 
-        builder.ping(&mut taos)?;
+        // builder.ping(&mut taos)?;
         Ok(taos)
     }
 }
@@ -881,16 +882,17 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
 pub unsafe extern "C" fn ws_enable_log(log_level: *const c_char) -> i32 {
     static ONCE_INIT: std::sync::Once = std::sync::Once::new();
 
-    let log_level = if log_level.is_null() {
-        "info"
-    } else if let Ok(log_level_str) = CStr::from_ptr(log_level).to_str() {
-        log_level_str
-    } else {
-        return set_error_and_get_code(WsError::new(
-            Code::INVALID_PARA,
-            "log_level is not a valid string",
-        ));
-    };
+    // let log_level = if log_level.is_null() {
+    //     "info"
+    // } else if let Ok(log_level_str) = CStr::from_ptr(log_level).to_str() {
+    //     log_level_str
+    // } else {
+    //     return set_error_and_get_code(WsError::new(
+    //         Code::INVALID_PARA,
+    //         "log_level is not a valid string",
+    //     ));
+    // };
+    let log_level = "info";
 
     ONCE_INIT.call_once(|| {
         let mut builder = pretty_env_logger::formatted_timed_builder();
@@ -928,13 +930,40 @@ pub extern "C" fn ws_data_type(r#type: i32) -> *const c_char {
 /// ```
 #[no_mangle]
 pub unsafe extern "C" fn ws_connect(dsn: *const c_char) -> *mut WS_TAOS {
-    match connect_with_dsn(dsn) {
+    static ONCE_INIT: std::sync::Once = std::sync::Once::new();
+
+    let log_level = "error";
+    ONCE_INIT.call_once(|| {
+        let mut builder = pretty_env_logger::formatted_timed_builder();
+        builder.format_timestamp_nanos();
+        builder.parse_filters(log_level);
+        builder.init();
+    });
+
+    tracing::error!("connect");
+
+    CONNECT_START = Some(Instant::now());
+    connect_start = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+
+    QUERY_TIME = Duration::ZERO;
+    query_time = 0;
+
+    SEND_TIME = Duration::ZERO;
+    send_time = 0;
+
+    QT = QueryTime::new();
+
+    let client = match connect_with_dsn(dsn) {
         Ok(client) => Box::into_raw(Box::new(client)) as _,
         Err(err) => {
             set_error_and_get_code(err);
             std::ptr::null_mut()
         }
-    }
+    };
+    client
 }
 
 #[no_mangle]
@@ -960,9 +989,35 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
     version_info.as_ptr()
 }
 
+static mut CONNECT_START: Option<Instant> = None;
+static mut connect_start: u128 = 0;
+
+static mut QUERY_TIME: Duration = Duration::ZERO;
+static mut query_time: u128 = 0;
+
+static mut FREE_TIME: Duration = Duration::ZERO;
+
 #[no_mangle]
 /// Same to taos_close. This should always be called after everything done with the connection.
 pub unsafe extern "C" fn ws_close(taos: *mut WS_TAOS) -> i32 {
+    let elapsed = CONNECT_START.unwrap().elapsed();
+    let connect_end = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+
+    tracing::error!("query cnt: {}", QUERY_CNT);
+
+    tracing::error!("connect time: {:?}", elapsed);
+    tracing::error!("query time: {:?}", QUERY_TIME);
+    tracing::error!("send time: {:?}", SEND_TIME);
+    tracing::error!("send recv time: {:?}", QT.send_recv_duration());
+
+    tracing::error!("new connect time: {:?}", connect_end - connect_start);
+    tracing::error!("new query time: {:?}", query_time);
+    tracing::error!("new send time: {:?}", send_time);
+    tracing::error!("new send recv time: {:?}", QT.new_send_recv_duration());
+
     if !taos.is_null() {
         tracing::trace!("close connection {taos:p}");
         let client = Box::from_raw(taos as *mut Taos);
@@ -1044,6 +1099,8 @@ pub unsafe extern "C" fn ws_stop_query(rs: *mut WS_RES) -> i32 {
     }
 }
 
+static mut QUERY_CNT: u64 = 0;
+
 #[no_mangle]
 /// Query a sql with timeout.
 ///
@@ -1053,8 +1110,24 @@ pub unsafe extern "C" fn ws_query_timeout(
     sql: *const c_char,
     seconds: u32,
 ) -> *mut WS_RES {
+    QUERY_CNT += 1;
+    let now = Instant::now();
+    let start = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    // tracing::error!("query start: {:?}", start);
+
     let res: WsMaybeError<WsResultSet> =
         query_with_sql_timeout(taos, sql, Duration::from_secs(seconds as _)).into();
+
+    QUERY_TIME += now.elapsed();
+    let end = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    query_time += end - start;
+    // tracing::error!("query end: {:?}", end);
     Box::into_raw(Box::new(res)) as _
 }
 
@@ -1304,9 +1377,11 @@ pub unsafe extern "C" fn ws_num_fields(rs: *const WS_RES) -> i32 {
 #[no_mangle]
 /// Same to taos_free_result. Every websocket result-set object should be freed with this method.
 pub unsafe extern "C" fn ws_free_result(rs: *mut WS_RES) -> i32 {
+    let start = Instant::now();
     if !rs.is_null() {
         let _ = Box::from_raw(rs as *mut WsMaybeError<WsResultSet>);
     }
+    FREE_TIME += start.elapsed();
     Code::SUCCESS.into()
 }
 

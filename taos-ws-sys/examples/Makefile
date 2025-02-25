@@ -28,7 +28,8 @@ get-err:
 	gcc -g ws-get-err.c ${WS_FLAGS} -o ./target/ws-get-err && ./target/ws-get-err
 fetch-row:
 	gcc -g ws-fetch-row.c ${WS_FLAGS} -o ./target/ws-fetch-row && ./target/ws-fetch-row
-
+test:
+	gcc -g test.c ${WS_FLAGS} -o ./target/test && ./target/test
 tmq-basic:
 	gcc -g ws-tmq-basic.c ${WS_FLAGS} -o ./target/ws-tmq-basic && ./target/ws-tmq-basic
 

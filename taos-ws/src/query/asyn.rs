@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::Poll;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::bail;
 use byteorder::{ByteOrder, LittleEndian};
@@ -545,6 +545,10 @@ async fn read_queries(
     loop {
         tokio::select! {
             res = reader.try_next() => {
+                unsafe {
+                    QT.recv();
+                    QT.new_recv();
+                }
                 match res {
                     Ok(frame) => {
                         if let Some(frame) = frame {
@@ -619,6 +623,120 @@ pub fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
 pub fn is_support_binary_sql(v1: &str) -> bool {
     is_greater_than_or_equal_to(v1, "3.3.2.0")
 }
+
+pub struct QueryTime {
+    pub query_start: Option<Instant>,
+    pub query_ws_send_duration: Duration,
+    pub query_ws_send_start: Option<Instant>,
+    pub query_ws_recv_duration: Duration,
+    pub query_handle_start: Option<Instant>,
+    pub query_handle_duration: Duration,
+    pub send_start: Option<Instant>,
+    pub send_recv_duration: Duration,
+    pub new_send_start: u128,
+    pub new_send_recv_duration: u128,
+}
+
+impl QueryTime {
+    pub const fn new() -> Self {
+        Self {
+            query_start: None,
+            query_ws_send_duration: Duration::ZERO,
+            query_ws_send_start: None,
+            query_ws_recv_duration: Duration::ZERO,
+            query_handle_start: None,
+            query_handle_duration: Duration::ZERO,
+            send_start: None,
+            send_recv_duration: Duration::ZERO,
+            new_send_start: 0,
+            new_send_recv_duration: 0,
+        }
+    }
+
+    pub fn with_new_send_start(&mut self, start: u128) {
+        self.new_send_start = start;
+    }
+
+    pub fn new_recv(&mut self) {
+        if self.new_send_start == 0 {
+            return;
+        }
+        self.new_send_recv_duration += SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            - self.new_send_start;
+        self.new_send_start = 0;
+    }
+
+    pub fn new_send_recv_duration(&self) -> u128 {
+        self.new_send_recv_duration
+    }
+
+    pub fn with_send_start(&mut self, start: Instant) {
+        self.send_start = Some(start);
+    }
+
+    pub fn recv(&mut self) {
+        self.send_start.take().map(|start| {
+            self.send_recv_duration += start.elapsed();
+        });
+    }
+
+    pub fn send_recv_duration(&self) -> Duration {
+        self.send_recv_duration
+    }
+
+    // pub fn with_query_start(&mut self, start: Instant) {
+    //     self.query_start = Some(start);
+    // }
+
+    // pub fn query_ws_send(&mut self) {
+    //     if self.query_start.is_none() {
+    //         return;
+    //     }
+    //     self.query_ws_send_duration += self.query_start.unwrap().elapsed();
+    // }
+
+    // pub fn query_ws_send_duration(&self) -> Duration {
+    //     self.query_ws_send_duration
+    // }
+
+    // pub fn with_query_ws_send_start(&mut self, start: Instant) {
+    //     self.query_ws_send_start = Some(start);
+    // }
+
+    // pub fn query_ws_recv(&mut self) {
+    //     if self.query_ws_send_start.is_none() {
+    //         return;
+    //     }
+    //     self.query_ws_recv_duration += self.query_ws_send_start.unwrap().elapsed();
+    // }
+
+    // pub fn query_ws_recv_duration(&self) -> Duration {
+    //     self.query_ws_recv_duration
+    // }
+
+    // pub fn with_query_handle_start(&mut self, start: Instant) {
+    //     self.query_handle_start = Some(start);
+    // }
+
+    // pub fn query_handle(&mut self) {
+    //     if self.query_handle_start.is_none() {
+    //         return;
+    //     }
+    //     self.query_handle_duration += self.query_handle_start.unwrap().elapsed();
+    // }
+
+    // pub fn query_handle_duration(&self) -> Duration {
+    //     self.query_handle_duration
+    // }
+}
+
+pub static mut QT: QueryTime = QueryTime::new();
+
+pub static mut SEND_TIME: Duration = Duration::ZERO;
+pub static mut send_time: u128 = 0;
 
 impl WsTaos {
     /// Build TDengine websocket client from dsn.
@@ -770,6 +888,12 @@ impl WsTaos {
                     msg = msg_recv.recv_async() => {
                         match msg {
                             Ok(msg) => {
+                                let now = Instant::now();
+                                let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+                                unsafe {
+                                    QT.with_send_start(now);
+                                    QT.with_new_send_start(start);
+                                }
                                 if let Err(err) = sender.send(msg).await {
                                     tracing::error!("Write websocket error: {}", err);
                                     let mut keys = Vec::new();
@@ -781,12 +905,16 @@ impl WsTaos {
                                     }
                                     break;
                                 }
+                                unsafe { SEND_TIME += now.elapsed(); }
+                                let end = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+                                unsafe {
+                                    send_time += end - start;
+                                }
                             }
                             Err(_) => {
                                 break;
                             }
                         }
-                        // dbg!(&msg);
                     }
                 }
             }
