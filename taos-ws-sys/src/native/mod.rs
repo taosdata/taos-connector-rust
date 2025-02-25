@@ -595,20 +595,19 @@ pub struct BasicApi {
         port: u16,
     ) -> *mut TAOS,
 
-    pub(crate) taos_connect_dsn: extern "C" fn(
-        dsn: *const c_char,
-        user: *const c_char,
-        pass: *const c_char,
-        db: *const c_char,
-    ) -> *mut TAOS,
+    // pub(crate) taos_connect_dsn: extern "C" fn(
+    //     dsn: *const c_char,
+    //     user: *const c_char,
+    //     pass: *const c_char,
+    //     db: *const c_char,
+    // ) -> *mut TAOS,
 
-    pub(crate) taos_connect_dsn_auth: extern "C" fn(
-        dsn: *const c_char,
-        user: *const c_char,
-        auth: *const c_char,
-        db: *const c_char,
-    ) -> *mut TAOS,
-
+    // pub(crate) taos_connect_dsn_auth: extern "C" fn(
+    //     dsn: *const c_char,
+    //     user: *const c_char,
+    //     auth: *const c_char,
+    //     db: *const c_char,
+    // ) -> *mut TAOS,
     pub(crate) taos_close: unsafe extern "C" fn(taos: *mut TAOS),
 
     #[allow(dead_code)]
@@ -681,8 +680,6 @@ impl ApiEntry {
                 taos_cleanup,
                 taos_connect,
                 taos_connect_auth,
-                taos_connect_dsn,
-                taos_connect_dsn_auth,
                 taos_close,
                 taos_options,
                 taos_options_connection
@@ -693,8 +690,8 @@ impl ApiEntry {
                 taos_cleanup,
                 taos_connect,
                 taos_connect_auth,
-                taos_connect_dsn,
-                taos_connect_dsn_auth,
+                // taos_connect_dsn,
+                // taos_connect_dsn_auth,
                 taos_close,
                 taos_options,
                 taos_options_connection,

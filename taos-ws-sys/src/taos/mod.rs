@@ -123,7 +123,8 @@ pub extern "C" fn taos_connect_dsn(
     if DRIVER.load(Ordering::Relaxed) {
         stub::taos_connect_dsn(dsn, user, pass, db)
     } else {
-        (CAPI.basic_api.taos_connect_dsn)(dsn, user, pass, db)
+        // (CAPI.basic_api.taos_connect_dsn)(dsn, user, pass, db)
+        todo!()
     }
 }
 
@@ -138,7 +139,8 @@ pub extern "C" fn taos_connect_dsn_auth(
     if DRIVER.load(Ordering::Relaxed) {
         stub::taos_connect_dsn_auth(dsn, user, auth, db)
     } else {
-        (CAPI.basic_api.taos_connect_dsn_auth)(dsn, user, auth, db)
+        // (CAPI.basic_api.taos_connect_dsn_auth)(dsn, user, auth, db)
+        todo!()
     }
 }
 
@@ -160,11 +162,34 @@ pub unsafe extern "C" fn taos_options(
     arg: *const c_void,
     varargs: ...
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
-        ws::taos_options(option, arg)
-    } else {
-        (CAPI.basic_api.taos_options)(option, arg)
+    use std::ffi::CStr;
+
+    use taos_error::Code;
+    use ws::error::{set_err_and_get_code, TaosError};
+
+    if option == TSDB_OPTION::TSDB_OPTION_DRIVER {
+        match CStr::from_ptr(arg as _).to_str() {
+            Ok(driver) => {
+                if driver == "native" {
+                    DRIVER.store(false, Ordering::Relaxed);
+                }
+            }
+            Err(_) => {
+                return set_err_and_get_code(TaosError::new(
+                    Code::INVALID_PARA,
+                    "arg is invalid utf-8",
+                ))
+            }
+        }
     }
+
+    Code::SUCCESS.into()
+
+    // if DRIVER.load(Ordering::Relaxed) {
+    //     ws::taos_options(option, arg)
+    // } else {
+    //     (CAPI.basic_api.taos_options)(option, arg)
+    // }
 }
 
 #[no_mangle]

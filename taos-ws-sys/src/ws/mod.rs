@@ -2,7 +2,6 @@
 
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use error::{set_err_and_get_code, TaosError};
@@ -16,7 +15,7 @@ use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
 
 use crate::taos::query::TAOS_FIELD;
-use crate::taos::{self, TAOS, TAOS_ROW, TSDB_OPTION};
+use crate::taos::{TAOS, TAOS_ROW, TSDB_OPTION};
 
 pub mod error;
 pub mod query;
@@ -124,22 +123,6 @@ pub fn taos_close(taos: *mut TAOS) {
 }
 
 pub unsafe fn taos_options(option: TSDB_OPTION, arg: *const c_void) -> c_int {
-    if option == TSDB_OPTION::TSDB_OPTION_DRIVER {
-        match CStr::from_ptr(arg as _).to_str() {
-            Ok(driver) => {
-                if driver == "native" {
-                    taos::DRIVER.store(false, Ordering::Relaxed);
-                }
-            }
-            Err(_) => {
-                return set_err_and_get_code(TaosError::new(
-                    Code::INVALID_PARA,
-                    "arg is invalid utf-8",
-                ))
-            }
-        }
-    }
-
     Code::SUCCESS.into()
 }
 
