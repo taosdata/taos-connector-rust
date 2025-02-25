@@ -1,5 +1,5 @@
 use std::ffi::{c_char, c_int, c_ulong, CStr};
-use std::ptr;
+use std::{ptr, slice};
 
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -8,10 +8,11 @@ use taos_query::block_in_place_or_global;
 use taos_query::common::{Timestamp, Ty, Value};
 use taos_query::prelude::Itertools;
 use taos_query::stmt::Bindable;
+use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_ws::stmt::{StmtField, WsFieldsable};
 use taos_ws::{Stmt, Stmt2, Taos};
-use tracing::error;
+use tracing::{error, trace};
 
 use crate::taos::stmt::{TAOS_FIELD_E, TAOS_MULTI_BIND, TAOS_STMT, TAOS_STMT_OPTIONS};
 use crate::taos::{TAOS, TAOS_RES};
@@ -64,6 +65,11 @@ unsafe fn stmt_init(
     single_stb_insert: bool,
     single_table_bind_once: bool,
 ) -> TaosResult<TaosStmt> {
+    trace!(
+        "stmt_init, req_id: {req_id}, single_stb_insert: {single_stb_insert}, \
+        single_table_bind_once: {single_table_bind_once}"
+    );
+
     let taos = (taos as *mut Taos)
         .as_mut()
         .ok_or(TaosError::new(Code::FAILED, "taos is null"))?;
@@ -79,42 +85,62 @@ unsafe fn stmt_init(
     Ok(TaosStmt::new(stmt2))
 }
 
-// pub unsafe fn taos_stmt_prepare(
-//     stmt: *mut TAOS_STMT,
-//     sql: *const c_char,
-//     length: c_ulong,
-// ) -> c_int {
-//     match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-//         Some(maybe_err) => {
-//             let sql = if length > 0 {
-//                 std::str::from_utf8_unchecked(std::slice::from_raw_parts(sql as _, length as _))
-//             } else {
-//                 CStr::from_ptr(sql).to_str().expect(
-//                     "taos_stmt_prepare with a sql len 0 means the input should always be valid utf-8",
-//                 )
-//             };
+pub unsafe fn taos_stmt_prepare(
+    stmt: *mut TAOS_STMT,
+    sql: *const c_char,
+    length: c_ulong,
+) -> c_int {
+    trace!("taos_stmt_prepare start, stmt: {stmt:?}, sql: {sql:?}, length: {length}");
 
-//             if let Some(errno) = maybe_err.errno() {
-//                 return format_errno(errno);
-//             }
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
 
-//             if let Err(err) = maybe_err
-//                 .deref_mut()
-//                 .ok_or_else(|| RawError::from_string("data is null"))
-//                 .and_then(|stmt| stmt.prepare(sql))
-//             {
-//                 error!("stmt prepare error, err: {err:?}");
-//                 maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-//                 set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
-//             } else {
-//                 maybe_err.with_err(None);
-//                 clear_error_info();
-//                 Code::SUCCESS.into()
-//             }
-//         }
-//         None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-//     }
-// }
+    let stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    if sql.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "sql is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    let sql = if length > 0 {
+        // TODO: check utf-8
+        str::from_utf8_unchecked(slice::from_raw_parts(sql as _, length as _))
+    } else {
+        match CStr::from_ptr(sql).to_str() {
+            Ok(sql) => sql,
+            Err(_) => {
+                maybe_err.with_err(Some(TaosError::new(
+                    Code::INVALID_PARA,
+                    "sql is invalid utf-8",
+                )));
+                return format_errno(Code::INVALID_PARA.into());
+            }
+        }
+    };
+
+    trace!("taos_stmt_prepare, sql: {sql}");
+
+    match stmt2.prepare(sql) {
+        Ok(_) => {
+            trace!("taos_stmt_prepare succ");
+            maybe_err.clear_err();
+            clear_err_and_ret_succ()
+        }
+        Err(err) => {
+            error!("taos_stmt_prepare failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            format_errno(err.code().into())
+        }
+    }
+}
 
 // pub unsafe fn taos_stmt_set_tbname_tags(
 //     stmt: *mut TAOS_STMT,
@@ -870,9 +896,9 @@ mod tests {
             let stmt = taos_stmt_init(taos);
             assert!(!stmt.is_null());
 
-            // let sql = c"insert into ? using s0 tags (?) values (?, ?)";
-            // let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
-            // assert_eq!(code, 0);
+            let sql = c"insert into ? using s0 tags (?) values (?, ?)";
+            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
 
             // let name = c"d0";
             // let mut tags = vec![TAOS_MULTI_BIND::from_primitives(&[false], &[99])];
