@@ -22,13 +22,20 @@ use crate::ws::error::{
 };
 use crate::ws::TaosResult;
 
+#[derive(Debug)]
 struct TaosStmt {
     stmt2: Stmt2,
+    params: Vec<Stmt2BindParam>,
+    cur_param: Option<Stmt2BindParam>,
 }
 
 impl TaosStmt {
     fn new(stmt2: Stmt2) -> Self {
-        Self { stmt2 }
+        Self {
+            stmt2,
+            params: Vec::new(),
+            cur_param: Some(Stmt2BindParam::new(None, None, None)),
+        }
     }
 }
 
@@ -98,7 +105,7 @@ pub unsafe fn taos_stmt_prepare(
     };
 
     let stmt2 = match maybe_err.deref_mut() {
-        Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+        Some(taos_stmt) => &mut taos_stmt.stmt2,
         None => {
             maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
             return format_errno(Code::INVALID_PARA.into());
@@ -189,27 +196,43 @@ pub unsafe fn taos_stmt_prepare(
 //     Ok(())
 // }
 
-// pub unsafe fn taos_stmt_set_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int {
-//     match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-//         Some(maybe_err) => {
-//             let name = CStr::from_ptr(name).to_str().unwrap();
-//             if let Err(err) = maybe_err
-//                 .deref_mut()
-//                 .ok_or_else(|| RawError::from_string("data is null"))
-//                 .and_then(|stmt| stmt.set_tbname(name))
-//             {
-//                 error!("stmt set tbname error, err: {err:?}");
-//                 maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-//                 set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
-//             } else {
-//                 maybe_err.with_err(None);
-//                 clear_error_info();
-//                 Code::SUCCESS.into()
-//             }
-//         }
-//         None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-//     }
-// }
+pub unsafe fn taos_stmt_set_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int {
+    trace!("taos_stmt_set_tbname start, stmt: {stmt:?}, name: {name:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(name) => name,
+        Err(_) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::INVALID_PARA,
+                "name is invalid utf-8",
+            )));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    taos_stmt
+        .cur_param
+        .as_mut()
+        .map(|param| param.with_table_name(name.to_owned()));
+
+    trace!("taos_stmt_set_tbname succ, taos_stmt: {taos_stmt:?}");
+
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
 
 // pub unsafe fn taos_stmt_set_tags(stmt: *mut TAOS_STMT, tags: *mut TAOS_MULTI_BIND) -> c_int {
 //     let maybe_err = match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
@@ -245,9 +268,9 @@ pub unsafe fn taos_stmt_prepare(
 //     Code::SUCCESS.into()
 // }
 
-// pub unsafe fn taos_stmt_set_sub_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int {
-//     taos_stmt_set_tbname(stmt, name)
-// }
+pub unsafe fn taos_stmt_set_sub_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int {
+    taos_stmt_set_tbname(stmt, name)
+}
 
 // #[allow(non_snake_case)]
 // pub unsafe fn taos_stmt_get_tag_fields(
@@ -886,9 +909,9 @@ mod tests {
             test_exec_many(
                 taos,
                 &[
-                    "drop database if exists test_1738740951",
-                    "create database test_1738740951",
-                    "use test_1738740951",
+                    "drop database if exists test_1740472346",
+                    "create database test_1740472346",
+                    "use test_1740472346",
                     "create table s0 (ts timestamp, c1 int) tags (t1 int)",
                 ],
             );
@@ -900,16 +923,16 @@ mod tests {
             let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
             assert_eq!(code, 0);
 
-            // let name = c"d0";
+            let name = c"d0";
             // let mut tags = vec![TAOS_MULTI_BIND::from_primitives(&[false], &[99])];
             // let code = taos_stmt_set_tbname_tags(stmt, name.as_ptr(), tags.as_mut_ptr());
             // assert_eq!(code, 0);
 
-            // let code = taos_stmt_set_tbname(stmt, name.as_ptr());
-            // assert_eq!(code, 0);
+            let code = taos_stmt_set_tbname(stmt, name.as_ptr());
+            assert_eq!(code, 0);
 
-            // let code = taos_stmt_set_sub_tbname(stmt, name.as_ptr());
-            // assert_eq!(code, 0);
+            let code = taos_stmt_set_sub_tbname(stmt, name.as_ptr());
+            assert_eq!(code, 0);
 
             // let code = taos_stmt_set_tags(stmt, tags.as_mut_ptr());
             // assert_eq!(code, 0);
@@ -972,7 +995,7 @@ mod tests {
             let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
 
-            test_exec(taos, "drop database test_1738740951");
+            test_exec(taos, "drop database test_1740472346");
         }
     }
 }
