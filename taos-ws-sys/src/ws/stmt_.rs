@@ -29,6 +29,7 @@ struct TaosStmt {
     tag_fields: Option<Vec<Stmt2Field>>,
     col_fields: Option<Vec<Stmt2Field>>,
     params: Vec<Stmt2BindParam>,
+    // TODO: use Stmt2BindParam instead of Option<Stmt2BindParam>
     cur_param: Option<Stmt2BindParam>,
 }
 
@@ -611,23 +612,41 @@ pub unsafe fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
     clear_err_and_ret_succ()
 }
 
-// pub unsafe fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
-//     match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-//         Some(maybe_err) => match maybe_err
-//             .deref_mut()
-//             .ok_or_else(|| RawError::from_string("data is null"))
-//             .and_then(Bindable::execute)
-//         {
-//             Ok(_) => Code::SUCCESS.into(),
-//             Err(err) => {
-//                 error!("taos_stmt_execute failed, err: {err:?}");
-//                 maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-//                 set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
-//             }
-//         },
-//         None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-//     }
-// }
+pub unsafe fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
+    trace!("taos_stmt_execute start, stmt: {stmt:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    let params = std::mem::take(&mut taos_stmt.params);
+    if let Err(err) = stmt2.bind(&params) {
+        error!("taos_stmt_execute failed, err: {err:?}");
+        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+        return format_errno(err.code().into());
+    }
+
+    match stmt2.exec() {
+        Ok(_) => {
+            trace!("taos_stmt_execute succ");
+            maybe_err.clear_err();
+            clear_err_and_ret_succ()
+        }
+        Err(err) => {
+            error!("taos_stmt_execute failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            format_errno(err.code().into())
+        }
+    }
+}
 
 // pub fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS_RES {
 //     todo!()
@@ -1232,8 +1251,8 @@ mod tests {
             let code = taos_stmt_add_batch(stmt);
             assert_eq!(code, 0);
 
-            // let code = taos_stmt_execute(stmt);
-            // assert_eq!(code, 0);
+            let code = taos_stmt_execute(stmt);
+            assert_eq!(code, 0);
 
             // let errstr = taos_stmt_errstr(stmt);
             // assert_eq!(CStr::from_ptr(errstr), c"");
