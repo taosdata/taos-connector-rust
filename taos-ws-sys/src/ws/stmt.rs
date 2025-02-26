@@ -701,7 +701,7 @@ impl TAOS_MULTI_BIND {
 #[cfg(test)]
 #[allow(dead_code)]
 impl TAOS_MULTI_BIND {
-    fn from_primitives<T: taos_query::common::itypes::IValue>(
+    pub fn from_primitives<T: taos_query::common::itypes::IValue>(
         nulls: &[bool],
         values: &[T],
     ) -> Self {
