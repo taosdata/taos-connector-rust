@@ -880,15 +880,26 @@ pub unsafe fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *mut c_char {
     taos_errstr(stmt as _) as _
 }
 
-// pub unsafe fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int {
-//     match (stmt as *mut TaosMaybeError<Stmt>)
-//         .as_mut()
-//         .and_then(|maybe_err| maybe_err.deref_mut())
-//     {
-//         Some(stmt) => stmt.affected_rows() as _,
-//         None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-//     }
-// }
+pub unsafe fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int {
+    trace!("taos_stmt_affected_rows start, stmt: {stmt:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt) => &mut taos_stmt.stmt2,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    trace!(
+        "taos_stmt_affected_rows succ, affected_rows: {}",
+        stmt2.affected_rows()
+    );
+
+    stmt2.affected_rows() as _
+}
 
 // pub unsafe fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c_int {
 //     match (stmt as *mut TaosMaybeError<Stmt>)
@@ -1495,8 +1506,8 @@ mod tests {
             let errstr = taos_stmt_errstr(stmt);
             assert_eq!(CStr::from_ptr(errstr), c"");
 
-            // let affected_rows = taos_stmt_affected_rows(stmt);
-            // assert_eq!(affected_rows, 1);
+            let affected_rows = taos_stmt_affected_rows(stmt);
+            assert_eq!(affected_rows, 1);
 
             // let affected_rows_once = taos_stmt_affected_rows_once(stmt);
             // assert_eq!(affected_rows_once, 1);
