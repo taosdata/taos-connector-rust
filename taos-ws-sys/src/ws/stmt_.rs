@@ -560,33 +560,56 @@ pub unsafe fn taos_stmt_bind_param_batch(
     clear_err_and_ret_succ()
 }
 
-// #[allow(non_snake_case)]
-// pub fn taos_stmt_bind_single_param_batch(
-//     stmt: *mut TAOS_STMT,
-//     bind: *mut TAOS_MULTI_BIND,
-//     colIdx: c_int,
-// ) -> c_int {
-//     todo!()
-// }
+#[allow(non_snake_case)]
+pub fn taos_stmt_bind_single_param_batch(
+    stmt: *mut TAOS_STMT,
+    bind: *mut TAOS_MULTI_BIND,
+    colIdx: c_int,
+) -> c_int {
+    todo!("taos_stmt_bind_single_param_batch")
+}
 
-// pub unsafe fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
-//     match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-//         Some(maybe_err) => {
-//             if let Err(err) = maybe_err
-//                 .deref_mut()
-//                 .ok_or_else(|| RawError::from_string("data is null"))
-//                 .and_then(|stmt| stmt.add_batch())
-//             {
-//                 error!("taos_stmt_add_batch failed, err: {err:?}");
-//                 maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-//                 set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
-//             } else {
-//                 Code::SUCCESS.into()
-//             }
-//         }
-//         None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-//     }
-// }
+pub unsafe fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
+    trace!("taos_stmt_add_batch start, stmt: {stmt:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_set_tags can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+    }
+
+    taos_stmt.params.push(taos_stmt.cur_param.take().unwrap());
+    taos_stmt.cur_param = Some(Stmt2BindParam::new(None, None, None));
+
+    trace!("taos_stmt_add_batch succ, taos_stmt: {taos_stmt:?}");
+
+    maybe_err.with_err(None);
+    clear_err_and_ret_succ()
+}
 
 // pub unsafe fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
 //     match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
@@ -1206,8 +1229,8 @@ mod tests {
             let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
             assert_eq!(code, 0);
 
-            // let code = taos_stmt_add_batch(stmt);
-            // assert_eq!(code, 0);
+            let code = taos_stmt_add_batch(stmt);
+            assert_eq!(code, 0);
 
             // let code = taos_stmt_execute(stmt);
             // assert_eq!(code, 0);
