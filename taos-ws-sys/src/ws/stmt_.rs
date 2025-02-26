@@ -451,9 +451,54 @@ pub unsafe fn taos_stmt_set_sub_tbname(stmt: *mut TAOS_STMT, name: *const c_char
 //     }
 // }
 
-// pub fn taos_stmt_bind_param(stmt: *mut TAOS_STMT, bind: *mut TAOS_MULTI_BIND) -> c_int {
-//     todo!()
-// }
+pub unsafe fn taos_stmt_bind_param(stmt: *mut TAOS_STMT, bind: *mut TAOS_MULTI_BIND) -> c_int {
+    trace!("taos_stmt_bind_param start, stmt: {stmt:?}, bind: {bind:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    let col_cnt = match stmt2.is_insert() {
+        Some(true) => taos_stmt
+            .col_fields
+            .as_ref()
+            .map(|fields| fields.len())
+            .unwrap_or(0),
+        Some(false) => stmt2.fields_count().unwrap_or(0),
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+    };
+
+    let binds = slice::from_raw_parts(bind, col_cnt);
+
+    let mut cols = Vec::with_capacity(col_cnt);
+    for bind in binds {
+        cols.push(bind.to_column_view());
+    }
+
+    taos_stmt
+        .cur_param
+        .as_mut()
+        .map(|param| param.with_columns(cols));
+
+    trace!("taos_stmt_bind_param succ, taos_stmt: {taos_stmt:?}");
+
+    maybe_err.with_err(None);
+    clear_err_and_ret_succ()
+}
 
 pub unsafe fn taos_stmt_bind_param_batch(
     stmt: *mut TAOS_STMT,
@@ -1152,6 +1197,13 @@ mod tests {
                 TAOS_MULTI_BIND::from_primitives_(&[20], &[false], &[4]),
             ];
             let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
+            assert_eq!(code, 0);
+
+            let mut cols = vec![
+                TAOS_MULTI_BIND::from_raw_timestamps_(&[1738910658659i64], &[false], &[8]),
+                TAOS_MULTI_BIND::from_primitives_(&[2025], &[false], &[4]),
+            ];
+            let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
             assert_eq!(code, 0);
 
             // let code = taos_stmt_add_batch(stmt);
