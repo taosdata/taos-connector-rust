@@ -715,7 +715,7 @@ impl TAOS_MULTI_BIND {
         }
     }
 
-    fn from_raw_timestamps(nulls: &[bool], values: &[i64]) -> Self {
+    pub fn from_raw_timestamps(nulls: &[bool], values: &[i64]) -> Self {
         Self {
             buffer_type: Ty::Timestamp as _,
             buffer: values.as_ptr() as _,

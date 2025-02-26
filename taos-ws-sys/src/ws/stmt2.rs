@@ -623,10 +623,8 @@ impl TAOS_STMT2_BIND {
                         let val = &slice[idx..idx + lens[i] as usize];
                         vals[i] = Some(val);
                         idx += lens[i] as usize;
-                        tracing::info!("val: {:?}", bytes::Bytes::from(val));
                     }
                 }
-                tracing::info!("vals: {:?}", vals);
                 ColumnView::from_geobytes::<&[u8], _, _, _>(vals)
             }
             _ => todo!(),

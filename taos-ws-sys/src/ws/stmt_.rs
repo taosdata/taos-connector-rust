@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use taos_error::{Code, Error as RawError};
 use taos_query::block_in_place_or_global;
-use taos_query::common::{Timestamp, Ty, Value};
+use taos_query::common::{ColumnView, Timestamp, Ty, Value};
 use taos_query::prelude::Itertools;
 use taos_query::stmt::Bindable;
 use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
@@ -455,44 +455,65 @@ pub unsafe fn taos_stmt_set_sub_tbname(stmt: *mut TAOS_STMT, name: *const c_char
 //     todo!()
 // }
 
-// pub unsafe fn taos_stmt_bind_param_batch(
-//     stmt: *mut TAOS_STMT,
-//     bind: *mut TAOS_MULTI_BIND,
-// ) -> c_int {
-//     let maybe_err = match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-//         Some(maybe_err) => maybe_err,
-//         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-//     };
+pub unsafe fn taos_stmt_bind_param_batch(
+    stmt: *mut TAOS_STMT,
+    bind: *mut TAOS_MULTI_BIND,
+) -> c_int {
+    trace!("taos_stmt_bind_param_batch start, stmt: {stmt:?}, bind: {bind:?}");
 
-//     let stmt = match maybe_err.deref_mut() {
-//         Some(stmt) => stmt,
-//         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "data is null")),
-//     };
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
 
-//     let fields = match stmt_get_col_fields(stmt) {
-//         Ok(fields) => fields,
-//         Err(err) => {
-//             error!("stmt_get_col_fields failed, err: {err:?}");
-//             maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-//             return set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
-//         }
-//     };
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
 
-//     let cols = std::slice::from_raw_parts(bind, fields.len())
-//         .iter()
-//         .map(TAOS_MULTI_BIND::to_json)
-//         .collect();
+    let stmt2 = &mut taos_stmt.stmt2;
 
-//     if let Err(err) = taos_query::block_in_place_or_global(stmt.stmt_bind(cols)) {
-//         error!("taos_stmt_bind_param_batch failed, err: {err:?}");
-//         maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-//         return set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
-//     }
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_set_tags can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+    }
 
-//     maybe_err.with_err(None);
-//     clear_error_info();
-//     Code::SUCCESS.into()
-// }
+    let col_cnt = taos_stmt
+        .col_fields
+        .as_ref()
+        .map(|fields| fields.len())
+        .unwrap_or(0);
+
+    let binds = slice::from_raw_parts(bind, col_cnt);
+
+    let mut cols = Vec::with_capacity(col_cnt);
+    for bind in binds {
+        cols.push(bind.to_column_view());
+    }
+
+    taos_stmt
+        .cur_param
+        .as_mut()
+        .map(|param| param.with_columns(cols));
+
+    trace!("taos_stmt_bind_param_batch succ, taos_stmt: {taos_stmt:?}");
+
+    maybe_err.with_err(None);
+    clear_err_and_ret_succ()
+}
 
 // #[allow(non_snake_case)]
 // pub fn taos_stmt_bind_single_param_batch(
@@ -598,7 +619,7 @@ impl TAOS_MULTI_BIND {
         assert!(!self.length.is_null());
         assert!(!self.buffer.is_null());
 
-        match self.ty_() {
+        let val = match self.ty_() {
             Ty::Null => Value::Null(self.ty_()),
             Ty::Bool => unsafe { Value::Bool(*(self.buffer as *const _)) },
             Ty::TinyInt => unsafe { Value::TinyInt(*(self.buffer as *const _)) },
@@ -638,6 +659,144 @@ impl TAOS_MULTI_BIND {
                 Value::Geometry(slice.into())
             },
             _ => todo!(),
+        };
+
+        trace!("to_value, value: {val:?}");
+
+        val
+    }
+
+    fn to_column_view(&self) -> ColumnView {
+        let ty = self.ty_();
+        let num = self.num as usize;
+        let is_nulls = unsafe { slice::from_raw_parts(self.is_null, num) };
+        let lens = unsafe { slice::from_raw_parts(self.length, num) };
+        let len = self.buffer_length * num;
+
+        trace!(
+            "to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}, \
+            total_len: {len}"
+        );
+
+        macro_rules! view {
+            ($from:expr) => {{
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const _, num) };
+                let mut vals = vec![None; num];
+                for i in 0..num {
+                    if is_nulls[i] == 0 {
+                        vals[i] = Some(slice[i]);
+                    }
+                }
+                $from(vals)
+            }};
+        }
+
+        let view = match ty {
+            Ty::Bool => view!(ColumnView::from_bools),
+            Ty::TinyInt => view!(ColumnView::from_tiny_ints),
+            Ty::SmallInt => view!(ColumnView::from_small_ints),
+            Ty::Int => view!(ColumnView::from_ints),
+            Ty::BigInt => view!(ColumnView::from_big_ints),
+            Ty::UTinyInt => view!(ColumnView::from_unsigned_tiny_ints),
+            Ty::USmallInt => view!(ColumnView::from_unsigned_small_ints),
+            Ty::UInt => view!(ColumnView::from_unsigned_ints),
+            Ty::UBigInt => view!(ColumnView::from_unsigned_big_ints),
+            Ty::Float => view!(ColumnView::from_floats),
+            Ty::Double => view!(ColumnView::from_doubles),
+            Ty::Timestamp => view!(ColumnView::from_millis_timestamp),
+            Ty::VarChar => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const _, len) };
+                let mut vals = vec![None; num];
+                for i in 0..num {
+                    if is_nulls[i] != 0 {
+                        let idx = i * self.buffer_length as usize;
+                        let bytes = &slice[idx..idx + lens[i] as usize];
+                        vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
+                    }
+                }
+                ColumnView::from_varchar::<&str, _, _, _>(vals)
+            }
+            Ty::NChar => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const _, len) };
+                let mut vals = vec![None; num];
+                for i in 0..num {
+                    if is_nulls[i] == 0 {
+                        let idx = i * self.buffer_length as usize;
+                        let bytes = &slice[idx..idx + lens[i] as usize];
+                        vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
+                    }
+                }
+                ColumnView::from_nchar::<&str, _, _, _>(vals)
+            }
+            Ty::Json => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
+                let mut vals = vec![None; num];
+                for i in 0..num {
+                    if is_nulls[i] == 0 {
+                        let idx = i * self.buffer_length as usize;
+                        let bytes = &slice[idx..idx + lens[i] as usize];
+                        vals[i] = serde_json::from_slice(bytes).unwrap();
+                    }
+                }
+                ColumnView::from_json::<&str, _, _, _>(vals)
+            }
+            Ty::VarBinary => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
+                let mut vals = vec![None; num];
+                for i in 0..num {
+                    if is_nulls[i] == 0 {
+                        let idx = i * self.buffer_length as usize;
+                        let val = &slice[idx..idx + lens[i] as usize];
+                        vals[i] = Some(val);
+                    }
+                }
+                ColumnView::from_bytes::<&[u8], _, _, _>(vals)
+            }
+            Ty::Geometry => {
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
+                let mut vals = vec![None; num];
+                for i in 0..num {
+                    if is_nulls[i] == 0 {
+                        let idx = i * self.buffer_length as usize;
+                        let val = &slice[idx..idx + lens[i] as usize];
+                        vals[i] = Some(val);
+                    }
+                }
+                ColumnView::from_geobytes::<&[u8], _, _, _>(vals)
+            }
+            _ => todo!(),
+        };
+
+        trace!("to_column_view, view: {view:?}");
+
+        view
+    }
+
+    #[cfg(test)]
+    fn from_primitives_<T: taos_query::common::itypes::IValue>(
+        values: &[T],
+        nulls: &[bool],
+        lens: &[i32],
+    ) -> Self {
+        Self {
+            buffer_type: T::TY as _,
+            buffer: values.as_ptr() as _,
+            buffer_length: std::mem::size_of::<T>(),
+            length: lens.as_ptr() as _,
+            is_null: nulls.as_ptr() as _,
+            num: values.len() as _,
+        }
+    }
+
+    #[cfg(test)]
+    fn from_raw_timestamps_(values: &[i64], nulls: &[bool], lens: &[i32]) -> Self {
+        Self {
+            buffer_type: Ty::Timestamp as _,
+            buffer: values.as_ptr() as _,
+            buffer_length: std::mem::size_of::<i64>(),
+            length: lens.as_ptr() as _,
+            is_null: nulls.as_ptr() as _,
+            num: values.len() as _,
         }
     }
 
@@ -942,7 +1101,7 @@ mod tests {
             assert_eq!(code, 0);
 
             let name = c"d0";
-            let mut tags = vec![TAOS_MULTI_BIND::from_primitives(&[false], &[99])];
+            let mut tags = vec![TAOS_MULTI_BIND::from_primitives_(&[99], &[false], &[4])];
             let code = taos_stmt_set_tbname_tags(stmt, name.as_ptr(), tags.as_mut_ptr());
             assert_eq!(code, 0);
 
@@ -988,12 +1147,12 @@ mod tests {
             // assert_eq!(ty, Ty::Int as i32);
             // assert_eq!(bytes, 4);
 
-            // let mut cols = vec![
-            //     TAOS_MULTI_BIND::from_raw_timestamps(&[false], &[1738910658659i64]),
-            //     TAOS_MULTI_BIND::from_primitives(&[false], &[20]),
-            // ];
-            // let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
-            // assert_eq!(code, 0);
+            let mut cols = vec![
+                TAOS_MULTI_BIND::from_raw_timestamps_(&[1738910658659i64], &[false], &[8]),
+                TAOS_MULTI_BIND::from_primitives_(&[20], &[false], &[4]),
+            ];
+            let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
+            assert_eq!(code, 0);
 
             // let code = taos_stmt_add_batch(stmt);
             // assert_eq!(code, 0);
