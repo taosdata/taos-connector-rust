@@ -1276,4 +1276,31 @@ mod tests {
             test_exec(taos, "drop database test_1740472346");
         }
     }
+
+    #[test]
+    fn test_taos_stmt_init_with_options() {
+        unsafe {
+            let taos = test_connect();
+            let mut option = TAOS_STMT_OPTIONS {
+                reqId: 1001,
+                singleStbInsert: true,
+                singleTableBindOnce: false,
+            };
+
+            let stmt = taos_stmt_init_with_options(taos, &mut option);
+            assert!(!stmt.is_null());
+
+            let code = taos_stmt_close(stmt);
+            assert_eq!(code, 0);
+        }
+
+        unsafe {
+            let taos = test_connect();
+            let stmt = taos_stmt_init_with_options(taos, ptr::null_mut());
+            assert!(!stmt.is_null());
+
+            let code = taos_stmt_close(stmt);
+            assert_eq!(code, 0);
+        }
+    }
 }
