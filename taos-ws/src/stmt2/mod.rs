@@ -221,6 +221,10 @@ impl Stmt2 {
     pub fn fields_count(&self) -> Option<usize> {
         self.fields_count
     }
+
+    pub fn affected_rows_once(&self) -> usize {
+        self.affected_rows_once
+    }
 }
 
 impl Drop for Stmt2 {
