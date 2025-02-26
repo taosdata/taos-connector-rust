@@ -1134,7 +1134,7 @@ impl TAOS_MULTI_BIND {
     }
 
     #[cfg(test)]
-    fn from_raw_timestamps(values: &[i64], nulls: &[bool], lens: &[i32]) -> Self {
+    fn from_timestamps(values: &[i64], nulls: &[bool], lens: &[i32]) -> Self {
         Self {
             buffer_type: Ty::Timestamp as _,
             buffer: values.as_ptr() as _,
@@ -1167,94 +1167,6 @@ impl From<&Stmt2Field> for TAOS_FIELD_E {
         }
     }
 }
-
-// #[cfg(test)]
-// #[allow(dead_code)]
-// impl TAOS_MULTI_BIND {
-//     fn from_primitives<T: taos_query::common::itypes::IValue>(
-//         nulls: &[bool],
-//         values: &[T],
-//     ) -> Self {
-//         Self {
-//             buffer_type: T::TY as _,
-//             buffer: values.as_ptr() as _,
-//             buffer_length: std::mem::size_of::<T>(),
-//             length: values.len() as _,
-//             is_null: nulls.as_ptr() as _,
-//             num: values.len() as _,
-//         }
-//     }
-
-//     fn from_raw_timestamps(nulls: &[bool], values: &[i64]) -> Self {
-//         Self {
-//             buffer_type: Ty::Timestamp as _,
-//             buffer: values.as_ptr() as _,
-//             buffer_length: std::mem::size_of::<i64>(),
-//             length: values.len() as _,
-//             is_null: nulls.as_ptr() as _,
-//             num: values.len() as _,
-//         }
-//     }
-
-//     fn from_binary_vec(values: &[Option<impl AsRef<[u8]>>]) -> Self {
-//         let mut buf_len = 0;
-//         let num = values.len();
-
-//         let mut nulls = std::mem::ManuallyDrop::new(Vec::with_capacity(num));
-//         nulls.resize(num, false);
-
-//         let mut len = std::mem::ManuallyDrop::new(Vec::with_capacity(num));
-//         for (i, v) in values.iter().enumerate() {
-//             match v {
-//                 Some(v) => {
-//                     let v = v.as_ref();
-//                     len.push(v.len() as _);
-//                     if v.len() > buf_len {
-//                         buf_len = v.len();
-//                     }
-//                 }
-//                 None => {
-//                     len.push(-1);
-//                     nulls[i] = true;
-//                 }
-//             }
-//         }
-
-//         let buf_size = buf_len * values.len();
-//         let mut buf = std::mem::ManuallyDrop::new(Vec::with_capacity(buf_size));
-//         unsafe { buf.set_len(buf_size) };
-//         buf.fill(0);
-
-//         for (i, v) in values.iter().enumerate() {
-//             if let Some(v) = v {
-//                 let v = v.as_ref();
-//                 unsafe {
-//                     let dst = buf.as_mut_ptr().add(buf_len * i);
-//                     std::ptr::copy_nonoverlapping(v.as_ptr(), dst, v.len());
-//                 }
-//             }
-//         }
-
-//         Self {
-//             buffer_type: Ty::VarChar as _,
-//             buffer: buf.as_ptr() as _,
-//             buffer_length: buf_len,
-//             length: len.as_ptr() as _,
-//             is_null: nulls.as_ptr() as _,
-//             num: num as _,
-//         }
-//     }
-
-//     fn from_string_vec(values: &[Option<impl AsRef<str>>]) -> Self {
-//         let values: Vec<_> = values
-//             .iter()
-//             .map(|f| f.as_ref().map(|s| s.as_ref().as_bytes()))
-//             .collect();
-//         let mut bind = Self::from_binary_vec(&values);
-//         bind.buffer_type = Ty::NChar as _;
-//         bind
-//     }
-// }
 
 #[cfg(test)]
 mod tests {
@@ -1330,14 +1242,14 @@ mod tests {
             assert_eq!(bytes, 4);
 
             let mut cols = vec![
-                TAOS_MULTI_BIND::from_raw_timestamps(&[1738910658659i64], &[false], &[8]),
+                TAOS_MULTI_BIND::from_timestamps(&[1738910658659i64], &[false], &[8]),
                 TAOS_MULTI_BIND::from_primitives(&[20], &[false], &[4]),
             ];
             let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
             assert_eq!(code, 0);
 
             let mut cols = vec![
-                TAOS_MULTI_BIND::from_raw_timestamps(&[1738910658659i64], &[false], &[8]),
+                TAOS_MULTI_BIND::from_timestamps(&[1738910658659i64], &[false], &[8]),
                 TAOS_MULTI_BIND::from_primitives(&[2025], &[false], &[4]),
             ];
             let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
