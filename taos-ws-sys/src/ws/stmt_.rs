@@ -438,12 +438,65 @@ pub unsafe fn taos_stmt_get_col_fields(
     clear_err_and_ret_succ()
 }
 
-// pub unsafe fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_FIELD_E) {
-//     if !fields.is_null() {
-//         let (_, (len, cap)) = STMT_FIELDS_MAP.remove(&(fields as usize)).unwrap();
-//         let _ = Vec::from_raw_parts(fields, len, cap);
-//     }
-// }
+pub unsafe fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_FIELD_E) {
+    trace!("taos_stmt_reclaim_fields start, stmt: {stmt:?}, fields: {fields:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => {
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
+            return;
+        }
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return;
+        }
+    };
+
+    if fields.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fields is null")));
+        return;
+    }
+
+    if let Some(addr) = taos_stmt.tag_fields_addr {
+        if addr == fields as usize {
+            let len = taos_stmt
+                .tag_fields
+                .as_ref()
+                .map(|fields| fields.len())
+                .unwrap_or(0);
+            let _ = Vec::from_raw_parts(fields, len, len);
+            taos_stmt.tag_fields_addr = None;
+            maybe_err.clear_err();
+            clear_err_and_ret_succ();
+            return;
+        }
+    }
+
+    if let Some(addr) = taos_stmt.col_fields_addr {
+        if addr == fields as usize {
+            let len = taos_stmt
+                .col_fields
+                .as_ref()
+                .map(|fields| fields.len())
+                .unwrap_or(0);
+            let _ = Vec::from_raw_parts(fields, len, len);
+            taos_stmt.col_fields_addr = None;
+            maybe_err.clear_err();
+            clear_err_and_ret_succ();
+            return;
+        }
+    }
+
+    maybe_err.with_err(Some(TaosError::new(
+        Code::INVALID_PARA,
+        "fields is invalid",
+    )));
+}
 
 // pub unsafe fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int {
 //     *insert = 1;
@@ -1279,7 +1332,7 @@ mod tests {
             assert_eq!(code, 0);
             assert_eq!(field_num, 1);
 
-            // taos_stmt_reclaim_fields(stmt, fields);
+            taos_stmt_reclaim_fields(stmt, fields);
 
             let mut field_num = 0;
             let mut fields = ptr::null_mut();
@@ -1287,7 +1340,7 @@ mod tests {
             assert_eq!(code, 0);
             assert_eq!(field_num, 2);
 
-            // taos_stmt_reclaim_fields(stmt, fields);
+            taos_stmt_reclaim_fields(stmt, fields);
 
             // let mut insert = 0;
             // let code = taos_stmt_is_insert(stmt, &mut insert);
