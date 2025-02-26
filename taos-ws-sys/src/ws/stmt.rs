@@ -27,7 +27,6 @@ struct TaosStmt {
     tag_fields_addr: Option<usize>,
     col_fields_addr: Option<usize>,
     params: Vec<Stmt2BindParam>,
-    // TODO: use Stmt2BindParam instead of Option<Stmt2BindParam>
     cur_param: Option<Stmt2BindParam>,
 }
 
@@ -40,7 +39,38 @@ impl TaosStmt {
             tag_fields_addr: None,
             col_fields_addr: None,
             params: Vec::new(),
-            cur_param: Some(Stmt2BindParam::new(None, None, None)),
+            cur_param: None,
+        }
+    }
+
+    fn init_cur_param_if_none(&mut self) {
+        if self.cur_param.is_none() {
+            self.cur_param = Some(Stmt2BindParam::new(None, None, None));
+        }
+    }
+
+    fn set_cur_param_tbname(&mut self, name: String) {
+        self.init_cur_param_if_none();
+        self.cur_param
+            .as_mut()
+            .map(|param| param.with_table_name(name));
+    }
+
+    fn set_cur_param_tags(&mut self, tags: Vec<Value>) {
+        self.init_cur_param_if_none();
+        self.cur_param.as_mut().map(|param| param.with_tags(tags));
+    }
+
+    fn set_cur_param_cols(&mut self, cols: Vec<ColumnView>) {
+        self.init_cur_param_if_none();
+        self.cur_param
+            .as_mut()
+            .map(|param| param.with_columns(cols));
+    }
+
+    fn move_cur_param_to_params(&mut self) {
+        if let Some(cur_param) = self.cur_param.take() {
+            self.params.push(cur_param);
         }
     }
 }
@@ -211,10 +241,7 @@ pub unsafe fn taos_stmt_set_tbname(stmt: *mut TAOS_STMT, name: *const c_char) ->
         }
     };
 
-    taos_stmt
-        .cur_param
-        .as_mut()
-        .map(|param| param.with_table_name(name.to_owned()));
+    taos_stmt.set_cur_param_tbname(name.to_owned());
 
     trace!("taos_stmt_set_tbname succ, taos_stmt: {taos_stmt:?}");
 
@@ -271,10 +298,7 @@ pub unsafe fn taos_stmt_set_tags(stmt: *mut TAOS_STMT, tags: *mut TAOS_MULTI_BIN
         tags.push(bind.to_value());
     }
 
-    taos_stmt
-        .cur_param
-        .as_mut()
-        .map(|param| param.with_tags(tags));
+    taos_stmt.set_cur_param_tags(tags);
 
     trace!("taos_stmt_set_tags succ, taos_stmt: {taos_stmt:?}");
 
@@ -702,10 +726,7 @@ pub unsafe fn taos_stmt_bind_param(stmt: *mut TAOS_STMT, bind: *mut TAOS_MULTI_B
         cols.push(bind.to_column_view());
     }
 
-    taos_stmt
-        .cur_param
-        .as_mut()
-        .map(|param| param.with_columns(cols));
+    taos_stmt.set_cur_param_cols(cols);
 
     trace!("taos_stmt_bind_param succ, taos_stmt: {taos_stmt:?}");
 
@@ -762,10 +783,7 @@ pub unsafe fn taos_stmt_bind_param_batch(
         cols.push(bind.to_column_view());
     }
 
-    taos_stmt
-        .cur_param
-        .as_mut()
-        .map(|param| param.with_columns(cols));
+    taos_stmt.set_cur_param_cols(cols);
 
     trace!("taos_stmt_bind_param_batch succ, taos_stmt: {taos_stmt:?}");
 
@@ -815,8 +833,7 @@ pub unsafe fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
         }
     }
 
-    taos_stmt.params.push(taos_stmt.cur_param.take().unwrap());
-    taos_stmt.cur_param = Some(Stmt2BindParam::new(None, None, None));
+    taos_stmt.move_cur_param_to_params();
 
     trace!("taos_stmt_add_batch succ, taos_stmt: {taos_stmt:?}");
 
@@ -836,6 +853,8 @@ pub unsafe fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
         Some(taos_stmt) => taos_stmt,
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
     };
+
+    taos_stmt.move_cur_param_to_params();
 
     let stmt2 = &mut taos_stmt.stmt2;
 
@@ -1171,7 +1190,22 @@ impl From<&Stmt2Field> for TAOS_FIELD_E {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::taos::query::taos_affected_rows;
+    use crate::ws::query::*;
     use crate::ws::{test_connect, test_exec, test_exec_many};
+
+    macro_rules! new_bind {
+        ($ty:expr, $buffer:ident, $length:ident, $is_null:ident) => {
+            TAOS_MULTI_BIND {
+                buffer_type: $ty as _,
+                buffer: $buffer.as_mut_ptr() as _,
+                buffer_length: *$length.iter().max().unwrap() as _,
+                length: $length.as_mut_ptr(),
+                is_null: $is_null.as_mut_ptr(),
+                num: $is_null.len() as _,
+            }
+        };
+    }
 
     #[test]
     fn test_stmt() {
@@ -1191,7 +1225,8 @@ mod tests {
             assert!(!stmt.is_null());
 
             let sql = c"insert into ? using s0 tags (?) values (?, ?)";
-            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
+            let len = sql.to_bytes().len();
+            let code = taos_stmt_prepare(stmt, sql.as_ptr(), len as _);
             assert_eq!(code, 0);
 
             let name = c"d0";
@@ -1301,6 +1336,83 @@ mod tests {
 
             let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt_use_result() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1740560525",
+                    "create database test_1740560525",
+                    "use test_1740560525",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 1)",
+                    "insert into t0 values(1739762261438, 99)",
+                ],
+            );
+
+            let stmt = taos_stmt_init(taos);
+            assert!(!stmt.is_null());
+
+            let sql = c"select * from t0 where c1 > ?";
+            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![0];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let mut bind = vec![c1];
+            let code = taos_stmt_bind_param(stmt, bind.as_mut_ptr());
+            assert_eq!(code, 0);
+
+            let code = taos_stmt_execute(stmt);
+            assert_eq!(code, 0);
+
+            let res = taos_stmt_use_result(stmt);
+            assert!(!res.is_null());
+
+            let affected_rows = taos_affected_rows(res);
+            assert_eq!(affected_rows, 0);
+
+            let precision = taos_result_precision(res);
+            assert_eq!(precision, 0);
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert!(len > 0);
+            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert!(len > 0);
+            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
+            taos_stop_query(res);
+
+            taos_free_result(res);
+
+            let code = taos_stmt_close(stmt);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1740560525");
         }
     }
 }
