@@ -876,9 +876,9 @@ pub unsafe fn taos_stmt_close(stmt: *mut TAOS_STMT) -> c_int {
     clear_err_and_ret_succ()
 }
 
-// pub unsafe fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *mut c_char {
-//     taos_errstr(stmt as _) as _
-// }
+pub unsafe fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *mut c_char {
+    taos_errstr(stmt as _) as _
+}
 
 // pub unsafe fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int {
 //     match (stmt as *mut TaosMaybeError<Stmt>)
@@ -1492,8 +1492,8 @@ mod tests {
             let code = taos_stmt_execute(stmt);
             assert_eq!(code, 0);
 
-            // let errstr = taos_stmt_errstr(stmt);
-            // assert_eq!(CStr::from_ptr(errstr), c"");
+            let errstr = taos_stmt_errstr(stmt);
+            assert_eq!(CStr::from_ptr(errstr), c"");
 
             // let affected_rows = taos_stmt_affected_rows(stmt);
             // assert_eq!(affected_rows, 1);
