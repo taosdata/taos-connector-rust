@@ -952,7 +952,7 @@ pub unsafe fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c_int {
 impl TAOS_MULTI_BIND {
     fn to_value(&self) -> Value {
         if !self.is_null.is_null() && unsafe { self.is_null.read() != 0 } {
-            let val = Value::Null(self.ty_());
+            let val = Value::Null(self.ty());
             trace!("to_value, value: {val:?}");
             return val;
         }
@@ -960,8 +960,8 @@ impl TAOS_MULTI_BIND {
         assert!(!self.length.is_null());
         assert!(!self.buffer.is_null());
 
-        let val = match self.ty_() {
-            Ty::Null => Value::Null(self.ty_()),
+        let val = match self.ty() {
+            Ty::Null => Value::Null(self.ty()),
             Ty::Bool => unsafe { Value::Bool(*(self.buffer as *const _)) },
             Ty::TinyInt => unsafe { Value::TinyInt(*(self.buffer as *const _)) },
             Ty::SmallInt => unsafe { Value::SmallInt(*(self.buffer as *const _)) },
@@ -1008,7 +1008,7 @@ impl TAOS_MULTI_BIND {
     }
 
     fn to_column_view(&self) -> ColumnView {
-        let ty = self.ty_();
+        let ty = self.ty();
         let num = self.num as usize;
         let is_nulls = unsafe { slice::from_raw_parts(self.is_null, num) };
         let lens = unsafe { slice::from_raw_parts(self.length, num) };
@@ -1113,12 +1113,12 @@ impl TAOS_MULTI_BIND {
         view
     }
 
-    fn ty_(&self) -> Ty {
+    fn ty(&self) -> Ty {
         self.buffer_type.into()
     }
 
     #[cfg(test)]
-    fn from_primitives_<T: taos_query::common::itypes::IValue>(
+    fn from_primitives<T: taos_query::common::itypes::IValue>(
         values: &[T],
         nulls: &[bool],
         lens: &[i32],
@@ -1134,7 +1134,7 @@ impl TAOS_MULTI_BIND {
     }
 
     #[cfg(test)]
-    fn from_raw_timestamps_(values: &[i64], nulls: &[bool], lens: &[i32]) -> Self {
+    fn from_raw_timestamps(values: &[i64], nulls: &[bool], lens: &[i32]) -> Self {
         Self {
             buffer_type: Ty::Timestamp as _,
             buffer: values.as_ptr() as _,
@@ -1283,7 +1283,7 @@ mod tests {
             assert_eq!(code, 0);
 
             let name = c"d0";
-            let mut tags = vec![TAOS_MULTI_BIND::from_primitives_(&[99], &[false], &[4])];
+            let mut tags = vec![TAOS_MULTI_BIND::from_primitives(&[99], &[false], &[4])];
             let code = taos_stmt_set_tbname_tags(stmt, name.as_ptr(), tags.as_mut_ptr());
             assert_eq!(code, 0);
 
@@ -1330,15 +1330,15 @@ mod tests {
             assert_eq!(bytes, 4);
 
             let mut cols = vec![
-                TAOS_MULTI_BIND::from_raw_timestamps_(&[1738910658659i64], &[false], &[8]),
-                TAOS_MULTI_BIND::from_primitives_(&[20], &[false], &[4]),
+                TAOS_MULTI_BIND::from_raw_timestamps(&[1738910658659i64], &[false], &[8]),
+                TAOS_MULTI_BIND::from_primitives(&[20], &[false], &[4]),
             ];
             let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
             assert_eq!(code, 0);
 
             let mut cols = vec![
-                TAOS_MULTI_BIND::from_raw_timestamps_(&[1738910658659i64], &[false], &[8]),
-                TAOS_MULTI_BIND::from_primitives_(&[2025], &[false], &[4]),
+                TAOS_MULTI_BIND::from_raw_timestamps(&[1738910658659i64], &[false], &[8]),
+                TAOS_MULTI_BIND::from_primitives(&[2025], &[false], &[4]),
             ];
             let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
             assert_eq!(code, 0);
