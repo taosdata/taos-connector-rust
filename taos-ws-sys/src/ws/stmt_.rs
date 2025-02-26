@@ -364,57 +364,79 @@ pub unsafe fn taos_stmt_get_tag_fields(
     clear_err_and_ret_succ()
 }
 
-// #[allow(non_snake_case)]
-// pub unsafe fn taos_stmt_get_col_fields(
-//     stmt: *mut TAOS_STMT,
-//     fieldNum: *mut c_int,
-//     fields: *mut *mut TAOS_FIELD_E,
-// ) -> c_int {
-//     let maybe_err = match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-//         Some(stmt) => stmt,
-//         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-//     };
+#[allow(non_snake_case)]
+pub unsafe fn taos_stmt_get_col_fields(
+    stmt: *mut TAOS_STMT,
+    fieldNum: *mut c_int,
+    fields: *mut *mut TAOS_FIELD_E,
+) -> c_int {
+    trace!("taos_stmt_get_col_fields start, stmt: {stmt:?}, field_num: {fieldNum:?}, fields: {fields:?}");
 
-//     let stmt = match maybe_err.deref_mut() {
-//         Some(stmt) => stmt,
-//         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "data is null")),
-//     };
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
 
-//     let stmt_fields = match stmt_get_col_fields(stmt) {
-//         Ok(fields) => fields,
-//         Err(err) => {
-//             error!("stmt get col fields error, err: {err:?}");
-//             maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-//             return set_err_and_get_code(TaosError::new(err.code(), &err.to_string()));
-//         }
-//     };
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
 
-//     let taos_fields: Vec<TAOS_FIELD_E> = stmt_fields.iter().map(|field| field.into()).collect();
-//     let len = taos_fields.len();
-//     let cap = taos_fields.capacity();
+    if fieldNum.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fieldNum is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
-//     *fieldNum = len as _;
+    if fields.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fields is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
-//     if !taos_fields.is_empty() {
-//         *fields = Box::into_raw(taos_fields.into_boxed_slice()) as _;
-//     }
+    let stmt2 = &mut taos_stmt.stmt2;
 
-//     STMT_FIELDS_MAP.insert(*fields as usize, (len, cap));
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_get_col_fields can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+    }
 
-//     maybe_err.with_err(None);
-//     clear_error_info();
-//     Code::SUCCESS.into()
-// }
+    let col_fields: Vec<TAOS_FIELD_E> = taos_stmt
+        .col_fields
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|field| field.into())
+        .collect();
 
-// fn stmt_get_col_fields(stmt: &mut Stmt) -> TaosResult<&Vec<StmtField>> {
-//     if stmt.col_fields().is_none() {
-//         let fields = stmt.get_col_fields()?;
-//         stmt.with_col_fields(fields);
-//     }
-//     Ok(stmt.col_fields().unwrap())
-// }
+    trace!("taos_stmt_get_col_fields, fields: {col_fields:?}");
 
-// static STMT_FIELDS_MAP: Lazy<DashMap<usize, (usize, usize)>> = Lazy::new(DashMap::new);
+    *fieldNum = col_fields.len() as _;
+
+    if !col_fields.is_empty() {
+        *fields = Box::into_raw(col_fields.into_boxed_slice()) as _;
+        taos_stmt.col_fields_addr = Some(*fields as usize);
+    }
+
+    trace!("taos_stmt_get_col_fields succ, taos_stmt: {taos_stmt:?}");
+
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
 
 // pub unsafe fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_FIELD_E) {
 //     if !fields.is_null() {
@@ -1259,11 +1281,11 @@ mod tests {
 
             // taos_stmt_reclaim_fields(stmt, fields);
 
-            // let mut field_num = 0;
-            // let mut fields = ptr::null_mut();
-            // let code = taos_stmt_get_col_fields(stmt, &mut field_num, &mut fields);
-            // assert_eq!(code, 0);
-            // assert_eq!(field_num, 2);
+            let mut field_num = 0;
+            let mut fields = ptr::null_mut();
+            let code = taos_stmt_get_col_fields(stmt, &mut field_num, &mut fields);
+            assert_eq!(code, 0);
+            assert_eq!(field_num, 2);
 
             // taos_stmt_reclaim_fields(stmt, fields);
 
