@@ -22,7 +22,6 @@ pub mod query;
 pub mod sml;
 pub mod stmt;
 pub mod stmt2;
-pub mod stmt_;
 pub mod stub;
 pub mod tmq;
 
