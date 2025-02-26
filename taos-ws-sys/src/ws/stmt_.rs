@@ -550,34 +550,88 @@ pub unsafe fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_
     clear_err_and_ret_succ()
 }
 
-// pub unsafe fn taos_stmt_get_param(
-//     stmt: *mut TAOS_STMT,
-//     idx: c_int,
-//     r#type: *mut c_int,
-//     bytes: *mut c_int,
-// ) -> c_int {
-//     match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-//         Some(maybe_err) => match maybe_err
-//             .deref_mut()
-//             .ok_or_else(|| RawError::from_string("data is null"))
-//             .and_then(|stmt| stmt.s_get_param(idx as _))
-//         {
-//             Ok(param) => {
-//                 *r#type = param.data_type as _;
-//                 *bytes = param.length as _;
-//                 maybe_err.with_err(None);
-//                 clear_error_info();
-//                 Code::SUCCESS.into()
-//             }
-//             Err(err) => {
-//                 error!("taos_stmt_get_param failed, err: {err:?}");
-//                 maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-//                 set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
-//             }
-//         },
-//         None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-//     }
-// }
+pub unsafe fn taos_stmt_get_param(
+    stmt: *mut TAOS_STMT,
+    idx: c_int,
+    r#type: *mut c_int,
+    bytes: *mut c_int,
+) -> c_int {
+    trace!(
+        "taos_stmt_get_param start, stmt: {stmt:?}, idx: {idx}, type: {type:?}, bytes: {bytes:?}"
+    );
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    if r#type.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "type is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    if bytes.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "bytes is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_get_param can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+    }
+
+    let col_cnt = taos_stmt
+        .col_fields
+        .as_ref()
+        .map(|fields| fields.len())
+        .unwrap_or(0);
+
+    if idx < 0 || idx >= col_cnt as _ {
+        maybe_err.with_err(Some(TaosError::new(
+            Code::INVALID_PARA,
+            "idx is out of range",
+        )));
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    let field = taos_stmt
+        .col_fields
+        .as_ref()
+        .unwrap()
+        .get(idx as usize)
+        .unwrap();
+
+    *r#type = field.field_type as _;
+    *bytes = field.bytes as _;
+
+    trace!("taos_stmt_get_param succ, field: {field:?}");
+
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
 
 pub unsafe fn taos_stmt_bind_param(stmt: *mut TAOS_STMT, bind: *mut TAOS_MULTI_BIND) -> c_int {
     trace!("taos_stmt_bind_param start, stmt: {stmt:?}, bind: {bind:?}");
@@ -1376,12 +1430,12 @@ mod tests {
             assert_eq!(code, 0);
             assert_eq!(nums, 2);
 
-            // let mut ty = 0;
-            // let mut bytes = 0;
-            // let code = taos_stmt_get_param(stmt, 1, &mut ty, &mut bytes);
-            // assert_eq!(code, 0);
-            // assert_eq!(ty, Ty::Int as i32);
-            // assert_eq!(bytes, 4);
+            let mut ty = 0;
+            let mut bytes = 0;
+            let code = taos_stmt_get_param(stmt, 1, &mut ty, &mut bytes);
+            assert_eq!(code, 0);
+            assert_eq!(ty, Ty::Int as i32);
+            assert_eq!(bytes, 4);
 
             let mut cols = vec![
                 TAOS_MULTI_BIND::from_raw_timestamps_(&[1738910658659i64], &[false], &[8]),
