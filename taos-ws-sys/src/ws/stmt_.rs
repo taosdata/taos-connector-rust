@@ -498,10 +498,45 @@ pub unsafe fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_F
     )));
 }
 
-// pub unsafe fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int {
-//     *insert = 1;
-//     Code::SUCCESS.into()
-// }
+pub unsafe fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int {
+    trace!("taos_stmt_is_insert start, stmt: {stmt:?}, insert: {insert:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    if insert.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "insert is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    if stmt2.is_insert().is_none() {
+        maybe_err.with_err(Some(TaosError::new(
+            Code::FAILED,
+            "taos_stmt_prepare is not called",
+        )));
+        return format_errno(Code::FAILED.into());
+    }
+
+    let is_insert = stmt2.is_insert().unwrap();
+    *insert = is_insert as _;
+
+    trace!("taos_stmt_is_insert succ, is_insert: {is_insert}");
+
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
 
 pub unsafe fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_int {
     trace!("taos_stmt_num_params start, stmt: {stmt:?}, nums: {nums:?}");
@@ -1420,10 +1455,10 @@ mod tests {
 
             taos_stmt_reclaim_fields(stmt, fields);
 
-            // let mut insert = 0;
-            // let code = taos_stmt_is_insert(stmt, &mut insert);
-            // assert_eq!(code, 0);
-            // assert_eq!(insert, 1);
+            let mut insert = 0;
+            let code = taos_stmt_is_insert(stmt, &mut insert);
+            assert_eq!(code, 0);
+            assert_eq!(insert, 1);
 
             let mut nums = 0;
             let code = taos_stmt_num_params(stmt, &mut nums);
