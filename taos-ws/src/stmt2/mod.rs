@@ -4,10 +4,9 @@ use std::time::{Duration, Instant};
 
 use futures::channel::oneshot;
 use taos_query::common::{Field, Precision};
-use taos_query::prelude::RawResult;
 use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
-use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable};
+use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable, RawResult};
 use tracing::Instrument;
 
 use crate::query::asyn::QueryMetrics;

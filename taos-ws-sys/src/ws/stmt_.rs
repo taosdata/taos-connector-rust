@@ -1,27 +1,23 @@
 use std::ffi::{c_char, c_int, c_ulong, CStr};
 use std::{ptr, slice};
 
-use dashmap::DashMap;
-use once_cell::sync::Lazy;
-use taos_error::{Code, Error as RawError};
+use taos_error::Code;
 use taos_query::block_in_place_or_global;
 use taos_query::common::{ColumnView, Timestamp, Ty, Value};
-use taos_query::prelude::Itertools;
-use taos_query::stmt::Bindable;
 use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_ws::query::{BindType, Stmt2Field};
-use taos_ws::stmt::{StmtField, WsFieldsable};
-use taos_ws::{Stmt, Stmt2, Taos};
+use taos_ws::{Stmt2, Taos};
 use tracing::{error, trace};
 
 use crate::taos::stmt::{TAOS_FIELD_E, TAOS_MULTI_BIND, TAOS_STMT, TAOS_STMT_OPTIONS};
 use crate::taos::{TAOS, TAOS_RES};
 use crate::ws::error::{
-    clear_err_and_ret_succ, clear_error_info, format_errno, set_err_and_get_code, taos_errstr,
-    TaosError, TaosMaybeError,
+    clear_err_and_ret_succ, format_errno, set_err_and_get_code, taos_errstr, TaosError,
+    TaosMaybeError,
 };
-use crate::ws::TaosResult;
+use crate::ws::query::QueryResultSet;
+use crate::ws::{ResultSet, TaosResult};
 
 #[derive(Debug)]
 struct TaosStmt {
@@ -864,9 +860,40 @@ pub unsafe fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
     }
 }
 
-// pub fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS_RES {
-//     todo!()
-// }
+pub unsafe fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS_RES {
+    trace!("taos_stmt_use_result start, stmt: {stmt:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => {
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
+            return ptr::null_mut();
+        }
+    };
+
+    let stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt) => &mut taos_stmt.stmt2,
+        None => {
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid"));
+            return ptr::null_mut();
+        }
+    };
+
+    match stmt2.result_set() {
+        Ok(rs) => {
+            let rs: TaosMaybeError<ResultSet> = ResultSet::Query(QueryResultSet::new(rs)).into();
+            trace!("taos_stmt_use_result succ, result_set: {rs:?}");
+            maybe_err.clear_err();
+            clear_err_and_ret_succ();
+            Box::into_raw(Box::new(rs)) as _
+        }
+        Err(err) => {
+            error!("taos_stmt_use_result failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            ptr::null_mut()
+        }
+    }
+}
 
 pub unsafe fn taos_stmt_close(stmt: *mut TAOS_STMT) -> c_int {
     if stmt.is_null() {
@@ -923,17 +950,6 @@ pub unsafe fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c_int {
 }
 
 impl TAOS_MULTI_BIND {
-    // pub fn new(ty: Ty) -> Self {
-    //     Self {
-    //         buffer_type: ty as _,
-    //         buffer: ptr::null_mut(),
-    //         buffer_length: 0,
-    //         length: ptr::null_mut(),
-    //         is_null: ptr::null_mut(),
-    //         num: 1,
-    //     }
-    // }
-
     fn to_value(&self) -> Value {
         if !self.is_null.is_null() && unsafe { self.is_null.read() != 0 } {
             let val = Value::Null(self.ty_());
@@ -1097,6 +1113,10 @@ impl TAOS_MULTI_BIND {
         view
     }
 
+    fn ty_(&self) -> Ty {
+        self.buffer_type.into()
+    }
+
     #[cfg(test)]
     fn from_primitives_<T: taos_query::common::itypes::IValue>(
         values: &[T],
@@ -1123,169 +1143,6 @@ impl TAOS_MULTI_BIND {
             is_null: nulls.as_ptr() as _,
             num: values.len() as _,
         }
-    }
-
-    // pub fn first_to_json(&self) -> serde_json::Value {
-    //     self.to_json().as_array().unwrap().first().unwrap().clone()
-    // }
-
-    // pub fn to_json(&self) -> serde_json::Value {
-    //     use serde_json::{json, Value};
-
-    //     assert!(self.num > 0, "invalid bind value");
-    //     let len = self.num as usize;
-
-    //     macro_rules! _nulls {
-    //         () => {
-    //             json!(std::iter::repeat(Value::Null).take(len).collect::<Vec<_>>())
-    //         };
-    //     }
-
-    //     if self.buffer.is_null() {
-    //         return _nulls!();
-    //     }
-
-    //     macro_rules! _impl_primitive {
-    //         ($t:ty) => {{
-    //             let slice = std::slice::from_raw_parts(self.buffer as *const $t, len);
-    //             match self.is_null.is_null() {
-    //                 true => json!(slice),
-    //                 false => {
-    //                     let nulls = std::slice::from_raw_parts(self.is_null as *const bool, len);
-    //                     let column: Vec<_> = slice
-    //                         .iter()
-    //                         .zip(nulls)
-    //                         .map(
-    //                             |(value, is_null)| {
-    //                                 if *is_null {
-    //                                     None
-    //                                 } else {
-    //                                     Some(*value)
-    //                                 }
-    //                             },
-    //                         )
-    //                         .collect();
-    //                     json!(column)
-    //                 }
-    //             }
-    //         }};
-    //     }
-
-    //     unsafe {
-    //         match Ty::from(self.buffer_type) {
-    //             Ty::Null => _nulls!(),
-    //             Ty::Bool => _impl_primitive!(bool),
-    //             Ty::TinyInt => _impl_primitive!(i8),
-    //             Ty::SmallInt => _impl_primitive!(i16),
-    //             Ty::Int => _impl_primitive!(i32),
-    //             Ty::BigInt => _impl_primitive!(i64),
-    //             Ty::UTinyInt => _impl_primitive!(u8),
-    //             Ty::USmallInt => _impl_primitive!(u16),
-    //             Ty::UInt => _impl_primitive!(u32),
-    //             Ty::UBigInt => _impl_primitive!(u64),
-    //             Ty::Float => _impl_primitive!(f32),
-    //             Ty::Double => _impl_primitive!(f64),
-    //             Ty::Timestamp => _impl_primitive!(i64),
-    //             Ty::VarChar => {
-    //                 let len = self.num as usize;
-    //                 if self.is_null.is_null() {
-    //                     let column = (0..len)
-    //                         .map(|i| {
-    //                             let ptr = (self.buffer as *const u8)
-    //                                 .offset(self.buffer_length as isize * i as isize);
-    //                             let len = *self.length.add(i) as usize;
-    //                             let bytes = std::slice::from_raw_parts(ptr, len);
-    //                             std::str::from_utf8_unchecked(bytes)
-    //                         })
-    //                         .collect::<Vec<_>>();
-    //                     return json!(column);
-    //                 }
-    //                 let nulls = std::slice::from_raw_parts(self.is_null as *const bool, len);
-    //                 let column = (0..len)
-    //                     .zip(nulls)
-    //                     .map(|(i, is_null)| {
-    //                         if *is_null {
-    //                             None
-    //                         } else {
-    //                             let ptr = (self.buffer as *const u8)
-    //                                 .offset(self.buffer_length as isize * i as isize);
-    //                             let len = *self.length.add(i) as usize;
-    //                             let bytes = std::slice::from_raw_parts(ptr, len);
-    //                             Some(std::str::from_utf8_unchecked(bytes))
-    //                         }
-    //                     })
-    //                     .collect::<Vec<_>>();
-    //                 json!(column)
-    //             }
-    //             Ty::NChar => {
-    //                 let len = self.num as usize;
-    //                 if self.is_null.is_null() {
-    //                     let column = (0..len)
-    //                         .map(|i| {
-    //                             let ptr = (self.buffer as *const u8)
-    //                                 .offset(self.buffer_length as isize * i as isize);
-    //                             let len = *self.length.add(i) as usize;
-    //                             let bytes = std::slice::from_raw_parts(ptr, len);
-    //                             std::str::from_utf8_unchecked(bytes)
-    //                         })
-    //                         .collect::<Vec<_>>();
-    //                     return json!(column);
-    //                 }
-    //                 let nulls = std::slice::from_raw_parts(self.is_null as *const bool, len);
-    //                 let column = (0..len)
-    //                     .zip(nulls)
-    //                     .map(|(i, is_null)| {
-    //                         if *is_null {
-    //                             None
-    //                         } else {
-    //                             let ptr = (self.buffer as *const u8)
-    //                                 .offset(self.buffer_length as isize * i as isize);
-    //                             let len = *self.length.add(i) as usize;
-    //                             let bytes = std::slice::from_raw_parts(ptr, len);
-    //                             Some(std::str::from_utf8_unchecked(bytes))
-    //                         }
-    //                     })
-    //                     .collect::<Vec<_>>();
-    //                 json!(column)
-    //             }
-    //             Ty::Json => {
-    //                 let len = self.num as usize;
-    //                 if self.is_null.is_null() {
-    //                     let column = (0..len)
-    //                         .map(|i| {
-    //                             let ptr = (self.buffer as *const u8)
-    //                                 .offset(self.buffer_length as isize * i as isize);
-    //                             let len = *self.length.add(i) as usize;
-    //                             let bytes = std::slice::from_raw_parts(ptr, len);
-    //                             std::str::from_utf8_unchecked(bytes)
-    //                         })
-    //                         .collect::<Vec<_>>();
-    //                     return json!(column);
-    //                 }
-    //                 let nulls = std::slice::from_raw_parts(self.is_null as *const bool, len);
-    //                 let column = (0..len)
-    //                     .zip(nulls)
-    //                     .map(|(i, is_null)| {
-    //                         if *is_null {
-    //                             None
-    //                         } else {
-    //                             let ptr = (self.buffer as *const u8)
-    //                                 .offset(self.buffer_length as isize * i as isize);
-    //                             let len = *self.length.add(i) as usize;
-    //                             let bytes = std::slice::from_raw_parts(ptr, len);
-    //                             Some(serde_json::from_slice::<serde_json::Value>(bytes).unwrap())
-    //                         }
-    //                     })
-    //                     .collect::<Vec<_>>();
-    //                 json!(column)
-    //             }
-    //             _ => todo!(),
-    //         }
-    //     }
-    // }
-
-    fn ty_(&self) -> Ty {
-        self.buffer_type.into()
     }
 }
 
@@ -1396,28 +1253,6 @@ impl From<&Stmt2Field> for TAOS_FIELD_E {
 //         let mut bind = Self::from_binary_vec(&values);
 //         bind.buffer_type = Ty::NChar as _;
 //         bind
-//     }
-// }
-
-// impl From<&StmtField> for TAOS_FIELD_E {
-//     fn from(field: &StmtField) -> Self {
-//         let field_name = field.name.as_str();
-//         let mut name = [0 as c_char; 65];
-//         unsafe {
-//             std::ptr::copy_nonoverlapping(
-//                 field_name.as_ptr(),
-//                 name.as_mut_ptr() as _,
-//                 field_name.len(),
-//             );
-//         };
-
-//         Self {
-//             name,
-//             r#type: field.field_type,
-//             precision: field.precision,
-//             scale: field.scale,
-//             bytes: field.bytes,
-//         }
 //     }
 // }
 
