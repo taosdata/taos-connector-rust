@@ -170,52 +170,18 @@ pub unsafe fn taos_stmt_prepare(
     clear_err_and_ret_succ()
 }
 
-// pub unsafe fn taos_stmt_set_tbname_tags(
-//     stmt: *mut TAOS_STMT,
-//     name: *const c_char,
-//     tags: *mut TAOS_MULTI_BIND,
-// ) -> c_int {
-//     let maybe_err = match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-//         Some(maybe_err) => maybe_err,
-//         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-//     };
-
-//     match stmt_set_tbname_tags(maybe_err, name, tags) {
-//         Ok(_) => {
-//             maybe_err.with_err(None);
-//             clear_error_info();
-//             Code::SUCCESS.into()
-//         }
-//         Err(err) => {
-//             error!("stmt set_tbname_tags error, err: {err:?}");
-//             maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-//             set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
-//         }
-//     }
-// }
-
-// unsafe fn stmt_set_tbname_tags(
-//     maybe_err: &mut TaosMaybeError<Stmt>,
-//     name: *const c_char,
-//     tags: *mut TAOS_MULTI_BIND,
-// ) -> TaosResult<()> {
-//     let stmt = maybe_err
-//         .deref_mut()
-//         .ok_or(TaosError::new(Code::INVALID_PARA, "data is null"))?;
-
-//     let name = CStr::from_ptr(name).to_str().unwrap();
-//     stmt.set_tbname(name)?;
-
-//     let fields = stmt_get_tag_fields(stmt)?;
-//     let tags = std::slice::from_raw_parts(tags, fields.len())
-//         .iter()
-//         .map(TAOS_MULTI_BIND::to_tag_value)
-//         .collect_vec();
-
-//     stmt.set_tags(&tags)?;
-
-//     Ok(())
-// }
+pub unsafe fn taos_stmt_set_tbname_tags(
+    stmt: *mut TAOS_STMT,
+    name: *const c_char,
+    tags: *mut TAOS_MULTI_BIND,
+) -> c_int {
+    trace!("taos_stmt_set_tbname_tags, stmt: {stmt:?}, name: {name:?}, tags: {tags:?}");
+    let code = taos_stmt_set_tbname(stmt, name);
+    if code != 0 {
+        return code;
+    }
+    taos_stmt_set_tags(stmt, tags)
+}
 
 pub unsafe fn taos_stmt_set_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int {
     trace!("taos_stmt_set_tbname start, stmt: {stmt:?}, name: {name:?}");
@@ -977,8 +943,8 @@ mod tests {
 
             let name = c"d0";
             let mut tags = vec![TAOS_MULTI_BIND::from_primitives(&[false], &[99])];
-            // let code = taos_stmt_set_tbname_tags(stmt, name.as_ptr(), tags.as_mut_ptr());
-            // assert_eq!(code, 0);
+            let code = taos_stmt_set_tbname_tags(stmt, name.as_ptr(), tags.as_mut_ptr());
+            assert_eq!(code, 0);
 
             let code = taos_stmt_set_tbname(stmt, name.as_ptr());
             assert_eq!(code, 0);
