@@ -503,28 +503,52 @@ pub unsafe fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_F
 //     Code::SUCCESS.into()
 // }
 
-// pub unsafe fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_int {
-//     match (stmt as *mut TaosMaybeError<Stmt>).as_mut() {
-//         Some(maybe_err) => match maybe_err
-//             .deref_mut()
-//             .ok_or_else(|| RawError::from_string("data is null"))
-//             .and_then(Stmt::s_num_params)
-//         {
-//             Ok(num) => {
-//                 *nums = num as _;
-//                 maybe_err.with_err(None);
-//                 clear_error_info();
-//                 Code::SUCCESS.into()
-//             }
-//             Err(err) => {
-//                 error!("taos_stmt_num_params failed, err: {err:?}");
-//                 maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-//                 set_err_and_get_code(TaosError::new(err.code(), &err.to_string()))
-//             }
-//         },
-//         None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-//     }
-// }
+pub unsafe fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_int {
+    trace!("taos_stmt_num_params start, stmt: {stmt:?}, nums: {nums:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    if nums.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "nums is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    match stmt2.is_insert() {
+        Some(true) => {
+            *nums = taos_stmt
+                .col_fields
+                .as_ref()
+                .map(|fields| fields.len())
+                .unwrap_or(0) as _;
+        }
+        Some(false) => *nums = stmt2.fields_count().unwrap_or(0) as _,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+    }
+
+    trace!("taos_stmt_num_params succ");
+
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
 
 // pub unsafe fn taos_stmt_get_param(
 //     stmt: *mut TAOS_STMT,
@@ -1347,10 +1371,10 @@ mod tests {
             // assert_eq!(code, 0);
             // assert_eq!(insert, 1);
 
-            // let mut nums = 0;
-            // let code = taos_stmt_num_params(stmt, &mut nums);
-            // assert_eq!(code, 0);
-            // assert_eq!(nums, 2);
+            let mut nums = 0;
+            let code = taos_stmt_num_params(stmt, &mut nums);
+            assert_eq!(code, 0);
+            assert_eq!(nums, 2);
 
             // let mut ty = 0;
             // let mut bytes = 0;
