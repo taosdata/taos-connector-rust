@@ -769,6 +769,22 @@ impl RawBlock {
         unsafe { self.columns.get_unchecked(col).is_null_unchecked(row) }
     }
 
+    pub fn is_null_by_col(&self, mut rows: usize, col: usize) -> Result<Vec<bool>, Error> {
+        if col >= self.ncols() || self.ncols() == 0 {
+            return Err(Error::from(taos_error::Code::INVALID_PARA));
+        }
+
+        if rows > self.nrows() {
+            rows = self.nrows();
+        }
+
+        let mut is_nulls = Vec::with_capacity(rows);
+        for row in 0..rows {
+            is_nulls.push(self.is_null(row, col));
+        }
+        Ok(is_nulls)
+    }
+
     #[inline]
     /// Get one value at `(row, col)` of the block.
     ///

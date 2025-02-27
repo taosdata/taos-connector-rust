@@ -11,10 +11,12 @@ use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr
 use taos_query::{Fetchable, Queryable, RawBlock as Block};
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
-use tracing::trace;
+use tracing::{error, trace};
 
 use crate::taos::{__taos_async_fn_t, TAOS, TAOS_RES, TAOS_ROW};
-use crate::ws::error::{set_err_and_get_code, TaosError, TaosMaybeError};
+use crate::ws::error::{
+    clear_err_and_ret_succ, format_errno, set_err_and_get_code, TaosError, TaosMaybeError,
+};
 use crate::ws::{ResultSet, ResultSetOperations, Row, TaosResult, TAOS_FIELD};
 
 pub unsafe fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES {
@@ -308,13 +310,52 @@ pub unsafe fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) -> bool {
 }
 
 #[allow(non_snake_case)]
-pub fn taos_is_null_by_column(
+pub unsafe fn taos_is_null_by_column(
     res: *mut TAOS_RES,
     columnIndex: c_int,
     result: *mut bool,
     rows: *mut c_int,
 ) -> c_int {
-    todo!()
+    trace!("taos_is_null_by_column start, res: {res:?}, column_index: {columnIndex}, result: {result:?}, rows: {rows:?}");
+
+    if res.is_null() || result.is_null() || rows.is_null() || *rows <= 0 || columnIndex < 0 {
+        return Code::INVALID_PARA.into();
+    }
+
+    let maybe_err = (res as *mut TaosMaybeError<ResultSet>).as_mut().unwrap();
+    if maybe_err.deref_mut().is_none() {
+        return Code::INVALID_PARA.into();
+    }
+
+    match maybe_err.deref_mut().unwrap() {
+        ResultSet::Query(rs) => match &rs.block {
+            Some(block) => match block.is_null_by_col(*rows as _, columnIndex as _) {
+                Ok(is_nulls) => {
+                    trace!("taos_is_null_by_column succ, is_nulls: {is_nulls:?}");
+                    *rows = is_nulls.len() as _;
+                    let res = slice::from_raw_parts_mut(result, is_nulls.len());
+                    for (i, is_null) in is_nulls.iter().enumerate() {
+                        res[i] = *is_null;
+                    }
+                    maybe_err.clear_err();
+                    clear_err_and_ret_succ()
+                }
+                Err(err) => {
+                    error!("taos_is_null_by_column failed, err: {err:?}");
+                    maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                    format_errno(err.code().into())
+                }
+            },
+            None => {
+                maybe_err.with_err(Some(TaosError::new(Code::FAILED, "block is none")));
+                format_errno(Code::FAILED.into())
+            }
+        },
+        _ => {
+            maybe_err.with_err(Some(TaosError::new(Code::FAILED, "rs is invalid")));
+            format_errno(Code::FAILED.into())
+        }
+    }
 }
 
 pub unsafe fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
@@ -1171,6 +1212,51 @@ mod tests {
 
             let type_invalid = taos_data_type(100);
             assert_eq!(type_invalid, ptr::null(),);
+        }
+    }
+
+    #[test]
+    fn test_taos_is_null_by_column() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1740644681",
+                    "create database test_1740644681",
+                    "use test_1740644681",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (now+1s, 1)",
+                    "insert into t0 values (now+2s, null)",
+                    "insert into t0 values (now+3s, 2)",
+                    "insert into t0 values (now+4s, null)",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let mut rows = 0;
+            let mut data = ptr::null_mut();
+            let code = taos_fetch_raw_block(res, &mut rows, &mut data);
+            assert_eq!(code, 0);
+            assert_eq!(rows, 4);
+            assert!(!data.is_null());
+
+            let mut rows = 100;
+            let mut result = vec![false; rows as _];
+            let code = taos_is_null_by_column(res, 1, result.as_mut_ptr(), &mut rows);
+            assert_eq!(code, 0);
+            assert_eq!(rows, 4);
+
+            assert!(!result[0]);
+            assert!(result[1]);
+            assert!(!result[2]);
+            assert!(result[3]);
+
+            taos_free_result(res);
+
+            test_exec(taos, "drop database test_1740644681");
         }
     }
 }

@@ -276,7 +276,7 @@ pub unsafe extern "C" fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) ->
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_is_null_by_column(
+pub unsafe extern "C" fn taos_is_null_by_column(
     res: *mut TAOS_RES,
     columnIndex: c_int,
     result: *mut bool,
