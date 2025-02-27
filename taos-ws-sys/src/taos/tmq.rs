@@ -424,7 +424,7 @@ pub unsafe extern "C" fn tmq_err2str(code: i32) -> *const c_char {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn tmq_get_connect(tmq: *mut tmq_t) -> *mut TAOS {
+pub unsafe extern "C" fn tmq_get_connect(tmq: *mut tmq_t) -> *mut TAOS {
     if DRIVER.load(Ordering::Relaxed) {
         stub::tmq_get_connect(tmq)
     } else {
@@ -434,7 +434,7 @@ pub extern "C" fn tmq_get_connect(tmq: *mut tmq_t) -> *mut TAOS {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn tmq_get_raw(res: *mut TAOS_RES, raw: *mut tmq_raw_data) -> i32 {
+pub unsafe extern "C" fn tmq_get_raw(res: *mut TAOS_RES, raw: *mut tmq_raw_data) -> i32 {
     if DRIVER.load(Ordering::Relaxed) {
         stub::tmq_get_raw(res, raw)
     } else {
@@ -444,7 +444,7 @@ pub extern "C" fn tmq_get_raw(res: *mut TAOS_RES, raw: *mut tmq_raw_data) -> i32
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn tmq_write_raw(taos: *mut TAOS, raw: tmq_raw_data) -> i32 {
+pub unsafe extern "C" fn tmq_write_raw(taos: *mut TAOS, raw: tmq_raw_data) -> i32 {
     if DRIVER.load(Ordering::Relaxed) {
         stub::tmq_write_raw(taos, raw)
     } else {
@@ -454,7 +454,7 @@ pub extern "C" fn tmq_write_raw(taos: *mut TAOS, raw: tmq_raw_data) -> i32 {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn tmq_free_raw(raw: tmq_raw_data) {
+pub unsafe extern "C" fn tmq_free_raw(raw: tmq_raw_data) {
     if DRIVER.load(Ordering::Relaxed) {
         stub::tmq_free_raw(raw);
     } else {
@@ -464,7 +464,7 @@ pub extern "C" fn tmq_free_raw(raw: tmq_raw_data) {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn tmq_get_json_meta(res: *mut TAOS_RES) -> *const c_char {
+pub unsafe extern "C" fn tmq_get_json_meta(res: *mut TAOS_RES) -> *const c_char {
     if DRIVER.load(Ordering::Relaxed) {
         stub::tmq_get_json_meta(res)
     } else {
@@ -475,7 +475,7 @@ pub extern "C" fn tmq_get_json_meta(res: *mut TAOS_RES) -> *const c_char {
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn tmq_free_json_meta(jsonMeta: *mut c_char) {
+pub unsafe extern "C" fn tmq_free_json_meta(jsonMeta: *mut c_char) {
     if DRIVER.load(Ordering::Relaxed) {
         stub::tmq_free_json_meta(jsonMeta);
     } else {

@@ -62,7 +62,7 @@ pub enum TSDB_OPTION_CONNECTION {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_init() -> c_int {
+pub unsafe extern "C" fn taos_init() -> c_int {
     if DRIVER.load(Ordering::Relaxed) {
         stub::taos_init()
     } else {
@@ -72,7 +72,7 @@ pub extern "C" fn taos_init() -> c_int {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_cleanup() {
+pub unsafe extern "C" fn taos_cleanup() {
     if DRIVER.load(Ordering::Relaxed) {
         stub::taos_cleanup();
     } else {
@@ -98,7 +98,7 @@ pub unsafe extern "C" fn taos_connect(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_connect_auth(
+pub unsafe extern "C" fn taos_connect_auth(
     ip: *const c_char,
     user: *const c_char,
     auth: *const c_char,

@@ -141,17 +141,17 @@ pub struct TmqApi {
 
     pub(crate) tmq_err2str: unsafe extern "C" fn(code: i32) -> *const c_char,
 
-    pub(crate) tmq_get_connect: extern "C" fn(tmq: *mut tmq_t) -> *mut TAOS,
+    pub(crate) tmq_get_connect: unsafe extern "C" fn(tmq: *mut tmq_t) -> *mut TAOS,
 
-    pub(crate) tmq_get_raw: extern "C" fn(res: *mut TAOS_RES, raw: *mut tmq_raw_data) -> i32,
+    pub(crate) tmq_get_raw: unsafe extern "C" fn(res: *mut TAOS_RES, raw: *mut tmq_raw_data) -> i32,
 
-    pub(crate) tmq_write_raw: extern "C" fn(taos: *mut TAOS, raw: tmq_raw_data) -> i32,
+    pub(crate) tmq_write_raw: unsafe extern "C" fn(taos: *mut TAOS, raw: tmq_raw_data) -> i32,
 
-    pub(crate) tmq_free_raw: extern "C" fn(raw: tmq_raw_data),
+    pub(crate) tmq_free_raw: unsafe extern "C" fn(raw: tmq_raw_data),
 
-    pub(crate) tmq_get_json_meta: extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
+    pub(crate) tmq_get_json_meta: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_char,
 
-    pub(crate) tmq_free_json_meta: extern "C" fn(jsonMeta: *mut c_char),
+    pub(crate) tmq_free_json_meta: unsafe extern "C" fn(jsonMeta: *mut c_char),
 }
 
 pub struct StmtApi {
@@ -280,7 +280,7 @@ pub struct SmlApi {
         precision: c_int,
     ) -> *mut TAOS_RES,
 
-    pub(crate) taos_schemaless_insert_with_reqid: extern "C" fn(
+    pub(crate) taos_schemaless_insert_with_reqid: unsafe extern "C" fn(
         taos: *mut TAOS,
         lines: *mut *mut c_char,
         numLines: c_int,
@@ -308,7 +308,7 @@ pub struct SmlApi {
         req_id: i64,
     ) -> *mut TAOS_RES,
 
-    pub(crate) taos_schemaless_insert_ttl: extern "C" fn(
+    pub(crate) taos_schemaless_insert_ttl: unsafe extern "C" fn(
         taos: *mut TAOS,
         lines: *mut *mut c_char,
         numLines: c_int,
@@ -317,7 +317,7 @@ pub struct SmlApi {
         ttl: i32,
     ) -> *mut TAOS_RES,
 
-    pub(crate) taos_schemaless_insert_ttl_with_reqid: extern "C" fn(
+    pub(crate) taos_schemaless_insert_ttl_with_reqid: unsafe extern "C" fn(
         taos: *mut TAOS,
         lines: *mut *mut c_char,
         numLines: c_int,
@@ -349,30 +349,30 @@ pub struct SmlApi {
     )
         -> *mut TAOS_RES,
 
-    pub(crate) taos_schemaless_insert_raw_ttl_with_reqid_tbname_key: extern "C" fn(
-        taos: *mut TAOS,
-        lines: *mut c_char,
-        len: c_int,
-        totalRows: *mut i32,
-        protocol: c_int,
-        precision: c_int,
-        ttl: i32,
-        reqid: i64,
-        tbnameKey: *mut c_char,
-    )
-        -> *mut TAOS_RES,
+    pub(crate) taos_schemaless_insert_raw_ttl_with_reqid_tbname_key:
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            lines: *mut c_char,
+            len: c_int,
+            totalRows: *mut i32,
+            protocol: c_int,
+            precision: c_int,
+            ttl: i32,
+            reqid: i64,
+            tbnameKey: *mut c_char,
+        ) -> *mut TAOS_RES,
 
-    pub(crate) taos_schemaless_insert_ttl_with_reqid_tbname_key: extern "C" fn(
-        taos: *mut TAOS,
-        lines: *mut *mut c_char,
-        numLines: c_int,
-        protocol: c_int,
-        precision: c_int,
-        ttl: i32,
-        reqid: i64,
-        tbnameKey: *mut c_char,
-    )
-        -> *mut TAOS_RES,
+    pub(crate) taos_schemaless_insert_ttl_with_reqid_tbname_key:
+        unsafe extern "C" fn(
+            taos: *mut TAOS,
+            lines: *mut *mut c_char,
+            numLines: c_int,
+            protocol: c_int,
+            precision: c_int,
+            ttl: i32,
+            reqid: i64,
+            tbnameKey: *mut c_char,
+        ) -> *mut TAOS_RES,
 }
 
 pub struct QueryApi {
@@ -419,7 +419,7 @@ pub struct QueryApi {
 
     pub(crate) taos_is_null: unsafe extern "C" fn(res: *mut TAOS_RES, row: i32, col: i32) -> bool,
 
-    pub(crate) taos_is_null_by_column: extern "C" fn(
+    pub(crate) taos_is_null_by_column: unsafe extern "C" fn(
         res: *mut TAOS_RES,
         columnIndex: c_int,
         result: *mut bool,
@@ -428,10 +428,14 @@ pub struct QueryApi {
 
     pub(crate) taos_is_update_query: unsafe extern "C" fn(res: *mut TAOS_RES) -> bool,
 
-    pub(crate) taos_fetch_block: extern "C" fn(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int,
+    pub(crate) taos_fetch_block:
+        unsafe extern "C" fn(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int,
 
-    pub(crate) taos_fetch_block_s:
-        extern "C" fn(res: *mut TAOS_RES, numOfRows: *mut c_int, rows: *mut TAOS_ROW) -> c_int,
+    pub(crate) taos_fetch_block_s: unsafe extern "C" fn(
+        res: *mut TAOS_RES,
+        numOfRows: *mut c_int,
+        rows: *mut TAOS_ROW,
+    ) -> c_int,
 
     pub(crate) taos_fetch_raw_block: unsafe extern "C" fn(
         res: *mut TAOS_RES,
@@ -440,13 +444,14 @@ pub struct QueryApi {
     ) -> c_int,
 
     pub(crate) taos_get_column_data_offset:
-        extern "C" fn(res: *mut TAOS_RES, columnIndex: c_int) -> *mut c_int,
+        unsafe extern "C" fn(res: *mut TAOS_RES, columnIndex: c_int) -> *mut c_int,
 
-    pub(crate) taos_validate_sql: extern "C" fn(taos: *mut TAOS, sql: *const c_char) -> c_int,
+    pub(crate) taos_validate_sql:
+        unsafe extern "C" fn(taos: *mut TAOS, sql: *const c_char) -> c_int,
 
-    pub(crate) taos_fetch_lengths: extern "C" fn(res: *mut TAOS_RES) -> *mut c_int,
+    pub(crate) taos_fetch_lengths: unsafe extern "C" fn(res: *mut TAOS_RES) -> *mut c_int,
 
-    pub(crate) taos_result_block: extern "C" fn(res: *mut TAOS_RES) -> *mut TAOS_ROW,
+    pub(crate) taos_result_block: unsafe extern "C" fn(res: *mut TAOS_RES) -> *mut TAOS_ROW,
 
     pub(crate) taos_get_server_info: unsafe extern "C" fn(taos: *mut TAOS) -> *const c_char,
 
@@ -459,14 +464,14 @@ pub struct QueryApi {
         required: *mut c_int,
     ) -> c_int,
 
-    pub(crate) taos_query_a: extern "C" fn(
+    pub(crate) taos_query_a: unsafe extern "C" fn(
         taos: *mut TAOS,
         sql: *const c_char,
         fp: __taos_async_fn_t,
         param: *mut c_void,
     ),
 
-    pub(crate) taos_query_a_with_reqid: extern "C" fn(
+    pub(crate) taos_query_a_with_reqid: unsafe extern "C" fn(
         taos: *mut TAOS,
         sql: *const c_char,
         fp: __taos_async_fn_t,
@@ -475,28 +480,31 @@ pub struct QueryApi {
     ),
 
     pub(crate) taos_fetch_rows_a:
-        extern "C" fn(res: *mut TAOS_RES, fp: __taos_async_fn_t, param: *mut c_void),
+        unsafe extern "C" fn(res: *mut TAOS_RES, fp: __taos_async_fn_t, param: *mut c_void),
 
     pub(crate) taos_fetch_raw_block_a:
-        extern "C" fn(res: *mut TAOS_RES, fp: __taos_async_fn_t, param: *mut c_void),
+        unsafe extern "C" fn(res: *mut TAOS_RES, fp: __taos_async_fn_t, param: *mut c_void),
 
-    pub(crate) taos_get_raw_block: extern "C" fn(res: *mut TAOS_RES) -> *const c_void,
+    pub(crate) taos_get_raw_block: unsafe extern "C" fn(res: *mut TAOS_RES) -> *const c_void,
 
-    pub(crate) taos_kill_query: extern "C" fn(taos: *mut TAOS),
+    pub(crate) taos_kill_query: unsafe extern "C" fn(taos: *mut TAOS),
 
-    pub(crate) taos_reset_current_db: extern "C" fn(taos: *mut TAOS),
+    pub(crate) taos_reset_current_db: unsafe extern "C" fn(taos: *mut TAOS),
 
-    pub(crate) taos_get_db_route_info:
-        extern "C" fn(taos: *mut TAOS, db: *const c_char, dbInfo: *mut TAOS_DB_ROUTE_INFO) -> c_int,
+    pub(crate) taos_get_db_route_info: unsafe extern "C" fn(
+        taos: *mut TAOS,
+        db: *const c_char,
+        dbInfo: *mut TAOS_DB_ROUTE_INFO,
+    ) -> c_int,
 
-    pub(crate) taos_get_table_vgId: extern "C" fn(
+    pub(crate) taos_get_table_vgId: unsafe extern "C" fn(
         taos: *mut TAOS,
         db: *const c_char,
         table: *const c_char,
         vgId: *mut c_int,
     ) -> c_int,
 
-    pub(crate) taos_get_tables_vgId: extern "C" fn(
+    pub(crate) taos_get_tables_vgId: unsafe extern "C" fn(
         taos: *mut TAOS,
         db: *const c_char,
         table: *mut *const c_char,
@@ -505,11 +513,11 @@ pub struct QueryApi {
     ) -> c_int,
 
     pub(crate) taos_load_table_info:
-        extern "C" fn(taos: *mut TAOS, tableNameList: *const c_char) -> c_int,
+        unsafe extern "C" fn(taos: *mut TAOS, tableNameList: *const c_char) -> c_int,
 
-    pub(crate) taos_set_hb_quit: extern "C" fn(quitByKill: i8),
+    pub(crate) taos_set_hb_quit: unsafe extern "C" fn(quitByKill: i8),
 
-    pub(crate) taos_set_notify_cb: extern "C" fn(
+    pub(crate) taos_set_notify_cb: unsafe extern "C" fn(
         taos: *mut TAOS,
         fp: __taos_notify_fn_t,
         param: *mut c_void,
@@ -517,27 +525,27 @@ pub struct QueryApi {
     ) -> c_int,
 
     pub(crate) taos_set_conn_mode:
-        extern "C" fn(taos: *mut TAOS, mode: c_int, value: c_int) -> c_int,
+        unsafe extern "C" fn(taos: *mut TAOS, mode: c_int, value: c_int) -> c_int,
 
-    pub(crate) taos_set_config: extern "C" fn(config: *const c_char) -> setConfRet,
+    pub(crate) taos_set_config: unsafe extern "C" fn(config: *const c_char) -> setConfRet,
 
-    pub(crate) taos_data_type: extern "C" fn(r#type: c_int) -> *const c_char,
+    pub(crate) taos_data_type: unsafe extern "C" fn(r#type: c_int) -> *const c_char,
 
     pub(crate) taos_errno: unsafe extern "C" fn(taos: *const TAOS) -> c_int,
 
     pub(crate) taos_errstr: unsafe extern "C" fn(taos: *const TAOS) -> *const c_char,
 
     pub(crate) taos_fetch_whitelist_a:
-        extern "C" fn(taos: *mut TAOS, fp: __taos_async_whitelist_fn_t, param: *mut c_void),
+        unsafe extern "C" fn(taos: *mut TAOS, fp: __taos_async_whitelist_fn_t, param: *mut c_void),
 
-    pub(crate) taos_write_raw_block: extern "C" fn(
+    pub(crate) taos_write_raw_block: unsafe extern "C" fn(
         taos: *mut TAOS,
         numOfRows: i32,
         pData: *mut c_char,
         tbname: *const c_char,
     ) -> i32,
 
-    pub(crate) taos_write_raw_block_with_reqid: extern "C" fn(
+    pub(crate) taos_write_raw_block_with_reqid: unsafe extern "C" fn(
         taos: *mut TAOS,
         numOfRows: i32,
         pData: *mut c_char,
@@ -545,7 +553,7 @@ pub struct QueryApi {
         reqid: i64,
     ) -> i32,
 
-    pub(crate) taos_write_raw_block_with_fields: extern "C" fn(
+    pub(crate) taos_write_raw_block_with_fields: unsafe extern "C" fn(
         taos: *mut TAOS,
         rows: i32,
         pData: *mut c_char,
@@ -554,7 +562,7 @@ pub struct QueryApi {
         numFields: i32,
     ) -> i32,
 
-    pub(crate) taos_write_raw_block_with_fields_with_reqid: extern "C" fn(
+    pub(crate) taos_write_raw_block_with_fields_with_reqid: unsafe extern "C" fn(
         taos: *mut TAOS,
         rows: i32,
         pData: *mut c_char,
@@ -564,20 +572,20 @@ pub struct QueryApi {
         reqid: i64,
     ) -> i32,
 
-    pub(crate) taos_check_server_status: extern "C" fn(
+    pub(crate) taos_check_server_status: unsafe extern "C" fn(
         fqdn: *const c_char,
         port: i32,
         details: *mut c_char,
         maxlen: i32,
     ) -> TSDB_SERVER_STATUS,
 
-    pub(crate) getBuildInfo: extern "C" fn() -> *const c_char,
+    pub(crate) getBuildInfo: unsafe extern "C" fn() -> *const c_char,
 }
 
 pub struct BasicApi {
-    pub(crate) taos_init: extern "C" fn() -> c_int,
+    pub(crate) taos_init: unsafe extern "C" fn() -> c_int,
 
-    pub(crate) taos_cleanup: extern "C" fn(),
+    pub(crate) taos_cleanup: unsafe extern "C" fn(),
 
     pub(crate) taos_connect: unsafe extern "C" fn(
         ip: *const c_char,
@@ -587,7 +595,7 @@ pub struct BasicApi {
         port: u16,
     ) -> *mut TAOS,
 
-    pub(crate) taos_connect_auth: extern "C" fn(
+    pub(crate) taos_connect_auth: unsafe extern "C" fn(
         ip: *const c_char,
         user: *const c_char,
         auth: *const c_char,
@@ -595,14 +603,14 @@ pub struct BasicApi {
         port: u16,
     ) -> *mut TAOS,
 
-    // pub(crate) taos_connect_dsn: extern "C" fn(
+    // pub(crate) taos_connect_dsn: unsafe extern "C" fn(
     //     dsn: *const c_char,
     //     user: *const c_char,
     //     pass: *const c_char,
     //     db: *const c_char,
     // ) -> *mut TAOS,
 
-    // pub(crate) taos_connect_dsn_auth: extern "C" fn(
+    // pub(crate) taos_connect_dsn_auth: unsafe extern "C" fn(
     //     dsn: *const c_char,
     //     user: *const c_char,
     //     auth: *const c_char,

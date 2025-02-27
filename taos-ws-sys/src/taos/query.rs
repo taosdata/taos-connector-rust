@@ -301,7 +301,7 @@ pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int {
+pub unsafe extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int {
     if DRIVER.load(Ordering::Relaxed) {
         query::taos_fetch_block(res, rows)
     } else {
@@ -312,7 +312,7 @@ pub extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_fetch_block_s(
+pub unsafe extern "C" fn taos_fetch_block_s(
     res: *mut TAOS_RES,
     numOfRows: *mut c_int,
     rows: *mut TAOS_ROW,
@@ -342,7 +342,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_get_column_data_offset(
+pub unsafe extern "C" fn taos_get_column_data_offset(
     res: *mut TAOS_RES,
     columnIndex: c_int,
 ) -> *mut c_int {
@@ -355,7 +355,7 @@ pub extern "C" fn taos_get_column_data_offset(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int {
+pub unsafe extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int {
     if DRIVER.load(Ordering::Relaxed) {
         query::taos_validate_sql(taos, sql)
     } else {
@@ -365,7 +365,7 @@ pub extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_in
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
+pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
     if DRIVER.load(Ordering::Relaxed) {
         query::taos_fetch_lengths(res)
     } else {
@@ -375,7 +375,7 @@ pub extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
+pub unsafe extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
     if DRIVER.load(Ordering::Relaxed) {
         query::taos_result_block(res)
     } else {
@@ -420,7 +420,7 @@ pub unsafe extern "C" fn taos_get_current_db(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_query_a(
+pub unsafe extern "C" fn taos_query_a(
     taos: *mut TAOS,
     sql: *const c_char,
     fp: __taos_async_fn_t,
@@ -435,7 +435,7 @@ pub extern "C" fn taos_query_a(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_query_a_with_reqid(
+pub unsafe extern "C" fn taos_query_a_with_reqid(
     taos: *mut TAOS,
     sql: *const c_char,
     fp: __taos_async_fn_t,
@@ -451,7 +451,11 @@ pub extern "C" fn taos_query_a_with_reqid(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_fetch_rows_a(res: *mut TAOS_RES, fp: __taos_async_fn_t, param: *mut c_void) {
+pub unsafe extern "C" fn taos_fetch_rows_a(
+    res: *mut TAOS_RES,
+    fp: __taos_async_fn_t,
+    param: *mut c_void,
+) {
     if DRIVER.load(Ordering::Relaxed) {
         query::taos_fetch_rows_a(res, fp, param);
     } else {
@@ -461,7 +465,7 @@ pub extern "C" fn taos_fetch_rows_a(res: *mut TAOS_RES, fp: __taos_async_fn_t, p
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_fetch_raw_block_a(
+pub unsafe extern "C" fn taos_fetch_raw_block_a(
     res: *mut TAOS_RES,
     fp: __taos_async_fn_t,
     param: *mut c_void,
@@ -475,7 +479,7 @@ pub extern "C" fn taos_fetch_raw_block_a(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
+pub unsafe extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
     if DRIVER.load(Ordering::Relaxed) {
         query::taos_get_raw_block(res)
     } else {
@@ -485,7 +489,7 @@ pub extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_kill_query(taos: *mut TAOS) {
+pub unsafe extern "C" fn taos_kill_query(taos: *mut TAOS) {
     if DRIVER.load(Ordering::Relaxed) {
         stub::taos_kill_query(taos);
     } else {
@@ -495,7 +499,7 @@ pub extern "C" fn taos_kill_query(taos: *mut TAOS) {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_reset_current_db(taos: *mut TAOS) {
+pub unsafe extern "C" fn taos_reset_current_db(taos: *mut TAOS) {
     if DRIVER.load(Ordering::Relaxed) {
         stub::taos_reset_current_db(taos);
     } else {
@@ -506,7 +510,7 @@ pub extern "C" fn taos_reset_current_db(taos: *mut TAOS) {
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_get_db_route_info(
+pub unsafe extern "C" fn taos_get_db_route_info(
     taos: *mut TAOS,
     db: *const c_char,
     dbInfo: *mut TAOS_DB_ROUTE_INFO,
@@ -521,7 +525,7 @@ pub extern "C" fn taos_get_db_route_info(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_get_table_vgId(
+pub unsafe extern "C" fn taos_get_table_vgId(
     taos: *mut TAOS,
     db: *const c_char,
     table: *const c_char,
@@ -537,7 +541,7 @@ pub extern "C" fn taos_get_table_vgId(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_get_tables_vgId(
+pub unsafe extern "C" fn taos_get_tables_vgId(
     taos: *mut TAOS,
     db: *const c_char,
     table: *mut *const c_char,
@@ -554,7 +558,10 @@ pub extern "C" fn taos_get_tables_vgId(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_load_table_info(taos: *mut TAOS, tableNameList: *const c_char) -> c_int {
+pub unsafe extern "C" fn taos_load_table_info(
+    taos: *mut TAOS,
+    tableNameList: *const c_char,
+) -> c_int {
     if DRIVER.load(Ordering::Relaxed) {
         stub::taos_load_table_info(taos, tableNameList)
     } else {
@@ -565,7 +572,7 @@ pub extern "C" fn taos_load_table_info(taos: *mut TAOS, tableNameList: *const c_
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_set_hb_quit(quitByKill: i8) {
+pub unsafe extern "C" fn taos_set_hb_quit(quitByKill: i8) {
     if DRIVER.load(Ordering::Relaxed) {
         stub::taos_set_hb_quit(quitByKill);
     } else {
@@ -575,7 +582,7 @@ pub extern "C" fn taos_set_hb_quit(quitByKill: i8) {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_set_notify_cb(
+pub unsafe extern "C" fn taos_set_notify_cb(
     taos: *mut TAOS,
     fp: __taos_notify_fn_t,
     param: *mut c_void,
@@ -590,7 +597,7 @@ pub extern "C" fn taos_set_notify_cb(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_set_conn_mode(taos: *mut TAOS, mode: c_int, value: c_int) -> c_int {
+pub unsafe extern "C" fn taos_set_conn_mode(taos: *mut TAOS, mode: c_int, value: c_int) -> c_int {
     if DRIVER.load(Ordering::Relaxed) {
         stub::taos_set_conn_mode(taos, mode, value)
     } else {
@@ -600,7 +607,7 @@ pub extern "C" fn taos_set_conn_mode(taos: *mut TAOS, mode: c_int, value: c_int)
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_set_config(config: *const c_char) -> setConfRet {
+pub unsafe extern "C" fn taos_set_config(config: *const c_char) -> setConfRet {
     if DRIVER.load(Ordering::Relaxed) {
         stub::taos_set_config(config)
     } else {
@@ -610,7 +617,7 @@ pub extern "C" fn taos_set_config(config: *const c_char) -> setConfRet {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
+pub unsafe extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
     if DRIVER.load(Ordering::Relaxed) {
         query::taos_data_type(r#type)
     } else {
@@ -640,7 +647,7 @@ pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_fetch_whitelist_a(
+pub unsafe extern "C" fn taos_fetch_whitelist_a(
     taos: *mut TAOS,
     fp: __taos_async_whitelist_fn_t,
     param: *mut c_void,
@@ -655,7 +662,7 @@ pub extern "C" fn taos_fetch_whitelist_a(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_write_raw_block(
+pub unsafe extern "C" fn taos_write_raw_block(
     taos: *mut TAOS,
     numOfRows: i32,
     pData: *mut c_char,
@@ -671,7 +678,7 @@ pub extern "C" fn taos_write_raw_block(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_write_raw_block_with_reqid(
+pub unsafe extern "C" fn taos_write_raw_block_with_reqid(
     taos: *mut TAOS,
     numOfRows: i32,
     pData: *mut c_char,
@@ -688,7 +695,7 @@ pub extern "C" fn taos_write_raw_block_with_reqid(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_write_raw_block_with_fields(
+pub unsafe extern "C" fn taos_write_raw_block_with_fields(
     taos: *mut TAOS,
     rows: i32,
     pData: *mut c_char,
@@ -708,7 +715,7 @@ pub extern "C" fn taos_write_raw_block_with_fields(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_write_raw_block_with_fields_with_reqid(
+pub unsafe extern "C" fn taos_write_raw_block_with_fields_with_reqid(
     taos: *mut TAOS,
     rows: i32,
     pData: *mut c_char,
@@ -730,7 +737,7 @@ pub extern "C" fn taos_write_raw_block_with_fields_with_reqid(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_check_server_status(
+pub unsafe extern "C" fn taos_check_server_status(
     fqdn: *const c_char,
     port: i32,
     details: *mut c_char,
@@ -745,7 +752,7 @@ pub extern "C" fn taos_check_server_status(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn getBuildInfo() -> *const c_char {
+pub unsafe extern "C" fn getBuildInfo() -> *const c_char {
     if DRIVER.load(Ordering::Relaxed) {
         stub::getBuildInfo()
     } else {

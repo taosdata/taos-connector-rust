@@ -27,6 +27,11 @@ pub mod tmq;
 
 type TaosResult<T> = Result<T, TaosError>;
 
+pub struct SafePtr<T>(pub T);
+
+unsafe impl<T> Send for SafePtr<T> {}
+unsafe impl<T> Sync for SafePtr<T> {}
+
 impl From<&Field> for TAOS_FIELD {
     fn from(field: &Field) -> Self {
         let mut name = [0 as c_char; 65];

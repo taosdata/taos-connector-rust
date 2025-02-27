@@ -16,7 +16,7 @@ use crate::taos::stmt2::{
 use crate::taos::{__taos_async_fn_t, TAOS, TAOS_RES};
 use crate::ws::error::*;
 use crate::ws::query::QueryResultSet;
-use crate::ws::{ResultSet, TaosResult};
+use crate::ws::{ResultSet, SafePtr, TaosResult};
 
 pub unsafe fn taos_stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> *mut TAOS_STMT2 {
     trace!("taos_stmt2_init start, taos: {taos:?}, option: {option:?}");
@@ -185,11 +185,6 @@ pub unsafe fn taos_stmt2_bind_param(
         }
     }
 }
-
-pub struct SafePtr<T>(T);
-
-unsafe impl<T> Send for SafePtr<T> {}
-unsafe impl<T> Sync for SafePtr<T> {}
 
 pub unsafe fn taos_stmt2_exec(stmt: *mut TAOS_STMT2, affected_rows: *mut c_int) -> c_int {
     trace!("taos_stmt2_exec start, stmt: {stmt:?}, affected_rows: {affected_rows:?}");
@@ -1206,18 +1201,6 @@ mod tests {
     #[test]
     fn test_taos_stmt2_exec_async() {
         unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1739864837",
-                    "create database test_1739864837",
-                    "use test_1739864837",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values(1739762261437, 2)",
-                ],
-            );
-
             extern "C" fn fp(userdata: *mut c_void, res: *mut TAOS_RES, code: c_int) {
                 unsafe {
                     assert_eq!(code, 0);
@@ -1239,8 +1222,22 @@ mod tests {
                     let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
                     assert!(len > 0);
                     println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
+                    taos_free_result(res);
                 }
             }
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1739864837",
+                    "create database test_1739864837",
+                    "use test_1739864837",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values(1739762261437, 2)",
+                ],
+            );
 
             let userdata = c"hello, world";
             let mut option = TAOS_STMT2_OPTION {

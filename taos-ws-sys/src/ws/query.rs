@@ -8,16 +8,16 @@ use cargo_metadata::MetadataCommand;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
 use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr};
-use taos_query::{Fetchable, Queryable, RawBlock as Block};
+use taos_query::{global_tokio_runtime, Fetchable, Queryable, RawBlock as Block};
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
-use tracing::{error, trace};
+use tracing::{error, trace, Instrument};
 
 use crate::taos::{__taos_async_fn_t, TAOS, TAOS_RES, TAOS_ROW};
 use crate::ws::error::{
     clear_err_and_ret_succ, format_errno, set_err_and_get_code, TaosError, TaosMaybeError,
 };
-use crate::ws::{ResultSet, ResultSetOperations, Row, TaosResult, TAOS_FIELD};
+use crate::ws::{ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD};
 
 pub unsafe fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES {
     taos_query_with_reqid(taos, sql, generate_req_id() as _)
@@ -545,23 +545,75 @@ pub fn taos_data_type(r#type: c_int) -> *const c_char {
     }
 }
 
-pub fn taos_query_a(
+pub unsafe fn taos_query_a(
     taos: *mut TAOS,
     sql: *const c_char,
     fp: __taos_async_fn_t,
     param: *mut c_void,
 ) {
-    todo!()
+    taos_query_a_with_reqid(taos, sql, fp, param, generate_req_id() as _);
 }
 
-pub fn taos_query_a_with_reqid(
+pub unsafe fn taos_query_a_with_reqid(
     taos: *mut TAOS,
     sql: *const c_char,
     fp: __taos_async_fn_t,
     param: *mut c_void,
     reqid: i64,
 ) {
-    todo!()
+    trace!("taos_query_a_with_reqid start, taos: {taos:?}, sql: {sql:?}, reqid: {reqid}, fp: {fp:?}, param: {param:?}");
+
+    let taos = SafePtr(taos);
+    let sql = SafePtr(sql);
+    let param = SafePtr(param);
+
+    global_tokio_runtime().spawn(
+        async move {
+            let taos = taos;
+            let sql = sql;
+            let param = param;
+
+            let cb = fp as *const ();
+            if taos.0.is_null() || sql.0.is_null() || cb.is_null() {
+                if !cb.is_null() {
+                    let code = format_errno(Code::INVALID_PARA.into());
+                    fp(param.0, ptr::null_mut(), code);
+                }
+                return;
+            }
+
+            let sql = match CStr::from_ptr(sql.0).to_str() {
+                Ok(sql) => sql,
+                Err(_) => {
+                    error!("taos_query_a_with_reqid failed, err: sql is invalid utf-8");
+                    let code = format_errno(Code::INVALID_PARA.into());
+                    fp(param.0, ptr::null_mut(), code);
+                    return;
+                }
+            };
+
+            let taos = (taos.0 as *mut Taos).as_mut().unwrap();
+
+            match taos_query::AsyncQueryable::query_with_req_id(taos, sql, reqid as _).await {
+                Ok(rs) => {
+                    trace!("taos_query_a_with_reqid callback, result_set: {rs:?}");
+                    let rs: TaosMaybeError<ResultSet> =
+                        ResultSet::Query(QueryResultSet::new(rs)).into();
+                    let res = Box::into_raw(Box::new(rs));
+                    fp(param.0, res as _, 0);
+                }
+                Err(err) => {
+                    error!("taos_query_a_with_reqid failed, err: {err:?}");
+                    let code = format_errno(err.code().into());
+                    fp(param.0, ptr::null_mut(), code);
+                    return;
+                }
+            };
+        }
+        .in_current_span(),
+    );
+
+    trace!("taos_query_a_with_reqid succ");
 }
 
 pub fn taos_fetch_rows_a(res: *mut TAOS_RES, fp: __taos_async_fn_t, param: *mut c_void) {
@@ -1257,6 +1309,53 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1740644681");
+        }
+    }
+
+    #[test]
+    fn test_taos_query_a() {
+        unsafe {
+            extern "C" fn cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+                unsafe {
+                    assert_eq!(code, 0);
+                    assert_eq!(CStr::from_ptr(param as _), c"hello, world");
+                    assert!(!res.is_null());
+
+                    let row = taos_fetch_row(res);
+                    assert!(!row.is_null());
+
+                    let fields = taos_fetch_fields(res);
+                    assert!(!fields.is_null());
+
+                    let num_fields = taos_num_fields(res);
+                    assert_eq!(num_fields, 2);
+
+                    let mut str = vec![0 as c_char; 1024];
+                    let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+                    assert!(len > 0);
+                    println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
+                    taos_free_result(res);
+                }
+            }
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1740664844",
+                    "create database test_1740664844",
+                    "use test_1740664844",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (now, 1)",
+                ],
+            );
+
+            let sql = c"select * from t0";
+            let param = c"hello, world";
+            taos_query_a(taos, sql.as_ptr(), cb, param.as_ptr() as _);
+
+            test_exec(taos, "drop database test_1740664844");
         }
     }
 }

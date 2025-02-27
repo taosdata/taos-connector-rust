@@ -108,7 +108,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_with_reqid(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_schemaless_insert_ttl(
+pub unsafe extern "C" fn taos_schemaless_insert_ttl(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
     numLines: c_int,
@@ -126,7 +126,7 @@ pub extern "C" fn taos_schemaless_insert_ttl(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_schemaless_insert_ttl_with_reqid(
+pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
     numLines: c_int,
@@ -194,7 +194,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
+pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
     taos: *mut TAOS,
     lines: *mut c_char,
     len: c_int,
@@ -221,7 +221,7 @@ pub extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_schemaless_insert_ttl_with_reqid_tbname_key(
+pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid_tbname_key(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
     numLines: c_int,
