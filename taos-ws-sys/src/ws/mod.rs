@@ -130,7 +130,7 @@ pub unsafe fn taos_options(option: TSDB_OPTION, arg: *const c_void) -> c_int {
 fn init_logger() {
     use tracing_subscriber::EnvFilter;
 
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error"));
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
