@@ -1740,6 +1740,8 @@ mod tests {
             assert!(len > 0);
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
 
+            taos_free_result(res);
+
             let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
 
