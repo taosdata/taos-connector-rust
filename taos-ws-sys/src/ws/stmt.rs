@@ -589,7 +589,13 @@ pub unsafe fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_
                 .map(|fields| fields.len())
                 .unwrap_or(0) as _;
         }
-        Some(false) => *nums = stmt2.fields_count().unwrap_or(0) as _,
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_num_params can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
         None => {
             maybe_err.with_err(Some(TaosError::new(
                 Code::FAILED,
