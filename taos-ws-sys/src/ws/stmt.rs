@@ -1208,7 +1208,6 @@ impl From<&Stmt2Field> for TAOS_FIELD_E {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::taos::query::taos_affected_rows;
     use crate::ws::query::*;
     use crate::ws::{test_connect, test_exec, test_exec_many};
 
