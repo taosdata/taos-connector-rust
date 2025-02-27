@@ -1100,25 +1100,6 @@ impl TAOS_MULTI_BIND {
                     .collect::<Vec<_>>();
                 ColumnView::from_nchar::<&str, _, _, _>(vals)
             }
-            Ty::Json => {
-                let vals = (0..num)
-                    .zip(is_nulls)
-                    .map(|(i, is_null)| {
-                        if *is_null != 0 {
-                            None
-                        } else {
-                            unsafe {
-                                let ptr = (self.buffer as *const u8)
-                                    .offset(self.buffer_length as isize * i as isize);
-                                let len = *self.length.add(i) as usize;
-                                let bytes = slice::from_raw_parts(ptr, len);
-                                serde_json::from_slice(bytes).unwrap()
-                            }
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                ColumnView::from_json::<&str, _, _, _>(vals)
-            }
             Ty::VarBinary => {
                 let vals = (0..num)
                     .zip(is_nulls)
