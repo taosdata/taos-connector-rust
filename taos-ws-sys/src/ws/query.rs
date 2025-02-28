@@ -617,8 +617,55 @@ pub unsafe fn taos_query_a_with_reqid(
     trace!("taos_query_a_with_reqid succ");
 }
 
-pub fn taos_fetch_rows_a(res: *mut TAOS_RES, fp: __taos_async_fn_t, param: *mut c_void) {
-    todo!()
+pub unsafe fn taos_fetch_rows_a(res: *mut TAOS_RES, fp: __taos_async_fn_t, param: *mut c_void) {
+    trace!("taos_fetch_rows_a start, res: {res:?}, fp: {fp:?}, param: {param:?}");
+
+    let res = SafePtr(res);
+    let param = SafePtr(param);
+
+    global_tokio_runtime().spawn(
+        async move {
+            let res = res;
+            let param = param;
+
+            let cb = fp as *const ();
+            if res.0.is_null() || cb.is_null() {
+                if !cb.is_null() {
+                    let code = format_errno(Code::INVALID_PARA.into());
+                    fp(param.0, ptr::null_mut(), code);
+                }
+                return;
+            }
+
+            let maybe_err = (res.0 as *mut TaosMaybeError<ResultSet>).as_mut().unwrap();
+            if maybe_err.deref_mut().is_none() {
+                let code = format_errno(Code::INVALID_PARA.into());
+                fp(param.0, ptr::null_mut(), code);
+                return;
+            }
+
+            let rs = maybe_err.deref_mut().unwrap();
+            let rows = if let ResultSet::Query(rs) = rs {
+                match rs.fetch_rows() {
+                    Ok(rows) => rows,
+                    Err(err) => {
+                        let code = format_errno(err.errno().into());
+                        fp(param.0, ptr::null_mut(), code);
+                        return;
+                    }
+                }
+            } else {
+                let code = format_errno(Code::INVALID_PARA.into());
+                fp(param.0, ptr::null_mut(), code);
+                return;
+            };
+
+            fp(param.0, res.0, rows as _);
+        }
+        .in_current_span(),
+    );
+
+    trace!("taos_fetch_rows_a succ");
 }
 
 pub fn taos_fetch_raw_block_a(res: *mut TAOS_RES, fp: __taos_async_fn_t, param: *mut c_void) {
@@ -649,6 +696,19 @@ impl QueryResultSet {
                 current_row: 0,
             },
         }
+    }
+
+    pub fn fetch_rows(&mut self) -> Result<usize, Error> {
+        if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
+            self.block = self.rs.fetch_raw_block()?;
+            self.row.current_row = 0;
+        }
+
+        if let Some(block) = self.block.as_ref() {
+            return Ok(block.nrows());
+        }
+
+        Ok(0)
     }
 }
 
@@ -728,6 +788,7 @@ impl ResultSetOperations for QueryResultSet {
                 let res = block.get_raw_value_unchecked(self.row.current_row, col);
                 self.row.data[col] = res.2;
             }
+
             self.row.current_row += 1;
             Ok(self.row.data.as_ptr() as _)
         } else {
@@ -765,6 +826,7 @@ unsafe fn query(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> TaosResult<
 #[cfg(test)]
 mod tests {
     use std::ptr;
+    use std::thread::sleep;
 
     use taos_query::common::Precision;
 
@@ -1357,6 +1419,131 @@ mod tests {
             taos_query_a(taos, sql.as_ptr(), cb, param.as_ptr() as _);
 
             test_exec(taos, "drop database test_1740664844");
+        }
+    }
+
+    #[test]
+    fn test_taos_fetch_rows_a() {
+        unsafe {
+            extern "C" fn fetch_rows_cb(taos: *mut c_void, res: *mut TAOS_RES, num_of_row: c_int) {
+                unsafe {
+                    println!("fetch_rows_cb, num_of_row: {}", num_of_row);
+                    let num_fields = taos_num_fields(res);
+                    let fields = taos_fetch_fields(res);
+                    if num_of_row > 0 {
+                        assert_eq!(num_of_row, 4);
+                        for i in 0..num_of_row {
+                            let row = taos_fetch_row(res);
+                            let mut str = vec![0 as c_char; 1024];
+                            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+                            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+                        }
+                        taos_fetch_rows_a(res, fetch_rows_cb, taos);
+                    } else {
+                        println!("fetch_rows_cb, no more data");
+                        taos_free_result(res);
+                    }
+                }
+            }
+
+            extern "C" fn query_cb(taos: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+                unsafe {
+                    println!("query_cb");
+                    if code == 0 && !res.is_null() {
+                        taos_fetch_rows_a(res, fetch_rows_cb, taos);
+                    } else {
+                        taos_free_result(res);
+                    }
+                }
+            }
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1740731669",
+                    "create database test_1740731669",
+                    "use test_1740731669",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (now, 1)",
+                    "insert into t0 values (now+1s, 2)",
+                    "insert into t0 values (now+2s, 3)",
+                    "insert into t0 values (now+3s, 4)",
+                ],
+            );
+
+            let sql = c"select * from t0";
+            taos_query_a(taos, sql.as_ptr(), query_cb, taos);
+
+            sleep(Duration::from_secs(1));
+
+            test_exec(taos, "drop database test_1740731669");
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_taos_fetch_rows_a_() {
+        unsafe {
+            extern "C" fn fetch_rows_cb(taos: *mut c_void, res: *mut TAOS_RES, num_of_row: c_int) {
+                unsafe {
+                    println!("fetch_rows_cb, num_of_row: {}", num_of_row);
+                    let num_fields = taos_num_fields(res);
+                    let fields = taos_fetch_fields(res);
+                    if num_of_row > 0 {
+                        for i in 0..num_of_row {
+                            let row = taos_fetch_row(res);
+                            let mut str = vec![0 as c_char; 1024];
+                            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+                            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+                        }
+                        taos_fetch_rows_a(res, fetch_rows_cb, taos);
+                    } else {
+                        println!("fetch_rows_cb, no more data");
+                        taos_free_result(res);
+                    }
+                }
+            }
+
+            extern "C" fn query_cb(taos: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+                unsafe {
+                    println!("query_cb");
+                    if code == 0 && !res.is_null() {
+                        taos_fetch_rows_a(res, fetch_rows_cb, taos);
+                    } else {
+                        taos_free_result(res);
+                    }
+                }
+            }
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1740732937",
+                    "create database test_1740732937",
+                    "use test_1740732937",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+
+            let num = 7000;
+            for i in 0..num {
+                let sql = format!("insert into t0 values ({}, {})", ts + i, i);
+                test_exec(taos, &sql);
+            }
+
+            let sql = c"select * from t0";
+            taos_query_a(taos, sql.as_ptr(), query_cb, taos);
+
+            sleep(Duration::from_secs(5));
+
+            test_exec(taos, "drop database test_1740732937");
         }
     }
 }
