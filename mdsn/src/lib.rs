@@ -333,7 +333,7 @@ impl Dsn {
                 match (host, port) {
                     (Some(host), Some(port)) => Ok(Some(Address::new(host, port))),
                     (Some(host), None) => {
-                        if host.contains("/") {
+                        if host.contains('/') {
                             Ok(Some(Address::from_path(host)))
                         } else {
                             Ok(Some(Address::from_host(host)))
@@ -391,7 +391,7 @@ impl Dsn {
                                     return None;
                                 }
                                 if let Some(port) =
-                                    addr.strip_prefix(":").map(|port| port.parse::<u16>())
+                                    addr.strip_prefix(':').map(|port| port.parse::<u16>())
                                 {
                                     return port
                                         .map_err(|e| {
@@ -407,7 +407,7 @@ impl Dsn {
                                         .map(Some)
                                         .transpose();
                                 }
-                                if let Some(host) = addr.strip_suffix(":") {
+                                if let Some(host) = addr.strip_suffix(':') {
                                     return Some(Ok(Address::from_host(percent_decode(
                                         host.to_string(),
                                     ))));
@@ -538,7 +538,7 @@ impl Dsn {
                     let subject = if subject.is_empty() {
                         None
                     } else {
-                        if subject.contains("?") {
+                        if subject.contains('?') {
                             return Err(DsnError::InvalidSpecialCharacterFormat(
                                 "Subject contains '?' mark".to_string(),
                             ));
