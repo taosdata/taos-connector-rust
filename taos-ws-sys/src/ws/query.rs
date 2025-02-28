@@ -603,6 +603,7 @@ pub unsafe fn taos_query_a_with_reqid(
                     fp(param.0, res as _, 0);
                 }
                 Err(err) => {
+                    // TODO: use TaosMaybeError to handle error
                     error!("taos_query_a_with_reqid failed, err: {err:?}");
                     let code = format_errno(err.code().into());
                     fp(param.0, ptr::null_mut(), code);

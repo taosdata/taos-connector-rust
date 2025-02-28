@@ -114,38 +114,6 @@ pub unsafe extern "C" fn taos_connect_auth(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_connect_dsn(
-    dsn: *const c_char,
-    user: *const c_char,
-    pass: *const c_char,
-    db: *const c_char,
-) -> *mut TAOS {
-    if DRIVER.load(Ordering::Relaxed) {
-        stub::taos_connect_dsn(dsn, user, pass, db)
-    } else {
-        // (CAPI.basic_api.taos_connect_dsn)(dsn, user, pass, db)
-        todo!()
-    }
-}
-
-#[no_mangle]
-#[instrument(level = "trace", ret)]
-pub extern "C" fn taos_connect_dsn_auth(
-    dsn: *const c_char,
-    user: *const c_char,
-    auth: *const c_char,
-    db: *const c_char,
-) -> *mut TAOS {
-    if DRIVER.load(Ordering::Relaxed) {
-        stub::taos_connect_dsn_auth(dsn, user, auth, db)
-    } else {
-        // (CAPI.basic_api.taos_connect_dsn_auth)(dsn, user, auth, db)
-        todo!()
-    }
-}
-
-#[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
     if DRIVER.load(Ordering::Relaxed) {
         ws::taos_close(taos);

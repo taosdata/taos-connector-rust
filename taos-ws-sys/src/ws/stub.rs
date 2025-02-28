@@ -26,24 +26,6 @@ pub fn taos_connect_auth(
     todo!("taos_connect_auth");
 }
 
-pub fn taos_connect_dsn(
-    dsn: *const c_char,
-    user: *const c_char,
-    pass: *const c_char,
-    db: *const c_char,
-) -> *mut TAOS {
-    todo!("taos_connect_dsn");
-}
-
-pub fn taos_connect_dsn_auth(
-    dsn: *const c_char,
-    user: *const c_char,
-    auth: *const c_char,
-    db: *const c_char,
-) -> *mut TAOS {
-    todo!("taos_connect_dsn_auth");
-}
-
 pub fn taos_kill_query(taos: *mut TAOS) {}
 
 pub fn taos_reset_current_db(taos: *mut TAOS) {

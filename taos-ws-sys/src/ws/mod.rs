@@ -27,6 +27,7 @@ pub mod tmq;
 
 type TaosResult<T> = Result<T, TaosError>;
 
+// TODO: use AtomicPtr
 pub struct SafePtr<T>(pub T);
 
 unsafe impl<T> Send for SafePtr<T> {}
