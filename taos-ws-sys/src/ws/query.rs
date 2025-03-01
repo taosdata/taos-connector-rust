@@ -435,6 +435,9 @@ pub unsafe fn taos_get_column_data_offset(res: *mut TAOS_RES, columnIndex: c_int
             if col < block.ncols() && block.ncols() > 0 {
                 let offsets = block.get_col_data_offset_unchecked(col);
                 trace!("taos_get_column_data_offset succ, offsets: {offsets:?}");
+                if offsets.is_empty() {
+                    return ptr::null_mut();
+                }
                 rs.offsets = Some(offsets);
                 return rs.offsets.as_ref().unwrap().as_ptr() as *mut _;
             } else {
@@ -1593,12 +1596,12 @@ mod tests {
                     "drop database if exists test_1740785939",
                     "create database test_1740785939",
                     "use test_1740785939",
-                    "create table t0 (ts timestamp, c1 varchar(20))",
-                    "insert into t0 values (now+1s, 'hello')",
-                    "insert into t0 values (now+2s, 'world')",
-                    "insert into t0 values (now+3s, null)",
-                    "insert into t0 values (now+4s, 'hello, world')",
-                    "insert into t0 values (now+4s, null)",
+                    "create table t0 (ts timestamp, c1 varchar(20), c2 nchar(15), c3 varbinary(20), c4 geometry(50))",
+                    "insert into t0 values (now+1s, 'hello', 'hello', 'hello', 'POINT(1.0 1.0)')",
+                    "insert into t0 values (now+2s, 'world', 'world', 'world', 'POINT(2.0 2.0)')",
+                    "insert into t0 values (now+3s, null, null, null, null)",
+                    "insert into t0 values (now+4s, 'hello, world', 'hello, world', 'hello, world', 'POINT(3.0 3.0)')",
+                    "insert into t0 values (now+4s, null, null, null, null)",
                 ],
             );
 
@@ -1612,11 +1615,33 @@ mod tests {
             assert_eq!(rows, 5);
             assert!(!data.is_null());
 
+            let offset = taos_get_column_data_offset(res, 0);
+            assert!(offset.is_null());
+
             let offset = taos_get_column_data_offset(res, 1);
             assert!(!offset.is_null());
 
             let offsets = slice::from_raw_parts(offset, rows as _);
-            println!("offsets: {:?}", offsets);
+            assert_eq!(offsets, [0, 7, -1, 14, -1]);
+
+            let offset = taos_get_column_data_offset(res, 2);
+            assert!(!offset.is_null());
+
+            // TODO: confirm the offsets
+            let offsets = slice::from_raw_parts(offset, rows as _);
+            assert_eq!(offsets, [0, 22, -1, 44, -1]);
+
+            let offset = taos_get_column_data_offset(res, 3);
+            assert!(!offset.is_null());
+
+            let offsets = slice::from_raw_parts(offset, rows as _);
+            assert_eq!(offsets, [0, 7, -1, 14, -1]);
+
+            let offset = taos_get_column_data_offset(res, 4);
+            assert!(!offset.is_null());
+
+            let offsets = slice::from_raw_parts(offset, rows as _);
+            assert_eq!(offsets, [0, 23, -1, 46, -1]);
 
             taos_free_result(res);
 
