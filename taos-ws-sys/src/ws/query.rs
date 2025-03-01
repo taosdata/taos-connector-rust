@@ -329,23 +329,23 @@ pub unsafe fn taos_is_null_by_column(
 
     match maybe_err.deref_mut().unwrap() {
         ResultSet::Query(rs) => match &rs.block {
-            Some(block) => match block.is_null_by_col(*rows as _, columnIndex as _) {
-                Ok(is_nulls) => {
-                    trace!("taos_is_null_by_column succ, is_nulls: {is_nulls:?}");
-                    *rows = is_nulls.len() as _;
-                    let res = slice::from_raw_parts_mut(result, is_nulls.len());
-                    for (i, is_null) in is_nulls.iter().enumerate() {
-                        res[i] = *is_null;
-                    }
-                    maybe_err.clear_err();
-                    clear_err_and_ret_succ()
+            Some(block) => {
+                let col = columnIndex as usize;
+                if col >= block.ncols() || block.ncols() == 0 {
+                    error!("taos_is_null_by_column failed, column index is invalid");
+                    return Code::INVALID_PARA.into();
                 }
-                Err(err) => {
-                    error!("taos_is_null_by_column failed, err: {err:?}");
-                    maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-                    format_errno(err.code().into())
+
+                let is_nulls = block.is_null_by_col_unchecked(*rows as _, col);
+                trace!("taos_is_null_by_column succ, is_nulls: {is_nulls:?}");
+                *rows = is_nulls.len() as _;
+                let res = slice::from_raw_parts_mut(result, is_nulls.len());
+                for (i, is_null) in is_nulls.iter().enumerate() {
+                    res[i] = *is_null;
                 }
-            },
+                maybe_err.clear_err();
+                clear_err_and_ret_succ()
+            }
             None => {
                 maybe_err.with_err(Some(TaosError::new(Code::FAILED, "block is none")));
                 format_errno(Code::FAILED.into())
@@ -412,8 +412,42 @@ pub unsafe fn taos_fetch_raw_block(
 }
 
 #[allow(non_snake_case)]
-pub fn taos_get_column_data_offset(res: *mut TAOS_RES, columnIndex: c_int) -> *mut c_int {
-    todo!()
+pub unsafe fn taos_get_column_data_offset(res: *mut TAOS_RES, columnIndex: c_int) -> *mut c_int {
+    trace!("taos_get_column_data_offset start, res: {res:?}, column_index: {columnIndex}");
+
+    if res.is_null() || columnIndex < 0 {
+        error!("taos_get_column_data_offset failed, res or column index is invalid");
+        return ptr::null_mut();
+    }
+
+    let maybe_err = (res as *mut TaosMaybeError<ResultSet>).as_mut().unwrap();
+    let rs = match maybe_err.deref_mut() {
+        Some(rs) => rs,
+        None => {
+            error!("taos_get_column_data_offset failed, res is invalid");
+            return ptr::null_mut();
+        }
+    };
+
+    let col = columnIndex as usize;
+    if let ResultSet::Query(rs) = rs {
+        if let Some(block) = rs.block.as_ref() {
+            if col < block.ncols() && block.ncols() > 0 {
+                let offsets = block.get_col_data_offset_unchecked(col);
+                trace!("taos_get_column_data_offset succ, offsets: {offsets:?}");
+                rs.offsets = Some(offsets);
+                return rs.offsets.as_ref().unwrap().as_ptr() as *mut _;
+            } else {
+                error!("taos_get_column_data_offset failed, column index is invalid");
+            }
+        } else {
+            error!("taos_get_column_data_offset failed, block is none");
+        }
+    } else {
+        error!("taos_get_column_data_offset failed, rs is invalid");
+    }
+
+    ptr::null_mut()
 }
 
 pub fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int {
@@ -682,6 +716,7 @@ pub struct QueryResultSet {
     block: Option<Block>,
     fields: Vec<TAOS_FIELD>,
     row: Row,
+    offsets: Option<Vec<i32>>,
 }
 
 impl QueryResultSet {
@@ -695,6 +730,7 @@ impl QueryResultSet {
                 data: vec![ptr::null(); num_of_fields],
                 current_row: 0,
             },
+            offsets: None,
         }
     }
 
@@ -1544,6 +1580,47 @@ mod tests {
             sleep(Duration::from_secs(5));
 
             test_exec(taos, "drop database test_1740732937");
+        }
+    }
+
+    #[test]
+    fn test_taos_get_column_data_offset() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1740785939",
+                    "create database test_1740785939",
+                    "use test_1740785939",
+                    "create table t0 (ts timestamp, c1 varchar(20))",
+                    "insert into t0 values (now+1s, 'hello')",
+                    "insert into t0 values (now+2s, 'world')",
+                    "insert into t0 values (now+3s, null)",
+                    "insert into t0 values (now+4s, 'hello, world')",
+                    "insert into t0 values (now+4s, null)",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let mut rows = 0;
+            let mut data = ptr::null_mut();
+            let code = taos_fetch_raw_block(res, &mut rows, &mut data);
+            assert_eq!(code, 0);
+            assert_eq!(rows, 5);
+            assert!(!data.is_null());
+
+            let offset = taos_get_column_data_offset(res, 1);
+            assert!(!offset.is_null());
+
+            let offsets = slice::from_raw_parts(offset, rows as _);
+            println!("offsets: {:?}", offsets);
+
+            taos_free_result(res);
+
+            test_exec(taos, "drop database test_1740785939");
         }
     }
 }

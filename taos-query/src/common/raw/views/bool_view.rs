@@ -32,6 +32,7 @@ impl std::ops::Add for BoolView {
         &self + &rhs
     }
 }
+
 impl std::ops::Add for &BoolView {
     type Output = BoolView;
 
@@ -75,11 +76,6 @@ impl BoolView {
     pub fn len(&self) -> usize {
         self.data.len()
     }
-
-    // /// Raw slice of `bool` type.
-    // pub fn as_raw_slice(&self) -> &[bool] {
-    //     unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const bool, self.len()) }
-    // }
 
     /// Raw pointer of the slice.
     pub fn as_raw_ptr(&self) -> *const bool {
@@ -251,27 +247,32 @@ impl ExactSizeIterator for BoolViewIter<'_> {
     }
 }
 
-#[test]
-fn test_bool_slice() {
-    let data = [true, false, false, true];
-    let view = BoolView::from_iter(data);
-    dbg!(&view);
-    let slice = view.slice(1..3);
-    dbg!(&slice);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let data = [None, Some(false), Some(true), None];
-    let view = BoolView::from_iter(data);
-    dbg!(&view);
-    let slice = view.slice(1..4);
-    dbg!(&slice);
+    #[test]
+    fn test_bool_slice() {
+        let data = [true, false, false, true];
+        let view = BoolView::from_iter(data);
+        dbg!(&view);
+        let slice = view.slice(1..3);
+        dbg!(&slice);
 
-    let chain = &view + slice.as_ref().unwrap();
-    dbg!(&chain);
-    assert!(chain.len() == 7);
-    assert!(chain
-        .slice(0..4)
-        .unwrap()
-        .iter()
-        .zip(view.iter())
-        .all(|(l, r)| dbg!(l) == r));
+        let data = [None, Some(false), Some(true), None];
+        let view = BoolView::from_iter(data);
+        dbg!(&view);
+        let slice = view.slice(1..4);
+        dbg!(&slice);
+
+        let chain = &view + slice.as_ref().unwrap();
+        dbg!(&chain);
+        assert!(chain.len() == 7);
+        assert!(chain
+            .slice(0..4)
+            .unwrap()
+            .iter()
+            .zip(view.iter())
+            .all(|(l, r)| dbg!(l) == r));
+    }
 }

@@ -19,6 +19,7 @@ impl IsColumnView for VarCharView {
     fn ty(&self) -> Ty {
         Ty::VarChar
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         Self::from_iter::<String, _, _, _>(
             iter.map(|v| v.to_str().map(|v| v.into_owned()))

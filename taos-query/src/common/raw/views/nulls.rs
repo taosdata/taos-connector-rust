@@ -7,6 +7,7 @@ use bytes::Bytes;
 const fn null_bits_len(len: usize) -> usize {
     (len + 7) / 8
 }
+
 /// A bitmap for nulls.
 ///
 /// ```text
@@ -138,61 +139,66 @@ impl Iterator for NullsIter<'_> {
 
 impl ExactSizeIterator for NullsIter<'_> {}
 
-#[test]
-fn test_null_bits() {
-    let bools = [true, false, false, true, false, false, true, true];
-    let nulls = NullBits::from_iter(bools);
-    println!("0b{:0b}", nulls.0[0]);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // get
-    for i in 0..6 {
-        assert_eq!(bools[i], unsafe { nulls.is_null_unchecked(i) });
+    #[test]
+    fn test_null_bits() {
+        let bools = [true, false, false, true, false, false, true, true];
+        let nulls = NullBits::from_iter(bools);
+        println!("0b{:0b}", nulls.0[0]);
+
+        // get
+        for i in 0..6 {
+            assert_eq!(bools[i], unsafe { nulls.is_null_unchecked(i) });
+        }
+        // iter
+        let iter = nulls.iter();
+        dbg!(iter.len());
+        let iter = nulls.into_iter().take(bools.len());
+        let len = iter.len();
+        dbg!(len);
+        // dbg!(iter.len());
+
+        // assert_eq!(iter.len(), bools.len());
+        let slice = unsafe { nulls.slice(1..5) };
+        println!("0b{:0b}", slice.0[0]);
+        for i in 0..4 {
+            dbg!(unsafe { slice.is_null_unchecked(i) });
+        }
+
+        for i in 0..4 {
+            assert_eq!(bools[i + 1], unsafe { slice.is_null_unchecked(i) });
+        }
+        let slice_iter = slice.iter().take(3);
+        let bools: Vec<bool> = slice_iter.collect();
+        assert_eq!(&bools, &[false, false, true]);
     }
-    // iter
-    let iter = nulls.iter();
-    dbg!(iter.len());
-    let iter = nulls.into_iter().take(bools.len());
-    let len = iter.len();
-    dbg!(len);
-    // dbg!(iter.len());
 
-    // assert_eq!(iter.len(), bools.len());
-    let slice = unsafe { nulls.slice(1..5) };
-    println!("0b{:0b}", slice.0[0]);
-    for i in 0..4 {
-        dbg!(unsafe { slice.is_null_unchecked(i) });
-    }
+    #[test]
+    fn test_null_bits_slice() {
+        const SIZE: usize = 1235;
+        let bools: Vec<bool> = (0..SIZE).map(|_| rand::random()).collect();
+        let nulls = NullBits::from_iter(bools.clone());
 
-    for i in 0..4 {
-        assert_eq!(bools[i + 1], unsafe { slice.is_null_unchecked(i) });
-    }
-    let slice_iter = slice.iter().take(3);
-    let bools: Vec<bool> = slice_iter.collect();
-    assert_eq!(&bools, &[false, false, true]);
-}
-
-#[test]
-fn test_null_bits_slice() {
-    const SIZE: usize = 1235;
-    let bools: Vec<bool> = (0..SIZE).map(|_| rand::random()).collect();
-    let nulls = NullBits::from_iter(bools.clone());
-
-    for start in (0..SIZE).step_by(3) {
-        for end in (start + 1..SIZE).step_by(7) {
-            let range = start..end;
-            let slice = unsafe { nulls.slice(range) };
-            // let new = slice.is_null_unchecked(row)
-            for i in start..end {
-                let correct = bools[i];
-                let data = unsafe { slice.is_null_unchecked(i - start) };
-                assert_eq!(
-                    correct,
-                    data,
-                    "{} range {:?}. bytes: {:?}",
-                    i,
-                    start..end,
-                    nulls.0
-                );
+        for start in (0..SIZE).step_by(3) {
+            for end in (start + 1..SIZE).step_by(7) {
+                let range = start..end;
+                let slice = unsafe { nulls.slice(range) };
+                // let new = slice.is_null_unchecked(row)
+                for i in start..end {
+                    let correct = bools[i];
+                    let data = unsafe { slice.is_null_unchecked(i - start) };
+                    assert_eq!(
+                        correct,
+                        data,
+                        "{} range {:?}. bytes: {:?}",
+                        i,
+                        start..end,
+                        nulls.0
+                    );
+                }
             }
         }
     }

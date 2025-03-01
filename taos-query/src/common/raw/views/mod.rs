@@ -1212,6 +1212,7 @@ impl ColumnView {
             _ => self.clone(),
         }
     }
+
     pub unsafe fn as_timestamp_view(&self) -> &TimestampView {
         match self {
             ColumnView::Timestamp(view) => view,

@@ -424,7 +424,6 @@ impl RawBlock {
             fields: fields.iter().map(|s| s.name().to_string()).collect(),
             columns,
             group_id: 0,
-            // raw_fields: Vec::new(),
         }
     }
 
@@ -446,21 +445,20 @@ impl RawBlock {
 
         let schema_end = schema_start + cols * std::mem::size_of::<ColSchema>();
         let schemas = Schemas::from(bytes.slice(schema_start..schema_end));
-        // dbg!(&schemas);
+
         let lengths_end = schema_end + std::mem::size_of::<u32>() * cols;
         let lengths = Lengths::from(bytes.slice(schema_end..lengths_end));
-        // dbg!(&lengths);
+
         let mut data_offset = lengths_end;
         let mut columns = Vec::with_capacity(cols);
         for col in 0..cols {
-            // go for each column
             let length = unsafe { lengths.get_unchecked(col) } as usize;
             let schema = unsafe { schemas.get_unchecked(col) };
 
             macro_rules! _primitive_value {
                 ($ty:ident, $prim:ty) => {{
                     let o1 = data_offset;
-                    let o2 = data_offset + ((rows + 7) >> 3); // null bitmap len.
+                    let o2 = data_offset + ((rows + 7) >> 3); // bitmap len
                     data_offset = o2 + rows * std::mem::size_of::<$prim>();
                     let nulls = bytes.slice(o1..o2);
                     let data = bytes.slice(o2..data_offset);
@@ -478,18 +476,12 @@ impl RawBlock {
                 Ty::SmallInt => _primitive_value!(SmallInt, i16),
                 Ty::Int => _primitive_value!(Int, i32),
                 Ty::BigInt => _primitive_value!(BigInt, i64),
+                Ty::UTinyInt => _primitive_value!(UTinyInt, u8),
+                Ty::USmallInt => _primitive_value!(USmallInt, u16),
+                Ty::UInt => _primitive_value!(UInt, u32),
+                Ty::UBigInt => _primitive_value!(UBigInt, u64),
                 Ty::Float => _primitive_value!(Float, f32),
                 Ty::Double => _primitive_value!(Double, f64),
-                Ty::VarChar => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-
-                    ColumnView::VarChar(VarCharView { offsets, data })
-                }
                 Ty::Timestamp => {
                     let o1 = data_offset;
                     let o2 = data_offset + ((rows + 7) >> 3);
@@ -502,14 +494,20 @@ impl RawBlock {
                         precision,
                     })
                 }
+                Ty::VarChar => {
+                    let o1 = data_offset;
+                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
+                    data_offset = o2 + length;
+                    let offsets = Offsets::from(bytes.slice(o1..o2));
+                    let data = bytes.slice(o2..data_offset);
+                    ColumnView::VarChar(VarCharView { offsets, data })
+                }
                 Ty::NChar => {
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
                     data_offset = o2 + length;
-
                     let offsets = Offsets::from(bytes.slice(o1..o2));
                     let data = bytes.slice(o2..data_offset);
-
                     ColumnView::NChar(NCharView {
                         offsets,
                         data,
@@ -518,41 +516,30 @@ impl RawBlock {
                         layout: layout.clone(),
                     })
                 }
-                Ty::UTinyInt => _primitive_value!(UTinyInt, u8),
-                Ty::USmallInt => _primitive_value!(USmallInt, u16),
-                Ty::UInt => _primitive_value!(UInt, u32),
-                Ty::UBigInt => _primitive_value!(UBigInt, u64),
                 Ty::Json => {
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
                     data_offset = o2 + length;
-
                     let offsets = Offsets::from(bytes.slice(o1..o2));
                     let data = bytes.slice(o2..data_offset);
-
                     ColumnView::Json(JsonView { offsets, data })
                 }
                 Ty::VarBinary => {
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
                     data_offset = o2 + length;
-
                     let offsets = Offsets::from(bytes.slice(o1..o2));
                     let data: Bytes = bytes.slice(o2..data_offset);
-
                     ColumnView::VarBinary(VarBinaryView { offsets, data })
                 }
                 Ty::Geometry => {
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
                     data_offset = o2 + length;
-
                     let offsets = Offsets::from(bytes.slice(o1..o2));
                     let data = bytes.slice(o2..data_offset);
-
                     ColumnView::Geometry(GeometryView { offsets, data })
                 }
-
                 ty => {
                     unreachable!("unsupported type: {ty}")
                 }
@@ -769,28 +756,75 @@ impl RawBlock {
         unsafe { self.columns.get_unchecked(col).is_null_unchecked(row) }
     }
 
-    pub fn is_null_by_col(&self, mut rows: usize, col: usize) -> Result<Vec<bool>, Error> {
-        if col >= self.ncols() || self.ncols() == 0 {
-            return Err(Error::from(taos_error::Code::INVALID_PARA));
-        }
-
+    pub fn is_null_by_col_unchecked(&self, mut rows: usize, col: usize) -> Vec<bool> {
         if rows > self.nrows() {
             rows = self.nrows();
         }
-
         let mut is_nulls = Vec::with_capacity(rows);
         for row in 0..rows {
             is_nulls.push(self.is_null(row, col));
         }
-        Ok(is_nulls)
+        is_nulls
     }
 
-    #[inline]
+    pub fn get_col_data_offset_unchecked(&self, col: usize) -> Vec<i32> {
+        let view = unsafe { self.columns.get_unchecked(col) };
+        match view {
+            ColumnView::VarChar(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            ColumnView::NChar(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            ColumnView::Json(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            ColumnView::VarBinary(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            ColumnView::Geometry(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            _ => vec![],
+        }
+    }
+
     /// Get one value at `(row, col)` of the block.
     ///
     /// # Safety
     ///
     /// `(row, col)` should not exceed the block limit.
+    #[inline]
     pub unsafe fn get_raw_value_unchecked(
         &self,
         row: usize,
