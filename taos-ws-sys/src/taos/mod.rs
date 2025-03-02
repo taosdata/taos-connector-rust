@@ -38,14 +38,14 @@ pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RE
 #[derive(Debug, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum TSDB_OPTION {
-    TSDB_OPTION_LOCALE = 0,
-    TSDB_OPTION_CHARSET = 1,
-    TSDB_OPTION_TIMEZONE = 2,
-    TSDB_OPTION_CONFIGDIR = 3,
-    TSDB_OPTION_SHELL_ACTIVITY_TIMER = 4,
-    TSDB_OPTION_USE_ADAPTER = 5,
-    TSDB_OPTION_DRIVER = 6,
-    TSDB_MAX_OPTIONS = 7,
+    TSDB_OPTION_LOCALE,
+    TSDB_OPTION_CHARSET,
+    TSDB_OPTION_TIMEZONE,
+    TSDB_OPTION_CONFIGDIR,
+    TSDB_OPTION_SHELL_ACTIVITY_TIMER,
+    TSDB_OPTION_USE_ADAPTER,
+    TSDB_OPTION_DRIVER,
+    TSDB_MAX_OPTIONS,
 }
 
 #[repr(C)]
@@ -124,39 +124,35 @@ pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub unsafe extern "C" fn taos_options(
-    option: TSDB_OPTION,
-    arg: *const c_void,
-    varargs: ...
-) -> c_int {
+pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
     use std::ffi::CStr;
 
     use taos_error::Code;
     use ws::error::{set_err_and_get_code, TaosError};
 
     if option == TSDB_OPTION::TSDB_OPTION_DRIVER {
-        match CStr::from_ptr(arg as _).to_str() {
-            Ok(driver) => {
-                if driver == "native" {
-                    DRIVER.store(false, Ordering::Relaxed);
-                }
+        if let Ok(driver) = CStr::from_ptr(arg as _).to_str() {
+            if driver == "native" {
+                DRIVER.store(false, Ordering::Relaxed);
             }
-            Err(_) => {
-                return set_err_and_get_code(TaosError::new(
-                    Code::INVALID_PARA,
-                    "arg is invalid utf-8",
-                ))
-            }
+        } else {
+            return set_err_and_get_code(TaosError::new(
+                Code::INVALID_PARA,
+                "arg is invalid utf-8",
+            ));
         }
     }
 
-    Code::SUCCESS.into()
-
-    // if DRIVER.load(Ordering::Relaxed) {
-    //     ws::taos_options(option, arg)
-    // } else {
-    //     (CAPI.basic_api.taos_options)(option, arg)
-    // }
+    if DRIVER.load(Ordering::Relaxed) {
+        ws::taos_options(option, arg)
+    } else {
+        (CAPI.basic_api.taos_options)(option, arg)
+        // if code != 0 {
+        //     return code;
+        // }
+        // // TODO: What's up?
+        // (CAPI.basic_api.taosDriverInit)(EDriverType::DRIVER_NATIVE)
+    }
 }
 
 #[no_mangle]

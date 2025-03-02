@@ -75,14 +75,15 @@ unsafe fn connect(
     db: *const c_char,
     mut port: u16,
 ) -> TaosResult<Taos> {
-    const DEFAULT_IP: &str = "localhost";
+    const DEFAULT_HOST: &str = "localhost";
     const DEFAULT_PORT: u16 = 6041;
+    const DEFAULT_PORT_CLOUD: u16 = 443;
     const DEFAULT_USER: &str = "root";
     const DEFAULT_PASS: &str = "taosdata";
     const DEFAULT_DB: &str = "";
 
-    let ip = if ip.is_null() {
-        DEFAULT_IP
+    let host = if ip.is_null() {
+        DEFAULT_HOST
     } else {
         CStr::from_ptr(ip).to_str()?
     };
@@ -105,11 +106,20 @@ unsafe fn connect(
         CStr::from_ptr(db).to_str()?
     };
 
-    if port == 0 {
-        port = DEFAULT_PORT;
-    }
+    let dsn = if (host.contains("cloud.tdengine") || host.contains("cloud.taosdata"))
+        && user == "token"
+    {
+        if port == 0 {
+            port = DEFAULT_PORT_CLOUD;
+        }
+        format!("wss://{host}:{port}/{db}?token={pass}")
+    } else {
+        if port == 0 {
+            port = DEFAULT_PORT;
+        }
+        format!("ws://{user}:{pass}@{host}:{port}/{db}")
+    };
 
-    let dsn = format!("ws://{user}:{pass}@{ip}:{port}/{db}");
     let builder = TaosBuilder::from_dsn(dsn)?;
     let mut taos = builder.build()?;
     builder.ping(&mut taos)?;
