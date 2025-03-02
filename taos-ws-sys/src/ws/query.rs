@@ -440,9 +440,8 @@ pub unsafe fn taos_get_column_data_offset(res: *mut TAOS_RES, columnIndex: c_int
                 }
                 rs.offsets = Some(offsets);
                 return rs.offsets.as_ref().unwrap().as_ptr() as *mut _;
-            } else {
-                error!("taos_get_column_data_offset failed, column index is invalid");
             }
+            error!("taos_get_column_data_offset failed, column index is invalid");
         } else {
             error!("taos_get_column_data_offset failed, block is none");
         }
@@ -504,9 +503,8 @@ pub unsafe fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
 
             rs.lengths = Some(lengths);
             return rs.lengths.as_ref().unwrap().as_ptr() as *mut _;
-        } else {
-            error!("taos_fetch_lengths failed, block is none");
         }
+        error!("taos_fetch_lengths failed, block is none");
     } else {
         error!("taos_fetch_lengths failed, rs is invalid");
     }
@@ -697,7 +695,6 @@ pub unsafe fn taos_query_a_with_reqid(
                     error!("taos_query_a_with_reqid failed, err: {err:?}");
                     let code = format_errno(err.code().into());
                     fp(param.0, ptr::null_mut(), code);
-                    return;
                 }
             };
         }

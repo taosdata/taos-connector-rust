@@ -124,7 +124,6 @@ pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-#[allow(clippy::just_underscores_and_digits)]
 pub unsafe extern "C" fn taos_options(
     option: TSDB_OPTION,
     arg: *const c_void,

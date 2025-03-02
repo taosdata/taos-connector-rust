@@ -51,21 +51,17 @@ impl TaosStmt {
 
     fn set_cur_param_tbname(&mut self, name: String) {
         self.init_cur_param_if_none();
-        self.cur_param
-            .as_mut()
-            .map(|param| param.with_table_name(name));
+        self.cur_param.as_mut().unwrap().with_table_name(name);
     }
 
     fn set_cur_param_tags(&mut self, tags: Vec<Value>) {
         self.init_cur_param_if_none();
-        self.cur_param.as_mut().map(|param| param.with_tags(tags));
+        self.cur_param.as_mut().unwrap().with_tags(tags);
     }
 
     fn set_cur_param_cols(&mut self, cols: Vec<ColumnView>) {
         self.init_cur_param_if_none();
-        self.cur_param
-            .as_mut()
-            .map(|param| param.with_columns(cols));
+        self.cur_param.as_mut().unwrap().with_columns(cols);
     }
 
     fn move_cur_param_to_params(&mut self) {
@@ -288,8 +284,7 @@ pub unsafe fn taos_stmt_set_tags(stmt: *mut TAOS_STMT, tags: *mut TAOS_MULTI_BIN
     let tag_cnt = taos_stmt
         .tag_fields
         .as_ref()
-        .map(|fields| fields.len())
-        .unwrap_or(0);
+        .map_or(0, |fields| fields.len());
 
     let binds = slice::from_raw_parts(tags, tag_cnt);
 
@@ -487,8 +482,7 @@ pub unsafe fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_F
             let len = taos_stmt
                 .tag_fields
                 .as_ref()
-                .map(|fields| fields.len())
-                .unwrap_or(0);
+                .map_or(0, |fields| fields.len());
             let _ = Vec::from_raw_parts(fields, len, len);
             taos_stmt.tag_fields_addr = None;
             maybe_err.clear_err();
@@ -502,8 +496,7 @@ pub unsafe fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_F
             let len = taos_stmt
                 .col_fields
                 .as_ref()
-                .map(|fields| fields.len())
-                .unwrap_or(0);
+                .map_or(0, |fields| fields.len());
             let _ = Vec::from_raw_parts(fields, len, len);
             taos_stmt.col_fields_addr = None;
             maybe_err.clear_err();
@@ -586,8 +579,7 @@ pub unsafe fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_
             *nums = taos_stmt
                 .col_fields
                 .as_ref()
-                .map(|fields| fields.len())
-                .unwrap_or(0) as _;
+                .map_or(0, |fields| fields.len() as _);
         }
         Some(false) => {
             maybe_err.with_err(Some(TaosError::new(
@@ -667,8 +659,7 @@ pub unsafe fn taos_stmt_get_param(
     let col_cnt = taos_stmt
         .col_fields
         .as_ref()
-        .map(|fields| fields.len())
-        .unwrap_or(0);
+        .map_or(0, |fields| fields.len());
 
     if idx < 0 || idx >= col_cnt as _ {
         maybe_err.with_err(Some(TaosError::new(
@@ -713,8 +704,7 @@ pub unsafe fn taos_stmt_bind_param(stmt: *mut TAOS_STMT, bind: *mut TAOS_MULTI_B
         Some(true) => taos_stmt
             .col_fields
             .as_ref()
-            .map(|fields| fields.len())
-            .unwrap_or(0),
+            .map_or(0, |fields| fields.len()),
         Some(false) => stmt2.fields_count().unwrap_or(0),
         None => {
             maybe_err.with_err(Some(TaosError::new(
@@ -779,8 +769,7 @@ pub unsafe fn taos_stmt_bind_param_batch(
     let col_cnt = taos_stmt
         .col_fields
         .as_ref()
-        .map(|fields| fields.len())
-        .unwrap_or(0);
+        .map_or(0, |fields| fields.len());
 
     let binds = slice::from_raw_parts(bind, col_cnt);
 
