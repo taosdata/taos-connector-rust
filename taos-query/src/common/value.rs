@@ -10,9 +10,9 @@ use super::{Timestamp, Ty};
 
 #[derive(Debug, Clone)]
 pub enum BorrowedValue<'b> {
-    Null(Ty),    // 0
-    Bool(bool),  // 1
-    TinyInt(i8), // 2
+    Null(Ty),
+    Bool(bool),
+    TinyInt(i8),
     SmallInt(i16),
     Int(i32),
     BigInt(i64),
@@ -24,7 +24,7 @@ pub enum BorrowedValue<'b> {
     UTinyInt(u8),
     USmallInt(u16),
     UInt(u32),
-    UBigInt(u64), // 14
+    UBigInt(u64),
     Json(Cow<'b, [u8]>),
     VarBinary(Cow<'b, [u8]>),
     Decimal(Decimal),

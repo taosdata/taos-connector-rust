@@ -1,4 +1,12 @@
+use std::ffi::c_void;
+use std::fmt::{Debug, Display};
+use std::io::Write;
+use std::iter::FusedIterator;
+
 use itertools::Itertools;
+
+use crate::common::{BorrowedValue, Ty, Value};
+use crate::Precision;
 
 mod bool_view;
 pub use bool_view::BoolView;
@@ -64,14 +72,6 @@ mod lengths;
 pub(crate) use lengths::*;
 
 mod from;
-
-use std::ffi::c_void;
-use std::fmt::{Debug, Display};
-use std::io::Write;
-use std::iter::FusedIterator;
-
-use crate::common::{BorrowedValue, Ty, Value};
-use crate::Precision;
 
 pub(crate) trait IsColumnView: Sized {
     #[allow(dead_code)]

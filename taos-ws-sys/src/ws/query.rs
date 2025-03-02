@@ -457,8 +457,61 @@ pub fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int {
     todo!()
 }
 
-pub fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
-    todo!()
+pub unsafe fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
+    trace!("taos_fetch_lengths start, res: {res:?}");
+
+    if res.is_null() {
+        error!("taos_fetch_lengths failed, res is null");
+        return ptr::null_mut();
+    }
+
+    let maybe_err = (res as *mut TaosMaybeError<ResultSet>).as_mut().unwrap();
+    let rs = match maybe_err.deref_mut() {
+        Some(rs) => rs,
+        None => {
+            error!("taos_fetch_lengths failed, res is invalid");
+            return ptr::null_mut();
+        }
+    };
+
+    if let ResultSet::Query(rs) = rs {
+        if let Some(block) = rs.block.as_ref() {
+            let lengths = if rs.has_called_fetch_row {
+                let mut lengths = Vec::with_capacity(block.ncols());
+                for col in 0..block.ncols() {
+                    tracing::trace!(
+                        "taos_fetch_lengths, row: {:?}, col: {:?}",
+                        rs.row.current_row - 1,
+                        col
+                    );
+                    let (_, len, _) = block.get_raw_value_unchecked(rs.row.current_row - 1, col);
+                    lengths.push(len as i32);
+                }
+                lengths
+            } else {
+                block
+                    .schemas()
+                    .iter()
+                    .map(|schema| schema.len() as i32)
+                    .collect::<Vec<_>>()
+            };
+
+            trace!("taos_fetch_lengths succ, lengths: {lengths:?}");
+
+            if lengths.is_empty() {
+                return ptr::null_mut();
+            }
+
+            rs.lengths = Some(lengths);
+            return rs.lengths.as_ref().unwrap().as_ptr() as *mut _;
+        } else {
+            error!("taos_fetch_lengths failed, block is none");
+        }
+    } else {
+        error!("taos_fetch_lengths failed, rs is invalid");
+    }
+
+    ptr::null_mut()
 }
 
 pub fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
@@ -720,6 +773,8 @@ pub struct QueryResultSet {
     fields: Vec<TAOS_FIELD>,
     row: Row,
     offsets: Option<Vec<i32>>,
+    lengths: Option<Vec<i32>>,
+    has_called_fetch_row: bool,
 }
 
 impl QueryResultSet {
@@ -734,6 +789,8 @@ impl QueryResultSet {
                 current_row: 0,
             },
             offsets: None,
+            lengths: None,
+            has_called_fetch_row: false,
         }
     }
 
@@ -813,6 +870,10 @@ impl ResultSetOperations for QueryResultSet {
     }
 
     unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error> {
+        if !self.has_called_fetch_row {
+            self.has_called_fetch_row = true;
+        }
+
         if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
             self.block = self.rs.fetch_raw_block()?;
             self.row.current_row = 0;
@@ -1596,7 +1657,7 @@ mod tests {
                     "drop database if exists test_1740785939",
                     "create database test_1740785939",
                     "use test_1740785939",
-                    "create table t0 (ts timestamp, c1 varchar(20), c2 nchar(15), c3 varbinary(20), c4 geometry(50))",
+                    "create table t0 (ts timestamp, c1 varchar(20), c2 nchar(20), c3 varbinary(20), c4 geometry(50))",
                     "insert into t0 values (now+1s, 'hello', 'hello', 'hello', 'POINT(1.0 1.0)')",
                     "insert into t0 values (now+2s, 'world', 'world', 'world', 'POINT(2.0 2.0)')",
                     "insert into t0 values (now+3s, null, null, null, null)",
@@ -1646,6 +1707,81 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1740785939");
+        }
+    }
+
+    #[test]
+    fn test_taos_fetch_lengths() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1740838806",
+                    "create database test_1740838806",
+                    "use test_1740838806",
+                    "create table t0 (ts timestamp, c1 bool, c2 int, c3 varchar(10), c4 nchar(15))",
+                    "insert into t0 values (now, 1, 2025, 'hello', 'helloworld')",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let mut rows = 0;
+            let mut data = ptr::null_mut();
+            let code = taos_fetch_raw_block(res, &mut rows, &mut data);
+            assert_eq!(code, 0);
+            assert_eq!(rows, 1);
+            assert!(!data.is_null());
+
+            let lengths = taos_fetch_lengths(res);
+            assert!(!lengths.is_null());
+
+            // TODO: confirm the lengths
+            let lengths = slice::from_raw_parts(lengths, 5);
+            assert_eq!(lengths, [8, 1, 4, 12, 62]);
+
+            taos_free_result(res);
+
+            test_exec(taos, "drop database test_1740838806");
+        }
+
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1740841972",
+                    "create database test_1740841972",
+                    "use test_1740841972",
+                    "create table t0 (ts timestamp, c1 bool, c2 int, c3 varchar(10), c4 nchar(15))",
+                    "insert into t0 values (now, 1, 2025, 'hello', 'helloworld')",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let mut rows = 0;
+            let mut data = ptr::null_mut();
+            let code = taos_fetch_raw_block(res, &mut rows, &mut data);
+            assert_eq!(code, 0);
+            assert_eq!(rows, 1);
+            assert!(!data.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let lengths = taos_fetch_lengths(res);
+            assert!(!lengths.is_null());
+
+            let lengths = slice::from_raw_parts(lengths, 5);
+            assert_eq!(lengths, [8, 1, 4, 5, 10]);
+
+            taos_free_result(res);
+
+            test_exec(taos, "drop database test_1740841972");
         }
     }
 }

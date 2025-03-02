@@ -106,18 +106,9 @@ impl NCharView {
         let offset = self.offsets.get_unchecked(row);
         if offset >= 0 {
             self.nchar_to_utf8();
-            //     // let me: &mut Self = unsafe { std::mem::transmute(&self) };
-            //     let is_chars = &mut *self.is_chars.get();
-            //     *is_chars = false;
-            //     Some(
-            //         InlineNChar::<u16>::from_ptr(self.data.as_ptr().offset(*offset as isize))
-            //             .into_inline_str(),
-            //     )
-            // } else {
             Some(InlineStr::<u16>::from_ptr(
                 self.data.as_ptr().offset(offset as isize),
             ))
-            // }
         } else {
             None
         }

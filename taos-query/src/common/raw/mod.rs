@@ -92,7 +92,6 @@ impl Header {
 ///
 /// The length of bitmap is decided by number of rows of this data block, and the length of each column data is
 /// recorded in the first segment, next to the struct header
-// #[derive(Debug)]
 pub struct RawBlock {
     /// Layout is auto detected.
     layout: Rc<RefCell<Layout>>,
@@ -1471,9 +1470,7 @@ async fn test_raw_from_v2() {
     use std::ops::Deref;
 
     use crate::prelude::AsyncInlinable;
-    // pretty_env_logger::formatted_builder()
-    //     .filter_level(tracing::LevelFilter::Trace)
-    //     .init();
+
     let bytes = b"\x10\x86\x1aA \xcc)AB\xc2\x14AZ],A\xa2\x8d$A\x87\xb9%A\xf5~\x0fA\x96\xf7,AY\xee\x17A1|\x15As\x00\x00\x00q\x00\x00\x00s\x00\x00\x00t\x00\x00\x00u\x00\x00\x00t\x00\x00\x00n\x00\x00\x00n\x00\x00\x00n\x00\x00\x00r\x00\x00\x00";
 
     let block = RawBlock::parse_from_raw_block_v2(
@@ -1641,6 +1638,7 @@ fn test_v2_null() {
     dbg!(raw);
     assert!(null.is_null());
 }
+
 #[test]
 fn test_from_v2() {
     let raw = RawBlock::parse_from_raw_block_v2(
