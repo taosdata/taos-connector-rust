@@ -414,6 +414,7 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     }
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()>;
+
     async fn commit_all(&self) -> RawResult<()>;
 
     async fn commit_offset(

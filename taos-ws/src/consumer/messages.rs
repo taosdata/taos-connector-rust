@@ -131,6 +131,8 @@ pub enum TmqSend {
     CommitOffset(OffsetSeekArgs),
 }
 
+impl ToMessage for TmqSend {}
+
 unsafe impl Send for TmqSend {}
 unsafe impl Sync for TmqSend {}
 
@@ -293,5 +295,3 @@ fn test_serde_recv_data() {
     let d: TmqRecv = serde_json::from_str(json).unwrap();
     let _ = dbg!(d.ok());
 }
-
-impl ToMessage for TmqSend {}
