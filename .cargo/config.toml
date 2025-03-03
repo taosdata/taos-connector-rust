@@ -10,6 +10,9 @@ rustflags = [
     "-Aclippy::incompatible_msrv",
     "-Aclippy::missing_transmute_annotations",
 
+    # Perf Group
+    "-Aclippy::result_large_err",
+
     # Cargo Group
     "-Wclippy::negative_feature_names",
     "-Wclippy::redundant_feature_names",
