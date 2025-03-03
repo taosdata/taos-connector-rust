@@ -924,7 +924,7 @@ impl WsTaos {
             let len = meta.len();
             tracing::trace!("write block with req_id: {req_id}, raw data len: {len}",);
 
-            match time::timeout(
+            let recv = time::timeout(
                 Duration::from_secs(60),
                 self.sender.send_recv(WsSend::Binary(meta)),
             )
@@ -936,7 +936,9 @@ impl WsTaos {
                     0xE002, // Connection closed
                     "Write raw data timeout, maybe the connection has been lost",
                 )
-            })?? {
+            })??;
+
+            match recv {
                 WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
                 _ => Err(RawError::from_string("write raw block error"))?,
             }
