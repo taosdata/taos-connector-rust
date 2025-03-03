@@ -582,18 +582,7 @@ pub struct QueryApi {
     pub(crate) getBuildInfo: unsafe extern "C" fn() -> *const c_char,
 }
 
-// TODO: What's up?
-#[repr(C)]
-#[allow(non_camel_case_types)]
-pub enum EDriverType {
-    DRIVER_NATIVE = 0,
-    DRIVER_WEBSOCKET = 1,
-    DRIVER_MAX = 2,
-}
-
 pub struct BasicApi {
-    pub(crate) taosDriverInit: unsafe extern "C" fn(driverType: EDriverType) -> i32,
-
     pub(crate) taos_init: unsafe extern "C" fn() -> c_int,
 
     pub(crate) taos_cleanup: unsafe extern "C" fn(),
@@ -681,7 +670,6 @@ impl ApiEntry {
 
         let basic_api = unsafe {
             symbol!(
-                taosDriverInit,
                 taos_init,
                 taos_cleanup,
                 taos_connect,
@@ -692,7 +680,6 @@ impl ApiEntry {
             );
 
             BasicApi {
-                taosDriverInit,
                 taos_init,
                 taos_cleanup,
                 taos_connect,

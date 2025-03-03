@@ -147,11 +147,6 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
         ws::taos_options(option, arg)
     } else {
         (CAPI.basic_api.taos_options)(option, arg)
-        // if code != 0 {
-        //     return code;
-        // }
-        // // TODO: What's up?
-        // (CAPI.basic_api.taosDriverInit)(EDriverType::DRIVER_NATIVE)
     }
 }
 
