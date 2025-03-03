@@ -13,9 +13,9 @@ use taos_query::TBuilder;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
+use tracing::instrument;
 
-use crate::taos::query::TAOS_FIELD;
-use crate::taos::{TAOS, TAOS_ROW, TSDB_OPTION};
+use crate::ws::query::TAOS_FIELD;
 
 pub mod error;
 pub mod query;
@@ -24,6 +24,43 @@ pub mod stmt;
 pub mod stmt2;
 pub mod stub;
 pub mod tmq;
+
+pub type TAOS = c_void;
+
+#[allow(non_camel_case_types)]
+pub type TAOS_RES = c_void;
+
+#[allow(non_camel_case_types)]
+pub type TAOS_ROW = *mut *mut c_void;
+
+#[allow(non_camel_case_types)]
+pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub enum TSDB_OPTION {
+    TSDB_OPTION_LOCALE,
+    TSDB_OPTION_CHARSET,
+    TSDB_OPTION_TIMEZONE,
+    TSDB_OPTION_CONFIGDIR,
+    TSDB_OPTION_SHELL_ACTIVITY_TIMER,
+    TSDB_OPTION_USE_ADAPTER,
+    TSDB_OPTION_DRIVER,
+    TSDB_MAX_OPTIONS,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub enum TSDB_OPTION_CONNECTION {
+    TSDB_OPTION_CONNECTION_CLEAR = -1,
+    TSDB_OPTION_CONNECTION_CHARSET = 0,
+    TSDB_OPTION_CONNECTION_TIMEZONE = 1,
+    TSDB_OPTION_CONNECTION_USER_IP = 2,
+    TSDB_OPTION_CONNECTION_USER_APP = 3,
+    TSDB_MAX_OPTIONS_CONNECTION = 4,
+}
 
 type TaosResult<T> = Result<T, TaosError>;
 
@@ -52,7 +89,9 @@ impl From<&Field> for TAOS_FIELD {
     }
 }
 
-pub unsafe fn taos_connect(
+#[no_mangle]
+#[instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_connect(
     ip: *const c_char,
     user: *const c_char,
     pass: *const c_char,
@@ -126,18 +165,19 @@ unsafe fn connect(
     Ok(taos)
 }
 
-pub fn taos_close(taos: *mut TAOS) {
+#[no_mangle]
+#[instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
     if taos.is_null() {
         set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
         return;
     }
-
-    unsafe {
-        let _ = Box::from_raw(taos as *mut Taos);
-    }
+    let _ = Box::from_raw(taos as *mut Taos);
 }
 
-pub unsafe fn taos_options(option: TSDB_OPTION, arg: *const c_void) -> c_int {
+#[no_mangle]
+#[instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void) -> c_int {
     Code::SUCCESS.into()
 }
 

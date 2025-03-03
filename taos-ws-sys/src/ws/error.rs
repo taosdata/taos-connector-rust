@@ -3,11 +3,13 @@ use std::ffi::{c_char, c_int, CStr, CString};
 use std::ptr;
 
 use taos_error::Code;
-use tracing::trace;
+use tracing::{instrument, trace};
 
-use crate::taos::TAOS_RES;
+use crate::ws::TAOS_RES;
 
-pub unsafe fn taos_errno(res: *mut TAOS_RES) -> c_int {
+#[no_mangle]
+#[instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
     if res.is_null() {
         return errno();
     }
@@ -21,7 +23,9 @@ pub unsafe fn taos_errno(res: *mut TAOS_RES) -> c_int {
     }
 }
 
-pub unsafe fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
+#[no_mangle]
+#[instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
     if res.is_null() {
         if errno() == 0 {
             return EMPTY.as_ptr();
