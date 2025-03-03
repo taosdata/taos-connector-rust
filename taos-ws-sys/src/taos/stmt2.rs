@@ -96,6 +96,18 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_stmt2_bind_param_a(
+    stmt: *mut TAOS_STMT2,
+    bindv: *mut TAOS_STMT2_BINDV,
+    col_idx: i32,
+    fp: __taos_async_fn_t,
+    param: *mut c_void,
+) -> c_int {
+    todo!("taos_stmt2_bind_param_a")
+}
+
+#[no_mangle]
+#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_exec(
     stmt: *mut TAOS_STMT2,
     affected_rows: *mut c_int,
