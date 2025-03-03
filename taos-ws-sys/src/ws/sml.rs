@@ -348,7 +348,7 @@ mod tests {
     use taos_query::util::generate_req_id;
 
     use super::*;
-    use crate::taos::sml::{TSDB_SML_PROTOCOL_TYPE, TSDB_SML_TIMESTAMP_TYPE};
+    use crate::ws::sml::{TSDB_SML_PROTOCOL_TYPE, TSDB_SML_TIMESTAMP_TYPE};
     use crate::ws::{test_connect, test_exec, test_exec_many};
 
     #[test]
