@@ -145,12 +145,12 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     type Target = Taos;
 
     fn from_dsn<D: IntoDsn>(dsn: D) -> RawResult<Self> {
+        use taos_query::TBuilder;
+
         let mut dsn = dsn.into_dsn()?;
         if dsn.params.contains_key("token") && dsn.protocol.is_none() {
             dsn.protocol.replace("wss".to_string());
         }
-        // dbg!(&dsn);
-        use taos_query::TBuilder;
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(
                 TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),

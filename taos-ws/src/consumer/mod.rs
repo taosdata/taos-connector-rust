@@ -459,13 +459,11 @@ impl WsMessageSet {
 
 impl Consumer {
     async fn poll_wait(&self) -> RawResult<(Offset, MessageSet<Meta, Data>)> {
-        if self.tmq_conf.auto_commit {
+        if self.auto_commit {
             let mut guard = self.auto_commit_offset.lock().await;
             if let Some(offset) = guard.0.take() {
                 let now = Instant::now();
-                if now - guard.1
-                    > Duration::from_millis(self.tmq_conf.auto_commit_interval_ms.unwrap())
-                {
+                if now - guard.1 > Duration::from_millis(self.auto_commit_interval_ms.unwrap()) {
                     guard.1 = now;
                     if let Err(err) = AsAsyncConsumer::commit(self, offset).await {
                         tracing::error!("auto commit failed, err: {err:?}");
@@ -515,9 +513,9 @@ impl Consumer {
                             // Release the lock
                             self.polling_mutex.store(false, Ordering::Release);
 
-                            if self.tmq_conf.auto_commit {
+                            if self.auto_commit {
                                 let mut guard = self.auto_commit_offset.lock().await;
-                                guard.0 = Some(offset.clone());
+                                guard.0.replace(offset.clone());
                             }
 
                             return match message_type {
@@ -585,9 +583,9 @@ impl Consumer {
                         // Release the lock
                         self.polling_mutex.store(false, Ordering::Release);
 
-                        if self.tmq_conf.auto_commit {
+                        if self.auto_commit {
                             let mut guard = self.auto_commit_offset.lock().await;
-                            guard.0 = Some(offset.clone());
+                            guard.0.replace(offset.clone());
                         }
 
                         break match message_type {
@@ -953,8 +951,6 @@ impl AsConsumer for Consumer {
 
 impl TmqBuilder {
     pub fn new<D: IntoDsn>(dsn: D) -> RawResult<Self> {
-        const DEFAULT_AUTO_COMMIT_INTERVAL_MS: u64 = 5;
-
         let dsn = dsn.into_dsn()?;
         let info = TaosBuilder::from_dsn(&dsn)?;
         let group_id = dsn
@@ -965,26 +961,29 @@ impl TmqBuilder {
         let client_id = dsn.params.get("client.id").map(ToString::to_string);
         let offset_reset = dsn.params.get("auto.offset.reset").map(ToString::to_string);
 
-        let mut auto_commit = false;
+        let mut auto_commit = "false".to_owned();
         if let Some(s) = dsn.params.get("enable.auto.commit") {
             if !s.is_empty() {
-                auto_commit = s.to_lowercase().parse::<bool>().map_err(|_| {
+                let s1 = s.to_lowercase();
+                let _ = s1.parse::<bool>().map_err(|_| {
                     DsnError::InvalidParam("enable.auto.commit".to_owned(), s.to_owned())
                 })?;
+                auto_commit = s1;
             }
         }
 
         let mut auto_commit_interval_ms = None;
-        if auto_commit {
-            let mut ms = DEFAULT_AUTO_COMMIT_INTERVAL_MS;
+        if auto_commit == "true" {
+            let mut ms = "5";
             if let Some(s) = dsn.params.get("auto.commit.interval.ms") {
                 if !s.is_empty() {
-                    ms = s.to_lowercase().parse::<u64>().map_err(|_| {
+                    let _ = s.to_lowercase().parse::<u64>().map_err(|_| {
                         DsnError::InvalidParam("auto.commit.interval.ms".to_owned(), s.to_owned())
                     })?;
+                    ms = s;
                 }
             }
-            auto_commit_interval_ms = Some(ms);
+            auto_commit_interval_ms = Some(ms.to_owned());
         }
 
         let snapshot_enable = dsn
@@ -1506,6 +1505,12 @@ impl TmqBuilder {
             support_fetch_raw: is_support_binary_sql(&version),
             polling_mutex,
             cache: cache_rx,
+            auto_commit: self.conf.auto_commit == "true",
+            auto_commit_interval_ms: self
+                .conf
+                .auto_commit_interval_ms
+                .as_deref()
+                .and_then(|s| s.parse::<u64>().ok()),
             auto_commit_offset: Arc::new(Mutex::new((None, Instant::now()))),
         })
     }
@@ -1523,6 +1528,8 @@ pub struct Consumer {
     /// Polling, if true, the consumer will wait for the message to be consumed.
     polling_mutex: Arc<AtomicBool>,
     cache: flume::Receiver<TmqRecvData>,
+    auto_commit: bool,
+    auto_commit_interval_ms: Option<u64>,
     auto_commit_offset: Arc<Mutex<(Option<Offset>, Instant)>>,
 }
 

@@ -2179,10 +2179,6 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_ws_tmq_committed() -> taos_query::RawResult<()> {
-        // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(tracing::LevelFilter::Info)
-        //     .init();
-
         use taos_query::prelude::*;
 
         let dsn = "tmq+ws://localhost:6041?".to_string();
