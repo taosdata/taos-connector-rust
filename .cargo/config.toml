@@ -7,7 +7,11 @@ rustflags = [
     "-Aclippy::missing_safety_doc",
 
     # Suspicious Group
+    "-Aclippy::incompatible_msrv",
     "-Aclippy::missing_transmute_annotations",
+
+    # Perf Group
+    "-Aclippy::result_large_err",
 
     # Cargo Group
     "-Wclippy::negative_feature_names",
@@ -127,7 +131,6 @@ rustflags = [
     "-Wclippy::exit",
     "-Wclippy::filetype_is_file",
     "-Wclippy::float_cmp_const",
-    "-Wclippy::fn_to_numeric_cast_any",
     "-Wclippy::get_unwrap",
     "-Wclippy::host_endian_bytes",
     "-Wclippy::impl_trait_in_params",

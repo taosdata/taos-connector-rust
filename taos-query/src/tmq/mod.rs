@@ -96,7 +96,7 @@ impl FromStr for Timeout {
         match s.to_lowercase().as_str() {
             "never" => Ok(Timeout::Never),
             "none" => Ok(Timeout::None),
-            _ => parse_duration(s).map(Timeout::Duration).map_err(Into::into),
+            _ => parse_duration(s).map(Timeout::Duration),
         }
     }
 }
@@ -414,6 +414,7 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     }
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()>;
+
     async fn commit_all(&self) -> RawResult<()>;
 
     async fn commit_offset(

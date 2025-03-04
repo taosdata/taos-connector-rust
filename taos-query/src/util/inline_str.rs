@@ -70,7 +70,6 @@ macro_rules! _impl_inline_str {
             }
 
             impl InlineStr<$ty> {
-
                 /// # Safety
                 ///
                 /// Do not use it directly.
@@ -117,6 +116,7 @@ macro_rules! _impl_inline_str {
                 pub(crate) unsafe fn set_len(&mut self, len: usize) {
                     self.len = len as _;
                 }
+
                 #[inline(never)]
                 pub(crate) unsafe fn replace_utf8(&mut self, s: &str, pos: usize) {
                     std::ptr::copy(s.as_ptr(), self.as_mut_ptr().add(pos), s.len());
@@ -130,8 +130,8 @@ _impl_inline_str!(u8 u16 u32 u64 usize);
 
 macro_rules! _impl_test_inline_str {
     ($ty:ty, $bytes:literal, $print:literal) => {{
-        let bytes = $bytes;
         use super::Inlinable;
+        let bytes = $bytes;
         let inline = unsafe { InlineStr::<$ty>::from_ptr(bytes.as_ptr()) };
         dbg!(inline);
         assert_eq!(inline.len(), 4);
