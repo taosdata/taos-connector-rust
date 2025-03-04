@@ -543,10 +543,9 @@ impl Iterator for Data {
         }
     }
 }
-// impl taos_query::tmq::AsConsumer for Consumer {}
+
 #[cfg(test)]
 mod tests {
-
     use super::TmqBuilder;
 
     #[test]
@@ -572,9 +571,6 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_ws_tmq_meta() -> taos_query::RawResult<()> {
-        // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(tracing::LevelFilter::Debug)
-        //     .init();
         use taos_query::prelude::*;
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos+ws://localhost:6041".to_string());
         let mut dsn = Dsn::from_str(&dsn)?;
