@@ -618,10 +618,7 @@ impl TAOS_STMT2_BIND {
             is_nulls = Some(unsafe { slice::from_raw_parts(self.is_null, num) });
         }
 
-        trace!(
-            "to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}, \
-            total_len: {len}"
-        );
+        trace!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}, total_len: {len}");
 
         macro_rules! view {
             ($from:expr) => {{
@@ -700,29 +697,6 @@ impl TAOS_STMT2_BIND {
                 }
 
                 ColumnView::from_nchar::<&str, _, _, _>(vals)
-            }
-            Ty::Json => {
-                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
-                let mut vals = vec![None; num];
-                let mut idx = 0;
-
-                if let Some(is_nulls) = is_nulls {
-                    for i in 0..num {
-                        if is_nulls[i] == 0 {
-                            let bytes = &slice[idx..idx + lens[i] as usize];
-                            vals[i] = serde_json::from_slice(bytes).unwrap();
-                            idx += lens[i] as usize;
-                        }
-                    }
-                } else {
-                    for i in 0..num {
-                        let bytes = &slice[idx..idx + lens[i] as usize];
-                        vals[i] = serde_json::from_slice(bytes).unwrap();
-                        idx += lens[i] as usize;
-                    }
-                }
-
-                ColumnView::from_json::<&str, _, _, _>(vals)
             }
             Ty::VarBinary => {
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
