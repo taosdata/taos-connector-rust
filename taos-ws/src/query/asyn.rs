@@ -1223,7 +1223,7 @@ pub(crate) async fn fetch(
                     .await
                     .is_err()
                 {
-                    tracing::error!("Failed to send raw block; receiver may be closed");
+                    tracing::warn!("Failed to send raw block; receiver may be closed");
                     break;
                 }
             }
