@@ -547,6 +547,8 @@ impl TaosStmt2 {
 
 impl TAOS_STMT2_BIND {
     fn to_value(&self) -> Value {
+        trace!("to_value, bind: {self:?}");
+
         if !self.is_null.is_null() && unsafe { self.is_null.read() != 0 } {
             let val = Value::Null(self.ty());
             trace!("to_value, value: {val:?}");
@@ -604,11 +606,17 @@ impl TAOS_STMT2_BIND {
     }
 
     fn to_column_view(&self) -> ColumnView {
+        trace!("to_column_view, bind: {self:?}");
+
         let ty = self.ty();
         let num = self.num as usize;
-        let is_nulls = unsafe { slice::from_raw_parts(self.is_null, num) };
         let lens = unsafe { slice::from_raw_parts(self.length, num) };
         let len = lens.iter().sum::<i32>() as usize;
+
+        let mut is_nulls = None;
+        if !self.is_null.is_null() {
+            is_nulls = Some(unsafe { slice::from_raw_parts(self.is_null, num) });
+        }
 
         trace!(
             "to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}, \
@@ -619,8 +627,14 @@ impl TAOS_STMT2_BIND {
             ($from:expr) => {{
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const _, num) };
                 let mut vals = vec![None; num];
-                for i in 0..num {
-                    if is_nulls[i] == 0 {
+                if let Some(is_nulls) = is_nulls {
+                    for i in 0..num {
+                        if is_nulls[i] == 0 {
+                            vals[i] = Some(slice[i]);
+                        }
+                    }
+                } else {
+                    for i in 0..num {
                         vals[i] = Some(slice[i]);
                     }
                 }
@@ -645,65 +659,115 @@ impl TAOS_STMT2_BIND {
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const _, len) };
                 let mut vals = vec![None; num];
                 let mut idx = 0;
-                for i in 0..num {
-                    if is_nulls[i] == 0 {
+
+                if let Some(is_nulls) = is_nulls {
+                    for i in 0..num {
+                        if is_nulls[i] == 0 {
+                            let bytes = &slice[idx..idx + lens[i] as usize];
+                            vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
+                            idx += lens[i] as usize;
+                        }
+                    }
+                } else {
+                    for i in 0..num {
                         let bytes = &slice[idx..idx + lens[i] as usize];
                         vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
                         idx += lens[i] as usize;
                     }
                 }
+
                 ColumnView::from_varchar::<&str, _, _, _>(vals)
             }
             Ty::NChar => {
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const _, len) };
                 let mut vals = vec![None; num];
                 let mut idx = 0;
-                for i in 0..num {
-                    if is_nulls[i] == 0 {
+
+                if let Some(is_nulls) = is_nulls {
+                    for i in 0..num {
+                        if is_nulls[i] == 0 {
+                            let bytes = &slice[idx..idx + lens[i] as usize];
+                            vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
+                            idx += lens[i] as usize;
+                        }
+                    }
+                } else {
+                    for i in 0..num {
                         let bytes = &slice[idx..idx + lens[i] as usize];
                         vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
                         idx += lens[i] as usize;
                     }
                 }
+
                 ColumnView::from_nchar::<&str, _, _, _>(vals)
             }
             Ty::Json => {
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
                 let mut vals = vec![None; num];
                 let mut idx = 0;
-                for i in 0..num {
-                    if is_nulls[i] == 0 {
+
+                if let Some(is_nulls) = is_nulls {
+                    for i in 0..num {
+                        if is_nulls[i] == 0 {
+                            let bytes = &slice[idx..idx + lens[i] as usize];
+                            vals[i] = serde_json::from_slice(bytes).unwrap();
+                            idx += lens[i] as usize;
+                        }
+                    }
+                } else {
+                    for i in 0..num {
                         let bytes = &slice[idx..idx + lens[i] as usize];
                         vals[i] = serde_json::from_slice(bytes).unwrap();
                         idx += lens[i] as usize;
                     }
                 }
+
                 ColumnView::from_json::<&str, _, _, _>(vals)
             }
             Ty::VarBinary => {
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
                 let mut vals = vec![None; num];
                 let mut idx = 0;
-                for i in 0..num {
-                    if is_nulls[i] == 0 {
+
+                if let Some(is_nulls) = is_nulls {
+                    for i in 0..num {
+                        if is_nulls[i] == 0 {
+                            let val = &slice[idx..idx + lens[i] as usize];
+                            vals[i] = Some(val);
+                            idx += lens[i] as usize;
+                        }
+                    }
+                } else {
+                    for i in 0..num {
                         let val = &slice[idx..idx + lens[i] as usize];
                         vals[i] = Some(val);
                         idx += lens[i] as usize;
                     }
                 }
+
                 ColumnView::from_bytes::<&[u8], _, _, _>(vals)
             }
             Ty::Geometry => {
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
                 let mut vals = vec![None; num];
                 let mut idx = 0;
-                for i in 0..num {
-                    if is_nulls[i] == 0 {
+
+                if let Some(is_nulls) = is_nulls {
+                    for i in 0..num {
+                        if is_nulls[i] == 0 {
+                            let val = &slice[idx..idx + lens[i] as usize];
+                            vals[i] = Some(val);
+                            idx += lens[i] as usize;
+                        }
+                    }
+                } else {
+                    for i in 0..num {
                         let val = &slice[idx..idx + lens[i] as usize];
                         vals[i] = Some(val);
                         idx += lens[i] as usize;
                     }
                 }
+
                 ColumnView::from_geobytes::<&[u8], _, _, _>(vals)
             }
             _ => todo!(),
@@ -840,6 +904,18 @@ mod tests {
                 length: $length.as_mut_ptr(),
                 is_null: $is_null.as_mut_ptr(),
                 num: $is_null.len() as _,
+            }
+        };
+    }
+
+    macro_rules! new_bind_without_is_null {
+        ($ty:expr, $buffer:ident, $length:ident) => {
+            TAOS_STMT2_BIND {
+                buffer_type: $ty as _,
+                buffer: $buffer.as_mut_ptr() as _,
+                length: $length.as_mut_ptr(),
+                is_null: ptr::null_mut(),
+                num: $length.len() as _,
             }
         };
     }
@@ -1148,7 +1224,94 @@ mod tests {
             let mut col1 = vec![
                 ts, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15,
             ];
-            let mut col2 = col1.clone();
+
+            let mut buffer = vec![
+                1739521477831i64,
+                1739521477832,
+                1739521477833,
+                1739521477834,
+            ];
+            let mut length = vec![8, 8, 8, 8];
+            let ts = new_bind_without_is_null!(Ty::Timestamp, buffer, length);
+
+            let mut buffer = vec![1i8, 1, 0, 0];
+            let mut length = vec![1, 1, 1, 1];
+            let c1 = new_bind_without_is_null!(Ty::Bool, buffer, length);
+
+            let mut buffer = vec![23i8, 0, -23, 0];
+            let mut length = vec![1, 1, 1, 1];
+            let c2 = new_bind_without_is_null!(Ty::TinyInt, buffer, length);
+
+            let mut buffer = vec![34i16, 0, -34, 0];
+            let mut length = vec![2, 2, 2, 2];
+            let c3 = new_bind_without_is_null!(Ty::SmallInt, buffer, length);
+
+            let mut buffer = vec![45i32, 46, -45, 0];
+            let mut length = vec![4, 4, 4, 4];
+            let c4 = new_bind_without_is_null!(Ty::Int, buffer, length);
+
+            let mut buffer = vec![56i64, 57, -56, 0];
+            let mut length = vec![8, 8, 8, 8];
+            let c5 = new_bind_without_is_null!(Ty::BigInt, buffer, length);
+
+            let mut buffer = vec![67u8, 68, 67, 0];
+            let mut length = vec![1, 1, 1, 1];
+            let c6 = new_bind_without_is_null!(Ty::UTinyInt, buffer, length);
+
+            let mut buffer = vec![78u16, 79, 78, 0];
+            let mut length = vec![2, 2, 2, 2];
+            let c7 = new_bind_without_is_null!(Ty::USmallInt, buffer, length);
+
+            let mut buffer = vec![89u32, 90, 89, 0];
+            let mut length = vec![4, 4, 4, 4];
+            let c8 = new_bind_without_is_null!(Ty::UInt, buffer, length);
+
+            let mut buffer = vec![100u64, 101, 100, 0];
+            let mut length = vec![8, 8, 8, 8];
+            let c9 = new_bind_without_is_null!(Ty::UBigInt, buffer, length);
+
+            let mut buffer = vec![1.23f32, 1.24, -1.23, 0.0];
+            let mut length = vec![4, 4, 4, 4];
+            let c10 = new_bind_without_is_null!(Ty::Float, buffer, length);
+
+            let mut buffer = vec![2345.67f64, 2345.68, -2345.67, 0.0];
+            let mut length = vec![8, 8, 8, 8];
+            let c11 = new_bind_without_is_null!(Ty::Double, buffer, length);
+
+            let mut buffer = vec![
+                104u8, 101, 108, 108, 111, 119, 111, 114, 108, 100, 104, 101, 108, 108, 111, 119,
+                111, 114, 108, 100, 104, 101, 108, 108, 111, 119, 111, 114, 108, 100,
+            ];
+            let mut length = vec![5, 5, 10, 10];
+            let c12 = new_bind_without_is_null!(Ty::VarChar, buffer, length);
+
+            let mut buffer = vec![
+                104u8, 101, 108, 108, 111, 119, 111, 114, 108, 100, 104, 101, 108, 108, 111, 119,
+                111, 114, 108, 100, 104, 101, 108, 108, 111, 119, 111, 114, 108, 100,
+            ];
+            let mut length = vec![5, 5, 10, 10];
+            let c13 = new_bind_without_is_null!(Ty::NChar, buffer, length);
+
+            let mut buffer = vec![
+                104u8, 101, 108, 108, 111, 119, 111, 114, 108, 100, 104, 101, 108, 108, 111, 119,
+                111, 114, 108, 100, 104, 101, 108, 108, 111, 119, 111, 114, 108, 100,
+            ];
+            let mut length = vec![5, 5, 10, 10];
+            let c14 = new_bind_without_is_null!(Ty::VarBinary, buffer, length);
+
+            let mut buffer = vec![
+                1u8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 1, 1, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63,
+                0, 0, 0, 0, 0, 0, 240, 63,
+            ];
+            let mut length = vec![21, 21, 21, 21];
+            let c15 = new_bind_without_is_null!(Ty::Geometry, buffer, length);
+
+            let mut col2 = vec![
+                ts, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15,
+            ];
+
             let mut cols = vec![col1.as_mut_ptr(), col2.as_mut_ptr()];
 
             let mut bindv = TAOS_STMT2_BINDV {
