@@ -1146,6 +1146,21 @@ impl WsTaos {
         }
     }
 
+    pub async fn validate_sql(&self, sql: &str) -> RawResult<()> {
+        let mut req = Vec::with_capacity(30 + sql.len());
+        let req_id = generate_req_id();
+        req.write_u64_le(req_id).map_err(Error::from)?;
+        req.write_u64_le(0).map_err(Error::from)?;
+        req.write_u64_le(10).map_err(Error::from)?;
+        req.write_u16_le(1).map_err(Error::from)?;
+        req.write_u32_le(sql.len() as _).map_err(Error::from)?;
+        req.write_all(sql.as_bytes()).map_err(Error::from)?;
+
+        let _recv = self.sender.send_recv(WsSend::Binary(req)).await?;
+
+        Ok(())
+    }
+
     pub fn version(&self) -> &str {
         &self.sender.version.version
     }
@@ -1813,4 +1828,11 @@ mod tests {
         client.exec(format!("drop database {db}")).await?;
         Ok(())
     }
+
+    // #[tokio::test]
+    // async fn test_validate_sql() -> anyhow::Result<()> {
+    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+    //     taos.validate_sql("select * from t0").await?;
+    //     Ok(())
+    // }
 }
