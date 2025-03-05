@@ -1362,7 +1362,6 @@ mod async_tests {
             .data(data.clone())
             .ttl(1000)
             .req_id(200u64)
-            .table_name_key("host")
             .build()?;
         assert_eq!(taos.put(&sml_data).await?, ());
 
@@ -1371,7 +1370,6 @@ mod async_tests {
             .data(data.clone())
             .ttl(1000)
             .req_id(201u64)
-            .table_name_key("host")
             .build()?;
         assert_eq!(taos.put(&sml_data).await?, ());
 
@@ -1379,14 +1377,12 @@ mod async_tests {
             .protocol(SchemalessProtocol::Telnet)
             .data(data.clone())
             .req_id(202u64)
-            .table_name_key("host")
             .build()?;
         assert_eq!(taos.put(&sml_data).await?, ());
 
         let sml_data = SmlDataBuilder::default()
             .protocol(SchemalessProtocol::Telnet)
             .data(data.clone())
-            .table_name_key("host")
             .build()?;
         assert_eq!(taos.put(&sml_data).await?, ());
 
