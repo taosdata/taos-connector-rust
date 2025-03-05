@@ -11,33 +11,29 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 
 use bytes::Bytes;
+pub use data::*;
+use derive_builder::Builder;
 use itertools::Itertools;
+use layout::Layout;
+pub use meta::*;
 use rayon::prelude::*;
+pub use rows::*;
 use serde::Deserialize;
 use taos_error::Error;
+pub use views::ColumnView;
+use views::*;
 
 use crate::common::{BorrowedValue, Field, Precision, Ty, Value};
 
 pub mod layout;
 pub mod meta;
-
-mod data;
-
-use layout::Layout;
-
 #[allow(clippy::missing_safety_doc)]
 #[allow(clippy::should_implement_trait)]
 pub mod views;
 
-pub use data::*;
-pub use meta::*;
-pub use views::ColumnView;
-use views::*;
-
+mod data;
 mod de;
 mod rows;
-use derive_builder::Builder;
-pub use rows::*;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed(1))]
@@ -79,6 +75,7 @@ impl Header {
     fn nrows(&self) -> usize {
         self.nrows as _
     }
+
     fn ncols(&self) -> usize {
         self.ncols as _
     }
@@ -95,7 +92,6 @@ impl Header {
 ///
 /// The length of bitmap is decided by number of rows of this data block, and the length of each column data is
 /// recorded in the first segment, next to the struct header
-// #[derive(Debug)]
 pub struct RawBlock {
     /// Layout is auto detected.
     layout: Rc<RefCell<Layout>>,
@@ -427,7 +423,6 @@ impl RawBlock {
             fields: fields.iter().map(|s| s.name().to_string()).collect(),
             columns,
             group_id: 0,
-            // raw_fields: Vec::new(),
         }
     }
 
@@ -449,21 +444,20 @@ impl RawBlock {
 
         let schema_end = schema_start + cols * std::mem::size_of::<ColSchema>();
         let schemas = Schemas::from(bytes.slice(schema_start..schema_end));
-        // dbg!(&schemas);
+
         let lengths_end = schema_end + std::mem::size_of::<u32>() * cols;
         let lengths = Lengths::from(bytes.slice(schema_end..lengths_end));
-        // dbg!(&lengths);
+
         let mut data_offset = lengths_end;
         let mut columns = Vec::with_capacity(cols);
         for col in 0..cols {
-            // go for each column
             let length = unsafe { lengths.get_unchecked(col) } as usize;
             let schema = unsafe { schemas.get_unchecked(col) };
 
             macro_rules! _primitive_value {
                 ($ty:ident, $prim:ty) => {{
                     let o1 = data_offset;
-                    let o2 = data_offset + ((rows + 7) >> 3); // null bitmap len.
+                    let o2 = data_offset + ((rows + 7) >> 3); // bitmap len
                     data_offset = o2 + rows * std::mem::size_of::<$prim>();
                     let nulls = bytes.slice(o1..o2);
                     let data = bytes.slice(o2..data_offset);
@@ -481,18 +475,12 @@ impl RawBlock {
                 Ty::SmallInt => _primitive_value!(SmallInt, i16),
                 Ty::Int => _primitive_value!(Int, i32),
                 Ty::BigInt => _primitive_value!(BigInt, i64),
+                Ty::UTinyInt => _primitive_value!(UTinyInt, u8),
+                Ty::USmallInt => _primitive_value!(USmallInt, u16),
+                Ty::UInt => _primitive_value!(UInt, u32),
+                Ty::UBigInt => _primitive_value!(UBigInt, u64),
                 Ty::Float => _primitive_value!(Float, f32),
                 Ty::Double => _primitive_value!(Double, f64),
-                Ty::VarChar => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-
-                    ColumnView::VarChar(VarCharView { offsets, data })
-                }
                 Ty::Timestamp => {
                     let o1 = data_offset;
                     let o2 = data_offset + ((rows + 7) >> 3);
@@ -505,14 +493,20 @@ impl RawBlock {
                         precision,
                     })
                 }
+                Ty::VarChar => {
+                    let o1 = data_offset;
+                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
+                    data_offset = o2 + length;
+                    let offsets = Offsets::from(bytes.slice(o1..o2));
+                    let data = bytes.slice(o2..data_offset);
+                    ColumnView::VarChar(VarCharView { offsets, data })
+                }
                 Ty::NChar => {
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
                     data_offset = o2 + length;
-
                     let offsets = Offsets::from(bytes.slice(o1..o2));
                     let data = bytes.slice(o2..data_offset);
-
                     ColumnView::NChar(NCharView {
                         offsets,
                         data,
@@ -521,41 +515,30 @@ impl RawBlock {
                         layout: layout.clone(),
                     })
                 }
-                Ty::UTinyInt => _primitive_value!(UTinyInt, u8),
-                Ty::USmallInt => _primitive_value!(USmallInt, u16),
-                Ty::UInt => _primitive_value!(UInt, u32),
-                Ty::UBigInt => _primitive_value!(UBigInt, u64),
                 Ty::Json => {
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
                     data_offset = o2 + length;
-
                     let offsets = Offsets::from(bytes.slice(o1..o2));
                     let data = bytes.slice(o2..data_offset);
-
                     ColumnView::Json(JsonView { offsets, data })
                 }
                 Ty::VarBinary => {
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
                     data_offset = o2 + length;
-
                     let offsets = Offsets::from(bytes.slice(o1..o2));
                     let data: Bytes = bytes.slice(o2..data_offset);
-
                     ColumnView::VarBinary(VarBinaryView { offsets, data })
                 }
                 Ty::Geometry => {
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
                     data_offset = o2 + length;
-
                     let offsets = Offsets::from(bytes.slice(o1..o2));
                     let data = bytes.slice(o2..data_offset);
-
                     ColumnView::Geometry(GeometryView { offsets, data })
                 }
-
                 ty => {
                     unreachable!("unsupported type: {ty}")
                 }
@@ -772,12 +755,75 @@ impl RawBlock {
         unsafe { self.columns.get_unchecked(col).is_null_unchecked(row) }
     }
 
-    #[inline]
+    pub fn is_null_by_col_unchecked(&self, mut rows: usize, col: usize) -> Vec<bool> {
+        if rows > self.nrows() {
+            rows = self.nrows();
+        }
+        let mut is_nulls = Vec::with_capacity(rows);
+        for row in 0..rows {
+            is_nulls.push(self.is_null(row, col));
+        }
+        is_nulls
+    }
+
+    pub fn get_col_data_offset_unchecked(&self, col: usize) -> Vec<i32> {
+        let view = unsafe { self.columns.get_unchecked(col) };
+        match view {
+            ColumnView::VarChar(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            ColumnView::NChar(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            ColumnView::Json(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            ColumnView::VarBinary(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            ColumnView::Geometry(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            _ => vec![],
+        }
+    }
+
     /// Get one value at `(row, col)` of the block.
     ///
     /// # Safety
     ///
     /// `(row, col)` should not exceed the block limit.
+    #[inline]
     pub unsafe fn get_raw_value_unchecked(
         &self,
         row: usize,
@@ -1149,10 +1195,13 @@ pub enum SchemalessPrecision {
 impl From<SchemalessPrecision> for String {
     fn from(precision: SchemalessPrecision) -> Self {
         match precision {
+            SchemalessPrecision::Hours => "h".to_string(),
+            SchemalessPrecision::Minutes => "m".to_string(),
+            SchemalessPrecision::Seconds => "s".to_string(),
             SchemalessPrecision::Millisecond => "ms".to_string(),
             SchemalessPrecision::Microsecond => "us".to_string(),
             SchemalessPrecision::Nanosecond => "ns".to_string(),
-            _ => todo!(),
+            SchemalessPrecision::NonConfigured => todo!(),
         }
     }
 }
@@ -1182,6 +1231,8 @@ pub struct SmlData {
     ttl: Option<i32>,
     #[builder(setter(into, strip_option), default)]
     req_id: Option<u64>,
+    #[builder(setter(into, strip_option), default)]
+    table_name_key: Option<String>,
 }
 
 impl SmlData {
@@ -1209,6 +1260,11 @@ impl SmlData {
     pub fn req_id(&self) -> Option<u64> {
         self.req_id
     }
+
+    #[inline]
+    pub fn table_name_key(&self) -> Option<&String> {
+        self.table_name_key.as_ref()
+    }
 }
 
 impl From<SmlDataBuilderError> for Error {
@@ -1216,6 +1272,7 @@ impl From<SmlDataBuilderError> for Error {
         Error::from_any(value)
     }
 }
+
 #[async_trait::async_trait]
 impl crate::prelude::AsyncInlinable for RawBlock {
     async fn read_optional_inlined<R: tokio::io::AsyncRead + Send + Unpin>(
@@ -1424,9 +1481,7 @@ async fn test_raw_from_v2() {
     use std::ops::Deref;
 
     use crate::prelude::AsyncInlinable;
-    // pretty_env_logger::formatted_builder()
-    //     .filter_level(tracing::LevelFilter::Trace)
-    //     .init();
+
     let bytes = b"\x10\x86\x1aA \xcc)AB\xc2\x14AZ],A\xa2\x8d$A\x87\xb9%A\xf5~\x0fA\x96\xf7,AY\xee\x17A1|\x15As\x00\x00\x00q\x00\x00\x00s\x00\x00\x00t\x00\x00\x00u\x00\x00\x00t\x00\x00\x00n\x00\x00\x00n\x00\x00\x00n\x00\x00\x00r\x00\x00\x00";
 
     let block = RawBlock::parse_from_raw_block_v2(
@@ -1594,6 +1649,7 @@ fn test_v2_null() {
     dbg!(raw);
     assert!(null.is_null());
 }
+
 #[test]
 fn test_from_v2() {
     let raw = RawBlock::parse_from_raw_block_v2(

@@ -19,6 +19,7 @@ impl IsColumnView for VarCharView {
     fn ty(&self) -> Ty {
         Ty::VarChar
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         Self::from_iter::<String, _, _, _>(
             iter.map(|v| v.to_str().map(|v| v.into_owned()))
@@ -138,6 +139,7 @@ impl VarCharView {
             .map(|row| unsafe { self.get_unchecked(row) }.map(|s| s.to_string()))
             .collect()
     }
+
     pub fn iter_as_bytes(&self) -> impl Iterator<Item = Option<&[u8]>> {
         (0..self.len()).map(|row| unsafe { self.get_unchecked(row) }.map(|s| s.as_bytes()))
     }
@@ -266,26 +268,31 @@ impl ExactSizeIterator for VarCharNullsIter<'_> {
     }
 }
 
-#[test]
-fn test_slice() {
-    let data = [None, Some(""), Some("abc"), Some("中文"), None, None, Some("a loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooog string")];
-    let view = VarCharView::from_iter::<&str, _, _, _>(data);
-    let slice = view.slice(0..0);
-    assert!(slice.is_none());
-    let slice = view.slice(100..1000);
-    assert!(slice.is_none());
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    for start in 0..data.len() {
-        let end = start + 1;
-        for end in end..data.len() {
-            let slice = view.slice(start..end).unwrap();
-            assert_eq!(
-                slice.to_vec().as_slice(),
-                &data[start..end]
-                    .iter()
-                    .map(|s| s.map(ToString::to_string))
-                    .collect_vec()
-            );
+    #[test]
+    fn test_slice() {
+        let data = [None, Some(""), Some("abc"), Some("中文"), None, None, Some("a loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooog string")];
+        let view = VarCharView::from_iter::<&str, _, _, _>(data);
+        let slice = view.slice(0..0);
+        assert!(slice.is_none());
+        let slice = view.slice(100..1000);
+        assert!(slice.is_none());
+
+        for start in 0..data.len() {
+            let end = start + 1;
+            for end in end..data.len() {
+                let slice = view.slice(start..end).unwrap();
+                assert_eq!(
+                    slice.to_vec().as_slice(),
+                    &data[start..end]
+                        .iter()
+                        .map(|s| s.map(ToString::to_string))
+                        .collect_vec()
+                );
+            }
         }
     }
 }

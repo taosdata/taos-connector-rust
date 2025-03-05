@@ -2,9 +2,6 @@ name: Build
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
 
 env:
   TOOLS_BUILD_TYPE: Release
@@ -27,7 +24,7 @@ jobs:
 
       - name: Set up Rust
         id: setup-rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy
 
@@ -62,7 +59,7 @@ jobs:
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "main"
+          ref: "feat/new-libtaos-with-ws"
 
       - name: Prepare development tools
         run: |
@@ -70,15 +67,21 @@ jobs:
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
 
-      - name: Checkout Rust connector
+      - name: Set up Rust
+        id: setup-rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build TDengine
         env:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
+          rustc --version
           cd TDengine
           echo use commit ${BRANCH_NAME}
           sed -iE "s#GIT_TAG.*#GIT_TAG ${BRANCH_NAME}#" cmake/taosws_CMakeLists.txt.in
           mkdir release && cd release
           cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
+          rustc --version
 
       - uses: actions/cache@v4
         id: cache-rust-target
@@ -86,8 +89,9 @@ jobs:
           path: TDengine/tools/taosws-rs/target/
           key: ${{ runner.os }}-cargo-target-${{ steps.setup-rust.outputs.cachekey }}
 
-      - name: Build & Install TDengine
+      - name: Install TDengine
         run: |
+          rustc --version
           cd TDengine/release/
           make -j8 || exit 1
           sudo make install
