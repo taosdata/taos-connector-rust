@@ -462,8 +462,8 @@ mod r#async {
         }
     }
 
-    #[cfg(feature = "async")]
     /// The synchronous query trait for TDengine connection.
+    #[cfg(feature = "async")]
     #[async_trait]
     pub trait AsyncQueryable: Send + Sync + Sized {
         type AsyncResultSet: AsyncFetchable;
@@ -475,10 +475,6 @@ mod r#async {
 
         async fn put(&self, schemaless_data: &SmlData) -> RawResult<()>;
 
-        // async fn put_line_protocol;
-        // async fn put_opentsdb_lines;
-        // async fn put_json()
-
         async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
             &self,
             sql: T,
@@ -487,7 +483,6 @@ mod r#async {
 
         async fn exec<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<usize> {
             let sql = sql.as_ref();
-            // tracing::trace!("exec sql: {sql}");
             self.query(sql).await.map(|res| res.affected_rows() as _)
         }
 
@@ -497,7 +492,6 @@ mod r#async {
             req_id: u64,
         ) -> RawResult<usize> {
             let sql = sql.as_ref();
-            // tracing::trace!("exec sql: {sql}");
             self.query_with_req_id(sql, req_id)
                 .await
                 .map(|res| res.affected_rows() as _)

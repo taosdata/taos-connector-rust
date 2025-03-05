@@ -96,13 +96,6 @@ impl taos_query::AsyncQueryable for Taos {
 
     async fn put(&self, data: &SmlData) -> RawResult<()> {
         self.client().s_put(data).await
-
-        // if let Some(ws) = self.async_sml.get() {
-        //     ws.s_put(data).await
-        // } else {
-        //     let async_sml = crate::schemaless::WsTaos::from_wsinfo(&self.dsn).await?;
-        //     self.async_sml.get_or_init(|| async_sml).s_put(data).await
-        // }
     }
 }
 

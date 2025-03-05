@@ -1195,10 +1195,13 @@ pub enum SchemalessPrecision {
 impl From<SchemalessPrecision> for String {
     fn from(precision: SchemalessPrecision) -> Self {
         match precision {
+            SchemalessPrecision::Hours => "h".to_string(),
+            SchemalessPrecision::Minutes => "m".to_string(),
+            SchemalessPrecision::Seconds => "s".to_string(),
             SchemalessPrecision::Millisecond => "ms".to_string(),
             SchemalessPrecision::Microsecond => "us".to_string(),
             SchemalessPrecision::Nanosecond => "ns".to_string(),
-            _ => todo!(),
+            SchemalessPrecision::NonConfigured => todo!(),
         }
     }
 }
@@ -1228,6 +1231,8 @@ pub struct SmlData {
     ttl: Option<i32>,
     #[builder(setter(into, strip_option), default)]
     req_id: Option<u64>,
+    #[builder(setter(into, strip_option), default)]
+    table_name_key: Option<String>,
 }
 
 impl SmlData {
@@ -1255,6 +1260,11 @@ impl SmlData {
     pub fn req_id(&self) -> Option<u64> {
         self.req_id
     }
+
+    #[inline]
+    pub fn table_name_key(&self) -> Option<&String> {
+        self.table_name_key.as_ref()
+    }
 }
 
 impl From<SmlDataBuilderError> for Error {
@@ -1262,6 +1272,7 @@ impl From<SmlDataBuilderError> for Error {
         Error::from_any(value)
     }
 }
+
 #[async_trait::async_trait]
 impl crate::prelude::AsyncInlinable for RawBlock {
     async fn read_optional_inlined<R: tokio::io::AsyncRead + Send + Unpin>(

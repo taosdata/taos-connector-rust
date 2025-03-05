@@ -1128,24 +1128,21 @@ impl WsTaos {
     }
 
     pub async fn s_put(&self, sml: &SmlData) -> RawResult<()> {
-        let action = WsSend::Insert {
+        let req = WsSend::Insert {
             protocol: sml.protocol() as u8,
             precision: sml.precision().into(),
             data: sml.data().join("\n"),
             ttl: sml.ttl(),
             req_id: sml.req_id(),
+            table_name_key: sml.table_name_key().cloned(),
         };
-        tracing::trace!("put send: {:?}", action);
-        let req = self.sender.send_recv(action).await?;
-
-        match req {
-            WsRecvData::Insert(res) => {
-                tracing::trace!("put resp : {:?}", res);
+        tracing::trace!("sml req: {req:?}");
+        match self.sender.send_recv(req).await? {
+            WsRecvData::Insert(resp) => {
+                tracing::trace!("sml resp: {resp:?}");
                 Ok(())
             }
-            _ => {
-                unreachable!()
-            }
+            _ => unreachable!(),
         }
     }
 

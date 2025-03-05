@@ -56,6 +56,7 @@ pub enum WsSend {
         data: String,
         ttl: Option<i32>,
         req_id: Option<ReqId>,
+        table_name_key: Option<String>,
     },
     Query {
         req_id: ReqId,
@@ -188,7 +189,6 @@ pub enum WsRecvData {
         version: String,
     },
     Insert(InsertResp),
-
     #[serde(alias = "binary_query")]
     Query(WsQueryResp),
     Fetch(WsFetchResp),
