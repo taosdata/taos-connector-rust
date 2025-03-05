@@ -465,6 +465,7 @@ impl Consumer {
                 let now = Instant::now();
                 if now - guard.1 > Duration::from_millis(self.auto_commit_interval_ms.unwrap()) {
                     guard.1 = now;
+                    tracing::trace!("poll auto commit, commit offset: {offset:?}");
                     if let Err(err) = AsAsyncConsumer::commit(self, offset).await {
                         tracing::error!("auto commit failed, err: {err:?}");
                     }
@@ -514,6 +515,7 @@ impl Consumer {
                             self.polling_mutex.store(false, Ordering::Release);
 
                             if self.auto_commit {
+                                tracing::trace!("poll auto commit, set offset: {offset:?}");
                                 let mut guard = self.auto_commit_offset.lock().await;
                                 guard.0.replace(offset.clone());
                             }
@@ -584,6 +586,7 @@ impl Consumer {
                         self.polling_mutex.store(false, Ordering::Release);
 
                         if self.auto_commit {
+                            tracing::trace!("poll auto commit, set offset: {offset:?}");
                             let mut guard = self.auto_commit_offset.lock().await;
                             guard.0.replace(offset.clone());
                         }
@@ -2659,6 +2662,126 @@ mod tests {
             "drop database test_ws_tmq_poll_lost2",
             "drop topic test_ws_tmq_poll_lost",
             "drop database test_ws_tmq_poll_lost",
+        ])
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_auto_commit() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1741091352",
+            "drop database if exists test_1741091352",
+            "create database test_1741091352 wal_retention_period 3600",
+            "create topic topic_1741091352 with meta as database test_1741091352",
+            "use test_1741091352",
+            // kind 1: create super table using all types
+            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 json)",
+            // kind 2: create child table with json tag
+            "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
+            "create table tb1 using stb1 tags(NULL)",
+            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)
+            tb1 values(now, true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            "insert into tb1 using stb1 tags(NULL) values(now, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)
+            tb1 values(now, true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            // kind 3: create super table with all types except json (especially for tags)
+            "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
+            t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
+            t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
+            // kind 4: create child table with all types except json
+            "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)",
+            // kind 5: create common table
+            "create table `table` (ts timestamp, v int)",
+            // kind 6: column in super table
+            "alter table stb1 add column new1 bool",
+            "alter table stb1 add column new2 tinyint",
+            "alter table stb1 add column new10 nchar(16)",
+            "alter table stb1 modify column new10 nchar(32)",
+            "alter table stb1 drop column new10",
+            "alter table stb1 drop column new2",
+            "alter table stb1 drop column new1",
+            // kind 7: add tag in super table
+            "alter table `stb2` add tag new1 bool",
+            "alter table `stb2` rename tag new1 new1_new",
+            "alter table `stb2` modify tag t10 nchar(32)",
+            "alter table `stb2` drop tag new1_new",
+            // kind 8: column in common table
+            "alter table `table` add column new1 bool",
+            "alter table `table` add column new2 tinyint",
+            "alter table `table` add column new10 nchar(16)",
+            "alter table `table` modify column new10 nchar(32)",
+            "alter table `table` rename column new10 new10_new",
+            "alter table `table` drop column new10_new",
+            "alter table `table` drop column new2",
+            "alter table `table` drop column new1",
+        ])
+        .await?;
+
+        taos.exec_many([
+            "drop database if exists test_1741138531",
+            "create database test_1741138531 wal_retention_period 3600",
+            "use test_1741138531",
+        ])
+        .await?;
+
+        let mut consumer = TmqBuilder::new(
+            "ws://localhost:6041?group.id=10&timeout=500ms&auto.offset.reset=earliest&enable.auto.commit=true&auto.commit.interval.ms=1",
+        )?.build_consumer().await?;
+
+        consumer.subscribe(["topic_1741091352"]).await?;
+
+        {
+            let mut pre_topic = None;
+            let mut pre_vgroup_id = 0;
+            let mut pre_offset = 0;
+
+            let mut stream = consumer.stream();
+            while let Some((offset, _)) = stream.try_next().await? {
+                if let Some(pre_topic) = pre_topic.as_deref() {
+                    let offset = consumer.committed(pre_topic, pre_vgroup_id).await?;
+                    assert!(offset >= pre_offset);
+                }
+
+                pre_topic = Some(offset.topic().to_owned());
+                pre_vgroup_id = offset.vgroup_id();
+                pre_offset = offset.offset();
+            }
+        }
+
+        consumer.unsubscribe().await;
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        taos.exec_many([
+            "drop database test_1741138531",
+            "drop topic topic_1741091352",
+            "drop database test_1741091352",
         ])
         .await?;
 
