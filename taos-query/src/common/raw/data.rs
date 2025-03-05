@@ -12,6 +12,7 @@ const RAW_PTR_OFFSET: usize = std::mem::size_of::<u32>() + std::mem::size_of::<u
 /// It can be copy/cloned, but should not use it outbound away a offset lifetime.
 #[repr(C)]
 #[derive(Debug, Clone)]
+#[allow(non_camel_case_types)]
 pub struct raw_data_t {
     pub raw: *const c_void,
     pub raw_len: u32,
