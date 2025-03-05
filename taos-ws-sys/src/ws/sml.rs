@@ -372,6 +372,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid_tbname_key(
 }
 
 #[allow(non_snake_case)]
+#[allow(clippy::too_many_arguments)]
 unsafe fn sml_insert(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
