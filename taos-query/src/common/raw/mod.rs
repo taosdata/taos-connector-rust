@@ -1201,7 +1201,7 @@ impl From<SchemalessPrecision> for String {
             SchemalessPrecision::Millisecond => "ms".to_string(),
             SchemalessPrecision::Microsecond => "us".to_string(),
             SchemalessPrecision::Nanosecond => "ns".to_string(),
-            SchemalessPrecision::NonConfigured => "".to_string(),
+            SchemalessPrecision::NonConfigured => String::new(),
         }
     }
 }
