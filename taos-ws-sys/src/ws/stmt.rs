@@ -55,30 +55,46 @@ pub struct TAOS_FIELD_E {
 #[derive(Debug)]
 struct TaosStmt {
     stmt2: Stmt2,
+    stb_insert: bool,
     tag_fields: Option<Vec<Stmt2Field>>,
     col_fields: Option<Vec<Stmt2Field>>,
     tag_fields_addr: Option<usize>,
     col_fields_addr: Option<usize>,
     params: Vec<Stmt2BindParam>,
     cur_param: Option<Stmt2BindParam>,
+    tbname: Option<String>,
+    tags: Option<Vec<Value>>,
 }
 
 impl TaosStmt {
-    fn new(stmt2: Stmt2) -> Self {
+    fn new(stmt2: Stmt2, stb_insert: bool) -> Self {
         Self {
             stmt2,
+            stb_insert,
             tag_fields: None,
             col_fields: None,
             tag_fields_addr: None,
             col_fields_addr: None,
             params: Vec::new(),
             cur_param: None,
+            tbname: None,
+            tags: None,
         }
     }
 
     fn init_cur_param_if_none(&mut self) {
         if self.cur_param.is_none() {
-            self.cur_param = Some(Stmt2BindParam::new(None, None, None));
+            trace!(
+                "stmt init cur_param, tbname: {:?}, tags: {:?}",
+                self.tbname,
+                self.tags
+            );
+
+            self.cur_param = Some(Stmt2BindParam::new(
+                self.tbname.clone(),
+                self.tags.clone(),
+                None,
+            ));
         }
     }
 
@@ -99,6 +115,8 @@ impl TaosStmt {
 
     fn move_cur_param_to_params(&mut self) {
         if let Some(cur_param) = self.cur_param.take() {
+            self.tbname = cur_param.table_name().cloned();
+            self.tags = cur_param.tags().cloned();
             self.params.push(cur_param);
         }
     }
@@ -160,7 +178,10 @@ unsafe fn stmt_init(
         single_table_bind_once,
     ))?;
 
-    Ok(TaosStmt::new(stmt2))
+    Ok(TaosStmt::new(
+        stmt2,
+        single_stb_insert && single_table_bind_once,
+    ))
 }
 
 #[no_mangle]
@@ -793,6 +814,10 @@ pub unsafe extern "C" fn taos_stmt_bind_param(
 
     taos_stmt.set_cur_param_cols(cols);
 
+    if taos_stmt.stb_insert {
+        taos_stmt.move_cur_param_to_params();
+    }
+
     trace!("taos_stmt_bind_param succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.with_err(None);
@@ -850,6 +875,10 @@ pub unsafe extern "C" fn taos_stmt_bind_param_batch(
     }
 
     taos_stmt.set_cur_param_cols(cols);
+
+    if taos_stmt.stb_insert {
+        taos_stmt.move_cur_param_to_params();
+    }
 
     trace!("taos_stmt_bind_param_batch succ, taos_stmt: {taos_stmt:?}");
 
@@ -933,6 +962,8 @@ pub unsafe extern "C" fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
     let stmt2 = &mut taos_stmt.stmt2;
 
     let params = std::mem::take(&mut taos_stmt.params);
+    trace!("taos_stmt_execute, params: {params:?}");
+
     if let Err(err) = stmt2.bind(&params) {
         error!("taos_stmt_execute failed, err: {err:?}");
         maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
@@ -1341,6 +1372,8 @@ impl From<&Stmt2Field> for TAOS_FIELD_E {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::CString;
+
     use super::*;
     use crate::ws::query::*;
     use crate::ws::{test_connect, test_exec, test_exec_many};
@@ -2029,6 +2062,153 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1740573608");
+        }
+    }
+
+    #[test]
+    fn test_stmt_stb_insert() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1741246945",
+                    "create database test_1741246945",
+                    "use test_1741246945",
+                    "create table s0 (ts timestamp, c1 int) tags (t1 int)",
+                ],
+            );
+
+            let mut option = TAOS_STMT_OPTIONS {
+                reqId: 1001,
+                singleStbInsert: true,
+                singleTableBindOnce: true,
+            };
+            let stmt = taos_stmt_init_with_options(taos, &mut option);
+            assert!(!stmt.is_null());
+
+            let sql = c"insert into s0 (tbname, ts, c1) values(?, ?, ?)";
+            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let num_of_sub_table = 10;
+            let num_of_row = 10;
+
+            let mut buffer = vec![1739521477831i64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
+            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+
+            let mut buffer = vec![99];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let ts_start = 1739521477831i64;
+
+            for i in 0..num_of_sub_table {
+                test_exec(taos, format!("create table d{i} using s0 tags({i})"));
+
+                let name = CString::new(format!("d{i}")).unwrap();
+                let code = taos_stmt_set_tbname(stmt, name.as_ptr());
+                assert_eq!(code, 0);
+
+                for j in 0..num_of_row {
+                    let mut ts = ts.clone();
+                    let mut buffer = vec![ts_start + j];
+                    ts.buffer = buffer.as_mut_ptr() as _;
+
+                    let mut cols = vec![ts, c1.clone()];
+                    let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
+                    assert_eq!(code, 0);
+                }
+            }
+
+            let code = taos_stmt_add_batch(stmt);
+            assert_eq!(code, 0);
+
+            let code = taos_stmt_execute(stmt);
+            assert_eq!(code, 0);
+
+            let affected_rows = taos_stmt_affected_rows(stmt);
+            assert_eq!(affected_rows as i64, num_of_sub_table * num_of_row);
+
+            let code = taos_stmt_close(stmt);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1741246945");
+        }
+
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1741251640",
+                    "create database test_1741251640",
+                    "use test_1741251640",
+                    "create table s0 (ts timestamp, c1 int) tags (t1 int)",
+                ],
+            );
+
+            let mut option = TAOS_STMT_OPTIONS {
+                reqId: 1001,
+                singleStbInsert: true,
+                singleTableBindOnce: true,
+            };
+            let stmt = taos_stmt_init_with_options(taos, &mut option);
+            assert!(!stmt.is_null());
+
+            let sql = c"insert into s0 (tbname, ts, c1) values(?, ?, ?)";
+            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let num_of_sub_table = 10;
+            let num_of_row = 10;
+
+            let mut buffer = vec![1739521477831i64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
+            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+
+            let mut buffer = vec![99];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let ts_start = 1739521477831i64;
+
+            for i in 0..num_of_sub_table {
+                test_exec(taos, format!("create table d{i} using s0 tags({i})"));
+
+                let name = CString::new(format!("d{i}")).unwrap();
+                let code = taos_stmt_set_tbname(stmt, name.as_ptr());
+                assert_eq!(code, 0);
+
+                for j in 0..num_of_row {
+                    let mut ts = ts.clone();
+                    let mut buffer = vec![ts_start + j];
+                    ts.buffer = buffer.as_mut_ptr() as _;
+
+                    let mut cols = vec![ts, c1.clone()];
+                    let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
+                    assert_eq!(code, 0);
+                }
+            }
+
+            let code = taos_stmt_add_batch(stmt);
+            assert_eq!(code, 0);
+
+            let code = taos_stmt_execute(stmt);
+            assert_eq!(code, 0);
+
+            let affected_rows = taos_stmt_affected_rows(stmt);
+            assert_eq!(affected_rows as i64, num_of_sub_table * num_of_row);
+
+            let code = taos_stmt_close(stmt);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1741251640");
         }
     }
 }
