@@ -165,9 +165,10 @@ pub unsafe extern "C" fn tmq_list_append(list: *mut tmq_list_t, value: *const c_
 #[no_mangle]
 #[instrument(level = "trace", ret)]
 pub extern "C" fn tmq_list_destroy(list: *mut tmq_list_t) {
-    trace!(list=?list, "tmq_list_destroy");
+    trace!("tmq_list_destroy start, list: {list:?}");
     if !list.is_null() {
-        let _ = unsafe { Box::from_raw(list as *mut TaosMaybeError<TmqList>) };
+        let list = unsafe { Box::from_raw(list as *mut TaosMaybeError<TmqList>) };
+        trace!("tmq_list_destroy succ, list: {list:?}");
     }
 }
 
@@ -326,8 +327,43 @@ pub unsafe extern "C" fn tmq_unsubscribe(tmq: *mut tmq_t) -> i32 {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq_list_t) -> i32 {
-    todo!()
+pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq_list_t) -> i32 {
+    trace!("tmq_subscription start, tmq: {tmq:?}, topics: {topics:?}");
+
+    if tmq.is_null() {
+        error!("tmq_subscription failed, err: tmq is null");
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    if topics.is_null() {
+        error!("tmq_subscription failed, err: topics is null");
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    match (tmq as *mut TaosMaybeError<Tmq>)
+        .as_mut()
+        .and_then(|tmq| tmq.deref_mut())
+    {
+        Some(tmq) => {
+            if let Some(consumer) = tmq.consumer.take() {
+                let topic_list = consumer.list_topics().unwrap();
+                *topics = tmq_list_new();
+                for t in topic_list {
+                    let val = CString::new(t).unwrap();
+                    let code = tmq_list_append(*topics, val.as_ptr());
+                    if code != 0 {
+                        error!(
+                            "tmq_subscription failed, err: tmq_list_append failed, code: {code}"
+                        );
+                        return code;
+                    }
+                }
+            }
+            trace!("tmq_subscription succ");
+            Code::SUCCESS.into()
+        }
+        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "tmq is invalid")),
+    }
 }
 
 #[no_mangle]
@@ -1263,6 +1299,8 @@ unsafe fn _tmq_commit_sync(tmq: *mut tmq_t, res: *const TAOS_RES) -> TaosResult<
 
 #[cfg(test)]
 mod tests {
+    use std::thread::sleep;
+
     use super::*;
     use crate::ws::query::{taos_fetch_fields, taos_fetch_row, taos_num_fields, taos_print_row};
     use crate::ws::{test_connect, test_exec_many};
@@ -1685,6 +1723,81 @@ mod tests {
             test_exec_many(
                 taos,
                 &[format!("drop topic {topic}"), format!("drop database {db}")],
+            );
+        }
+    }
+
+    #[test]
+    fn test_tmq_subscription() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1741260674",
+                    "drop database if exists test_1741260674",
+                    "create database test_1741260674",
+                    "use test_1741260674",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (now, 1)",
+                    "insert into t0 values (now+1s, 2)",
+                    "insert into t0 values (now+2s, 3)",
+                    "insert into t0 values (now+3s, 4)",
+                    "create topic topic_1741260674 as database test_1741260674",
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let val = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let val = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let tmq = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!tmq.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = "topic_1741260674";
+            let val = CString::from_str(topic).unwrap();
+            let errno = tmq_list_append(list, val.as_ptr());
+            assert_eq!(errno, 0);
+
+            let errno = tmq_subscribe(tmq, list);
+            assert_eq!(errno, 0);
+
+            let mut topics = ptr::null_mut();
+            let code = tmq_subscription(tmq, &mut topics);
+            assert_eq!(code, 0);
+
+            let size = tmq_list_get_size(topics);
+            assert_eq!(size, 1);
+
+            let arr = tmq_list_to_c_array(topics);
+            assert!(!arr.is_null());
+
+            tmq_list_destroy(topics);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            sleep(Duration::from_secs(3));
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic topic_1741260674",
+                    "drop database test_1741260674",
+                ],
             );
         }
     }
