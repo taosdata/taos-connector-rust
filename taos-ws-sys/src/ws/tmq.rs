@@ -467,51 +467,53 @@ pub unsafe extern "C" fn tmq_commit_async(
 
             trace!("tmq_commit_async, offset: {offset:?}");
 
-            let tmq = match (tmq.0 as *mut TaosMaybeError<Tmq>)
-                .as_mut()
-                .and_then(|tmq| tmq.deref_mut())
-            {
+            let maybe_err = (tmq.0 as *mut TaosMaybeError<Tmq>).as_mut().unwrap();
+
+            let tmq1 = match maybe_err.deref_mut() {
                 Some(tmq) => tmq,
                 None => {
                     error!("tmq_commit_async failed, err: tmq is invalid");
+                    maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "tmq is invalid")));
                     let code = format_errno(Code::INVALID_PARA.into());
-                    cb(param.0, code, param.0);
+                    cb(tmq.0, code, param.0);
                     return;
                 }
             };
 
-            if tmq.consumer.is_none() {
-                error!("tmq_commit_async failed, err: consumer is none");
-                let code = format_errno(Code::FAILED.into());
-                cb(param.0, code, param.0);
-                return;
-            }
-
-            let consumer = tmq.consumer.as_mut().unwrap();
+            let consumer = match &mut tmq1.consumer {
+                Some(consumer) => consumer,
+                None => {
+                    error!("tmq_commit_async failed, err: consumer is none");
+                    maybe_err.with_err(Some(TaosError::new(Code::FAILED, "consumer is none")));
+                    let code = format_errno(Code::FAILED.into());
+                    cb(tmq.0, code, param.0);
+                    return;
+                }
+            };
 
             match offset {
                 Some(offset) => {
                     match taos_query::tmq::AsAsyncConsumer::commit(consumer, offset).await {
                         Ok(_) => {
                             trace!("tmq_commit_async commit callback");
-                            cb(param.0, 0, param.0);
+                            cb(tmq.0, 0, param.0);
                         }
                         Err(err) => {
                             error!("tmq_commit_async commit failed, err: {err:?}");
                             let code = format_errno(err.code().into());
-                            cb(param.0, code, param.0);
+                            cb(tmq.0, code, param.0);
                         }
                     }
                 }
                 None => match taos_query::tmq::AsAsyncConsumer::commit_all(consumer).await {
                     Ok(_) => {
                         trace!("tmq_commit_async commit all callback, commit all succ");
-                        cb(param.0, 0, param.0);
+                        cb(tmq.0, 0, param.0);
                     }
                     Err(err) => {
                         error!("tmq_commit_async commit all failed, err: {err:?}");
                         let code = format_errno(err.code().into());
-                        cb(param.0, code, param.0);
+                        cb(tmq.0, code, param.0);
                     }
                 },
             }
@@ -586,7 +588,7 @@ pub unsafe extern "C" fn tmq_commit_offset_sync(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn tmq_commit_offset_async(
+pub unsafe extern "C" fn tmq_commit_offset_async(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
     vgId: i32,
@@ -594,7 +596,87 @@ pub extern "C" fn tmq_commit_offset_async(
     cb: tmq_commit_cb,
     param: *mut c_void,
 ) {
-    todo!()
+    trace!(
+        "tmq_commit_offset_async start, tmq: {tmq:?}, p_topic_name: {pTopicName:?}, vg_id: {vgId}, offset: {offset}, cb: {cb:?}, param: {param:?}"
+    );
+
+    if tmq.is_null() {
+        error!("tmq_commit_offset_async failed, err: tmq is null");
+        return;
+    }
+
+    if pTopicName.is_null() {
+        error!("tmq_commit_offset_async failed, err: p_topic_name is null");
+        return;
+    }
+
+    let tmq = SafePtr(tmq);
+    let p_topic_name = SafePtr(pTopicName);
+    let param = SafePtr(param);
+
+    global_tokio_runtime().spawn(
+        async move {
+            let tmq = tmq;
+            let p_topic_name = p_topic_name;
+            let param = param;
+
+            let maybe_err = (tmq.0 as *mut TaosMaybeError<Tmq>).as_mut().unwrap();
+
+            let tmq1 = match maybe_err.deref_mut() {
+                Some(tmq) => tmq,
+                None => {
+                    error!("tmq_commit_offset_async failed, err: tmq is invalid");
+                    maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "tmq is invalid")));
+                    let code: i32 = format_errno(Code::INVALID_PARA.into());
+                    cb(tmq.0, code, param.0);
+                    return;
+                }
+            };
+
+            let consumer = match &mut tmq1.consumer {
+                Some(consumer) => consumer,
+                None => {
+                    error!("tmq_commit_offset_async failed, err: consumer is none");
+                    maybe_err.with_err(Some(TaosError::new(Code::FAILED, "consumer is none")));
+                    let code = format_errno(Code::FAILED.into());
+                    cb(tmq.0, code, param.0);
+                    return;
+                }
+            };
+
+            let topic = match CStr::from_ptr(p_topic_name.0).to_str() {
+                Ok(topic) => topic,
+                Err(_) => {
+                    error!("tmq_commit_offset_async failed, err: p_topic_name is invalid utf-8");
+                    maybe_err.with_err(Some(TaosError::new(
+                        Code::INVALID_PARA,
+                        "pTopicName is invalid utf-8",
+                    )));
+                    let code = format_errno(Code::INVALID_PARA.into());
+                    cb(tmq.0, code, param.0);
+                    return;
+                }
+            };
+
+            match taos_query::tmq::AsAsyncConsumer::commit_offset(consumer, topic, vgId, offset)
+                .await
+            {
+                Ok(_) => {
+                    trace!("tmq_commit_offset_async callback");
+                    cb(tmq.0, 0, param.0);
+                }
+                Err(err) => {
+                    error!("tmq_commit_offset_async failed, err: {err:?}");
+                    maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                    let code = format_errno(err.code().into());
+                    cb(tmq.0, code, param.0);
+                }
+            }
+        }
+        .in_current_span(),
+    );
+
+    trace!("tmq_commit_offset_async succ");
 }
 
 static TOPIC_ASSIGNMETN_MAP: Lazy<DashMap<usize, (usize, usize)>> = Lazy::new(DashMap::new);
@@ -1953,6 +2035,142 @@ mod tests {
             tmq_commit_async(consumer, res, cb, param.as_ptr() as _);
 
             sleep(Duration::from_secs(1));
+
+            let errno = tmq_unsubscribe(consumer);
+            assert_eq!(errno, 0);
+
+            let errno = tmq_consumer_close(consumer);
+            assert_eq!(errno, 0);
+
+            test_exec_many(
+                taos,
+                &[format!("drop topic {topic}"), format!("drop database {db}")],
+            );
+        }
+    }
+
+    #[test]
+    fn test_tmq_commit_offset_async() {
+        unsafe {
+            extern "C" fn cb(tmq: *mut tmq_t, code: i32, param: *mut c_void) {
+                unsafe {
+                    assert!(!tmq.is_null());
+                    assert_eq!(code, 0);
+
+                    assert!(!param.is_null());
+                    assert_eq!("hello", CStr::from_ptr(param as *const _).to_str().unwrap());
+                }
+            }
+
+            let db = "test_1741271535";
+            let topic = "topic_1741271535";
+            let table = "t0";
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    &format!("drop topic if exists {topic}"),
+                    &format!("drop database if exists {db}"),
+                    &format!("create database {db}"),
+                    &format!("use {db}"),
+                    &format!("create table {table} (ts timestamp, c1 int)"),
+                    &format!("insert into {table} values (now, 1)"),
+                    &format!("insert into {table} values (now, 2)"),
+                    &format!("create topic {topic} as database {db}"),
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let value = CString::from_str(topic).unwrap();
+            let errno = tmq_list_append(list, value.as_ptr());
+            assert_eq!(errno, 0);
+
+            let errno = tmq_subscribe(consumer, list);
+            assert_eq!(errno, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            let topic_name = CString::from_str(topic).unwrap();
+            let mut assignment = ptr::null_mut();
+            let mut num_of_assignment = 0;
+
+            let errno = tmq_get_topic_assignment(
+                consumer,
+                topic_name.as_ptr(),
+                &mut assignment,
+                &mut num_of_assignment,
+            );
+            assert_eq!(errno, 0);
+
+            let (_, (len, cap)) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
+            let assigns = Vec::from_raw_parts(assignment, len, cap);
+
+            let mut vg_ids = Vec::new();
+            for assign in &assigns {
+                vg_ids.push(assign.vgId);
+            }
+
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                if res.is_null() {
+                    break;
+                }
+
+                let topic_name = tmq_get_topic_name(res);
+                assert!(!topic_name.is_null());
+                assert_eq!(
+                    CStr::from_ptr(topic_name),
+                    CString::new(topic).unwrap().as_c_str()
+                );
+
+                let vg_id = tmq_get_vgroup_id(res);
+                assert!(vg_ids.contains(&vg_id));
+
+                let mut current_offset = 0;
+                for assign in &assigns {
+                    if assign.vgId == vg_id {
+                        current_offset = assign.currentOffset;
+                        println!("current_offset: {current_offset}");
+                        break;
+                    }
+                }
+
+                let param = c"hello";
+                tmq_commit_offset_async(
+                    consumer,
+                    topic_name,
+                    vg_id,
+                    current_offset,
+                    cb,
+                    param.as_ptr() as _,
+                );
+
+                sleep(Duration::from_secs(1));
+
+                let committed_offset = tmq_committed(consumer, topic_name, vg_id);
+                assert_eq!(committed_offset, current_offset);
+            }
 
             let errno = tmq_unsubscribe(consumer);
             assert_eq!(errno, 0);
