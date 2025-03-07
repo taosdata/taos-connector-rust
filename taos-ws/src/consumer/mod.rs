@@ -977,7 +977,7 @@ impl TmqBuilder {
 
         let mut auto_commit_interval_ms = None;
         if auto_commit == "true" {
-            let mut ms = "5";
+            let mut ms = "5000";
             if let Some(s) = dsn.params.get("auto.commit.interval.ms") {
                 if !s.is_empty() {
                     let _ = s.to_lowercase().parse::<u64>().map_err(|_| {
@@ -1058,6 +1058,7 @@ impl TmqBuilder {
                     s.to_string()
                 }
             });
+
         let conf = TmqInit {
             group_id,
             client_id,

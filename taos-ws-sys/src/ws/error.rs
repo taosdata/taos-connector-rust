@@ -42,8 +42,8 @@ pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
     }
 }
 
-const EMPTY: &CStr = c"";
-const MAX_ERRSTR_LEN: usize = 4096;
+pub const EMPTY: &CStr = c"";
+pub const MAX_ERRSTR_LEN: usize = 4096;
 
 thread_local! {
     static ERRNO: RefCell<i32> = const { RefCell::new(0) };

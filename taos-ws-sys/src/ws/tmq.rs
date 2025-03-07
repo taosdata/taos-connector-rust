@@ -15,7 +15,9 @@ use taos_ws::query::Error;
 use taos_ws::{Consumer, Offset, TmqBuilder};
 use tracing::{error, instrument, trace, warn, Instrument};
 
-use crate::ws::error::{format_errno, set_err_and_get_code, TaosError, TaosMaybeError};
+use crate::ws::error::{
+    errno, errstr, format_errno, set_err_and_get_code, TaosError, TaosMaybeError, EMPTY,
+};
 use crate::ws::{
     ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD, TAOS_RES, TAOS_ROW,
 };
@@ -1102,8 +1104,18 @@ pub unsafe extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn tmq_err2str(code: i32) -> *const c_char {
-    todo!()
+pub unsafe extern "C" fn tmq_err2str(code: i32) -> *const c_char {
+    trace!("tmq_err2str, code: {code}");
+
+    let err = match code {
+        0 => TaosError::new(Code::SUCCESS, "success"),
+        -1 => TaosError::new(Code::FAILED, "fail"),
+        _ if code == format_errno(errno()) => return errstr(),
+        _ => return EMPTY.as_ptr(),
+    };
+
+    set_err_and_get_code(err);
+    errstr()
 }
 
 #[derive(Debug)]
@@ -2291,6 +2303,31 @@ mod tests {
                 taos,
                 &[format!("drop topic {topic}"), format!("drop database {db}")],
             );
+        }
+    }
+
+    #[test]
+    fn test_tmq_err2str() {
+        unsafe {
+            let errstr = tmq_err2str(0);
+            assert_eq!(CStr::from_ptr(errstr).to_str().unwrap(), "success");
+        }
+
+        unsafe {
+            let errstr = tmq_err2str(-1);
+            assert_eq!(CStr::from_ptr(errstr).to_str().unwrap(), "fail");
+        }
+
+        unsafe {
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid para"));
+            let errstr = tmq_err2str(format_errno(Code::INVALID_PARA.into()));
+            assert_eq!(CStr::from_ptr(errstr).to_str().unwrap(), "invalid para");
+        }
+
+        unsafe {
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid para"));
+            let errstr = tmq_err2str(format_errno(Code::COLUMN_EXISTS.into()));
+            assert_eq!(CStr::from_ptr(errstr).to_str().unwrap(), "");
         }
     }
 }
