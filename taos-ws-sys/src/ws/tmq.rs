@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{mem, ptr};
 
 use dashmap::DashMap;
@@ -132,12 +132,32 @@ pub extern "C" fn tmq_conf_destroy(conf: *mut tmq_conf_t) {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn tmq_conf_set_auto_commit_cb(
+pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
     conf: *mut tmq_conf_t,
     cb: tmq_commit_cb,
     param: *mut c_void,
 ) {
-    todo!()
+    trace!("tmq_conf_set_auto_commit_cb start, conf: {conf:?}, cb: {cb:?}, param: {param:?}");
+
+    let fp = cb as *const ();
+    if fp.is_null() {
+        trace!("tmq_conf_set_auto_commit_cb succ, cb is null");
+        return;
+    }
+
+    match (conf as *mut TaosMaybeError<TmqConf>)
+        .as_mut()
+        .and_then(|maybe_err| maybe_err.deref_mut())
+    {
+        Some(conf) => {
+            conf.auto_commit_cb = Some((cb, param));
+            trace!("tmq_conf_set_auto_commit_cb succ");
+        }
+        None => {
+            error!("tmq_conf_set_auto_commit_cb failed, err: conf is null");
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "conf is null"));
+        }
+    }
 }
 
 #[no_mangle]
@@ -1267,12 +1287,14 @@ impl ResultSetOperations for TmqResultSet {
 #[derive(Debug)]
 struct TmqConf {
     map: HashMap<String, String>,
+    auto_commit_cb: Option<(tmq_commit_cb, *mut c_void)>,
 }
 
 impl TmqConf {
     fn new() -> Self {
         Self {
             map: HashMap::new(),
+            auto_commit_cb: None,
         }
     }
 }
@@ -1403,12 +1425,25 @@ unsafe fn _tmq_list_append(list: *mut tmq_list_t, value: *const c_char) -> TaosR
 
 struct Tmq {
     consumer: Option<Consumer>,
+    auto_commit: bool,
+    auto_commit_interval_ms: u64,
+    auto_commit_offset: (Option<Offset>, Instant),
+    auto_commit_cb: Option<(tmq_commit_cb, *mut c_void)>,
 }
 
 impl Tmq {
-    fn new(consumer: Consumer) -> Self {
+    fn new(
+        consumer: Consumer,
+        auto_commit: bool,
+        auto_commit_interval_ms: u64,
+        auto_commit_cb: Option<(tmq_commit_cb, *mut c_void)>,
+    ) -> Self {
         Self {
             consumer: Some(consumer),
+            auto_commit,
+            auto_commit_interval_ms,
+            auto_commit_offset: (None, Instant::now()),
+            auto_commit_cb,
         }
     }
 }
@@ -1422,46 +1457,95 @@ impl Drop for Tmq {
 }
 
 unsafe fn _tmq_consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
-    let mut dsn = Dsn::from_str("taos://localhost:6041")?;
+    let mut dsn = Dsn::from_str("ws://localhost:6041")?;
 
     match (conf as *mut TaosMaybeError<TmqConf>)
         .as_mut()
         .and_then(|conf| conf.deref_mut())
     {
         Some(conf) => {
-            for (key, value) in conf.map.iter() {
-                dsn.params.insert(key.clone(), value.clone());
-            }
-        }
-        None => return Err(TaosError::new(Code::FAILED, "conf is null")),
-    }
+            let mut auto_commit = false;
+            let mut auto_commit_interval_ms = 5000;
 
-    let consumer = TmqBuilder::from_dsn(&dsn)?.build()?;
-    Ok(Tmq::new(consumer))
+            for (key, val) in conf.map.iter() {
+                if key == "enable.auto.commit" {
+                    auto_commit = val.to_lowercase().parse().unwrap();
+                    dsn.params.insert(key.clone(), "false".to_string());
+                    continue;
+                } else if key == "auto.commit.interval.ms" {
+                    auto_commit_interval_ms = val.parse().unwrap();
+                }
+
+                dsn.params.insert(key.clone(), val.clone());
+            }
+
+            trace!("tmq_consumer_new, dsn: {dsn:?}");
+
+            let consumer = TmqBuilder::from_dsn(&dsn)?.build()?;
+            Ok(Tmq::new(
+                consumer,
+                auto_commit,
+                auto_commit_interval_ms,
+                conf.auto_commit_cb,
+            ))
+        }
+        None => return Err(TaosError::new(Code::INVALID_PARA, "conf is null")),
+    }
 }
 
-unsafe fn _tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> TaosResult<Option<ResultSet>> {
+unsafe fn _tmq_consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Option<ResultSet>> {
     let timeout = match timeout {
         0 => tmq::Timeout::Never,
         n if n < 0 => tmq::Timeout::from_millis(1000),
         _ => tmq::Timeout::from_millis(timeout as u64),
     };
 
-    match (tmq as *mut TaosMaybeError<Tmq>)
+    match (tmq_ptr as *mut TaosMaybeError<Tmq>)
         .as_mut()
         .and_then(|tmq| tmq.deref_mut())
     {
         Some(tmq) => match &tmq.consumer {
             Some(consumer) => {
+                if tmq.auto_commit {
+                    if let Some(offset) = tmq.auto_commit_offset.0.take() {
+                        let now = Instant::now();
+                        if now - tmq.auto_commit_offset.1
+                            > Duration::from_millis(tmq.auto_commit_interval_ms)
+                        {
+                            tmq.auto_commit_offset.1 = now;
+                            trace!("poll auto commit, commit offset: {offset:?}");
+                            if let Err(err) = consumer.commit(offset) {
+                                error!("poll auto commit failed, err: {err:?}");
+
+                                if let Some((cb, param)) = tmq.auto_commit_cb {
+                                    trace!("poll auto commit failed, callback");
+                                    cb(tmq_ptr, format_errno(err.code().into()), param);
+                                }
+                            } else {
+                                if let Some((cb, param)) = tmq.auto_commit_cb {
+                                    trace!("poll auto commit succ, callback");
+                                    cb(tmq_ptr, 0, param);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let res = consumer.recv_timeout(timeout)?;
                 match res {
                     Some((offset, message_set)) => {
+                        if tmq.auto_commit {
+                            trace!("poll auto commit, set offset: {offset:?}");
+                            tmq.auto_commit_offset.0 = Some(offset.clone());
+                        }
+
                         if message_set.has_meta() {
                             return Err(TaosError::new(
                                 Code::FAILED,
                                 "message has meta, only support topic created with select sql",
                             ));
                         }
+
                         let data = message_set.into_data().unwrap();
                         match data.fetch_raw_block()? {
                             Some(block) => {
@@ -1519,7 +1603,7 @@ mod tests {
 
     use super::*;
     use crate::ws::query::{taos_fetch_fields, taos_fetch_row, taos_num_fields, taos_print_row};
-    use crate::ws::{test_connect, test_exec_many};
+    use crate::ws::{test_connect, test_exec, test_exec_many};
 
     #[test]
     fn test_tmq_conf() {
@@ -2328,6 +2412,157 @@ mod tests {
             set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid para"));
             let errstr = tmq_err2str(format_errno(Code::COLUMN_EXISTS.into()));
             assert_eq!(CStr::from_ptr(errstr).to_str().unwrap(), "");
+        }
+    }
+
+    #[test]
+    fn test_poll_auto_commit() {
+        unsafe {
+            extern "C" fn cb(tmq: *mut tmq_t, code: i32, param: *mut c_void) {
+                unsafe {
+                    println!("call auto commit callback");
+
+                    assert!(!tmq.is_null());
+                    assert_eq!(code, 0);
+
+                    assert!(!param.is_null());
+                    assert_eq!("hello", CStr::from_ptr(param as *const _).to_str().unwrap());
+                }
+            }
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                [
+                    "drop topic if exists topic_1741333066",
+                    "drop database if exists test_1741333066",
+                    "create database test_1741333066 wal_retention_period 3600",
+                    "use test_1741333066",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "create topic topic_1741333066 as select * from t0",
+                ],
+            );
+
+            let num = 9000;
+            let ts = 1741336467000i64;
+            for i in 0..num {
+                test_exec(taos, format!("insert into t0 values ({}, 1)", ts + i));
+            }
+
+            test_exec_many(
+                taos,
+                [
+                    "drop database if exists test_1741333142",
+                    "create database test_1741333142 wal_retention_period 3600",
+                    "use test_1741333142",
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let val = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let val = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"enable.auto.commit".as_ptr();
+            let val = c"true".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.commit.interval.ms".as_ptr();
+            let val = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let param = c"hello";
+            tmq_conf_set_auto_commit_cb(conf, cb, param.as_ptr() as _);
+
+            let mut errstr = [0; 256];
+            let tmq = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!tmq.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let value = CString::from_str("topic_1741333066").unwrap();
+            let code = tmq_list_append(list, value.as_ptr());
+            assert_eq!(code, 0);
+
+            let code = tmq_subscribe(tmq, list);
+            assert_eq!(code, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            let topic = CString::from_str("topic_1741333066").unwrap();
+            let mut assignment = ptr::null_mut();
+            let mut num_of_assignment = 0;
+
+            let code = tmq_get_topic_assignment(
+                tmq,
+                topic.as_ptr(),
+                &mut assignment,
+                &mut num_of_assignment,
+            );
+            assert_eq!(code, 0);
+
+            let (_, (len, cap)) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
+            let assigns = Vec::from_raw_parts(assignment, len, cap);
+
+            let mut vg_ids = Vec::new();
+            for assign in &assigns {
+                vg_ids.push(assign.vgId);
+            }
+
+            let mut pre_topic = None;
+            let mut pre_vg_id = 0;
+            let mut pre_offset = 0;
+
+            loop {
+                let res = tmq_consumer_poll(tmq, 1000);
+                println!("poll res: {res:?}");
+                if res.is_null() {
+                    break;
+                }
+
+                let topic = tmq_get_topic_name(res);
+                assert!(!topic.is_null());
+
+                let vg_id = tmq_get_vgroup_id(res);
+                assert!(vg_ids.contains(&vg_id));
+
+                if let Some(pre_topic) = pre_topic {
+                    let offset = tmq_committed(tmq, pre_topic, pre_vg_id);
+                    assert!(offset > pre_offset);
+                }
+
+                pre_topic = Some(topic);
+                pre_vg_id = vg_id;
+                pre_offset = tmq_get_vgroup_offset(res);
+            }
+
+            let code = tmq_unsubscribe(tmq);
+            assert_eq!(code, 0);
+
+            let code = tmq_consumer_close(tmq);
+            assert_eq!(code, 0);
+
+            sleep(Duration::from_secs(3));
+
+            test_exec_many(
+                taos,
+                [
+                    "drop topic topic_1741333066",
+                    "drop database test_1741333066",
+                ],
+            );
         }
     }
 }

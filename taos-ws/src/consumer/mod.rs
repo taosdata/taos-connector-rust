@@ -467,7 +467,7 @@ impl Consumer {
                     guard.1 = now;
                     tracing::trace!("poll auto commit, commit offset: {offset:?}");
                     if let Err(err) = AsAsyncConsumer::commit(self, offset).await {
-                        tracing::error!("auto commit failed, err: {err:?}");
+                        tracing::error!("poll auto commit failed, err: {err:?}");
                     }
                 }
             }
