@@ -1489,7 +1489,7 @@ unsafe fn _tmq_consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
                 conf.auto_commit_cb,
             ))
         }
-        None => return Err(TaosError::new(Code::INVALID_PARA, "conf is null")),
+        None => Err(TaosError::new(Code::INVALID_PARA, "conf is null")),
     }
 }
 
@@ -1521,11 +1521,9 @@ unsafe fn _tmq_consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Op
                                     trace!("poll auto commit failed, callback");
                                     cb(tmq_ptr, format_errno(err.code().into()), param);
                                 }
-                            } else {
-                                if let Some((cb, param)) = tmq.auto_commit_cb {
-                                    trace!("poll auto commit succ, callback");
-                                    cb(tmq_ptr, 0, param);
-                                }
+                            } else if let Some((cb, param)) = tmq.auto_commit_cb {
+                                trace!("poll auto commit succ, callback");
+                                cb(tmq_ptr, 0, param);
                             }
                         }
                     }
