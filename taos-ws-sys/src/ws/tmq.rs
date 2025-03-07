@@ -1301,7 +1301,7 @@ unsafe fn _tmq_conf_set(
                 },
                 "session.timeout.ms" => match u32::from_str(&val) {
                     Ok(val) => {
-                        if val < 6000 || val > 1800000 {
+                        if !(6000..=1800000).contains(&val) {
                             error!("tmq_conf_set failed, err: session.timeout.ms out of range");
                             return Err(TaosError::new(
                                 Code::INVALID_PARA,
