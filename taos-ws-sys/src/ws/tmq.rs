@@ -627,7 +627,7 @@ pub unsafe extern "C" fn tmq_commit_offset_async(
                 None => {
                     error!("tmq_commit_offset_async failed, err: tmq is invalid");
                     maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "tmq is invalid")));
-                    let code: i32 = format_errno(Code::INVALID_PARA.into());
+                    let code = format_errno(Code::INVALID_PARA.into());
                     cb(tmq.0, code, param.0);
                     return;
                 }
