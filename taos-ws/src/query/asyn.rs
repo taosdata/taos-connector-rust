@@ -409,7 +409,13 @@ async fn read_queries(
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     },
-                    // Block type is for binary.
+                    WsRecvData::ValidateSql { .. } => {
+                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                            let _ = sender.send(ok.map(|_| data));
+                        } else {
+                            tracing::warn!("req_id {req_id} not detected, message might be lost");
+                        }
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -1156,9 +1162,16 @@ impl WsTaos {
         req.write_u32_le(sql.len() as _).map_err(Error::from)?;
         req.write_all(sql.as_bytes()).map_err(Error::from)?;
 
-        let _recv = self.sender.send_recv(WsSend::Binary(req)).await?;
-
-        Ok(())
+        match self.sender.send_recv(WsSend::Binary(req)).await? {
+            WsRecvData::ValidateSql { result_code, .. } => {
+                if result_code != 0 {
+                    Err(RawError::new(result_code, "validate sql error"))
+                } else {
+                    Ok(())
+                }
+            }
+            _ => unreachable!(),
+        }
     }
 
     pub fn version(&self) -> &str {
@@ -1829,10 +1842,12 @@ mod tests {
         Ok(())
     }
 
-    // #[tokio::test]
-    // async fn test_validate_sql() -> anyhow::Result<()> {
-    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
-    //     taos.validate_sql("select * from t0").await?;
-    //     Ok(())
-    // }
+    #[tokio::test]
+    async fn test_validate_sql() -> anyhow::Result<()> {
+        let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+        taos.validate_sql("create database if not exists test_1741338182")
+            .await?;
+        let _ = taos.validate_sql("select * from t0").await.unwrap_err();
+        Ok(())
+    }
 }

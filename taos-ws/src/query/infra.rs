@@ -279,6 +279,12 @@ pub enum WsRecvData {
         #[serde(default)]
         timing: u64,
     },
+    ValidateSql {
+        #[serde(default)]
+        timing: u64,
+        #[serde(default)]
+        result_code: i64,
+    },
 }
 
 #[allow(dead_code)]
