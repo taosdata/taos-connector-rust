@@ -615,8 +615,40 @@ pub unsafe extern "C" fn taos_get_column_data_offset(
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int {
-    todo!()
+pub unsafe extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int {
+    trace!("taos_validate_sql start, taos: {taos:?}, sql: {sql:?}");
+
+    if taos.is_null() {
+        error!("taos_validate_sql failed, taos is null");
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
+    }
+
+    if sql.is_null() {
+        error!("taos_validate_sql failed, sql is null");
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "sql is null"));
+    }
+
+    let sql = match CStr::from_ptr(sql).to_str() {
+        Ok(sql) => sql,
+        Err(_) => {
+            error!("taos_validate_sql failed, sql is invalid utf-8");
+            return set_err_and_get_code(TaosError::new(
+                Code::INVALID_PARA,
+                "sql is invalid utf-8",
+            ));
+        }
+    };
+
+    trace!("taos_validate_sql, sql: {sql}");
+
+    let taos = (taos as *mut Taos).as_mut().unwrap();
+    if let Err(err) = taos_query::block_in_place_or_global(taos.client().validate_sql(sql)) {
+        error!("taos_validate_sql failed, err: {err:?}");
+        return set_err_and_get_code(err.into());
+    }
+
+    trace!("taos_validate_sql succ");
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
@@ -1963,6 +1995,16 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1740841972");
+        }
+    }
+
+    #[test]
+    fn test_taos_validate_sql() {
+        unsafe {
+            let taos = test_connect();
+            let sql = c"create database if not exists test_1741339814";
+            let code = taos_validate_sql(taos, sql.as_ptr());
+            assert_eq!(code, 0);
         }
     }
 }
