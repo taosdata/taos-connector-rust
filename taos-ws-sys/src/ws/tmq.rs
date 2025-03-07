@@ -1271,47 +1271,90 @@ unsafe fn _tmq_conf_set(
     value: *const c_char,
 ) -> TaosResult<()> {
     let key = CStr::from_ptr(key).to_str()?.to_string();
-    let value = CStr::from_ptr(value).to_str()?.to_string();
+    let val = CStr::from_ptr(value).to_str()?.to_string();
+
+    trace!("tmq_conf_set start, key: {key}, val: {val}");
 
     match (conf as *mut TaosMaybeError<TmqConf>)
         .as_mut()
-        .and_then(|conf| conf.deref_mut())
+        .and_then(|maybe_err| maybe_err.deref_mut())
     {
-        Some(tmq_conf) => {
+        Some(conf) => {
             match key.to_lowercase().as_str() {
-                "group.id" | "client.id" | "td.connect.db" => {}
-                "enable.auto.commit" | "msg.with.table.name" => match value.to_lowercase().as_str()
-                {
-                    "true" | "false" => {}
-                    _ => {
-                        trace!(key, value, "tmq_conf_set failed");
-                        return Err(TaosError::new(Code::INVALID_PARA, "invalid value"));
+                "td.connect.ip" | "td.connect.user" | "td.connect.pass" | "td.connect.db"
+                | "group.id" | "client.id" => {}
+                "enable.auto.commit" | "msg.with.table.name" | "enable.replay" => {
+                    match val.to_lowercase().as_str() {
+                        "true" | "false" => {}
+                        _ => {
+                            error!("tmq_conf_set failed, err: invalid bool value");
+                            return Err(TaosError::new(Code::INVALID_PARA, "invalid bool value"));
+                        }
                     }
-                },
-                "auto.commit.interval.ms" => match i32::from_str(&value) {
+                }
+                "td.connect.port" | "auto.commit.interval.ms" => match u32::from_str(&val) {
                     Ok(_) => {}
                     Err(_) => {
-                        trace!(key, value, "tmq_conf_set failed");
-                        return Err(TaosError::new(Code::INVALID_PARA, "invalid value"));
+                        error!("tmq_conf_set failed, err: invalid integer value");
+                        return Err(TaosError::new(Code::INVALID_PARA, "invalid integer value"));
                     }
                 },
-                "auto.offset.reset" => match value.to_lowercase().as_str() {
+                "session.timeout.ms" => match u32::from_str(&val) {
+                    Ok(val) => {
+                        if val < 6000 || val > 1800000 {
+                            error!("tmq_conf_set failed, err: session.timeout.ms out of range");
+                            return Err(TaosError::new(
+                                Code::INVALID_PARA,
+                                "session.timeout.ms out of range",
+                            ));
+                        }
+                    }
+                    Err(_) => {
+                        error!("tmq_conf_set failed, err: session.timeout.ms is invalid");
+                        return Err(TaosError::new(
+                            Code::INVALID_PARA,
+                            "session.timeout.ms is invalid",
+                        ));
+                    }
+                },
+                "max.poll.interval.ms" => match i32::from_str(&val) {
+                    Ok(val) => {
+                        if val < 1000 {
+                            error!("tmq_conf_set failed, err: max.poll.interval.ms out of range");
+                            return Err(TaosError::new(
+                                Code::INVALID_PARA,
+                                "max.poll.interval.ms out of range",
+                            ));
+                        }
+                    }
+                    Err(_) => {
+                        error!("tmq_conf_set failed, err: max.poll.interval.ms is invalid");
+                        return Err(TaosError::new(
+                            Code::INVALID_PARA,
+                            "max.poll.interval.ms is invalid",
+                        ));
+                    }
+                },
+                "auto.offset.reset" => match val.to_lowercase().as_str() {
                     "none" | "earliest" | "latest" => {}
                     _ => {
-                        trace!(key, value, "tmq_conf_set failed");
-                        return Err(TaosError::new(Code::INVALID_PARA, "invalid value"));
+                        error!("tmq_conf_set failed, err: auto.offset.reset is invalid");
+                        return Err(TaosError::new(
+                            Code::INVALID_PARA,
+                            "auto.offset.reset is invalid",
+                        ));
                     }
                 },
                 _ => {
-                    trace!("tmq_conf_set failed, unknow key: {key}");
-                    return Err(TaosError::new(Code::FAILED, "unknow key"));
+                    error!("tmq_conf_set failed, err: unknow key: {key}");
+                    return Err(TaosError::new(Code::FAILED, &format!("unknow key: {key}")));
                 }
             }
-            trace!(key, value, "tmq_conf_set done");
-            tmq_conf.map.insert(key, value);
+            conf.map.insert(key, val);
+            trace!("tmq_conf_set succ, conf: {conf:?}");
             Ok(())
         }
-        None => Err(TaosError::new(Code::OBJECT_IS_NULL, "conf is null")),
+        None => Err(TaosError::new(Code::INVALID_PARA, "conf is null")),
     }
 }
 
@@ -1469,15 +1512,81 @@ mod tests {
     #[test]
     fn test_tmq_conf() {
         unsafe {
-            let tmq_conf = tmq_conf_new();
-            assert!(!tmq_conf.is_null());
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
 
-            let key = c"group.id".as_ptr() as *const c_char;
-            let value = c"test".as_ptr() as *const c_char;
-            let res = tmq_conf_set(tmq_conf, key, value);
+            let key = c"td.connect.ip";
+            let val = c"localhost";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
-            tmq_conf_destroy(tmq_conf);
+            let key = c"td.connect.user";
+            let val = c"root";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"td.connect.pass";
+            let val = c"taosdata";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"group.id";
+            let val = c"1";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"client.id";
+            let val = c"1";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"enable.auto.commit";
+            let val = c"true";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"msg.with.table.name";
+            let val = c"true";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"enable.replay";
+            let val = c"true";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"td.connect.port";
+            let val = c"6041";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.commit.interval.ms";
+            let val = c"5000";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"session.timeout.ms";
+            let val = c"10000";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"max.poll.interval.ms";
+            let val = c"10000";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset";
+            let val = c"earliest";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let tmq = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!tmq.is_null());
+
+            tmq_consumer_close(tmq);
+
+            tmq_conf_destroy(conf);
         }
     }
 
