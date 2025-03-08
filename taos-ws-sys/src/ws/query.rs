@@ -568,6 +568,69 @@ pub unsafe extern "C" fn taos_fetch_raw_block(
 }
 
 #[no_mangle]
+#[instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_fetch_raw_block_a(
+    res: *mut TAOS_RES,
+    fp: __taos_async_fn_t,
+    param: *mut c_void,
+) {
+    trace!("taos_fetch_raw_block_a start, res: {res:?}, fp: {fp:?}, param: {param:?}");
+
+    let cb = fp as *const ();
+    if res.is_null() || cb.is_null() {
+        error!("taos_fetch_raw_block_a failed, res or fp is null");
+        if !cb.is_null() {
+            let code = format_errno(Code::INVALID_PARA.into());
+            fp(param, res, code);
+        }
+        return;
+    }
+
+    let res = SafePtr(res);
+    let param = SafePtr(param);
+
+    global_tokio_runtime().spawn(
+        async move {
+            let res = res;
+            let param = param;
+
+            let maybe_err = (res.0 as *mut TaosMaybeError<ResultSet>).as_mut().unwrap();
+            if maybe_err.deref_mut().is_none() {
+                error!("taos_fetch_raw_block_a callback failed, res is invalid");
+                maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "res is invalid")));
+                let code = format_errno(Code::INVALID_PARA.into());
+                fp(param.0, res.0, code);
+                return;
+            }
+
+            let rs = maybe_err.deref_mut().unwrap();
+            if let ResultSet::Query(qrs) = rs {
+                match qrs.rs.fetch_raw_block() {
+                    Ok(block) => {
+                        trace!("taos_fetch_raw_block_a callback succ");
+                        qrs.block = block;
+                        fp(param.0, res.0, 0);
+                    }
+                    Err(err) => {
+                        error!("taos_fetch_raw_block_a callback failed, err: {err:?}");
+                        let code = format_errno(err.code().into());
+                        fp(param.0, res.0, code);
+                    }
+                }
+            } else {
+                error!("taos_fetch_raw_block_a callback failed, rs is invalid");
+                maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "rs is invalid")));
+                let code = format_errno(Code::INVALID_PARA.into());
+                fp(param.0, res.0, code);
+            };
+        }
+        .in_current_span(),
+    );
+
+    trace!("taos_fetch_raw_block_a succ");
+}
+
+#[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_get_column_data_offset(
@@ -970,16 +1033,6 @@ pub unsafe extern "C" fn taos_fetch_rows_a(
     );
 
     trace!("taos_fetch_rows_a succ");
-}
-
-#[no_mangle]
-#[instrument(level = "trace", ret)]
-pub extern "C" fn taos_fetch_raw_block_a(
-    res: *mut TAOS_RES,
-    fp: __taos_async_fn_t,
-    param: *mut c_void,
-) {
-    todo!()
 }
 
 #[no_mangle]
@@ -2005,6 +2058,45 @@ mod tests {
             let sql = c"create database if not exists test_1741339814";
             let code = taos_validate_sql(taos, sql.as_ptr());
             assert_eq!(code, 0);
+        }
+    }
+
+    #[test]
+    fn test_taos_fetch_raw_block_a() {
+        unsafe {
+            extern "C" fn cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+                unsafe {
+                    println!("callback");
+                    assert_eq!(code, 0);
+                    assert!(!res.is_null());
+                    assert!(!param.is_null());
+                    assert_eq!(CStr::from_ptr(param as _), c"hello");
+                }
+            }
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1741443150",
+                    "create database test_1741443150",
+                    "use test_1741443150",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (now, 1)",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let param = c"hello";
+            taos_fetch_raw_block_a(res, cb, param.as_ptr() as _);
+
+            sleep(Duration::from_secs(1));
+
+            taos_free_result(res);
+
+            test_exec(taos, "drop database test_1741443150");
         }
     }
 }
