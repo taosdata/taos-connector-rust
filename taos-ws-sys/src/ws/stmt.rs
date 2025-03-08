@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_ulong, c_void, CStr};
 use std::{ptr, slice};
 
@@ -60,10 +61,11 @@ struct TaosStmt {
     col_fields: Option<Vec<Stmt2Field>>,
     tag_fields_addr: Option<usize>,
     col_fields_addr: Option<usize>,
-    params: Vec<Stmt2BindParam>,
-    cur_param: Option<Stmt2BindParam>,
+    bind_params: Vec<Stmt2BindParam>,
     tbname: Option<String>,
     tags: Option<Vec<Value>>,
+    cols: Option<Vec<ColumnView>>,
+    single_cols: Option<HashMap<usize, ColumnView>>,
 }
 
 impl TaosStmt {
@@ -75,50 +77,62 @@ impl TaosStmt {
             col_fields: None,
             tag_fields_addr: None,
             col_fields_addr: None,
-            params: Vec::new(),
-            cur_param: None,
+            bind_params: Vec::new(),
             tbname: None,
             tags: None,
+            cols: None,
+            single_cols: None,
         }
     }
 
-    fn init_cur_param_if_none(&mut self) {
-        if self.cur_param.is_none() {
-            trace!(
-                "stmt init cur_param, tbname: {:?}, tags: {:?}",
-                self.tbname,
-                self.tags
-            );
+    fn set_tbname(&mut self, tbname: String) {
+        self.tbname = Some(tbname);
+    }
 
-            self.cur_param = Some(Stmt2BindParam::new(
-                self.tbname.clone(),
-                self.tags.clone(),
-                None,
-            ));
+    fn set_tags(&mut self, tags: Vec<Value>) {
+        self.tags = Some(tags);
+    }
+
+    fn set_cols(&mut self, cols: Vec<ColumnView>) {
+        self.cols = Some(cols);
+    }
+
+    fn set_single_col(&mut self, idx: usize, col: ColumnView) {
+        if self.single_cols.is_none() {
+            self.single_cols = Some(HashMap::new());
         }
+        self.single_cols.as_mut().unwrap().insert(idx, col);
     }
 
-    fn set_cur_param_tbname(&mut self, name: String) {
-        self.init_cur_param_if_none();
-        self.cur_param.as_mut().unwrap().with_table_name(name);
-    }
-
-    fn set_cur_param_tags(&mut self, tags: Vec<Value>) {
-        self.init_cur_param_if_none();
-        self.cur_param.as_mut().unwrap().with_tags(tags);
-    }
-
-    fn set_cur_param_cols(&mut self, cols: Vec<ColumnView>) {
-        self.init_cur_param_if_none();
-        self.cur_param.as_mut().unwrap().with_columns(cols);
-    }
-
-    fn move_cur_param_to_params(&mut self) {
-        if let Some(cur_param) = self.cur_param.take() {
-            self.tbname = cur_param.table_name().cloned();
-            self.tags = cur_param.tags().cloned();
-            self.params.push(cur_param);
+    fn move_to_bind_params(&mut self) -> TaosResult<()> {
+        if let Some(cols) = self.cols.take() {
+            let param = Stmt2BindParam::new(self.tbname.clone(), self.tags.clone(), Some(cols));
+            self.bind_params.push(param);
         }
+
+        if let Some(mut map) = self.single_cols.take() {
+            let len = self.col_fields.as_ref().unwrap().len();
+            if map.len() != len {
+                error!("move_to_bind_params, incorrect number of fields bound");
+                return Err(TaosError::new(
+                    Code::FAILED,
+                    "incorrect number of fields bound",
+                ));
+            }
+
+            let mut cols = Vec::with_capacity(len);
+            for i in 0..len {
+                if let Some(col) = map.remove(&i) {
+                    trace!("move_to_bind_params, idx: {i}, col: {col:?}");
+                    cols.push(col);
+                }
+            }
+
+            let param = Stmt2BindParam::new(self.tbname.clone(), self.tags.clone(), Some(cols));
+            self.bind_params.push(param);
+        }
+
+        Ok(())
     }
 }
 
@@ -303,7 +317,7 @@ pub unsafe extern "C" fn taos_stmt_set_tbname(stmt: *mut TAOS_STMT, name: *const
         }
     };
 
-    taos_stmt.set_cur_param_tbname(name.to_owned());
+    taos_stmt.set_tbname(name.to_owned());
 
     trace!("taos_stmt_set_tbname succ, taos_stmt: {taos_stmt:?}");
 
@@ -364,7 +378,7 @@ pub unsafe extern "C" fn taos_stmt_set_tags(
         tags.push(bind.to_value());
     }
 
-    taos_stmt.set_cur_param_tags(tags);
+    taos_stmt.set_tags(tags);
 
     trace!("taos_stmt_set_tags succ, taos_stmt: {taos_stmt:?}");
 
@@ -812,10 +826,14 @@ pub unsafe extern "C" fn taos_stmt_bind_param(
         cols.push(bind.to_column_view());
     }
 
-    taos_stmt.set_cur_param_cols(cols);
+    taos_stmt.set_cols(cols);
 
     if taos_stmt.stb_insert {
-        taos_stmt.move_cur_param_to_params();
+        if let Err(err) = taos_stmt.move_to_bind_params() {
+            error!("taos_stmt_bind_param failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            return format_errno(err.code().into());
+        }
     }
 
     trace!("taos_stmt_bind_param succ, taos_stmt: {taos_stmt:?}");
@@ -874,10 +892,14 @@ pub unsafe extern "C" fn taos_stmt_bind_param_batch(
         cols.push(bind.to_column_view());
     }
 
-    taos_stmt.set_cur_param_cols(cols);
+    taos_stmt.set_cols(cols);
 
     if taos_stmt.stb_insert {
-        taos_stmt.move_cur_param_to_params();
+        if let Err(err) = taos_stmt.move_to_bind_params() {
+            error!("taos_stmt_bind_param_batch failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            return format_errno(err.code().into());
+        }
     }
 
     trace!("taos_stmt_bind_param_batch succ, taos_stmt: {taos_stmt:?}");
@@ -889,12 +911,63 @@ pub unsafe extern "C" fn taos_stmt_bind_param_batch(
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_stmt_bind_single_param_batch(
+pub unsafe extern "C" fn taos_stmt_bind_single_param_batch(
     stmt: *mut TAOS_STMT,
     bind: *mut TAOS_MULTI_BIND,
     colIdx: c_int,
 ) -> c_int {
-    todo!("taos_stmt_bind_single_param_batch")
+    trace!(
+        "taos_stmt_bind_single_param_batch start, stmt: {stmt:?}, bind: {bind:?}, col_idx: {colIdx}"
+    );
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_bind_single_param_batch can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_bind_single_param_batch is not called",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+    }
+
+    let view = match bind.as_ref() {
+        Some(bind) => bind.to_column_view(),
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "bind is null")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    trace!("taos_stmt_bind_single_param_batch, idx: {colIdx}, view: {view:?}");
+
+    taos_stmt.set_single_col(colIdx as _, view);
+
+    trace!("taos_stmt_bind_single_param_batch succ, taos_stmt: {taos_stmt:?}");
+    maybe_err.with_err(None);
+    Code::SUCCESS.into()
 }
 
 #[no_mangle]
@@ -932,7 +1005,11 @@ pub unsafe extern "C" fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
         }
     }
 
-    taos_stmt.move_cur_param_to_params();
+    if let Err(err) = taos_stmt.move_to_bind_params() {
+        error!("taos_stmt_add_batch failed, err: {err:?}");
+        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+        return format_errno(err.code().into());
+    }
 
     trace!("taos_stmt_add_batch succ, taos_stmt: {taos_stmt:?}");
 
@@ -955,13 +1032,17 @@ pub unsafe extern "C" fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
     };
 
-    taos_stmt.move_cur_param_to_params();
+    if let Err(err) = taos_stmt.move_to_bind_params() {
+        error!("taos_stmt_execute failed, err: {err:?}");
+        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+        return format_errno(err.code().into());
+    }
 
     trace!("taos_stmt_execute, taos_stmt: {taos_stmt:?}");
 
     let stmt2 = &mut taos_stmt.stmt2;
 
-    let params = std::mem::take(&mut taos_stmt.params);
+    let params = std::mem::take(&mut taos_stmt.bind_params);
     trace!("taos_stmt_execute, params: {params:?}");
 
     if let Err(err) = stmt2.bind(&params) {
@@ -2209,6 +2290,84 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1741251640");
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt_bind_single_param_batch() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1741438739",
+                    "create database test_1741438739",
+                    "use test_1741438739",
+                    "create table s0 (ts timestamp, c1 int) tags (t1 int)",
+                    "create table d0 using s0 tags(0)",
+                    "create table d1 using s0 tags(1)",
+                ],
+            );
+
+            let stmt = taos_stmt_init(taos);
+            assert!(!stmt.is_null());
+
+            let sql = c"insert into s0 (tbname, ts, c1) values(?, ?, ?)";
+            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let tbname = c"d0";
+            let code = taos_stmt_set_tbname(stmt, tbname.as_ptr());
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![1739521477831i64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
+            let mut ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+
+            let mut buffer = vec![99];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let mut c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let code = taos_stmt_bind_single_param_batch(stmt, &mut ts, 0);
+            assert_eq!(code, 0);
+
+            let code = taos_stmt_bind_single_param_batch(stmt, &mut c1, 1);
+            assert_eq!(code, 0);
+
+            let code = taos_stmt_add_batch(stmt);
+
+            let tbname = c"d1";
+            let code = taos_stmt_set_tbname(stmt, tbname.as_ptr());
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![1739521477831i64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
+            let mut ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+
+            let mut buffer = vec![99];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let mut c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let code = taos_stmt_bind_single_param_batch(stmt, &mut ts, 0);
+            assert_eq!(code, 0);
+
+            let code = taos_stmt_bind_single_param_batch(stmt, &mut c1, 1);
+            assert_eq!(code, 0);
+
+            let code = taos_stmt_execute(stmt);
+            assert_eq!(code, 0);
+
+            let affected_rows = taos_stmt_affected_rows(stmt);
+            assert_eq!(affected_rows, 2);
+
+            let code = taos_stmt_close(stmt);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1741438739");
         }
     }
 }
