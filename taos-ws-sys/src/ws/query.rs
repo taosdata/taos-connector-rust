@@ -631,6 +631,43 @@ pub unsafe extern "C" fn taos_fetch_raw_block_a(
 }
 
 #[no_mangle]
+#[instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
+    trace!("taos_result_block start, res: {res:?}");
+
+    if res.is_null() {
+        error!("taos_result_block failed, res is null");
+        return ptr::null_mut();
+    }
+
+    let maybe_err = (res as *mut TaosMaybeError<ResultSet>).as_mut().unwrap();
+    if maybe_err.deref_mut().is_none() {
+        error!("taos_result_block failed, res is invalid");
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "res is invalid")));
+        return ptr::null_mut();
+    }
+
+    let rs = maybe_err.deref_mut().unwrap();
+    if let ResultSet::Query(qrs) = rs {
+        match qrs.fetch_row() {
+            Ok(_) => {
+                trace!("taos_result_block succ, ptr: {:?}", qrs.row_data_ptr_ptr);
+                return qrs.row_data_ptr_ptr;
+            }
+            Err(err) => {
+                error!("taos_result_block failed, err: {err:?}");
+                maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "rs is invalid")));
+            }
+        }
+    } else {
+        error!("taos_result_block failed, rs is invalid");
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "rs is invalid")));
+    };
+
+    return ptr::null_mut();
+}
+
+#[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_get_column_data_offset(
@@ -770,12 +807,6 @@ pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
     }
 
     ptr::null_mut()
-}
-
-#[no_mangle]
-#[instrument(level = "trace", ret)]
-pub extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
-    todo!()
 }
 
 #[no_mangle]
@@ -1047,22 +1078,39 @@ pub struct QueryResultSet {
     block: Option<Block>,
     fields: Vec<TAOS_FIELD>,
     row: Row,
+    #[allow(dead_code)]
+    row_data_ptr: TAOS_ROW,
+    row_data_ptr_ptr: *mut TAOS_ROW,
     offsets: Option<Vec<i32>>,
     lengths: Option<Vec<i32>>,
     has_called_fetch_row: bool,
 }
 
+impl Drop for QueryResultSet {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = Box::from_raw(self.row_data_ptr_ptr);
+        }
+    }
+}
+
 impl QueryResultSet {
     pub fn new(rs: taos_ws::ResultSet) -> Self {
         let num_of_fields = rs.num_of_fields();
+        let mut row = Row {
+            data: vec![ptr::null(); num_of_fields],
+            current_row: 0,
+        };
+        let row_data_ptr = row.data.as_mut_ptr() as _;
+        let row_data_ptr_ptr = Box::into_raw(Box::new(row_data_ptr));
+
         Self {
             rs,
             block: None,
             fields: Vec::new(),
-            row: Row {
-                data: vec![ptr::null(); num_of_fields],
-                current_row: 0,
-            },
+            row,
+            row_data_ptr,
+            row_data_ptr_ptr,
             offsets: None,
             lengths: None,
             has_called_fetch_row: false,
@@ -2066,11 +2114,24 @@ mod tests {
         unsafe {
             extern "C" fn cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
                 unsafe {
-                    println!("callback");
                     assert_eq!(code, 0);
                     assert!(!res.is_null());
                     assert!(!param.is_null());
                     assert_eq!(CStr::from_ptr(param as _), c"hello");
+
+                    let row = taos_result_block(res);
+                    assert!(!row.is_null());
+
+                    let fields = taos_fetch_fields(res);
+                    assert!(!fields.is_null());
+
+                    let num_fields = taos_num_fields(res);
+                    assert_eq!(num_fields, 2);
+
+                    let mut str = vec![0 as c_char; 1024];
+                    let len = taos_print_row(str.as_mut_ptr(), *row, fields, num_fields);
+                    assert!(len > 0);
+                    println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
                 }
             }
 
