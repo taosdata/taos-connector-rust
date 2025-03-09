@@ -172,6 +172,7 @@ impl Layout {
         self.set(Self::SCHEMA_CHANGED, true);
         self
     }
+
     pub fn set_schema_changed(&mut self, value: bool) -> &mut Self {
         self.set(Self::SCHEMA_CHANGED, value);
         self

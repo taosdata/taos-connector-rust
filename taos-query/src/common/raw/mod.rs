@@ -285,19 +285,15 @@ impl RawBlock {
 
             match field.ty() {
                 Ty::Null => unreachable!(),
-
-                // Signed integers columns.
                 Ty::Bool => _primitive_view!(Bool, bool),
                 Ty::TinyInt => _primitive_view!(TinyInt, i8),
                 Ty::SmallInt => _primitive_view!(SmallInt, i16),
                 Ty::Int => _primitive_view!(Int, i32),
                 Ty::BigInt => _primitive_view!(BigInt, i64),
-                // Unsigned integers columns.
                 Ty::UTinyInt => _primitive_view!(UTinyInt, u8),
                 Ty::USmallInt => _primitive_view!(USmallInt, u16),
                 Ty::UInt => _primitive_view!(UInt, u32),
                 Ty::UBigInt => _primitive_view!(UBigInt, u64),
-                // Float columns.
                 Ty::Float => _primitive_view!(Float, f32),
                 Ty::Double => _primitive_view!(Double, f64),
                 Ty::VarChar => {
