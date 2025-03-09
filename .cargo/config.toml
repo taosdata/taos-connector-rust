@@ -9,6 +9,7 @@ rustflags = [
     # Suspicious Group
     "-Aclippy::incompatible_msrv",
     "-Aclippy::missing_transmute_annotations",
+    "-Aclippy::macro_metavars_in_unsafe",
 
     # Perf Group
     "-Aclippy::result_large_err",
