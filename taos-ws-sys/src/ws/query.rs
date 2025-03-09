@@ -1985,7 +1985,7 @@ mod tests {
                     "insert into t0 values (now+2s, 'world', 'world', 'world', 'POINT(2.0 2.0)')",
                     "insert into t0 values (now+3s, null, null, null, null)",
                     "insert into t0 values (now+4s, 'hello, world', 'hello, world', 'hello, world', 'POINT(3.0 3.0)')",
-                    "insert into t0 values (now+4s, null, null, null, null)",
+                    "insert into t0 values (now+5s, null, null, null, null)",
                 ],
             );
 
