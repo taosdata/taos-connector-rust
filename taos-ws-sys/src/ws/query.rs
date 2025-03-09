@@ -518,7 +518,11 @@ pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
 #[no_mangle]
 #[instrument(level = "trace", ret)]
 pub extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int {
-    todo!()
+    trace!("taos_fetch_block start, res: {res:?}, rows: {rows:?}");
+    let mut num_of_rows = 0;
+    taos_fetch_block_s(res, &mut num_of_rows, rows);
+    trace!("taos_fetch_block succ, num_of_rows: {num_of_rows}");
+    num_of_rows
 }
 
 #[no_mangle]
