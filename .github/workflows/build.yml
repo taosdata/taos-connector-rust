@@ -24,7 +24,7 @@ jobs:
 
       - name: Set up Rust
         id: setup-rust
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.78.0
           components: clippy
@@ -68,21 +68,15 @@ jobs:
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
 
-      - name: Set up Rust
-        id: setup-rust
-        uses: dtolnay/rust-toolchain@nightly
-
       - name: Build TDengine
         env:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
-          rustc --version
           cd TDengine
           echo use commit ${BRANCH_NAME}
           sed -iE "s#GIT_TAG.*#GIT_TAG ${BRANCH_NAME}#" cmake/taosws_CMakeLists.txt.in
           mkdir release && cd release
           cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
-          rustc --version
 
       - uses: actions/cache@v4
         id: cache-rust-target
@@ -92,7 +86,6 @@ jobs:
 
       - name: Install TDengine
         run: |
-          rustc --version
           cd TDengine/release/
           make -j8 || exit 1
           sudo make install
