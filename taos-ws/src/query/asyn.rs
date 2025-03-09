@@ -830,7 +830,10 @@ impl WsTaos {
         meta.write_u64_le(message_id).map_err(Error::from)?;
         meta.write_u64_le(raw_meta_message as u64)
             .map_err(Error::from)?;
-        meta.write_all(&raw.as_bytes()).map_err(Error::from)?;
+
+        meta.write_u32_le(raw.raw_len()).map_err(Error::from)?;
+        meta.write_u16_le(raw.raw_type()).map_err(Error::from)?;
+        meta.write_all(raw.raw_slice()).map_err(Error::from)?;
         let len = meta.len();
 
         tracing::trace!("write meta with req_id: {req_id}, raw data length: {len}",);
@@ -925,7 +928,7 @@ impl WsTaos {
             let len = meta.len();
             tracing::trace!("write block with req_id: {req_id}, raw data len: {len}",);
 
-            match time::timeout(
+            let recv = time::timeout(
                 Duration::from_secs(60),
                 self.sender.send_recv(WsSend::Binary(meta)),
             )
@@ -937,7 +940,9 @@ impl WsTaos {
                     0xE002, // Connection closed
                     "Write raw data timeout, maybe the connection has been lost",
                 )
-            })?? {
+            })??;
+
+            match recv {
                 WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
                 _ => Err(RawError::from_string("write raw block error"))?,
             }

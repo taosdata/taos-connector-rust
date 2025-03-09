@@ -66,21 +66,21 @@ async fn main() -> anyhow::Result<()> {
                 MessageSet::Meta(meta) => {
                     println!("{mid} meta: {:?}", meta);
                     let raw = meta.as_raw_meta().await?;
-                    let bytes = raw.as_bytes();
+                    let bytes = raw.to_bytes();
                     let path = format!("raw_{}.bin", mid);
                     std::fs::write(path, bytes.deref())?;
                 }
                 MessageSet::Data(data) => {
                     println!("{mid} data: {:?}", data);
                     let raw = data.as_raw_data().await?;
-                    let bytes = raw.as_bytes();
+                    let bytes = raw.to_bytes();
                     let path = format!("raw_{}.bin", mid);
                     std::fs::write(path, bytes.deref())?;
                 }
                 MessageSet::MetaData(meta, ..) => {
                     println!("{mid} meta data: {:?}", meta);
                     let raw = meta.as_raw_meta().await?;
-                    let bytes = raw.as_bytes();
+                    let bytes = raw.to_bytes();
                     let path = format!("raw_{}.bin", mid);
                     std::fs::write(path, bytes.deref())?;
                 }

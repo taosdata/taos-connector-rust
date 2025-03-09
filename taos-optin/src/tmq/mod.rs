@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use itertools::Itertools;
-use taos_query::common::{raw_data_t, RawData, RawMeta};
+use taos_query::common::RawMeta;
 use taos_query::prelude::tokio::sync::oneshot;
 use taos_query::prelude::tokio::{self, time};
 use taos_query::prelude::{RawError, RawResult};
@@ -15,6 +15,7 @@ use taos_query::tmq::{
 };
 use taos_query::util::Edition;
 use taos_query::{Dsn, IntoDsn, RawBlock};
+use tracing::instrument;
 
 use crate::raw::{ApiEntry, RawRes};
 use crate::types::tmq_res_t;
@@ -298,51 +299,48 @@ pub struct Messages {
 }
 
 impl Iterator for Messages {
-    type Item = (Offset, MessageSet<Meta, Data>);
+    type Item = RawResult<(Offset, MessageSet<Meta, Data>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.tmq
-            .poll_timeout(self.timeout.map_or(-1, |t| t.as_millis() as i64))
-            .map(|raw| (Offset(raw.clone()), MessageSet::from(raw)))
+        let timeout = self.timeout.map_or(-1, |t| t.as_millis() as _);
+        match self.tmq.poll_timeout(timeout) {
+            Ok(Some(raw)) => Some(Ok((Offset(raw.clone()), MessageSet::from(raw)))),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
     }
 }
 
 #[derive(Debug)]
 pub struct Meta {
     res: RawRes,
-    raw: RawData,
+    // raw: RawData,
 }
 
 impl AsyncOnSync for Meta {}
 
 impl IsMeta for Meta {
     fn as_raw_meta(&self) -> RawResult<RawMeta> {
-        Ok(unsafe { std::mem::transmute(self.raw.clone()) })
+        self.res.tmq_get_raw()
     }
 
     fn as_json_meta(&self) -> RawResult<taos_query::common::JsonMeta> {
-        let meta = serde_json::from_slice(self.res.tmq_get_json_meta().as_bytes())
-            .map_err(|err| RawError::from_string(err.to_string()))?;
-        Ok(meta)
+        self.res.tmq_get_json_meta()
     }
 }
 impl Meta {
     fn new(res: RawRes) -> Self {
-        let raw = res.tmq_get_raw();
-        Self { res, raw }
+        // let raw = res.tmq_get_raw().expect("get raw message error");
+        Self { res }
     }
 
-    pub fn to_raw(&self) -> raw_data_t {
-        self.raw.as_raw_data_t()
-    }
-
+    #[cfg(test)]
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::from_slice(self.res.tmq_get_json_meta().as_bytes())
-            .expect("meta json should always be valid json format")
-    }
-
-    pub fn to_sql(&self) -> String {
-        todo!()
+        self.res
+            .tmq_get_json_meta()
+            .ok()
+            .and_then(|v| serde_json::to_value(v).ok())
+            .unwrap_or_else(|| serde_json::Value::Null)
     }
 }
 #[derive(Debug)]
@@ -359,7 +357,7 @@ impl Data {
 #[async_trait::async_trait]
 impl IsAsyncData for Data {
     async fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
-        Ok(self.raw.tmq_get_raw())
+        self.raw.tmq_get_raw()
     }
 
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
@@ -369,7 +367,7 @@ impl IsAsyncData for Data {
 
 impl IsData for Data {
     fn as_raw_data(&self) -> RawResult<taos_query::common::RawData> {
-        Ok(self.raw.tmq_get_raw())
+        self.raw.tmq_get_raw()
     }
 
     fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
@@ -383,7 +381,9 @@ impl From<RawRes> for MessageSet<Meta, Data> {
             tmq_res_t::TMQ_RES_INVALID => unreachable!(),
             tmq_res_t::TMQ_RES_DATA => Self::Data(Data::new(raw)),
             tmq_res_t::TMQ_RES_TABLE_META => Self::Meta(Meta::new(raw)),
-            tmq_res_t::TMQ_RES_METADATA => Self::MetaData(Meta::new(raw.clone()), Data::new(raw)),
+            // tmq_res_t::TMQ_RES_METADATA => Self::MetaData(Meta::new(raw.clone()), Data::new(raw)),
+            // TODO: New variant RAWDATA since 3.3.6.0
+            _ => Self::MetaData(Meta::new(raw.clone()), Data::new(raw)),
         }
     }
 }
@@ -419,7 +419,7 @@ impl AsConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
-        Ok(self.tmq.poll_timeout(timeout.as_raw_timeout()).map(|raw| {
+        Ok(self.tmq.poll_timeout(timeout.as_raw_timeout())?.map(|raw| {
             (
                 Offset(raw.clone()),
                 match raw.tmq_message_type() {
@@ -428,7 +428,12 @@ impl AsConsumer for Consumer {
                     tmq_res_t::TMQ_RES_TABLE_META => {
                         taos_query::tmq::MessageSet::Meta(Meta::new(raw))
                     }
-                    tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(
+                    // tmq_res_t::TMQ_RES_METADATA => taos_query::tmq::MessageSet::MetaData(
+                    //     Meta::new(raw.clone()),
+                    //     Data::new(raw),
+                    // ),
+                    // TODO: New variant RAWDATA since 3.3.6.0
+                    _ => taos_query::tmq::MessageSet::MetaData(
                         Meta::new(raw.clone()),
                         Data::new(raw),
                     ),
@@ -528,6 +533,7 @@ impl AsAsyncConsumer for Consumer {
         r
     }
 
+    #[instrument(skip_all)]
     async fn recv_timeout(
         &self,
         timeout: taos_query::tmq::Timeout,
@@ -537,6 +543,7 @@ impl AsAsyncConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
+        let now = time::Instant::now();
         let (tx, rx) = oneshot::channel();
 
         self.tmq
@@ -560,14 +567,16 @@ impl AsAsyncConsumer for Consumer {
                 Ok(None)
             }
             res = rx => {
-                let raw = res.map_err(RawError::from_any)?.map(|raw| {
+                let raw = res.map_err(RawError::from_any)??.map(|raw| {
                     (
                         Offset(raw.clone()),
                         match raw.tmq_message_type() {
                             tmq_res_t::TMQ_RES_INVALID => unreachable!(),
                             tmq_res_t::TMQ_RES_DATA => MessageSet::Data(Data::new(raw)),
                             tmq_res_t::TMQ_RES_TABLE_META => MessageSet::Meta(Meta::new(raw)),
-                            tmq_res_t::TMQ_RES_METADATA => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw))
+                            // tmq_res_t::TMQ_RES_METADATA => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw)),
+                            // TODO: New variant RAWDATA since 3.3.6.0
+                            _ => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw)),
                         },
                     )
                 });
@@ -575,13 +584,20 @@ impl AsAsyncConsumer for Consumer {
             }
         };
 
+        let elapsed = now.elapsed();
         match res {
             Ok(res) => {
-                tracing::trace!("Got a new message");
+                tracing::trace!(
+                    consumer.recv.elapsed.ms = elapsed.as_millis(),
+                    "Got a new message"
+                );
                 Ok(res)
             }
             Err(err) => {
-                tracing::warn!("Polling message error: {err:?}");
+                tracing::warn!(
+                    consumer.recv.elapsed.ms = elapsed.as_millis(),
+                    "Polling message error: {err:?}"
+                );
                 Err(err)
             }
         }

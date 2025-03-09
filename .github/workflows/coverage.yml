@@ -134,7 +134,9 @@ jobs:
 
       - name: Set up Rust
         id: setup-rust
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.78.0
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov

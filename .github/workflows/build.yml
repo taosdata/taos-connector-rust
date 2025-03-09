@@ -26,6 +26,7 @@ jobs:
         id: setup-rust
         uses: dtolnay/rust-toolchain@nightly
         with:
+          toolchain: 1.78.0
           components: clippy
 
       - uses: actions/cache@v4

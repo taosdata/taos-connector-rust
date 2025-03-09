@@ -1,8 +1,8 @@
-use std::io::Read;
 use std::time::Instant;
 
 use clap::Parser;
 use taos::*;
+use taos_query::common::RawData;
 
 #[derive(Debug, Parser)]
 struct Opts {
@@ -96,10 +96,7 @@ async fn main() -> anyhow::Result<()> {
             std::io::stdin().read_line(&mut String::new())?;
         }
         let mut file = std::fs::File::open(&path)?;
-        let mut buf = Vec::new();
-        let size = buf.len();
-        file.read_to_end(&mut buf)?;
-        let raw = RawMeta::new(bytes::Bytes::from(buf));
+        let raw: RawMeta = Inlinable::read_inlined(&mut file)?;
         let instant = Instant::now();
         conn.write_raw_meta(&raw).await?;
         eprintln!("{}: write raw data from {:?} done", idx, path);
@@ -107,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
             "{},{},{},{}",
             idx,
             path.display(),
-            size,
+            raw.raw_len(),
             instant.elapsed().as_millis()
         );
         idx += 1;
@@ -153,10 +150,8 @@ async fn main() -> anyhow::Result<()> {
                 std::io::stdin().read_line(&mut String::new())?;
             }
             let mut file = std::fs::File::open(path)?;
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)?;
-            let size = buf.len();
-            let raw = RawMeta::new(bytes::Bytes::from(buf));
+            let raw: RawData = Inlinable::read_inlined(&mut file)?;
+            let size = raw.raw_len() as usize + 6;
             senders[idx % opts.workers]
                 .send((idx, path.clone(), raw, size))
                 .await?;

@@ -9,11 +9,40 @@ use taos::*;
 
 #[derive(Debug, Parser)]
 struct Opts {
+    /// User
+    #[clap(short, long, default_value = "root")]
+    user: String,
+    /// Password
+    #[clap(short = 'P', long, default_value = "taosdata")]
+    pass: String,
     /// The target to connect to.
-    #[clap(
-        default_value = "tmq://localhost:6030/ts5250?group.id=dump&experimental.snapshot.enable=true&auto.offset.reset=earliest"
-    )]
-    tmq: String,
+    #[clap(long, default_value = "localhost")]
+    host: String,
+    #[clap(long, default_value = "6030")]
+    port: u16,
+    /// The topic to consume from.
+    #[clap(short, long, required = true)]
+    topic: String,
+
+    /// Poll timeout
+    #[clap(long)]
+    timeout: Option<String>,
+    /// Consumer group
+    #[clap(long)]
+    group: Option<String>,
+
+    /// Set options.
+    ///
+    /// By default, we already set
+    /// 1. experimental.snapshot.enable=true
+    /// 2. auto.offset.reset=latest
+    /// 3. client.id=raw-dump .
+    #[clap(short, long)]
+    set: Vec<String>,
+
+    /// Interactive mode.
+    #[clap(short, long)]
+    interactive: bool,
 
     /// Read raw data from directory.
     #[clap(short, long, default_value = "./")]
@@ -42,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
         .parse_default_env()
         .try_init()?;
 
-    let args = Opts::parse();
+    let mut args = Opts::parse();
     if args.raw_dir.exists() {
         if !args.raw_dir.is_dir() {
             bail!("{} is not a directory", args.raw_dir.display());
@@ -51,7 +80,29 @@ async fn main() -> anyhow::Result<()> {
         std::fs::create_dir_all(&args.raw_dir)?;
     }
 
-    let mut dsn: Dsn = args.tmq.parse()?;
+    let mut dsn = Dsn::default();
+    dsn.driver = "tmq".to_string();
+    dsn.username = Some(args.user);
+    dsn.password = Some(args.pass);
+    dsn.subject = Some(args.topic);
+
+    dsn.addresses.push(Address::new(args.host, args.port));
+
+    if let Some(timeout) = &args.timeout {
+        dsn.set("timeout", timeout);
+    }
+    if let Some(group) = &args.group {
+        dsn.set("group.id", group);
+    }
+
+    for s in &args.set {
+        tracing::debug!("set: {}", s);
+        if let Some((k, v)) = s.split_once('=') {
+            dsn.set(k.trim(), v.trim());
+        } else {
+            dsn.set(s.trim(), "");
+        }
+    }
 
     let topic = dsn
         .subject
@@ -67,6 +118,8 @@ async fn main() -> anyhow::Result<()> {
     }
     eprintln!("group id: {}", dsn.get("group.id").unwrap());
 
+    tracing::debug!("Full dsn: {dsn}");
+
     let tmq = TmqBuilder::from_dsn(&dsn)?;
 
     let mut consumer = tmq.build().await?;
@@ -76,15 +129,34 @@ async fn main() -> anyhow::Result<()> {
 
     let mut last_offset = None;
     let blocks_cost = Duration::ZERO;
+    if args.interactive {
+        println!("> Interactive mode, press q to quit, c or nothing to continue, m to commit, off to continue and set interactive mode off:");
+
+        let mut buf = String::new();
+        std::io::stdin().read_line(&mut buf)?;
+        let buf = buf.trim();
+        match buf {
+            "q" | "quit" => return Ok(()),
+            "m" => {
+                println!("no offset to commit");
+            }
+            "off" => {
+                args.interactive = false;
+            }
+            _ => {}
+        }
+    }
     {
         // let mut stream = consumer.stream();
         eprintln!("start consuming");
 
         let begin = Instant::now();
+        let u = consumer.default_timeout();
+        tracing::info!("{:?}", u);
 
         let mut mid = 0;
         println!("id,type,size");
-        while let Some((offset, message)) = consumer.recv_timeout(Timeout::from_secs(5)).await? {
+        while let Some((offset, message)) = consumer.recv_timeout(u).await? {
             // println!("{mid} offset: {:?}", offset);
             // get information from offset
             match message {
@@ -93,7 +165,7 @@ async fn main() -> anyhow::Result<()> {
                         continue;
                     }
                     let raw = meta.as_raw_meta().await?;
-                    let bytes = raw.as_bytes();
+                    let bytes = raw.to_bytes();
                     println!("{mid},meta,{}", bytes.len());
                     let path = args.raw_dir.join(format!("raw_{}_meta.bin", mid));
                     std::fs::write(path, bytes.deref())?;
@@ -101,7 +173,7 @@ async fn main() -> anyhow::Result<()> {
                 MessageSet::Data(data) => {
                     // println!("{mid} data: {:?}", data);
                     let raw = data.as_raw_data().await?;
-                    let bytes = raw.as_bytes();
+                    let bytes = raw.to_bytes();
                     println!("{mid},data,{}", bytes.len());
 
                     if args.print_block {
@@ -134,7 +206,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                     // println!("{mid} meta data: {:?}", meta);
                     let raw = meta.as_raw_meta().await?;
-                    let bytes = raw.as_bytes();
+                    let bytes = raw.to_bytes();
                     println!("{mid},metadata,{}", bytes.len());
                     if args.print_block {
                         while let Some(block) = data.fetch_raw_block().await? {
@@ -163,13 +235,28 @@ async fn main() -> anyhow::Result<()> {
             }
             mid += 1;
 
-            if !args.no_commit {
-                println!("committing offset: {:?}", offset);
-                consumer.commit(offset).await?;
+            if args.interactive {
+                println!("> Interactive mode, press q to quit, c or nothing to continue, m to commit, off to continue and set interactive mode off:");
+                let mut buf = String::new();
+                std::io::stdin().read_line(&mut buf)?;
+                let buf = buf.trim();
+                match buf {
+                    "q" | "quit" => break,
+                    "m" => {
+                        consumer.commit(offset).await?;
+                    }
+                    "off" => {
+                        args.interactive = false;
+                    }
+                    _ => {}
+                }
+                tracing::info!(mid, "polling next message");
             } else {
-                last_offset = Some(offset);
-                println!("no commit, sleep 5s instead");
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                if !args.no_commit {
+                    consumer.commit(offset).await?;
+                } else {
+                    last_offset = Some(offset);
+                }
             }
         }
         drop(last_offset);

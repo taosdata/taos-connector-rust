@@ -10,6 +10,7 @@ pub(super) mod tmq {
     use taos_query::prelude::tokio::sync::oneshot;
     use taos_query::tmq::{Assignment, VGroupId};
     use taos_query::RawError;
+    use tracing::trace;
 
     use super::Topics;
     use crate::into_c_str::IntoCStr;
@@ -23,8 +24,8 @@ pub(super) mod tmq {
         tmq_api: Arc<TmqApi>,
         tmq_ptr: *mut tmq_t,
         timeout: i64,
-        sender: flume::Sender<oneshot::Sender<Option<RawRes>>>,
-        receiver: Option<flume::Receiver<oneshot::Sender<Option<RawRes>>>>,
+        sender: flume::Sender<oneshot::Sender<RawResult<Option<RawRes>>>>,
+        receiver: Option<flume::Receiver<oneshot::Sender<RawResult<Option<RawRes>>>>>,
         thread_handle: Option<std::thread::JoinHandle<()>>,
         stop_signal: Arc<AtomicBool>,
     }
@@ -175,13 +176,16 @@ pub(super) mod tmq {
             }
         }
 
-        pub fn poll_timeout(&self, timeout: i64) -> Option<RawRes> {
+        pub fn poll_timeout(&self, timeout: i64) -> RawResult<Option<RawRes>> {
             tracing::trace!("poll next message with timeout {}", timeout);
             let res = unsafe { (self.tmq_api.tmq_consumer_poll)(self.as_ptr(), timeout) };
             if res.is_null() {
-                None
+                self.api.check(res)?;
+                Ok(None)
             } else {
-                Some(unsafe { RawRes::from_ptr_unchecked(self.api.clone(), res) })
+                Ok(Some(unsafe {
+                    RawRes::from_ptr_unchecked(self.api.clone(), res)
+                }))
             }
         }
 
@@ -336,7 +340,7 @@ pub(super) mod tmq {
                 return;
             }
 
-            tracing::trace!("Spawning worker thread to call C func `tmq_consumer_poll`");
+            trace!("Spawning worker thread to call C func `tmq_consumer_poll`");
 
             let receiver = self.receiver.take().unwrap();
             let safe_tmq = SafeTmqT(self.as_ptr());
@@ -353,58 +357,67 @@ pub(super) mod tmq {
                     match receiver.recv() {
                         Ok(sender) => {
                             if let Some(res) = cache.take() {
-                                if let Err(res) = sender.send(Some(res)) {
-                                    tracing::trace!(
-                                        "Receiver has been closed, cached res: {res:?}"
-                                    );
-                                    cache = res;
+                                if let Err(res) = sender.send(Ok(Some(res))) {
+                                    trace!("Receiver has been closed, cached res: {res:?}");
+                                    cache = res.unwrap();
                                 }
-                                tracing::trace!("Using cache, poll next message.");
+                                trace!("Using cache, poll next message.");
                                 continue;
                             }
 
                             let mut timeout = timeout;
-                            let mut res = std::ptr::null_mut();
+                            let mut poll_res = std::ptr::null_mut();
+                            let mut val = Ok(None);
 
                             while timeout > 0 {
                                 let time = timeout.min(2000);
                                 timeout -= time;
 
-                                tracing::trace!(
+                                trace!(
                                     "Calling C func `tmq_consumer_poll` with ptr: {:?}, timeout: {}",
                                     safe_tmq.0,
                                     time
                                 );
-                                let r = unsafe { (tmq_api.tmq_consumer_poll)(safe_tmq.0, time) };
-                                tracing::trace!("C func `tmq_consumer_poll` returned a ptr: {r:?}");
+                                let now = std::time::Instant::now();
+                                let res = unsafe { (tmq_api.tmq_consumer_poll)(safe_tmq.0, time) };
+                                let elapsed = now.elapsed();
+                                trace!(
+                                    tmq.poll.elapsed.ms = elapsed.as_millis(),
+                                    "C func `tmq_consumer_poll` returned a ptr: {res:?}"
+                                );
 
-                                if !r.is_null() {
-                                    res = r;
+                                if !res.is_null() {
+                                    poll_res = res;
+                                    break;
+                                }
+
+                                if let Err(err) = api.check(res) {
+                                    val = Err(err);
                                     break;
                                 }
                             }
 
-                            if res.is_null() {
-                                if sender.send(None).is_err() {
-                                    tracing::trace!("Receiver has been closed");
+                            if poll_res.is_null() {
+                                if sender.send(val).is_err() {
+                                    trace!("Receiver has been closed");
                                 }
                                 continue;
                             }
 
-                            let res = unsafe { RawRes::from_ptr_unchecked(api.clone(), res) };
-                            if let Err(res) = sender.send(Some(res)) {
-                                tracing::trace!("Receiver has been closed, cached res: {res:?}");
-                                cache = res;
+                            let res = unsafe { RawRes::from_ptr_unchecked(api.clone(), poll_res) };
+                            if let Err(res) = sender.send(Ok(Some(res))) {
+                                trace!("Receiver has been closed, cached res: {res:?}");
+                                cache = res.unwrap();
                             }
                         }
                         Err(_) => {
-                            tracing::trace!("Sender has been closed, exit thread.");
+                            trace!("Sender has been closed, exit thread.");
                             break;
                         }
                     };
                 }
 
-                tracing::trace!("Worker thread stopped.");
+                trace!("Worker thread stopped.");
             });
 
             self.thread_handle = Some(handle);
@@ -414,7 +427,7 @@ pub(super) mod tmq {
             self.tmq_api.clone()
         }
 
-        pub(crate) fn sender(&self) -> flume::Sender<oneshot::Sender<Option<RawRes>>> {
+        pub(crate) fn sender(&self) -> flume::Sender<oneshot::Sender<RawResult<Option<RawRes>>>> {
             self.sender.clone()
         }
     }
