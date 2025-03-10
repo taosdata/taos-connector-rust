@@ -1457,7 +1457,7 @@ mod tests {
 
     use super::*;
     use crate::ws::query::*;
-    use crate::ws::{test_connect, test_exec, test_exec_many};
+    use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
 
     macro_rules! new_bind {
         ($ty:expr, $buffer:ident, $length:ident, $is_null:ident) => {
@@ -1587,6 +1587,7 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1740472346");
+            taos_close(taos);
         }
     }
 
@@ -1605,6 +1606,8 @@ mod tests {
 
             let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
+
+            taos_close(taos);
         }
 
         unsafe {
@@ -1614,6 +1617,8 @@ mod tests {
 
             let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
+
+            taos_close(taos);
         }
     }
 
@@ -1691,6 +1696,7 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1740560525");
+            taos_close(taos);
         }
     }
 
@@ -2083,6 +2089,7 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1740563439");
+            taos_close(taos);
         }
 
         unsafe {
@@ -2143,6 +2150,7 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1740573608");
+            taos_close(taos);
         }
     }
 
@@ -2218,6 +2226,7 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1741246945");
+            taos_close(taos);
         }
 
         unsafe {
@@ -2290,6 +2299,7 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1741251640");
+            taos_close(taos);
         }
     }
 
@@ -2368,6 +2378,7 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1741438739");
+            taos_close(taos);
         }
     }
 }

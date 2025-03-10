@@ -1601,7 +1601,7 @@ mod tests {
 
     use super::*;
     use crate::ws::query::{taos_fetch_fields, taos_fetch_row, taos_num_fields, taos_print_row};
-    use crate::ws::{test_connect, test_exec, test_exec_many};
+    use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
 
     #[test]
     fn test_tmq_conf() {
@@ -1768,6 +1768,8 @@ mod tests {
                 taos,
                 &[format!("drop topic {topic}"), format!("drop database {db}")],
             );
+
+            taos_close(taos);
         }
     }
 
@@ -1846,6 +1848,8 @@ mod tests {
                 taos,
                 &[format!("drop topic {topic}"), format!("drop database {db}")],
             );
+
+            taos_close(taos);
         }
     }
 
@@ -1951,6 +1955,8 @@ mod tests {
                 taos,
                 &[format!("drop topic {topic}"), format!("drop database {db}")],
             );
+
+            taos_close(taos);
         }
     }
 
@@ -2088,6 +2094,8 @@ mod tests {
                 taos,
                 &[format!("drop topic {topic}"), format!("drop database {db}")],
             );
+
+            taos_close(taos);
         }
     }
 
@@ -2169,6 +2177,8 @@ mod tests {
                     "drop database test_1741260674",
                 ],
             );
+
+            taos_close(taos);
         }
     }
 
@@ -2249,6 +2259,8 @@ mod tests {
                 taos,
                 &[format!("drop topic {topic}"), format!("drop database {db}")],
             );
+
+            taos_close(taos);
         }
     }
 
@@ -2385,6 +2397,8 @@ mod tests {
                 taos,
                 &[format!("drop topic {topic}"), format!("drop database {db}")],
             );
+
+            taos_close(taos);
         }
     }
 
@@ -2561,6 +2575,8 @@ mod tests {
                     "drop database test_1741333066",
                 ],
             );
+
+            taos_close(taos);
         }
     }
 }

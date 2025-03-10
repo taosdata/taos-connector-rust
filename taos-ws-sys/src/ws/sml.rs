@@ -537,7 +537,7 @@ mod tests {
 
     use super::*;
     use crate::ws::sml::{TSDB_SML_PROTOCOL_TYPE, TSDB_SML_TIMESTAMP_TYPE};
-    use crate::ws::{test_connect, test_exec, test_exec_many};
+    use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
 
     #[test]
     fn test_sml_insert_raw() {
@@ -602,6 +602,7 @@ mod tests {
             assert!(!res.is_null());
 
             test_exec(taos, "drop database test_1737291333");
+            taos_close(taos);
         }
 
         unsafe {
@@ -630,6 +631,7 @@ mod tests {
             assert_eq!(total_rows, 2);
 
             test_exec(taos, "drop database test_1741168851");
+            taos_close(taos);
         }
     }
 
@@ -696,6 +698,7 @@ mod tests {
             assert!(!res.is_null());
 
             test_exec(taos, "drop database test_1741166212");
+            taos_close(taos);
         }
     }
 }

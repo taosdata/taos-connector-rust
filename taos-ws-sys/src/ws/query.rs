@@ -1255,7 +1255,7 @@ mod tests {
 
     use super::*;
     use crate::ws::error::{taos_errno, taos_errstr};
-    use crate::ws::{taos_connect, test_connect, test_exec, test_exec_many};
+    use crate::ws::{taos_close, taos_connect, test_connect, test_exec, test_exec_many};
 
     #[test]
     fn test_taos_query() {
@@ -1279,6 +1279,8 @@ mod tests {
                 "drop database test_1737102397",
             ],
         );
+
+        unsafe { taos_close(taos) };
     }
 
     #[test]
@@ -1304,6 +1306,7 @@ mod tests {
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1737102398");
+            taos_close(taos);
         }
     }
 
@@ -1330,6 +1333,7 @@ mod tests {
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1737102399");
+            taos_close(taos);
         }
     }
 
@@ -1356,6 +1360,7 @@ mod tests {
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1737102400");
+            taos_close(taos);
         }
     }
 
@@ -1382,6 +1387,7 @@ mod tests {
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1737102401");
+            taos_close(taos);
         }
     }
 
@@ -1417,6 +1423,7 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1737102402");
+            taos_close(taos);
         }
     }
 
@@ -1452,6 +1459,7 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1737102403");
+            taos_close(taos);
         }
     }
 
@@ -1478,6 +1486,7 @@ mod tests {
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1737102404");
+            taos_close(taos);
         }
     }
 
@@ -1504,6 +1513,8 @@ mod tests {
                     "drop database test_1737102405",
                 ],
             );
+
+            taos_close(taos);
         }
     }
 
@@ -1541,6 +1552,8 @@ mod tests {
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1737102406");
+
+            taos_close(taos);
         }
     }
 
@@ -1568,6 +1581,7 @@ mod tests {
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1737102407");
+            taos_close(taos);
         }
     }
 
@@ -1603,6 +1617,7 @@ mod tests {
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1737102408");
+            taos_close(taos);
         }
     }
 
@@ -1641,6 +1656,7 @@ mod tests {
             assert!(is_update);
 
             test_exec(taos, "drop database test_1737102409");
+            taos_close(taos);
         }
     }
 
@@ -1671,6 +1687,7 @@ mod tests {
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1737102410");
+            taos_close(taos);
         }
     }
 
@@ -1682,6 +1699,7 @@ mod tests {
             assert!(!server_info.is_null());
             let server_info = CStr::from_ptr(server_info).to_str().unwrap();
             println!("server_info: {server_info}");
+            taos_close(taos);
         }
     }
 
@@ -1706,6 +1724,7 @@ mod tests {
                     "create database test_1737102411",
                 ],
             );
+            taos_close(taos);
 
             let taos = taos_connect(
                 c"localhost".as_ptr(),
@@ -1721,6 +1740,8 @@ mod tests {
             let code = taos_get_current_db(taos, db.as_mut_ptr(), db.len() as _, &mut required);
             assert_eq!(code, 0);
             println!("db: {:?}", CStr::from_ptr(db.as_ptr()));
+
+            taos_close(taos);
         }
     }
 
@@ -1734,6 +1755,7 @@ mod tests {
             assert!(code != 0);
             let errstr = taos_errstr(ptr::null_mut());
             println!("errstr: {:?}", CStr::from_ptr(errstr));
+            taos_close(taos);
         }
     }
 
@@ -1795,6 +1817,7 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1740644681");
+            taos_close(taos);
         }
     }
 
@@ -1842,6 +1865,7 @@ mod tests {
             taos_query_a(taos, sql.as_ptr(), cb, param.as_ptr() as _);
 
             test_exec(taos, "drop database test_1740664844");
+            taos_close(taos);
         }
     }
 
@@ -1901,6 +1925,7 @@ mod tests {
             sleep(Duration::from_secs(1));
 
             test_exec(taos, "drop database test_1740731669");
+            taos_close(taos);
         }
     }
 
@@ -1967,6 +1992,7 @@ mod tests {
             sleep(Duration::from_secs(5));
 
             test_exec(taos, "drop database test_1740732937");
+            taos_close(taos);
         }
     }
 
@@ -2030,6 +2056,7 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1740785939");
+            taos_close(taos);
         }
     }
 
@@ -2068,6 +2095,7 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1740838806");
+            taos_close(taos);
         }
 
         unsafe {
@@ -2105,6 +2133,7 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1740841972");
+            taos_close(taos);
         }
     }
 
@@ -2167,11 +2196,12 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1741443150");
+            taos_close(taos);
         }
     }
 
     #[test]
-    fn test_taos_gete_raw_block() {
+    fn test_taos_get_raw_block() {
         unsafe {
             let taos = test_connect();
             test_exec_many(
@@ -2194,6 +2224,7 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1741489408");
+            taos_close(taos);
         }
     }
 }

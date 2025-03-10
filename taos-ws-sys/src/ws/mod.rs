@@ -13,7 +13,7 @@ use taos_query::TBuilder;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
-use tracing::instrument;
+use tracing::{instrument, trace};
 
 use crate::ws::query::TAOS_FIELD;
 
@@ -168,6 +168,7 @@ unsafe fn connect(
 #[no_mangle]
 #[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
+    trace!("taos_close, taos: {taos:?}");
     if taos.is_null() {
         set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
         return;
@@ -400,12 +401,12 @@ pub fn test_exec<S: AsRef<str>>(taos: *mut TAOS, sql: S) {
         let res = query::taos_query(taos, sql.as_ptr());
         assert!(!res.is_null());
 
-        let errno = error::taos_errno(res);
-        if errno != 0 {
-            let errstr = error::taos_errstr(res);
-            println!("errno: {}, errstr: {:?}", errno, CStr::from_ptr(errstr));
+        let code = error::taos_errno(res);
+        if code != 0 {
+            let err = error::taos_errstr(res);
+            println!("code: {}, err: {:?}", code, CStr::from_ptr(err));
         }
-        assert_eq!(errno, 0);
+        assert_eq!(code, 0);
 
         query::taos_free_result(res);
     }
