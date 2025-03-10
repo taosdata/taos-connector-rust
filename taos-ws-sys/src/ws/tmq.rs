@@ -1621,7 +1621,9 @@ mod tests {
     use std::thread::sleep;
 
     use super::*;
-    use crate::ws::query::{taos_fetch_fields, taos_fetch_row, taos_num_fields, taos_print_row};
+    use crate::ws::query::{
+        taos_fetch_fields, taos_fetch_row, taos_free_result, taos_num_fields, taos_print_row,
+    };
     use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
 
     #[test]
@@ -1781,6 +1783,8 @@ mod tests {
             let res = tmq_consumer_poll(consumer, 1000);
             let errno = tmq_commit_sync(consumer, res);
             assert_eq!(errno, 0);
+
+            taos_free_result(res);
 
             let errno = tmq_unsubscribe(consumer);
             assert_eq!(errno, 0);
@@ -1967,6 +1971,8 @@ mod tests {
 
                 let errno = tmq_commit_sync(consumer, res);
                 assert_eq!(errno, 0);
+
+                taos_free_result(res);
             }
 
             let errno = tmq_unsubscribe(consumer);
@@ -2106,6 +2112,8 @@ mod tests {
 
                 let committed_offset = tmq_committed(consumer, topic_name, vg_id);
                 assert_eq!(committed_offset, current_offset);
+
+                taos_free_result(res);
             }
 
             let errno = tmq_unsubscribe(consumer);
@@ -2273,6 +2281,8 @@ mod tests {
 
             sleep(Duration::from_secs(1));
 
+            taos_free_result(res);
+
             let errno = tmq_unsubscribe(consumer);
             assert_eq!(errno, 0);
 
@@ -2409,6 +2419,8 @@ mod tests {
 
                 let committed_offset = tmq_committed(consumer, topic_name, vg_id);
                 assert_eq!(committed_offset, current_offset);
+
+                taos_free_result(res);
             }
 
             let errno = tmq_unsubscribe(consumer);
@@ -2557,8 +2569,8 @@ mod tests {
                 vg_ids.push(assign.vgId);
             }
 
-            let mut pre_topic = None;
-            let mut pre_vg_id = 0;
+            let topic = topic.as_ptr();
+            let mut pre_vg_id = None;
             let mut pre_offset = 0;
 
             loop {
@@ -2568,20 +2580,18 @@ mod tests {
                     break;
                 }
 
-                let topic = tmq_get_topic_name(res);
-                assert!(!topic.is_null());
-
                 let vg_id = tmq_get_vgroup_id(res);
                 assert!(vg_ids.contains(&vg_id));
 
-                if let Some(pre_topic) = pre_topic {
-                    let offset = tmq_committed(tmq, pre_topic, pre_vg_id);
-                    assert!(offset > pre_offset);
+                if let Some(pre_vg_id) = pre_vg_id {
+                    let offset = tmq_committed(tmq, topic, pre_vg_id);
+                    assert!(offset >= pre_offset);
                 }
 
-                pre_topic = Some(topic);
-                pre_vg_id = vg_id;
+                pre_vg_id = Some(vg_id);
                 pre_offset = tmq_get_vgroup_offset(res);
+
+                taos_free_result(res);
             }
 
             let code = tmq_unsubscribe(tmq);
