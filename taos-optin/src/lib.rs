@@ -1,4 +1,4 @@
-#![allow(clippy::macro_metavars_in_unsafe)]
+// #![allow(clippy::macro_metavars_in_unsafe)]
 
 use std::cell::UnsafeCell;
 use std::ffi::{c_char, CStr, CString};

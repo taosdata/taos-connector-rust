@@ -333,7 +333,7 @@ impl Dsn {
                 match (host, port) {
                     (Some(host), Some(port)) => Ok(Some(Address::new(host, port))),
                     (Some(host), None) => {
-                        if host.contains("/") {
+                        if host.contains('/') {
                             Ok(Some(Address::from_path(host)))
                         } else {
                             Ok(Some(Address::from_host(host)))
@@ -391,7 +391,7 @@ impl Dsn {
                                     return None;
                                 }
                                 if let Some(port) =
-                                    addr.strip_prefix(":").map(|port| port.parse::<u16>())
+                                    addr.strip_prefix(':').map(|port| port.parse::<u16>())
                                 {
                                     return port
                                         .map_err(|e| {
@@ -407,7 +407,7 @@ impl Dsn {
                                         .map(Some)
                                         .transpose();
                                 }
-                                if let Some(host) = addr.strip_suffix(":") {
+                                if let Some(host) = addr.strip_suffix(':') {
                                     return Some(Ok(Address::from_host(percent_decode(
                                         host.to_string(),
                                     ))));
@@ -483,43 +483,6 @@ impl Dsn {
                         }
                     }
                 }
-                // if let Some(cap) = AT_SINGLE_ADDR_WITH_PORT_REGEX.captures(dbg!(main)) {
-                //     let host = cap
-                //         .get(1)
-                //         .map(|m| m.as_str().to_string())
-                //         .map(percent_decode);
-                //     let port = cap.get(3).map(|m| m.as_str().parse::<u16>().unwrap());
-                //     match (host, port) {
-                //         (Some(host), Some(port)) => {
-                //             Ok((protocol, None, None, vec![Address::new(host, port)]))
-                //         }
-                //         (Some(host), None) => {
-                //             if host.contains("/") {
-                //                 Ok((protocol, None, None, vec![Address::from_path(host)]))
-                //             } else {
-                //                 Ok((protocol, None, None, vec![Address::from_host(host)]))
-                //             }
-                //         }
-                //         (host, port) => Ok((
-                //             protocol,
-                //             None,
-                //             None,
-                //             vec![Address {
-                //                 host,
-                //                 port,
-                //                 ..Default::default()
-                //             }],
-                //         )),
-                //     }
-                // } else if main == ":" {
-                //     Ok((protocol, None, None, vec![]))
-                // } else if AT_MULTI_ADDR_WITH_PORT_REGEX.is_match(main) {
-                //     main.split(',').map(|s| s.trim()).map(|)
-                //     let _ = dbg!(&cap);
-                //     Ok((protocol, None, None, vec![]))
-                // } else {
-                //     Err(DsnError::InvalidFormat(main.to_string()))
-                // }
             }
         }
         if conf.starts_with("//") {
@@ -575,7 +538,7 @@ impl Dsn {
                     let subject = if subject.is_empty() {
                         None
                     } else {
-                        if subject.contains("?") {
+                        if subject.contains('?') {
                             return Err(DsnError::InvalidSpecialCharacterFormat(
                                 "Subject contains '?' mark".to_string(),
                             ));
@@ -668,7 +631,7 @@ impl Dsn {
         } else {
             // path-like dsn
             lazy_static::lazy_static! {
-                static ref PATH_REGEX: Regex = Regex::new(r"(?P<path>.*)\?(?P<params>[^?]+)").unwrap();
+                static ref PATH_REGEX: Regex = Regex::new(r"(?P<path>[^?]*)\?(?P<params>.*)").unwrap();
             }
             let mut dsn = Dsn {
                 driver,
@@ -1696,16 +1659,17 @@ mod tests {
     }
     #[test]
     fn path_with_special_chars() {
-        let s = "taos:/!@#$%^&*()-_+=[]{}:;><?|~,?params=1";
+        let s = "taos:/!@#$%^&*()-_+=[]{}:;><|~,?params=1";
         let dsn = Dsn::from_str(s).unwrap();
-        assert_eq!(dsn.path.unwrap(), "/!@#$%^&*()-_+=[]{}:;><?|~,");
+        assert_eq!(dsn.path.unwrap(), "/!@#$%^&*()-_+=[]{}:;><|~,");
         assert_eq!(dsn.params.get("params").unwrap(), "1");
     }
     #[test]
     fn at_question_position_mix() {
-        let s = "taos:/!@#$%^&*()-_+=[]{}:;><?|~,?params=./@abc.txt&b=!@#$%^*()-_+=[]{}:;><中文汉字£¢§®";
+        let s =
+            "taos:/!@#$%^&*()-_+=[]{}:;><|~,?params=./@abc.txt&b=!@#$%^*()-_+=[]{}:;><中文汉字£¢§®";
         let dsn = Dsn::from_str(s).unwrap();
-        assert_eq!(dsn.path.unwrap(), "/!@#$%^&*()-_+=[]{}:;><?|~,");
+        assert_eq!(dsn.path.unwrap(), "/!@#$%^&*()-_+=[]{}:;><|~,");
         assert_eq!(dsn.params.get("params").unwrap(), "./@abc.txt");
         assert_eq!(
             dsn.params.get("b").unwrap(),
@@ -1801,5 +1765,21 @@ mod tests {
 
         let dsn = Dsn::from_str("mqtt://:").unwrap();
         assert!(dsn.addresses.is_empty());
+    }
+
+    #[test]
+    fn taosx_csv_dsn() {
+        let dsn = r#"csv:/data/test-csv?skip=0&has_header=true&new_file_notify=false&file_pattern=^\\?\\-\\*\\-\\[\\-\\]\\-[ab]\\-[^ef]\\-.\\-.*\\.csv$"#;
+        let dsn = Dsn::from_str(dsn).unwrap();
+        dbg!(&dsn);
+        assert_eq!(dsn.driver, "csv");
+        assert_eq!(dsn.path.as_deref().unwrap(), "/data/test-csv");
+        assert_eq!(dsn.get("skip").unwrap(), "0");
+        assert_eq!(dsn.get("has_header").unwrap(), "true");
+        assert_eq!(dsn.get("new_file_notify").unwrap(), "false");
+        assert_eq!(
+            dsn.get("file_pattern").unwrap(),
+            r#"^\\?\\-\\*\\-\\[\\-\\]\\-[ab]\\-[^ef]\\-.\\-.*\\.csv$"#,
+        );
     }
 }
