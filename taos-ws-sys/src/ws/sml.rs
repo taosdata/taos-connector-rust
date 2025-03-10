@@ -214,6 +214,8 @@ unsafe fn sml_insert_raw(
 
     let data = String::from_utf8(slice.to_vec())?;
 
+    trace!("sml_insert_raw, data: {data:?}");
+
     let sml_data = if !tbnameKey.is_null() {
         let tbname_key = CStr::from_ptr(tbnameKey)
             .to_str()
@@ -402,6 +404,7 @@ unsafe fn sml_insert(
 
     let lines: &[*mut c_char] = slice::from_raw_parts(lines as _, numLines as _);
     let mut datas = Vec::with_capacity(numLines as _);
+
     for line in lines {
         if line.is_null() {
             return Err(TaosError::new(Code::INVALID_PARA, "line is null"));
@@ -411,6 +414,8 @@ unsafe fn sml_insert(
             .map_err(|_| TaosError::new(Code::INVALID_PARA, "line is invalid utf-8"))?;
         datas.push(data.to_string());
     }
+
+    trace!("sml_insert, datas: {datas:?}");
 
     let sml_data = if !tbnameKey.is_null() {
         let tbname_key = CStr::from_ptr(tbnameKey)
