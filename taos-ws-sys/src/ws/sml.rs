@@ -378,7 +378,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid_tbname_key(
 unsafe fn sml_insert(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
-    numLines: c_int,
+    mut numLines: c_int,
     protocol: c_int,
     precision: c_int,
     ttl: i32,
@@ -400,6 +400,10 @@ unsafe fn sml_insert(
             Code::INVALID_PARA,
             "numLines is less than 0",
         ));
+    }
+
+    if SchemalessProtocol::from(protocol) == SchemalessProtocol::Json {
+        numLines = 1;
     }
 
     let lines: &[*mut c_char] = slice::from_raw_parts(lines as _, numLines as _);

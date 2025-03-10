@@ -1154,7 +1154,7 @@ impl crate::prelude::sync::Inlinable for RawBlock {
 }
 
 #[repr(C)]
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SchemalessProtocol {
     Unknown = 0,
     #[default]
