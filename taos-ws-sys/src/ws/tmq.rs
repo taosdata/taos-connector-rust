@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::ptr;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
-use std::{mem, ptr};
 
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -223,19 +223,17 @@ pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *m
 
     match (list as *const TaosMaybeError<TmqList>)
         .as_ref()
-        .and_then(|list| list.deref())
+        .and_then(|list| list.deref_mut())
     {
         Some(list) => {
             if !list.topics.is_empty() {
-                let mut array: Vec<*mut c_char> = list
+                let arr = list
                     .topics
                     .iter()
                     .map(|s| CString::new(&**s).unwrap().into_raw())
-                    .collect();
-
-                let ptr = array.as_mut_ptr();
-                mem::forget(array);
-                ptr
+                    .collect::<Vec<_>>();
+                list.set_c_array(arr);
+                list.c_array.as_mut().unwrap().as_mut_ptr()
             } else {
                 ptr::null_mut()
             }
@@ -1395,11 +1393,34 @@ unsafe fn _tmq_conf_set(
 #[derive(Debug)]
 struct TmqList {
     topics: Vec<String>,
+    c_array: Option<Vec<*mut c_char>>,
+}
+
+impl Drop for TmqList {
+    fn drop(&mut self) {
+        self.free_c_array();
+    }
 }
 
 impl TmqList {
     fn new() -> Self {
-        Self { topics: Vec::new() }
+        Self {
+            topics: Vec::new(),
+            c_array: None,
+        }
+    }
+
+    fn free_c_array(&mut self) {
+        if let Some(arr) = self.c_array.take() {
+            for ch in arr {
+                let _ = unsafe { CString::from_raw(ch) };
+            }
+        }
+    }
+
+    fn set_c_array(&mut self, arr: Vec<*mut c_char>) {
+        self.free_c_array();
+        self.c_array = Some(arr);
     }
 }
 
@@ -1687,20 +1708,23 @@ mod tests {
     #[test]
     fn test_tmq_list() {
         unsafe {
-            let tmq_list = tmq_list_new();
-            assert!(!tmq_list.is_null());
+            let list = tmq_list_new();
+            assert!(!list.is_null());
 
-            let value = c"topic".as_ptr();
-            let res = tmq_list_append(tmq_list, value);
+            let val = c"topic".as_ptr();
+            let res = tmq_list_append(list, val);
             assert_eq!(res, 0);
 
-            let size = tmq_list_get_size(tmq_list);
+            let size = tmq_list_get_size(list);
             assert_eq!(size, 1);
 
-            let array = tmq_list_to_c_array(tmq_list);
-            assert!(!array.is_null());
+            let arr = tmq_list_to_c_array(list);
+            assert!(!arr.is_null());
 
-            tmq_list_destroy(tmq_list);
+            let arr = tmq_list_to_c_array(list);
+            assert!(!arr.is_null());
+
+            tmq_list_destroy(list);
         }
     }
 
