@@ -641,6 +641,37 @@ mod tests {
             test_exec(taos, "drop database test_1741168851");
             taos_close(taos);
         }
+
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1741608340",
+                    "create database test_1741608340",
+                    "use test_1741608340",
+                ],
+            );
+
+            let data = r#"[{"metric":"metric_json","timestamp":1626846400,"value":10.3,"tags":{"groupid":2,"location":"California.SanFrancisco","id":"d1001"}}]"#;
+
+            let data = data.as_bytes();
+            let len = data.len() as i32;
+            let lines = data.as_ptr() as *mut _;
+            let mut total_rows = 0;
+            let protocol = TSDB_SML_PROTOCOL_TYPE::TSDB_SML_JSON_PROTOCOL as i32;
+            let precision = TSDB_SML_TIMESTAMP_TYPE::TSDB_SML_TIMESTAMP_MILLI_SECONDS as i32;
+            let ttl = 0;
+
+            let res =
+                taos_schemaless_insert_raw(taos, lines, len, &mut total_rows, protocol, precision);
+            assert!(!res.is_null());
+            assert_eq!(total_rows, 1);
+            taos_free_result(res);
+
+            test_exec(taos, "drop database test_1741608340");
+            taos_close(taos);
+        }
     }
 
     #[test]
