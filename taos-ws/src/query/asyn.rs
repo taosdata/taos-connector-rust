@@ -321,7 +321,13 @@ async fn read_queries(
         match frame {
             Message::Text(text) => {
                 tracing::trace!("received json response: {text}",);
-                let v: WsRecv = serde_json::from_str(&text).unwrap();
+                // 如果text 序列化失败，打印日志，继续处理下一个消息
+                let v = serde_json::from_str::<WsRecv>(&text);
+                if let Err(err) = v {
+                    tracing::error!("failed to deserialize json text: {text}, error: {err:?}");
+                    return ControlFlow::Continue(());
+                }
+                let v = v.unwrap();
                 let queries_sender = queries_sender.clone();
                 let ws2 = ws2.clone();
                 let (req_id, data, ok) = v.ok();
@@ -403,7 +409,13 @@ async fn read_queries(
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     },
-                    // Block type is for binary.
+                    WsRecvData::ValidateSql { .. } => {
+                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                            let _ = sender.send(ok.map(|_| data));
+                        } else {
+                            tracing::warn!("req_id {req_id} not detected, message might be lost");
+                        }
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -705,9 +717,7 @@ impl WsTaos {
                             ok?;
                             break;
                         }
-                        WsRecvData::Version { .. } => {
-                            continue;
-                        }
+                        WsRecvData::Version { .. } => {}
                         data => {
                             return Err(RawError::from_string(format!(
                                 "Unexpected login result: {data:?}"
@@ -820,7 +830,10 @@ impl WsTaos {
         meta.write_u64_le(message_id).map_err(Error::from)?;
         meta.write_u64_le(raw_meta_message as u64)
             .map_err(Error::from)?;
-        meta.write_all(&raw.as_bytes()).map_err(Error::from)?;
+
+        meta.write_u32_le(raw.raw_len()).map_err(Error::from)?;
+        meta.write_u16_le(raw.raw_type()).map_err(Error::from)?;
+        meta.write_all(raw.raw_slice()).map_err(Error::from)?;
         let len = meta.len();
 
         tracing::trace!("write meta with req_id: {req_id}, raw data length: {len}",);
@@ -915,7 +928,7 @@ impl WsTaos {
             let len = meta.len();
             tracing::trace!("write block with req_id: {req_id}, raw data len: {len}",);
 
-            match time::timeout(
+            let recv = time::timeout(
                 Duration::from_secs(60),
                 self.sender.send_recv(WsSend::Binary(meta)),
             )
@@ -927,7 +940,9 @@ impl WsTaos {
                     0xE002, // Connection closed
                     "Write raw data timeout, maybe the connection has been lost",
                 )
-            })?? {
+            })??;
+
+            match recv {
                 WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
                 _ => Err(RawError::from_string("write raw block error"))?,
             }
@@ -1124,24 +1139,43 @@ impl WsTaos {
     }
 
     pub async fn s_put(&self, sml: &SmlData) -> RawResult<()> {
-        let action = WsSend::Insert {
+        let req = WsSend::Insert {
             protocol: sml.protocol() as u8,
             precision: sml.precision().into(),
             data: sml.data().join("\n"),
             ttl: sml.ttl(),
             req_id: sml.req_id(),
+            table_name_key: sml.table_name_key().cloned(),
         };
-        tracing::trace!("put send: {:?}", action);
-        let req = self.sender.send_recv(action).await?;
-
-        match req {
-            WsRecvData::Insert(res) => {
-                tracing::trace!("put resp : {:?}", res);
+        tracing::trace!("sml req: {req:?}");
+        match self.sender.send_recv(req).await? {
+            WsRecvData::Insert(resp) => {
+                tracing::trace!("sml resp: {resp:?}");
                 Ok(())
             }
-            _ => {
-                unreachable!()
+            _ => unreachable!(),
+        }
+    }
+
+    pub async fn validate_sql(&self, sql: &str) -> RawResult<()> {
+        let mut req = Vec::with_capacity(30 + sql.len());
+        let req_id = generate_req_id();
+        req.write_u64_le(req_id).map_err(Error::from)?;
+        req.write_u64_le(0).map_err(Error::from)?;
+        req.write_u64_le(10).map_err(Error::from)?;
+        req.write_u16_le(1).map_err(Error::from)?;
+        req.write_u32_le(sql.len() as _).map_err(Error::from)?;
+        req.write_all(sql.as_bytes()).map_err(Error::from)?;
+
+        match self.sender.send_recv(WsSend::Binary(req)).await? {
+            WsRecvData::ValidateSql { result_code, .. } => {
+                if result_code != 0 {
+                    Err(RawError::new(result_code, "validate sql error"))
+                } else {
+                    Ok(())
+                }
             }
+            _ => unreachable!(),
         }
     }
 
@@ -1219,7 +1253,7 @@ pub(crate) async fn fetch(
                     .await
                     .is_err()
                 {
-                    tracing::error!("Failed to send raw block; receiver may be closed");
+                    tracing::warn!("Failed to send raw block; receiver may be closed");
                     break;
                 }
             }
@@ -1812,4 +1846,13 @@ mod tests {
         client.exec(format!("drop database {db}")).await?;
         Ok(())
     }
+
+    // #[tokio::test]
+    // async fn test_validate_sql() -> anyhow::Result<()> {
+    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+    //     taos.validate_sql("create database if not exists test_1741338182")
+    //         .await?;
+    //     let _ = taos.validate_sql("select * from t0").await.unwrap_err();
+    //     Ok(())
+    // }
 }
