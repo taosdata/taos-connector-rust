@@ -921,6 +921,8 @@ pub unsafe extern "C" fn taos_get_current_db(
         code = -1;
     }
 
+    taos_free_result(res);
+
     trace!(
         "taos_get_current_db done database={:?}",
         CStr::from_ptr(database)
