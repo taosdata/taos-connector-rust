@@ -536,6 +536,7 @@ mod tests {
     use taos_query::util::generate_req_id;
 
     use super::*;
+    use crate::ws::query::taos_free_result;
     use crate::ws::sml::{TSDB_SML_PROTOCOL_TYPE, TSDB_SML_TIMESTAMP_TYPE};
     use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
 
@@ -562,23 +563,27 @@ mod tests {
 
             let res = taos_schemaless_insert_raw(taos, lines, len, total_rows, protocol, precision);
             assert!(!res.is_null());
+            taos_free_result(res);
 
             let req_id = generate_req_id() as _;
             let res = taos_schemaless_insert_raw_with_reqid(
                 taos, lines, len, total_rows, protocol, precision, req_id,
             );
             assert!(!res.is_null());
+            taos_free_result(res);
 
             let res = taos_schemaless_insert_raw_ttl(
                 taos, lines, len, total_rows, protocol, precision, ttl,
             );
             assert!(!res.is_null());
+            taos_free_result(res);
 
             let req_id = generate_req_id() as _;
             let res = taos_schemaless_insert_raw_ttl_with_reqid(
                 taos, lines, len, total_rows, protocol, precision, ttl, req_id,
             );
             assert!(!res.is_null());
+            taos_free_result(res);
 
             let req_id = generate_req_id() as _;
             let tbname_key = c"host".as_ptr() as *mut _;
@@ -586,6 +591,7 @@ mod tests {
                 taos, lines, len, total_rows, protocol, precision, ttl, req_id, tbname_key,
             );
             assert!(!res.is_null());
+            taos_free_result(res);
 
             let req_id = generate_req_id() as _;
             let res = taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
@@ -600,6 +606,7 @@ mod tests {
                 ptr::null_mut(),
             );
             assert!(!res.is_null());
+            taos_free_result(res);
 
             test_exec(taos, "drop database test_1737291333");
             taos_close(taos);
@@ -629,8 +636,40 @@ mod tests {
                 taos_schemaless_insert_raw(taos, lines, len, &mut total_rows, protocol, precision);
             assert!(!res.is_null());
             assert_eq!(total_rows, 2);
+            taos_free_result(res);
 
             test_exec(taos, "drop database test_1741168851");
+            taos_close(taos);
+        }
+
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1741608340",
+                    "create database test_1741608340",
+                    "use test_1741608340",
+                ],
+            );
+
+            let data = r#"[{"metric":"metric_json","timestamp":1626846400,"value":10.3,"tags":{"groupid":2,"location":"California.SanFrancisco","id":"d1001"}}]"#;
+
+            let data = data.as_bytes();
+            let len = data.len() as i32;
+            let lines = data.as_ptr() as *mut _;
+            let mut total_rows = 0;
+            let protocol = TSDB_SML_PROTOCOL_TYPE::TSDB_SML_JSON_PROTOCOL as i32;
+            let precision = TSDB_SML_TIMESTAMP_TYPE::TSDB_SML_TIMESTAMP_MILLI_SECONDS as i32;
+            let ttl = 0;
+
+            let res =
+                taos_schemaless_insert_raw(taos, lines, len, &mut total_rows, protocol, precision);
+            assert!(!res.is_null());
+            assert_eq!(total_rows, 1);
+            taos_free_result(res);
+
+            test_exec(taos, "drop database test_1741608340");
             taos_close(taos);
         }
     }
@@ -661,21 +700,25 @@ mod tests {
 
             let res = taos_schemaless_insert(taos, lines, num_lines, protocol, precision);
             assert!(!res.is_null());
+            taos_free_result(res);
 
             let req_id = generate_req_id() as _;
             let res = taos_schemaless_insert_with_reqid(
                 taos, lines, num_lines, protocol, precision, req_id,
             );
             assert!(!res.is_null());
+            taos_free_result(res);
 
             let res = taos_schemaless_insert_ttl(taos, lines, num_lines, protocol, precision, ttl);
             assert!(!res.is_null());
+            taos_free_result(res);
 
             let req_id = generate_req_id() as _;
             let res = taos_schemaless_insert_ttl_with_reqid(
                 taos, lines, num_lines, protocol, precision, ttl, req_id,
             );
             assert!(!res.is_null());
+            taos_free_result(res);
 
             let req_id = generate_req_id() as _;
             let tbname_key = c"host".as_ptr() as *mut _;
@@ -683,6 +726,7 @@ mod tests {
                 taos, lines, num_lines, protocol, precision, ttl, req_id, tbname_key,
             );
             assert!(!res.is_null());
+            taos_free_result(res);
 
             let req_id = generate_req_id() as _;
             let res = taos_schemaless_insert_ttl_with_reqid_tbname_key(
@@ -696,6 +740,7 @@ mod tests {
                 ptr::null_mut(),
             );
             assert!(!res.is_null());
+            taos_free_result(res);
 
             test_exec(taos, "drop database test_1741166212");
             taos_close(taos);

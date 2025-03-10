@@ -676,7 +676,6 @@ impl RawBlock {
         self.table.as_deref()
     }
 
-    // todo: db name?
     #[inline]
     pub fn tmq_db_name(&self) -> Option<&str> {
         self.database.as_deref()

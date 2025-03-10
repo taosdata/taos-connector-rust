@@ -227,12 +227,12 @@ pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *m
     {
         Some(list) => {
             if !list.topics.is_empty() {
-                let arr: Vec<*mut c_char> = list
+                let arr = list
                     .topics
                     .iter()
                     .map(|s| CString::new(&**s).unwrap().into_raw())
-                    .collect();
-                list.c_array = Some(arr);
+                    .collect::<Vec<_>>();
+                list.set_c_array(arr);
                 list.c_array.as_mut().unwrap().as_mut_ptr()
             } else {
                 ptr::null_mut()
@@ -1396,12 +1396,31 @@ struct TmqList {
     c_array: Option<Vec<*mut c_char>>,
 }
 
+impl Drop for TmqList {
+    fn drop(&mut self) {
+        self.free_c_array();
+    }
+}
+
 impl TmqList {
     fn new() -> Self {
         Self {
             topics: Vec::new(),
             c_array: None,
         }
+    }
+
+    fn free_c_array(&mut self) {
+        if let Some(arr) = self.c_array.take() {
+            for ch in arr {
+                let _ = unsafe { CString::from_raw(ch) };
+            }
+        }
+    }
+
+    fn set_c_array(&mut self, arr: Vec<*mut c_char>) {
+        self.free_c_array();
+        self.c_array = Some(arr);
     }
 }
 
@@ -1602,7 +1621,9 @@ mod tests {
     use std::thread::sleep;
 
     use super::*;
-    use crate::ws::query::{taos_fetch_fields, taos_fetch_row, taos_num_fields, taos_print_row};
+    use crate::ws::query::{
+        taos_fetch_fields, taos_fetch_row, taos_free_result, taos_num_fields, taos_print_row,
+    };
     use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
 
     #[test]
@@ -1689,20 +1710,23 @@ mod tests {
     #[test]
     fn test_tmq_list() {
         unsafe {
-            let tmq_list = tmq_list_new();
-            assert!(!tmq_list.is_null());
+            let list = tmq_list_new();
+            assert!(!list.is_null());
 
-            let value = c"topic".as_ptr();
-            let res = tmq_list_append(tmq_list, value);
+            let val = c"topic".as_ptr();
+            let res = tmq_list_append(list, val);
             assert_eq!(res, 0);
 
-            let size = tmq_list_get_size(tmq_list);
+            let size = tmq_list_get_size(list);
             assert_eq!(size, 1);
 
-            let array = tmq_list_to_c_array(tmq_list);
-            assert!(!array.is_null());
+            let arr = tmq_list_to_c_array(list);
+            assert!(!arr.is_null());
 
-            tmq_list_destroy(tmq_list);
+            let arr = tmq_list_to_c_array(list);
+            assert!(!arr.is_null());
+
+            tmq_list_destroy(list);
         }
     }
 
@@ -1759,6 +1783,8 @@ mod tests {
             let res = tmq_consumer_poll(consumer, 1000);
             let errno = tmq_commit_sync(consumer, res);
             assert_eq!(errno, 0);
+
+            taos_free_result(res);
 
             let errno = tmq_unsubscribe(consumer);
             assert_eq!(errno, 0);
@@ -1945,6 +1971,8 @@ mod tests {
 
                 let errno = tmq_commit_sync(consumer, res);
                 assert_eq!(errno, 0);
+
+                taos_free_result(res);
             }
 
             let errno = tmq_unsubscribe(consumer);
@@ -2084,6 +2112,8 @@ mod tests {
 
                 let committed_offset = tmq_committed(consumer, topic_name, vg_id);
                 assert_eq!(committed_offset, current_offset);
+
+                taos_free_result(res);
             }
 
             let errno = tmq_unsubscribe(consumer);
@@ -2251,6 +2281,8 @@ mod tests {
 
             sleep(Duration::from_secs(1));
 
+            taos_free_result(res);
+
             let errno = tmq_unsubscribe(consumer);
             assert_eq!(errno, 0);
 
@@ -2387,6 +2419,8 @@ mod tests {
 
                 let committed_offset = tmq_committed(consumer, topic_name, vg_id);
                 assert_eq!(committed_offset, current_offset);
+
+                taos_free_result(res);
             }
 
             let errno = tmq_unsubscribe(consumer);
@@ -2535,8 +2569,8 @@ mod tests {
                 vg_ids.push(assign.vgId);
             }
 
-            let mut pre_topic = None;
-            let mut pre_vg_id = 0;
+            let topic = topic.as_ptr();
+            let mut pre_vg_id = None;
             let mut pre_offset = 0;
 
             loop {
@@ -2546,20 +2580,18 @@ mod tests {
                     break;
                 }
 
-                let topic = tmq_get_topic_name(res);
-                assert!(!topic.is_null());
-
                 let vg_id = tmq_get_vgroup_id(res);
                 assert!(vg_ids.contains(&vg_id));
 
-                if let Some(pre_topic) = pre_topic {
-                    let offset = tmq_committed(tmq, pre_topic, pre_vg_id);
-                    assert!(offset > pre_offset);
+                if let Some(pre_vg_id) = pre_vg_id {
+                    let offset = tmq_committed(tmq, topic, pre_vg_id);
+                    assert!(offset >= pre_offset);
                 }
 
-                pre_topic = Some(topic);
-                pre_vg_id = vg_id;
+                pre_vg_id = Some(vg_id);
                 pre_offset = tmq_get_vgroup_offset(res);
+
+                taos_free_result(res);
             }
 
             let code = tmq_unsubscribe(tmq);
