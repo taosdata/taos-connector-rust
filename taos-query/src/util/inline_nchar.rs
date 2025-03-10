@@ -109,6 +109,7 @@ macro_rules! _impl_inline_str {
 
                 #[inline]
                 #[allow(mutable_transmutes)]
+                #[allow(clippy::missing_transmute_annotations)]
                 /// # Safety
                 ///
                 /// Do not use it directly.
