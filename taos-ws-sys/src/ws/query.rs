@@ -897,6 +897,7 @@ pub unsafe extern "C" fn taos_get_current_db(
     let mut data = ptr::null_mut();
     let mut code = taos_fetch_raw_block(res, &mut rows, &mut data);
     if code != 0 {
+        taos_free_result(res);
         return code;
     }
 
@@ -910,6 +911,7 @@ pub unsafe extern "C" fn taos_get_current_db(
     }
 
     if db.is_null() {
+        taos_free_result(res);
         return set_err_and_get_code(TaosError::new(Code::FAILED, "get value failed"));
     }
 
