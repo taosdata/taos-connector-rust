@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::ptr;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
-use std::{mem, ptr};
 
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -223,19 +223,17 @@ pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *m
 
     match (list as *const TaosMaybeError<TmqList>)
         .as_ref()
-        .and_then(|list| list.deref())
+        .and_then(|list| list.deref_mut())
     {
         Some(list) => {
             if !list.topics.is_empty() {
-                let mut array: Vec<*mut c_char> = list
+                let arr: Vec<*mut c_char> = list
                     .topics
                     .iter()
                     .map(|s| CString::new(&**s).unwrap().into_raw())
                     .collect();
-
-                let ptr = array.as_mut_ptr();
-                mem::forget(array);
-                ptr
+                list.c_array = Some(arr);
+                list.c_array.as_mut().unwrap().as_mut_ptr()
             } else {
                 ptr::null_mut()
             }
@@ -1395,11 +1393,15 @@ unsafe fn _tmq_conf_set(
 #[derive(Debug)]
 struct TmqList {
     topics: Vec<String>,
+    c_array: Option<Vec<*mut c_char>>,
 }
 
 impl TmqList {
     fn new() -> Self {
-        Self { topics: Vec::new() }
+        Self {
+            topics: Vec::new(),
+            c_array: None,
+        }
     }
 }
 
