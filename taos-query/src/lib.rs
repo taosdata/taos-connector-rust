@@ -2,6 +2,7 @@
 //!
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::type_complexity)]
+#![allow(unknown_lints)]
 
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Display};
