@@ -11,7 +11,7 @@ use tracing::Instrument;
 
 use crate::query::asyn::QueryMetrics;
 use crate::query::infra::{Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
-use crate::query::WsTaos;
+use crate::query::{BindType, WsTaos};
 use crate::{ResultSet, Taos};
 
 mod bind;
@@ -63,26 +63,61 @@ impl Stmt2 {
         unreachable!()
     }
 
-    async fn prepare<S: AsRef<str> + Send>(&mut self, sql: S) -> RawResult<()> {
+    async fn prepare<S: AsRef<str> + Send>(&mut self, _sql: S) -> RawResult<()> {
+        let sql = "insert into ? values(?, ?, ?, ?)";
+        tracing::trace!("stmt2 prepare, magic sql: {sql}");
+
         let req = WsSend::Stmt2Prepare {
             req_id: generate_req_id(),
             stmt_id: self.stmt_id.unwrap(),
-            sql: sql.as_ref().to_string(),
-            get_fields: true,
+            sql: sql.to_string(),
+            get_fields: false,
         };
+
         let resp = self.client.send_request(req).await?;
-        if let WsRecvData::Stmt2Prepare {
-            is_insert,
-            fields,
-            fields_count,
-            ..
-        } = resp
-        {
-            self.is_insert = Some(is_insert);
-            self.fields = fields;
-            self.fields_count = Some(fields_count);
+
+        let fields = vec![
+            Stmt2Field {
+                name: "ts".to_string(),
+                field_type: 9,
+                precision: 0,
+                scale: 0,
+                bytes: 8,
+                bind_type: BindType::Column,
+            },
+            Stmt2Field {
+                name: "current".to_string(),
+                field_type: 6,
+                precision: 0,
+                scale: 0,
+                bytes: 4,
+                bind_type: BindType::Column,
+            },
+            Stmt2Field {
+                name: "voltage".to_string(),
+                field_type: 4,
+                precision: 0,
+                scale: 0,
+                bytes: 4,
+                bind_type: BindType::Column,
+            },
+            Stmt2Field {
+                name: "phase".to_string(),
+                field_type: 6,
+                precision: 0,
+                scale: 0,
+                bytes: 4,
+                bind_type: BindType::Column,
+            },
+        ];
+
+        if let WsRecvData::Stmt2Prepare { .. } = resp {
+            self.is_insert = Some(true);
+            self.fields = Some(fields);
+            self.fields_count = None;
             return Ok(());
         }
+
         unreachable!()
     }
 
