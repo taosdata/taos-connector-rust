@@ -1486,20 +1486,17 @@ unsafe fn _tmq_consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
             let host = conf
                 .map
                 .get("td.connect.ip")
-                .map(|val| val.as_str())
-                .unwrap_or("localhost");
+                .map_or("localhost", |val| val.as_str());
 
             let user = conf
                 .map
                 .get("td.connect.user")
-                .map(|val| val.as_str())
-                .unwrap_or("root");
+                .map_or("root", |val| val.as_str());
 
             let pass = conf
                 .map
                 .get("td.connect.pass")
-                .map(|val| val.as_str())
-                .unwrap_or("taosdata");
+                .map_or("taosdata", |val| val.as_str());
 
             let dsn = if (host.contains("cloud.tdengine") || host.contains("cloud.taosdata"))
                 && user == "token"
@@ -1507,16 +1504,14 @@ unsafe fn _tmq_consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
                 let port = conf
                     .map
                     .get("td.connect.port")
-                    .map(|val| val.as_str())
-                    .unwrap_or("443");
+                    .map_or("443", |val| val.as_str());
 
                 format!("wss://{host}:{port}/?token={pass}")
             } else {
                 let port = conf
                     .map
                     .get("td.connect.port")
-                    .map(|val| val.as_str())
-                    .unwrap_or("6041");
+                    .map_or("6041", |val| val.as_str());
 
                 format!("ws://{user}:{pass}@{host}:{port}")
             };
@@ -1533,7 +1528,7 @@ unsafe fn _tmq_consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
                         dsn.params.insert(key.clone(), "false".to_string());
                     }
                     "auto.commit.interval.ms" => {
-                        auto_commit_interval_ms = val.parse().unwrap_or(5000)
+                        auto_commit_interval_ms = val.parse().unwrap_or(5000);
                     }
                     _ => {
                         dsn.params.insert(key.clone(), val.clone());
