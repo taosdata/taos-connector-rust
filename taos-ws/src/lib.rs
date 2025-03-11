@@ -132,6 +132,7 @@ impl taos_query::TBuilder for TaosBuilder {
             })
         }
     }
+
     fn is_enterprise_edition(&self) -> RawResult<bool> {
         if self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
@@ -329,6 +330,7 @@ impl TaosBuilder {
             "ws"
         }
     }
+
     fn set_https(&self, https: bool) {
         self.https.store(https, Ordering::SeqCst);
     }

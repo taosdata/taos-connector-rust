@@ -1313,8 +1313,9 @@ unsafe fn _tmq_conf_set(
     {
         Some(conf) => {
             match key.to_lowercase().as_str() {
-                "td.connect.ip" | "td.connect.user" | "td.connect.pass" | "td.connect.db"
-                | "group.id" | "client.id" => {}
+                // TODO: TmqInit add user and pass
+                // "td.connect.ip" | "td.connect.user" | "td.connect.pass" | "td.connect.db"
+                // | "group.id" | "client.id" => {}
                 "enable.auto.commit" | "msg.with.table.name" | "enable.replay" => {
                     match val.to_lowercase().as_str() {
                         "true" | "false" => {}
@@ -1324,31 +1325,36 @@ unsafe fn _tmq_conf_set(
                         }
                     }
                 }
-                "td.connect.port" | "auto.commit.interval.ms" => match u32::from_str(&val) {
-                    Ok(_) => {}
-                    Err(_) => {
-                        error!("tmq_conf_set failed, err: invalid integer value");
-                        return Err(TaosError::new(Code::INVALID_PARA, "invalid integer value"));
-                    }
-                },
-                "session.timeout.ms" => match u32::from_str(&val) {
-                    Ok(val) => {
-                        if !(6000..=1800000).contains(&val) {
-                            error!("tmq_conf_set failed, err: session.timeout.ms out of range");
+                "td.connect.port" | "auto.commit.interval.ms" | "session.timeout.ms" => {
+                    match u32::from_str(&val) {
+                        Ok(_) => {}
+                        Err(_) => {
+                            error!("tmq_conf_set failed, err: invalid integer value");
                             return Err(TaosError::new(
                                 Code::INVALID_PARA,
-                                "session.timeout.ms out of range",
+                                "invalid integer value",
                             ));
                         }
                     }
-                    Err(_) => {
-                        error!("tmq_conf_set failed, err: session.timeout.ms is invalid");
-                        return Err(TaosError::new(
-                            Code::INVALID_PARA,
-                            "session.timeout.ms is invalid",
-                        ));
-                    }
-                },
+                }
+                // "session.timeout.ms" => match u32::from_str(&val) {
+                //     Ok(val) => {
+                //         if !(6000..=1800000).contains(&val) {
+                //             error!("tmq_conf_set failed, err: session.timeout.ms out of range");
+                //             return Err(TaosError::new(
+                //                 Code::INVALID_PARA,
+                //                 "session.timeout.ms out of range",
+                //             ));
+                //         }
+                //     }
+                //     Err(_) => {
+                //         error!("tmq_conf_set failed, err: session.timeout.ms is invalid");
+                //         return Err(TaosError::new(
+                //             Code::INVALID_PARA,
+                //             "session.timeout.ms is invalid",
+                //         ));
+                //     }
+                // },
                 "max.poll.interval.ms" => match i32::from_str(&val) {
                     Ok(val) => {
                         if val < 1000 {
@@ -1377,10 +1383,7 @@ unsafe fn _tmq_conf_set(
                         ));
                     }
                 },
-                _ => {
-                    error!("tmq_conf_set failed, err: unknow key: {key}");
-                    return Err(TaosError::new(Code::FAILED, &format!("unknow key: {key}")));
-                }
+                _ => {}
             }
             conf.map.insert(key, val);
             trace!("tmq_conf_set succ, conf: {conf:?}");
