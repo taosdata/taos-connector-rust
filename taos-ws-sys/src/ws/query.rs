@@ -325,8 +325,8 @@ pub unsafe extern "C" fn taos_print_row_with_size(
         if content.len() > *size {
             return -1;
         }
-        let cstr = CString::new(content).unwrap();
-        ptr::copy_nonoverlapping(cstr.as_ptr(), str, content.len());
+        let cstr = content.as_ptr() as *const c_char;
+        ptr::copy_nonoverlapping(cstr, str, content.len());
         *size -= content.len();
         content.len() as _
     }
@@ -1533,7 +1533,8 @@ mod tests {
                     "create database test_1737102406",
                     "use test_1737102406",
                     "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
+                    "insert into t0 values (1741660079228, 1)",
+                    "insert into t0 values (1741660080229, 0)",
                 ],
             );
 
@@ -1551,13 +1552,100 @@ mod tests {
 
             let mut str = vec![0 as c_char; 1024];
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            assert!(len > 0);
-            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+            assert_eq!(len, 15);
+            assert_eq!(
+                "1741660079228 1",
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
+            );
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(len, 15);
+            assert_eq!(
+                "1741660080229 0",
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
+            );
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1737102406");
 
             taos_close(taos);
+        }
+
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1741657731",
+                    "create database test_1741657731",
+                    "use test_1741657731",
+                    "create table t0 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, \
+                    c5 bigint, c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, \
+                    c9 bigint unsigned, c10 float, c11 double, c12 varchar(20), c13 nchar(10), \
+                    c14 varbinary(10), c15 geometry(50))",
+                    "insert into t0 values (now, true, 1, 1, 1, 1, 1, 1, 1, 1, 1.1, 1.1, \
+                    'hello world', 'hello', 'hello', 'POINT(1 1)')",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 16);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(len, 110);
+            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1741657731");
+
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_write_to_cstr() {
+        unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &str) -> i32 {
+            if content.len() > *size {
+                return -1;
+            }
+            let cstr = content.as_ptr() as *const c_char;
+            ptr::copy_nonoverlapping(cstr, str, content.len());
+            *size -= content.len();
+            content.len() as _
+        }
+
+        unsafe {
+            let mut len = 0;
+            let mut size = 1024;
+            let mut str = vec![0 as c_char; size];
+            let length = write_to_cstr(&mut size, str.as_mut_ptr().add(len), "hello world");
+            assert_eq!(length, 11);
+            assert_eq!(
+                "hello world",
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
+            );
+
+            len += length as usize;
+            let length = write_to_cstr(&mut size, str.as_mut_ptr().add(len), "hello\0world");
+            assert_eq!(length, 11);
+            assert_eq!(
+                "hello worldhello",
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
+            );
         }
     }
 
