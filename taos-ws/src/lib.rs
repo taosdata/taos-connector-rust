@@ -45,7 +45,6 @@ impl Default for Retries {
 
 #[derive(Clone, Debug)]
 pub struct TaosBuilder {
-    // scheme: &'static str, // ws or wss
     https: Arc<AtomicBool>,
     addr: String,
     auth: WsAuth,

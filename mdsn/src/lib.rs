@@ -814,6 +814,7 @@ impl IntoDsn for &Dsn {
         Ok(self.clone())
     }
 }
+
 impl IntoDsn for Dsn {
     fn into_dsn(self) -> Result<Dsn, DsnError> {
         Ok(self)
@@ -911,6 +912,7 @@ impl TryFrom<&Dsn> for Dsn {
         Ok(value.clone())
     }
 }
+
 impl FromStr for Dsn {
     type Err = DsnError;
 

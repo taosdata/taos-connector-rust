@@ -1478,31 +1478,73 @@ impl Drop for Tmq {
 }
 
 unsafe fn _tmq_consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
-    let mut dsn = Dsn::from_str("ws://localhost:6041")?;
-
     match (conf as *mut TaosMaybeError<TmqConf>)
         .as_mut()
         .and_then(|conf| conf.deref_mut())
     {
         Some(conf) => {
+            let host = conf
+                .map
+                .get("td.connect.ip")
+                .map(|val| val.as_str())
+                .unwrap_or("localhost");
+
+            let user = conf
+                .map
+                .get("td.connect.user")
+                .map(|val| val.as_str())
+                .unwrap_or("root");
+
+            let pass = conf
+                .map
+                .get("td.connect.pass")
+                .map(|val| val.as_str())
+                .unwrap_or("taosdata");
+
+            let dsn = if (host.contains("cloud.tdengine") || host.contains("cloud.taosdata"))
+                && user == "token"
+            {
+                let port = conf
+                    .map
+                    .get("td.connect.port")
+                    .map(|val| val.as_str())
+                    .unwrap_or("443");
+
+                format!("wss://{host}:{port}/?token={pass}")
+            } else {
+                let port = conf
+                    .map
+                    .get("td.connect.port")
+                    .map(|val| val.as_str())
+                    .unwrap_or("6041");
+
+                format!("ws://{user}:{pass}@{host}:{port}")
+            };
+
+            let mut dsn = Dsn::from_str(&dsn)?;
+
             let mut auto_commit = false;
             let mut auto_commit_interval_ms = 5000;
 
             for (key, val) in conf.map.iter() {
-                if key == "enable.auto.commit" {
-                    auto_commit = val.to_lowercase().parse().unwrap();
-                    dsn.params.insert(key.clone(), "false".to_string());
-                    continue;
-                } else if key == "auto.commit.interval.ms" {
-                    auto_commit_interval_ms = val.parse().unwrap();
+                match key.as_str() {
+                    "enable.auto.commit" => {
+                        auto_commit = val.to_lowercase().parse().unwrap_or(false);
+                        dsn.params.insert(key.clone(), "false".to_string());
+                    }
+                    "auto.commit.interval.ms" => {
+                        auto_commit_interval_ms = val.parse().unwrap_or(5000)
+                    }
+                    _ => {
+                        dsn.params.insert(key.clone(), val.clone());
+                    }
                 }
-
-                dsn.params.insert(key.clone(), val.clone());
             }
 
             trace!("tmq_consumer_new, dsn: {dsn:?}");
 
             let consumer = TmqBuilder::from_dsn(&dsn)?.build()?;
+
             Ok(Tmq::new(
                 consumer,
                 auto_commit,
@@ -1694,6 +1736,24 @@ mod tests {
 
             let key = c"auto.offset.reset";
             let val = c"earliest";
+            let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let tmq = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!tmq.is_null());
+
+            tmq_consumer_close(tmq);
+
+            tmq_conf_destroy(conf);
+        }
+
+        unsafe {
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id";
+            let val = c"10";
             let res = tmq_conf_set(conf, key.as_ptr() as _, val.as_ptr() as _);
             assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 

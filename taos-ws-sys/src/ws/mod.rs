@@ -159,6 +159,8 @@ unsafe fn connect(
         format!("ws://{user}:{pass}@{host}:{port}/{db}")
     };
 
+    trace!("taos_connect, dsn: {:?}", dsn);
+
     let builder = TaosBuilder::from_dsn(dsn)?;
     let mut taos = builder.build()?;
     builder.ping(&mut taos)?;

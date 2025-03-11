@@ -243,7 +243,7 @@ impl RawBlock {
         let cols = fields.len();
 
         let mut schemas_bytes =
-            bytes::BytesMut::with_capacity(rows * std::mem::size_of::<ColSchema>());
+            bytes::BytesMut::with_capacity(cols * std::mem::size_of::<ColSchema>());
         fields
             .iter()
             .for_each(|f| schemas_bytes.put(f.to_column_schema().as_bytes()));

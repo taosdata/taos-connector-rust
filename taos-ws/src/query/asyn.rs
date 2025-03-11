@@ -1353,9 +1353,6 @@ impl AsyncFetchable for ResultSet {
                 }
             }
         }
-        // let future = self.fetch().boxed();
-        // // .poll_unpin(cx)
-        // todo!()
     }
 }
 
