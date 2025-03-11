@@ -2,7 +2,7 @@
 //!
 mod messages;
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -14,6 +14,7 @@ use dashmap::DashMap as HashMap;
 use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
 use messages::*;
+use once_cell::sync::Lazy;
 use taos_query::common::{Field, JsonMeta, RawMeta};
 use taos_query::prelude::{Code, RawError};
 use taos_query::tmq::{
@@ -101,7 +102,7 @@ impl TBuilder for TmqBuilder {
             "enable.auto.commit",
             "auto.commit.interval.ms",
             "experimental.snapshot.enable",
-            "with.table.name",
+            "msg.with.table.name",
             "msg.enable.batchmeta",
             "msg.consume.excluded",
             "msg.consume.rawdata",
@@ -963,6 +964,27 @@ impl AsConsumer for Consumer {
     }
 }
 
+static AVAILABLE_PARAMS: Lazy<HashSet<&str>> = Lazy::new(|| {
+    let mut params = HashSet::new();
+    params.insert("group.id");
+    params.insert("client.id");
+    params.insert("auto.offset.reset");
+    params.insert("experimental.snapshot.enable");
+    params.insert("snapshot");
+    params.insert("msg.with.table.name");
+    params.insert("enable.auto.commit");
+    params.insert("auto.commit.interval.ms");
+    params.insert("offset");
+    params.insert("msg.enable.batchmeta");
+    params.insert("enable.batch.meta");
+    params.insert("batchmeta");
+    params.insert("msg.consume.excluded");
+    params.insert("replica");
+    params.insert("msg.consume.rawdata");
+    params.insert("timeout");
+    params
+});
+
 impl TmqBuilder {
     pub fn new<D: IntoDsn>(dsn: D) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
@@ -1005,7 +1027,7 @@ impl TmqBuilder {
             .unwrap_or("false".to_string());
         let with_table_name = dsn
             .params
-            .get("with.table.name")
+            .get("msg.with.table.name")
             .and_then(|s| {
                 if s.is_empty() {
                     None
@@ -1068,6 +1090,22 @@ impl TmqBuilder {
                 s.to_string()
             }
         });
+
+        let config = {
+            let filtered: std::collections::HashMap<_, _> = dsn
+                .params
+                .iter()
+                .filter(|(key, _)| !AVAILABLE_PARAMS.contains(key.as_str()))
+                .map(|(key, val)| (key.clone(), val.clone()))
+                .collect();
+
+            if filtered.is_empty() {
+                None
+            } else {
+                Some(filtered)
+            }
+        };
+
         let conf = TmqInit {
             group_id,
             client_id,
@@ -1080,6 +1118,7 @@ impl TmqBuilder {
             enable_batch_meta,
             msg_consume_excluded,
             msg_consume_rawdata,
+            config,
         };
 
         Ok(Self {
@@ -2699,6 +2738,45 @@ mod tests {
             "drop database test_ws_tmq_poll_lost",
         ])
         .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_tmq_config() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1741674686",
+            "drop database if exists test_1741674686",
+            "create database test_1741674686",
+            "create topic topic_1741674686 as database test_1741674686",
+            "use test_1741674686",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values(now, 1)",
+        ])
+        .await?;
+
+        let builder = TmqBuilder::new(
+            "ws://localhost:6041?group.id=10&client.id=1&auto.offset.reset=earliest&\
+            experimental.snapshot.enable=false&msg.with.table.name=true&enable.auto.commit=false&\
+            auto.commit.interval.ms=5000&msg.enable.batchmeta=1&msg.consume.excluded=1&\
+            msg.consume.rawdata=1&timeout=200ms&td.connect.ip=localhost&enable.replay=false",
+        )?;
+
+        let mut consumer = builder.build_consumer().await?;
+        consumer.subscribe(["topic_1741674686"]).await?;
+        consumer.unsubscribe().await;
+
+        taos.exec_many([
+            "drop topic topic_1741674686",
+            "drop database test_1741674686",
+        ])
+        .await?;
+
         Ok(())
     }
 }
