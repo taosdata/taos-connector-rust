@@ -564,6 +564,7 @@ impl RawBlock {
     ) -> Result<VecDeque<Self>, std::io::Error> {
         use byteorder::ReadBytesExt;
 
+        let now = std::time::Instant::now();
         let mut cursor = MultiBlockCursor::new(Cursor::new(bytes.into()));
         let code = cursor.read_i32::<byteorder::LittleEndian>()?;
         let message = cursor.get_str()?;
@@ -616,6 +617,10 @@ impl RawBlock {
             raw_block.with_field_names(fields.iter());
             raw_block_queue.push_back(raw_block);
         }
+
+        let elapsed = now.elapsed();
+        tracing::info!("parse multi raw block elapsed: {:?}", elapsed.as_millis());
+
         Ok(raw_block_queue)
     }
 
