@@ -56,6 +56,10 @@ impl NCharView {
         self.offsets.len()
     }
 
+    pub fn as_raw_ptr(&self) -> *const u8 {
+        self.data.as_ptr() as _
+    }
+
     /// Check if the value at `row` index is NULL or not.
     pub fn is_null(&self, row: usize) -> bool {
         if row < self.len() {

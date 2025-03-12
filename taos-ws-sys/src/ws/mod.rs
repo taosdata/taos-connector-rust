@@ -233,7 +233,13 @@ pub trait ResultSetOperations {
 
     fn get_fields(&mut self) -> *mut TAOS_FIELD;
 
-    unsafe fn fetch_block(&mut self, ptr: *mut *mut c_void, rows: *mut i32) -> Result<(), Error>;
+    unsafe fn fetch_raw_block(
+        &mut self,
+        ptr: *mut *mut c_void,
+        rows: *mut i32,
+    ) -> Result<(), Error>;
+
+    unsafe fn fetch_block(&mut self, rows: *mut TAOS_ROW, num: *mut c_int) -> Result<(), Error>;
 
     unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error>;
 
@@ -340,11 +346,23 @@ impl ResultSetOperations for ResultSet {
         }
     }
 
-    unsafe fn fetch_block(&mut self, ptr: *mut *mut c_void, rows: *mut i32) -> Result<(), Error> {
+    unsafe fn fetch_raw_block(
+        &mut self,
+        ptr: *mut *mut c_void,
+        rows: *mut i32,
+    ) -> Result<(), Error> {
         match self {
-            ResultSet::Query(rs) => rs.fetch_block(ptr, rows),
-            ResultSet::Schemaless(rs) => rs.fetch_block(ptr, rows),
-            ResultSet::Tmq(rs) => rs.fetch_block(ptr, rows),
+            ResultSet::Query(rs) => rs.fetch_raw_block(ptr, rows),
+            ResultSet::Schemaless(rs) => rs.fetch_raw_block(ptr, rows),
+            ResultSet::Tmq(rs) => rs.fetch_raw_block(ptr, rows),
+        }
+    }
+
+    unsafe fn fetch_block(&mut self, rows: *mut TAOS_ROW, num: *mut c_int) -> Result<(), Error> {
+        match self {
+            ResultSet::Query(rs) => rs.fetch_block(rows, num),
+            ResultSet::Schemaless(rs) => rs.fetch_block(rows, num),
+            ResultSet::Tmq(rs) => rs.fetch_block(rows, num),
         }
     }
 

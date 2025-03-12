@@ -517,10 +517,18 @@ impl ResultSetOperations for SchemalessResultSet {
         ptr::null_mut()
     }
 
-    unsafe fn fetch_block(&mut self, ptr: *mut *mut c_void, rows: *mut i32) -> Result<(), Error> {
+    unsafe fn fetch_raw_block(
+        &mut self,
+        ptr: *mut *mut c_void,
+        rows: *mut i32,
+    ) -> Result<(), Error> {
         Err(Error::CommonError(
             "schemaless result set does not support fetch block".to_owned(),
         ))
+    }
+
+    unsafe fn fetch_block(&mut self, rows: *mut TAOS_ROW, num: *mut c_int) -> Result<(), Error> {
+        todo!()
     }
 
     unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error> {

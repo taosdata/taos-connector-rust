@@ -517,10 +517,10 @@ pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
 
 #[no_mangle]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int {
+pub unsafe extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int {
     trace!("taos_fetch_block start, res: {res:?}, rows: {rows:?}");
     let mut num_of_rows = 0;
-    taos_fetch_block_s(res, &mut num_of_rows, rows);
+    let _ = taos_fetch_block_s(res, &mut num_of_rows, rows);
     trace!("taos_fetch_block succ, num_of_rows: {num_of_rows}");
     num_of_rows
 }
@@ -528,12 +528,36 @@ pub extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c
 #[no_mangle]
 #[allow(non_snake_case)]
 #[instrument(level = "trace", ret)]
-pub extern "C" fn taos_fetch_block_s(
+pub unsafe extern "C" fn taos_fetch_block_s(
     res: *mut TAOS_RES,
     numOfRows: *mut c_int,
     rows: *mut TAOS_ROW,
 ) -> c_int {
-    todo!()
+    trace!("taos_fetch_block_s start, res: {res:?}, num_of_rows: {numOfRows:?}, rows: {rows:?}");
+
+    if numOfRows.is_null() {
+        error!("taos_fetch_block_s failed, num_of_rows is null");
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "numOfRows is null"));
+    }
+
+    match (res as *mut TaosMaybeError<ResultSet>).as_mut() {
+        Some(maybe_err) => match maybe_err.deref_mut() {
+            Some(rs) => match rs.fetch_block(rows, numOfRows) {
+                Ok(()) => {
+                    trace!("taos_fetch_block_s succ, num_of_rows: {}", *numOfRows);
+                    Code::SUCCESS.into()
+                }
+                Err(err) => {
+                    error!("taos_fetch_block_s failed, err: {err:?}");
+                    set_err_and_get_code(TaosError::new(err.errno(), &err.errstr()));
+                    maybe_err.with_err(Some(TaosError::new(err.errno(), &err.errstr())));
+                    err.errno().into()
+                }
+            },
+            None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null")),
+        },
+        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null")),
+    }
 }
 
 #[no_mangle]
@@ -553,7 +577,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block(
 
     match (res as *mut TaosMaybeError<ResultSet>).as_mut() {
         Some(maybe_err) => match maybe_err.deref_mut() {
-            Some(rs) => match rs.fetch_block(pData, numOfRows) {
+            Some(rs) => match rs.fetch_raw_block(pData, numOfRows) {
                 Ok(()) => {
                     trace!(rs=?rs, "taos_fetch_raw_block done");
                     Code::SUCCESS.into()
@@ -1127,6 +1151,7 @@ pub struct QueryResultSet {
     offsets: Option<Vec<i32>>,
     lengths: Option<Vec<i32>>,
     has_called_fetch_row: bool,
+    rows: Vec<*const c_void>,
 }
 
 impl Drop for QueryResultSet {
@@ -1157,6 +1182,7 @@ impl QueryResultSet {
             offsets: None,
             lengths: None,
             has_called_fetch_row: false,
+            rows: vec![ptr::null(); num_of_fields],
         }
     }
 
@@ -1224,7 +1250,11 @@ impl ResultSetOperations for QueryResultSet {
         self.fields.as_mut_ptr()
     }
 
-    unsafe fn fetch_block(&mut self, ptr: *mut *mut c_void, rows: *mut i32) -> Result<(), Error> {
+    unsafe fn fetch_raw_block(
+        &mut self,
+        ptr: *mut *mut c_void,
+        rows: *mut i32,
+    ) -> Result<(), Error> {
         self.block = self.rs.fetch_raw_block()?;
         if let Some(block) = self.block.as_ref() {
             *ptr = block.as_raw_bytes().as_ptr() as _;
@@ -1232,6 +1262,26 @@ impl ResultSetOperations for QueryResultSet {
         } else {
             *rows = 0;
         }
+        Ok(())
+    }
+
+    unsafe fn fetch_block(&mut self, rows: *mut TAOS_ROW, num: *mut c_int) -> Result<(), Error> {
+        if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
+            self.block = self.rs.fetch_raw_block()?;
+            self.row.current_row = 0;
+        }
+
+        if let Some(block) = self.block.as_ref() {
+            if block.nrows() > 0 {
+                for (i, col) in block.columns().enumerate() {
+                    self.rows[i] = col.as_raw_ptr();
+                }
+                self.row.current_row = block.nrows();
+                *rows = self.rows.as_ptr() as _;
+                *num = block.nrows() as _;
+            }
+        }
+
         Ok(())
     }
 
@@ -2346,6 +2396,90 @@ mod tests {
             taos_free_result(res);
 
             test_exec(taos, "drop database test_1741489408");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_fetch_block_s() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1741779708",
+                    "create database test_1741779708",
+                    "use test_1741779708",
+                    "create table t0 (ts timestamp, c1 int, c2 varchar(20))",
+                    "insert into t0 values (1741780784749, 2025, 'hello')",
+                    "insert into t0 values (1741780784750, 999, null)",
+                    "insert into t0 values (1741780784751, null, 'world')",
+                    "insert into t0 values (1741780784752, null, null)",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let num_fields = taos_num_fields(res);
+            let fields = taos_fetch_fields(res);
+            let fields = slice::from_raw_parts(fields, num_fields as _);
+
+            loop {
+                let mut num_of_rows = 0;
+                let mut rows = ptr::null_mut();
+                let code = taos_fetch_block_s(res, &mut num_of_rows, &mut rows);
+                assert_eq!(code, 0);
+                println!("num_of_rows: {}", num_of_rows);
+
+                if num_of_rows == 0 {
+                    break;
+                }
+
+                let rows = slice::from_raw_parts(rows, num_fields as _);
+
+                for (c, field) in fields.iter().enumerate() {
+                    for r in 0..num_of_rows as usize {
+                        match field.r#type as usize {
+                            TSDB_DATA_TYPE_TIMESTAMP => {
+                                if taos_is_null(res, r as _, c as _) {
+                                    println!("col: {}, row: {}, val: NULL", c, r);
+                                } else {
+                                    let val = rows[c].offset((r * 8) as isize) as *mut i64;
+                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                }
+                            }
+                            TSDB_DATA_TYPE_INT => {
+                                if taos_is_null(res, r as _, c as _) {
+                                    println!("col: {}, row: {}, val: NULL", c, r);
+                                } else {
+                                    let val = rows[c].offset((r * 4) as isize) as *mut i32;
+                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                }
+                            }
+                            TSDB_DATA_TYPE_VARCHAR => {
+                                let offsets = taos_get_column_data_offset(res, c as _);
+                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
+                                if offsets[r] == -1 {
+                                    println!("col: {}, row: {}, val: NULL", c, r);
+                                } else {
+                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
+                                    let len = ptr::read_unaligned(ptr);
+                                    let val =
+                                        rows[c].offset((offsets[r] + 2) as isize) as *mut c_char;
+                                    let val = CStr::from_ptr(val).to_str().unwrap();
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            taos_free_result(res);
+
+            test_exec(taos, "drop database test_1741779708");
             taos_close(taos);
         }
     }

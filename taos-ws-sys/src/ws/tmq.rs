@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
@@ -257,7 +257,7 @@ pub unsafe extern "C" fn tmq_consumer_new(
             Box::into_raw(Box::new(tmq)) as _
         }
         Err(err) => {
-            trace!(err=?err, "tmq_consumer_new failed");
+            error!(err=?err, "tmq_consumer_new failed");
             if errstrLen > 0 && !errstr.is_null() {
                 let message = CString::new(err.to_string()).unwrap();
                 let count = message.to_bytes().len().min(errstrLen as usize - 1);
@@ -1231,7 +1231,11 @@ impl ResultSetOperations for TmqResultSet {
         self.fields.as_mut_ptr()
     }
 
-    unsafe fn fetch_block(&mut self, ptr: *mut *mut c_void, rows: *mut i32) -> Result<(), Error> {
+    unsafe fn fetch_raw_block(
+        &mut self,
+        ptr: *mut *mut c_void,
+        rows: *mut i32,
+    ) -> Result<(), Error> {
         self.block = self.data.fetch_raw_block()?;
         if let Some(block) = self.block.as_ref() {
             *ptr = block.as_raw_bytes().as_ptr() as _;
@@ -1240,6 +1244,10 @@ impl ResultSetOperations for TmqResultSet {
             *rows = 0;
         }
         Ok(())
+    }
+
+    unsafe fn fetch_block(&mut self, rows: *mut TAOS_ROW, num: *mut c_int) -> Result<(), Error> {
+        todo!()
     }
 
     unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error> {

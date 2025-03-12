@@ -33,6 +33,10 @@ impl VarCharView {
         self.offsets.len()
     }
 
+    pub fn as_raw_ptr(&self) -> *const u8 {
+        self.data.as_ptr() as _
+    }
+
     /// A iterator only decide if the value at some row index is NULL or not.
     pub fn is_null_iter(&self) -> VarCharNullsIter {
         VarCharNullsIter { view: self, row: 0 }
@@ -169,11 +173,6 @@ impl VarCharView {
             wtr.write_all(&bytes)?;
             Ok(offsets_bytes.len() + bytes.len())
         }
-        // let offsets = self.offsets.as_bytes();
-        // dbg!(self, offsets);
-        // wtr.write_all(offsets)?;
-        // wtr.write_all(&self.data)?;
-        // Ok(offsets.len() + self.data.len())
     }
 
     pub fn from_iter<
@@ -197,7 +196,6 @@ impl VarCharView {
                 offsets.push(-1);
             }
         }
-        // dbg!(&offsets);
         let offsets_bytes = unsafe {
             Vec::from_raw_parts(
                 offsets.as_mut_ptr() as *mut u8,
