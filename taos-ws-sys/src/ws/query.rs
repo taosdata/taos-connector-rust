@@ -1085,6 +1085,36 @@ pub unsafe extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void
     data
 }
 
+#[no_mangle]
+#[instrument(level = "trace", ret)]
+pub unsafe extern "C" fn taos_check_server_status(
+    fqdn: *const c_char,
+    mut port: i32,
+    details: *mut c_char,
+    maxlen: i32,
+) -> TSDB_SERVER_STATUS {
+    trace!("taos_check_server_status start, fqdn: {fqdn:?}, port: {port}, details: {details:?}, maxlen: {maxlen}");
+
+    let fqdn = if fqdn.is_null() {
+        "localhost"
+    } else {
+        match CStr::from_ptr(fqdn).to_str() {
+            Ok(fqdn) => fqdn,
+            Err(_) => {
+                error!("taos_check_server_status failed, fqdn is invalid utf-8");
+                set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "fqdn is invalid utf-8"));
+                return TSDB_SERVER_STATUS::TSDB_SRV_STATUS_UNAVAILABLE;
+            }
+        }
+    };
+
+    if port == 0 {
+        port = 6030;
+    }
+
+    todo!()
+}
+
 #[derive(Debug)]
 pub struct QueryResultSet {
     rs: taos_ws::ResultSet,

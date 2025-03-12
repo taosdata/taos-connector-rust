@@ -409,7 +409,7 @@ async fn read_queries(
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     },
-                    WsRecvData::ValidateSql { .. } => {
+                    WsRecvData::ValidateSql { .. } | WsRecvData::CheckServerStatus { .. } => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
                             let _ = sender.send(ok.map(|_| data));
                         } else {
@@ -1179,6 +1179,21 @@ impl WsTaos {
         }
     }
 
+    pub async fn check_server_status(&self, fqdn: &str, port: i32) -> RawResult<(i32, String)> {
+        let req = WsSend::CheckServerStatus {
+            req_id: generate_req_id(),
+            fqdn: fqdn.to_string(),
+            port,
+        };
+
+        match self.sender.send_recv(req).await? {
+            WsRecvData::CheckServerStatus {
+                status, details, ..
+            } => Ok((status, details)),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn version(&self) -> &str {
         &self.sender.version.version
     }
@@ -1850,6 +1865,14 @@ mod tests {
     //     taos.validate_sql("create database if not exists test_1741338182")
     //         .await?;
     //     let _ = taos.validate_sql("select * from t0").await.unwrap_err();
+    //     Ok(())
+    // }
+
+    // #[tokio::test]
+    // async fn test_check_server_status() -> anyhow::Result<()> {
+    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+    //     let (stauts, details) = taos.check_server_status("127.0.0.1", 6030).await?;
+    //     println!("status: {}, details: {}", stauts, details);
     //     Ok(())
     // }
 }

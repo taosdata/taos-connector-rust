@@ -6,7 +6,6 @@ use tracing::instrument;
 
 use crate::ws::query::{
     __taos_async_whitelist_fn_t, __taos_notify_fn_t, setConfRet, TAOS_DB_ROUTE_INFO,
-    TSDB_SERVER_STATUS,
 };
 use crate::ws::tmq::{tmq_raw_data, tmq_t};
 use crate::ws::{TAOS, TAOS_FIELD, TAOS_RES, TSDB_OPTION_CONNECTION};
@@ -222,17 +221,6 @@ pub extern "C" fn tmq_get_json_meta(res: *mut TAOS_RES) -> *const c_char {
 #[instrument(level = "trace", ret)]
 pub extern "C" fn tmq_free_json_meta(jsonMeta: *mut c_char) {
     todo!("tmq_free_json_meta");
-}
-
-#[no_mangle]
-#[instrument(level = "trace", ret)]
-pub extern "C" fn taos_check_server_status(
-    fqdn: *const c_char,
-    port: i32,
-    details: *mut c_char,
-    maxlen: i32,
-) -> TSDB_SERVER_STATUS {
-    todo!("taos_check_server_status");
 }
 
 #[no_mangle]
