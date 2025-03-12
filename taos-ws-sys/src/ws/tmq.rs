@@ -1504,17 +1504,25 @@ unsafe fn _tmq_consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
             let dsn = if (host.contains("cloud.tdengine") || host.contains("cloud.taosdata"))
                 && user == "token"
             {
-                let port = conf
+                let mut port = conf
                     .map
                     .get("td.connect.port")
                     .map_or("443", |val| val.as_str());
 
+                if port == "0" {
+                    port = "443";
+                }
+
                 format!("wss://{host}:{port}/?token={pass}")
             } else {
-                let port = conf
+                let mut port = conf
                     .map
                     .get("td.connect.port")
                     .map_or("6041", |val| val.as_str());
+
+                if port == "0" {
+                    port = "6041";
+                }
 
                 format!("ws://{user}:{pass}@{host}:{port}")
             };
