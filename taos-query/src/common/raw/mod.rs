@@ -594,8 +594,9 @@ impl RawBlock {
             let block_start_pos = cursor.position() as usize;
             let block_end_pos = cursor.position() + block_total_len as u64 - 18;
 
-            let slice = &cursor.get_ref()[block_start_pos..block_end_pos as usize];
-            let bytes = bytes::Bytes::copy_from_slice(slice);
+            let bytes = cursor
+                .get_ref()
+                .slice(block_start_pos..block_end_pos as usize);
             let mut raw_block = RawBlock::parse_from_raw_block(bytes, precision.into());
 
             //cursor.read_u8()?;// skip useless byte
