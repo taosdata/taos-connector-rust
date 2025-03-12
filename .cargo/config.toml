@@ -13,6 +13,7 @@ rustflags = [
 
     # Perf Group
     "-Aclippy::result_large_err",
+    "-Aclippy::large_enum_variant",
 
     # Cargo Group
     "-Wclippy::negative_feature_names",
