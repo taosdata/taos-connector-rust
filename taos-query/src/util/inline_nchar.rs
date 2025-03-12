@@ -93,13 +93,12 @@ macro_rules! _impl_inline_str {
                 pub const fn len(&self) -> usize {
                     self.len as _
                 }
+
                 #[inline]
                 pub const fn chars_len(&self) -> usize {
                     self.len() / std::mem::size_of::<char>()
                 }
 
-                // #[inline]
-                // #[rustversion::attr(nightly, const)]
                 pub fn chars(&self) -> Chars<$ty> {
                     Chars {
                         data: self,
@@ -119,7 +118,6 @@ macro_rules! _impl_inline_str {
                     }
                     let chars_len = self.chars_len();
                     let v: &mut super::InlineStr<$ty> = std::mem::transmute(self);
-                    // let ptr = self.data.as_ptr() as *mut u8;
                     let ptr = v.as_mut_ptr();
                     let mut len = 0usize;
                     for i in 0..chars_len {
