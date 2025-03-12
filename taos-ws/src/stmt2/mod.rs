@@ -109,12 +109,20 @@ impl Stmt2 {
                 bytes: 4,
                 bind_type: BindType::Column,
             },
+            Stmt2Field {
+                name: "phase".to_string(),
+                field_type: 6,
+                precision: 0,
+                scale: 0,
+                bytes: 4,
+                bind_type: BindType::TableName,
+            },
         ];
 
         if let WsRecvData::Stmt2Prepare { .. } = resp {
             self.is_insert = Some(true);
             self.fields = Some(fields);
-            self.fields_count = None;
+            self.fields_count = Some(0);
             return Ok(());
         }
 
@@ -130,6 +138,9 @@ impl Stmt2 {
             self.fields.as_ref(),
             self.fields_count.unwrap(),
         )?;
+
+        tracing::trace!("stmt2 bind, bytes: {:?}", bytes);
+
         let req = WsSend::Binary(bytes);
         let resp = self.client.send_request(req).await?;
         if let WsRecvData::Stmt2Bind { .. } = resp {
@@ -828,6 +839,50 @@ mod tests {
 
         let res = stmt2.result_set().await;
         assert!(res.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2_magic() -> anyhow::Result<()> {
+        let db = "stmt2_202503120939";
+        let dsn = "ws://localhost:6041";
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        taos.exec_many(vec![
+            &format!("drop database if exists {db}"),
+            &format!("create database {db}"),
+            &format!("use {db}"),
+            "create table s0 (ts timestamp, current float, voltage int, phase float) \
+            tags(groupid int, location varchar(100))",
+            "create table d0 using s0 tags(1, 'hello')",
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+        stmt2.prepare("insert into t0 values(?, ?)").await?;
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![
+                1726803356466,
+                1726803357466,
+                1726803358466,
+                1726803359466,
+            ]),
+            ColumnView::from_floats(vec![99.9, 100.1, 101.2, 102.3]),
+            ColumnView::from_ints(vec![99, 100, 101, 102]),
+            ColumnView::from_floats(vec![99.9, 100.1, 101.2, 102.3]),
+        ];
+
+        let tbname = "d0".to_string();
+        let param = Stmt2BindParam::new(Some(tbname), None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 4);
+
+        taos.exec(format!("drop database {db}")).await?;
 
         Ok(())
     }
