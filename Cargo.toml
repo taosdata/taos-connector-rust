@@ -26,3 +26,8 @@ license = "MIT OR Apache-2.0"
 readme = "./README.md"
 repository = "https://github.com/taosdata/taos-connector-rust.git"
 rust-version = "1.70"
+
+[profile.release]
+lto = true
+panic = "abort"
+overflow-checks = false
