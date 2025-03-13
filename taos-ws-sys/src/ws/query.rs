@@ -8,7 +8,9 @@ use cargo_metadata::MetadataCommand;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
 use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr};
-use taos_query::{global_tokio_runtime, Fetchable, Queryable, RawBlock as Block};
+use taos_query::{
+    block_in_place_or_global, global_tokio_runtime, Fetchable, Queryable, RawBlock as Block,
+};
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
 use tracing::{error, instrument, trace, Instrument};
@@ -120,6 +122,18 @@ pub enum TSDB_SERVER_STATUS {
     TSDB_SRV_STATUS_SERVICE_OK = 2,
     TSDB_SRV_STATUS_SERVICE_DEGRADED = 3,
     TSDB_SRV_STATUS_EXTING = 4,
+}
+
+impl From<i32> for TSDB_SERVER_STATUS {
+    fn from(value: i32) -> Self {
+        match value {
+            1 => TSDB_SERVER_STATUS::TSDB_SRV_STATUS_NETWORK_OK,
+            2 => TSDB_SERVER_STATUS::TSDB_SRV_STATUS_SERVICE_OK,
+            3 => TSDB_SERVER_STATUS::TSDB_SRV_STATUS_SERVICE_DEGRADED,
+            4 => TSDB_SERVER_STATUS::TSDB_SRV_STATUS_EXTING,
+            _ => TSDB_SERVER_STATUS::TSDB_SRV_STATUS_UNAVAILABLE,
+        }
+    }
 }
 
 #[no_mangle]
@@ -1119,7 +1133,8 @@ pub unsafe extern "C" fn taos_check_server_status(
 ) -> TSDB_SERVER_STATUS {
     trace!("taos_check_server_status start, fqdn: {fqdn:?}, port: {port}, details: {details:?}, maxlen: {maxlen}");
 
-    let fqdn = if fqdn.is_null() {
+    // TODO: read taos.cfg
+    let host = if fqdn.is_null() {
         "localhost"
     } else {
         match CStr::from_ptr(fqdn).to_str() {
@@ -1136,7 +1151,30 @@ pub unsafe extern "C" fn taos_check_server_status(
         port = 6030;
     }
 
-    todo!()
+    let (status, ds) = match block_in_place_or_global(check_server_status(host, port)) {
+        Ok(res) => res,
+        Err(err) => {
+            error!("taos_check_server_status failed, err: {err:?}");
+            set_err_and_get_code(err);
+            return TSDB_SERVER_STATUS::TSDB_SRV_STATUS_UNAVAILABLE;
+        }
+    };
+
+    trace!("taos_check_server_status succ, status: {status}, details: {ds:?}");
+
+    let len = ds.len().min(maxlen as usize);
+    ptr::copy_nonoverlapping(ds.as_ptr() as _, details, len);
+    status.into()
+}
+
+async fn check_server_status(host: &str, port: i32) -> TaosResult<(i32, String)> {
+    use taos_query::AsyncTBuilder;
+    use taos_ws::TaosBuilder;
+
+    let dsn = format!("ws://{host}:6041");
+    let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+    let (status, details) = taos.client().check_server_status(host, port).await?;
+    Ok((status, details))
 }
 
 #[derive(Debug)]
@@ -1332,8 +1370,8 @@ impl ResultSetOperations for QueryResultSet {
 
 #[cfg(test)]
 mod tests {
-    use std::ptr;
     use std::thread::sleep;
+    use std::{ptr, vec};
 
     use taos_query::common::Precision;
 
@@ -2689,6 +2727,18 @@ mod tests {
 
             test_exec(taos, "drop database test_1741782821");
             taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_check_server_status() {
+        unsafe {
+            let max_len = 20;
+            let mut details = vec![0 as c_char; max_len];
+            let status =
+                taos_check_server_status(ptr::null(), 0, details.as_mut_ptr(), max_len as _);
+            let details = CStr::from_ptr(details.as_ptr());
+            println!("status: {status:?}, details: {details:?}");
         }
     }
 }
