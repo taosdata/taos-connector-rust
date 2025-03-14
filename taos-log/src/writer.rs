@@ -150,10 +150,12 @@ impl<'a> RollingFileAppenderBuilder<'a> {
         let disk_available_space = Arc::new(AtomicU64::new(disk.available_space()));
         thread::spawn({
             let disk_available_space = disk_available_space.clone();
-            move || loop {
-                disk.refresh();
-                disk_available_space.store(disk.available_space(), atomic::Ordering::SeqCst);
-                std::thread::sleep(std::time::Duration::from_secs(30));
+            move || -> ! {
+                loop {
+                    disk.refresh();
+                    disk_available_space.store(disk.available_space(), atomic::Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                }
             }
         });
 
@@ -206,9 +208,9 @@ pub struct RollingFileAppender {
 }
 
 impl RollingFileAppender {
-    pub fn builder<'a>(
-        log_dir: impl AsRef<Path>,
-        component: impl Into<String>,
+    pub fn builder<'a, P: AsRef<Path>, S: Into<String>>(
+        log_dir: P,
+        component: S,
         instance_id: u8,
     ) -> RollingFileAppenderBuilder<'a> {
         RollingFileAppenderBuilder {
@@ -423,7 +425,7 @@ impl Config {
 
         // delete by rotation_count
         if self.rotation_count != 0 {
-            split_index = self.rotation_count.saturating_sub(1).min(split_index)
+            split_index = self.rotation_count.saturating_sub(1).min(split_index);
         }
 
         if !self.log_keep_days.is_zero() {
@@ -431,7 +433,7 @@ impl Config {
             let reserved_time =
                 Local::now().with_time(NaiveTime::MIN).unwrap() - self.log_keep_days;
             let index = files.partition_point(|(_, (date, _))| date > &reserved_time);
-            split_index = split_index.min(index)
+            split_index = split_index.min(index);
         }
 
         // split files for compress and delete

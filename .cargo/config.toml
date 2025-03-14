@@ -147,7 +147,6 @@ rustflags = [
     "-Wclippy::needless_raw_strings",
     # "-Wclippy::pathbuf_init_then_push",
     "-Wclippy::partial_pub_fields",
-    "-Wclippy::print_stderr",
     "-Wclippy::print_stdout",
     "-Wclippy::pub_without_shorthand",
     "-Wclippy::rc_buffer",

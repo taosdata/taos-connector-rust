@@ -42,8 +42,8 @@ pub enum ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfigError::Io(e) => write!(f, "Config IO error: {}", e),
-            ConfigError::Parse(msg) => write!(f, "Config parse error: {}", msg),
+            ConfigError::Io(e) => write!(f, "Config IO error: {e}"),
+            ConfigError::Parse(msg) => write!(f, "Config parse error: {msg}"),
         }
     }
 }
@@ -87,8 +87,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
                     Ok(0) => config.compression = false,
                     _ => {
                         return Err(ConfigError::Parse(format!(
-                            "Failed to parse compression: {}",
-                            value
+                            "Failed to parse compression: {value}",
                         )));
                     }
                 },
@@ -101,8 +100,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
                     Ok(207) => todo!(),
                     _ => {
                         return Err(ConfigError::Parse(format!(
-                            "Failed to parse debugFlag: {}",
-                            value
+                            "Failed to parse debugFlag: {value}",
                         )));
                     }
                 },
@@ -114,8 +112,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
                     Ok(port) => config.server_port = Some(port),
                     Err(_) => {
                         return Err(ConfigError::Parse(format!(
-                            "Failed to parse serverPort: {}",
-                            value
+                            "Failed to parse serverPort: {value}",
                         )));
                     }
                 },

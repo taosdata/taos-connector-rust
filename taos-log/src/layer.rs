@@ -59,7 +59,7 @@ impl<Q, S, M> TaosLayer<Q, S, M> {
         } else {
             s
         };
-        buf.push_str(s.as_str())
+        buf.push_str(s.as_str());
     }
 
     fn fmt_thread_id(&self, buf: &mut String) {
@@ -70,7 +70,7 @@ impl<Q, S, M> TaosLayer<Q, S, M> {
         } else {
             s
         };
-        buf.push_str(s.as_str())
+        buf.push_str(s.as_str());
     }
 
     fn fmt_level(&self, buf: &mut String, level: &tracing::Level) {
@@ -131,13 +131,15 @@ impl<Q, S, M> TaosLayer<Q, S, M> {
                 }
 
                 {
-                    if let Some(qid) = span.extensions().get::<Q>().cloned() {
+                    let qid = span.extensions().get::<Q>().cloned();
+                    if let Some(qid) = qid {
                         qid_field.replace(qid);
                     }
                 }
 
                 {
-                    if let Some(fields) = span.extensions().get::<RecordFields>().cloned() {
+                    let fields = span.extensions().get::<RecordFields>().cloned();
+                    if let Some(fields) = fields {
                         kvs.extend(fields.0.into_iter());
                     }
                 }
@@ -304,7 +306,7 @@ where
             let mut writer = self.make_writer.make_writer_for(metadata);
             let res = std::io::Write::write_all(&mut writer, buf.as_bytes());
             if let Err(e) = res {
-                eprintln!("[TaosLayer] Unable to write an event to the Writer for this Subscriber! Error: {}\n", e);
+                eprintln!("[TaosLayer] Unable to write an event to the Writer for this Subscriber! Error: {e}\n");
             }
             buf.clear();
         });

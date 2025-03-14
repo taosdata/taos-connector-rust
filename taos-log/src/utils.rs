@@ -1,4 +1,5 @@
-use tracing_subscriber::{registry::LookupSpan, Registry};
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::Registry;
 
 use crate::QidManager;
 
@@ -133,7 +134,7 @@ impl QidMetadataSetter for Span {
                 let mut ext = span.extensions_mut();
                 ext.replace(qid.clone());
             }
-        })
+        });
     }
 }
 
@@ -171,7 +172,7 @@ impl QidMetadataSetter for tracing::Span {
                 let mut ext = span.extensions_mut();
                 ext.replace(qid.clone());
             }
-        })
+        });
     }
 }
 
@@ -182,9 +183,8 @@ mod tests {
 
     use tracing::info_span;
 
-    use crate::fake::Qid;
-
     use super::*;
+    use crate::fake::Qid;
 
     #[test]
     fn qid_set_get_test() {
@@ -225,7 +225,8 @@ mod tests {
         }
 
         {
-            use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+            use tracing_subscriber::layer::SubscriberExt;
+            use tracing_subscriber::util::SubscriberInitExt;
             let _guard = tracing_subscriber::registry()
                 .with(tracing_subscriber::fmt::layer())
                 .set_default();
@@ -238,7 +239,8 @@ mod tests {
         }
 
         {
-            use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+            use tracing_subscriber::layer::SubscriberExt;
+            use tracing_subscriber::util::SubscriberInitExt;
             let _guard = tracing_subscriber::registry()
                 .with(tracing_subscriber::fmt::layer())
                 .set_default();
