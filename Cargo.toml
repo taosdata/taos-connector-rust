@@ -3,6 +3,7 @@ members = [
   "mdsn",
   "taos",
   "taos-error",
+  "taos-log",
   "taos-macros",
   "taos-optin",
   "taos-query",

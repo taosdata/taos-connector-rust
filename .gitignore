@@ -6,6 +6,7 @@
 !.cargo/config.toml
 .idea
 .vscode
+*.log*
 TDengine
 USER_MANUAL.md TODO.md
 cobertura.xml
