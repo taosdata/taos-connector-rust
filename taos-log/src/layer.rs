@@ -395,6 +395,7 @@ mod tests {
     fn layer_test() {
         use tracing_subscriber::layer::SubscriberExt;
         use tracing_subscriber::util::SubscriberInitExt;
+
         let (tx, rx) = std::sync::mpsc::channel();
         let _guard = tracing_subscriber::registry()
             .with(TaosLayer::<Qid, _, _>::new(TestWriter(tx.clone())))
@@ -403,7 +404,7 @@ mod tests {
         tracing::info_span!("outer", "k" = "kkk").in_scope(|| {
             tracing::info!(port = 1111, "this is a test info log");
             let s = rx.recv().unwrap();
-            assert_eq!(&s[38..], "INFO  QID:0x7fffffffffffffff mod:taoslog::layer::tests, k:kkk, port:1111, this is a test info log\n");
+            assert_eq!(&s[38..], "INFO  QID:0x7fffffffffffffff mod:taos_log::layer::tests, k:kkk, port:1111, this is a test info log\n");
             // test qid init
             let qid: Qid = Span.get_qid().unwrap();
             assert_eq!(qid.get(), 9223372036854775807);
@@ -411,7 +412,7 @@ mod tests {
             tracing::info_span!("inner", "a" = "aaa").in_scope(|| {
                 tracing::info!(ip = "127.0.0.1","this is a test inner info log");
                 let s = rx.recv().unwrap();
-                assert_eq!(&s[38..], "INFO  QID:0x3e7 mod:taoslog::layer::tests, a:aaa, ip:127.0.0.1, k:kkk, this is a test inner info log\n");
+                assert_eq!(&s[38..], "INFO  QID:0x3e7 mod:taos_log::layer::tests, a:aaa, ip:127.0.0.1, k:kkk, this is a test inner info log\n");
                 // test qid inherit
                 let qid: Qid = Span.get_qid().unwrap();
                 assert_eq!(qid.get(), 999);
