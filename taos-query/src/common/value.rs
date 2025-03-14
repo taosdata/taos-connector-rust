@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt::Display;
 use std::str::Utf8Error;
 
-use bigdecimal::{BigDecimal, FromPrimitive, Zero};
+use bigdecimal::{BigDecimal, Zero};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
@@ -376,42 +376,6 @@ impl BorrowedValue<'_> {
     }
     pub(crate) fn to_f64(&self) -> Option<f64> {
         borrowed_value_to_float!(self)
-    }
-    pub(crate) fn to_decimal(&self) -> Option<bigdecimal::BigDecimal> {
-        match self {
-            BorrowedValue::Null(_) => None,
-            v @ BorrowedValue::Bool(_) => v.to_i8().and_then(|v| BigDecimal::from_i8(v)),
-            BorrowedValue::TinyInt(v) => BigDecimal::from_i8(*v),
-            BorrowedValue::SmallInt(v) => BigDecimal::from_i16(*v),
-            BorrowedValue::Int(v) => BigDecimal::from_i32(*v),
-            BorrowedValue::BigInt(v) => BigDecimal::from_i64(*v),
-            BorrowedValue::Float(v) => BigDecimal::from_f32(*v),
-            BorrowedValue::Double(v) => BigDecimal::from_f64(*v),
-            BorrowedValue::VarChar(v) => v.parse().ok(),
-            BorrowedValue::Timestamp(timestamp) => BigDecimal::from_i64(timestamp.as_raw_i64()),
-            BorrowedValue::NChar(cow) => cow.parse().ok(),
-            BorrowedValue::UTinyInt(v) => BigDecimal::from_u8(*v),
-            BorrowedValue::USmallInt(v) => BigDecimal::from_u16(*v),
-            BorrowedValue::UInt(v) => BigDecimal::from_u32(*v),
-            BorrowedValue::UBigInt(v) => BigDecimal::from_u64(*v),
-            BorrowedValue::Json(cow) => String::from_utf8(cow.to_vec())
-                .ok()
-                .and_then(|v| v.parse().ok()),
-            BorrowedValue::VarBinary(cow) => String::from_utf8(cow.to_vec())
-                .ok()
-                .and_then(|v| v.parse().ok()),
-            BorrowedValue::Decimal(v) => Some(bigdecimal::BigDecimal::from_bigint(
-                v.data.into(),
-                v.scale as _,
-            )),
-            BorrowedValue::Decimal64(v) => Some(bigdecimal::BigDecimal::from_bigint(
-                v.data.into(),
-                v.scale as _,
-            )),
-            BorrowedValue::Blob(_) => todo!(),
-            BorrowedValue::MediumBlob(_) => todo!(),
-            BorrowedValue::Geometry(_) => todo!(),
-        }
     }
 
     pub(crate) fn to_str(&self) -> Option<Cow<str>> {

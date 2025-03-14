@@ -1,6 +1,6 @@
 use bigdecimal::{BigDecimal, ToPrimitive};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Decimal<T> {
     pub(crate) data: T,
     pub(crate) precision: u8,

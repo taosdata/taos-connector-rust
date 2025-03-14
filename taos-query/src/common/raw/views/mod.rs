@@ -73,7 +73,7 @@ use std::fmt::{Debug, Display};
 use std::io::Write;
 use std::iter::FusedIterator;
 
-use crate::common::{self, BorrowedValue, Ty, Value};
+use crate::common::{BorrowedValue, Ty, Value};
 use crate::Precision;
 
 pub(crate) trait IsColumnView: Sized {
@@ -285,13 +285,13 @@ impl ColumnView {
         ColumnView::Double(DoubleView::from_iter(values))
     }
 
-    pub fn from_decimal<T: Into<Option<common::decimal::Decimal<i128>>>>(values: Vec<T>) -> Self {
-        ColumnView::Decimal(DecimalView::from_iter(values))
-    }
+    // pub fn from_decimal<T: Into<Option<common::decimal::Decimal<i128>>>>(values: Vec<T>) -> Self {
+    //     ColumnView::Decimal(DecimalView::from_iter(values))
+    // }
 
-    pub fn from_decimal64<T: Into<Option<common::decimal::Decimal<i64>>>>(values: Vec<T>) -> Self {
-        ColumnView::Decimal64(DecimalView::from_iter(values))
-    }
+    // pub fn from_decimal64<T: Into<Option<common::decimal::Decimal<i64>>>>(values: Vec<T>) -> Self {
+    //     ColumnView::Decimal64(DecimalView::from_iter(values))
+    // }
 
     pub fn from_varchar<
         S: AsRef<str>,
@@ -404,12 +404,9 @@ impl ColumnView {
             Ty::VarBinary => ColumnView::VarBinary(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
             )),
-            Ty::Decimal => ColumnView::Decimal(IsColumnView::from_borrowed_value_iter(
-                self.iter().chain(rhs),
-            )),
-            Ty::Decimal64 => ColumnView::Decimal64(IsColumnView::from_borrowed_value_iter(
-                self.iter().chain(rhs),
-            )),
+            Ty::Decimal | Ty::Decimal64 => {
+                unimplemented!("Unable to determine the values for precision and scale")
+            }
             Ty::Blob => todo!(),
             Ty::MediumBlob => todo!(),
             Ty::Geometry => ColumnView::Geometry(IsColumnView::from_borrowed_value_iter(
@@ -481,8 +478,9 @@ impl ColumnView {
             Ty::Timestamp => Self::from_millis_timestamp(vec![None; n]),
             Ty::VarChar => Self::from_varchar::<&'static str, _, _, _>(vec![None; n]),
             Ty::NChar => Self::from_nchar::<&'static str, _, _, _>(vec![None; n]),
-            Ty::Decimal => Self::from_decimal(vec![None; n]),
-            Ty::Decimal64 => Self::from_decimal64(vec![None; n]),
+            Ty::Decimal | Ty::Decimal64 => {
+                unimplemented!("Unable to determine the values for precision and scale")
+            }
             Ty::Json => todo!(),
             Ty::VarBinary => todo!(),
             Ty::Blob => todo!(),

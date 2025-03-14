@@ -405,7 +405,7 @@ impl RawBlock {
 
                     data_lengths[i] = *length * rows as u32;
                 }
-                Ty::Decimal | Ty::Decimal64 => unimplemented!("decimal64 type not supported"),
+                Ty::Decimal | Ty::Decimal64 => unimplemented!("decimal type not supported"),
                 Ty::VarBinary => todo!(),
                 Ty::Blob => todo!(),
                 Ty::MediumBlob => todo!(),
@@ -480,6 +480,7 @@ impl RawBlock {
                     let o2 = data_offset + ((rows + 7) >> 3); // null bitmap len.
                     data_offset = o2 + rows * std::mem::size_of::<$prim>();
                     let nulls = bytes.slice(o1..o2);
+                    dbg!(o2, data_offset);
                     let data = bytes.slice(o2..data_offset);
                     // precision + scale
                     let schema_bytes = schema.into_bytes();
@@ -1679,4 +1680,60 @@ fn test_from_v2() {
     dbg!(&raw);
 
     println!("{}", raw.pretty_format());
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::{BufMut, BytesMut};
+
+    use super::*;
+
+    #[test]
+    fn parse_decimal_raw_block_test() -> anyhow::Result<()> {
+        let mut bytes = BytesMut::new();
+
+        // header
+        bytes.extend_from_slice(
+            Header {
+                version: 3,
+                length: 82,
+                nrows: 1,
+                ncols: 3,
+                flag: 0,
+                group_id: 0,
+            }
+            .as_bytes(),
+        );
+        // 28
+
+        // schema (1+4) * 3
+        let mut schema_bytes = BytesMut::new();
+        schema_bytes.extend_from_slice(
+            ColSchema::new(Ty::Decimal, u32::from_be_bytes([8, 0, 5, 2])).as_bytes(), // 123.45
+        );
+        schema_bytes.extend_from_slice(
+            ColSchema::new(Ty::Decimal, u32::from_be_bytes([8, 0, 5, 0])).as_bytes(), // 12345
+        );
+        schema_bytes.extend_from_slice(
+            ColSchema::new(Ty::Decimal, u32::from_be_bytes([8, 0, 5, 5])).as_bytes(), // 0.12345
+        );
+        bytes.extend(schema_bytes.freeze());
+        // 43
+
+        // length 4 * 3
+        for _ in 0..3 {
+            bytes.put_u32(9);
+        }
+
+        // nums (1 + 8) * 3
+        for _ in 0..3 {
+            bytes.extend(NullBits::from_iter([true, true, true]).0);
+            bytes.put_i64(12345);
+        }
+
+        let block = RawBlock::parse_from_raw_block(bytes, Precision::Microsecond);
+        let cols = block.column_views();
+        dbg!(cols);
+        Ok(())
+    }
 }

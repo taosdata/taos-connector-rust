@@ -4,7 +4,7 @@ use bytes::Bytes;
 
 use crate::common::{self, BorrowedValue, Ty};
 
-use super::{IsColumnView, NullBits, NullsIter};
+use super::{NullBits, NullsIter};
 
 type Item<T> = common::decimal::Decimal<T>;
 type View<T> = DecimalView<T>;
@@ -17,36 +17,6 @@ pub struct DecimalView<T> {
     pub(crate) scale: u8,
     pub(crate) _p: PhantomData<T>,
 }
-
-macro_rules! impl_is_column_view {
-    ($ty: expr, $prim: ty) => {
-        impl IsColumnView for View<$prim> {
-            fn ty(&self) -> Ty {
-                $ty
-            }
-
-            fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-                iter.map(|v| {
-                    v.to_decimal().and_then(|v| {
-                        use bigdecimal::ToPrimitive;
-                        let (data, scale) = v.as_bigint_and_exponent();
-                        paste::paste! {
-                            data.[<to_$prim>]().map(|data| Item {
-                                data,
-                                precision: v.digits() as _,
-                                scale: scale as _,
-                            })
-                        }
-                    })
-                })
-                .collect()
-            }
-        }
-    };
-}
-
-impl_is_column_view!(Ty::Decimal, i128);
-impl_is_column_view!(Ty::Decimal64, i64);
 
 impl<T> DecimalView<T> {
     const ITEM_SIZE: usize = std::mem::size_of::<T>();
@@ -184,77 +154,6 @@ impl DecimalView<i64> {
             .map_or(BorrowedValue::Null(Ty::Decimal), BorrowedValue::Decimal64)
     }
 }
-
-macro_rules! impl_from_iter {
-    ($prim: ty) => {
-        impl<A: Into<Option<Item<$prim>>>> FromIterator<A> for DecimalView<$prim> {
-            fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
-                let mut first_precision: Option<u8> = None;
-                let mut first_scale: Option<u8> = None;
-                let (nulls, mut values): (Vec<bool>, Vec<_>) = iter
-                    .into_iter()
-                    .map(|v| match v.into() {
-                        Some(v) => {
-                            let (num, scale) = (v.data, v.scale);
-                            if let Some(first_scale) = first_scale {
-                                if first_scale != scale {
-                                    (false, 0)
-                                } else {
-                                    (true, num)
-                                }
-                            } else {
-                                let _ = first_precision.insert(v.precision);
-                                let _ = first_scale.insert(scale);
-                                (true, num)
-                            }
-                        }
-                        None => (false, 0),
-                    })
-                    .unzip();
-                Self {
-                    nulls: NullBits::from_iter(nulls),
-                    data: Bytes::from({
-                        let (ptr, len, cap) =
-                            (values.as_mut_ptr(), values.len(), values.capacity());
-                        std::mem::forget(values);
-
-                        let item_size = std::mem::size_of::<i64>();
-
-                        #[cfg(target_endian = "little")]
-                        unsafe {
-                            Vec::from_raw_parts(ptr as *mut u8, len * item_size, cap * item_size)
-                        }
-
-                        #[cfg(target_endian = "big")]
-                        {
-                            let mut bytes = unsafe {
-                                Vec::from_raw_parts(
-                                    ptr as *mut u8,
-                                    len * item_size,
-                                    cap * item_size,
-                                )
-                            };
-                            for i in (0..bytes.len()).step_by(item_size) {
-                                let j = i + item_size;
-                                let val = i64::from_ne_bytes(
-                                    &bytes[i..j].try_into().expect("slice with incorrect length"),
-                                );
-                                bytes[i..j].copy_from_slice(&val.to_le_bytes());
-                            }
-                            bytes
-                        }
-                    }),
-                    precision: first_precision.unwrap_or_default(),
-                    scale: first_scale.unwrap_or_default(),
-                    _p: PhantomData,
-                }
-            }
-        }
-    };
-}
-
-impl_from_iter!(i128);
-impl_from_iter!(i64);
 
 pub struct DecimalViewIter<'a, T> {
     view: &'a DecimalView<T>,
