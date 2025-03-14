@@ -1,4 +1,12 @@
+use std::ffi::c_void;
+use std::fmt::{Debug, Display};
+use std::io::Write;
+use std::iter::FusedIterator;
+
 use itertools::Itertools;
+
+use crate::common::{BorrowedValue, Ty, Value};
+use crate::Precision;
 
 mod bool_view;
 pub use bool_view::BoolView;
@@ -64,14 +72,6 @@ mod lengths;
 pub(crate) use lengths::*;
 
 mod from;
-
-use std::ffi::c_void;
-use std::fmt::{Debug, Display};
-use std::io::Write;
-use std::iter::FusedIterator;
-
-use crate::common::{BorrowedValue, Ty, Value};
-use crate::Precision;
 
 pub(crate) trait IsColumnView: Sized {
     #[allow(dead_code)]
@@ -611,8 +611,8 @@ impl ColumnView {
             ColumnView::UInt(view) => view.slice(range).map(ColumnView::UInt),
             ColumnView::UBigInt(view) => view.slice(range).map(ColumnView::UBigInt),
             ColumnView::Json(view) => view.slice(range).map(ColumnView::Json),
-            ColumnView::VarBinary(_view) => todo!(), //view.slice(range).map(ColumnView::VarBinary),
-            ColumnView::Geometry(_view) => todo!(),  //view.slice(range).map(ColumnView::Geometry),
+            ColumnView::VarBinary(_view) => todo!(),
+            ColumnView::Geometry(_view) => todo!(),
         }
     }
 
@@ -660,6 +660,28 @@ impl ColumnView {
         }
     }
 
+    pub fn as_raw_ptr(&self) -> *const c_void {
+        match self {
+            ColumnView::Bool(view) => view.as_raw_ptr() as _,
+            ColumnView::TinyInt(view) => view.as_raw_ptr() as _,
+            ColumnView::SmallInt(view) => view.as_raw_ptr() as _,
+            ColumnView::Int(view) => view.as_raw_ptr() as _,
+            ColumnView::BigInt(view) => view.as_raw_ptr() as _,
+            ColumnView::UTinyInt(view) => view.as_raw_ptr() as _,
+            ColumnView::USmallInt(view) => view.as_raw_ptr() as _,
+            ColumnView::UBigInt(view) => view.as_raw_ptr() as _,
+            ColumnView::UInt(view) => view.as_raw_ptr() as _,
+            ColumnView::Float(view) => view.as_raw_ptr() as _,
+            ColumnView::Double(view) => view.as_raw_ptr() as _,
+            ColumnView::Timestamp(view) => view.as_raw_ptr() as _,
+            ColumnView::VarChar(view) => view.as_raw_ptr() as _,
+            ColumnView::NChar(view) => view.as_raw_ptr() as _,
+            ColumnView::Json(view) => view.as_raw_ptr() as _,
+            ColumnView::VarBinary(view) => view.as_raw_ptr() as _,
+            ColumnView::Geometry(view) => view.as_raw_ptr() as _,
+        }
+    }
+
     /// Cast behaviors:
     ///
     /// - BOOL to VARCHAR/NCHAR: true => "true", false => "false"
@@ -676,7 +698,6 @@ impl ColumnView {
         }
         use Ty::*;
         match self {
-            // (Bool, UBigInt) => ColumnView::from_big_ints(self.)
             ColumnView::Bool(booleans) => {
                 macro_rules! _cast_bool_to {
                     ($ty:ty) => {
@@ -1212,6 +1233,7 @@ impl ColumnView {
             _ => self.clone(),
         }
     }
+
     pub unsafe fn as_timestamp_view(&self) -> &TimestampView {
         match self {
             ColumnView::Timestamp(view) => view,

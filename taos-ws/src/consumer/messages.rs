@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bytes::Bytes;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -83,6 +85,10 @@ pub struct TmqInit {
     pub enable_batch_meta: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub msg_consume_excluded: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub msg_consume_rawdata: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<HashMap<String, String>>,
 }
 
 impl TmqInit {
@@ -130,6 +136,8 @@ pub enum TmqSend {
     Position(OffsetArgs),
     CommitOffset(OffsetSeekArgs),
 }
+
+impl ToMessage for TmqSend {}
 
 unsafe impl Send for TmqSend {}
 unsafe impl Sync for TmqSend {}
@@ -293,5 +301,3 @@ fn test_serde_recv_data() {
     let d: TmqRecv = serde_json::from_str(json).unwrap();
     let _ = dbg!(d.ok());
 }
-
-impl ToMessage for TmqSend {}

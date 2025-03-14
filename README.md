@@ -1,241 +1,209 @@
-# The Official Rust Connector for [TDengine]
+<!-- omit in toc -->
+# TDengine Rust Connector
 
-| Docs.rs                                        | Crates.io Version                                  | Crates.io Downloads                                | CodeCov                                                                                                                                                           |
-| ---------------------------------------------- | -------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ![docs.rs](https://img.shields.io/docsrs/taos) | ![Crates.io](https://img.shields.io/crates/v/taos) | ![Crates.io](https://img.shields.io/crates/d/taos) | [![codecov](https://codecov.io/gh/taosdata/taos-connector-rust/branch/main/graph/badge.svg?token=P11UKNLTVO)](https://codecov.io/gh/taosdata/taos-connector-rust) |
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/taosdata/taos-connector-rust/build.yml)](https://github.com/taosdata/taos-connector-rust/actions/workflows/build.yml)
+[![codecov](https://codecov.io/gh/taosdata/taos-connector-rust/branch/main/graph/badge.svg?token=P11UKNLTVO)](https://codecov.io/gh/taosdata/taos-connector-rust)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/taosdata/taos-connector-rust)
+![GitHub License](https://img.shields.io/github/license/taosdata/taos-connector-rust)
+[![Crates.io](https://img.shields.io/crates/v/taos)](https://crates.io/crates/taos)
+<br />
+[![Twitter Follow](https://img.shields.io/twitter/follow/tdenginedb?label=TDengine&style=social)](https://twitter.com/tdenginedb)
+[![YouTube Channel](https://img.shields.io/badge/Subscribe_@tdengine--white?logo=youtube&style=social)](https://www.youtube.com/@tdengine)
+[![Discord Community](https://img.shields.io/badge/Join_Discord--white?logo=discord&style=social)](https://discord.com/invite/VZdSuUg4pS)
+[![LinkedIn](https://img.shields.io/badge/Follow_LinkedIn--white?logo=linkedin&style=social)](https://www.linkedin.com/company/tdengine)
+[![StackOverflow](https://img.shields.io/badge/Ask_StackOverflow--white?logo=stackoverflow&style=social&logoColor=orange)](https://stackoverflow.com/questions/tagged/tdengine)
 
-This is the official TDengine connector in Rust.
+English | [简体中文](./README-CN.md)
 
-## Dependencies
+<!-- omit in toc -->
+## Table of Contents
 
-- [Rust](https://www.rust-lang.org/learn/get-started) of course.
+- [1. Introduction](#1-introduction)
+- [2. Documentation](#2-documentation)
+- [3. Prerequisites](#3-prerequisites)
+- [4. Build](#4-build)
+- [5. Testing](#5-testing)
+  - [5.1 Test Execution](#51-test-execution)
+  - [5.2 Test Case Addition](#52-test-case-addition)
+  - [5.3 Performance Testing](#53-performance-testing)
+- [6. CI/CD](#6-cicd)
+- [7. Submitting Issues](#7-submitting-issues)
+- [8. Submitting PRs](#8-submitting-prs)
+- [9. References](#9-references)
+- [10. License](#10-license)
 
-if you use the default features, it'll depend on:
+## 1. Introduction
 
-- [TDengine] Client library and headers.
+`taos` is the official Rust language connector of TDengine, through which Rust developers can develop applications that access TDengine databases. It supports data writing, data query, data subscription, schemaless writing, parameter binding and other functions.
 
-## Usage
+## 2. Documentation
 
-By default, enable both native and websocket client:
+- To use Rust Connector, please check [Developer Guide](https://docs.taosdata.com/develop/), which includes examples of data writing, data querying, data subscription, modeless writing, and parameter binding.
+- For other reference information, please refer to the [Reference Manual](https://docs.taosdata.com/reference/connector/rust/), which includes version history, data type mapping, sample program summary, API reference, and FAQ.
+- This quick guide is mainly for developers who like to contribute/build/test the Rust connector by themselves. To learn about TDengine, you can visit the [official documentation](https://docs.tdengine.com).
 
-```toml
-[dependencies]
-taos = "*"
+## 3. Prerequisites
+
+1. Rust 1.78 or above has been installed. The latest version is recommended.
+2. TDengine has been installed locally. For specific steps, please refer to [Deploy TDengine](https://docs.tdengine.com/get-started/deploy-from-package/).
+3. Modify the `/etc/taos/taos.cfg` configuration file and add the following configuration:
+   ```text
+   supportVnodes 256
+   ```
+4. Start taosd and taosAdapter.
+
+## 4. Build
+
+Run the following command in the project directory to build the project:
+
+```bash
+cargo build
 ```
 
-For websocket client only:
+## 5. Testing
 
-```toml
-[dependencies]
-taos = { version = "*", default-features = false, features = ["ws"] }
+### 5.1 Test Execution
+
+Run the test by executing the following command in the project directory:
+
+```bash
+cargo test
 ```
 
-For native only:
+The test case will connect to the local TDengine server and taosAdapter for testing. After the test is completed, you will see a result summary similar to the following. If all test cases pass, the `failed` item should be 0:
 
-```toml
-[dependencies]
-taos = { version = "*", default-features = false, features = ["native"] }
+```text
+test result: ok. 101 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.21s
 ```
 
-### Query
+### 5.2 Test Case Addition
 
-```rust
-use chrono::{DateTime, Local};
-use taos::*;
+1. Create a test module: In the `.rs` file that needs to be tested, add a module with the `#[cfg(test)]` attribute. This attribute ensures that the test code is only compiled when the test is executed.
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let dsn = "taos://localhost:6030";
-    let builder = TaosBuilder::from_dsn(dsn)?;
+   ```rust
+   #[cfg(test)]
+   mod tests {
+       // Write your test cases here
+   }
+   ```
 
-    let taos = builder.build()?;
+2. Import the contents of the module under test: In the test module, use `use super::*;` to import all the contents of the external module into the scope of the test module so that you can access the functions and structures that need to be tested.
 
-    let db = "query";
+   ```rust
+   #[cfg(test)]
+   mod tests {
+       use super::*;
 
-    // prepare database
-    taos.exec_many([
-        format!("DROP DATABASE IF EXISTS `{db}`"),
-        format!("CREATE DATABASE `{db}`"),
-        format!("USE `{db}`"),
-    ])
-    .await?;
+       // Write your test cases here
+   }
+   ```
 
-    let inserted = taos.exec_many([
-        // create super table
-        "CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT) \
-         TAGS (`groupid` INT, `location` BINARY(16))",
-        // create child table
-        "CREATE TABLE `d0` USING `meters` TAGS(0, 'Los Angles')",
-        // insert into child table
-        "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32)",
-        // insert with NULL values
-        "INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL)",
-        // insert and automatically create table with tags if not exists
-        "INSERT INTO `d1` USING `meters` TAGS(1, 'San Francisco') values(now - 9s, 10.1, 119, 0.33)",
-        // insert many records in a single sql
-        "INSERT INTO `d1` values (now-8s, 10, 120, 0.33) (now - 6s, 10, 119, 0.34) (now - 4s, 11.2, 118, 0.322)",
-    ]).await?;
+3. Write test functions: In the test module, define functions with the `#[test]` attribute. Each test function should contain the following steps:
 
-    assert_eq!(inserted, 6);
-    let mut result = taos.query("select * from `meters`").await?;
+   - Setup: Prepare the data or state required for the test.
+   - Execution: Call the function or method that needs to be tested.
+   - Assertions: Use assertion macros to verify that the results are as expected.
 
-    for field in result.fields() {
-        println!("got field: {}", field.name());
-    }
+   ```rust
+   #[cfg(test)]
+   mod tests {
+       use super::*;
 
-    // Query option 1, use rows stream.
-    let mut rows = result.rows();
-    while let Some(row) = rows.try_next().await? {
-        for (name, value) in row {
-            println!("got value of {}: {}", name, value);
-        }
-    }
+       #[test]
+       fn test_add() {
+           let result = add(2, 3);
+           assert_eq!(result, 5);
+       }
+   }
+   ```
 
-    // Query options 2, use deserialization with serde.
-    #[derive(Debug, serde::Deserialize)]
-    #[allow(dead_code)]
-    struct Record {
-        // deserialize timestamp to chrono::DateTime<Local>
-        ts: DateTime<Local>,
-        // float to f32
-        current: Option<f32>,
-        // int to i32
-        voltage: Option<i32>,
-        phase: Option<f32>,
-        groupid: i32,
-        // binary/varchar to String
-        location: String,
-    }
+   In the above example, the `assert_eq!` macro is used to check if `result` is equal to the expected value `5`. If not, the test will fail and panic.
 
-    let records: Vec<Record> = taos
-        .query("select * from `meters`")
-        .await?
-        .deserialize()
-        .try_collect()
-        .await?;
+4. Asynchronous function testing: For asynchronous functions, you can use the `#[tokio::test]` attribute macro to mark the test function and provide it with the Tokio asynchronous runtime.
 
-    dbg!(records);
-    Ok(())
-}
-```
+   ```rust
+   #[cfg(test)]
+   mod tests {
+       use super::*;
+       use tokio;
 
-### Subscription
+       #[tokio::test]
+       async fn test_async_function() {
+           let result = async_function().await;
+           assert_eq!(result, expected_value);
+       }
+   }
+   ```
 
-```rust
-use std::time::Duration;
+   To enable asynchronous testing support, make sure to include the Tokio dependency in your `Cargo.toml`. You can choose the appropriate asynchronous runtime and corresponding test property macros based on your project needs.
 
-use chrono::{DateTime, Local};
-use taos::*;
+5. Test panic cases: For functions that are expected to panic, you can use the `#[should_panic]` attribute. This attribute optionally accepts an `expected` parameter to specify the expected panic message.
 
-// Query options 2, use deserialization with serde.
-#[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)]
-struct Record {
-    // deserialize timestamp to chrono::DateTime<Local>
-    ts: DateTime<Local>,
-    // float to f32
-    current: Option<f32>,
-    // int to i32
-    voltage: Option<i32>,
-    phase: Option<f32>,
-}
+   ```rust
+   #[cfg(test)]
+   mod tests {
+       use super::*;
 
-async fn prepare(taos: Taos) -> anyhow::Result<()> {
-    let inserted = taos.exec_many([
-        // create child table
-        "CREATE TABLE `d0` USING `meters` TAGS(0, 'Los Angles')",
-        // insert into child table
-        "INSERT INTO `d0` values(now - 10s, 10, 116, 0.32)",
-        // insert with NULL values
-        "INSERT INTO `d0` values(now - 8s, NULL, NULL, NULL)",
-        // insert and automatically create table with tags if not exists
-        "INSERT INTO `d1` USING `meters` TAGS(1, 'San Francisco') values(now - 9s, 10.1, 119, 0.33)",
-        // insert many records in a single sql
-        "INSERT INTO `d1` values (now-8s, 10, 120, 0.33) (now - 6s, 10, 119, 0.34) (now - 4s, 11.2, 118, 0.322)",
-    ]).await?;
-    assert_eq!(inserted, 6);
-    Ok(())
-}
+       #[test]
+       #[should_panic(expected = "Divide by zero error")]
+       fn test_divide_by_zero() {
+           divide(1, 0);
+       }
+   }
+   ```
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // std::env::set_var("RUST_LOG", "debug");
-    pretty_env_logger::init();
-    let dsn = "taos://localhost:6030";
-    let builder = TaosBuilder::from_dsn(dsn)?;
+   In this example, the `divide` function should panic when the denominator is zero, and the message should be "Divide by zero error".
 
-    let taos = builder.build()?;
-    let db = "tmq";
+6. Ignore specific tests: For tests that take a long time or are not run often, you can use the `#[ignore]` attribute to mark them. By default, these tests will not be run unless explicitly run with the `cargo test -- --ignored` command.
 
-    // prepare database
-    taos.exec_many([
-        format!("DROP TOPIC IF EXISTS tmq_meters"),
-        format!("DROP DATABASE IF EXISTS `{db}`"),
-        format!("CREATE DATABASE `{db}`"),
-        format!("USE `{db}`"),
-        // create super table
-        format!("CREATE TABLE `meters` (`ts` TIMESTAMP, `current` FLOAT, `voltage` INT, `phase` FLOAT)\
-                 TAGS (`groupid` INT, `location` BINARY(16))"),
-        // create topic for subscription
-        format!("CREATE TOPIC tmq_meters with META AS DATABASE {db}")
-    ])
-    .await?;
+   ```rust
+   #[cfg(test)]
+   mod tests {
+       use super::*;
 
-    let task = tokio::spawn(prepare(taos));
+       #[test]
+       #[ignore]
+       fn test_long_running() {
+           // Long-running test code
+       }
+   }
+   ```
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+### 5.3 Performance Testing
 
-    // subscribe
-    let tmq = TmqBuilder::from_dsn("taos://localhost:6030/?group.id=test")?;
+Performance testing is under development.
 
-    let mut consumer = tmq.build()?;
-    consumer.subscribe(["tmq_meters"]).await?;
+## 6. CI/CD
 
-    {
-        let mut stream = consumer.stream();
+- [Build Workflow](https://github.com/taosdata/taos-connector-rust/actions/workflows/build.yml)
+- [Code Coverage](https://app.codecov.io/gh/taosdata/taos-connector-rust)
 
-        while let Some((offset, message)) = stream.try_next().await? {
-            // get information from offset
+## 7. Submitting Issues
 
-            // the topic
-            let topic = offset.topic();
-            // the vgroup id, like partition id in kafka.
-            let vgroup_id = offset.vgroup_id();
-            println!("* in vgroup id {vgroup_id} of topic {topic}\n");
+We welcome the submission of [GitHub Issue](https://github.com/taosdata/taos-connector-rust/issues/new?template=Blank+issue). When submitting, please provide the following information:
 
-            if let Some(data) = message.into_data() {
-                while let Some(block) = data.fetch_raw_block().await? {
-                    // one block for one table, get table name if needed
-                    let name = block.table_name();
-                    let records: Vec<Record> = block.deserialize().try_collect()?;
-                    println!(
-                        "** table: {}, got {} records: {:#?}\n",
-                        name.unwrap(),
-                        records.len(),
-                        records
-                    );
-                }
-            }
-            consumer.commit(offset).await?;
-        }
-    }
+- Description of the problem, whether it must occur, preferably with detailed call stack.
+- Rust connector version.
+- Connection parameters (no username or password required).
+- TDengine server version.
 
-    consumer.unsubscribe().await;
+## 8. Submitting PRs
 
-    task.await??;
+We welcome developers to contribute to this project. When submitting PRs, please follow these steps:
 
-    Ok(())
-}
+1. Fork this project, refer to ([how to fork a repo](https://docs.github.com/en/get-started/quickstart/fork-a-repo)).
+2. Create a new branch from the main branch with a meaningful branch name (`git checkout -b my_branch`). Do not modify the main branch directly.
+3. Modify the code, ensure all unit tests pass, and add new unit tests to verify the changes.
+4. Push the changes to the remote branch (`git push origin my_branch`).
+5. Create a Pull Request on GitHub ([how to create a pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request)).
+6. After submitting the PR, you can find your PR through the [Pull Request](https://github.com/taosdata/taos-connector-rust/pulls). Click on the corresponding link to see if the CI for your PR has passed. If it has passed, it will display "All checks have passed". Regardless of whether the CI passes or not, you can click "Show all checks" -> "Details" to view the detailed test case logs.
+7. After submitting the PR, if CI passes, you can find your PR on the [codecov](https://app.codecov.io/gh/taosdata/taos-connector-rust/pulls) page to check the test coverage.
 
-```
+## 9. References
 
-## Contribution
+- [TDengine Official Website](https://www.tdengine.com/)
+- [TDengine GitHub](https://github.com/taosdata/TDengine)
 
-Welcome for all contributions.
+## 10. License
 
-## License
-
-Keep same with [TDengine].
-
-[TDengine]: https://www.taosdata.com/en/getting-started/
-[r2d2]: https://crates.io/crates/r2d2
+[MIT License](./LICENSE)

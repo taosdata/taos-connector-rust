@@ -45,7 +45,6 @@ impl Default for Retries {
 
 #[derive(Clone, Debug)]
 pub struct TaosBuilder {
-    // scheme: &'static str, // ws or wss
     https: Arc<AtomicBool>,
     addr: String,
     auth: WsAuth,
@@ -108,6 +107,7 @@ impl taos_query::TBuilder for TaosBuilder {
     fn client_version() -> &'static str {
         "0"
     }
+
     fn ping(&self, taos: &mut Self::Target) -> RawResult<()> {
         taos_query::Queryable::exec(taos, "select server_version()").map(|_| ())
     }
@@ -132,6 +132,7 @@ impl taos_query::TBuilder for TaosBuilder {
             })
         }
     }
+
     fn is_enterprise_edition(&self) -> RawResult<bool> {
         if self.addr.matches(".cloud.tdengine.com").next().is_some()
             || self.addr.matches(".cloud.taosdata.com").next().is_some()
@@ -329,6 +330,7 @@ impl TaosBuilder {
             "ws"
         }
     }
+
     fn set_https(&self, https: bool) {
         self.https.store(https, Ordering::SeqCst);
     }

@@ -31,6 +31,10 @@ impl VarBinaryView {
         self.offsets.len()
     }
 
+    pub fn as_raw_ptr(&self) -> *const u8 {
+        self.data.as_ptr() as _
+    }
+
     /// A iterator only decide if the value at some row index is NULL or not.
     pub fn is_null_iter(&self) -> VarBinaryNullsIter {
         VarBinaryNullsIter { view: self, row: 0 }

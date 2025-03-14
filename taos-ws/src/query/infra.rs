@@ -56,6 +56,7 @@ pub enum WsSend {
         data: String,
         ttl: Option<i32>,
         req_id: Option<ReqId>,
+        table_name_key: Option<String>,
     },
     Query {
         req_id: ReqId,
@@ -88,6 +89,11 @@ pub enum WsSend {
         req_id: ReqId,
         stmt_id: StmtId,
     },
+    CheckServerStatus {
+        req_id: ReqId,
+        fqdn: String,
+        port: i32,
+    },
 }
 
 impl WsSend {
@@ -99,7 +105,8 @@ impl WsSend {
             | WsSend::Stmt2Prepare { req_id, .. }
             | WsSend::Stmt2Exec { req_id, .. }
             | WsSend::Stmt2Result { req_id, .. }
-            | WsSend::Stmt2Close { req_id, .. } => *req_id,
+            | WsSend::Stmt2Close { req_id, .. }
+            | WsSend::CheckServerStatus { req_id, .. } => *req_id,
             WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
             WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
             WsSend::Fetch(args) | WsSend::FetchBlock(args) | WsSend::FreeResult(args) => {
@@ -188,7 +195,6 @@ pub enum WsRecvData {
         version: String,
     },
     Insert(InsertResp),
-
     #[serde(alias = "binary_query")]
     Query(WsQueryResp),
     Fetch(WsFetchResp),
@@ -279,6 +285,20 @@ pub enum WsRecvData {
         #[serde(default)]
         timing: u64,
     },
+    ValidateSql {
+        #[serde(default)]
+        timing: u64,
+        #[serde(default)]
+        result_code: i64,
+    },
+    CheckServerStatus {
+        #[serde(default)]
+        timing: u64,
+        #[serde(default)]
+        status: i32,
+        #[serde(default)]
+        details: String,
+    },
 }
 
 #[allow(dead_code)]
@@ -292,7 +312,7 @@ pub struct Stmt2Field {
     pub bind_type: BindType,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BindType {
     Column,
     Tag,

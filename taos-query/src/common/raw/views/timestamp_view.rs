@@ -140,7 +140,6 @@ impl TimestampView {
                 std::ptr::read_unaligned(
                     self.data.as_ptr().add(row * std::mem::size_of::<Item>()) as _
                 ),
-                // *self.get_raw_at(row),
                 self.precision,
             ))
         }
