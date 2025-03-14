@@ -78,7 +78,7 @@ pub enum Ty {
     VarBinary = 16, // 16
     /// 17, Not supported now.
     #[doc(hidden)]
-    Decimal, // 17
+    Decimal = 17, // 17
     /// 18, Not supported now.
     #[doc(hidden)]
     Blob, // 18
@@ -88,6 +88,8 @@ pub enum Ty {
 
     /// 20, Geometry, `geometry` in sql, [`Vec<u8>`] in Rust.
     Geometry, // 20
+
+    Decimal64 = 21,
 }
 
 impl<'de> serde::Deserialize<'de> for Ty {
@@ -262,7 +264,7 @@ impl Ty {
             UBigInt => "BIGINT UNSIGNED",
             Json => "JSON",
             VarBinary => "VARBINARY",
-            Decimal => "DECIMAL",
+            Decimal | Decimal64 => "DECIMAL",
             Blob => "BLOB",
             MediumBlob => "MEDIUMBLOB",
             Geometry => "GEOMETRY",
@@ -289,7 +291,7 @@ impl Ty {
             UBigInt => "bigint unsigned",
             Json => "json",
             VarBinary => "varbinary",
-            Decimal => "decimal",
+            Decimal | Decimal64 => "decimal",
             Blob => "blob",
             MediumBlob => "mediumblob",
             Geometry => "geometry",
@@ -317,6 +319,7 @@ impl Ty {
             Json => "TSDB_DATA_TYPE_JSON\0".as_ptr() as *const c_char,
             VarBinary => "TSDB_DATA_TYPE_VARBINARY\0".as_ptr() as *const c_char,
             Decimal => "TSDB_DATA_TYPE_DECIMAL\0".as_ptr() as *const c_char,
+            Decimal64 => "TSDB_DATA_TYPE_DECIMAL64\0".as_ptr() as *const c_char,
             Blob => "TSDB_DATA_TYPE_BLOB\0".as_ptr() as *const c_char,
             MediumBlob => "TSDB_DATA_TYPE_MEDIUMBLOB\0".as_ptr() as *const c_char,
             Geometry => "TSDB_DATA_TYPE_GEOMETRY\0".as_ptr() as *const c_char,
@@ -365,7 +368,7 @@ impl Ty {
         }
         _var_str!(
             Null Bool TinyInt SmallInt Int BigInt UTinyInt USmallInt UInt UBigInt
-            Float Double VarChar NChar Timestamp Json VarBinary Decimal Blob MediumBlob Geometry
+            Float Double VarChar NChar Timestamp Json VarBinary Decimal Decimal64 Blob MediumBlob Geometry
         )
     }
 

@@ -405,8 +405,8 @@ impl RawBlock {
 
                     data_lengths[i] = *length * rows as u32;
                 }
+                Ty::Decimal | Ty::Decimal64 => unimplemented!("decimal64 type not supported"),
                 Ty::VarBinary => todo!(),
-                Ty::Decimal => todo!(),
                 Ty::Blob => todo!(),
                 Ty::MediumBlob => todo!(),
                 Ty::Geometry => todo!(),
@@ -471,6 +471,27 @@ impl RawBlock {
                         nulls: NullBits(nulls),
                         data,
                     }})
+                }};
+            }
+
+            macro_rules! _decimal_value {
+                ($prim: ty) => {{
+                    let o1 = data_offset;
+                    let o2 = data_offset + ((rows + 7) >> 3); // null bitmap len.
+                    data_offset = o2 + rows * std::mem::size_of::<$prim>();
+                    let nulls = bytes.slice(o1..o2);
+                    let data = bytes.slice(o2..data_offset);
+                    // precision + scale
+                    let schema_bytes = schema.into_bytes();
+                    let precision = schema_bytes[3];
+                    let scale = schema_bytes[4];
+                    ColumnView::Decimal(DecimalView {
+                        nulls: NullBits(nulls),
+                        data,
+                        precision,
+                        scale,
+                        _p: std::marker::PhantomData,
+                    })
                 }};
             }
 
@@ -545,6 +566,8 @@ impl RawBlock {
 
                     ColumnView::VarBinary(VarBinaryView { offsets, data })
                 }
+                Ty::Decimal => _decimal_value!(i128),
+                Ty::Decimal64 => _decimal_value!(i64),
                 Ty::Geometry => {
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;

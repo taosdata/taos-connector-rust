@@ -177,9 +177,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
             Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
             VarBinary(v) | Geometry(v) => visitor.visit_borrowed_bytes(v),
-            Decimal(_) => Err(<Self::Error as de::Error>::custom(
-                "un supported type to deserialize",
-            )),
+            Decimal(v) | Decimal64(v) => visitor.visit_string(v.to_string()),
         }
     }
 
@@ -197,7 +195,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
     {
         use Value::*;
         match self {
-            Null(_) => visitor.visit_borrowed_str(""), // todo: empty string or error?
+            Null(_) => visitor.visit_borrowed_str(""),
             Bool(v) => visitor.visit_bool(*v),
             TinyInt(v) => visitor.visit_i8(*v),
             SmallInt(v) => visitor.visit_i16(*v),
@@ -216,9 +214,10 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
                     .format("%Y-%m-%dT%H:%M:%S%.f")
                     .to_string(),
             ),
-            _ => Err(<Self::Error as de::Error>::custom(
-                "un supported type to deserialize",
-            )),
+            Decimal(v) | Decimal64(v) => visitor.visit_string(v.to_string()),
+            Geometry(_) | MediumBlob(_) | Blob(_) | VarBinary(_) => Err(
+                <Self::Error as de::Error>::custom("un supported type to deserialize"),
+            ),
         }
     }
 
@@ -276,9 +275,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
                 visitor.visit_newtype_struct(v.as_slice().into_deserializer())
             }
             VarBinary(v) | Geometry(v) => visitor.visit_bytes(v),
-            Decimal(_) => Err(<Self::Error as de::Error>::custom(
-                "un supported type to deserialize",
-            )),
+            Decimal(v) | Decimal64(v) => _v_!(v.to_string()),
         }
     }
 

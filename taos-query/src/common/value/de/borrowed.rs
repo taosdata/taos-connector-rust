@@ -148,9 +148,8 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
-            Decimal(_) => Err(<Self::Error as de::Error>::custom(
-                "un supported type to deserialize",
-            )),
+            Decimal(v) => visitor.visit_string(v.to_string()),
+            Decimal64(v) => visitor.visit_string(v.to_string()),
         }
     }
 
@@ -264,9 +263,8 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
-            Decimal(_) => Err(<Self::Error as de::Error>::custom(
-                "un supported type to deserialize",
-            )),
+            Decimal(v) => _v_!(v.to_string()),
+            Decimal64(v) => _v_!(v.to_string()),
         }
     }
 

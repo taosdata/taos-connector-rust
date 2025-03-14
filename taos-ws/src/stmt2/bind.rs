@@ -478,6 +478,7 @@ fn write_col(bytes: &mut [u8], col: &ColumnView) -> usize {
             Json(view) => variable_view_iter!(view),
             VarBinary(view) => variable_view_iter!(view),
             Geometry(view) => variable_view_iter!(view),
+            Decimal(_) | Decimal64(_) => unimplemented!("decimal type is unsupported in stmt2"),
         }
     }
 

@@ -1,6 +1,7 @@
 mod describe;
 mod field;
 // mod opts;
+mod decimal;
 mod precision;
 pub mod raw;
 mod timestamp;
