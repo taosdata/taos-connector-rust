@@ -5,8 +5,6 @@ use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
 
-pub type Result<Config> = std::result::Result<Config, ConfigError>;
-
 #[derive(Debug)]
 pub struct Config {
     pub compression: bool,
@@ -37,15 +35,15 @@ impl Default for Config {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ConfigError {
-    IoError(io::Error),
-    ParseError(String),
+    Io(io::Error),
+    Parse(String),
 }
 
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfigError::IoError(e) => write!(f, "Config IO error: {}", e),
-            ConfigError::ParseError(msg) => write!(f, "Config parse error: {}", msg),
+            ConfigError::Io(e) => write!(f, "Config IO error: {}", e),
+            ConfigError::Parse(msg) => write!(f, "Config parse error: {}", msg),
         }
     }
 }
@@ -53,26 +51,26 @@ impl fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            ConfigError::IoError(e) => Some(e),
-            ConfigError::ParseError(_) => None,
+            ConfigError::Io(e) => Some(e),
+            ConfigError::Parse(_) => None,
         }
     }
 }
 
 impl From<io::Error> for ConfigError {
     fn from(e: io::Error) -> Self {
-        ConfigError::IoError(e)
+        ConfigError::Io(e)
     }
 }
 
-fn read_config_file<P: AsRef<Path>>(filename: P) -> Result<Vec<String>> {
+fn read_config_file<P: AsRef<Path>>(filename: P) -> Result<Vec<String>, ConfigError> {
     let file = File::open(filename)?;
     let reader = io::BufReader::new(file);
     let lines = reader.lines().collect::<io::Result<_>>()?;
     Ok(lines)
 }
 
-fn parse_config(lines: Vec<String>) -> Result<Config> {
+fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
     let mut config = Config::default();
 
     for line in lines {
@@ -88,7 +86,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config> {
                     Ok(1) => config.compression = true,
                     Ok(0) => config.compression = false,
                     _ => {
-                        return Err(ConfigError::ParseError(format!(
+                        return Err(ConfigError::Parse(format!(
                             "Failed to parse compression: {}",
                             value
                         )));
@@ -102,7 +100,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config> {
                     Ok(199) => todo!(),
                     Ok(207) => todo!(),
                     _ => {
-                        return Err(ConfigError::ParseError(format!(
+                        return Err(ConfigError::Parse(format!(
                             "Failed to parse debugFlag: {}",
                             value
                         )));
@@ -115,7 +113,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config> {
                 "serverPort" => match value.parse::<u16>() {
                     Ok(port) => config.server_port = Some(port),
                     Err(_) => {
-                        return Err(ConfigError::ParseError(format!(
+                        return Err(ConfigError::Parse(format!(
                             "Failed to parse serverPort: {}",
                             value
                         )));
@@ -134,7 +132,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_config() -> Result<()> {
+    fn test_config() -> Result<(), ConfigError> {
         let lines = read_config_file("./tests/taos.cfg")?;
         let config = parse_config(lines)?;
         assert_eq!(config.compression, true);
