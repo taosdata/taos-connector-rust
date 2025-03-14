@@ -278,9 +278,8 @@ where
 mod tests {
     use serde::Deserialize;
 
-    use crate::common::Ty;
-
     use super::*;
+    use crate::common::Ty;
 
     #[test]
     fn test_empty_deserializer() {

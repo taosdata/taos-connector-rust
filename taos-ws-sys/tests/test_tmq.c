@@ -5,7 +5,7 @@
 int main()
 {
     // Test tmq_conf
-    _tmq_conf_t *tmq_conf = tmq_conf_new();
+    tmq_conf_t *tmq_conf = tmq_conf_new();
     assert(tmq_conf != NULL);
 
     tmq_conf_res_t conf_res = tmq_conf_set(tmq_conf, "group.id", "1");
@@ -14,7 +14,7 @@ int main()
     tmq_conf_destroy(tmq_conf);
 
     // Test tmq_list
-    _tmq_list_t *tmq_list = tmq_list_new();
+    tmq_list_t *tmq_list = tmq_list_new();
     assert(tmq_list != NULL);
 
     int32_t list_res = tmq_list_append(tmq_list, "value");

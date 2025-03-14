@@ -627,7 +627,7 @@ pub fn is_support_binary_sql(v1: &str) -> bool {
 }
 
 impl WsTaos {
-    /// Build TDengine websocket client from dsn.
+    /// Build TDengine WebSocket client from dsn.
     ///
     /// ```text
     /// ws://localhost:6041/

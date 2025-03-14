@@ -23,7 +23,6 @@ use util::Edition;
 
 pub mod common;
 mod de;
-mod error;
 pub mod helpers;
 mod iter;
 pub mod prelude;
