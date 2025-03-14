@@ -97,6 +97,8 @@ pub struct Described {
     pub field: String,
     #[serde(rename = "type")]
     pub ty: Ty,
+    #[serde(skip)]
+    origin_ty: Option<String>,
     pub length: usize,
     #[serde(default)]
     pub note: Option<String>,
@@ -119,9 +121,20 @@ impl Described {
 
     fn sql_repr_by_compression(&self, compression: Option<&CompressOptions>) -> String {
         let ty = self.ty;
+        let ty_str = if matches!(ty, Ty::Decimal | Ty::Decimal64) {
+            match self.origin_ty.clone() {
+                Some(t) => t,
+                None => ty.to_string(),
+            }
+        } else {
+            ty.to_string()
+        };
+
         match (self.is_primary_key(), ty.is_var_type(), compression) {
-            (true, true, None) => format!("`{}` {}({}) PRIMARY KEY", self.field, ty, self.length),
-            (true, false, None) => format!("`{}` {} PRIMARY KEY", self.field, self.ty),
+            (true, true, None) => {
+                format!("`{}` {}({}) PRIMARY KEY", self.field, ty, self.length)
+            }
+            (true, false, None) => format!("`{}` {} PRIMARY KEY", self.field, ty_str),
             (true, true, Some(t)) => {
                 if t.is_disabled() {
                     format!("`{}` {}({}) PRIMARY KEY", self.field, ty, self.length)
@@ -131,14 +144,14 @@ impl Described {
             }
             (true, false, Some(t)) => {
                 if t.is_disabled() {
-                    format!("`{}` {} PRIMARY KEY", self.field, ty)
+                    format!("`{}` {} PRIMARY KEY", self.field, ty_str)
                 } else {
-                    format!("`{}` {} {} PRIMARY KEY", self.field, ty, t)
+                    format!("`{}` {} {} PRIMARY KEY", self.field, ty_str, t)
                 }
             }
 
             (false, true, None) => format!("`{}` {}({})", self.field, ty, self.length),
-            (false, false, None) => format!("`{}` {}", self.field, self.ty),
+            (false, false, None) => format!("`{}` {}", self.field, ty_str),
             (false, true, Some(t)) => {
                 if t.is_disabled() {
                     format!("`{}` {}({})", self.field, ty, self.length)
@@ -148,9 +161,9 @@ impl Described {
             }
             (false, false, Some(t)) => {
                 if t.is_disabled() {
-                    format!("`{}` {}", self.field, ty)
+                    format!("`{}` {}", self.field, ty_str)
                 } else {
-                    format!("`{}` {} {}", self.field, ty, t)
+                    format!("`{}` {} {}", self.field, ty_str, t)
                 }
             }
         }
@@ -170,6 +183,7 @@ impl Described {
         Self {
             field,
             ty,
+            origin_ty: None,
             length,
             note: None,
             compression: None,
@@ -182,6 +196,11 @@ impl Described {
         self
     }
 
+    pub fn with_origin_ty_name(mut self, ty_name: &str) -> Self {
+        self.origin_ty = Some(ty_name.to_string());
+        self
+    }
+
     /// Return true if the field is primary key.
     pub fn is_primary_key(&self) -> bool {
         self.note.as_deref() == Some("PRIMARY KEY")
@@ -190,6 +209,10 @@ impl Described {
     /// Return true if the field is tag.
     pub fn is_tag(&self) -> bool {
         self.note.as_deref() == Some("TAG")
+    }
+
+    pub fn origin_ty_name(&self) -> Option<&str> {
+        self.origin_ty.as_ref().map(|s| s.as_str())
     }
 }
 #[derive(Debug, Serialize, PartialEq, Eq, Clone)]
@@ -294,10 +317,10 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let field = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let ty = seq
+                let origin_ty: String = seq
                     .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(1, &self))
-                    .and_then(|s| Ty::from_str(s).map_err(de::Error::custom))?;
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                let ty = Ty::from_str(&origin_ty).map_err(de::Error::custom)?;
                 let length = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(2, &self))?;
@@ -331,6 +354,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let desc = Described {
                     field,
                     ty,
+                    origin_ty: Some(origin_ty),
                     length,
                     note,
                     compression,
@@ -348,6 +372,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
             {
                 let mut field = None;
                 let mut ty = None;
+                let mut origin_ty = None;
                 let mut length = None;
                 let mut note = None;
                 let mut encode = None;
@@ -365,8 +390,10 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                             if ty.is_some() {
                                 return Err(de::Error::duplicate_field("type"));
                             }
-                            let t: Ty = map.next_value()?;
+                            let origin: String = map.next_value()?;
+                            let t: Ty = Ty::from_str(&origin).map_err(|e| de::Error::custom(e))?;
                             ty = Some(t);
+                            origin_ty = Some(origin);
                         }
                         Meta::Length => {
                             if length.is_some() {
@@ -413,6 +440,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let desc = Described {
                     field,
                     ty,
+                    origin_ty,
                     length,
                     note,
                     compression,
@@ -469,6 +497,7 @@ mod tests {
         let desc = Described {
             field: "ts".to_string(),
             ty: Ty::Timestamp,
+            origin_ty: None,
             length: 0,
             note: None,
             compression: None,
@@ -478,6 +507,7 @@ mod tests {
         let desc = Described {
             field: "ts".to_string(),
             ty: Ty::Timestamp,
+            origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
             compression: None,
@@ -487,6 +517,7 @@ mod tests {
         let desc = Described {
             field: "ts".to_string(),
             ty: Ty::Timestamp,
+            origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
             compression: Some(CompressOptions::disabled()),
@@ -495,6 +526,7 @@ mod tests {
         let desc = Described {
             field: "ts".to_string(),
             ty: Ty::Timestamp,
+            origin_ty: None,
             length: 0,
             note: None,
             compression: Some(CompressOptions::disabled()),
@@ -503,6 +535,7 @@ mod tests {
         let desc = Described {
             field: "ts".to_string(),
             ty: Ty::VarChar,
+            origin_ty: None,
             length: 100,
             note: Some("PRIMARY KEY".to_string()),
             compression: Some(CompressOptions::disabled()),
@@ -511,6 +544,7 @@ mod tests {
         let desc = Described {
             field: "ts".to_string(),
             ty: Ty::VarChar,
+            origin_ty: None,
             length: 100,
             note: None,
             compression: Some(CompressOptions::disabled()),
@@ -520,6 +554,7 @@ mod tests {
         let desc = Described {
             field: "ts".to_string(),
             ty: Ty::Timestamp,
+            origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
             compression: Some(CompressOptions::new("delta-i", "lz4", "medium")),
@@ -531,6 +566,7 @@ mod tests {
         let desc = Described {
             field: "ts".to_string(),
             ty: Ty::Timestamp,
+            origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
             compression: Some(CompressOptions::new("disabled", "lz4", "medium")),
@@ -542,6 +578,7 @@ mod tests {
         let desc = Described {
             field: "ts".to_string(),
             ty: Ty::Timestamp,
+            origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
             compression: Some(CompressOptions::new("disabled", "disabled", "medium")),
@@ -550,6 +587,7 @@ mod tests {
         let desc = Described {
             field: "ts".to_string(),
             ty: Ty::Timestamp,
+            origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
             compression: Some(CompressOptions::new("disabled", "lz4", "medium")),
@@ -561,6 +599,7 @@ mod tests {
         let desc = Described {
             field: "ts".to_string(),
             ty: Ty::VarBinary,
+            origin_ty: None,
             length: 100,
             note: Some("PRIMARY KEY".to_string()),
             compression: Some(CompressOptions::new("disabled", "disabled", "medium")),
@@ -577,6 +616,7 @@ mod tests {
         let meta = ColumnMeta::Column(Described {
             field: "name".to_string(),
             ty: Ty::BigInt,
+            origin_ty: None,
             length: 8,
             note: None,
             compression: None,
@@ -596,6 +636,7 @@ mod tests {
         let meta = ColumnMeta::Column(Described {
             field: "name".to_string(),
             ty: Ty::BigInt,
+            origin_ty: None,
             length: 8,
             note: Some("PRIMARY KEY".to_string()),
             compression: None,
@@ -614,6 +655,7 @@ mod tests {
         let meta = ColumnMeta::Column(Described {
             field: "name".to_string(),
             ty: Ty::BigInt,
+            origin_ty: None,
             length: 8,
             note: None,
             compression: Some(CompressOptions::new("delta-i", "lz4", "medium")),
@@ -635,6 +677,7 @@ mod tests {
         let meta = ColumnMeta::Column(Described {
             field: "name".to_string(),
             ty: Ty::BigInt,
+            origin_ty: None,
             length: 8,
             note: Some("PRIMARY KEY".to_string()),
             compression: Some(CompressOptions::new("delta-i", "lz4", "medium")),
@@ -660,6 +703,7 @@ mod tests {
             ColumnMeta::Column(Described {
                 field: "name".to_string(),
                 ty: Ty::BigInt,
+                origin_ty: None,
                 length: 8,
                 note: None,
                 compression: None,

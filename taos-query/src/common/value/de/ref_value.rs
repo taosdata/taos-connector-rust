@@ -1,3 +1,4 @@
+use bigdecimal::ToPrimitive;
 use serde::de::{self, DeserializeSeed, IntoDeserializer, Visitor};
 use serde::forward_to_deserialize_any;
 
@@ -146,6 +147,24 @@ impl<'de, 'v: 'de> de::VariantAccess<'de> for EnumValueDeserializer<'v> {
     }
 }
 
+macro_rules! value_forward_to_deserialize_any {
+    ($($ty: ty)*) => {
+        $(paste::paste! {
+            fn [<deserialize_$ty>]<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+            where
+                V: Visitor<'de>,
+            {
+                match self {
+                    Value::Decimal(v) | Value::Decimal64(v) => {
+                        visitor.[<visit_$ty>](v.[<to_$ty>]().ok_or(de::Error::custom(format!("decimal cannot cast to target type: {}", stringify!($ty))))?)
+                    }
+                    v => v.deserialize_any(visitor),
+                }
+            }
+        })*
+    };
+}
+
 impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
     type Error = Error;
 
@@ -177,16 +196,24 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
             Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
             VarBinary(v) | Geometry(v) => visitor.visit_borrowed_bytes(v),
-            Decimal(_) => Err(<Self::Error as de::Error>::custom(
-                "un supported type to deserialize",
-            )),
+            Decimal(v) | Decimal64(v) => visitor.visit_string(v.to_string()),
         }
     }
 
-    serde::forward_to_deserialize_any! {bool i8 u8 i16 u16 i32 u32 i64 u64 f32 f64 char}
+    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self {
+            Value::Decimal(v) | Value::Decimal64(v) => visitor.visit_bool(!v.is_zero()),
+            v => v.deserialize_any(visitor),
+        }
+    }
+
+    value_forward_to_deserialize_any! {i8 u8 i16 u16 i32 u32 i64 u64 f32 f64 i128 u128}
 
     serde::forward_to_deserialize_any! {
-        unit
+        unit char
         bytes byte_buf unit_struct
         tuple_struct tuple identifier ignored_any
     }
@@ -197,7 +224,7 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
     {
         use Value::*;
         match self {
-            Null(_) => visitor.visit_borrowed_str(""), // todo: empty string or error?
+            Null(_) => visitor.visit_borrowed_str(""),
             Bool(v) => visitor.visit_bool(*v),
             TinyInt(v) => visitor.visit_i8(*v),
             SmallInt(v) => visitor.visit_i16(*v),
@@ -216,9 +243,10 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
                     .format("%Y-%m-%dT%H:%M:%S%.f")
                     .to_string(),
             ),
-            _ => Err(<Self::Error as de::Error>::custom(
-                "un supported type to deserialize",
-            )),
+            Decimal(v) | Decimal64(v) => visitor.visit_string(v.to_string()),
+            Geometry(_) | MediumBlob(_) | Blob(_) | VarBinary(_) => Err(
+                <Self::Error as de::Error>::custom("un supported type to deserialize"),
+            ),
         }
     }
 
@@ -276,9 +304,8 @@ impl<'de, 'v: 'de> serde::de::Deserializer<'de> for &'v Value {
                 visitor.visit_newtype_struct(v.as_slice().into_deserializer())
             }
             VarBinary(v) | Geometry(v) => visitor.visit_bytes(v),
-            Decimal(_) => Err(<Self::Error as de::Error>::custom(
-                "un supported type to deserialize",
-            )),
+            v @ Decimal(_) => visitor.visit_newtype_struct(v),
+            v @ Decimal64(_) => visitor.visit_newtype_struct(v),
         }
     }
 

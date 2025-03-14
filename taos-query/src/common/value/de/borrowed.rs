@@ -1,3 +1,4 @@
+use bigdecimal::ToPrimitive;
 use serde::de::{self, DeserializeSeed, IntoDeserializer, Visitor};
 use serde::forward_to_deserialize_any;
 
@@ -105,6 +106,27 @@ impl<'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'_> {
     }
 }
 
+macro_rules! value_forward_to_deserialize_any {
+    ($($ty: ty)*) => {
+        $(paste::paste! {
+            fn [<deserialize_$ty>]<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+            where
+                V: Visitor<'de>,
+            {
+                match self {
+                    BorrowedValue::Decimal(v)  => {
+                        visitor.[<visit_$ty>](v.as_bigdecimal().[<to_$ty>]().ok_or(de::Error::custom(format!("decimal cannot cast to target type: {}", stringify!($ty))))?)
+                    }
+                    BorrowedValue::Decimal64(v) => {
+                        visitor.[<visit_$ty>](v.as_bigdecimal().[<to_$ty>]().ok_or(de::Error::custom(format!("decimal cannot cast to target type: {}", stringify!($ty))))?)
+                    }
+                    v => v.deserialize_any(visitor),
+                }
+            }
+        })*
+    };
+}
+
 impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     type Error = Error;
 
@@ -148,16 +170,27 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
-            Decimal(_) => Err(<Self::Error as de::Error>::custom(
-                "un supported type to deserialize",
-            )),
+            Decimal(v) => visitor.visit_string(v.to_string()),
+            Decimal64(v) => visitor.visit_string(v.to_string()),
         }
     }
 
-    forward_to_deserialize_any! {bool i8 u8 i16 u16 i32 u32 i64 u64 f32 f64 char}
+    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self {
+            BorrowedValue::Decimal(v) => visitor.visit_bool(!v.as_bigdecimal().is_zero()),
+            BorrowedValue::Decimal64(v) => visitor.visit_bool(!v.as_bigdecimal().is_zero()),
+            v => v.deserialize_any(visitor),
+        }
+    }
+
+    value_forward_to_deserialize_any! {i8 u8 i16 u16 i32 u32 i64 u64 f32 f64 i128 u128}
 
     forward_to_deserialize_any! {
         // unit
+        char
         bytes byte_buf
         tuple identifier
     }
@@ -194,6 +227,8 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 Cow::Owned(v) => visitor.visit_str(&v),
             },
             Timestamp(v) => visitor.visit_string(v.to_datetime_with_tz().to_rfc3339()),
+            Decimal(v) => visitor.visit_string(v.as_bigdecimal().to_string()),
+            Decimal64(v) => visitor.visit_string(v.as_bigdecimal().to_string()),
             _ => Err(<Self::Error as de::Error>::custom(
                 "unsupported type to deserialize",
             )),
@@ -264,9 +299,8 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
-            Decimal(_) => Err(<Self::Error as de::Error>::custom(
-                "un supported type to deserialize",
-            )),
+            v @ Decimal(_) => visitor.visit_newtype_struct(v),
+            v @ Decimal64(_) => visitor.visit_newtype_struct(v),
         }
     }
 

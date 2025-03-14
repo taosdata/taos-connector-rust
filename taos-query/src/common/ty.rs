@@ -78,7 +78,7 @@ pub enum Ty {
     VarBinary = 16, // 16
     /// 17, Not supported now.
     #[doc(hidden)]
-    Decimal, // 17
+    Decimal = 17, // 17
     /// 18, Not supported now.
     #[doc(hidden)]
     Blob, // 18
@@ -88,6 +88,8 @@ pub enum Ty {
 
     /// 20, Geometry, `geometry` in sql, [`Vec<u8>`] in Rust.
     Geometry, // 20
+
+    Decimal64 = 21,
 }
 
 impl<'de> serde::Deserialize<'de> for Ty {
@@ -158,9 +160,27 @@ impl<'de> serde::Deserialize<'de> for Ty {
 }
 
 impl FromStr for Ty {
-    type Err = &'static str;
+    type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
+        let s = s.to_ascii_lowercase();
+        if let Some(s) = s.trim().strip_prefix("decimal") {
+            let mut ps = s
+                .split_terminator(['(', ',', ')'])
+                .filter(|s| !s.trim().is_empty());
+            let Some(precision) = ps.next() else {
+                return Err("decimal type precision or scale not found".to_string());
+            };
+            let precision: u8 = precision
+                .trim()
+                .parse()
+                .map_err(|e: std::num::ParseIntError| e.to_string())?;
+            if precision <= 18 {
+                return Ok(Self::Decimal64);
+            } else {
+                return Ok(Self::Decimal);
+            }
+        }
+        match s.as_str() {
             "timestamp" => Ok(Ty::Timestamp),
             "bool" => Ok(Ty::Bool),
             "tinyint" => Ok(Ty::TinyInt),
@@ -177,11 +197,10 @@ impl FromStr for Ty {
             "nchar" => Ok(Ty::NChar),
             "json" => Ok(Ty::Json),
             "varbinary" => Ok(Ty::VarBinary),
-            "decimal" => Ok(Ty::Decimal),
             "blob" => Ok(Ty::Blob),
             "mediumblob" => Ok(Ty::MediumBlob),
             "geometry" => Ok(Ty::Geometry),
-            _ => Err("not a valid data type string"),
+            s => Err(format!("not a valid data type string: {s}")),
         }
     }
 }
@@ -225,6 +244,7 @@ impl Ty {
                 | Double
                 | Timestamp
                 | Decimal
+                | Decimal64
         )
     }
 
@@ -235,7 +255,7 @@ impl Ty {
             Bool | TinyInt | UTinyInt => 1,
             SmallInt | USmallInt => 2,
             Int | UInt | Float => 4,
-            BigInt | Double | Timestamp | UBigInt => 8,
+            BigInt | Double | Timestamp | UBigInt | Decimal64 => 8,
             Decimal => 16,
             _ => 0,
         }
@@ -262,7 +282,7 @@ impl Ty {
             UBigInt => "BIGINT UNSIGNED",
             Json => "JSON",
             VarBinary => "VARBINARY",
-            Decimal => "DECIMAL",
+            Decimal | Decimal64 => "DECIMAL",
             Blob => "BLOB",
             MediumBlob => "MEDIUMBLOB",
             Geometry => "GEOMETRY",
@@ -289,7 +309,7 @@ impl Ty {
             UBigInt => "bigint unsigned",
             Json => "json",
             VarBinary => "varbinary",
-            Decimal => "decimal",
+            Decimal | Decimal64 => "decimal",
             Blob => "blob",
             MediumBlob => "mediumblob",
             Geometry => "geometry",
@@ -317,6 +337,7 @@ impl Ty {
             Json => "TSDB_DATA_TYPE_JSON\0".as_ptr() as *const c_char,
             VarBinary => "TSDB_DATA_TYPE_VARBINARY\0".as_ptr() as *const c_char,
             Decimal => "TSDB_DATA_TYPE_DECIMAL\0".as_ptr() as *const c_char,
+            Decimal64 => "TSDB_DATA_TYPE_DECIMAL64\0".as_ptr() as *const c_char,
             Blob => "TSDB_DATA_TYPE_BLOB\0".as_ptr() as *const c_char,
             MediumBlob => "TSDB_DATA_TYPE_MEDIUMBLOB\0".as_ptr() as *const c_char,
             Geometry => "TSDB_DATA_TYPE_GEOMETRY\0".as_ptr() as *const c_char,
@@ -348,6 +369,7 @@ impl Ty {
             18 => Some(Blob),
             19 => Some(MediumBlob),
             20 => Some(Geometry),
+            21 => Some(Decimal64),
             _ => None,
         }
     }
@@ -365,7 +387,7 @@ impl Ty {
         }
         _var_str!(
             Null Bool TinyInt SmallInt Int BigInt UTinyInt USmallInt UInt UBigInt
-            Float Double VarChar NChar Timestamp Json VarBinary Decimal Blob MediumBlob Geometry
+            Float Double VarChar NChar Timestamp Json VarBinary Decimal Decimal64 Blob MediumBlob Geometry
         )
     }
 
@@ -394,6 +416,7 @@ impl Ty {
             18 => Blob,
             19 => MediumBlob,
             20 => Geometry,
+            21 => Decimal64,
             _ => panic!("unknown data type"),
         }
     }

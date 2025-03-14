@@ -1,5 +1,4 @@
 use derive_more::{Deref, DerefMut, Display, From};
-use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
@@ -18,7 +17,8 @@ pub type IUBigInt = u64;
 pub type IFloat = f32;
 pub type IDouble = f64;
 pub type IJson = Json;
-pub type IDecimal = Decimal;
+pub type IDecimal = bigdecimal::BigDecimal;
+pub type IDecimal64 = bigdecimal::BigDecimal;
 
 #[derive(Debug, Clone, Copy, Deref, DerefMut, Deserialize, Serialize, Display, From)]
 pub struct ITimestamp(pub i64);
@@ -246,7 +246,6 @@ impl_prim!(
     UBigInt = u64
     Float = f32
     Double = f64
-    Decimal = Decimal
     Json = Json
 );
 
@@ -273,7 +272,7 @@ macro_rules! impl_is_primitive {
 impl_is_primitive!(
     Bool TinyInt SmallInt Int BigInt
     UTinyInt USmallInt UInt UBigInt
-    Float Double Decimal
+    Float Double
 );
 
 impl IsValue for ITimestamp {

@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
+use bigdecimal::ToPrimitive;
 use serde::de::{DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor};
 use serde::Deserializer;
 
@@ -229,6 +230,30 @@ impl<'de, 'a: 'de> MapAccess<'de> for RowView<'a> {
     }
 }
 
+macro_rules! value_forward_to_deserialize_any {
+    ($($ty: ty)*) => {
+        $(paste::paste! {
+            fn [<deserialize_$ty>]<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+            where
+                V: Visitor<'de>,
+            {
+                match self.walk_next() {
+                    Some(BorrowedValue::Decimal(v))  => {
+                        visitor.[<visit_$ty>]::<DeError>(v.as_bigdecimal().[<to_$ty>]().ok_or(<Self::Error as serde::de::Error>::custom(format!("decimal cannot cast to target type: {}", stringify!($ty))))?)
+                    }
+                    Some(BorrowedValue::Decimal64(v)) => {
+                       visitor.[<visit_$ty>]::<DeError>(v.as_bigdecimal().[<to_$ty>]().ok_or(<Self::Error as serde::de::Error>::custom(format!("decimal cannot cast to target type: {}", stringify!($ty))))?)
+                    }
+                    Some(v) => v.deserialize_any(visitor).map_err(|e| serde::de::Error::custom(e)),
+                    None => Err(<Self::Error as serde::de::Error>::custom(
+                        "expect value, not none",
+                    )),
+                }
+            }
+        })*
+    };
+}
+
 impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
     type Error = DeError;
 
@@ -249,9 +274,33 @@ impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
         }
     }
 
+    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        use bigdecimal::Zero;
+        match self.walk_next() {
+            Some(BorrowedValue::Decimal(v)) => visitor
+                .visit_bool::<DeError>(!v.as_bigdecimal().is_zero())
+                .map_err(|e| serde::de::Error::custom(e)),
+            Some(BorrowedValue::Decimal64(v)) => visitor
+                .visit_bool::<DeError>(!v.as_bigdecimal().is_zero())
+                .map_err(|e| serde::de::Error::custom(e)),
+            Some(v) => v
+                .deserialize_any(visitor)
+                .map_err(|e| serde::de::Error::custom(e)),
+            None => Err(<Self::Error as serde::de::Error>::custom(
+                "expect value, not none",
+            )),
+        }
+    }
+
+    value_forward_to_deserialize_any! {
+        i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 i128 u128
+    }
+
     serde::forward_to_deserialize_any! {
-        bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char bytes byte_buf enum
-        identifier ignored_any
+        char bytes byte_buf enum identifier ignored_any
     }
 
     // Refer to the "Understanding deserializer lifetimes" page for information
