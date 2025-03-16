@@ -9,7 +9,9 @@ use error::{set_err_and_get_code, TaosError};
 use query::QueryResultSet;
 use sml::SchemalessResultSet;
 use taos_error::Code;
+use taos_log::QidManager;
 use taos_query::common::{Field, Precision, Ty};
+use taos_query::util::generate_req_id;
 use taos_query::TBuilder;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
@@ -188,35 +190,33 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
     Code::SUCCESS.into()
 }
 
+#[derive(Clone)]
+struct Qid(u64);
+
+impl QidManager for Qid {
+    fn init() -> Self {
+        Self(generate_req_id())
+    }
+
+    fn get(&self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for Qid {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
 #[ctor::ctor]
-fn init_logger() {
+fn init() {
     use taos_log::layer::TaosLayer;
     use taos_log::writer::RollingFileAppender;
-    use taos_log::QidManager;
-    use taos_query::util::generate_req_id;
     use tracing_log::LogTracer;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::Layer;
-
-    #[derive(Clone)]
-    struct Qid(u64);
-
-    impl QidManager for Qid {
-        fn init() -> Self {
-            Self(generate_req_id())
-        }
-
-        fn get(&self) -> u64 {
-            self.0
-        }
-    }
-
-    impl From<u64> for Qid {
-        fn from(value: u64) -> Self {
-            Self(value)
-        }
-    }
 
     Config::init().expect("failed to init config");
 

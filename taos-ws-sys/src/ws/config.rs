@@ -4,8 +4,10 @@ use std::fmt;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::OnceLock;
 
+use chrono_tz::Tz;
 use tracing::level_filters::LevelFilter;
 
 #[derive(Debug)]
@@ -14,7 +16,7 @@ pub struct Config {
     pub log_dir: String,
     pub log_level: LevelFilter,
     pub log_output_to_screen: bool,
-    pub timezone: Option<String>,
+    pub timezone: Option<Tz>,
     pub first_ep: Option<String>,
     pub second_ep: Option<String>,
     pub fqdn: Option<String>,
@@ -38,13 +40,12 @@ impl Default for Config {
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
-
 impl Config {
     pub fn init() -> Result<(), ConfigError> {
         let config = Config::new("/etc/taos/taos.cfg")?;
         CONFIG
             .set(config)
-            .map_err(|_| ConfigError::Init("repeated initialization".to_string()))?;
+            .map_err(|_| ConfigError::Init("Config has been initialized".to_string()))?;
         Ok(())
     }
 
@@ -142,30 +143,25 @@ fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
                     }
 
                     if let Ok(level) = std::env::var("RUST_LOG") {
-                        let level = level.to_lowercase();
-                        match level.as_str() {
-                            "error" => config.log_level = LevelFilter::ERROR,
-                            "warn" => config.log_level = LevelFilter::WARN,
-                            "info" => config.log_level = LevelFilter::INFO,
-                            "debug" => config.log_level = LevelFilter::DEBUG,
-                            "trace" => config.log_level = LevelFilter::TRACE,
-                            _ => {}
-                        }
+                        config.log_level = LevelFilter::from_str(value).map_err(|_| {
+                            ConfigError::Parse(format!("failed to parse RUST_LOG: {value}"))
+                        })?;
                         config.log_output_to_screen = true;
                     }
                 }
-                "timezone" => config.timezone = Some(value.to_string()),
+                "timezone" => {
+                    config.timezone = Some(Tz::from_str(value).map_err(|_| {
+                        ConfigError::Parse(format!("failed to parse timezone: {value}"))
+                    })?);
+                }
                 "firstEp" => config.first_ep = Some(value.to_string()),
                 "secondEp" => config.second_ep = Some(value.to_string()),
                 "fqdn" => config.fqdn = Some(value.to_string()),
-                "serverPort" => match value.parse::<u16>() {
-                    Ok(port) => config.server_port = Some(port),
-                    Err(_) => {
-                        return Err(ConfigError::Parse(format!(
-                            "failed to parse serverPort: {value}",
-                        )));
-                    }
-                },
+                "serverPort" => {
+                    config.server_port = Some(value.parse::<u16>().map_err(|_| {
+                        ConfigError::Parse(format!("failed to parse serverPort: {value}",))
+                    })?);
+                }
                 _ => {}
             }
         }
@@ -185,7 +181,7 @@ mod tests {
         assert_eq!(config.log_dir, "/var/log/taos".to_string());
         assert_eq!(config.log_level, LevelFilter::DEBUG);
         assert_eq!(config.log_output_to_screen, true);
-        assert_eq!(config.timezone, Some("UTC-8".to_string()));
+        assert_eq!(config.timezone, Some(Tz::Asia__Shanghai));
         assert_eq!(config.first_ep, Some("hostname:6030".to_string()));
         assert_eq!(config.second_ep, Some("hostname:16030".to_string()));
         assert_eq!(config.fqdn, Some("hostname".to_string()));
