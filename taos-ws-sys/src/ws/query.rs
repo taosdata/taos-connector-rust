@@ -15,6 +15,7 @@ use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
 use tracing::{error, instrument, trace, Instrument};
 
+use crate::ws::config::Config;
 use crate::ws::error::{
     clear_err_and_ret_succ, format_errno, set_err_and_get_code, TaosError, TaosMaybeError,
 };
@@ -1133,9 +1134,14 @@ pub unsafe extern "C" fn taos_check_server_status(
 ) -> TSDB_SERVER_STATUS {
     trace!("taos_check_server_status start, fqdn: {fqdn:?}, port: {port}, details: {details:?}, maxlen: {maxlen}");
 
-    // TODO: read taos.cfg
-    let host = if fqdn.is_null() {
-        "localhost"
+    let config = Config::get();
+
+    let fqdn = if fqdn.is_null() {
+        if let Some(fqdn) = config.fqdn.as_ref() {
+            fqdn
+        } else {
+            ""
+        }
     } else {
         match CStr::from_ptr(fqdn).to_str() {
             Ok(fqdn) => fqdn,
@@ -1147,11 +1153,11 @@ pub unsafe extern "C" fn taos_check_server_status(
         }
     };
 
-    if port == 0 {
-        port = 6030;
+    if port == 0 && !config.server_port.is_none() {
+        port = config.server_port.unwrap() as _;
     }
 
-    let (status, ds) = match block_in_place_or_global(check_server_status(host, port)) {
+    let (status, ds) = match block_in_place_or_global(check_server_status(fqdn, port)) {
         Ok(res) => res,
         Err(err) => {
             error!("taos_check_server_status failed, err: {err:?}");
@@ -1167,13 +1173,22 @@ pub unsafe extern "C" fn taos_check_server_status(
     status.into()
 }
 
-async fn check_server_status(host: &str, port: i32) -> TaosResult<(i32, String)> {
+async fn check_server_status(fqdn: &str, port: i32) -> TaosResult<(i32, String)> {
     use taos_query::AsyncTBuilder;
     use taos_ws::TaosBuilder;
 
+    let config = Config::get();
+    let host = if let Some(host) = config.first_ep.as_ref() {
+        host
+    } else if let Some(host) = config.second_ep.as_ref() {
+        host
+    } else {
+        "localhost"
+    };
+
     let dsn = format!("ws://{host}:6041");
     let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
-    let (status, details) = taos.client().check_server_status(host, port).await?;
+    let (status, details) = taos.client().check_server_status(fqdn, port).await?;
     Ok((status, details))
 }
 
