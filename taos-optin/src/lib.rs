@@ -142,6 +142,13 @@ impl taos_query::AsyncQueryable for Taos {
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
+    async fn exec<T: AsRef<str> + Send + Sync>(&self, sql: T) -> RawResult<usize> {
+        let sql = sql.as_ref();
+        // tracing::trace!("exec sql: {sql}");
+        self.raw.exec_async(sql).await
+    }
+
+    #[tracing::instrument(level = "trace", skip_all)]
     async fn query_with_req_id<T: AsRef<str> + Send + Sync>(
         &self,
         _sql: T,
@@ -1059,6 +1066,35 @@ mod tests {
         }
 
         println!("summary: {:?}", set.summary());
+        Ok(())
+    }
+    #[tokio::test]
+    async fn exec_async() -> RawResult<()> {
+        use taos_query::prelude::*;
+        let builder = TaosBuilder::from_dsn(DSN_V3)?;
+        let taos = builder.build().await?;
+        let affected_rows = taos
+            .exec_many([
+                "drop database if exists test_exec_async",
+                "create database test_exec_async",
+                "use test_exec_async",
+                "create table test_exec_async.t1 (ts timestamp, val int)",
+            ])
+            .await?;
+
+        assert_eq!(affected_rows, 0);
+        let affected_rows = taos
+            .exec("insert into test_exec_async.t1 values(now, 1)")
+            .await?;
+        assert_eq!(affected_rows, 1);
+
+        let affected_rows = taos
+            .exec("insert into test_exec_async.t1 values(now, 2)(now+1s, 3)")
+            .await?;
+        assert_eq!(affected_rows, 2);
+
+        assert_eq!(taos.exec("drop database test_exec_async").await?, 0);
+
         Ok(())
     }
 
