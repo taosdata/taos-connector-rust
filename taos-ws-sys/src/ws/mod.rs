@@ -4,6 +4,7 @@ use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
 use std::time::Duration;
 
+use config::Config;
 use error::{set_err_and_get_code, TaosError};
 use query::QueryResultSet;
 use sml::SchemalessResultSet;
@@ -187,16 +188,67 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
 
 #[ctor::ctor]
 fn init_logger() {
-    use tracing_subscriber::EnvFilter;
+    use taos_log::layer::TaosLayer;
+    use taos_log::writer::RollingFileAppender;
+    use taos_log::QidManager;
+    use taos_query::util::generate_req_id;
+    use tracing_log::LogTracer;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::Layer;
 
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error"));
+    #[derive(Clone)]
+    struct Qid(u64);
 
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_file(true)
-        .with_line_number(true)
-        .with_target(false)
-        .init();
+    impl QidManager for Qid {
+        fn init() -> Self {
+            Self(generate_req_id())
+        }
+
+        fn get(&self) -> u64 {
+            self.0
+        }
+    }
+
+    impl From<u64> for Qid {
+        fn from(value: u64) -> Self {
+            Self(value)
+        }
+    }
+
+    Config::init().expect("failed to init config");
+
+    let config = Config::get();
+
+    let mut layers = Vec::new();
+
+    let appender = RollingFileAppender::builder(&config.log_dir, "taos", 16)
+        .compress(true)
+        .reserved_disk_size("1GB")
+        .rotation_count(3)
+        .rotation_size("1GB")
+        .build()
+        .unwrap();
+
+    layers.push(
+        TaosLayer::<Qid>::new(appender)
+            .with_location()
+            .with_filter(config.log_level)
+            .boxed(),
+    );
+
+    if config.log_output_to_screen {
+        layers.push(
+            TaosLayer::<Qid, _, _>::new(std::io::stdout)
+                .with_location()
+                .with_filter(config.log_level)
+                .boxed(),
+        );
+    }
+
+    tracing_subscriber::registry().with(layers).init();
+
+    LogTracer::init().expect("failed to init log tracer");
 }
 
 #[derive(Debug)]

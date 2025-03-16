@@ -1624,7 +1624,6 @@ pub unsafe extern "C" fn ws_get_current_db(
 }
 
 /*  --------------------------schemaless INTERFACE------------------------------- */
-
 #[no_mangle]
 pub unsafe extern "C" fn ws_schemaless_insert_raw(
     taos: *mut WS_TAOS,

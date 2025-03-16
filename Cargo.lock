@@ -3887,10 +3887,12 @@ dependencies = [
  "serde_json",
  "syn 2.0.98",
  "taos-error",
+ "taos-log",
  "taos-query",
  "taos-ws",
  "tokio",
  "tracing",
+ "tracing-log",
  "tracing-subscriber",
 ]
 

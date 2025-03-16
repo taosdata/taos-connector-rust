@@ -4,12 +4,16 @@ use std::fmt;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
+use std::sync::OnceLock;
+
+use tracing::level_filters::LevelFilter;
 
 #[derive(Debug)]
 pub struct Config {
     pub compression: bool,
     pub log_dir: String,
-    pub log_level: String,
+    pub log_level: LevelFilter,
+    pub log_output_to_screen: bool,
     pub timezone: Option<String>,
     pub first_ep: Option<String>,
     pub second_ep: Option<String>,
@@ -22,7 +26,8 @@ impl Default for Config {
         Self {
             compression: false,
             log_dir: "/var/log/taos".to_string(),
-            log_level: "warn".to_string(),
+            log_level: LevelFilter::WARN,
+            log_output_to_screen: false,
             timezone: None,
             first_ep: None,
             second_ep: None,
@@ -32,11 +37,33 @@ impl Default for Config {
     }
 }
 
+static CONFIG: OnceLock<Config> = OnceLock::new();
+
+impl Config {
+    pub fn init() -> Result<(), ConfigError> {
+        let config = Config::new("/etc/taos/taos.cfg")?;
+        CONFIG
+            .set(config)
+            .map_err(|_| ConfigError::Init("repeated initialization".to_string()))?;
+        Ok(())
+    }
+
+    pub fn get() -> &'static Config {
+        CONFIG.get().expect("config not initialized")
+    }
+
+    fn new(filename: &str) -> Result<Config, ConfigError> {
+        let lines = read_config_file(filename)?;
+        parse_config(lines)
+    }
+}
+
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ConfigError {
     Io(io::Error),
     Parse(String),
+    Init(String),
 }
 
 impl fmt::Display for ConfigError {
@@ -44,6 +71,7 @@ impl fmt::Display for ConfigError {
         match self {
             ConfigError::Io(e) => write!(f, "Config IO error: {e}"),
             ConfigError::Parse(msg) => write!(f, "Config parse error: {msg}"),
+            ConfigError::Init(msg) => write!(f, "Config initialization error: {msg}"),
         }
     }
 }
@@ -53,6 +81,7 @@ impl std::error::Error for ConfigError {
         match self {
             ConfigError::Io(e) => Some(e),
             ConfigError::Parse(_) => None,
+            ConfigError::Init(_) => None,
         }
     }
 }
@@ -87,23 +116,44 @@ fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
                     Ok(0) => config.compression = false,
                     _ => {
                         return Err(ConfigError::Parse(format!(
-                            "Failed to parse compression: {value}",
+                            "failed to parse compression: {value}",
                         )));
                     }
                 },
                 "logDir" => config.log_dir = value.to_string(),
-                "debugFlag" => match value.parse::<u8>() {
-                    Ok(131) => config.log_level = "warn".to_string(),
-                    Ok(135) => config.log_level = "debug".to_string(),
-                    Ok(143) => config.log_level = "trace".to_string(),
-                    Ok(199) => todo!(),
-                    Ok(207) => todo!(),
-                    _ => {
-                        return Err(ConfigError::Parse(format!(
-                            "Failed to parse debugFlag: {value}",
-                        )));
+                "debugFlag" => {
+                    match value.parse::<u8>() {
+                        Ok(131) => config.log_level = LevelFilter::WARN,
+                        Ok(135) => config.log_level = LevelFilter::DEBUG,
+                        Ok(143) => config.log_level = LevelFilter::TRACE,
+                        Ok(199) => {
+                            config.log_level = LevelFilter::DEBUG;
+                            config.log_output_to_screen = true;
+                        }
+                        Ok(207) => {
+                            config.log_level = LevelFilter::TRACE;
+                            config.log_output_to_screen = true;
+                        }
+                        _ => {
+                            return Err(ConfigError::Parse(format!(
+                                "failed to parse debugFlag: {value}",
+                            )));
+                        }
                     }
-                },
+
+                    if let Ok(level) = std::env::var("RUST_LOG") {
+                        let level = level.to_lowercase();
+                        match level.as_str() {
+                            "error" => config.log_level = LevelFilter::ERROR,
+                            "warn" => config.log_level = LevelFilter::WARN,
+                            "info" => config.log_level = LevelFilter::INFO,
+                            "debug" => config.log_level = LevelFilter::DEBUG,
+                            "trace" => config.log_level = LevelFilter::TRACE,
+                            _ => {}
+                        }
+                        config.log_output_to_screen = true;
+                    }
+                }
                 "timezone" => config.timezone = Some(value.to_string()),
                 "firstEp" => config.first_ep = Some(value.to_string()),
                 "secondEp" => config.second_ep = Some(value.to_string()),
@@ -112,7 +162,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
                     Ok(port) => config.server_port = Some(port),
                     Err(_) => {
                         return Err(ConfigError::Parse(format!(
-                            "Failed to parse serverPort: {value}",
+                            "failed to parse serverPort: {value}",
                         )));
                     }
                 },
@@ -130,11 +180,11 @@ mod tests {
 
     #[test]
     fn test_config() -> Result<(), ConfigError> {
-        let lines = read_config_file("./tests/taos.cfg")?;
-        let config = parse_config(lines)?;
+        let config = Config::new("./tests/taos.cfg")?;
         assert_eq!(config.compression, true);
         assert_eq!(config.log_dir, "/var/log/taos".to_string());
-        assert_eq!(config.log_level, "warn".to_string());
+        assert_eq!(config.log_level, LevelFilter::DEBUG);
+        assert_eq!(config.log_output_to_screen, true);
         assert_eq!(config.timezone, Some("UTC-8".to_string()));
         assert_eq!(config.first_ep, Some("hostname:6030".to_string()));
         assert_eq!(config.second_ep, Some("hostname:16030".to_string()));
