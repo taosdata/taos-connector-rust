@@ -10,7 +10,7 @@ use tracing::level_filters::LevelFilter;
 
 #[derive(Debug)]
 pub struct Config {
-    pub compression: bool,
+    pub compression: String,
     pub log_dir: String,
     pub log_level: LevelFilter,
     pub log_output_to_screen: bool,
@@ -24,7 +24,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            compression: false,
+            compression: "false".to_string(),
             log_dir: "/var/log/taos".to_string(),
             log_level: LevelFilter::WARN,
             log_output_to_screen: false,
@@ -111,9 +111,9 @@ fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
         if let Some((key, value)) = line.split_once(char::is_whitespace) {
             let value = value.trim();
             match key {
-                "compression" => match value.parse::<u8>() {
-                    Ok(1) => config.compression = true,
-                    Ok(0) => config.compression = false,
+                "compression" => match value {
+                    "1" => config.compression = "true".to_string(),
+                    "0" => config.compression = "false".to_string(),
                     _ => {
                         return Err(ConfigError::Parse(format!(
                             "failed to parse compression: {value}",
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn test_config() -> Result<(), ConfigError> {
         let config = Config::new("./tests/taos.cfg")?;
-        assert_eq!(config.compression, true);
+        assert_eq!(config.compression, "true");
         assert_eq!(config.log_dir, "/var/log/taos".to_string());
         assert_eq!(config.log_level, LevelFilter::DEBUG);
         assert_eq!(config.log_output_to_screen, true);

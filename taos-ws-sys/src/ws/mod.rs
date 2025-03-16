@@ -147,18 +147,20 @@ unsafe fn connect(
         CStr::from_ptr(db).to_str()?
     };
 
+    let compression = &Config::get().compression;
+
     let dsn = if (host.contains("cloud.tdengine") || host.contains("cloud.taosdata"))
         && user == "token"
     {
         if port == 0 {
             port = DEFAULT_PORT_CLOUD;
         }
-        format!("wss://{host}:{port}/{db}?token={pass}")
+        format!("wss://{host}:{port}/{db}?token={pass}&compression={compression}")
     } else {
         if port == 0 {
             port = DEFAULT_PORT;
         }
-        format!("ws://{user}:{pass}@{host}:{port}/{db}")
+        format!("ws://{user}:{pass}@{host}:{port}/{db}?compression={compression}")
     };
 
     trace!("taos_connect, dsn: {:?}", dsn);
