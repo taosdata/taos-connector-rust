@@ -40,19 +40,20 @@ impl Default for Config {
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
+
+pub fn init() -> Result<(), ConfigError> {
+    let config = Config::new("/etc/taos/taos.cfg")?;
+    CONFIG
+        .set(config)
+        .map_err(|_| ConfigError::Init("Config has been initialized".to_string()))?;
+    Ok(())
+}
+
+pub fn config() -> &'static Config {
+    CONFIG.get().expect("config not initialized")
+}
+
 impl Config {
-    pub fn init() -> Result<(), ConfigError> {
-        let config = Config::new("/etc/taos/taos.cfg")?;
-        CONFIG
-            .set(config)
-            .map_err(|_| ConfigError::Init("Config has been initialized".to_string()))?;
-        Ok(())
-    }
-
-    pub fn get() -> &'static Config {
-        CONFIG.get().expect("config not initialized")
-    }
-
     fn new(filename: &str) -> Result<Config, ConfigError> {
         let lines = read_config_file(filename)?;
         parse_config(lines)
@@ -142,7 +143,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
                     }
 
                     if let Ok(level) = std::env::var("RUST_LOG") {
-                        config.log_level = LevelFilter::from_str(value).map_err(|_| {
+                        config.log_level = LevelFilter::from_str(&level).map_err(|_| {
                             ConfigError::Parse(format!("failed to parse RUST_LOG: {value}"))
                         })?;
                         config.log_output_to_screen = true;

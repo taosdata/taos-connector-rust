@@ -4,7 +4,6 @@ use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
 use std::time::Duration;
 
-use config::Config;
 use error::{set_err_and_get_code, TaosError};
 use query::QueryResultSet;
 use sml::SchemalessResultSet;
@@ -149,7 +148,7 @@ unsafe fn connect(
         CStr::from_ptr(db).to_str()?
     };
 
-    let compression = &Config::get().compression;
+    let compression = &config::config().compression;
 
     let dsn = if (host.contains("cloud.tdengine") || host.contains("cloud.taosdata"))
         && user == "token"
@@ -218,9 +217,13 @@ fn init() {
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::Layer;
 
-    Config::init().expect("failed to init config");
+    config::init().expect("failed to init config");
 
-    let config = Config::get();
+    let config = config::config();
+
+    if let Some(timezone) = &config.timezone {
+        std::env::set_var("TZ", timezone.name());
+    }
 
     let mut layers = Vec::new();
 

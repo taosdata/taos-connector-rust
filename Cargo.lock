@@ -3951,7 +3951,6 @@ dependencies = [
  "bytes",
  "cargo_metadata",
  "cbindgen",
- "chrono",
  "chrono-tz",
  "ctor",
  "dashmap",

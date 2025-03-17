@@ -15,13 +15,12 @@ use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
 use tracing::{error, instrument, trace, Instrument};
 
-use crate::ws::config::Config;
 use crate::ws::error::{
     clear_err_and_ret_succ, format_errno, set_err_and_get_code, TaosError, TaosMaybeError,
 };
 use crate::ws::{
-    ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, __taos_async_fn_t, TAOS, TAOS_RES,
-    TAOS_ROW,
+    config, ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, __taos_async_fn_t, TAOS,
+    TAOS_RES, TAOS_ROW,
 };
 
 pub const TSDB_DATA_TYPE_NULL: usize = 0;
@@ -1134,7 +1133,7 @@ pub unsafe extern "C" fn taos_check_server_status(
 ) -> TSDB_SERVER_STATUS {
     trace!("taos_check_server_status start, fqdn: {fqdn:?}, port: {port}, details: {details:?}, maxlen: {maxlen}");
 
-    let config = Config::get();
+    let config = config::config();
 
     let fqdn = if fqdn.is_null() {
         if let Some(fqdn) = config.fqdn.as_ref() {
@@ -1177,7 +1176,7 @@ async fn check_server_status(fqdn: &str, port: i32) -> TaosResult<(i32, String)>
     use taos_query::AsyncTBuilder;
     use taos_ws::TaosBuilder;
 
-    let config = Config::get();
+    let config = config::config();
     let host = if let Some(host) = config.first_ep.as_ref() {
         host
     } else if let Some(host) = config.second_ep.as_ref() {
