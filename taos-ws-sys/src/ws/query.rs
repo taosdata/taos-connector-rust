@@ -80,30 +80,6 @@ pub struct TAOS_DB_ROUTE_INFO {
     pub vgHash: *mut TAOS_VGROUP_HASH_INFO,
 }
 
-#[repr(C)]
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub enum SET_CONF_RET_CODE {
-    SET_CONF_RET_SUCC = 0,
-    SET_CONF_RET_ERR_PART = -1,
-    SET_CONF_RET_ERR_INNER = -2,
-    SET_CONF_RET_ERR_JSON_INVALID = -3,
-    SET_CONF_RET_ERR_JSON_PARSE = -4,
-    SET_CONF_RET_ERR_ONLY_ONCE = -5,
-    SET_CONF_RET_ERR_TOO_LONG = -6,
-}
-
-pub const RET_MSG_LENGTH: usize = 1024;
-
-#[repr(C)]
-#[derive(Debug)]
-#[allow(non_snake_case)]
-#[allow(non_camel_case_types)]
-pub struct setConfRet {
-    pub retCode: SET_CONF_RET_CODE,
-    pub retMsg: [c_char; RET_MSG_LENGTH],
-}
-
 #[allow(non_camel_case_types)]
 pub type __taos_async_whitelist_fn_t = extern "C" fn(
     param: *mut c_void,
