@@ -1114,13 +1114,10 @@ pub unsafe extern "C" fn taos_check_server_status(
 ) -> TSDB_SERVER_STATUS {
     trace!("taos_check_server_status start, fqdn: {fqdn:?}, port: {port}, details: {details:?}, maxlen: {maxlen}");
 
-    let config = config::config();
-
     let fqdn = if fqdn.is_null() {
-        if let Some(fqdn) = config.fqdn.as_ref() {
-            fqdn
-        } else {
-            ""
+        match config::config() {
+            Some(cfg) => cfg.fqdn.as_deref().unwrap_or(""),
+            None => "",
         }
     } else {
         match CStr::from_ptr(fqdn).to_str() {
@@ -1133,8 +1130,10 @@ pub unsafe extern "C" fn taos_check_server_status(
         }
     };
 
-    if port == 0 && config.server_port.is_some() {
-        port = config.server_port.unwrap() as _;
+    if port == 0 {
+        if let Some(cfg) = config::config() {
+            port = cfg.server_port.unwrap_or(0) as _;
+        }
     }
 
     let (status, ds) = match block_in_place_or_global(check_server_status(fqdn, port)) {
@@ -1157,14 +1156,14 @@ async fn check_server_status(fqdn: &str, port: i32) -> TaosResult<(i32, String)>
     use taos_query::AsyncTBuilder;
     use taos_ws::TaosBuilder;
 
-    let config = config::config();
-    let host = if let Some(host) = config.first_ep.as_ref() {
-        host
-    } else if let Some(host) = config.second_ep.as_ref() {
-        host
-    } else {
-        "localhost"
-    };
+    let mut host = "localhost";
+    if let Some(cfg) = config::config() {
+        if let Some(ep) = &cfg.first_ep {
+            host = ep;
+        } else if let Some(ep) = &cfg.second_ep {
+            host = ep;
+        }
+    }
 
     let dsn = format!("ws://{host}:6041");
     let taos = TaosBuilder::from_dsn(dsn)?.build().await?;

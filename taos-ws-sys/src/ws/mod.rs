@@ -148,7 +148,11 @@ unsafe fn connect(
         CStr::from_ptr(db).to_str()?
     };
 
-    let compression = &config::config().compression;
+    let compression = if let Some(cfg) = config::config() {
+        &cfg.compression
+    } else {
+        "false"
+    };
 
     let dsn = if (host.contains("cloud.tdengine") || host.contains("cloud.taosdata"))
         && user == "token"
@@ -217,43 +221,47 @@ fn init() {
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::Layer;
 
-    config::init().expect("failed to init config");
-
-    let config = config::config();
-
-    if let Some(timezone) = &config.timezone {
-        std::env::set_var("TZ", timezone.name());
+    if let Err(err) = config::init() {
+        eprintln!("failed to init config, err: {:?}", err);
     }
 
-    let mut layers = Vec::new();
+    if let Some(cfg) = config::config() {
+        if let Some(timezone) = cfg.timezone {
+            std::env::set_var("TZ", timezone.name());
+        }
 
-    let appender = RollingFileAppender::builder(&config.log_dir, "taos", 16)
-        .compress(true)
-        .reserved_disk_size("1GB")
-        .rotation_count(3)
-        .rotation_size("1GB")
-        .build()
-        .unwrap();
+        let mut layers = Vec::new();
 
-    layers.push(
-        TaosLayer::<Qid>::new(appender)
-            .with_location()
-            .with_filter(config.log_level)
-            .boxed(),
-    );
+        let appender = RollingFileAppender::builder(&cfg.log_dir, "taos", 16)
+            .compress(true)
+            .reserved_disk_size("1GB")
+            .rotation_count(3)
+            .rotation_size("1GB")
+            .build()
+            .unwrap();
 
-    if config.log_output_to_screen {
         layers.push(
-            TaosLayer::<Qid, _, _>::new(std::io::stdout)
+            TaosLayer::<Qid>::new(appender)
                 .with_location()
-                .with_filter(config.log_level)
+                .with_filter(cfg.log_level)
                 .boxed(),
         );
+
+        if cfg.log_output_to_screen {
+            layers.push(
+                TaosLayer::<Qid, _, _>::new(std::io::stdout)
+                    .with_location()
+                    .with_filter(cfg.log_level)
+                    .boxed(),
+            );
+        }
+
+        tracing_subscriber::registry().with(layers).init();
+
+        if let Err(err) = LogTracer::init() {
+            eprintln!("failed to init LogTracer, err: {:?}", err);
+        }
     }
-
-    tracing_subscriber::registry().with(layers).init();
-
-    LogTracer::init().expect("failed to init log tracer");
 }
 
 #[derive(Debug)]

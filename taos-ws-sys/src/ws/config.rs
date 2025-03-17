@@ -49,8 +49,8 @@ pub fn init() -> Result<(), ConfigError> {
     Ok(())
 }
 
-pub fn config() -> &'static Config {
-    CONFIG.get().expect("config not initialized")
+pub fn config() -> Option<&'static Config> {
+    CONFIG.get()
 }
 
 impl Config {
