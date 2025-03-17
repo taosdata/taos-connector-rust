@@ -222,7 +222,7 @@ fn init() {
     use tracing_subscriber::Layer;
 
     if let Err(err) = config::init() {
-        eprintln!("failed to init config, err: {:?}", err);
+        eprintln!("failed to init config, err: {err:?}");
     }
 
     if let Some(cfg) = config::config() {
@@ -259,7 +259,7 @@ fn init() {
         tracing_subscriber::registry().with(layers).init();
 
         if let Err(err) = LogTracer::init() {
-            eprintln!("failed to init LogTracer, err: {:?}", err);
+            eprintln!("failed to init LogTracer, err: {err:?}");
         }
     }
 }
