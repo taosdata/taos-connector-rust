@@ -3,36 +3,34 @@ use std::ffi::{c_char, c_int, CStr, CString};
 use std::ptr;
 
 use taos_error::Code;
-use tracing::{instrument, trace};
+use tracing::trace;
 
 use crate::ws::TAOS_RES;
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
+    trace!("taos_errno, res: {res:?}");
     if res.is_null() {
         return errno();
     }
-
     match (res as *mut TaosMaybeError<()>)
         .as_ref()
         .and_then(TaosMaybeError::errno)
     {
         Some(errno) => format_errno(errno),
-        None => Code::SUCCESS.into(),
+        None => 0,
     }
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
+    trace!("taos_errstr, res: {res:?}");
     if res.is_null() {
         if errno() == 0 {
             return EMPTY.as_ptr();
         }
         return errstr();
     }
-
     match (res as *mut TaosMaybeError<()>)
         .as_ref()
         .and_then(TaosMaybeError::errstr)
