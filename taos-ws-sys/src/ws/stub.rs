@@ -3,9 +3,18 @@
 use std::ffi::{c_char, c_int, c_void};
 use std::ptr;
 
-use crate::ws::query::{__taos_async_whitelist_fn_t, __taos_notify_fn_t, TAOS_DB_ROUTE_INFO};
+use crate::ws::query::{__taos_notify_fn_t, TAOS_DB_ROUTE_INFO};
 use crate::ws::tmq::{tmq_raw_data, tmq_t};
 use crate::ws::{TAOS, TAOS_FIELD, TAOS_RES, TSDB_OPTION_CONNECTION};
+
+#[allow(non_camel_case_types)]
+pub type __taos_async_whitelist_fn_t = extern "C" fn(
+    param: *mut c_void,
+    code: i32,
+    taos: *mut TAOS,
+    numOfWhiteLists: i32,
+    pWhiteLists: *mut u64,
+);
 
 #[no_mangle]
 pub extern "C" fn taos_init() -> c_int {
@@ -240,9 +249,134 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_taos_set_config() {
+    fn test_stub() {
+        let code = taos_init();
+        assert_eq!(code, 0);
+
+        taos_cleanup();
+
+        let taos = taos_connect_auth(ptr::null(), ptr::null(), ptr::null(), ptr::null(), 0);
+        assert_eq!(taos, ptr::null_mut());
+
+        taos_kill_query(ptr::null_mut());
+
+        taos_reset_current_db(ptr::null_mut());
+
+        let code = taos_get_db_route_info(ptr::null_mut(), ptr::null(), ptr::null_mut());
+        assert_eq!(code, 0);
+
+        let code = taos_get_table_vgId(
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null(),
+            ptr::null_mut(),
+        );
+        assert_eq!(code, 0);
+
+        let code = taos_get_tables_vgId(
+            ptr::null_mut(),
+            ptr::null(),
+            ptr::null_mut(),
+            0,
+            ptr::null_mut(),
+        );
+        assert_eq!(code, 0);
+
+        let code = taos_load_table_info(ptr::null_mut(), ptr::null());
+        assert_eq!(code, 0);
+
+        taos_set_hb_quit(0);
+
+        extern "C" fn taos_set_notify_cb_cb(param: *mut c_void, ext: *mut c_void, r#type: c_int) {}
+
+        let code = taos_set_notify_cb(ptr::null_mut(), taos_set_notify_cb_cb, ptr::null_mut(), 0);
+        assert_eq!(code, 0);
+
+        let code = taos_set_conn_mode(ptr::null_mut(), 0, 0);
+        assert_eq!(code, 0);
+
+        let conn = tmq_get_connect(ptr::null_mut());
+        assert_eq!(conn, ptr::null_mut());
+
         let res = taos_set_config(ptr::null());
         assert_eq!(res.retCode, SET_CONF_RET_CODE::SET_CONF_RET_SUCC);
         assert_eq!(res.retMsg, [0; RET_MSG_LENGTH]);
+
+        #[allow(non_snake_case)]
+        extern "C" fn taos_fetch_whitelist_a_cb(
+            param: *mut c_void,
+            code: i32,
+            taos: *mut TAOS,
+            numOfWhiteLists: i32,
+            pWhiteLists: *mut u64,
+        ) {
+        }
+
+        taos_fetch_whitelist_a(ptr::null_mut(), taos_fetch_whitelist_a_cb, ptr::null_mut());
+
+        let code = tmq_get_raw(ptr::null_mut(), ptr::null_mut());
+        assert_eq!(code, 0);
+
+        let tmq_raw_data = tmq_raw_data {
+            raw: ptr::null_mut(),
+            raw_len: 0,
+            raw_type: 0,
+        };
+
+        let code = tmq_write_raw(ptr::null_mut(), tmq_raw_data);
+        assert_eq!(code, 0);
+
+        let code = taos_write_raw_block(ptr::null_mut(), 0, ptr::null_mut(), ptr::null());
+        assert_eq!(code, 0);
+
+        let code =
+            taos_write_raw_block_with_reqid(ptr::null_mut(), 0, ptr::null_mut(), ptr::null(), 0);
+        assert_eq!(code, 0);
+
+        let code = taos_write_raw_block_with_fields(
+            ptr::null_mut(),
+            0,
+            ptr::null_mut(),
+            ptr::null(),
+            ptr::null_mut(),
+            0,
+        );
+        assert_eq!(code, 0);
+
+        let code = taos_write_raw_block_with_fields_with_reqid(
+            ptr::null_mut(),
+            0,
+            ptr::null_mut(),
+            ptr::null(),
+            ptr::null_mut(),
+            0,
+            0,
+        );
+        assert_eq!(code, 0);
+
+        let tmq_raw_data = tmq_raw_data {
+            raw: ptr::null_mut(),
+            raw_len: 0,
+            raw_type: 0,
+        };
+
+        tmq_free_raw(tmq_raw_data);
+
+        let json_meta = tmq_get_json_meta(ptr::null_mut());
+        assert_eq!(json_meta, ptr::null());
+
+        tmq_free_json_meta(ptr::null_mut());
+
+        let build_info = getBuildInfo();
+        assert_eq!(build_info, ptr::null());
+
+        let code = taos_options_connection(
+            ptr::null_mut(),
+            TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CLEAR,
+            ptr::null(),
+        );
+        assert_eq!(code, 0);
+
+        taos_write_crashinfo(0, ptr::null_mut(), ptr::null_mut());
     }
 }

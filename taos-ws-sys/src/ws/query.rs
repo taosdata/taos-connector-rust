@@ -80,15 +80,6 @@ pub struct TAOS_DB_ROUTE_INFO {
     pub vgHash: *mut TAOS_VGROUP_HASH_INFO,
 }
 
-#[allow(non_camel_case_types)]
-pub type __taos_async_whitelist_fn_t = extern "C" fn(
-    param: *mut c_void,
-    code: i32,
-    taos: *mut TAOS,
-    numOfWhiteLists: i32,
-    pWhiteLists: *mut u64,
-);
-
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
