@@ -8,7 +8,7 @@ use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, global_tokio_runtime};
 use taos_ws::query::{BindType, Stmt2Field};
 use taos_ws::{Stmt2, Taos};
-use tracing::{error, instrument, trace, Instrument};
+use tracing::{error, trace, Instrument};
 
 use crate::ws::error::*;
 use crate::ws::query::QueryResultSet;
@@ -62,7 +62,6 @@ pub struct TAOS_FIELD_ALL {
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_init(
     taos: *mut TAOS,
     option: *mut TAOS_STMT2_OPTION,
@@ -108,11 +107,7 @@ unsafe fn stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> TaosRes
             None => (generate_req_id(), false, false, None, ptr::null_mut()),
         };
 
-    trace!(
-        "stmt2_init, req_id: {req_id}, single_stb_insert: {single_stb_insert}, \
-        single_table_bind_once: {single_table_bind_once}, async_exec_fn: {async_exec_fn:?}, \
-        userdata: {userdata:?}"
-    );
+    trace!("stmt2_init, req_id: {req_id}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}, async_exec_fn: {async_exec_fn:?}, userdata: {userdata:?}");
 
     block_in_place_or_global(stmt2.init_with_options(
         req_id,
@@ -124,7 +119,6 @@ unsafe fn stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> TaosRes
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_prepare(
     stmt: *mut TAOS_STMT2,
     sql: *const c_char,
@@ -183,7 +177,6 @@ pub unsafe extern "C" fn taos_stmt2_prepare(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_bind_param(
     stmt: *mut TAOS_STMT2,
     bindv: *mut TAOS_STMT2_BINDV,
@@ -239,7 +232,6 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_bind_param_a(
     stmt: *mut TAOS_STMT2,
     bindv: *mut TAOS_STMT2_BINDV,
@@ -247,11 +239,10 @@ pub unsafe extern "C" fn taos_stmt2_bind_param_a(
     fp: __taos_async_fn_t,
     param: *mut c_void,
 ) -> c_int {
-    todo!("taos_stmt2_bind_param_a")
+    0
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_exec(
     stmt: *mut TAOS_STMT2,
     affected_rows: *mut c_int,
@@ -338,7 +329,6 @@ pub unsafe extern "C" fn taos_stmt2_exec(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
     trace!("taos_stmt2_close, stmt: {stmt:?}");
     if stmt.is_null() {
@@ -349,7 +339,6 @@ pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mut c_int) -> c_int {
     trace!("taos_stmt2_is_insert start, stmt: {stmt:?}, insert: {insert:?}");
 
@@ -389,7 +378,6 @@ pub unsafe extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mu
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_get_fields(
     stmt: *mut TAOS_STMT2,
     count: *mut c_int,
@@ -443,7 +431,6 @@ pub unsafe extern "C" fn taos_stmt2_get_fields(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_free_fields(
     stmt: *mut TAOS_STMT2,
     fields: *mut TAOS_FIELD_ALL,
@@ -484,7 +471,6 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_RES {
     trace!("taos_stmt2_result start, stmt: {stmt:?}");
 
@@ -521,7 +507,6 @@ pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_R
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_stmt2_error(stmt: *mut TAOS_STMT2) -> *mut c_char {
     taos_errstr(stmt) as _
 }
