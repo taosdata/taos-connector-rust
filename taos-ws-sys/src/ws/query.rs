@@ -1153,7 +1153,7 @@ pub unsafe extern "C" fn taos_check_server_status(
         }
     };
 
-    if port == 0 && !config.server_port.is_none() {
+    if port == 0 && config.server_port.is_some() {
         port = config.server_port.unwrap() as _;
     }
 

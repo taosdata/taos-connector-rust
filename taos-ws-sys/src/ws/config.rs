@@ -81,8 +81,7 @@ impl std::error::Error for ConfigError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             ConfigError::Io(e) => Some(e),
-            ConfigError::Parse(_) => None,
-            ConfigError::Init(_) => None,
+            _ => None,
         }
     }
 }
