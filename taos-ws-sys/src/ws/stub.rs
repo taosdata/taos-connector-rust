@@ -289,6 +289,8 @@ mod tests {
 
         extern "C" fn taos_set_notify_cb_cb(param: *mut c_void, ext: *mut c_void, r#type: c_int) {}
 
+        taos_set_notify_cb_cb(ptr::null_mut(), ptr::null_mut(), 0);
+
         let code = taos_set_notify_cb(ptr::null_mut(), taos_set_notify_cb_cb, ptr::null_mut(), 0);
         assert_eq!(code, 0);
 
@@ -311,6 +313,8 @@ mod tests {
             pWhiteLists: *mut u64,
         ) {
         }
+
+        taos_fetch_whitelist_a_cb(ptr::null_mut(), 0, ptr::null_mut(), 0, ptr::null_mut());
 
         taos_fetch_whitelist_a(ptr::null_mut(), taos_fetch_whitelist_a_cb, ptr::null_mut());
 
