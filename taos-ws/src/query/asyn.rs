@@ -767,6 +767,7 @@ impl WsTaos {
                         let _ = sender.flush().await;
                     }
                     _ = rx.changed() => {
+                        let _= sender.send(Message::Close(None)).await;
                         let _ = sender.close().await;
                         tracing::trace!("close sender task");
                         break;
