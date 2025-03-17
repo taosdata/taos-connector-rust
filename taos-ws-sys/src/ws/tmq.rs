@@ -976,7 +976,7 @@ pub unsafe extern "C" fn tmq_commit_offset_async(
     trace!("tmq_commit_offset_async succ");
 }
 
-static TOPIC_ASSIGNMETN_MAP: Lazy<DashMap<usize, (usize, usize)>> = Lazy::new(DashMap::new);
+static TOPIC_ASSIGNMETN_MAP: Lazy<DashMap<usize, usize>> = Lazy::new(DashMap::new);
 
 #[no_mangle]
 #[allow(non_snake_case)]
@@ -1001,22 +1001,12 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
                     } else {
                         let (_, assigns) = assigns.first().unwrap().clone();
                         let len = assigns.len();
-                        let cap = assigns.capacity();
-
-                        trace!("tmq_get_topic_assignment, assigns: {assigns:?}, len: {len}, cap: {cap}");
-
+                        trace!("tmq_get_topic_assignment, assigns: {assigns:?}, len: {len}");
                         *numOfAssignment = len as _;
                         *assignment = Box::into_raw(assigns.into_boxed_slice()) as _;
-
-                        TOPIC_ASSIGNMETN_MAP.insert(*assignment as usize, (len, cap));
+                        TOPIC_ASSIGNMETN_MAP.insert(*assignment as usize, len);
                     }
-
-                    trace!(
-                        "tmq_get_topic_assignment succ, assignment: {:?}, num_of_assignment: {}",
-                        *assignment,
-                        *numOfAssignment
-                    );
-
+                    trace!("tmq_get_topic_assignment succ",);
                     0
                 }
                 None => {
@@ -1047,11 +1037,11 @@ pub unsafe extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignm
         return;
     }
 
-    let (_, (len, cap)) = TOPIC_ASSIGNMETN_MAP
+    let (_, len) = TOPIC_ASSIGNMETN_MAP
         .remove(&(pAssignment as usize))
         .unwrap();
-    let assigns = Vec::from_raw_parts(pAssignment, len, cap);
-    trace!("tmq_free_assignment succ, assigns: {assigns:?}, len: {len}, cap: {cap}");
+    let assigns = Vec::from_raw_parts(pAssignment, len, len);
+    trace!("tmq_free_assignment succ, assigns: {assigns:?}, len: {len}");
 }
 
 #[no_mangle]
@@ -1932,8 +1922,8 @@ mod tests {
             );
             assert_eq!(errno, 0);
 
-            let (_, (len, cap)) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
-            let assigns = Vec::from_raw_parts(assignment, len, cap);
+            let (_, len) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
+            let assigns = Vec::from_raw_parts(assignment, len, len);
 
             for assign in assigns {
                 let offset = tmq_position(consumer, topic_name.as_ptr(), assign.vgId);
@@ -2048,8 +2038,8 @@ mod tests {
             );
             assert_eq!(errno, 0);
 
-            let (_, (len, cap)) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
-            let assigns = Vec::from_raw_parts(assignment, len, cap);
+            let (_, len) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
+            let assigns = Vec::from_raw_parts(assignment, len, len);
 
             let mut vg_ids = Vec::new();
             for assign in &assigns {
@@ -2366,8 +2356,8 @@ mod tests {
             );
             assert_eq!(errno, 0);
 
-            let (_, (len, cap)) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
-            let assigns = Vec::from_raw_parts(assignment, len, cap);
+            let (_, len) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
+            let assigns = Vec::from_raw_parts(assignment, len, len);
 
             let mut vg_ids = Vec::new();
             for assign in &assigns {
@@ -2555,8 +2545,8 @@ mod tests {
             );
             assert_eq!(code, 0);
 
-            let (_, (len, cap)) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
-            let assigns = Vec::from_raw_parts(assignment, len, cap);
+            let (_, len) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
+            let assigns = Vec::from_raw_parts(assignment, len, len);
 
             let mut vg_ids = Vec::new();
             for assign in &assigns {
