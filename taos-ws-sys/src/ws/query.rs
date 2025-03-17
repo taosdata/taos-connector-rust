@@ -116,10 +116,20 @@ pub unsafe extern "C" fn taos_query_with_reqid(
     reqId: i64,
 ) -> *mut TAOS_RES {
     trace!("taos_query_with_reqid start, taos: {taos:?}, sql: {sql:?}, req_id: {reqId}");
-    let res: TaosMaybeError<ResultSet> = query(taos, sql, reqId as u64).into();
-    let res = Box::into_raw(Box::new(res)) as _;
-    trace!("taos_query_with_reqid succ, res: {res:?}");
-    res
+    let res = query(taos, sql, reqId as u64);
+    match res {
+        Ok(rs) => {
+            let res: TaosMaybeError<ResultSet> = rs.into();
+            let res = Box::into_raw(Box::new(res)) as _;
+            trace!("taos_query_with_reqid succ, res: {res:?}");
+            res
+        }
+        Err(err) => {
+            error!("taos_query_with_reqid failed, err: {err:?}");
+            set_err_and_get_code(err);
+            ptr::null_mut()
+        }
+    }
 }
 
 unsafe fn query(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> TaosResult<ResultSet> {

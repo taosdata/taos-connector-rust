@@ -491,6 +491,8 @@ pub fn test_exec<S: AsRef<str>>(taos: *mut TAOS, sql: S) {
         if code != 0 {
             let err = error::taos_errstr(res);
             println!("code: {}, err: {:?}", code, CStr::from_ptr(err));
+            query::taos_free_result(res);
+            return;
         }
         assert_eq!(code, 0);
 
@@ -547,6 +549,37 @@ mod tests {
 
             let taos = taos_connect(ptr::null(), ptr::null(), ptr::null(), invalid_utf8_ptr, 0);
             assert!(taos.is_null());
+        }
+    }
+
+    #[test]
+    fn test_test_exec() {
+        unsafe {
+            let taos = test_connect();
+            test_exec(taos, "drop database if exists d1");
+            test_exec(taos, "create database if not exists d1");
+            test_exec(taos, "use d1");
+            test_exec(
+                taos,
+                "create table if not exists t1 (ts timestamp, a int, b float, c binary(10))",
+            );
+            test_exec(taos, "insert into t1 values (now, 1, 1.1, 'hello')");
+            test_exec(taos, "insert into t1 values (now, 2, 2.2, 'world')");
+            test_exec(taos, "insert into t1 values (now, 3, 3.3, 'foo')");
+            test_exec(taos, "insert into t1 values (now, 4, 4.4, 'bar')");
+            test_exec(taos, "insert into t1 values (now, 5, 5.5, 'baz')");
+            test_exec(taos, "insert into t1 values (now, 6, 6.6, 'qux')");
+            test_exec(taos, "insert into t1 values (now, 7, 7.7, 'quux')");
+            test_exec(taos, "insert into t1 values (now, 8, 8.8, 'corge')");
+            test_exec(taos, "insert into t1 values (now, 9, 9.9, 'grault')");
+            test_exec(taos, "insert into t1 values (now, 10, 10.10, 'garply')");
+            test_exec(taos, "insert into t1 values (now, 11, 11.11, 'waldo')");
+            test_exec(taos, "insert into t1 values (now, 12, 12.12, 'fred')");
+            test_exec(taos, "insert into t1 values (now, 13, 13.13, 'plugh')");
+            test_exec(taos, "insert into t1 values (now, 14, 14.14, 'xyzzy')");
+            test_exec(taos, "insert into t1 values (now, 15, 15.15, 'thud')");
+            test_exec(taos, "insert into t1 values (now, 16, 16.16, 'foo')");
+            taos_close(taos);
         }
     }
 }
