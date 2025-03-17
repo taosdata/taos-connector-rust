@@ -8,7 +8,7 @@ use taos_query::util::generate_req_id;
 use taos_query::Queryable;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
-use tracing::{error, instrument, trace};
+use tracing::{error, trace};
 
 use crate::ws::error::{set_err_and_get_code, TaosError, TaosMaybeError};
 use crate::ws::{ResultSet, ResultSetOperations, TaosResult, TAOS, TAOS_FIELD, TAOS_RES, TAOS_ROW};
@@ -36,7 +36,6 @@ pub enum TSDB_SML_TIMESTAMP_TYPE {
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_schemaless_insert_raw(
     taos: *mut TAOS,
     lines: *mut c_char,
@@ -60,7 +59,6 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_schemaless_insert_raw_with_reqid(
     taos: *mut TAOS,
     lines: *mut c_char,
@@ -85,7 +83,6 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_with_reqid(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl(
     taos: *mut TAOS,
     lines: *mut c_char,
@@ -109,7 +106,6 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 #[allow(non_snake_case)]
 #[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid(
@@ -136,7 +132,6 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 #[allow(non_snake_case)]
 #[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
@@ -180,8 +175,6 @@ unsafe fn sml_insert_raw(
     reqid: i64,
     tbnameKey: *mut c_char,
 ) -> TaosResult<ResultSet> {
-    trace!("sml_insert_raw, taos: {taos:?}, lines: {lines:?}, len: {len}, total_rows: {totalRows:?}, protocol: {protocol}, precision: {precision}, ttl: {ttl}, reqid: {reqid}, tbname_key: {tbnameKey:?}");
-
     let taos = (taos as *mut Taos)
         .as_mut()
         .ok_or(TaosError::new(Code::INVALID_PARA, "taos is null"))?;
@@ -251,7 +244,6 @@ unsafe fn sml_insert_raw(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 #[allow(non_snake_case)]
 pub unsafe extern "C" fn taos_schemaless_insert(
     taos: *mut TAOS,
@@ -273,7 +265,6 @@ pub unsafe extern "C" fn taos_schemaless_insert(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 #[allow(non_snake_case)]
 pub unsafe extern "C" fn taos_schemaless_insert_with_reqid(
     taos: *mut TAOS,
@@ -296,7 +287,6 @@ pub unsafe extern "C" fn taos_schemaless_insert_with_reqid(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 #[allow(non_snake_case)]
 pub unsafe extern "C" fn taos_schemaless_insert_ttl(
     taos: *mut TAOS,
@@ -320,7 +310,6 @@ pub unsafe extern "C" fn taos_schemaless_insert_ttl(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
@@ -343,7 +332,6 @@ pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
 #[allow(non_snake_case)]
 #[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid_tbname_key(
@@ -385,8 +373,6 @@ unsafe fn sml_insert(
     reqid: i64,
     tbnameKey: *mut c_char,
 ) -> TaosResult<ResultSet> {
-    trace!("sml_insert, taos: {taos:?}, lines: {lines:?}, num_lines: {numLines}, protocol: {protocol}, precision: {precision}, ttl: {ttl}, reqid: {reqid}, tbname_key: {tbnameKey:?}");
-
     let taos = (taos as *mut Taos)
         .as_mut()
         .ok_or(TaosError::new(Code::INVALID_PARA, "taos is null"))?;
