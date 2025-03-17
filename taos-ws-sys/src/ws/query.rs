@@ -695,7 +695,7 @@ pub unsafe extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW 
         maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "rs is invalid")));
     };
 
-    return ptr::null_mut();
+    ptr::null_mut()
 }
 
 #[no_mangle]

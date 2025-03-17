@@ -376,7 +376,10 @@ pub unsafe extern "C" fn taos_stmt_set_tags(
 }
 
 #[no_mangle]
-pub unsafe fn taos_stmt_set_sub_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int {
+pub unsafe extern "C" fn taos_stmt_set_sub_tbname(
+    stmt: *mut TAOS_STMT,
+    name: *const c_char,
+) -> c_int {
     taos_stmt_set_tbname(stmt, name)
 }
 
