@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::fmt;
 use std::fs::File;
 use std::io::{self, BufRead};
@@ -9,6 +7,7 @@ use std::sync::OnceLock;
 
 use chrono_tz::Tz;
 use tracing::level_filters::LevelFilter;
+use tracing::trace;
 
 #[derive(Debug)]
 pub struct Config {
@@ -43,6 +42,7 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 
 pub fn init() -> Result<(), ConfigError> {
     let config = Config::new("/etc/taos/taos.cfg")?;
+    trace!("config init, config: {config:?}");
     CONFIG
         .set(config)
         .map_err(|_| ConfigError::Init("Config has been initialized".to_string()))?;
