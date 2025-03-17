@@ -96,6 +96,11 @@ impl TmqInit {
         self.enable_batch_meta = None;
         self
     }
+
+    pub(super) fn disable_auto_commit(mut self) -> Self {
+        self.auto_commit = "false".to_string();
+        self
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
@@ -114,7 +119,7 @@ pub enum TmqSend {
         #[serde(flatten)]
         conn: WsConnReq,
         #[serde(flatten)]
-        req: Box<TmqInit>,
+        req: TmqInit,
         topics: Vec<String>,
     },
     Unsubscribe {

@@ -661,7 +661,7 @@ impl AsAsyncConsumer for Consumer {
         let req_id = self.sender.req_id();
         let action = TmqSend::Subscribe {
             req_id,
-            req: Box::new(self.tmq_conf.clone()),
+            req: self.tmq_conf.clone().disable_auto_commit(),
             topics: self.topics.clone(),
             conn: self.conn.clone(),
         };
@@ -676,7 +676,11 @@ impl AsAsyncConsumer for Consumer {
                 // subscribe conf error -2.
                 let action = TmqSend::Subscribe {
                     req_id: self.sender.req_id(),
-                    req: Box::new(self.tmq_conf.clone().disable_batch_meta()),
+                    req: self
+                        .tmq_conf
+                        .clone()
+                        .disable_batch_meta()
+                        .disable_auto_commit(),
                     topics: self.topics.clone(),
                     conn: self.conn.clone(),
                 };
@@ -1522,12 +1526,10 @@ impl TmqBuilder {
                                     if bytes == PING {
                                         tracing::trace!("ping/pong handshake success");
                                     } else {
-                                        // do nothing
                                         tracing::warn!("received (unexpected) pong message, do nothing");
                                     }
                                 }
                                 Message::Frame(frame) => {
-                                    // do nothing
                                     tracing::warn!("received (unexpected) frame message, do nothing");
                                     tracing::trace!("* frame data: {frame:?}");
                                 }
