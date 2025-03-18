@@ -1036,15 +1036,16 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
 pub unsafe extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
     trace!("tmq_free_assignment start, p_assignment: {pAssignment:?}");
     if pAssignment.is_null() {
-        trace!("tmq_free_assignment succ, p_assignment is null");
+        error!("tmq_free_assignment failed, p_assignment is null");
         return;
     }
 
-    let (_, len) = TOPIC_ASSIGNMETN_MAP
-        .remove(&(pAssignment as usize))
-        .unwrap();
-    let assigns = Vec::from_raw_parts(pAssignment, len, len);
-    trace!("tmq_free_assignment succ, assigns: {assigns:?}, len: {len}");
+    if let Some((_, len)) = TOPIC_ASSIGNMETN_MAP.remove(&(pAssignment as usize)) {
+        let assigns = Vec::from_raw_parts(pAssignment, len, len);
+        trace!("tmq_free_assignment succ, assigns: {assigns:?}, len: {len}");
+    } else {
+        error!("tmq_free_assignment failed, err: p_assignment is invalid");
+    }
 }
 
 #[no_mangle]
