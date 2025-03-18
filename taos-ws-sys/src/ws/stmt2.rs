@@ -75,8 +75,10 @@ pub unsafe extern "C" fn taos_stmt2_init(
             return ptr::null_mut();
         }
     };
-    trace!("taos_stmt2_init succ, taos_stmt2: {taos_stmt2:?}");
-    Box::into_raw(Box::new(taos_stmt2)) as _
+    trace!("taos_stmt2_init, taos_stmt2: {taos_stmt2:?}");
+    let res = Box::into_raw(Box::new(taos_stmt2)) as _;
+    trace!("taos_stmt2_init succ, res: {res:?}");
+    res
 }
 
 unsafe fn stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> TaosResult<TaosStmt2> {
@@ -221,7 +223,7 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
         Ok(_) => {
             trace!("taos_stmt2_bind_param succ");
             maybe_err.clear_err();
-            Code::SUCCESS.into()
+            0
         }
         Err(err) => {
             error!("taos_stmt2_bind_param failed, err: {err:?}");

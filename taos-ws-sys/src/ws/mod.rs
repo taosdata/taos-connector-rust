@@ -190,7 +190,7 @@ pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
 #[no_mangle]
 #[instrument(level = "trace", ret)]
 pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
-    Code::SUCCESS.into()
+    0
 }
 
 #[derive(Clone)]

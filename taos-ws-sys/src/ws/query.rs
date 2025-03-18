@@ -550,7 +550,7 @@ pub unsafe extern "C" fn taos_fetch_block_s(
             Some(rs) => match rs.fetch_block(rows, numOfRows) {
                 Ok(()) => {
                     trace!("taos_fetch_block_s succ, num_of_rows: {}", *numOfRows);
-                    Code::SUCCESS.into()
+                    0
                 }
                 Err(err) => {
                     error!("taos_fetch_block_s failed, err: {err:?}");

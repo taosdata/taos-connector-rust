@@ -143,8 +143,19 @@ pub unsafe extern "C" fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_init_with_reqid(taos: *mut TAOS, reqid: i64) -> *mut TAOS_STMT {
-    let taos_stmt: TaosMaybeError<TaosStmt> = stmt_init(taos, reqid as _, false, false).into();
-    Box::into_raw(Box::new(taos_stmt)) as _
+    trace!("taos_stmt_init_with_reqid start, taos: {taos:?}, reqid: {reqid}");
+    let taos_stmt: TaosMaybeError<TaosStmt> = match stmt_init(taos, reqid as _, false, false) {
+        Ok(taos_stmt) => taos_stmt.into(),
+        Err(err) => {
+            error!("taos_stmt_init_with_reqid failed, err: {err:?}");
+            set_err_and_get_code(err);
+            return ptr::null_mut();
+        }
+    };
+    trace!("taos_stmt_init_with_reqid, taos_stmt: {taos_stmt:?}");
+    let res = Box::into_raw(Box::new(taos_stmt)) as _;
+    trace!("taos_stmt_init_with_reqid succ, res: {res:?}");
+    res
 }
 
 #[no_mangle]
@@ -152,6 +163,7 @@ pub unsafe extern "C" fn taos_stmt_init_with_options(
     taos: *mut TAOS,
     options: *mut TAOS_STMT_OPTIONS,
 ) -> *mut TAOS_STMT {
+    trace!("taos_stmt_init_with_options start, taos: {taos:?}, options: {options:?}");
     let (req_id, single_stb_insert, single_table_bind_once) = match options.as_ref() {
         Some(options) => (
             options.reqId as u64,
@@ -162,8 +174,18 @@ pub unsafe extern "C" fn taos_stmt_init_with_options(
     };
 
     let taos_stmt: TaosMaybeError<TaosStmt> =
-        stmt_init(taos, req_id, single_stb_insert, single_table_bind_once).into();
-    Box::into_raw(Box::new(taos_stmt)) as _
+        match stmt_init(taos, req_id, single_stb_insert, single_table_bind_once) {
+            Ok(taos_stmt) => taos_stmt.into(),
+            Err(err) => {
+                error!("taos_stmt_init_with_options failed, err: {err:?}");
+                set_err_and_get_code(err);
+                return ptr::null_mut();
+            }
+        };
+    trace!("taos_stmt_init_with_options, taos_stmt: {taos_stmt:?}");
+    let res = Box::into_raw(Box::new(taos_stmt)) as _;
+    trace!("taos_stmt_init_with_options succ, res: {res:?}");
+    res
 }
 
 unsafe fn stmt_init(
@@ -949,7 +971,7 @@ pub unsafe extern "C" fn taos_stmt_bind_single_param_batch(
 
     trace!("taos_stmt_bind_single_param_batch succ, taos_stmt: {taos_stmt:?}");
     maybe_err.with_err(None);
-    Code::SUCCESS.into()
+    0
 }
 
 #[no_mangle]
