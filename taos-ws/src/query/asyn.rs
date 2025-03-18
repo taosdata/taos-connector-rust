@@ -571,9 +571,6 @@ async fn read_queries(
                 queries_sender.scan(|k, _| {
                     keys.push(*k);
                 });
-                // queries_sender.for_each_async(|k, _| {
-                //     keys.push(*k);
-                // }).await;
                 for k in keys {
                     if let Some((_, sender)) = queries_sender.remove(&k) {
                         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "close signal received")));
@@ -591,11 +588,6 @@ async fn read_queries(
     queries_sender.scan(|k, _| {
         keys.push(*k);
     });
-    // queries_sender
-    //     .for_each_async(|k, _| {
-    //         keys.push(*k);
-    //     })
-    //     .await;
     for k in keys {
         if let Some((_, sender)) = queries_sender.remove(&k) {
             let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
