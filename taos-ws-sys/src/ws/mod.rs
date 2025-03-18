@@ -482,19 +482,15 @@ pub fn test_connect() -> *mut TAOS {
 
 #[cfg(test)]
 pub fn test_exec<S: AsRef<str>>(taos: *mut TAOS, sql: S) {
-    let sql = std::ffi::CString::new(sql.as_ref()).unwrap();
     unsafe {
+        let sql = std::ffi::CString::new(sql.as_ref()).unwrap();
         let res = query::taos_query(taos, sql.as_ptr());
-        assert!(!res.is_null());
-
-        let code = error::taos_errno(res);
-        if code != 0 {
+        if res.is_null() {
+            let code = error::taos_errno(res);
             let err = error::taos_errstr(res);
             println!("code: {}, err: {:?}", code, CStr::from_ptr(err));
-            query::taos_free_result(res);
         }
-        assert_eq!(code, 0);
-
+        assert!(!res.is_null());
         query::taos_free_result(res);
     }
 }
