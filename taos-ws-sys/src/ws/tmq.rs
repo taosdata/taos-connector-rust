@@ -324,7 +324,10 @@ pub unsafe extern "C" fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
             trace!("tmq_list_get_size succ, list: {list:?}");
             list.topics.len() as i32
         }
-        None => set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "list is null")),
+        None => {
+            error!("tmq_list_get_size failed, err: list is null");
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "list is null"))
+        }
     }
 }
 
@@ -2191,6 +2194,85 @@ mod tests {
                 &[
                     "drop topic topic_1741260674",
                     "drop database test_1741260674",
+                ],
+            );
+
+            taos_close(taos);
+        }
+
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1742281773",
+                    "drop database if exists test_1742281773",
+                    "create database test_1742281773",
+                    "use test_1742281773",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (now, 1)",
+                    "insert into t0 values (now+1s, 2)",
+                    "insert into t0 values (now+2s, 3)",
+                    "insert into t0 values (now+3s, 4)",
+                    "create topic topic_1742281773 as database test_1742281773",
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let val = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let val = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let tmq = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!tmq.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = c"topic_1742281773";
+            let errno = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(errno, 0);
+
+            let errno = tmq_subscribe(tmq, list);
+            assert_eq!(errno, 0);
+
+            let mut topics = ptr::null_mut();
+            let code = tmq_subscription(tmq, &mut topics);
+            assert_eq!(code, 0);
+            assert!(!topics.is_null());
+
+            let size = tmq_list_get_size(topics);
+            assert_eq!(size, 1);
+
+            let maybe_err = Box::from_raw(topics as *mut TaosMaybeError<TmqList>);
+            let topics = maybe_err.deref_mut().unwrap();
+            assert_eq!(topics.topics, vec!["topic_1742281773"]);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            sleep(Duration::from_secs(3));
+
+            let errno = tmq_unsubscribe(tmq);
+            assert_eq!(errno, 0);
+
+            let errno = tmq_consumer_close(tmq);
+            assert_eq!(errno, 0);
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic topic_1742281773",
+                    "drop database test_1742281773",
                 ],
             );
 
