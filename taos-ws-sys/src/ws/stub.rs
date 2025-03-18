@@ -4,6 +4,7 @@ use std::ffi::{c_char, c_int, c_void};
 use std::ptr;
 
 use crate::ws::query::{__taos_notify_fn_t, TAOS_DB_ROUTE_INFO};
+use crate::ws::stmt::TAOS_FIELD_E;
 use crate::ws::tmq::{tmq_raw_data, tmq_t};
 use crate::ws::{TAOS, TAOS_FIELD, TAOS_RES, TSDB_OPTION_CONNECTION};
 
@@ -244,6 +245,11 @@ pub extern "C" fn taos_options_connection(
 #[allow(non_snake_case)]
 pub extern "C" fn taos_write_crashinfo(signum: c_int, sigInfo: *mut c_void, context: *mut c_void) {}
 
+#[no_mangle]
+pub extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FIELD_E {
+    ptr::null_mut()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,5 +388,8 @@ mod tests {
         assert_eq!(code, 0);
 
         taos_write_crashinfo(0, ptr::null_mut(), ptr::null_mut());
+
+        let field_e = taos_fetch_fields_e(ptr::null_mut());
+        assert_eq!(field_e, ptr::null_mut());
     }
 }
