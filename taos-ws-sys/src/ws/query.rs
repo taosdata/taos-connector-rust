@@ -4,7 +4,6 @@ use std::time::Duration;
 use std::{ptr, slice};
 
 use bytes::Bytes;
-use cargo_metadata::MetadataCommand;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
 use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr};
@@ -872,39 +871,14 @@ pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char 
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
-    trace!("taos_get_client_info start");
-
-    static CLIENT_INFO: OnceLock<CString> = OnceLock::new();
-
-    let metadata = match MetadataCommand::new().no_deps().exec().ok() {
-        Some(md) => md,
-        None => {
-            error!("taos_get_client_info failed, MetadataCommand error");
-            set_err_and_get_code(TaosError::new(Code::FAILED, "MetadataCommand error"));
-            return ptr::null();
-        }
-    };
-
-    let package = match metadata
-        .packages
-        .into_iter()
-        .find(|pkg| pkg.name == "taos-ws-sys")
-    {
-        Some(pkg) => pkg,
-        None => {
-            error!("taos_get_client_info failed, find package error");
-            set_err_and_get_code(TaosError::new(Code::FAILED, "find package error"));
-            return ptr::null();
-        }
-    };
-
-    let version = package.version.to_string();
-    let client_info = CString::new(version).unwrap();
-
-    trace!("taos_get_client_info succ, client_info: {client_info:?}");
-
-    CLIENT_INFO.set(client_info).unwrap();
-    CLIENT_INFO.get().unwrap().as_ptr()
+    trace!("taos_get_client_info");
+    static VERSION: OnceLock<CString> = OnceLock::new();
+    VERSION
+        .get_or_init(|| {
+            let version = env!("CARGO_PKG_VERSION");
+            CString::new(version).unwrap()
+        })
+        .as_ptr()
 }
 
 #[no_mangle]
@@ -1922,7 +1896,7 @@ mod tests {
             let client_info = taos_get_client_info();
             assert!(!client_info.is_null());
             let client_info = CStr::from_ptr(client_info).to_str().unwrap();
-            println!("client_info: {client_info}");
+            assert_eq!(client_info, "0.2.1");
         }
     }
 
