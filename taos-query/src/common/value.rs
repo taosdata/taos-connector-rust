@@ -581,7 +581,7 @@ impl Value {
             Json(v) => v.as_str().expect("invalid str type"),
             Null(_) => "Null",
             Timestamp(_) => panic!("expect str but value is timestamp"),
-            _ => panic!("expect str but only varchar/binary/json/nchar is supported"),
+            s => panic!("expect str but only varchar/binary/json/nchar is supported: {s:?}"),
         }
     }
 

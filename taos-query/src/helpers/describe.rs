@@ -318,10 +318,25 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let field = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let origin_ty: String = seq
+                let origin: serde_json::Value = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(1, &self))?;
-                let ty = Ty::from_str(&origin_ty).map_err(de::Error::custom)?;
+                let mut origin_ty = None;
+                let ty = match origin {
+                    serde_json::Value::Number(n) => {
+                        if let Some(n) = n.as_u64() {
+                            Ty::from(n as u8)
+                        } else {
+                            return Err(de::Error::custom("invalid Ty number"));
+                        }
+                    }
+                    serde_json::Value::String(s) => {
+                        origin_ty = Some(s.clone());
+                        Ty::from_str(&s).map_err(de::Error::custom)?
+                    }
+                    _ => return Err(de::Error::custom("invalid Ty")),
+                };
+
                 let length = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(2, &self))?;
@@ -355,7 +370,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let desc = Described {
                     field,
                     ty,
-                    origin_ty: Some(origin_ty),
+                    origin_ty,
                     length,
                     note,
                     compression,
@@ -391,10 +406,22 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                             if ty.is_some() {
                                 return Err(de::Error::duplicate_field("type"));
                             }
-                            let origin: String = map.next_value()?;
-                            let t: Ty = Ty::from_str(&origin).map_err(de::Error::custom)?;
+                            let origin: serde_json::Value = map.next_value()?;
+                            let t = match origin {
+                                serde_json::Value::Number(n) => {
+                                    if let Some(n) = n.as_u64() {
+                                        Ty::from(n as u8)
+                                    } else {
+                                        return Err(de::Error::custom("invalid Ty number"));
+                                    }
+                                }
+                                serde_json::Value::String(s) => {
+                                    origin_ty = Some(s.clone());
+                                    Ty::from_str(&s).map_err(de::Error::custom)?
+                                }
+                                _ => return Err(de::Error::custom("invalid Ty")),
+                            };
                             ty = Some(t);
-                            origin_ty = Some(origin);
                         }
                         Meta::Length => {
                             if length.is_some() {
@@ -704,7 +731,7 @@ mod tests {
             ColumnMeta::Column(Described {
                 field: "name".to_string(),
                 ty: Ty::BigInt,
-                origin_ty: None,
+                origin_ty: Some("BIGINT".to_string()),
                 length: 8,
                 note: None,
                 compression: None,
