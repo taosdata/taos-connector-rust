@@ -40,7 +40,7 @@ pub(super) fn bind_params_to_bytes(
     fields_count: usize,
 ) -> RawResult<Vec<u8>> {
     if params.is_empty() {
-        return Err("No params to bind".into());
+        return Err("no params to bind".into());
     }
 
     let mut need_tbnames = false;
@@ -3095,7 +3095,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic = "No params to bind"]
+    #[should_panic = "no params to bind"]
     fn test_bind_params_to_bytes_without_params() {
         let _ = bind_params_to_bytes(&[], 100, 200, true, None, 0).unwrap();
     }
