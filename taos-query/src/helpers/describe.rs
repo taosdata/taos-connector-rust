@@ -92,6 +92,7 @@ impl fmt::Display for CompressOptions {
     }
 }
 
+#[allow(clippy::partial_pub_fields)]
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct Described {
     pub field: String,
@@ -212,7 +213,7 @@ impl Described {
     }
 
     pub fn origin_ty_name(&self) -> Option<&str> {
-        self.origin_ty.as_ref().map(|s| s.as_str())
+        self.origin_ty.as_deref()
     }
 }
 #[derive(Debug, Serialize, PartialEq, Eq, Clone)]
@@ -391,7 +392,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                                 return Err(de::Error::duplicate_field("type"));
                             }
                             let origin: String = map.next_value()?;
-                            let t: Ty = Ty::from_str(&origin).map_err(|e| de::Error::custom(e))?;
+                            let t: Ty = Ty::from_str(&origin).map_err(de::Error::custom)?;
                             ty = Some(t);
                             origin_ty = Some(origin);
                         }

@@ -299,8 +299,7 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
-            v @ Decimal(_) => visitor.visit_newtype_struct(v),
-            v @ Decimal64(_) => visitor.visit_newtype_struct(v),
+            v @ (Decimal(_) | Decimal64(_)) => visitor.visit_newtype_struct(v),
         }
     }
 

@@ -176,9 +176,8 @@ impl FromStr for Ty {
                 .map_err(|e: std::num::ParseIntError| e.to_string())?;
             if precision <= 18 {
                 return Ok(Self::Decimal64);
-            } else {
-                return Ok(Self::Decimal);
             }
+            return Ok(Self::Decimal);
         }
         match s.as_str() {
             "timestamp" => Ok(Ty::Timestamp),

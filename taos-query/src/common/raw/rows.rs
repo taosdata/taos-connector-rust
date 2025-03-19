@@ -282,13 +282,11 @@ impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
         match self.walk_next() {
             Some(BorrowedValue::Decimal(v)) => visitor
                 .visit_bool::<DeError>(!v.as_bigdecimal().is_zero())
-                .map_err(|e| serde::de::Error::custom(e)),
+                .map_err(serde::de::Error::custom),
             Some(BorrowedValue::Decimal64(v)) => visitor
                 .visit_bool::<DeError>(!v.as_bigdecimal().is_zero())
-                .map_err(|e| serde::de::Error::custom(e)),
-            Some(v) => v
-                .deserialize_any(visitor)
-                .map_err(|e| serde::de::Error::custom(e)),
+                .map_err(serde::de::Error::custom),
+            Some(v) => v.deserialize_any(visitor).map_err(serde::de::Error::custom),
             None => Err(<Self::Error as serde::de::Error>::custom(
                 "expect value, not none",
             )),

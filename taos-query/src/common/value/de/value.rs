@@ -301,8 +301,7 @@ impl<'de> serde::de::Deserializer<'de> for Value {
             VarBinary(_v) | Geometry(_v) => {
                 todo!()
             }
-            v @ Decimal(_) => visitor.visit_newtype_struct(v),
-            v @ Decimal64(_) => visitor.visit_newtype_struct(v),
+            v @ (Decimal(_) | Decimal64(_)) => visitor.visit_newtype_struct(v),
         }
     }
 

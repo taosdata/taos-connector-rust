@@ -117,9 +117,10 @@ impl<T> DecimalView<T> {
     }
 
     pub fn concat(&self, rhs: &View<T>) -> View<T> {
-        if self.precision != rhs.precision || self.scale != rhs.scale {
-            panic!("decimal strict concat needs same schema")
-        }
+        assert!(
+            !(self.precision != rhs.precision || self.scale != rhs.scale),
+            "decimal strict concat needs same schema"
+        );
 
         let nulls = self
             .nulls
