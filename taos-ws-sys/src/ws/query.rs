@@ -189,7 +189,7 @@ pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
-    trace!("taos_free_result start, res: {res:?}");
+    trace!("taos_free_result, res: {res:?}");
     if !res.is_null() {
         let _ = Box::from_raw(res as *mut TaosMaybeError<ResultSet>);
     }
