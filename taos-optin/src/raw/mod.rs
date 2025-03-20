@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::task::{Context, Poll, Waker};
 
 use dlopen2::raw::Library;
+use exec_future::ExecFuture;
 use taos_query::common::{c_field_t, raw_data_t, JsonMeta, RawData, SmlData};
 use taos_query::prelude::{Code, Field, Precision, RawError};
 use taos_query::tmq::Assignment;
@@ -25,6 +26,7 @@ use crate::types::{
 };
 use crate::{err_or, Auth};
 
+mod exec_future;
 mod query_future;
 
 lazy_static::lazy_static! {
@@ -985,6 +987,22 @@ impl RawTaos {
             sql.into_c_str()
         };
         QueryFuture::new(self.clone(), sql.into_owned())
+    }
+    #[inline]
+    pub fn exec_async<'a, S: IntoCStr<'a>>(&self, sql: S) -> ExecFuture<'_, 'a> {
+        let sql = if self.c.is_v20() {
+            // remove all backquotes
+            sql.into_c_str()
+                .to_str()
+                .unwrap()
+                .chars()
+                .filter(|c| *c != '`')
+                .collect::<String>()
+                .into_c_str()
+        } else {
+            sql.into_c_str()
+        };
+        ExecFuture::new(self, sql.into_owned())
     }
 
     #[inline]
