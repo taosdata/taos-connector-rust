@@ -7,7 +7,7 @@ use serde::de::value::Error;
 use serde::{de, forward_to_deserialize_any};
 
 const TIMESTAMP_VARIANTS: [&str; 3] = ["Milliseconds", "Microseconds", "Nanoseconds"];
-const VALUE_VARIANTS: [&str; 21] = [
+const VALUE_VARIANTS: [&str; 22] = [
     "Null",
     "Bool",
     "TinyInt",
@@ -29,6 +29,7 @@ const VALUE_VARIANTS: [&str; 21] = [
     "Blob",
     "MediumBlob",
     "Geometry",
+    "Decimal64",
 ];
 
 pub struct UnitOnly;

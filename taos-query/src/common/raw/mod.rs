@@ -405,8 +405,8 @@ impl RawBlock {
 
                     data_lengths[i] = *length * rows as u32;
                 }
+                Ty::Decimal | Ty::Decimal64 => unimplemented!("decimal type not supported"),
                 Ty::VarBinary => todo!(),
-                Ty::Decimal => todo!(),
                 Ty::Blob => todo!(),
                 Ty::MediumBlob => todo!(),
                 Ty::Geometry => todo!(),
@@ -471,6 +471,27 @@ impl RawBlock {
                         nulls: NullBits(nulls),
                         data,
                     }})
+                }};
+            }
+
+            macro_rules! _decimal_value {
+                ($ty: expr, $prim: ty) => {{
+                    let o1 = data_offset;
+                    let o2 = data_offset + ((rows + 7) >> 3); // null bitmap len.
+                    data_offset = o2 + rows * std::mem::size_of::<$prim>();
+                    let nulls = bytes.slice(o1..o2);
+                    let data = bytes.slice(o2..data_offset);
+                    // precision + scale
+                    let decimal_schema = schema.len;
+                    let precision = ((decimal_schema >> 8) & 0xFF) as _;
+                    let scale = (decimal_schema & 0xFF) as _;
+                    $ty(DecimalView {
+                        nulls: NullBits(nulls),
+                        data,
+                        precision,
+                        scale,
+                        _p: std::marker::PhantomData,
+                    })
                 }};
             }
 
@@ -545,6 +566,8 @@ impl RawBlock {
 
                     ColumnView::VarBinary(VarBinaryView { offsets, data })
                 }
+                Ty::Decimal => _decimal_value!(ColumnView::Decimal, i128),
+                Ty::Decimal64 => _decimal_value!(ColumnView::Decimal64, i64),
                 Ty::Geometry => {
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
@@ -1656,4 +1679,180 @@ fn test_from_v2() {
     dbg!(&raw);
 
     println!("{}", raw.pretty_format());
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::{BufMut, BytesMut};
+
+    use crate::common::decimal::Decimal;
+
+    use super::*;
+
+    #[test]
+    fn parse_decimal64_raw_block_test() -> anyhow::Result<()> {
+        let mut bytes = BytesMut::new();
+
+        // header
+        bytes.extend_from_slice(
+            Header {
+                version: 3,
+                length: 82,
+                nrows: 1,
+                ncols: 3,
+                flag: 0,
+                group_id: 0,
+            }
+            .as_bytes(),
+        );
+        // 28
+
+        // schema (1+4) * 3
+        bytes.extend_from_slice(
+            ColSchema::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 2).as_bytes(), // 123.45
+        );
+        bytes.extend_from_slice(
+            ColSchema::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 0).as_bytes(), // 12345
+        );
+        bytes.extend_from_slice(
+            ColSchema::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 5).as_bytes(), // 0.12345
+        );
+        // 43
+
+        // length 4 * 3
+        for _ in 0..3 {
+            bytes.put_u32_ne(9);
+        }
+
+        // nums (1 + 8) * 3
+        for _ in 0..3 {
+            bytes.extend(NullBits::from_iter([false, false, false]).0);
+            bytes.put_i64_ne(12345);
+        }
+
+        let block = RawBlock::parse_from_raw_block(bytes, Precision::Microsecond);
+        let cols = block.column_views();
+        let mut iter = cols.iter();
+
+        let mut check_decimal = |precision: u8, scale: u8| {
+            let col1 = iter.next();
+            let Some(ColumnView::Decimal64(rows)) = col1 else {
+                anyhow::bail!("not decimal type")
+            };
+            let Some(Some(decimal)) = rows.iter().next() else {
+                anyhow::bail!("decimal row not found")
+            };
+            assert_eq!(
+                decimal,
+                Decimal {
+                    data: 12345,
+                    precision,
+                    scale
+                }
+            );
+            Ok(())
+        };
+        check_decimal(5, 2)?;
+        check_decimal(5, 0)?;
+        check_decimal(5, 5)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_decimal_raw_block_test() -> anyhow::Result<()> {
+        let mut bytes = BytesMut::new();
+
+        // header
+        bytes.extend_from_slice(
+            Header {
+                version: 3,
+                length: 106,
+                nrows: 1,
+                ncols: 3,
+                flag: 0,
+                group_id: 0,
+            }
+            .as_bytes(),
+        );
+        // 28
+
+        // schema (1+4) * 3
+        bytes.extend_from_slice(
+            ColSchema::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 2).as_bytes(), // 123.45
+        );
+        bytes.extend_from_slice(
+            ColSchema::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 0).as_bytes(), // 12345
+        );
+        bytes.extend_from_slice(
+            ColSchema::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 5).as_bytes(), // 0.12345
+        );
+        // 43
+
+        // length 4 * 3
+        for _ in 0..3 {
+            bytes.put_u32_ne(9);
+        }
+
+        // nums (1 + 16) * 3
+        for _ in 0..3 {
+            bytes.extend(NullBits::from_iter([false, false, false]).0);
+            bytes.put_i128_ne(12345);
+        }
+
+        let block = RawBlock::parse_from_raw_block(bytes, Precision::Microsecond);
+        let cols = block.column_views();
+        let mut iter = cols.iter();
+
+        let mut check_decimal = |precision: u8, scale: u8| {
+            let col1 = iter.next();
+            let Some(ColumnView::Decimal(rows)) = col1 else {
+                anyhow::bail!("not decimal type")
+            };
+            let Some(Some(decimal)) = rows.iter().next() else {
+                anyhow::bail!("decimal row not found")
+            };
+            assert_eq!(
+                decimal,
+                Decimal {
+                    data: 12345,
+                    precision,
+                    scale
+                }
+            );
+            Ok(())
+        };
+        check_decimal(5, 2)?;
+        check_decimal(5, 0)?;
+        check_decimal(5, 5)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_decimal_float_test() -> anyhow::Result<()> {
+        let bytes = Bytes::from_static(&[
+            1, 0, 0, 0, 79, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0,
+            9, 8, 0, 0, 0, 21, 2, 5, 0, 8, 4, 4, 0, 0, 0, 8, 0, 0, 0, 8, 0, 0, 0, 4, 0, 0, 0, 0,
+            171, 120, 92, 155, 153, 1, 0, 0, 0, 57, 48, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+        ]);
+        let block = RawBlock::parse_from_raw_block(bytes, Precision::Microsecond);
+        let cols = block.column_views();
+        let mut iter = cols.iter();
+        while let Some(ColumnView::Decimal64(rows)) = iter.next() {
+            let Some(Some(decimal)) = rows.iter().next() else {
+                anyhow::bail!("decimal row not found")
+            };
+            assert_eq!(
+                decimal,
+                Decimal {
+                    data: 12345,
+                    precision: 5,
+                    scale: 2
+                }
+            );
+        }
+
+        Ok(())
+    }
 }
