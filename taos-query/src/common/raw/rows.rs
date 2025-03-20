@@ -447,3 +447,37 @@ impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
         self.deserialize_map(visitor)
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use serde::Deserialize;
+
+    use crate::common::Precision;
+
+    use super::*;
+
+    #[test]
+    fn deserialize_decimal_test() -> anyhow::Result<()> {
+        let bytes = bytes::Bytes::from_static(&[
+            1, 0, 0, 0, 79, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0,
+            9, 8, 0, 0, 0, 21, 2, 10, 0, 8, 4, 4, 0, 0, 0, 8, 0, 0, 0, 8, 0, 0, 0, 4, 0, 0, 0, 0,
+            138, 123, 47, 178, 149, 1, 0, 0, 0, 68, 214, 18, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+        ]);
+        let mut block = RawBlock::parse_from_raw_block(bytes, Precision::Microsecond);
+        block.fields = vec!["ts".to_string(), "v".to_string(), "g".to_string()];
+
+        #[allow(dead_code)]
+        #[derive(Debug, serde::Deserialize)]
+        struct Data {
+            ts: i64,
+            v: f64,
+        }
+        let values = block
+            .rows()
+            .map(|mut v| Data::deserialize(&mut v))
+            .collect::<Result<Vec<_>, _>>()?;
+        dbg!(values);
+        Ok(())
+    }
+}

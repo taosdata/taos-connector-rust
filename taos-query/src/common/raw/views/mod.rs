@@ -531,8 +531,8 @@ impl ColumnView {
             | ColumnView::Double(_)
             | ColumnView::UBigInt(_)
             | ColumnView::Timestamp(_)
-            | ColumnView::Decimal(_) => 8,
-            ColumnView::Decimal64(_) => 16,
+            | ColumnView::Decimal(_) => 16,
+            ColumnView::Decimal64(_) => 8,
             ColumnView::VarChar(view) => view.max_length(),
             ColumnView::NChar(view) => view.max_length(),
             ColumnView::Json(view) => view.max_length(),
@@ -1415,6 +1415,8 @@ _impl_from_iter!(
 
 #[cfg(test)]
 mod tests {
+    use crate::common::decimal::Decimal;
+
     use super::*;
 
     #[test]
@@ -1485,5 +1487,58 @@ mod tests {
         let result_column_varchar =
             column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::VarChar);
         assert_eq!(result_column_varchar.len(), 6);
+    }
+
+    #[test]
+    fn decimal_column_view_test() -> anyhow::Result<()> {
+        let view = ColumnView::from_decimal([Some(12345), None, Some(333)], 10, 2);
+        assert_eq!(format!("{view:?}"), "Decimal([Some(Decimal { data: 12345, precision: 10, scale: 2 }), None, Some(Decimal { data: 333, precision: 10, scale: 2 })])");
+        assert_eq!(view.len(), 3);
+        assert_eq!(view.max_variable_length(), 16);
+        assert!(!unsafe { view.is_null_unchecked(0) });
+        assert!(unsafe { view.is_null_unchecked(1) });
+        assert!(!unsafe { view.is_null_unchecked(2) });
+        assert_eq!(
+            view.get(0),
+            Some(BorrowedValue::Decimal(Decimal::new(12345, 10, 2)))
+        );
+        assert_eq!(view.get(1), Some(BorrowedValue::Null(Ty::Decimal)));
+        assert_eq!(
+            view.get(2),
+            Some(BorrowedValue::Decimal(Decimal::new(333, 10, 2)))
+        );
+        let slice = view.slice(1..3).unwrap();
+        assert_eq!(slice.len(), 2);
+        assert_eq!(slice.get(0), Some(BorrowedValue::Null(Ty::Decimal)));
+        assert_eq!(
+            slice.get(1),
+            Some(BorrowedValue::Decimal(Decimal::new(333, 10, 2)))
+        );
+
+        let view = ColumnView::from_decimal64([Some(12345), None, Some(333)], 10, 0);
+        assert_eq!(format!("{view:?}"), "Decimal64([Some(Decimal { data: 12345, precision: 10, scale: 0 }), None, Some(Decimal { data: 333, precision: 10, scale: 0 })])");
+        assert_eq!(view.len(), 3);
+        assert_eq!(view.max_variable_length(), 8);
+        assert!(!unsafe { view.is_null_unchecked(0) });
+        assert!(unsafe { view.is_null_unchecked(1) });
+        assert!(!unsafe { view.is_null_unchecked(2) });
+        assert_eq!(
+            view.get(0),
+            Some(BorrowedValue::Decimal64(Decimal::new(12345, 10, 0)))
+        );
+        assert_eq!(view.get(1), Some(BorrowedValue::Null(Ty::Decimal64)));
+        assert_eq!(
+            view.get(2),
+            Some(BorrowedValue::Decimal64(Decimal::new(333, 10, 0)))
+        );
+        let slice = view.slice(1..3).unwrap();
+        assert_eq!(slice.len(), 2);
+        assert_eq!(slice.get(0), Some(BorrowedValue::Null(Ty::Decimal64)));
+        assert_eq!(
+            slice.get(1),
+            Some(BorrowedValue::Decimal64(Decimal::new(333, 10, 0)))
+        );
+
+        Ok(())
     }
 }

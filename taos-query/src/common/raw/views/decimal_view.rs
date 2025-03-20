@@ -208,7 +208,7 @@ impl DecimalView<i128> {
 impl DecimalView<i64> {
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map_or(BorrowedValue::Null(Ty::Decimal), BorrowedValue::Decimal64)
+            .map_or(BorrowedValue::Null(Ty::Decimal64), BorrowedValue::Decimal64)
     }
 
     impl_from_iter!(i64);
@@ -240,5 +240,126 @@ impl<T> Iterator for DecimalViewIter<'_, T> {
         } else {
             (0, Some(0))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::decimal::Decimal;
+
+    use super::*;
+
+    #[test]
+    fn from_iter_64_test() -> anyhow::Result<()> {
+        let view = DecimalView::<i64>::from_values([Some(12345), None, Some(22), Some(5)], 10, 2);
+
+        let (precision, scale) = view.precision_and_scale();
+        assert_eq!(precision, 10);
+        assert_eq!(scale, 2);
+
+        assert_eq!(view.len(), 4);
+
+        assert_eq!(
+            unsafe { view.get_value_unchecked(0) },
+            BorrowedValue::Decimal64(Decimal::new(12345, precision, scale))
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(1) },
+            BorrowedValue::Null(Ty::Decimal64)
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(2) },
+            BorrowedValue::Decimal64(Decimal::new(22, precision, scale))
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(3) },
+            BorrowedValue::Decimal64(Decimal::new(5, precision, scale))
+        );
+
+        assert!(!view.is_null(0));
+        assert!(view.is_null(1));
+        assert!(!view.is_null(2));
+        assert!(!view.is_null(3));
+        assert!(!view.is_null(4));
+
+        let mut nulls = view.is_null_iter();
+        assert!(!nulls.next().unwrap());
+        assert!(nulls.next().unwrap());
+        assert!(!nulls.next().unwrap());
+        assert!(!nulls.next().unwrap());
+
+        let mut iter = view.iter();
+        assert_eq!(
+            iter.next(),
+            Some(Some(Decimal::new(12345, precision, scale)))
+        );
+        assert_eq!(iter.next(), Some(None));
+        assert_eq!(iter.next(), Some(Some(Decimal::new(22, precision, scale))));
+        assert_eq!(iter.next(), Some(Some(Decimal::new(5, precision, scale))));
+        assert_eq!(iter.next(), None);
+
+        let view = view.slice(1..3).unwrap();
+        let mut iter = view.iter();
+        assert_eq!(iter.next(), Some(None));
+        assert_eq!(iter.next(), Some(Some(Decimal::new(22, precision, scale))));
+        assert_eq!(iter.next(), None);
+        Ok(())
+    }
+
+    #[test]
+    fn from_iter_128_test() -> anyhow::Result<()> {
+        let view = DecimalView::<i128>::from_values([Some(12345), None, Some(22), Some(5)], 10, 2);
+
+        let (precision, scale) = view.precision_and_scale();
+        assert_eq!(precision, 10);
+        assert_eq!(scale, 2);
+
+        assert_eq!(view.len(), 4);
+
+        assert_eq!(
+            unsafe { view.get_value_unchecked(0) },
+            BorrowedValue::Decimal(Decimal::new(12345, precision, scale))
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(1) },
+            BorrowedValue::Null(Ty::Decimal)
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(2) },
+            BorrowedValue::Decimal(Decimal::new(22, precision, scale))
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(3) },
+            BorrowedValue::Decimal(Decimal::new(5, precision, scale))
+        );
+
+        assert!(!view.is_null(0));
+        assert!(view.is_null(1));
+        assert!(!view.is_null(2));
+        assert!(!view.is_null(3));
+        assert!(!view.is_null(4));
+
+        let mut nulls = view.is_null_iter();
+        assert!(!nulls.next().unwrap());
+        assert!(nulls.next().unwrap());
+        assert!(!nulls.next().unwrap());
+        assert!(!nulls.next().unwrap());
+
+        let mut iter = view.iter();
+        assert_eq!(
+            iter.next(),
+            Some(Some(Decimal::new(12345, precision, scale)))
+        );
+        assert_eq!(iter.next(), Some(None));
+        assert_eq!(iter.next(), Some(Some(Decimal::new(22, precision, scale))));
+        assert_eq!(iter.next(), Some(Some(Decimal::new(5, precision, scale))));
+        assert_eq!(iter.next(), None);
+
+        let view = view.slice(1..3).unwrap();
+        let mut iter = view.iter();
+        assert_eq!(iter.next(), Some(None));
+        assert_eq!(iter.next(), Some(Some(Decimal::new(22, precision, scale))));
+        assert_eq!(iter.next(), None);
+        Ok(())
     }
 }

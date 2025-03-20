@@ -446,3 +446,46 @@ macro_rules! _impl_from_primitive {
 }
 
 _impl_from_primitive!(i8 i16 i32 i64 u16 u32 u64);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decimal_ty_test() -> anyhow::Result<()> {
+        assert_eq!("DECIMAL(5,2)".parse::<Ty>().unwrap(), Ty::Decimal64);
+        assert_eq!("DECIMAL(20,2)".parse::<Ty>().unwrap(), Ty::Decimal);
+
+        assert_eq!(Ty::from_u8(17), Ty::Decimal);
+        assert_eq!(Ty::from_u8(21), Ty::Decimal64);
+
+        assert_eq!(Ty::Decimal.as_variant_str(), "Decimal");
+        assert_eq!(Ty::Decimal64.as_variant_str(), "Decimal64");
+
+        assert_eq!(Ty::Decimal.fixed_length(), 16);
+        assert_eq!(Ty::Decimal64.fixed_length(), 8);
+
+        assert!(!Ty::Decimal.is_json());
+        assert!(!Ty::Decimal64.is_json());
+
+        assert!(Ty::Decimal.is_primitive());
+        assert!(Ty::Decimal64.is_primitive());
+
+        assert_eq!(Ty::Decimal.name(), "DECIMAL");
+        assert_eq!(Ty::Decimal64.name(), "DECIMAL");
+
+        assert_eq!(Ty::Decimal.lowercase_name(), "decimal");
+        assert_eq!(Ty::Decimal64.lowercase_name(), "decimal");
+
+        assert_eq!(Ty::from_u8_option(17), Some(Ty::Decimal));
+        assert_eq!(Ty::from_u8_option(21), Some(Ty::Decimal64));
+
+        assert_eq!(Ty::from(17), Ty::Decimal);
+        assert_eq!(Ty::from(21), Ty::Decimal64);
+
+        assert_eq!(format!("{}", Ty::Decimal), "DECIMAL");
+        assert_eq!(format!("{}", Ty::Decimal64), "DECIMAL");
+
+        Ok(())
+    }
+}

@@ -216,6 +216,8 @@ impl BorrowedValue<'_> {
             Float(v) => Ok(format!("{v}")),
             Double(v) => Ok(format!("{v}")),
             Timestamp(v) => Ok(v.to_datetime_with_tz().to_rfc3339()),
+            Decimal(v) => Ok(v.to_string()),
+            Decimal64(v) => Ok(v.to_string()),
             _ => unreachable!("un supported type to string"),
         }
     }
@@ -1781,6 +1783,113 @@ mod tests {
             let dec: BigDecimal = serde::Deserialize::deserialize(value)?;
             assert_eq!(dec.to_string(), "1234.556");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn decimal_borrowed_value_test() -> anyhow::Result<()> {
+        let value = BorrowedValue::Decimal(Decimal::new(20_446_744_073_709_551_615i128, 20, 2));
+        assert_eq!(value.ty(), Ty::Decimal);
+        assert_eq!(value.to_i64(), Some(204467440737095516));
+        assert_eq!(value.to_bool(), Some(true));
+        assert_eq!(value.to_i8(), Some(92));
+        assert_eq!(value.to_f32(), Some(204467440737095516.15));
+        assert_eq!(value.to_sql_value(), "204467440737095516.15");
+        assert_eq!(value.to_sql_value_with_rfc3339(), "204467440737095516.15");
+        assert_eq!(value.to_string(), Ok("204467440737095516.15".to_string()));
+        assert_eq!(
+            value.to_value(),
+            Value::Decimal(bigdecimal::BigDecimal::new(
+                20446744073709551615i128.into(),
+                2
+            ))
+        );
+        assert_eq!(
+            value.to_json_value(),
+            serde_json::Value::String("204467440737095516.15".to_string())
+        );
+        assert_eq!(value.to_str(), Some("204467440737095516.15".into()));
+        assert_eq!(format!("{value}"), "204467440737095516.15");
+        assert!(value.eq(&Value::Decimal(bigdecimal::BigDecimal::new(
+            20446744073709551615i128.into(),
+            2
+        ))));
+        assert_eq!(
+            value.into_value(),
+            Value::Decimal(bigdecimal::BigDecimal::new(
+                20446744073709551615i128.into(),
+                2
+            ))
+        );
+
+        let value = BorrowedValue::Decimal64(Decimal::new(12345, 10, 0));
+        assert_eq!(value.ty(), Ty::Decimal64);
+        assert_eq!(value.to_i64(), Some(12345));
+        assert_eq!(value.to_bool(), Some(true));
+        assert_eq!(value.to_i8(), Some(57));
+        assert_eq!(value.to_f32(), Some(12345.00));
+        assert_eq!(value.to_sql_value(), "12345");
+        assert_eq!(value.to_sql_value_with_rfc3339(), "12345");
+        assert_eq!(value.to_string(), Ok("12345".to_string()));
+        assert_eq!(
+            value.to_value(),
+            Value::Decimal64(bigdecimal::BigDecimal::new(12345.into(), 0))
+        );
+        assert_eq!(
+            value.to_json_value(),
+            serde_json::Value::String("12345".to_string())
+        );
+        assert_eq!(value.to_str(), Some("12345".into()));
+        assert_eq!(format!("{value}"), "12345");
+        assert!(value.eq(&Value::Decimal64(bigdecimal::BigDecimal::new(
+            12345.into(),
+            0
+        ))));
+        assert_eq!(
+            value.into_value(),
+            Value::Decimal64(bigdecimal::BigDecimal::new(12345.into(), 0))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn decimal_value_test() -> anyhow::Result<()> {
+        let value = Value::Decimal(bigdecimal::BigDecimal::new(
+            20446744073709551615i128.into(),
+            2,
+        ));
+        assert_eq!(value.ty(), Ty::Decimal);
+        assert_eq!(
+            value.to_borrowed_value(),
+            BorrowedValue::Decimal(Decimal::new(20446744073709551615i128, 20, 2))
+        );
+        assert_eq!(value.to_sql_value(), "204467440737095516.15");
+        assert_eq!(value.to_sql_value_with_rfc3339(), "204467440737095516.15");
+        assert_eq!(value.to_string(), Ok("204467440737095516.15".to_string()));
+        assert_eq!(
+            value.to_json_value(),
+            serde_json::Value::String("204467440737095516.15".to_string())
+        );
+        assert!(value.eq(&BorrowedValue::Decimal(Decimal::new(
+            20446744073709551615i128,
+            5,
+            2
+        ))));
+
+        let value = Value::Decimal64(bigdecimal::BigDecimal::new(12345.into(), 0));
+        assert_eq!(value.ty(), Ty::Decimal64);
+        assert_eq!(
+            value.to_borrowed_value(),
+            BorrowedValue::Decimal64(Decimal::new(12345, 5, 0))
+        );
+        assert_eq!(value.to_sql_value(), "12345");
+        assert_eq!(value.to_sql_value_with_rfc3339(), "12345");
+        assert_eq!(value.to_string(), Ok("12345".to_string()));
+        assert_eq!(
+            value.to_json_value(),
+            serde_json::Value::String("12345".to_string())
+        );
+        assert!(value.eq(&BorrowedValue::Decimal64(Decimal::new(12345, 5, 0))));
         Ok(())
     }
 }
