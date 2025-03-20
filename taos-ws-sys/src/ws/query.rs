@@ -1099,13 +1099,10 @@ pub unsafe extern "C" fn taos_check_server_status(
     debug!("taos_check_server_status start, fqdn: {fqdn:?}, port: {port}, details: {details:?}, maxlen: {maxlen}");
 
     let fqdn = if fqdn.is_null() {
-        match config::config() {
-            Some(cfg) => cfg.fqdn.as_deref().unwrap_or(""),
-            None => "",
-        }
+        config::config().and_then(|cfg| cfg.fqdn.clone())
     } else {
         match CStr::from_ptr(fqdn).to_str() {
-            Ok(fqdn) => fqdn,
+            Ok(fqdn) => Some(fqdn.to_string()),
             Err(_) => {
                 error!("taos_check_server_status failed, fqdn is invalid utf-8");
                 set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "fqdn is invalid utf-8"));
@@ -1120,7 +1117,7 @@ pub unsafe extern "C" fn taos_check_server_status(
         }
     }
 
-    debug!("taos_check_server_status, fqdn: {fqdn}, port: {port}");
+    debug!("taos_check_server_status, fqdn: {fqdn:?}, port: {port}");
 
     let (status, ds) = match block_in_place_or_global(check_server_status(fqdn, port)) {
         Ok(res) => res,
@@ -1138,7 +1135,7 @@ pub unsafe extern "C" fn taos_check_server_status(
     status.into()
 }
 
-async fn check_server_status(fqdn: &str, port: i32) -> TaosResult<(i32, String)> {
+async fn check_server_status(fqdn: Option<String>, port: i32) -> TaosResult<(i32, String)> {
     use taos_query::AsyncTBuilder;
     use taos_ws::TaosBuilder;
 
@@ -2327,15 +2324,15 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_taos_validate_sql() {
-    //     unsafe {
-    //         let taos = test_connect();
-    //         let sql = c"create database if not exists test_1741339814";
-    //         let code = taos_validate_sql(taos, sql.as_ptr());
-    //         assert_eq!(code, 0);
-    //     }
-    // }
+    #[test]
+    fn test_taos_validate_sql() {
+        unsafe {
+            let taos = test_connect();
+            let sql = c"create database if not exists test_1741339814";
+            let code = taos_validate_sql(taos, sql.as_ptr());
+            assert_eq!(code, 0);
+        }
+    }
 
     #[test]
     fn test_taos_fetch_raw_block_a() {
@@ -2712,6 +2709,16 @@ mod tests {
 
     #[test]
     fn test_taos_check_server_status() {
+        unsafe {
+            let max_len = 20;
+            let mut details = vec![0 as c_char; max_len];
+            let fqdn = c"localhost";
+            let status =
+                taos_check_server_status(fqdn.as_ptr(), 6030, details.as_mut_ptr(), max_len as _);
+            let details = CStr::from_ptr(details.as_ptr());
+            println!("status: {status:?}, details: {details:?}");
+        }
+
         unsafe {
             let max_len = 20;
             let mut details = vec![0 as c_char; max_len];

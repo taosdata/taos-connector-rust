@@ -91,7 +91,7 @@ pub enum WsSend {
     },
     CheckServerStatus {
         req_id: ReqId,
-        fqdn: String,
+        fqdn: Option<String>,
         port: i32,
     },
 }
