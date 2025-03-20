@@ -9,7 +9,7 @@ use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_ws::query::{BindType, Stmt2Field};
 use taos_ws::{Stmt2, Taos};
-use tracing::{error, trace};
+use tracing::{debug, error};
 
 use crate::ws::error::{
     clear_err_and_ret_succ, format_errno, set_err_and_get_code, taos_errstr, TaosError,
@@ -123,7 +123,7 @@ impl TaosStmt {
             let mut cols = Vec::with_capacity(len);
             for i in 0..len {
                 if let Some(col) = map.remove(&i) {
-                    trace!("move_to_bind_params, idx: {i}, col: {col:?}");
+                    debug!("move_to_bind_params, idx: {i}, col: {col:?}");
                     cols.push(col);
                 }
             }
@@ -143,7 +143,7 @@ pub unsafe extern "C" fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_init_with_reqid(taos: *mut TAOS, reqid: i64) -> *mut TAOS_STMT {
-    trace!("taos_stmt_init_with_reqid start, taos: {taos:?}, reqid: {reqid}");
+    debug!("taos_stmt_init_with_reqid start, taos: {taos:?}, reqid: {reqid}");
     let taos_stmt: TaosMaybeError<TaosStmt> = match stmt_init(taos, reqid as _, false, false) {
         Ok(taos_stmt) => taos_stmt.into(),
         Err(err) => {
@@ -152,9 +152,9 @@ pub unsafe extern "C" fn taos_stmt_init_with_reqid(taos: *mut TAOS, reqid: i64) 
             return ptr::null_mut();
         }
     };
-    trace!("taos_stmt_init_with_reqid, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_init_with_reqid, taos_stmt: {taos_stmt:?}");
     let res = Box::into_raw(Box::new(taos_stmt)) as _;
-    trace!("taos_stmt_init_with_reqid succ, res: {res:?}");
+    debug!("taos_stmt_init_with_reqid succ, res: {res:?}");
     res
 }
 
@@ -163,7 +163,7 @@ pub unsafe extern "C" fn taos_stmt_init_with_options(
     taos: *mut TAOS,
     options: *mut TAOS_STMT_OPTIONS,
 ) -> *mut TAOS_STMT {
-    trace!("taos_stmt_init_with_options start, taos: {taos:?}, options: {options:?}");
+    debug!("taos_stmt_init_with_options start, taos: {taos:?}, options: {options:?}");
     let (req_id, single_stb_insert, single_table_bind_once) = match options.as_ref() {
         Some(options) => (
             options.reqId as u64,
@@ -182,9 +182,9 @@ pub unsafe extern "C" fn taos_stmt_init_with_options(
                 return ptr::null_mut();
             }
         };
-    trace!("taos_stmt_init_with_options, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_init_with_options, taos_stmt: {taos_stmt:?}");
     let res = Box::into_raw(Box::new(taos_stmt)) as _;
-    trace!("taos_stmt_init_with_options succ, res: {res:?}");
+    debug!("taos_stmt_init_with_options succ, res: {res:?}");
     res
 }
 
@@ -194,7 +194,7 @@ unsafe fn stmt_init(
     single_stb_insert: bool,
     single_table_bind_once: bool,
 ) -> TaosResult<TaosStmt> {
-    trace!("stmt_init start, req_id: {req_id}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}");
+    debug!("stmt_init start, req_id: {req_id}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}");
 
     let taos = (taos as *mut Taos)
         .as_mut()
@@ -209,7 +209,7 @@ unsafe fn stmt_init(
     ))?;
 
     let taos_stmt = TaosStmt::new(stmt2, single_stb_insert && single_table_bind_once);
-    trace!("stmt_init succ, taos_stmt: {taos_stmt:?}");
+    debug!("stmt_init succ, taos_stmt: {taos_stmt:?}");
     Ok(taos_stmt)
 }
 
@@ -219,7 +219,7 @@ pub unsafe extern "C" fn taos_stmt_prepare(
     sql: *const c_char,
     length: c_ulong,
 ) -> c_int {
-    trace!("taos_stmt_prepare start, stmt: {stmt:?}, sql: {sql:?}, length: {length}");
+    debug!("taos_stmt_prepare start, stmt: {stmt:?}, sql: {sql:?}, length: {length}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -255,7 +255,7 @@ pub unsafe extern "C" fn taos_stmt_prepare(
         }
     };
 
-    trace!("taos_stmt_prepare, sql: {sql}");
+    debug!("taos_stmt_prepare, sql: {sql}");
 
     let stmt2 = &mut taos_stmt.stmt2;
 
@@ -281,7 +281,7 @@ pub unsafe extern "C" fn taos_stmt_prepare(
         taos_stmt.col_fields = Some(col_fields);
     }
 
-    trace!("taos_stmt_prepare succ, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_prepare succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.clear_err();
     clear_err_and_ret_succ()
@@ -293,7 +293,7 @@ pub unsafe extern "C" fn taos_stmt_set_tbname_tags(
     name: *const c_char,
     tags: *mut TAOS_MULTI_BIND,
 ) -> c_int {
-    trace!("taos_stmt_set_tbname_tags, stmt: {stmt:?}, name: {name:?}, tags: {tags:?}");
+    debug!("taos_stmt_set_tbname_tags, stmt: {stmt:?}, name: {name:?}, tags: {tags:?}");
     let code = taos_stmt_set_tbname(stmt, name);
     if code != 0 {
         return code;
@@ -303,7 +303,7 @@ pub unsafe extern "C" fn taos_stmt_set_tbname_tags(
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_set_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int {
-    trace!("taos_stmt_set_tbname start, stmt: {stmt:?}, name: {name:?}");
+    debug!("taos_stmt_set_tbname start, stmt: {stmt:?}, name: {name:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -331,7 +331,7 @@ pub unsafe extern "C" fn taos_stmt_set_tbname(stmt: *mut TAOS_STMT, name: *const
 
     taos_stmt.set_tbname(name.to_owned());
 
-    trace!("taos_stmt_set_tbname succ, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_set_tbname succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.clear_err();
     clear_err_and_ret_succ()
@@ -342,7 +342,7 @@ pub unsafe extern "C" fn taos_stmt_set_tags(
     stmt: *mut TAOS_STMT,
     tags: *mut TAOS_MULTI_BIND,
 ) -> c_int {
-    trace!("taos_stmt_set_tags start, stmt: {stmt:?}, tags: {tags:?}");
+    debug!("taos_stmt_set_tags start, stmt: {stmt:?}, tags: {tags:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -391,7 +391,7 @@ pub unsafe extern "C" fn taos_stmt_set_tags(
 
     taos_stmt.set_tags(tags);
 
-    trace!("taos_stmt_set_tags succ, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_set_tags succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.clear_err();
     clear_err_and_ret_succ()
@@ -412,7 +412,7 @@ pub unsafe extern "C" fn taos_stmt_get_tag_fields(
     fieldNum: *mut c_int,
     fields: *mut *mut TAOS_FIELD_E,
 ) -> c_int {
-    trace!("taos_stmt_get_tag_fields start, stmt: {stmt:?}, field_num: {fieldNum:?}, fields: {fields:?}");
+    debug!("taos_stmt_get_tag_fields start, stmt: {stmt:?}, field_num: {fieldNum:?}, fields: {fields:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -465,7 +465,7 @@ pub unsafe extern "C" fn taos_stmt_get_tag_fields(
         .map(|field| field.into())
         .collect();
 
-    trace!("taos_stmt_get_tag_fields, fields: {tag_fields:?}");
+    debug!("taos_stmt_get_tag_fields, fields: {tag_fields:?}");
 
     *fieldNum = tag_fields.len() as _;
 
@@ -474,7 +474,7 @@ pub unsafe extern "C" fn taos_stmt_get_tag_fields(
         taos_stmt.tag_fields_addr = Some(*fields as usize);
     }
 
-    trace!("taos_stmt_get_tag_fields succ, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_get_tag_fields succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.clear_err();
     clear_err_and_ret_succ()
@@ -487,7 +487,7 @@ pub unsafe extern "C" fn taos_stmt_get_col_fields(
     fieldNum: *mut c_int,
     fields: *mut *mut TAOS_FIELD_E,
 ) -> c_int {
-    trace!("taos_stmt_get_col_fields start, stmt: {stmt:?}, field_num: {fieldNum:?}, fields: {fields:?}");
+    debug!("taos_stmt_get_col_fields start, stmt: {stmt:?}, field_num: {fieldNum:?}, fields: {fields:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -540,7 +540,7 @@ pub unsafe extern "C" fn taos_stmt_get_col_fields(
         .map(|field| field.into())
         .collect();
 
-    trace!("taos_stmt_get_col_fields, fields: {col_fields:?}");
+    debug!("taos_stmt_get_col_fields, fields: {col_fields:?}");
 
     *fieldNum = col_fields.len() as _;
 
@@ -549,7 +549,7 @@ pub unsafe extern "C" fn taos_stmt_get_col_fields(
         taos_stmt.col_fields_addr = Some(*fields as usize);
     }
 
-    trace!("taos_stmt_get_col_fields succ, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_get_col_fields succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.clear_err();
     clear_err_and_ret_succ()
@@ -557,7 +557,7 @@ pub unsafe extern "C" fn taos_stmt_get_col_fields(
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_FIELD_E) {
-    trace!("taos_stmt_reclaim_fields start, stmt: {stmt:?}, fields: {fields:?}");
+    debug!("taos_stmt_reclaim_fields start, stmt: {stmt:?}, fields: {fields:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -616,7 +616,7 @@ pub unsafe extern "C" fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: 
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int {
-    trace!("taos_stmt_is_insert start, stmt: {stmt:?}, insert: {insert:?}");
+    debug!("taos_stmt_is_insert start, stmt: {stmt:?}, insert: {insert:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -649,7 +649,7 @@ pub unsafe extern "C" fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut 
     let is_insert = stmt2.is_insert().unwrap();
     *insert = is_insert as _;
 
-    trace!("taos_stmt_is_insert succ, is_insert: {is_insert}");
+    debug!("taos_stmt_is_insert succ, is_insert: {is_insert}");
 
     maybe_err.clear_err();
     clear_err_and_ret_succ()
@@ -657,7 +657,7 @@ pub unsafe extern "C" fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut 
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_int {
-    trace!("taos_stmt_num_params start, stmt: {stmt:?}, nums: {nums:?}");
+    debug!("taos_stmt_num_params start, stmt: {stmt:?}, nums: {nums:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -702,7 +702,7 @@ pub unsafe extern "C" fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c
         }
     }
 
-    trace!("taos_stmt_num_params succ");
+    debug!("taos_stmt_num_params succ");
 
     maybe_err.clear_err();
     clear_err_and_ret_succ()
@@ -715,7 +715,7 @@ pub unsafe extern "C" fn taos_stmt_get_param(
     r#type: *mut c_int,
     bytes: *mut c_int,
 ) -> c_int {
-    trace!(
+    debug!(
         "taos_stmt_get_param start, stmt: {stmt:?}, idx: {idx}, type: {type:?}, bytes: {bytes:?}"
     );
 
@@ -785,7 +785,7 @@ pub unsafe extern "C" fn taos_stmt_get_param(
     *r#type = field.field_type as _;
     *bytes = field.bytes as _;
 
-    trace!("taos_stmt_get_param succ, field: {field:?}");
+    debug!("taos_stmt_get_param succ, field: {field:?}");
 
     maybe_err.clear_err();
     clear_err_and_ret_succ()
@@ -796,7 +796,7 @@ pub unsafe extern "C" fn taos_stmt_bind_param(
     stmt: *mut TAOS_STMT,
     bind: *mut TAOS_MULTI_BIND,
 ) -> c_int {
-    trace!("taos_stmt_bind_param start, stmt: {stmt:?}, bind: {bind:?}");
+    debug!("taos_stmt_bind_param start, stmt: {stmt:?}, bind: {bind:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -842,7 +842,7 @@ pub unsafe extern "C" fn taos_stmt_bind_param(
         }
     }
 
-    trace!("taos_stmt_bind_param succ, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_bind_param succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.with_err(None);
     clear_err_and_ret_succ()
@@ -853,7 +853,7 @@ pub unsafe extern "C" fn taos_stmt_bind_param_batch(
     stmt: *mut TAOS_STMT,
     bind: *mut TAOS_MULTI_BIND,
 ) -> c_int {
-    trace!("taos_stmt_bind_param_batch start, stmt: {stmt:?}, bind: {bind:?}");
+    debug!("taos_stmt_bind_param_batch start, stmt: {stmt:?}, bind: {bind:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -907,7 +907,7 @@ pub unsafe extern "C" fn taos_stmt_bind_param_batch(
         }
     }
 
-    trace!("taos_stmt_bind_param_batch succ, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_bind_param_batch succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.with_err(None);
     clear_err_and_ret_succ()
@@ -920,7 +920,7 @@ pub unsafe extern "C" fn taos_stmt_bind_single_param_batch(
     bind: *mut TAOS_MULTI_BIND,
     colIdx: c_int,
 ) -> c_int {
-    trace!(
+    debug!(
         "taos_stmt_bind_single_param_batch start, stmt: {stmt:?}, bind: {bind:?}, col_idx: {colIdx}"
     );
 
@@ -965,18 +965,18 @@ pub unsafe extern "C" fn taos_stmt_bind_single_param_batch(
         }
     };
 
-    trace!("taos_stmt_bind_single_param_batch, idx: {colIdx}, view: {view:?}");
+    debug!("taos_stmt_bind_single_param_batch, idx: {colIdx}, view: {view:?}");
 
     taos_stmt.set_single_col(colIdx as _, view);
 
-    trace!("taos_stmt_bind_single_param_batch succ, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_bind_single_param_batch succ, taos_stmt: {taos_stmt:?}");
     maybe_err.with_err(None);
     0
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
-    trace!("taos_stmt_add_batch start, stmt: {stmt:?}");
+    debug!("taos_stmt_add_batch start, stmt: {stmt:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -1014,7 +1014,7 @@ pub unsafe extern "C" fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
         return format_errno(err.code().into());
     }
 
-    trace!("taos_stmt_add_batch succ, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_add_batch succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.with_err(None);
     clear_err_and_ret_succ()
@@ -1022,7 +1022,7 @@ pub unsafe extern "C" fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
-    trace!("taos_stmt_execute start, stmt: {stmt:?}");
+    debug!("taos_stmt_execute start, stmt: {stmt:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -1040,12 +1040,12 @@ pub unsafe extern "C" fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
         return format_errno(err.code().into());
     }
 
-    trace!("taos_stmt_execute, taos_stmt: {taos_stmt:?}");
+    debug!("taos_stmt_execute, taos_stmt: {taos_stmt:?}");
 
     let stmt2 = &mut taos_stmt.stmt2;
 
     let params = std::mem::take(&mut taos_stmt.bind_params);
-    trace!("taos_stmt_execute, params: {params:?}");
+    debug!("taos_stmt_execute, params: {params:?}");
 
     if let Err(err) = stmt2.bind(&params) {
         error!("taos_stmt_execute failed, err: {err:?}");
@@ -1055,7 +1055,7 @@ pub unsafe extern "C" fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
 
     match stmt2.exec() {
         Ok(_) => {
-            trace!("taos_stmt_execute succ");
+            debug!("taos_stmt_execute succ");
             maybe_err.clear_err();
             clear_err_and_ret_succ()
         }
@@ -1069,7 +1069,7 @@ pub unsafe extern "C" fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS_RES {
-    trace!("taos_stmt_use_result start, stmt: {stmt:?}");
+    debug!("taos_stmt_use_result start, stmt: {stmt:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -1090,7 +1090,7 @@ pub unsafe extern "C" fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS
     match stmt2.result_set() {
         Ok(rs) => {
             let rs: TaosMaybeError<ResultSet> = ResultSet::Query(QueryResultSet::new(rs)).into();
-            trace!("taos_stmt_use_result succ, result_set: {rs:?}");
+            debug!("taos_stmt_use_result succ, result_set: {rs:?}");
             maybe_err.clear_err();
             clear_err_and_ret_succ();
             Box::into_raw(Box::new(rs)) as _
@@ -1105,7 +1105,7 @@ pub unsafe extern "C" fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_close(stmt: *mut TAOS_STMT) -> c_int {
-    trace!("taos_stmt_close, stmt: {stmt:?}");
+    debug!("taos_stmt_close, stmt: {stmt:?}");
     if stmt.is_null() {
         return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
     }
@@ -1120,7 +1120,7 @@ pub unsafe extern "C" fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *mut c_char {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int {
-    trace!("taos_stmt_affected_rows start, stmt: {stmt:?}");
+    debug!("taos_stmt_affected_rows start, stmt: {stmt:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -1132,7 +1132,7 @@ pub unsafe extern "C" fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int 
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
     };
 
-    trace!(
+    debug!(
         "taos_stmt_affected_rows succ, affected_rows: {}",
         stmt2.affected_rows()
     );
@@ -1142,7 +1142,7 @@ pub unsafe extern "C" fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int 
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c_int {
-    trace!("taos_stmt_affected_rows_once start, stmt: {stmt:?}");
+    debug!("taos_stmt_affected_rows_once start, stmt: {stmt:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -1154,7 +1154,7 @@ pub unsafe extern "C" fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
     };
 
-    trace!(
+    debug!(
         "taos_stmt_affected_rows_once succ, affected_rows_once: {}",
         stmt2.affected_rows_once(),
     );
@@ -1164,11 +1164,11 @@ pub unsafe extern "C" fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c
 
 impl TAOS_MULTI_BIND {
     fn to_value(&self) -> Value {
-        trace!("to_value, bind: {self:?}");
+        debug!("to_value, bind: {self:?}");
 
         if !self.is_null.is_null() && unsafe { self.is_null.read() != 0 } {
             let val = Value::Null(self.ty());
-            trace!("to_value, value: {val:?}");
+            debug!("to_value, value: {val:?}");
             return val;
         }
 
@@ -1217,13 +1217,13 @@ impl TAOS_MULTI_BIND {
             _ => todo!(),
         };
 
-        trace!("to_value, value: {val:?}");
+        debug!("to_value, value: {val:?}");
 
         val
     }
 
     fn to_column_view(&self) -> ColumnView {
-        trace!("to_column_view, bind: {self:?}");
+        debug!("to_column_view, bind: {self:?}");
 
         let ty = self.ty();
         let num = self.num as usize;
@@ -1234,7 +1234,7 @@ impl TAOS_MULTI_BIND {
             is_nulls = Some(unsafe { slice::from_raw_parts(self.is_null, num) });
         }
 
-        trace!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}");
+        debug!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}");
 
         macro_rules! view {
             ($ty:ty, $from:expr) => {{
@@ -1391,7 +1391,7 @@ impl TAOS_MULTI_BIND {
             }
         };
 
-        trace!("to_column_view, view: {view:?}");
+        debug!("to_column_view, view: {view:?}");
 
         view
     }

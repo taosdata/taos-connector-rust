@@ -12,7 +12,7 @@ use taos_query::{
 };
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
-use tracing::{error, trace, Instrument};
+use tracing::{debug, error, Instrument};
 
 use crate::ws::error::{
     clear_err_and_ret_succ, format_errno, set_err_and_get_code, TaosError, TaosMaybeError,
@@ -114,12 +114,12 @@ pub unsafe extern "C" fn taos_query_with_reqid(
     sql: *const c_char,
     reqId: i64,
 ) -> *mut TAOS_RES {
-    trace!("taos_query_with_reqid start, taos: {taos:?}, sql: {sql:?}, req_id: {reqId}");
+    debug!("taos_query_with_reqid start, taos: {taos:?}, sql: {sql:?}, req_id: {reqId}");
     match query(taos, sql, reqId as u64) {
         Ok(rs) => {
             let res: TaosMaybeError<ResultSet> = rs.into();
             let res = Box::into_raw(Box::new(res)) as _;
-            trace!("taos_query_with_reqid succ, res: {res:?}");
+            debug!("taos_query_with_reqid succ, res: {res:?}");
             res
         }
         Err(err) => {
@@ -135,7 +135,7 @@ unsafe fn query(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> TaosResult<
         .as_mut()
         .ok_or(TaosError::new(Code::INVALID_PARA, "taos is null"))?;
     let sql = CStr::from_ptr(sql).to_str()?;
-    trace!("query, sql: {sql:?}");
+    debug!("query, sql: {sql:?}");
     let rs = taos.query_with_req_id(sql, req_id)?;
     Ok(ResultSet::Query(QueryResultSet::new(rs)))
 }
@@ -148,7 +148,7 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
         ptr::null_mut()
     }
 
-    trace!("taos_fetch_row start, res: {res:?}");
+    debug!("taos_fetch_row start, res: {res:?}");
 
     let rs = match (res as *mut TaosMaybeError<ResultSet>).as_mut() {
         Some(rs) => rs,
@@ -162,7 +162,7 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
 
     match rs.fetch_row() {
         Ok(row) => {
-            trace!("taos_fetch_row succ, row: {row:?}");
+            debug!("taos_fetch_row succ, row: {row:?}");
             row
         }
         Err(err) => handle_error(err.errno(), &err.errstr()),
@@ -171,13 +171,13 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
-    trace!("taos_result_precision start, res: {res:?}");
+    debug!("taos_result_precision start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
         .and_then(|rs| rs.deref_mut())
     {
         Some(rs) => {
-            trace!("taos_result_precision succ, rs: {rs:?}");
+            debug!("taos_result_precision succ, rs: {rs:?}");
             rs.precision() as _
         }
         None => {
@@ -189,7 +189,7 @@ pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
-    trace!("taos_free_result, res: {res:?}");
+    debug!("taos_free_result, res: {res:?}");
     if !res.is_null() {
         let _ = Box::from_raw(res as *mut TaosMaybeError<ResultSet>);
     }
@@ -197,14 +197,14 @@ pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
-    trace!("taos_field_count start, res: {res:?}");
+    debug!("taos_field_count start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
         Some(rs) => {
-            trace!(rs=?rs, "taos_field_count done");
-            trace!("taos_field_count succ, rs: {rs:?}");
+            debug!(rs=?rs, "taos_field_count done");
+            debug!("taos_field_count succ, rs: {rs:?}");
             rs.num_of_fields()
         }
         None => {
@@ -221,13 +221,13 @@ pub unsafe extern "C" fn taos_num_fields(res: *mut TAOS_RES) -> c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_affected_rows(res: *mut TAOS_RES) -> c_int {
-    trace!("taos_affected_rows start, res: {res:?}");
+    debug!("taos_affected_rows start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
         Some(rs) => {
-            trace!("taos_affected_rows succ, rs: {rs:?}");
+            debug!("taos_affected_rows succ, rs: {rs:?}");
             rs.affected_rows() as _
         }
         None => {
@@ -239,13 +239,13 @@ pub unsafe extern "C" fn taos_affected_rows(res: *mut TAOS_RES) -> c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
-    trace!("taos_affected_rows64 start, res: {res:?}");
+    debug!("taos_affected_rows64 start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
         Some(rs) => {
-            trace!("taos_affected_rows64 succ, rs: {rs:?}");
+            debug!("taos_affected_rows64 succ, rs: {rs:?}");
             rs.affected_rows64() as _
         }
         None => {
@@ -257,13 +257,13 @@ pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIELD {
-    trace!("taos_fetch_fields start, res: {res:?}");
+    debug!("taos_fetch_fields start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
         .and_then(|rs| rs.deref_mut())
     {
         Some(rs) => {
-            trace!("taos_fetch_fields succ, rs: {rs:?}");
+            debug!("taos_fetch_fields succ, rs: {rs:?}");
             rs.get_fields()
         }
         None => {
@@ -276,7 +276,7 @@ pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIEL
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c_int {
-    trace!("taos_select_db start, taos: {taos:?}, db: {db:?}");
+    debug!("taos_select_db start, taos: {taos:?}, db: {db:?}");
 
     let taos = match (taos as *mut Taos).as_mut() {
         Some(taos) => taos,
@@ -298,7 +298,7 @@ pub unsafe extern "C" fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c
 
     match taos.query(format!("use {db}")) {
         Ok(_) => {
-            trace!("taos_select_db succ");
+            debug!("taos_select_db succ");
             0
         }
         Err(err) => {
@@ -336,7 +336,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
         content.len() as _
     }
 
-    trace!("taos_print_row_with_size start, str: {str:?}, size: {size}, row: {row:?}, fields: {fields:?}, num_fields: {num_fields}");
+    debug!("taos_print_row_with_size start, str: {str:?}, size: {size}, row: {row:?}, fields: {fields:?}, num_fields: {num_fields}");
 
     if str.is_null() || row.is_null() || fields.is_null() || num_fields <= 0 {
         error!("taos_print_row_with_size failed, invalid params");
@@ -414,20 +414,20 @@ pub unsafe extern "C" fn taos_print_row_with_size(
 
     *str.add(len) = 0;
 
-    trace!("taos_print_row_with_size succ, str: {str:?}, len: {len}");
+    debug!("taos_print_row_with_size succ, str: {str:?}, len: {len}");
 
     len as _
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
-    trace!("taos_stop_query start, res: {res:?}");
+    debug!("taos_stop_query start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
         .and_then(|rs| rs.deref_mut())
     {
         Some(rs) => {
-            trace!("taos_stop_query succ, rs: {rs:?}");
+            debug!("taos_stop_query succ, rs: {rs:?}");
             rs.stop_query();
         }
         None => {
@@ -439,7 +439,7 @@ pub unsafe extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) -> bool {
-    trace!("taos_is_null start, res: {res:?}, row: {row}, col: {col}");
+    debug!("taos_is_null start, res: {res:?}, row: {row}, col: {col}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
@@ -447,7 +447,7 @@ pub unsafe extern "C" fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) ->
         Some(ResultSet::Query(rs)) => match &rs.block {
             Some(block) => {
                 let is_null = block.is_null(row as _, col as _);
-                trace!("taos_is_null succ, is_null: {is_null}");
+                debug!("taos_is_null succ, is_null: {is_null}");
                 is_null
             }
             None => true,
@@ -464,7 +464,7 @@ pub unsafe extern "C" fn taos_is_null_by_column(
     result: *mut bool,
     rows: *mut c_int,
 ) -> c_int {
-    trace!("taos_is_null_by_column start, res: {res:?}, column_index: {columnIndex}, result: {result:?}, rows: {rows:?}");
+    debug!("taos_is_null_by_column start, res: {res:?}, column_index: {columnIndex}, result: {result:?}, rows: {rows:?}");
 
     if res.is_null() || result.is_null() || rows.is_null() || *rows <= 0 || columnIndex < 0 {
         error!("taos_is_null_by_column failed, invalid params");
@@ -487,7 +487,7 @@ pub unsafe extern "C" fn taos_is_null_by_column(
                 }
 
                 let is_nulls = block.is_null_by_col_unchecked(*rows as _, col);
-                trace!("taos_is_null_by_column succ, is_nulls: {is_nulls:?}");
+                debug!("taos_is_null_by_column succ, is_nulls: {is_nulls:?}");
                 *rows = is_nulls.len() as _;
                 let res = slice::from_raw_parts_mut(result, is_nulls.len());
                 for (i, is_null) in is_nulls.iter().enumerate() {
@@ -512,7 +512,7 @@ pub unsafe extern "C" fn taos_is_null_by_column(
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
-    trace!("taos_is_update_query, res: {res:?}");
+    debug!("taos_is_update_query, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
@@ -524,10 +524,10 @@ pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int {
-    trace!("taos_fetch_block start, res: {res:?}, rows: {rows:?}");
+    debug!("taos_fetch_block start, res: {res:?}, rows: {rows:?}");
     let mut num_of_rows = 0;
     let _ = taos_fetch_block_s(res, &mut num_of_rows, rows);
-    trace!("taos_fetch_block succ, num_of_rows: {num_of_rows}");
+    debug!("taos_fetch_block succ, num_of_rows: {num_of_rows}");
     num_of_rows
 }
 
@@ -538,7 +538,7 @@ pub unsafe extern "C" fn taos_fetch_block_s(
     numOfRows: *mut c_int,
     rows: *mut TAOS_ROW,
 ) -> c_int {
-    trace!("taos_fetch_block_s start, res: {res:?}, num_of_rows: {numOfRows:?}, rows: {rows:?}");
+    debug!("taos_fetch_block_s start, res: {res:?}, num_of_rows: {numOfRows:?}, rows: {rows:?}");
 
     if numOfRows.is_null() {
         error!("taos_fetch_block_s failed, num_of_rows is null");
@@ -549,7 +549,7 @@ pub unsafe extern "C" fn taos_fetch_block_s(
         Some(maybe_err) => match maybe_err.deref_mut() {
             Some(rs) => match rs.fetch_block(rows, numOfRows) {
                 Ok(()) => {
-                    trace!("taos_fetch_block_s succ, num_of_rows: {}", *numOfRows);
+                    debug!("taos_fetch_block_s succ, num_of_rows: {}", *numOfRows);
                     0
                 }
                 Err(err) => {
@@ -584,7 +584,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block(
         set_err_and_get_code(TaosError::new(Code::FAILED, message))
     }
 
-    trace!(
+    debug!(
         "taos_fetch_raw_block start, res: {res:?}, num_of_rows: {numOfRows:?}, p_data: {pData:?}"
     );
 
@@ -592,7 +592,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block(
         Some(maybe_err) => match maybe_err.deref_mut() {
             Some(rs) => match rs.fetch_raw_block(pData, numOfRows) {
                 Ok(()) => {
-                    trace!("taos_fetch_raw_block succ, rs: {rs:?}");
+                    debug!("taos_fetch_raw_block succ, rs: {rs:?}");
                     0
                 }
                 Err(err) => {
@@ -615,7 +615,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block_a(
     fp: __taos_async_fn_t,
     param: *mut c_void,
 ) {
-    trace!("taos_fetch_raw_block_a start, res: {res:?}, fp: {fp:?}, param: {param:?}");
+    debug!("taos_fetch_raw_block_a start, res: {res:?}, fp: {fp:?}, param: {param:?}");
 
     let cb = fp as *const ();
     if res.is_null() || cb.is_null() {
@@ -648,7 +648,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block_a(
             if let ResultSet::Query(qrs) = rs {
                 match qrs.rs.fetch_raw_block() {
                     Ok(block) => {
-                        trace!("taos_fetch_raw_block_a callback succ");
+                        debug!("taos_fetch_raw_block_a callback succ");
                         qrs.block = block;
                         fp(param.0, res.0, 0);
                     }
@@ -668,12 +668,12 @@ pub unsafe extern "C" fn taos_fetch_raw_block_a(
         .in_current_span(),
     );
 
-    trace!("taos_fetch_raw_block_a succ");
+    debug!("taos_fetch_raw_block_a succ");
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
-    trace!("taos_result_block start, res: {res:?}");
+    debug!("taos_result_block start, res: {res:?}");
 
     if res.is_null() {
         error!("taos_result_block failed, res is null");
@@ -691,7 +691,7 @@ pub unsafe extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW 
     if let ResultSet::Query(qrs) = rs {
         match qrs.fetch_row() {
             Ok(_) => {
-                trace!("taos_result_block succ, ptr: {:?}", qrs.row_data_ptr_ptr);
+                debug!("taos_result_block succ, ptr: {:?}", qrs.row_data_ptr_ptr);
                 return qrs.row_data_ptr_ptr;
             }
             Err(err) => {
@@ -713,7 +713,7 @@ pub unsafe extern "C" fn taos_get_column_data_offset(
     res: *mut TAOS_RES,
     columnIndex: c_int,
 ) -> *mut c_int {
-    trace!("taos_get_column_data_offset start, res: {res:?}, column_index: {columnIndex}");
+    debug!("taos_get_column_data_offset start, res: {res:?}, column_index: {columnIndex}");
 
     if res.is_null() || columnIndex < 0 {
         error!("taos_get_column_data_offset failed, res or column index is invalid");
@@ -734,7 +734,7 @@ pub unsafe extern "C" fn taos_get_column_data_offset(
         if let Some(block) = rs.block.as_ref() {
             if col < block.ncols() && block.ncols() > 0 {
                 let offsets = block.get_col_data_offset_unchecked(col);
-                trace!("taos_get_column_data_offset succ, offsets: {offsets:?}");
+                debug!("taos_get_column_data_offset succ, offsets: {offsets:?}");
                 if offsets.is_empty() {
                     return ptr::null_mut();
                 }
@@ -754,7 +754,7 @@ pub unsafe extern "C" fn taos_get_column_data_offset(
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int {
-    trace!("taos_validate_sql start, taos: {taos:?}, sql: {sql:?}");
+    debug!("taos_validate_sql start, taos: {taos:?}, sql: {sql:?}");
 
     if taos.is_null() {
         error!("taos_validate_sql failed, taos is null");
@@ -777,7 +777,7 @@ pub unsafe extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) 
         }
     };
 
-    trace!("taos_validate_sql, sql: {sql}");
+    debug!("taos_validate_sql, sql: {sql}");
 
     let taos = (taos as *mut Taos).as_mut().unwrap();
     if let Err(err) = taos_query::block_in_place_or_global(taos.client().validate_sql(sql)) {
@@ -785,13 +785,13 @@ pub unsafe extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) 
         return set_err_and_get_code(err.into());
     }
 
-    trace!("taos_validate_sql succ");
+    debug!("taos_validate_sql succ");
     0
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
-    trace!("taos_fetch_lengths start, res: {res:?}");
+    debug!("taos_fetch_lengths start, res: {res:?}");
 
     if res.is_null() {
         error!("taos_fetch_lengths failed, res is null");
@@ -812,7 +812,7 @@ pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
             let lengths = if rs.has_called_fetch_row {
                 let mut lengths = Vec::with_capacity(block.ncols());
                 for col in 0..block.ncols() {
-                    tracing::trace!(
+                    tracing::debug!(
                         "taos_fetch_lengths, row: {:?}, col: {:?}",
                         rs.row.current_row - 1,
                         col
@@ -829,7 +829,7 @@ pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
                     .collect::<Vec<_>>()
             };
 
-            trace!("taos_fetch_lengths succ, lengths: {lengths:?}");
+            debug!("taos_fetch_lengths succ, lengths: {lengths:?}");
 
             if lengths.is_empty() {
                 return ptr::null_mut();
@@ -848,7 +848,7 @@ pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char {
-    trace!("taos_get_server_info start, taos: {taos:?}");
+    debug!("taos_get_server_info start, taos: {taos:?}");
 
     static SERVER_INFO: OnceLock<CString> = OnceLock::new();
 
@@ -865,14 +865,14 @@ pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char 
         }
     });
 
-    trace!("taos_get_server_info succ, server_info: {server_info:?}");
+    debug!("taos_get_server_info succ, server_info: {server_info:?}");
 
     server_info.as_ptr()
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
-    trace!("taos_get_client_info");
+    debug!("taos_get_client_info");
     static VERSION: OnceLock<CString> = OnceLock::new();
     VERSION
         .get_or_init(|| {
@@ -889,7 +889,7 @@ pub unsafe extern "C" fn taos_get_current_db(
     len: c_int,
     required: *mut c_int,
 ) -> c_int {
-    trace!("taos_get_current_db start, taos: {taos:?}, database: {database:?}, len: {len}, required: {required:?}");
+    debug!("taos_get_current_db start, taos: {taos:?}, database: {database:?}, len: {len}, required: {required:?}");
 
     if taos.is_null() {
         error!("taos_get_current_db failed, taos is null");
@@ -936,14 +936,14 @@ pub unsafe extern "C" fn taos_get_current_db(
 
     taos_free_result(res);
 
-    trace!("taos_get_current_db succ, database: {database:?}");
+    debug!("taos_get_current_db succ, database: {database:?}");
 
     code
 }
 
 #[no_mangle]
 pub extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
-    trace!("taos_data_type, type: {}", r#type);
+    debug!("taos_data_type, type: {}", r#type);
     match Ty::from_u8_option(r#type as _) {
         Some(ty) => ty.tsdb_name(),
         None => ptr::null(),
@@ -968,7 +968,7 @@ pub unsafe extern "C" fn taos_query_a_with_reqid(
     param: *mut c_void,
     reqid: i64,
 ) {
-    trace!("taos_query_a_with_reqid start, taos: {taos:?}, sql: {sql:?}, reqid: {reqid}, fp: {fp:?}, param: {param:?}");
+    debug!("taos_query_a_with_reqid start, taos: {taos:?}, sql: {sql:?}, reqid: {reqid}, fp: {fp:?}, param: {param:?}");
 
     let taos = SafePtr(taos);
     let sql = SafePtr(sql);
@@ -1003,7 +1003,7 @@ pub unsafe extern "C" fn taos_query_a_with_reqid(
 
             match taos_query::AsyncQueryable::query_with_req_id(taos, sql, reqid as _).await {
                 Ok(rs) => {
-                    trace!("taos_query_a_with_reqid callback, result_set: {rs:?}");
+                    debug!("taos_query_a_with_reqid callback, result_set: {rs:?}");
                     let rs: TaosMaybeError<ResultSet> =
                         ResultSet::Query(QueryResultSet::new(rs)).into();
                     let res = Box::into_raw(Box::new(rs));
@@ -1020,7 +1020,7 @@ pub unsafe extern "C" fn taos_query_a_with_reqid(
         .in_current_span(),
     );
 
-    trace!("taos_query_a_with_reqid succ");
+    debug!("taos_query_a_with_reqid succ");
 }
 
 #[no_mangle]
@@ -1029,7 +1029,7 @@ pub unsafe extern "C" fn taos_fetch_rows_a(
     fp: __taos_async_fn_t,
     param: *mut c_void,
 ) {
-    trace!("taos_fetch_rows_a start, res: {res:?}, fp: {fp:?}, param: {param:?}");
+    debug!("taos_fetch_rows_a start, res: {res:?}, fp: {fp:?}, param: {param:?}");
 
     let res = SafePtr(res);
     let param = SafePtr(param);
@@ -1076,16 +1076,16 @@ pub unsafe extern "C" fn taos_fetch_rows_a(
         .in_current_span(),
     );
 
-    trace!("taos_fetch_rows_a succ");
+    debug!("taos_fetch_rows_a succ");
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
-    trace!("taos_get_raw_block start, res: {res:?}");
+    debug!("taos_get_raw_block start, res: {res:?}");
     let mut num_of_rows = 0;
     let mut data = ptr::null_mut();
     taos_fetch_raw_block(res, &mut num_of_rows, &mut data);
-    trace!("taos_get_raw_block succ, data: {data:?}");
+    debug!("taos_get_raw_block succ, data: {data:?}");
     data
 }
 
@@ -1096,7 +1096,7 @@ pub unsafe extern "C" fn taos_check_server_status(
     details: *mut c_char,
     maxlen: i32,
 ) -> TSDB_SERVER_STATUS {
-    trace!("taos_check_server_status start, fqdn: {fqdn:?}, port: {port}, details: {details:?}, maxlen: {maxlen}");
+    debug!("taos_check_server_status start, fqdn: {fqdn:?}, port: {port}, details: {details:?}, maxlen: {maxlen}");
 
     let fqdn = if fqdn.is_null() {
         match config::config() {
@@ -1129,7 +1129,7 @@ pub unsafe extern "C" fn taos_check_server_status(
         }
     };
 
-    trace!("taos_check_server_status succ, status: {status}, details: {ds:?}");
+    debug!("taos_check_server_status succ, status: {status}, details: {ds:?}");
 
     let len = ds.len().min(maxlen as usize);
     ptr::copy_nonoverlapping(ds.as_ptr() as _, details, len);

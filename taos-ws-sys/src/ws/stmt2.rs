@@ -8,7 +8,7 @@ use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, global_tokio_runtime};
 use taos_ws::query::{BindType, Stmt2Field};
 use taos_ws::{Stmt2, Taos};
-use tracing::{error, trace, Instrument};
+use tracing::{debug, error, Instrument};
 
 use crate::ws::error::*;
 use crate::ws::query::QueryResultSet;
@@ -66,7 +66,7 @@ pub unsafe extern "C" fn taos_stmt2_init(
     taos: *mut TAOS,
     option: *mut TAOS_STMT2_OPTION,
 ) -> *mut TAOS_STMT2 {
-    trace!("taos_stmt2_init start, taos: {taos:?}, option: {option:?}");
+    debug!("taos_stmt2_init start, taos: {taos:?}, option: {option:?}");
     let taos_stmt2: TaosMaybeError<TaosStmt2> = match stmt2_init(taos, option) {
         Ok(taos_stmt2) => taos_stmt2.into(),
         Err(err) => {
@@ -75,9 +75,9 @@ pub unsafe extern "C" fn taos_stmt2_init(
             return ptr::null_mut();
         }
     };
-    trace!("taos_stmt2_init, taos_stmt2: {taos_stmt2:?}");
+    debug!("taos_stmt2_init, taos_stmt2: {taos_stmt2:?}");
     let res = Box::into_raw(Box::new(taos_stmt2)) as _;
-    trace!("taos_stmt2_init succ, res: {res:?}");
+    debug!("taos_stmt2_init succ, res: {res:?}");
     res
 }
 
@@ -109,7 +109,7 @@ unsafe fn stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> TaosRes
             None => (generate_req_id(), false, false, None, ptr::null_mut()),
         };
 
-    trace!("stmt2_init, req_id: {req_id}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}, async_exec_fn: {async_exec_fn:?}, userdata: {userdata:?}");
+    debug!("stmt2_init, req_id: {req_id}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}, async_exec_fn: {async_exec_fn:?}, userdata: {userdata:?}");
 
     block_in_place_or_global(stmt2.init_with_options(
         req_id,
@@ -126,7 +126,7 @@ pub unsafe extern "C" fn taos_stmt2_prepare(
     sql: *const c_char,
     length: c_ulong,
 ) -> c_int {
-    trace!("taos_stmt2_prepare start, stmt: {stmt:?}, sql: {sql:?}, length: {length}");
+    debug!("taos_stmt2_prepare start, stmt: {stmt:?}, sql: {sql:?}, length: {length}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -162,11 +162,11 @@ pub unsafe extern "C" fn taos_stmt2_prepare(
         }
     };
 
-    trace!("taos_stmt2_prepare, sql: {sql}");
+    debug!("taos_stmt2_prepare, sql: {sql}");
 
     match stmt2.prepare(sql) {
         Ok(_) => {
-            trace!("taos_stmt2_prepare succ");
+            debug!("taos_stmt2_prepare succ");
             maybe_err.clear_err();
             clear_err_and_ret_succ()
         }
@@ -184,7 +184,7 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
     bindv: *mut TAOS_STMT2_BINDV,
     col_idx: i32,
 ) -> c_int {
-    trace!("taos_stmt2_bind_param start, stmt: {stmt:?}, bindv: {bindv:?}, col_idx: {col_idx}");
+    debug!("taos_stmt2_bind_param start, stmt: {stmt:?}, bindv: {bindv:?}, col_idx: {col_idx}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -217,11 +217,11 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
         }
     };
 
-    trace!("taos_stmt2_bind_param, params: {params:?}");
+    debug!("taos_stmt2_bind_param, params: {params:?}");
 
     match stmt2.bind(&params) {
         Ok(_) => {
-            trace!("taos_stmt2_bind_param succ");
+            debug!("taos_stmt2_bind_param succ");
             maybe_err.clear_err();
             0
         }
@@ -249,7 +249,7 @@ pub unsafe extern "C" fn taos_stmt2_exec(
     stmt: *mut TAOS_STMT2,
     affected_rows: *mut c_int,
 ) -> c_int {
-    trace!("taos_stmt2_exec start, stmt: {stmt:?}, affected_rows: {affected_rows:?}");
+    debug!("taos_stmt2_exec start, stmt: {stmt:?}, affected_rows: {affected_rows:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -276,7 +276,7 @@ pub unsafe extern "C" fn taos_stmt2_exec(
         match taos_stmt2.stmt2.exec() {
             Ok(rows) => {
                 *affected_rows = rows as _;
-                trace!("taos_stmt2_exec succ, affected_rows: {rows}");
+                debug!("taos_stmt2_exec succ, affected_rows: {rows}");
                 maybe_err.clear_err();
                 return clear_err_and_ret_succ();
             }
@@ -308,7 +308,7 @@ pub unsafe extern "C" fn taos_stmt2_exec(
 
             match Stmt2AsyncBindable::result_set(stmt2).await {
                 Ok(rs) => {
-                    trace!("async taos_stmt2_exec callback, result_set: {rs:?}");
+                    debug!("async taos_stmt2_exec callback, result_set: {rs:?}");
                     let rs: TaosMaybeError<ResultSet> =
                         ResultSet::Query(QueryResultSet::new(rs)).into();
                     let res = Box::into_raw(Box::new(rs));
@@ -326,13 +326,13 @@ pub unsafe extern "C" fn taos_stmt2_exec(
         .in_current_span(),
     );
 
-    trace!("async taos_stmt2_exec succ");
+    debug!("async taos_stmt2_exec succ");
     clear_err_and_ret_succ()
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
-    trace!("taos_stmt2_close, stmt: {stmt:?}");
+    debug!("taos_stmt2_close, stmt: {stmt:?}");
     if stmt.is_null() {
         return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
     }
@@ -342,7 +342,7 @@ pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mut c_int) -> c_int {
-    trace!("taos_stmt2_is_insert start, stmt: {stmt:?}, insert: {insert:?}");
+    debug!("taos_stmt2_is_insert start, stmt: {stmt:?}, insert: {insert:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -365,7 +365,7 @@ pub unsafe extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mu
     match stmt2.is_insert() {
         Some(is_insert) => {
             *insert = is_insert as _;
-            trace!("taos_stmt2_is_insert succ, is_insert: {is_insert}");
+            debug!("taos_stmt2_is_insert succ, is_insert: {is_insert}");
             maybe_err.clear_err();
             clear_err_and_ret_succ()
         }
@@ -385,7 +385,7 @@ pub unsafe extern "C" fn taos_stmt2_get_fields(
     count: *mut c_int,
     fields: *mut *mut TAOS_FIELD_ALL,
 ) -> c_int {
-    trace!("taos_stmt2_get_fields start, stmt: {stmt:?}, count: {count:?}, fields: {fields:?}");
+    debug!("taos_stmt2_get_fields start, stmt: {stmt:?}, count: {count:?}, fields: {fields:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -426,7 +426,7 @@ pub unsafe extern "C" fn taos_stmt2_get_fields(
         *count = stmt2.fields_count().unwrap() as _;
     }
 
-    trace!("taos_stmt2_get_fields succ, fields: {fields:?}, count: {count:?}");
+    debug!("taos_stmt2_get_fields succ, fields: {fields:?}, count: {count:?}");
 
     maybe_err.clear_err();
     clear_err_and_ret_succ()
@@ -437,7 +437,7 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
     stmt: *mut TAOS_STMT2,
     fields: *mut TAOS_FIELD_ALL,
 ) {
-    trace!("taos_stmt2_free_fields start, stmt: {stmt:?}, fields: {fields:?}");
+    debug!("taos_stmt2_free_fields start, stmt: {stmt:?}, fields: {fields:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -466,7 +466,7 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
     let len = taos_stmt2.fields_len.unwrap();
     let fields = Vec::from_raw_parts(fields, len, len);
 
-    trace!("taos_stmt2_free_fields succ, fields: {fields:?}");
+    debug!("taos_stmt2_free_fields succ, fields: {fields:?}");
 
     maybe_err.clear_err();
     clear_error_info();
@@ -474,7 +474,7 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_RES {
-    trace!("taos_stmt2_result start, stmt: {stmt:?}");
+    debug!("taos_stmt2_result start, stmt: {stmt:?}");
 
     let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut() {
         Some(maybe_err) => maybe_err,
@@ -495,7 +495,7 @@ pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_R
     match stmt2.result_set() {
         Ok(rs) => {
             let rs: TaosMaybeError<ResultSet> = ResultSet::Query(QueryResultSet::new(rs)).into();
-            trace!("taos_stmt2_result succ, result_set: {rs:?}");
+            debug!("taos_stmt2_result succ, result_set: {rs:?}");
             maybe_err.clear_err();
             clear_err_and_ret_succ();
             Box::into_raw(Box::new(rs)) as _
@@ -534,11 +534,11 @@ impl TaosStmt2 {
 
 impl TAOS_STMT2_BIND {
     fn to_value(&self) -> Value {
-        trace!("to_value, bind: {self:?}");
+        debug!("to_value, bind: {self:?}");
 
         if !self.is_null.is_null() && unsafe { self.is_null.read() != 0 } {
             let val = Value::Null(self.ty());
-            trace!("to_value, value: {val:?}");
+            debug!("to_value, value: {val:?}");
             return val;
         }
 
@@ -587,13 +587,13 @@ impl TAOS_STMT2_BIND {
             _ => todo!(),
         };
 
-        trace!("to_value, value: {val:?}");
+        debug!("to_value, value: {val:?}");
 
         val
     }
 
     fn to_column_view(&self) -> ColumnView {
-        trace!("to_column_view, bind: {self:?}");
+        debug!("to_column_view, bind: {self:?}");
 
         let ty = self.ty();
         let num = self.num as usize;
@@ -605,7 +605,7 @@ impl TAOS_STMT2_BIND {
             is_nulls = Some(unsafe { slice::from_raw_parts(self.is_null, num) });
         }
 
-        trace!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}, total_len: {len}");
+        debug!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}, total_len: {len}");
 
         macro_rules! view {
             ($from:expr) => {{
@@ -734,7 +734,7 @@ impl TAOS_STMT2_BIND {
             _ => todo!(),
         };
 
-        trace!("to_column_view, view: {view:?}");
+        debug!("to_column_view, view: {view:?}");
 
         view
     }

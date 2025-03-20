@@ -3,13 +3,13 @@ use std::ffi::{c_char, c_int, CStr, CString};
 use std::ptr;
 
 use taos_error::Code;
-use tracing::trace;
+use tracing::debug;
 
 use crate::ws::TAOS_RES;
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
-    trace!("taos_errno, res: {res:?}");
+    debug!("taos_errno, res: {res:?}");
     if res.is_null() {
         return errno();
     }
@@ -24,7 +24,7 @@ pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
-    trace!("taos_errstr, res: {res:?}");
+    debug!("taos_errstr, res: {res:?}");
     if res.is_null() {
         if errno() == 0 {
             return EMPTY.as_ptr();
@@ -133,7 +133,7 @@ impl<T> TaosMaybeError<T> {
 impl<T> Drop for TaosMaybeError<T> {
     fn drop(&mut self) {
         if !self.data.is_null() {
-            trace!(self.type_id, "drop MaybeError");
+            debug!(self.type_id, "drop MaybeError");
             let _ = unsafe { Box::from_raw(self.data) };
         }
     }

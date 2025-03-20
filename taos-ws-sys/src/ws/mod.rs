@@ -15,7 +15,7 @@ use taos_query::TBuilder;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
-use tracing::{instrument, trace};
+use tracing::{debug, instrument};
 
 use crate::ws::query::TAOS_FIELD;
 
@@ -93,7 +93,7 @@ impl From<&Field> for TAOS_FIELD {
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
+#[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_connect(
     ip: *const c_char,
     user: *const c_char,
@@ -168,7 +168,7 @@ unsafe fn connect(
         format!("ws://{user}:{pass}@{host}:{port}/{db}?compression={compression}")
     };
 
-    trace!("taos_connect, dsn: {:?}", dsn);
+    debug!("taos_connect, dsn: {:?}", dsn);
 
     let builder = TaosBuilder::from_dsn(dsn)?;
     let mut taos = builder.build()?;
@@ -177,9 +177,9 @@ unsafe fn connect(
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
+#[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
-    trace!("taos_close, taos: {taos:?}");
+    debug!("taos_close, taos: {taos:?}");
     if taos.is_null() {
         set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
         return;
@@ -188,7 +188,7 @@ pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
 }
 
 #[no_mangle]
-#[instrument(level = "trace", ret)]
+#[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
     0
 }
@@ -257,7 +257,7 @@ fn init() {
         tracing_subscriber::registry().with(layers).init();
 
         if let Err(err) = LogTracer::init() {
-            eprintln!("failed to init log tracer, err: {err:?}");
+            eprintln!("failed to init log debugr, err: {err:?}");
         }
     }
 }

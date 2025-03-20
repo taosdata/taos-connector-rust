@@ -13,7 +13,7 @@ use taos_query::{global_tokio_runtime, Dsn, TBuilder};
 use taos_ws::consumer::Data;
 use taos_ws::query::Error;
 use taos_ws::{Consumer, Offset, TmqBuilder};
-use tracing::{error, trace, warn, Instrument};
+use tracing::{debug, error, warn, Instrument};
 
 use crate::ws::error::{
     errno, errstr, format_errno, set_err_and_get_code, TaosError, TaosMaybeError, EMPTY,
@@ -91,7 +91,7 @@ pub const TSDB_MAX_REPLICA: usize = 5;
 pub extern "C" fn tmq_conf_new() -> *mut tmq_conf_t {
     let tmq_conf: TaosMaybeError<TmqConf> = TmqConf::new().into();
     let tmq_conf = Box::into_raw(Box::new(tmq_conf)) as _;
-    trace!("tmq_conf_new, tmq_conf: {tmq_conf:?}");
+    debug!("tmq_conf_new, tmq_conf: {tmq_conf:?}");
     tmq_conf
 }
 
@@ -101,7 +101,7 @@ pub unsafe extern "C" fn tmq_conf_set(
     key: *const c_char,
     value: *const c_char,
 ) -> tmq_conf_res_t {
-    trace!("tmq_conf_set start, conf: {conf:?}, key: {key:?}, value: {value:?}");
+    debug!("tmq_conf_set start, conf: {conf:?}, key: {key:?}, value: {value:?}");
 
     if conf.is_null() || key.is_null() || value.is_null() {
         error!("tmq_conf_set failed, err: invalid params");
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn tmq_conf_set(
 
     match conf_set(conf, key, value) {
         Ok(_) => {
-            trace!("tmq_conf_set succ");
+            debug!("tmq_conf_set succ");
             tmq_conf_res_t::TMQ_CONF_OK
         }
         Err(err) => {
@@ -131,7 +131,7 @@ unsafe fn conf_set(
     let key = CStr::from_ptr(key).to_str()?.to_string();
     let val = CStr::from_ptr(value).to_str()?.to_string();
 
-    trace!("conf_set, key: {key}, val: {val}");
+    debug!("conf_set, key: {key}, val: {val}");
 
     match (conf as *mut TaosMaybeError<TmqConf>)
         .as_mut()
@@ -220,7 +220,7 @@ unsafe fn conf_set(
 
 #[no_mangle]
 pub extern "C" fn tmq_conf_destroy(conf: *mut tmq_conf_t) {
-    trace!("tmq_conf_destroy, conf: {conf:?}");
+    debug!("tmq_conf_destroy, conf: {conf:?}");
     if !conf.is_null() {
         let _ = unsafe { Box::from_raw(conf as *mut TaosMaybeError<TmqConf>) };
     }
@@ -232,11 +232,11 @@ pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
     cb: tmq_commit_cb,
     param: *mut c_void,
 ) {
-    trace!("tmq_conf_set_auto_commit_cb start, conf: {conf:?}, cb: {cb:?}, param: {param:?}");
+    debug!("tmq_conf_set_auto_commit_cb start, conf: {conf:?}, cb: {cb:?}, param: {param:?}");
 
     let fp = cb as *const ();
     if fp.is_null() {
-        trace!("tmq_conf_set_auto_commit_cb succ, cb is null");
+        debug!("tmq_conf_set_auto_commit_cb succ, cb is null");
         return;
     }
 
@@ -246,7 +246,7 @@ pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
     {
         Some(conf) => {
             conf.auto_commit_cb = Some((cb, param));
-            trace!("tmq_conf_set_auto_commit_cb succ");
+            debug!("tmq_conf_set_auto_commit_cb succ");
         }
         None => {
             error!("tmq_conf_set_auto_commit_cb failed, err: conf is null");
@@ -258,23 +258,23 @@ pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
 #[no_mangle]
 pub extern "C" fn tmq_list_new() -> *mut tmq_list_t {
     let tmq_list: TaosMaybeError<TmqList> = TmqList::new().into();
-    trace!("tmq_list_new, tmq_list: {tmq_list:?}");
+    debug!("tmq_list_new, tmq_list: {tmq_list:?}");
     Box::into_raw(Box::new(tmq_list)) as _
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_list_append(list: *mut tmq_list_t, value: *const c_char) -> i32 {
-    trace!("tmq_list_append start, list: {list:?}, value: {value:?}");
+    debug!("tmq_list_append start, list: {list:?}, value: {value:?}");
 
     if list.is_null() || value.is_null() {
         return format_errno(Code::OBJECT_IS_NULL.into());
     }
 
-    trace!("tmq_list_append, value: {:?}", CStr::from_ptr(value));
+    debug!("tmq_list_append, value: {:?}", CStr::from_ptr(value));
 
     match list_append(list, value) {
         Ok(_) => {
-            trace!("tmq_list_append succ");
+            debug!("tmq_list_append succ");
             0
         }
         Err(err) => {
@@ -306,22 +306,22 @@ unsafe fn list_append(list: *mut tmq_list_t, value: *const c_char) -> TaosResult
 
 #[no_mangle]
 pub extern "C" fn tmq_list_destroy(list: *mut tmq_list_t) {
-    trace!("tmq_list_destroy start, list: {list:?}");
+    debug!("tmq_list_destroy start, list: {list:?}");
     if !list.is_null() {
         let list = unsafe { Box::from_raw(list as *mut TaosMaybeError<TmqList>) };
-        trace!("tmq_list_destroy succ, list: {list:?}");
+        debug!("tmq_list_destroy succ, list: {list:?}");
     }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
-    trace!("tmq_list_get_size start, list: {list:?}");
+    debug!("tmq_list_get_size start, list: {list:?}");
     match (list as *mut TaosMaybeError<TmqList>)
         .as_mut()
         .and_then(|list| list.deref_mut())
     {
         Some(list) => {
-            trace!("tmq_list_get_size succ, list: {list:?}");
+            debug!("tmq_list_get_size succ, list: {list:?}");
             list.topics.len() as i32
         }
         None => {
@@ -333,7 +333,7 @@ pub unsafe extern "C" fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *mut c_char {
-    trace!("tmq_list_to_c_array start, list: {list:?}");
+    debug!("tmq_list_to_c_array start, list: {list:?}");
 
     match (list as *const TaosMaybeError<TmqList>)
         .as_ref()
@@ -346,11 +346,11 @@ pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *m
                     .iter()
                     .map(|s| CString::new(&**s).unwrap().into_raw())
                     .collect::<Vec<_>>();
-                trace!("tmq_list_to_c_array succ, arr: {arr:?}, list: {list:?}");
+                debug!("tmq_list_to_c_array succ, arr: {arr:?}, list: {list:?}");
                 list.set_c_array(arr);
                 list.c_array.as_mut().unwrap().as_mut_ptr()
             } else {
-                trace!("tmq_list_to_c_array succ, topics is empty");
+                debug!("tmq_list_to_c_array succ, topics is empty");
                 ptr::null_mut()
             }
         }
@@ -368,12 +368,12 @@ pub unsafe extern "C" fn tmq_consumer_new(
     errstr: *mut c_char,
     errstrLen: i32,
 ) -> *mut tmq_t {
-    trace!("tmq_consumer_new start, conf: {conf:?}, errstr: {errstr:?}, errstr_len: {errstrLen}");
+    debug!("tmq_consumer_new start, conf: {conf:?}, errstr: {errstr:?}, errstr_len: {errstrLen}");
     match consumer_new(conf) {
         Ok(tmq) => {
             let tmq: TaosMaybeError<Tmq> = tmq.into();
             let tmq = Box::into_raw(Box::new(tmq)) as _;
-            trace!("tmq_consumer_new succ, tmq: {tmq:?}");
+            debug!("tmq_consumer_new succ, tmq: {tmq:?}");
             tmq
         }
         Err(err) => {
@@ -396,7 +396,7 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
         .and_then(|conf| conf.deref_mut())
     {
         Some(conf) => {
-            trace!("consumer_new, conf: {conf:?}");
+            debug!("consumer_new, conf: {conf:?}");
 
             let host = conf
                 .map
@@ -459,7 +459,7 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
                 }
             }
 
-            trace!("consumer_new, dsn: {dsn:?}");
+            debug!("consumer_new, dsn: {dsn:?}");
 
             let consumer = TmqBuilder::from_dsn(&dsn)?.build()?;
 
@@ -476,7 +476,7 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_subscribe(tmq: *mut tmq_t, topic_list: *const tmq_list_t) -> i32 {
-    trace!("tmq_subscribe start, tmq: {tmq:?}, topic_list: {topic_list:?}");
+    debug!("tmq_subscribe start, tmq: {tmq:?}, topic_list: {topic_list:?}");
 
     let tmq_list = match (topic_list as *const TaosMaybeError<TmqList>)
         .as_ref()
@@ -497,7 +497,7 @@ pub unsafe extern "C" fn tmq_subscribe(tmq: *mut tmq_t, topic_list: *const tmq_l
             if let Some(consumer) = &mut tmq.consumer {
                 match consumer.subscribe(&tmq_list.topics) {
                     Ok(_) => {
-                        trace!("tmq_subscribe succ");
+                        debug!("tmq_subscribe succ");
                         0
                     }
                     Err(err) => {
@@ -519,7 +519,7 @@ pub unsafe extern "C" fn tmq_subscribe(tmq: *mut tmq_t, topic_list: *const tmq_l
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_unsubscribe(tmq: *mut tmq_t) -> i32 {
-    trace!("tmq_unsubscribe start, tmq: {tmq:?}");
+    debug!("tmq_unsubscribe start, tmq: {tmq:?}");
 
     match (tmq as *mut TaosMaybeError<Tmq>)
         .as_mut()
@@ -529,7 +529,7 @@ pub unsafe extern "C" fn tmq_unsubscribe(tmq: *mut tmq_t) -> i32 {
             if let Some(consumer) = tmq.consumer.take() {
                 consumer.unsubscribe();
             }
-            trace!("tmq_unsubscribe succ");
+            debug!("tmq_unsubscribe succ");
             0
         }
         None => {
@@ -541,7 +541,7 @@ pub unsafe extern "C" fn tmq_unsubscribe(tmq: *mut tmq_t) -> i32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq_list_t) -> i32 {
-    trace!("tmq_subscription start, tmq: {tmq:?}, topics: {topics:?}");
+    debug!("tmq_subscription start, tmq: {tmq:?}, topics: {topics:?}");
 
     if topics.is_null() {
         error!("tmq_subscription failed, err: topics is null");
@@ -567,7 +567,7 @@ pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq
                     }
                 }
             }
-            trace!("tmq_subscription succ");
+            debug!("tmq_subscription succ");
             0
         }
         None => {
@@ -579,7 +579,7 @@ pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mut TAOS_RES {
-    trace!("tmq_consumer_poll start, tmq: {tmq:?}, timeout: {timeout}");
+    debug!("tmq_consumer_poll start, tmq: {tmq:?}, timeout: {timeout}");
 
     if tmq.is_null() {
         error!("tmq_consumer_poll failed, err: tmq is null");
@@ -590,11 +590,11 @@ pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mu
     match consumer_poll(tmq, timeout) {
         Ok(Some(rs)) => {
             let rs: TaosMaybeError<ResultSet> = rs.into();
-            trace!("tmq_consumer_poll succ, rs: {rs:?}");
+            debug!("tmq_consumer_poll succ, rs: {rs:?}");
             Box::into_raw(Box::new(rs)) as _
         }
         Ok(None) => {
-            trace!("tmq_consumer_poll succ, rs is none");
+            debug!("tmq_consumer_poll succ, rs is none");
             ptr::null_mut()
         }
         Err(err) => {
@@ -625,16 +625,16 @@ unsafe fn consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Option<
                             > Duration::from_millis(tmq.auto_commit_interval_ms)
                         {
                             tmq.auto_commit_offset.1 = now;
-                            trace!("poll auto commit, commit offset: {offset:?}");
+                            debug!("poll auto commit, commit offset: {offset:?}");
                             if let Err(err) = consumer.commit(offset) {
                                 error!("poll auto commit failed, err: {err:?}");
 
                                 if let Some((cb, param)) = tmq.auto_commit_cb {
-                                    trace!("poll auto commit failed, callback");
+                                    debug!("poll auto commit failed, callback");
                                     cb(tmq_ptr, format_errno(err.code().into()), param);
                                 }
                             } else if let Some((cb, param)) = tmq.auto_commit_cb {
-                                trace!("poll auto commit succ, callback");
+                                debug!("poll auto commit succ, callback");
                                 cb(tmq_ptr, 0, param);
                             }
                         }
@@ -645,7 +645,7 @@ unsafe fn consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Option<
                 match res {
                     Some((offset, message_set)) => {
                         if tmq.auto_commit {
-                            trace!("poll auto commit, set offset: {offset:?}");
+                            debug!("poll auto commit, set offset: {offset:?}");
                             tmq.auto_commit_offset.0 = Some(offset.clone());
                         }
 
@@ -675,7 +675,7 @@ unsafe fn consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Option<
 
 #[no_mangle]
 pub extern "C" fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
-    trace!("tmq_consumer_close, tmq: {tmq:?}");
+    debug!("tmq_consumer_close, tmq: {tmq:?}");
     if tmq.is_null() {
         error!("tmq_consumer_close failed, err: tmq is null");
         return format_errno(Code::INVALID_PARA.into());
@@ -686,7 +686,7 @@ pub extern "C" fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_commit_sync(tmq: *mut tmq_t, msg: *const TAOS_RES) -> i32 {
-    trace!("tmq_commit_sync start, tmq: {tmq:?}, msg: {msg:?}");
+    debug!("tmq_commit_sync start, tmq: {tmq:?}, msg: {msg:?}");
 
     if tmq.is_null() {
         error!("tmq_commit_sync failed, err: tmq is null");
@@ -695,7 +695,7 @@ pub unsafe extern "C" fn tmq_commit_sync(tmq: *mut tmq_t, msg: *const TAOS_RES) 
 
     match commit_sync(tmq, msg) {
         Ok(_) => {
-            trace!("tmq_commit_sync succ");
+            debug!("tmq_commit_sync succ");
             0
         }
         Err(err) => {
@@ -711,7 +711,7 @@ unsafe fn commit_sync(tmq: *mut tmq_t, res: *const TAOS_RES) -> TaosResult<()> {
         .and_then(|rs| rs.deref())
         .map(ResultSetOperations::tmq_get_offset);
 
-    trace!("commit_sync, offset: {offset:?}");
+    debug!("commit_sync, offset: {offset:?}");
 
     let tmq = match (tmq as *mut TaosMaybeError<Tmq>)
         .as_mut()
@@ -746,7 +746,7 @@ pub unsafe extern "C" fn tmq_commit_async(
     cb: tmq_commit_cb,
     param: *mut c_void,
 ) {
-    trace!("tmq_commit_async start, tmq: {tmq:?}, msg: {msg:?}, cb: {cb:?}, param: {param:?}");
+    debug!("tmq_commit_async start, tmq: {tmq:?}, msg: {msg:?}, cb: {cb:?}, param: {param:?}");
 
     if tmq.is_null() {
         error!("tmq_commit_async failed, err: tmq is null");
@@ -769,7 +769,7 @@ pub unsafe extern "C" fn tmq_commit_async(
                 .and_then(|rs| rs.deref())
                 .map(ResultSetOperations::tmq_get_offset);
 
-            trace!("tmq_commit_async, offset: {offset:?}");
+            debug!("tmq_commit_async, offset: {offset:?}");
 
             let maybe_err = (tmq.0 as *mut TaosMaybeError<Tmq>).as_mut().unwrap();
 
@@ -799,7 +799,7 @@ pub unsafe extern "C" fn tmq_commit_async(
                 Some(offset) => {
                     match taos_query::tmq::AsAsyncConsumer::commit(consumer, offset).await {
                         Ok(_) => {
-                            trace!("tmq_commit_async commit callback");
+                            debug!("tmq_commit_async commit callback");
                             cb(tmq.0, 0, param.0);
                         }
                         Err(err) => {
@@ -811,7 +811,7 @@ pub unsafe extern "C" fn tmq_commit_async(
                 }
                 None => match taos_query::tmq::AsAsyncConsumer::commit_all(consumer).await {
                     Ok(_) => {
-                        trace!("tmq_commit_async commit all callback, commit all succ");
+                        debug!("tmq_commit_async commit all callback, commit all succ");
                         cb(tmq.0, 0, param.0);
                     }
                     Err(err) => {
@@ -825,7 +825,7 @@ pub unsafe extern "C" fn tmq_commit_async(
         .in_current_span(),
     );
 
-    trace!("tmq_commit_async succ");
+    debug!("tmq_commit_async succ");
 }
 
 #[no_mangle]
@@ -836,7 +836,7 @@ pub unsafe extern "C" fn tmq_commit_offset_sync(
     vgId: i32,
     offset: i64,
 ) -> i32 {
-    trace!("tmq_commit_offset_sync start, tmq: {tmq:?}, p_topic_name: {pTopicName:?}, vg_id: {vgId}, offset: {offset}");
+    debug!("tmq_commit_offset_sync start, tmq: {tmq:?}, p_topic_name: {pTopicName:?}, vg_id: {vgId}, offset: {offset}");
 
     let may_err = match (tmq as *mut TaosMaybeError<Tmq>).as_mut() {
         Some(may_err) => may_err,
@@ -875,7 +875,7 @@ pub unsafe extern "C" fn tmq_commit_offset_sync(
 
     match consumer.commit_offset(topic_name, vgId, offset) {
         Ok(_) => {
-            trace!("tmq_commit_offset_sync succ");
+            debug!("tmq_commit_offset_sync succ");
             0
         }
         Err(err) => {
@@ -896,7 +896,7 @@ pub unsafe extern "C" fn tmq_commit_offset_async(
     cb: tmq_commit_cb,
     param: *mut c_void,
 ) {
-    trace!(
+    debug!(
         "tmq_commit_offset_async start, tmq: {tmq:?}, p_topic_name: {pTopicName:?}, vg_id: {vgId}, offset: {offset}, cb: {cb:?}, param: {param:?}"
     );
 
@@ -962,7 +962,7 @@ pub unsafe extern "C" fn tmq_commit_offset_async(
                 .await
             {
                 Ok(_) => {
-                    trace!("tmq_commit_offset_async callback");
+                    debug!("tmq_commit_offset_async callback");
                     cb(tmq.0, 0, param.0);
                 }
                 Err(err) => {
@@ -976,7 +976,7 @@ pub unsafe extern "C" fn tmq_commit_offset_async(
         .in_current_span(),
     );
 
-    trace!("tmq_commit_offset_async succ");
+    debug!("tmq_commit_offset_async succ");
 }
 
 static TOPIC_ASSIGNMETN_MAP: Lazy<DashMap<usize, usize>> = Lazy::new(DashMap::new);
@@ -989,7 +989,7 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
     assignment: *mut *mut tmq_topic_assignment,
     numOfAssignment: *mut i32,
 ) -> i32 {
-    trace!("tmq_get_topic_assignment start, tmq: {tmq:?}, p_topic_name: {pTopicName:?}, assignment: {assignment:?}, num_of_assignment: {numOfAssignment:?}");
+    debug!("tmq_get_topic_assignment start, tmq: {tmq:?}, p_topic_name: {pTopicName:?}, assignment: {assignment:?}, num_of_assignment: {numOfAssignment:?}");
 
     match (tmq as *mut TaosMaybeError<Tmq>)
         .as_mut()
@@ -1004,18 +1004,18 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
                     } else {
                         let (_, assigns) = assigns.first().unwrap().clone();
                         let len = assigns.len();
-                        trace!("tmq_get_topic_assignment, assigns: {assigns:?}, len: {len}");
+                        debug!("tmq_get_topic_assignment, assigns: {assigns:?}, len: {len}");
                         *numOfAssignment = len as _;
                         *assignment = Box::into_raw(assigns.into_boxed_slice()) as _;
                         TOPIC_ASSIGNMETN_MAP.insert(*assignment as usize, len);
                     }
-                    trace!("tmq_get_topic_assignment succ",);
+                    debug!("tmq_get_topic_assignment succ",);
                     0
                 }
                 None => {
                     *assignment = ptr::null_mut();
                     *numOfAssignment = 0;
-                    trace!("tmq_get_topic_assignment succ, no assignment");
+                    debug!("tmq_get_topic_assignment succ, no assignment");
                     0
                 }
             },
@@ -1034,7 +1034,7 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
 #[no_mangle]
 #[allow(non_snake_case)]
 pub unsafe extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
-    trace!("tmq_free_assignment start, p_assignment: {pAssignment:?}");
+    debug!("tmq_free_assignment start, p_assignment: {pAssignment:?}");
     if pAssignment.is_null() {
         error!("tmq_free_assignment failed, p_assignment is null");
         return;
@@ -1042,7 +1042,7 @@ pub unsafe extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignm
 
     if let Some((_, len)) = TOPIC_ASSIGNMETN_MAP.remove(&(pAssignment as usize)) {
         let assigns = Vec::from_raw_parts(pAssignment, len, len);
-        trace!("tmq_free_assignment succ, assigns: {assigns:?}, len: {len}");
+        debug!("tmq_free_assignment succ, assigns: {assigns:?}, len: {len}");
     } else {
         error!("tmq_free_assignment failed, err: p_assignment is invalid");
     }
@@ -1056,7 +1056,7 @@ pub unsafe extern "C" fn tmq_offset_seek(
     vgId: i32,
     offset: i64,
 ) -> i32 {
-    trace!(
+    debug!(
         "tmq_offset_seek start, tmq: {:?}, p_topic_name: {:?}, vg_id: {}, offset: {}",
         tmq,
         CStr::from_ptr(pTopicName),
@@ -1101,7 +1101,7 @@ pub unsafe extern "C" fn tmq_offset_seek(
 
     match consumer.offset_seek(topic_name, vgId, offset) {
         Ok(_) => {
-            trace!("tmq_offset_seek succ");
+            debug!("tmq_offset_seek succ");
             0
         }
         Err(err) => {
@@ -1119,7 +1119,7 @@ pub unsafe extern "C" fn tmq_position(
     pTopicName: *const c_char,
     vgId: i32,
 ) -> i64 {
-    trace!(
+    debug!(
         "tmq_position start, tmq: {:?}, p_topic_name: {:?}, vg_id: {}",
         tmq,
         CStr::from_ptr(pTopicName),
@@ -1162,7 +1162,7 @@ pub unsafe extern "C" fn tmq_position(
 
     match consumer.position(topic_name, vgId) {
         Ok(offset) => {
-            trace!("tmq_position succ, offset: {offset}");
+            debug!("tmq_position succ, offset: {offset}");
             offset
         }
         Err(err) => {
@@ -1180,7 +1180,7 @@ pub unsafe extern "C" fn tmq_committed(
     pTopicName: *const c_char,
     vgId: i32,
 ) -> i64 {
-    trace!(
+    debug!(
         "tmq_committed start, tmq: {:?}, p_topic_name: {:?}, vg_id: {}",
         tmq,
         CStr::from_ptr(pTopicName),
@@ -1223,7 +1223,7 @@ pub unsafe extern "C" fn tmq_committed(
 
     match consumer.committed(topic_name, vgId) {
         Ok(offset) => {
-            trace!("tmq_committed succ, offset: {offset}");
+            debug!("tmq_committed succ, offset: {offset}");
             offset
         }
         Err(err) => {
@@ -1236,13 +1236,13 @@ pub unsafe extern "C" fn tmq_committed(
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
-    trace!("tmq_get_table_name start, res: {res:?}");
+    debug!("tmq_get_table_name start, res: {res:?}");
     match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
         Some(rs) => {
-            trace!("tmq_get_table_name succ, rs: {rs:?}");
+            debug!("tmq_get_table_name succ, rs: {rs:?}");
             rs.tmq_get_table_name()
         }
         None => {
@@ -1254,24 +1254,24 @@ pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char
 
 #[no_mangle]
 pub extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
-    trace!("tmq_get_res_type start, res: {res:?}");
+    debug!("tmq_get_res_type start, res: {res:?}");
     if res.is_null() {
-        trace!("tmq_get_res_type succ, res is null");
+        debug!("tmq_get_res_type succ, res is null");
         return tmq_res_t::TMQ_RES_INVALID;
     }
-    trace!("tmq_get_res_type succ");
+    debug!("tmq_get_res_type succ");
     tmq_res_t::TMQ_RES_DATA
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char {
-    trace!("tmq_get_topic_name start, res: {res:?}");
+    debug!("tmq_get_topic_name start, res: {res:?}");
     match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
         Some(rs) => {
-            trace!("tmq_get_topic_name succ, rs: {rs:?}");
+            debug!("tmq_get_topic_name succ, rs: {rs:?}");
             rs.tmq_get_topic_name()
         }
         None => {
@@ -1283,13 +1283,13 @@ pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
-    trace!("tmq_get_db_name start, res: {res:?}");
+    debug!("tmq_get_db_name start, res: {res:?}");
     match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
         Some(rs) => {
-            trace!("tmq_get_db_name succ, rs: {rs:?}");
+            debug!("tmq_get_db_name succ, rs: {rs:?}");
             rs.tmq_get_db_name()
         }
         None => {
@@ -1301,13 +1301,13 @@ pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
-    trace!("tmq_get_vgroup_id start, res: {res:?}");
+    debug!("tmq_get_vgroup_id start, res: {res:?}");
     match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
         Some(rs) => {
-            trace!("tmq_get_vgroup_id succ, rs: {rs:?}");
+            debug!("tmq_get_vgroup_id succ, rs: {rs:?}");
             rs.tmq_get_vgroup_id()
         }
         None => {
@@ -1319,13 +1319,13 @@ pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
-    trace!("tmq_get_vgroup_offset start, res: {res:?}");
+    debug!("tmq_get_vgroup_offset start, res: {res:?}");
     match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
         Some(rs) => {
-            trace!("tmq_get_vgroup_offset succ, rs: {rs:?}");
+            debug!("tmq_get_vgroup_offset succ, rs: {rs:?}");
             rs.tmq_get_vgroup_offset()
         }
         None => {
@@ -1337,7 +1337,7 @@ pub unsafe extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_err2str(code: i32) -> *const c_char {
-    trace!("tmq_err2str, code: {code}");
+    debug!("tmq_err2str, code: {code}");
 
     let err = match code {
         0 => TaosError::new(Code::SUCCESS, "success"),
