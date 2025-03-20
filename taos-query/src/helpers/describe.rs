@@ -738,4 +738,22 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn decimal_describe_test() -> anyhow::Result<()> {
+        let desc = Described {
+            field: "v".to_string(),
+            ty: Ty::Decimal,
+            origin_ty: Some("DECIMAL(5, 2)".to_string()),
+            length: 16,
+            note: None,
+            compression: None,
+        };
+        let sql = desc.sql_repr();
+        assert_eq!(sql, "`v` DECIMAL(5, 2)");
+
+        let desc = desc.with_origin_ty_name("DECIMAL(10, 2)");
+        assert_eq!(desc.origin_ty_name(), Some("DECIMAL(10, 2)"));
+        Ok(())
+    }
 }
