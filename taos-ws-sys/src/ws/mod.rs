@@ -259,6 +259,8 @@ fn init() {
         if let Err(err) = LogTracer::init() {
             eprintln!("failed to init log debugr, err: {err:?}");
         }
+
+        debug!("config: {cfg:?}");
     }
 }
 

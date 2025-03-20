@@ -41,7 +41,6 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 
 pub fn init() {
     let config = Config::new("/etc/taos/taos.cfg");
-    println!("config init, config: {config:?}");
     let _ = CONFIG
         .set(config)
         .map_err(|_| eprintln!("failed to set CONFIG"));

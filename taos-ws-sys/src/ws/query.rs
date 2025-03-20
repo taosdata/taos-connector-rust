@@ -1120,6 +1120,8 @@ pub unsafe extern "C" fn taos_check_server_status(
         }
     }
 
+    debug!("taos_check_server_status, fqdn: {fqdn}, port: {port}");
+
     let (status, ds) = match block_in_place_or_global(check_server_status(fqdn, port)) {
         Ok(res) => res,
         Err(err) => {
