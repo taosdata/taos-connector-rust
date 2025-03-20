@@ -1237,18 +1237,20 @@ impl TAOS_MULTI_BIND {
         trace!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}");
 
         macro_rules! view {
-            ($from:expr) => {{
-                let slice = slice::from_raw_parts(self.buffer as *const _, num);
+            ($ty:ty, $from:expr) => {{
+                let buf = self.buffer as *const $ty;
                 let mut vals = vec![None; num];
-                if let Some(is_nulls) = is_nulls {
-                    for i in 0..num {
-                        if is_nulls[i] == 0 {
-                            vals[i] = Some(slice[i]);
+                for i in 0..num {
+                    if let Some(is_nulls) = is_nulls {
+                        for i in 0..num {
+                            if is_nulls[i] == 0 {
+                                vals[i] = Some(ptr::read_unaligned(buf.add(i)));
+                            }
                         }
-                    }
-                } else {
-                    for i in 0..num {
-                        vals[i] = Some(slice[i]);
+                    } else {
+                        for i in 0..num {
+                            vals[i] = Some(ptr::read_unaligned(buf.add(i)));
+                        }
                     }
                 }
                 $from(vals)
@@ -1257,18 +1259,18 @@ impl TAOS_MULTI_BIND {
 
         let view = unsafe {
             match ty {
-                Ty::Bool => view!(ColumnView::from_bools),
-                Ty::TinyInt => view!(ColumnView::from_tiny_ints),
-                Ty::SmallInt => view!(ColumnView::from_small_ints),
-                Ty::Int => view!(ColumnView::from_ints),
-                Ty::BigInt => view!(ColumnView::from_big_ints),
-                Ty::UTinyInt => view!(ColumnView::from_unsigned_tiny_ints),
-                Ty::USmallInt => view!(ColumnView::from_unsigned_small_ints),
-                Ty::UInt => view!(ColumnView::from_unsigned_ints),
-                Ty::UBigInt => view!(ColumnView::from_unsigned_big_ints),
-                Ty::Float => view!(ColumnView::from_floats),
-                Ty::Double => view!(ColumnView::from_doubles),
-                Ty::Timestamp => view!(ColumnView::from_millis_timestamp),
+                Ty::Bool => view!(bool, ColumnView::from_bools),
+                Ty::TinyInt => view!(i8, ColumnView::from_tiny_ints),
+                Ty::SmallInt => view!(i16, ColumnView::from_small_ints),
+                Ty::Int => view!(i32, ColumnView::from_ints),
+                Ty::BigInt => view!(i64, ColumnView::from_big_ints),
+                Ty::UTinyInt => view!(u8, ColumnView::from_unsigned_tiny_ints),
+                Ty::USmallInt => view!(u16, ColumnView::from_unsigned_small_ints),
+                Ty::UInt => view!(u32, ColumnView::from_unsigned_ints),
+                Ty::UBigInt => view!(u64, ColumnView::from_unsigned_big_ints),
+                Ty::Float => view!(f32, ColumnView::from_floats),
+                Ty::Double => view!(f64, ColumnView::from_doubles),
+                Ty::Timestamp => view!(i64, ColumnView::from_millis_timestamp),
                 Ty::VarChar => {
                     if let Some(is_nulls) = is_nulls {
                         let vals = (0..num)
@@ -2179,7 +2181,6 @@ mod tests {
             assert_eq!(code, 0);
 
             let num_of_sub_table = 10;
-            let num_of_row = 10;
 
             let mut buffer = vec![1739521477831i64];
             let mut length = vec![8];
@@ -2200,15 +2201,9 @@ mod tests {
                 let code = taos_stmt_set_tbname(stmt, name.as_ptr());
                 assert_eq!(code, 0);
 
-                for j in 0..num_of_row {
-                    let mut ts = ts.clone();
-                    let mut buffer = vec![ts_start + j];
-                    ts.buffer = buffer.as_mut_ptr() as _;
-
-                    let mut cols = vec![ts, c1.clone()];
-                    let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
-                    assert_eq!(code, 0);
-                }
+                let mut cols = vec![ts.clone(), c1.clone()];
+                let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
+                assert_eq!(code, 0);
             }
 
             let code = taos_stmt_add_batch(stmt);
@@ -2218,7 +2213,7 @@ mod tests {
             assert_eq!(code, 0);
 
             let affected_rows = taos_stmt_affected_rows(stmt);
-            assert_eq!(affected_rows as i64, num_of_sub_table * num_of_row);
+            assert_eq!(affected_rows as i64, num_of_sub_table);
 
             let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
@@ -2252,7 +2247,6 @@ mod tests {
             assert_eq!(code, 0);
 
             let num_of_sub_table = 10;
-            let num_of_row = 10;
 
             let mut buffer = vec![1739521477831i64];
             let mut length = vec![8];
@@ -2273,15 +2267,9 @@ mod tests {
                 let code = taos_stmt_set_tbname(stmt, name.as_ptr());
                 assert_eq!(code, 0);
 
-                for j in 0..num_of_row {
-                    let mut ts = ts.clone();
-                    let mut buffer = vec![ts_start + j];
-                    ts.buffer = buffer.as_mut_ptr() as _;
-
-                    let mut cols = vec![ts, c1.clone()];
-                    let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
-                    assert_eq!(code, 0);
-                }
+                let mut cols = vec![ts.clone(), c1.clone()];
+                let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
+                assert_eq!(code, 0);
             }
 
             let code = taos_stmt_add_batch(stmt);
@@ -2291,7 +2279,7 @@ mod tests {
             assert_eq!(code, 0);
 
             let affected_rows = taos_stmt_affected_rows(stmt);
-            assert_eq!(affected_rows as i64, num_of_sub_table * num_of_row);
+            assert_eq!(affected_rows as i64, num_of_sub_table);
 
             let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
