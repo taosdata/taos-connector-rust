@@ -2,9 +2,8 @@ use std::marker::PhantomData;
 
 use bytes::Bytes;
 
-use crate::common::{self, BorrowedValue, Ty};
-
 use super::{NullBits, NullsIter};
+use crate::common::{self, BorrowedValue, Ty};
 
 type Item<T> = common::decimal::Decimal<T>;
 type View<T> = DecimalView<T>;
@@ -28,6 +27,10 @@ impl<T> DecimalView<T> {
     /// Rows
     pub fn len(&self) -> usize {
         self.data.len() / std::mem::size_of::<T>()
+    }
+
+    pub fn as_raw_ptr(&self) -> *const u8 {
+        self.data.as_ptr() as _
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
@@ -245,9 +248,8 @@ impl<T> Iterator for DecimalViewIter<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::decimal::Decimal;
-
     use super::*;
+    use crate::common::decimal::Decimal;
 
     #[test]
     fn from_iter_64_test() -> anyhow::Result<()> {
