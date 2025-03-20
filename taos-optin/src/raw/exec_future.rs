@@ -5,6 +5,7 @@ use std::future::Future;
 use std::os::raw::{c_int, c_void};
 use std::pin::Pin;
 use std::rc::{Rc, Weak};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
@@ -19,7 +20,7 @@ use crate::RawTaos;
 pub struct ExecFuture<'f, 'a> {
     raw: &'f RawTaos,
     sql: Cow<'a, CStr>,
-    state: Rc<RefCell<State>>,
+    state: Rc<State>,
 }
 
 unsafe impl Send for ExecFuture<'_, '_> {}
@@ -27,20 +28,18 @@ unsafe impl Send for ExecFuture<'_, '_> {}
 /// Shared state between the future and the waiting thread
 struct State {
     api: Arc<ApiEntry>,
-    result: Option<Result<usize, RawError>>,
-    waiting: bool,
+    result: RefCell<Option<(Result<usize, RawError>, Duration)>>,
+    waiting: AtomicBool,
     time: Instant,
-    callback_cost: Option<Duration>,
 }
 
 impl State {
     pub fn new(api: Arc<ApiEntry>) -> Self {
         State {
             api,
-            result: None,
-            waiting: false,
+            result: RefCell::new(None),
+            waiting: AtomicBool::new(false),
             time: Instant::now(),
-            callback_cost: None,
         }
     }
 }
@@ -49,7 +48,7 @@ unsafe impl Send for State {}
 unsafe impl Sync for State {}
 
 struct AsyncQueryParam {
-    state: Weak<RefCell<State>>,
+    state: Weak<State>,
     sql: *mut c_char,
     waker: Waker,
 }
@@ -60,23 +59,19 @@ impl Unpin for ExecFuture<'_, '_> {}
 impl Future for ExecFuture<'_, '_> {
     type Output = Result<usize, RawError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut state = self.state.borrow_mut();
+        let state = self.state.as_ref();
 
-        if let Some(result) = state.result.take() {
+        if let Some((result, cost)) = state.result.take() {
             let d = state.time.elapsed();
-            tracing::trace!(
-                "Waken {:?} after callback received",
-                d - state.callback_cost.unwrap()
-            );
+            tracing::trace!("Waken {:?} after callback received", d - cost);
             Poll::Ready(result)
         } else {
-            if state.waiting {
+            if state.waiting.load(Ordering::SeqCst) {
                 tracing::trace!("It's waked but still waiting for taos_query_a callback.");
                 return Poll::Pending;
             }
 
-            state.waiting = true;
-            drop(state);
+            state.waiting.store(true, Ordering::SeqCst);
 
             #[no_mangle]
             #[inline(never)]
@@ -92,10 +87,9 @@ impl Future for ExecFuture<'_, '_> {
                 let param = Box::from_raw(param as *mut AsyncQueryParam);
                 if let Some(state) = param.state.upgrade() {
                     // let state = param.read();
-                    let mut s = state.borrow_mut();
+                    let s = state.as_ref();
                     let cost = s.time.elapsed();
                     tracing::trace!("Received query callback in {:?}", cost);
-                    s.callback_cost.replace(cost);
                     if res.is_null() && code == 0 {
                         unreachable!("query callback should be ok or error");
                     }
@@ -118,8 +112,8 @@ impl Future for ExecFuture<'_, '_> {
                         Ok((s.api.taos_affected_rows)(res) as usize)
                     };
 
-                    s.result.replace(result);
-                    s.waiting = false;
+                    s.result.borrow_mut().replace((result, cost));
+                    s.waiting.store(false, Ordering::SeqCst);
                     param.waker.wake();
                 } else {
                     tracing::trace!("Query callback received but no listener");
@@ -145,7 +139,7 @@ impl<'f, 'a> ExecFuture<'f, 'a> {
     /// Create a new `TimerFuture` which will complete after the provided
     /// timeout.
     pub fn new<T: IntoCStr<'a>>(taos: &'f RawTaos, sql: T) -> Self {
-        let state = Rc::new(RefCell::new(State::new(taos.c.clone())));
+        let state = Rc::new(State::new(taos.c.clone()));
         let sql = sql.into_c_str();
         tracing::trace!("query with: {}", sql.to_str().unwrap_or("<...>"));
 

@@ -1,7 +1,8 @@
-use std::cell::{RefCell, UnsafeCell};
+use std::cell::UnsafeCell;
 use std::ffi::c_void;
 use std::fmt::Debug;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -20,7 +21,7 @@ pub struct NCharView {
     pub(crate) is_chars: UnsafeCell<bool>,
     pub(crate) version: Version,
     /// Layout should set as NCHAR_DECODED when raw data decoded.
-    pub(crate) layout: Rc<RefCell<Layout>>,
+    pub(crate) layout: Rc<AtomicU32>, // Rc<RefCell<Layout>>
 }
 
 impl Clone for NCharView {
@@ -52,6 +53,9 @@ impl IsColumnView for NCharView {
 }
 
 impl NCharView {
+    fn layout(&self) -> &Layout {
+        unsafe { &*(self.layout.as_ptr() as *const Layout) }
+    }
     pub fn len(&self) -> usize {
         self.offsets.len()
     }
@@ -93,7 +97,9 @@ impl NCharView {
                 }
             }
             *self.is_chars.get() = false;
-            self.layout.borrow_mut().with_nchar_decoded();
+            let mut layout = *self.layout();
+            layout.with_nchar_decoded();
+            self.layout.store(layout.as_inner(), Ordering::SeqCst);
         }
     }
 
@@ -279,10 +285,10 @@ impl NCharView {
             data: data.into(),
             is_chars: UnsafeCell::new(false),
             version: Version::V2,
-            layout: Rc::new(RefCell::new({
+            layout: Rc::new(AtomicU32::new({
                 let mut layout = Layout::default();
                 layout.with_nchar_decoded();
-                layout
+                layout.as_inner()
             })),
         }
     }

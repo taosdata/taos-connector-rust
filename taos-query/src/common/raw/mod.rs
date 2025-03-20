@@ -1,7 +1,7 @@
 #![allow(clippy::size_of_in_element_count)]
 #![allow(clippy::type_complexity)]
 
-use std::cell::{Cell, RefCell, UnsafeCell};
+use std::cell::{Cell, UnsafeCell};
 use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::fmt::{Debug, Display};
@@ -9,6 +9,7 @@ use std::io::Cursor;
 use std::ops::Deref;
 use std::ptr::NonNull;
 use std::rc::Rc;
+use std::sync::atomic::AtomicU32;
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -98,7 +99,7 @@ impl Header {
 // #[derive(Debug)]
 pub struct RawBlock {
     /// Layout is auto detected.
-    layout: Rc<RefCell<Layout>>,
+    layout: Rc<AtomicU32>,
     /// Raw bytes version, may be v2 or v3.
     version: Version,
     /// Data is required, which could be v2 websocket block or a v3 raw block.
@@ -241,7 +242,9 @@ impl RawBlock {
             unsafe { (v as *const u64).read_unaligned() == 0x7FFFFF0000000000 }
         }
 
-        let layout = Rc::new(RefCell::new(Layout::INLINE_DEFAULT.with_schema_changed()));
+        let layout = Rc::new(AtomicU32::new(
+            Layout::INLINE_DEFAULT.with_schema_changed().as_inner(),
+        ));
 
         let bytes = bytes.into();
         let cols = fields.len();
@@ -434,7 +437,7 @@ impl RawBlock {
     pub fn parse_from_raw_block<T: Into<Bytes>>(bytes: T, precision: Precision) -> Self {
         let schema_start: usize = std::mem::size_of::<Header>();
 
-        let layout = Rc::new(RefCell::new(Layout::INLINE_DEFAULT));
+        let layout = Rc::new(AtomicU32::new(Layout::INLINE_DEFAULT.as_inner()));
 
         let bytes = bytes.into();
         let ptr = bytes.as_ptr();
@@ -672,7 +675,7 @@ impl RawBlock {
     /// Set table name of the block
     pub fn with_table_name<T: Into<String>>(&mut self, name: T) -> &mut Self {
         self.table = Some(name.into());
-        self.layout.borrow_mut().with_table_name();
+        unsafe { &mut *(self.layout.as_ptr() as *mut Layout) }.with_table_name();
 
         self
     }
@@ -683,12 +686,12 @@ impl RawBlock {
         names: I,
     ) -> &mut Self {
         self.fields = names.into_iter().map(|name| name.to_string()).collect();
-        self.layout.borrow_mut().with_field_names();
+        unsafe { &mut *(self.layout.as_ptr() as *mut Layout) }.with_field_names();
         self
     }
 
     fn with_layout(mut self, layout: Layout) -> Self {
-        self.layout = Rc::new(RefCell::new(layout));
+        self.layout = Rc::new(AtomicU32::new(layout.as_inner()));
         self
     }
 
@@ -779,11 +782,13 @@ impl RawBlock {
     }
 
     pub fn as_raw_bytes(&self) -> &[u8] {
-        if self.layout.borrow().schema_changed() {
+        let mut layout = self.layout();
+        if layout.schema_changed() {
             let bytes = views_to_raw_block(&self.columns);
             let bytes = bytes.into();
             self.data.replace(bytes);
-            self.layout.borrow_mut().set_schema_changed(false);
+            layout.set_schema_changed(false);
+            self.set_layout(layout);
         }
         unsafe { &(*self.data.as_ptr()) }
     }
@@ -836,7 +841,10 @@ impl RawBlock {
     }
 
     fn layout(&self) -> Layout {
-        Layout::from_bits(self.layout.borrow().as_inner()).unwrap()
+        unsafe { *(self.layout.as_ptr() as *mut Layout) }
+    }
+    fn set_layout(&self, layout: Layout) {
+        unsafe { *(self.layout.as_ptr() as *mut Layout) = layout }
     }
 
     pub fn fields(&self) -> Vec<Field> {
