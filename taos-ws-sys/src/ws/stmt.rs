@@ -1295,7 +1295,7 @@ impl TAOS_MULTI_BIND {
                                     .offset(self.buffer_length as isize * i as isize);
                                 let len = *self.length.add(i) as usize;
                                 let bytes = slice::from_raw_parts(ptr, len);
-                                str::from_utf8_unchecked(bytes)
+                                std::str::from_utf8_unchecked(bytes)
                             })
                             .collect::<Vec<_>>();
                         ColumnView::from_varchar::<&str, _, _, _>(vals)
@@ -1313,7 +1313,7 @@ impl TAOS_MULTI_BIND {
                                         .offset(self.buffer_length as isize * i as isize);
                                     let len = *self.length.add(i) as usize;
                                     let bytes = slice::from_raw_parts(ptr, len);
-                                    Some(str::from_utf8_unchecked(bytes))
+                                    Some(std::str::from_utf8_unchecked(bytes))
                                 }
                             })
                             .collect::<Vec<_>>();
@@ -1325,7 +1325,7 @@ impl TAOS_MULTI_BIND {
                                     .offset(self.buffer_length as isize * i as isize);
                                 let len = *self.length.add(i) as usize;
                                 let bytes = slice::from_raw_parts(ptr, len);
-                                str::from_utf8_unchecked(bytes)
+                                std::str::from_utf8_unchecked(bytes)
                             })
                             .collect::<Vec<_>>();
                         ColumnView::from_nchar::<&str, _, _, _>(vals)
