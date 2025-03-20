@@ -402,7 +402,7 @@ unsafe fn sml_insert(
         let data = CStr::from_ptr(*line)
             .to_str()
             .map_err(|_| TaosError::new(Code::INVALID_PARA, "line is invalid utf-8"))?;
-        datas.push(data.to_string());
+        datas.push(data.trim().to_string());
     }
 
     trace!("sml_insert, datas: {datas:?}");
