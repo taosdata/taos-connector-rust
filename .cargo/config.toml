@@ -143,7 +143,6 @@ rustflags = [
     "-Wclippy::mutex_atomic",
     "-Wclippy::needless_raw_strings",
     "-Wclippy::partial_pub_fields",
-    "-Wclippy::print_stdout",
     "-Wclippy::pub_without_shorthand",
     "-Wclippy::rc_buffer",
     "-Wclippy::rc_mutex",
