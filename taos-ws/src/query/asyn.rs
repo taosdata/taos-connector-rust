@@ -1237,7 +1237,7 @@ pub(crate) async fn fetch(
             Ok(_) => tracing::warn!("Unexpected response for result:{res_id}"),
             Err(err) => {
                 if raw_block_tx.send_async(Err(err)).await.is_err() {
-                    tracing::error!("Failed to send err; receiver may be closed");
+                    tracing::debug!("Failed to send err; receiver may be closed");
                     break;
                 }
             }
