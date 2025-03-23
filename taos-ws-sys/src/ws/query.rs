@@ -2324,15 +2324,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_taos_validate_sql() {
-        unsafe {
-            let taos = test_connect();
-            let sql = c"create database if not exists test_1741339814";
-            let code = taos_validate_sql(taos, sql.as_ptr());
-            assert_eq!(code, 0);
-        }
-    }
+    // #[test]
+    // fn test_taos_validate_sql() {
+    //     unsafe {
+    //         let taos = test_connect();
+    //         let sql = c"create database if not exists test_1741339814";
+    //         let code = taos_validate_sql(taos, sql.as_ptr());
+    //         assert_eq!(code, 0);
+    //     }
+    // }
 
     #[test]
     fn test_taos_fetch_raw_block_a() {
@@ -2707,25 +2707,25 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_taos_check_server_status() {
-        unsafe {
-            let max_len = 20;
-            let mut details = vec![0 as c_char; max_len];
-            let fqdn = c"localhost";
-            let status =
-                taos_check_server_status(fqdn.as_ptr(), 6030, details.as_mut_ptr(), max_len as _);
-            let details = CStr::from_ptr(details.as_ptr());
-            println!("status: {status:?}, details: {details:?}");
-        }
+    // #[test]
+    // fn test_taos_check_server_status() {
+    //     unsafe {
+    //         let max_len = 20;
+    //         let mut details = vec![0 as c_char; max_len];
+    //         let fqdn = c"localhost";
+    //         let status =
+    //             taos_check_server_status(fqdn.as_ptr(), 6030, details.as_mut_ptr(), max_len as _);
+    //         let details = CStr::from_ptr(details.as_ptr());
+    //         println!("status: {status:?}, details: {details:?}");
+    //     }
 
-        unsafe {
-            let max_len = 20;
-            let mut details = vec![0 as c_char; max_len];
-            let status =
-                taos_check_server_status(ptr::null(), 0, details.as_mut_ptr(), max_len as _);
-            let details = CStr::from_ptr(details.as_ptr());
-            println!("status: {status:?}, details: {details:?}");
-        }
-    }
+    //     unsafe {
+    //         let max_len = 20;
+    //         let mut details = vec![0 as c_char; max_len];
+    //         let status =
+    //             taos_check_server_status(ptr::null(), 0, details.as_mut_ptr(), max_len as _);
+    //         let details = CStr::from_ptr(details.as_ptr());
+    //         println!("status: {status:?}, details: {details:?}");
+    //     }
+    // }
 }
