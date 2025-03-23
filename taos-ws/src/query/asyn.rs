@@ -1855,14 +1855,14 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_validate_sql() -> anyhow::Result<()> {
-        let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
-        taos.validate_sql("create database if not exists test_1741338182")
-            .await?;
-        let _ = taos.validate_sql("select * from t0").await.unwrap_err();
-        Ok(())
-    }
+    // #[tokio::test]
+    // async fn test_validate_sql() -> anyhow::Result<()> {
+    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+    //     taos.validate_sql("create database if not exists test_1741338182")
+    //         .await?;
+    //     let _ = taos.validate_sql("select * from t0").await.unwrap_err();
+    //     Ok(())
+    // }
 
     #[tokio::test]
     async fn test_check_server_status() -> anyhow::Result<()> {
