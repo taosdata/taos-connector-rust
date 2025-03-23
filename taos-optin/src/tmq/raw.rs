@@ -727,11 +727,7 @@ pub(super) mod list {
 
     impl ExactSizeIterator for Iter<'_> {
         fn len(&self) -> usize {
-            if self.len >= self.index {
-                self.len - self.index
-            } else {
-                0
-            }
+            self.len.saturating_sub(self.index)
         }
     }
 
