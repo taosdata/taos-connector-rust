@@ -60,7 +60,7 @@ jobs:
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "feat/new-libtaos-with-ws"
+          ref: "3.0"
 
       - name: Prepare development tools
         run: |
