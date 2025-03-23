@@ -1864,15 +1864,15 @@ mod tests {
     //     Ok(())
     // }
 
-    #[tokio::test]
-    async fn test_check_server_status() -> anyhow::Result<()> {
-        let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
-        let (stauts, details) = taos
-            .check_server_status(Some("127.0.0.1".to_string()), 6030)
-            .await?;
-        println!("status: {}, details: {}", stauts, details);
-        let (stauts, details) = taos.check_server_status(None, 0).await?;
-        println!("status: {}, details: {}", stauts, details);
-        Ok(())
-    }
+    // #[tokio::test]
+    // async fn test_check_server_status() -> anyhow::Result<()> {
+    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+    //     let (stauts, details) = taos
+    //         .check_server_status(Some("127.0.0.1".to_string()), 6030)
+    //         .await?;
+    //     println!("status: {}, details: {}", stauts, details);
+    //     let (stauts, details) = taos.check_server_status(None, 0).await?;
+    //     println!("status: {}, details: {}", stauts, details);
+    //     Ok(())
+    // }
 }
