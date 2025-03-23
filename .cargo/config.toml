@@ -151,7 +151,6 @@ rustflags = [
     "-Wclippy::separated_literal_suffix",
     "-Wclippy::string_lit_chars_any",
     "-Wclippy::string_slice",
-    "-Wclippy::string_to_string",
     "-Wclippy::tests_outside_test_module",
     "-Wclippy::unnecessary_self_imports",
     "-Wclippy::unneeded_field_pattern",
