@@ -108,9 +108,16 @@ pub fn init() -> Result<(), String> {
         let cfg_dir = if let Some(dir) = &config.config_dir {
             dir.to_string()
         } else if let Ok(dir) = std::env::var("TAOS_CONFIG_DIR") {
-            dir
-        } else {
+            if Path::new(&dir).exists() {
+                dir
+            } else {
+                eprintln!("TAOS_CONFIG_DIR not found: {dir}");
+                return Ok(());
+            }
+        } else if Path::new(DEFAULT_CONFIG).exists() {
             DEFAULT_CONFIG.to_string()
+        } else {
+            return Ok(());
         };
         if let Err(err) = config.read_config(&cfg_dir) {
             return Err(err.to_string());
