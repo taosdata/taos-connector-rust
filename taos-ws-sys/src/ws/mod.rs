@@ -280,7 +280,7 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     use tracing_subscriber::Layer;
 
     if let Err(err) = config::init() {
-        return Err(TaosError::new(Code::FAILED, &err.to_string()).into());
+        return Err(TaosError::new(Code::FAILED, &err).into());
     }
 
     let cfg = config::CONFIG.read().unwrap();

@@ -258,7 +258,7 @@ impl Config {
         );
     }
 
-    pub fn set_config_dir(&mut self, cfg_dir: impl Into<FastStr>) {
+    pub fn set_config_dir<T: Into<FastStr>>(&mut self, cfg_dir: T) {
         self.config_dir = Some(cfg_dir.into());
     }
 
