@@ -4,6 +4,7 @@ use std::time::Duration;
 use std::{ptr, slice};
 
 use bytes::Bytes;
+use faststr::FastStr;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
 use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr};
@@ -1099,10 +1100,10 @@ pub unsafe extern "C" fn taos_check_server_status(
     debug!("taos_check_server_status start, fqdn: {fqdn:?}, port: {port}, details: {details:?}, maxlen: {maxlen}");
 
     let fqdn = if fqdn.is_null() {
-        config::config().and_then(|cfg| cfg.fqdn.clone())
+        config::get_global_fqdn()
     } else {
         match CStr::from_ptr(fqdn).to_str() {
-            Ok(fqdn) => Some(fqdn.to_string()),
+            Ok(fqdn) => Some(fqdn.to_string().into()),
             Err(_) => {
                 error!("taos_check_server_status failed, fqdn is invalid utf-8");
                 set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "fqdn is invalid utf-8"));
@@ -1112,9 +1113,7 @@ pub unsafe extern "C" fn taos_check_server_status(
     };
 
     if port == 0 {
-        if let Some(cfg) = config::config() {
-            port = cfg.server_port.unwrap_or(0) as _;
-        }
+        port = config::get_global_server_port() as _;
     }
 
     debug!("taos_check_server_status, fqdn: {fqdn:?}, port: {port}");
@@ -1135,20 +1134,23 @@ pub unsafe extern "C" fn taos_check_server_status(
     status.into()
 }
 
-async fn check_server_status(fqdn: Option<String>, port: i32) -> TaosResult<(i32, String)> {
+async fn check_server_status(fqdn: Option<FastStr>, port: i32) -> TaosResult<(i32, String)> {
     use taos_query::AsyncTBuilder;
     use taos_ws::TaosBuilder;
 
-    let mut host = "localhost";
-    if let Some(cfg) = config::config() {
-        if let Some(ep) = &cfg.first_ep {
-            host = ep;
-        } else if let Some(ep) = &cfg.second_ep {
-            host = ep;
-        }
+    let mut host = FastStr::from_static_str("localhost");
+    if let Some(ep) = config::get_global_first_ep() {
+        host = ep;
+    } else if let Some(ep) = config::get_global_second_ep() {
+        host = ep;
     }
 
-    let dsn = format!("ws://{host}:6041");
+    let dsn = if host.contains(":") {
+        format!("ws://{host}")
+    } else {
+        format!("ws://{host}:6041")
+    };
+
     let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
     let (status, details) = taos.client().check_server_status(fqdn, port).await?;
     Ok((status, details))
