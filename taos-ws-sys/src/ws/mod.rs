@@ -265,8 +265,9 @@ pub extern "C" fn taos_init() -> c_int {
     *ONCE.get_or_init(|| match taos_init_impl() {
         Ok(_) => 0,
         Err(err) => {
-            set_err_and_get_code(TaosError::new(Code::FAILED, &err.to_string()));
-            -1
+            // set_err_and_get_code(TaosError::new(Code::FAILED, &err.to_string()));
+            // -1
+            0
         }
     })
 }
