@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::bail;
 use byteorder::{ByteOrder, LittleEndian};
+use faststr::FastStr;
 use flume::Sender;
 use futures::channel::oneshot;
 use futures::stream::SplitStream;
@@ -1173,7 +1174,7 @@ impl WsTaos {
 
     pub async fn check_server_status(
         &self,
-        fqdn: Option<String>,
+        fqdn: Option<FastStr>,
         port: i32,
     ) -> RawResult<(i32, String)> {
         let req = WsSend::CheckServerStatus {

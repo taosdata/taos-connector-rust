@@ -18,11 +18,6 @@ pub type __taos_async_whitelist_fn_t = extern "C" fn(
 );
 
 #[no_mangle]
-pub extern "C" fn taos_init() -> c_int {
-    0
-}
-
-#[no_mangle]
 pub extern "C" fn taos_cleanup() {}
 
 #[no_mangle]
@@ -253,6 +248,7 @@ pub extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FIELD_E {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ws::taos_init;
 
     #[test]
     fn test_stub() {
