@@ -248,7 +248,6 @@ pub extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FIELD_E {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ws::taos_init;
 
     #[test]
     fn test_stub() {

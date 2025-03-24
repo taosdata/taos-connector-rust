@@ -2,6 +2,7 @@
 
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use error::{set_err_and_get_code, TaosError};
@@ -259,17 +260,20 @@ impl From<u64> for Qid {
     }
 }
 
-/// Run 1ce.
+/// Run once.
 #[no_mangle]
 pub extern "C" fn taos_init() -> c_int {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        taos_init_impl();
-    });
-    0
+    static ONCE: OnceLock<c_int> = OnceLock::new();
+    *ONCE.get_or_init(|| match taos_init_impl() {
+        Ok(_) => 0,
+        Err(err) => {
+            set_err_and_get_code(TaosError::new(Code::FAILED, &err.to_string()));
+            -1
+        }
+    })
 }
 
-fn taos_init_impl() {
+fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     use taos_log::layer::TaosLayer;
     use taos_log::writer::RollingFileAppender;
     use tracing_log::LogTracer;
@@ -292,8 +296,7 @@ fn taos_init_impl() {
         .reserved_disk_size("1GB")
         .rotation_count(3)
         .rotation_size("1GB")
-        .build()
-        .unwrap();
+        .build()?;
 
     layers.push(
         TaosLayer::<Qid>::new(appender)
@@ -313,11 +316,9 @@ fn taos_init_impl() {
 
     tracing_subscriber::registry().with(layers).init();
 
-    if let Err(err) = LogTracer::init() {
-        eprintln!("failed to init log debugr, err: {err:?}");
-    }
+    LogTracer::init()?;
 
-    debug!("config: {cfg:?}");
+    Ok(())
 }
 
 #[derive(Debug)]

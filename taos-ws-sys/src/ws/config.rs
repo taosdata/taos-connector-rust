@@ -83,9 +83,9 @@ pub fn get_global_server_port() -> u16 {
 pub fn init() {
     static ONCE: OnceLock<()> = OnceLock::new();
     const DEFAULT_CONFIG: &str = if cfg!(windows) {
-        "/etc/taos/taos.cfg"
-    } else {
         "C:\\TDengine\\cfg\\taos.cfg"
+    } else {
+        "/etc/taos/taos.cfg"
     };
     ONCE.get_or_init(|| {
         let mut config = CONFIG.write().unwrap();
@@ -266,6 +266,7 @@ impl Config {
     }
 
     pub fn set_config_dir(&mut self, config_dir: &str) -> Result<(), TaosError> {
+        self.config_dir = Some(config_dir.to_string().into());
         let config_dir = Path::new(config_dir);
         let config_file = if config_dir.is_file() {
             config_dir.to_path_buf()
