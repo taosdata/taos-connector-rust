@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use faststr::FastStr;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::common::{Precision, Ty};
@@ -91,7 +92,7 @@ pub enum WsSend {
     },
     CheckServerStatus {
         req_id: ReqId,
-        fqdn: Option<String>,
+        fqdn: Option<FastStr>,
         port: i32,
     },
 }

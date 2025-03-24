@@ -18,11 +18,6 @@ pub type __taos_async_whitelist_fn_t = extern "C" fn(
 );
 
 #[no_mangle]
-pub extern "C" fn taos_init() -> c_int {
-    0
-}
-
-#[no_mangle]
 pub extern "C" fn taos_cleanup() {}
 
 #[no_mangle]
@@ -256,9 +251,6 @@ mod tests {
 
     #[test]
     fn test_stub() {
-        let code = taos_init();
-        assert_eq!(code, 0);
-
         taos_cleanup();
 
         let taos = taos_connect_auth(ptr::null(), ptr::null(), ptr::null(), ptr::null(), 0);
