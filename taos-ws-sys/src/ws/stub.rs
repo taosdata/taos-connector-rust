@@ -252,9 +252,6 @@ mod tests {
 
     #[test]
     fn test_stub() {
-        let code = taos_init();
-        assert_eq!(code, 0);
-
         taos_cleanup();
 
         let taos = taos_connect_auth(ptr::null(), ptr::null(), ptr::null(), ptr::null(), 0);

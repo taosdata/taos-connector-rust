@@ -78,12 +78,7 @@ pub fn get_global_fqdn() -> Option<FastStr> {
 }
 pub fn get_global_server_port() -> u16 {
     let config = CONFIG.read().unwrap();
-    config.server_port.unwrap_or_else(|| {
-        config
-            .first_ep()
-            .and_then(|s| s.split_once(':').and_then(|(h, p)| p.parse().ok()))
-            .unwrap_or(0)
-    })
+    config.server_port.unwrap_or(0)
 }
 pub fn init() {
     static ONCE: OnceLock<()> = OnceLock::new();
@@ -188,7 +183,7 @@ impl Config {
     pub fn set_compression(&mut self, compression: bool) {
         self.compression = Some(compression);
     }
-    pub fn set_log_dir(&mut self, log_dir: impl Into<FastStr>) {
+    pub fn set_log_dir<T: Into<FastStr>>(&mut self, log_dir: T) {
         self.log_dir = Some(log_dir.into());
     }
 
@@ -235,13 +230,13 @@ impl Config {
     pub fn set_timezone(&mut self, timezone: Tz) {
         self.timezone = Some(timezone);
     }
-    pub fn set_first_ep(&mut self, first_ep: impl Into<FastStr>) {
+    pub fn set_first_ep<T: Into<FastStr>>(&mut self, first_ep: T) {
         self.first_ep = Some(first_ep.into());
     }
-    pub fn set_second_ep(&mut self, second_ep: impl Into<FastStr>) {
+    pub fn set_second_ep<T: Into<FastStr>>(&mut self, second_ep: T) {
         self.second_ep = Some(second_ep.into());
     }
-    pub fn set_fqdn(&mut self, fqdn: impl Into<FastStr>) {
+    pub fn set_fqdn<T: Into<FastStr>>(&mut self, fqdn: T) {
         self.fqdn = Some(fqdn.into());
     }
     pub fn set_server_port(&mut self, server_port: u16) {
@@ -296,9 +291,9 @@ impl Config {
         Config::new(&config_file)
             .map(|config| self.set(config))
             .inspect_err(|err| {
-                eprintln!("failed to set config: {:#}", err);
+                eprintln!("failed to set config: {err:#}");
             })?;
-        return Ok(());
+        Ok(())
     }
 
     const fn const_new() -> Config {
@@ -424,13 +419,13 @@ mod tests {
     fn test_config() {
         let config = Config::new("./tests/taos.cfg".as_ref()).unwrap();
         assert_eq!(config.compression(), true);
-        assert_eq!(config.log_dir.as_deref().unwrap(), "/var/log/taos");
+        assert_eq!(config.log_dir.as_deref().unwrap(), "/path/to/logDir/");
         assert_eq!(config.log_level.unwrap(), LevelFilter::DEBUG);
         assert_eq!(config.log_output_to_screen.unwrap(), true);
         assert_eq!(config.timezone, Some(Tz::Asia__Shanghai));
-        assert_eq!(config.first_ep.as_deref().unwrap(), "hostname:6030");
+        assert_eq!(config.first_ep.as_deref().unwrap(), "hostname:7030");
         assert_eq!(config.second_ep.as_deref().unwrap(), "hostname:16030");
         assert_eq!(config.fqdn.as_deref().unwrap(), "hostname");
-        assert_eq!(config.server_port, Some(6030));
+        assert_eq!(config.server_port, Some(8030));
     }
 }
