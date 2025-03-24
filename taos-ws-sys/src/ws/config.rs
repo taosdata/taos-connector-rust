@@ -26,22 +26,6 @@ pub struct Config {
     pub server_port: Option<u16>,
 }
 
-// impl Default for Config {
-//     fn default() -> Self {
-//         Self {
-//             compression: None, // "false".to_string(),
-//             log_dir: None, // "/var/log/taos".to_string(),
-//             log_level: None, // LevelFilter::WARN,
-//             log_output_to_screen: None, // false,
-//             timezone: None,
-//             first_ep: None,
-//             second_ep: None,
-//             fqdn: None,
-//             server_port: None,
-//         }
-//     }
-// }
-
 pub static CONFIG: RwLock<Config> = RwLock::new(Config::const_new());
 
 // FIXME
@@ -49,6 +33,7 @@ pub static CONFIG: RwLock<Config> = RwLock::new(Config::const_new());
 pub fn get_global_timezone() -> Option<Tz> {
     CONFIG.read().unwrap().timezone
 }
+#[allow(dead_code)]
 pub fn get_global_log_dir() -> FastStr {
     CONFIG.read().unwrap().log_dir().clone()
 }
@@ -80,22 +65,15 @@ pub fn get_global_server_port() -> u16 {
     let config = CONFIG.read().unwrap();
     config.server_port.unwrap_or(0)
 }
-pub fn init() {
-    static ONCE: OnceLock<()> = OnceLock::new();
+pub fn init() -> Result<(), String> {
+    static ONCE: OnceLock<Result<(), String>> = OnceLock::new();
     const DEFAULT_CONFIG: &str = if cfg!(windows) {
-        "/etc/taos/taos.cfg"
-    } else {
         "C:\\TDengine\\cfg\\taos.cfg"
+    } else {
+        "/etc/taos/taos.cfg"
     };
     ONCE.get_or_init(|| {
         let mut config = CONFIG.write().unwrap();
-        if config.config_dir.is_none() {
-            if let Ok(e) = std::env::var("TAOS_CONFIG_DIR") {
-                let _ = config.set_config_dir(&e);
-            } else {
-                let _ = config.set_config_dir(DEFAULT_CONFIG);
-            }
-        }
         if let Ok(e) = std::env::var("TAOS_LOG_DIR") {
             config.set_log_dir(e);
         }
@@ -126,7 +104,20 @@ pub fn init() {
         if let Ok(e) = std::env::var("TAOS_COMPRESSION") {
             config.set_compression(e.parse().unwrap());
         }
-    });
+
+        let cfg_dir = if let Some(dir) = &config.config_dir {
+            dir.to_string()
+        } else if let Ok(dir) = std::env::var("TAOS_CONFIG_DIR") {
+            dir
+        } else {
+            DEFAULT_CONFIG.to_string()
+        };
+        if let Err(err) = config.read_config(&cfg_dir) {
+            return Err(err.to_string());
+        }
+        Ok(())
+    })
+    .clone()
 }
 
 impl Config {
@@ -228,7 +219,9 @@ impl Config {
         self.log_output_to_screen = Some(log_output_to_screen);
     }
     pub fn set_timezone(&mut self, timezone: Tz) {
-        self.timezone = Some(timezone);
+        if self.timezone.is_none() {
+            self.timezone = Some(timezone);
+        }
     }
     pub fn set_first_ep<T: Into<FastStr>>(&mut self, first_ep: T) {
         self.first_ep = Some(first_ep.into());
@@ -265,8 +258,12 @@ impl Config {
         );
     }
 
-    pub fn set_config_dir(&mut self, config_dir: &str) -> Result<(), TaosError> {
-        let config_dir = Path::new(config_dir);
+    pub fn set_config_dir(&mut self, cfg_dir: impl Into<FastStr>) {
+        self.config_dir = Some(cfg_dir.into());
+    }
+
+    pub fn read_config(&mut self, cfg_dir: &str) -> Result<(), TaosError> {
+        let config_dir = Path::new(cfg_dir);
         let config_file = if config_dir.is_file() {
             config_dir.to_path_buf()
         } else if config_dir.is_dir() {

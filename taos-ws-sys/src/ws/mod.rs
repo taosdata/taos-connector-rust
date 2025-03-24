@@ -2,6 +2,7 @@
 
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use error::{set_err_and_get_code, TaosError};
@@ -197,9 +198,7 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
             }
             let dir = CStr::from_ptr(arg as _);
             if let Ok(dir) = dir.to_str() {
-                if let Err(err) = c.set_config_dir(dir) {
-                    return set_err_and_get_code(err);
-                }
+                c.set_config_dir(dir);
                 0
             } else {
                 return set_err_and_get_code(TaosError::new(
@@ -259,17 +258,20 @@ impl From<u64> for Qid {
     }
 }
 
-/// Run 1ce.
+/// Run once.
 #[no_mangle]
 pub extern "C" fn taos_init() -> c_int {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        taos_init_impl();
-    });
-    0
+    static ONCE: OnceLock<c_int> = OnceLock::new();
+    *ONCE.get_or_init(|| match taos_init_impl() {
+        Ok(_) => 0,
+        Err(err) => {
+            set_err_and_get_code(TaosError::new(Code::FAILED, &err.to_string()));
+            -1
+        }
+    })
 }
 
-fn taos_init_impl() {
+fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     use taos_log::layer::TaosLayer;
     use taos_log::writer::RollingFileAppender;
     use tracing_log::LogTracer;
@@ -277,28 +279,29 @@ fn taos_init_impl() {
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::Layer;
 
-    config::init();
+    if let Err(err) = config::init() {
+        return Err(TaosError::new(Code::FAILED, &err.to_string()).into());
+    }
 
     let cfg = config::CONFIG.read().unwrap();
-    if let Some(timezone) = cfg.timezone {
+    if let Some(timezone) = cfg.timezone() {
         std::env::set_var("TZ", timezone.name());
     }
 
     let mut layers = Vec::new();
-    let config_dir = config::get_global_log_dir();
+    let config_dir = cfg.log_dir();
 
     let appender = RollingFileAppender::builder(config_dir.as_str(), "taos", 16)
         .compress(true)
         .reserved_disk_size("1GB")
         .rotation_count(3)
         .rotation_size("1GB")
-        .build()
-        .unwrap();
+        .build()?;
 
     layers.push(
         TaosLayer::<Qid>::new(appender)
             .with_location()
-            .with_filter(cfg.log_level)
+            .with_filter(cfg.log_level())
             .boxed(),
     );
 
@@ -306,18 +309,16 @@ fn taos_init_impl() {
         layers.push(
             TaosLayer::<Qid, _, _>::new(std::io::stdout)
                 .with_location()
-                .with_filter(cfg.log_level)
+                .with_filter(cfg.log_level())
                 .boxed(),
         );
     }
 
     tracing_subscriber::registry().with(layers).init();
 
-    if let Err(err) = LogTracer::init() {
-        eprintln!("failed to init log debugr, err: {err:?}");
-    }
+    LogTracer::init()?;
 
-    debug!("config: {cfg:?}");
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -621,24 +622,13 @@ mod tests {
                 TSDB_OPTION::TSDB_OPTION_CONFIGDIR,
                 CString::new("invalid_path").unwrap().as_ptr() as *const c_void,
             );
-            assert!(p != 0);
-            let code = taos_errno(ptr::null_mut());
-            let str = taos_errstr(ptr::null_mut());
-            assert_eq!(Code::from(code), Code::INVALID_PARA);
-            assert_eq!(
-                CStr::from_ptr(str).to_str().unwrap(),
-                "config dir not found: invalid_path"
-            );
+            assert_eq!(p, 0);
 
             let p = taos_options(
                 TSDB_OPTION::TSDB_OPTION_CONFIGDIR,
                 CString::new("tests/").unwrap().as_ptr() as *const c_void,
             );
             assert_eq!(p, 0);
-            assert_eq!(
-                config::get_global_first_ep().as_deref().unwrap(),
-                "hostname:7030"
-            );
             taos_options(TSDB_OPTION::TSDB_OPTION_TIMEZONE, ptr::null());
             taos_options(
                 TSDB_OPTION::TSDB_OPTION_TIMEZONE,
