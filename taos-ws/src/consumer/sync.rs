@@ -77,8 +77,9 @@ impl WsSyncStmt {
 
 #[test]
 fn test_stmt_stable() -> anyhow::Result<()> {
-    use crate::Ws;
     use taos_query::Queryable;
+
+    use crate::Ws;
 
     let dsn = Dsn::from_str("taos://localhost:6041")?;
     dbg!(&dsn);
@@ -118,8 +119,9 @@ fn test_stmt_stable() -> anyhow::Result<()> {
 
 #[test]
 fn test_stmt_table() -> anyhow::Result<()> {
-    use crate::Ws;
     use taos_query::Queryable;
+
+    use crate::Ws;
 
     let dsn = Dsn::from_str("taos://localhost:6041")?;
     dbg!(&dsn);

@@ -1,14 +1,16 @@
 [workspace]
 members = [
   "mdsn",
+  "taos",
   "taos-error",
-  "taos-query",
+  "taos-log",
   "taos-macros",
   "taos-optin",
+  "taos-query",
   "taos-ws",
   "taos-ws-sys",
-  "taos",
 ]
+
 resolver = "2"
 
 [workspace.package]
@@ -25,3 +27,8 @@ license = "MIT OR Apache-2.0"
 readme = "./README.md"
 repository = "https://github.com/taosdata/taos-connector-rust.git"
 rust-version = "1.70"
+
+[profile.release]
+lto = true
+panic = "abort"
+overflow-checks = false

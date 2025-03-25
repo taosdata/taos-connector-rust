@@ -57,12 +57,24 @@ impl Stmt2BindParam {
         }
     }
 
+    pub fn with_table_name(&mut self, table_name: String) {
+        self.table_name = Some(table_name);
+    }
+
     pub fn table_name(&self) -> Option<&String> {
         self.table_name.as_ref()
     }
 
+    pub fn with_tags(&mut self, tags: Vec<Value>) {
+        self.tags = Some(tags);
+    }
+
     pub fn tags(&self) -> Option<&Vec<Value>> {
         self.tags.as_ref()
+    }
+
+    pub fn with_columns(&mut self, columns: Vec<ColumnView>) {
+        self.columns = Some(columns);
     }
 
     pub fn columns(&self) -> Option<&Vec<ColumnView>> {

@@ -1,5 +1,5 @@
-// use dlopen2::wrapper::{Container, WrapperApi};
-// use dlopen2::symbor::{Library, PtrOrNull, Ref, SymBorApi, Symbol};
+#![allow(non_snake_case)]
+
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
@@ -511,7 +511,6 @@ impl ApiEntry {
         Self::dlopen(path)
     }
 
-    #[allow(non_snake_case)]
     pub fn dlopen<S>(path: S) -> Result<Self, dlopen2::Error>
     where
         S: AsRef<Path>,
@@ -569,6 +568,7 @@ impl ApiEntry {
                 taos_fetch_lengths,
                 taos_fetch_block
             );
+
             optional_symbol!(
                 taos_fetch_block_s,
                 taos_fetch_raw_block,

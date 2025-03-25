@@ -51,9 +51,11 @@ impl WsTmqSender {
         self.req_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
+
     async fn send_recv(&self, msg: TmqSend) -> RawResult<TmqRecvData> {
         self.send_recv_timeout(msg, Duration::MAX).await
     }
+
     async fn send_recv_timeout(&self, msg: TmqSend, timeout: Duration) -> RawResult<TmqRecvData> {
         let send_timeout = Duration::from_millis(5000);
         let req_id = msg.req_id();
@@ -282,6 +284,7 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         Ok(edition)
     }
 }
+
 #[derive(Debug)]
 struct WsMessageBase {
     is_support_fetch_raw: bool,
@@ -309,7 +312,6 @@ impl WsMessageBase {
         }
 
         let req_id = self.sender.req_id();
-
         let msg = TmqSend::FetchRawData(MessageArgs {
             req_id,
             message_id: self.message_id,
@@ -326,9 +328,9 @@ impl WsMessageBase {
         }
         Ok(None)
     }
+
     async fn fetch_raw_block_old(&self) -> RawResult<Option<RawBlock>> {
         let req_id = self.sender.req_id();
-
         let msg = TmqSend::Fetch(MessageArgs {
             req_id,
             message_id: self.message_id,
@@ -471,30 +473,21 @@ impl WsMessageSet {
 }
 
 impl Consumer {
-    // async fn init_poll(&self, timeout: Duration) -> Result<()> {
-    //     let req_id = self.sender.req_id();
-    //     let action = TmqSend::Poll {
-    //         req_id,
-    //         blocking_time: 0,
-    //     };
-
-    //     let data = self.sender.send_recv_timeout(action, timeout).await?;
-    //     match data {
-    //         TmqRecvData::Poll(TmqPoll {
-    //             message_id,
-    //             database,
-    //             have_message,
-    //             topic,
-    //             vgroup_id,
-    //             message_type,
-    //         }) => {
-    //             assert!(!have_message);
-    //         }
-    //         _ => unreachable!(),
-    //     }
-    //     Ok(())
-    // }
     async fn poll_wait(&self) -> RawResult<(Offset, MessageSet<Meta, Data>)> {
+        if self.auto_commit {
+            let mut guard = self.auto_commit_offset.lock().await;
+            if let Some(offset) = guard.0.take() {
+                let now = Instant::now();
+                if now - guard.1 > Duration::from_millis(self.auto_commit_interval_ms.unwrap()) {
+                    guard.1 = now;
+                    tracing::trace!("poll auto commit, commit offset: {offset:?}");
+                    if let Err(err) = AsAsyncConsumer::commit(self, offset).await {
+                        tracing::error!("poll auto commit failed, err: {err:?}");
+                    }
+                }
+            }
+        }
+
         let elapsed = tokio::time::Instant::now();
 
         let is_in_polling =
@@ -530,10 +523,17 @@ impl Consumer {
                                 message_id,
                                 raw_blocks: Arc::new(Mutex::new(None)),
                             };
+
                             tracing::trace!("Got message in {}ms", dur.as_millis());
 
-                            // Release the lock.
+                            // Release the lock
                             self.polling_mutex.store(false, Ordering::Release);
+
+                            if self.auto_commit {
+                                tracing::trace!("poll auto commit, set offset: {offset:?}");
+                                let mut guard = self.auto_commit_offset.lock().await;
+                                guard.0.replace(offset.clone());
+                            }
 
                             return match message_type {
                                 MessageType::Meta => Ok((offset, MessageSet::Meta(Meta(message)))),
@@ -551,7 +551,6 @@ impl Consumer {
                                     ),
                                 )),
                                 MessageType::Invalid => unreachable!(),
-                                // _ => unreachable!(),
                             };
                         }
                     }
@@ -595,10 +594,18 @@ impl Consumer {
                             message_id,
                             raw_blocks: Arc::new(Mutex::new(None)),
                         };
+
                         tracing::trace!("Got message in {}ms", dur.as_millis());
 
-                        // Release the lock.
+                        // Release the lock
                         self.polling_mutex.store(false, Ordering::Release);
+
+                        if self.auto_commit {
+                            tracing::trace!("poll auto commit, set offset: {offset:?}");
+                            let mut guard = self.auto_commit_offset.lock().await;
+                            guard.0.replace(offset.clone());
+                        }
+
                         break match message_type {
                             MessageType::Meta => Ok((offset, MessageSet::Meta(Meta(message)))),
                             MessageType::Data => Ok((offset, MessageSet::Data(Data(message)))),
@@ -654,7 +661,7 @@ impl AsAsyncConsumer for Consumer {
         let req_id = self.sender.req_id();
         let action = TmqSend::Subscribe {
             req_id,
-            req: Box::new(self.tmq_conf.clone()),
+            req: self.tmq_conf.clone().disable_auto_commit(),
             topics: self.topics.clone(),
             conn: self.conn.clone(),
         };
@@ -669,7 +676,11 @@ impl AsAsyncConsumer for Consumer {
                 // subscribe conf error -2.
                 let action = TmqSend::Subscribe {
                     req_id: self.sender.req_id(),
-                    req: Box::new(self.tmq_conf.clone().disable_batch_meta()),
+                    req: self
+                        .tmq_conf
+                        .clone()
+                        .disable_batch_meta()
+                        .disable_auto_commit(),
                     topics: self.topics.clone(),
                     conn: self.conn.clone(),
                 };
@@ -679,10 +690,7 @@ impl AsAsyncConsumer for Consumer {
             }
         }
 
-        // dbg!(&self.tmq_conf);
-
         if let Some(offset) = self.tmq_conf.offset_seek.as_deref() {
-            // dbg!(offset);
             let offsets = offset
                 .split(',')
                 .map(|s| {
@@ -824,7 +832,6 @@ impl AsAsyncConsumer for Consumer {
         let recv = self.sender.send_recv(action).await.ok();
         match recv {
             Some(TmqRecvData::Assignment(TopicAssignment { assignment, timing })) => {
-                // assert_eq!(topic, topic);
                 tracing::trace!("timing: {:?}", timing);
                 tracing::trace!("assignment: {:?}", assignment);
                 assignment
@@ -996,23 +1003,32 @@ impl TmqBuilder {
             .ok_or_else(|| DsnError::RequireParam("group.id".to_string()))?;
         let client_id = dsn.params.get("client.id").map(ToString::to_string);
         let offset_reset = dsn.params.get("auto.offset.reset").map(ToString::to_string);
-        let auto_commit = dsn
-            .params
-            .get("enable.auto.commit")
-            .map_or("false".to_string(), |s| {
-                if s.is_empty() {
-                    "false".to_string()
-                } else {
-                    s.to_string()
-                }
-            });
-        let auto_commit_interval_ms = dsn.params.get("auto.commit.interval.ms").and_then(|s| {
-            if s.is_empty() {
-                None
-            } else {
-                Some(s.to_string())
+
+        let mut auto_commit = "false".to_owned();
+        if let Some(s) = dsn.params.get("enable.auto.commit") {
+            if !s.is_empty() {
+                let s1 = s.to_lowercase();
+                let _ = s1.parse::<bool>().map_err(|_| {
+                    DsnError::InvalidParam("enable.auto.commit".to_owned(), s.to_owned())
+                })?;
+                auto_commit = s1;
             }
-        });
+        }
+
+        let mut auto_commit_interval_ms = None;
+        if auto_commit == "true" {
+            let mut ms = "5000";
+            if let Some(s) = dsn.params.get("auto.commit.interval.ms") {
+                if !s.is_empty() {
+                    let _ = s.to_lowercase().parse::<u64>().map_err(|_| {
+                        DsnError::InvalidParam("auto.commit.interval.ms".to_owned(), s.to_owned())
+                    })?;
+                    ms = s;
+                }
+            }
+            auto_commit_interval_ms = Some(ms.to_owned());
+        }
+
         let snapshot_enable = dsn
             .params
             .get("experimental.snapshot.enable")
@@ -1136,8 +1152,7 @@ impl TmqBuilder {
             .info
             .build_stream_opt(self.info.to_tmq_url(), false)
             .await?;
-        // let (ws, _) = taos_query::block_in_place_or_global(connect_async(url))?;
-        // let (ws, _) = connect_async(&url).await.map_err(WsTmqError::from)?;
+
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
@@ -1146,6 +1161,7 @@ impl TmqBuilder {
                 .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
                 .context("Send version request message error")
         })?;
+
         let duration = Duration::from_secs(8);
         let version_future = async {
             let max_non_version = 5;
@@ -1187,6 +1203,7 @@ impl TmqBuilder {
                 }
             }
         };
+
         let version = match tokio::time::timeout(duration, version_future).await {
             Ok(Ok(version)) => version,
             Ok(Err(err)) => {
@@ -1220,12 +1237,7 @@ impl TmqBuilder {
                         tracing::trace!("Check websocket message sender alive");
                         if let Err(err) = sender.send(Message::Ping(PING.to_vec())).await {
                             tracing::trace!("sending ping message to {sending_url} error: {err:?}");
-                            // let mut keys = Vec::new();
                             let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
-
-                            // msg_handler.for_each_async(|k, _| {
-                            //     keys.push(*k);
-                            // }).await;
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
                                     let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
@@ -1296,7 +1308,6 @@ impl TmqBuilder {
                                             {
                                                 // We don't care about the result of the sender for unsubscribe
                                                 let _ = sender.send(ok.map(|_|recv));
-
                                             }  else {
                                                 tracing::warn!("unsubscribe message received but no receiver alive");
                                             }
@@ -1515,12 +1526,10 @@ impl TmqBuilder {
                                     if bytes == PING {
                                         tracing::trace!("ping/pong handshake success");
                                     } else {
-                                        // do nothing
                                         tracing::warn!("received (unexpected) pong message, do nothing");
                                     }
                                 }
                                 Message::Frame(frame) => {
-                                    // do no`thing
                                     tracing::warn!("received (unexpected) frame message, do nothing");
                                     tracing::trace!("* frame data: {frame:?}");
                                 }
@@ -1563,6 +1572,13 @@ impl TmqBuilder {
             support_fetch_raw: is_support_binary_sql(&version),
             polling_mutex,
             cache: cache_rx,
+            auto_commit: self.conf.auto_commit == "true",
+            auto_commit_interval_ms: self
+                .conf
+                .auto_commit_interval_ms
+                .as_deref()
+                .and_then(|s| s.parse::<u64>().ok()),
+            auto_commit_offset: Arc::new(Mutex::new((None, Instant::now()))),
         })
     }
 }
@@ -1579,6 +1595,9 @@ pub struct Consumer {
     /// Polling, if true, the consumer will wait for the message to be consumed.
     polling_mutex: Arc<AtomicBool>,
     cache: flume::Receiver<TmqRecvData>,
+    auto_commit: bool,
+    auto_commit_interval_ms: Option<u64>,
+    auto_commit_offset: Arc<Mutex<(Option<Offset>, Instant)>>,
 }
 
 impl Drop for Consumer {
@@ -1586,6 +1605,7 @@ impl Drop for Consumer {
         let _ = self.close_signal.send(true);
     }
 }
+
 #[derive(Debug, Clone)]
 pub struct Offset {
     message_id: MessageId,
@@ -1684,6 +1704,7 @@ mod tests {
     #[tokio::test]
     async fn test_ws_tmq_meta_batch() -> anyhow::Result<()> {
         use taos_query::prelude::{AsyncTBuilder, *};
+
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
@@ -1694,6 +1715,7 @@ mod tests {
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
             .build()
             .await?;
+
         taos.exec_many([
             "drop topic if exists ws_tmq_meta_batch",
             "drop database if exists ws_tmq_meta_batch",
@@ -1752,13 +1774,6 @@ mod tests {
             "alter table `table` drop column new10_new",
             "alter table `table` drop column new2",
             "alter table `table` drop column new1",
-            // // kind 9: drop normal table
-            // "drop table `table`",
-            // // kind 10: drop child table
-            // "drop table `tb2` `tb1`",
-            // // kind 11: drop super table
-            // "drop table `stb2`",
-            // "drop table `stb1`",
         ])
         .await?;
 
@@ -1804,7 +1819,6 @@ mod tests {
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
                         tracing::info!(count, batch.size = json.iter().len(), "{json:?}");
-                        // assert!(json.iter().len() > 1, "json meta is batch");
                         for meta in &json {
                             let sql = meta.to_string();
                             tracing::debug!(count, "sql: {}", sql);
@@ -1828,25 +1842,21 @@ mod tests {
                                     Code::STABLE_NOT_EXIST => {
                                         tracing::trace!("stable does not exists")
                                     }
-                                    _ => {
-                                        tracing::error!(count, "{}", err);
-                                    }
+                                    _ => tracing::error!(count, "{}", err),
                                 }
                             }
                         }
                     }
                     MessageSet::Data(data) => {
                         // data message may have more than one data block for various tables.
-                        while let Some(_data) = data.fetch_block().await? {
-                            // dbg!(data.table_name());
-                            // dbg!(data);
-                        }
+                        while let Some(_data) = data.fetch_block().await? {}
                     }
                     _ => unreachable!(),
                 }
                 consumer.commit(offset).await?;
             }
         }
+
         consumer.unsubscribe().await;
 
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -1857,6 +1867,7 @@ mod tests {
             "drop database ws_tmq_meta_batch",
         ])
         .await?;
+
         Ok(())
     }
 
@@ -2001,19 +2012,14 @@ mod tests {
                                     Code::STABLE_NOT_EXIST => {
                                         tracing::trace!("stable does not exists")
                                     }
-                                    _ => {
-                                        tracing::error!(count, "{}", err);
-                                    }
+                                    _ => tracing::error!(count, "{}", err),
                                 }
                             }
                         }
                     }
                     MessageSet::Data(data) => {
                         // data message may have more than one data block for various tables.
-                        while let Some(_data) = data.fetch_block().await? {
-                            // dbg!(data.table_name());
-                            // dbg!(data);
-                        }
+                        while let Some(_data) = data.fetch_block().await? {}
                     }
                     _ => unreachable!(),
                 }
@@ -2036,9 +2042,6 @@ mod tests {
     #[test]
     fn test_ws_tmq_meta_sync() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        // pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::LevelFilter::Info)
-        //     .init();
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?.build()?;
         taos.exec_many([
@@ -2227,9 +2230,6 @@ mod tests {
     #[test]
     fn test_ws_tmq_metadata() -> anyhow::Result<()> {
         use taos_query::prelude::sync::*;
-        // pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::LevelFilter::Debug)
-        //     .init();
 
         let taos = TaosBuilder::from_dsn("ws://localhost:6041")?.build()?;
         taos.exec_many([
@@ -2381,9 +2381,7 @@ mod tests {
     async fn test_consumer_cloud() -> anyhow::Result<()> {
         use taos_query::prelude::*;
         std::env::set_var("RUST_LOG", "debug");
-        // let _ = pretty_env_logger::formatted_builder()
-        //     .filter_level(tracing::LevelFilter::Debug)
-        //     .try_init();
+
         let dsn = std::env::var("TDENGINE_ClOUD_DSN");
         if dsn.is_err() {
             println!("Skip test when not in cloud");
@@ -2503,18 +2501,14 @@ mod tests {
                                     Code::STABLE_NOT_EXIST => {
                                         tracing::trace!("stable does not exists")
                                     }
-                                    _ => {
-                                        tracing::error!("{}", err);
-                                    }
+                                    _ => tracing::error!("{}", err),
                                 }
                             }
                         }
                     }
                     MessageSet::Data(data) => {
                         // data message may have more than one data block for various tables.
-                        while let Some(_data) = data.fetch_block().await? {
-                            // dbg!(data);
-                        }
+                        while let Some(_data) = data.fetch_block().await? {}
                     }
                     _ => unreachable!(),
                 }
@@ -2558,6 +2552,7 @@ mod tests {
     #[tokio::test]
     async fn test_ws_tmq_poll_lost() -> anyhow::Result<()> {
         use taos_query::prelude::*;
+
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
@@ -2568,6 +2563,7 @@ mod tests {
         let taos = TaosBuilder::from_dsn("taos://localhost:6041")?
             .build()
             .await?;
+
         taos.exec_many([
             "drop topic if exists test_ws_tmq_poll_lost",
             "drop database if exists test_ws_tmq_poll_lost",
@@ -2632,13 +2628,6 @@ mod tests {
             "alter table `table` drop column new10_new",
             "alter table `table` drop column new2",
             "alter table `table` drop column new1",
-            // // kind 9: drop normal table
-            // "drop table `table`",
-            // // kind 10: drop child table
-            // "drop table `tb2` `tb1`",
-            // // kind 11: drop super table
-            // "drop table `stb2`",
-            // "drop table `stb1`",
         ])
         .await?;
 
@@ -2684,6 +2673,7 @@ mod tests {
             .inspect_err(|err| {
                 println!("err: {:?}", err);
             })?;
+
             let _ = tokio::select! {
                 res = consumer.recv_timeout(Timeout::Duration(Duration::from_millis(400))) => {
                     res
@@ -2701,7 +2691,7 @@ mod tests {
 
             while let Some((offset, message)) = stream.try_next().await? {
                 // Offset contains information for topic name, database name and vgroup id,
-                //  similar to kafka topic/partition/offset.
+                // similar to kafka topic/partition/offset.
                 let _ = offset.topic();
                 let _ = offset.database();
                 let _ = offset.vgroup_id();
@@ -2709,7 +2699,6 @@ mod tests {
                 match message {
                     MessageSet::Meta(meta) => {
                         let _raw = meta.as_raw_meta().await?;
-
                         // meta data can be write to an database seamlessly by raw or json (to sql).
                         let json = meta.as_json_meta().await?;
                         for meta in &json {
@@ -2728,6 +2717,7 @@ mod tests {
                 consumer.commit(offset).await?;
             }
         }
+
         consumer.unsubscribe().await;
 
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -2738,6 +2728,127 @@ mod tests {
             "drop database test_ws_tmq_poll_lost",
         ])
         .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_auto_commit() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1741091352",
+            "drop database if exists test_1741091352",
+            "create database test_1741091352 wal_retention_period 3600",
+            "create topic topic_1741091352 with meta as database test_1741091352",
+            "use test_1741091352",
+            // kind 1: create super table using all types
+            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 json)",
+            // kind 2: create child table with json tag
+            "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
+            "create table tb1 using stb1 tags(NULL)",
+            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)
+            tb1 values(now, true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            "insert into tb1 using stb1 tags(NULL) values(now, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)
+            tb1 values(now, true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            // kind 3: create super table with all types except json (especially for tags)
+            "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
+            t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
+            t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
+            // kind 4: create child table with all types except json
+            "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            254, 65534, 1, 1)",
+            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL)",
+            // kind 5: create common table
+            "create table `table` (ts timestamp, v int)",
+            // kind 6: column in super table
+            "alter table stb1 add column new1 bool",
+            "alter table stb1 add column new2 tinyint",
+            "alter table stb1 add column new10 nchar(16)",
+            "alter table stb1 modify column new10 nchar(32)",
+            "alter table stb1 drop column new10",
+            "alter table stb1 drop column new2",
+            "alter table stb1 drop column new1",
+            // kind 7: add tag in super table
+            "alter table `stb2` add tag new1 bool",
+            "alter table `stb2` rename tag new1 new1_new",
+            "alter table `stb2` modify tag t10 nchar(32)",
+            "alter table `stb2` drop tag new1_new",
+            // kind 8: column in common table
+            "alter table `table` add column new1 bool",
+            "alter table `table` add column new2 tinyint",
+            "alter table `table` add column new10 nchar(16)",
+            "alter table `table` modify column new10 nchar(32)",
+            "alter table `table` rename column new10 new10_new",
+            "alter table `table` drop column new10_new",
+            "alter table `table` drop column new2",
+            "alter table `table` drop column new1",
+        ])
+        .await?;
+
+        taos.exec_many([
+            "drop database if exists test_1741138531",
+            "create database test_1741138531 wal_retention_period 3600",
+            "use test_1741138531",
+        ])
+        .await?;
+
+        let mut consumer = TmqBuilder::new(
+            "ws://localhost:6041?group.id=10&timeout=500ms&auto.offset.reset=earliest&enable.auto.commit=true&auto.commit.interval.ms=1",
+        )?.build_consumer().await?;
+
+        consumer.subscribe(["topic_1741091352"]).await?;
+
+        {
+            let mut pre_topic = None;
+            let mut pre_vgroup_id = 0;
+            let mut pre_offset = 0;
+
+            let mut stream = consumer.stream();
+            while let Some((offset, _)) = stream.try_next().await? {
+                if let Some(pre_topic) = pre_topic.as_deref() {
+                    let offset = consumer.committed(pre_topic, pre_vgroup_id).await?;
+                    assert!(offset >= pre_offset);
+                }
+
+                pre_topic = Some(offset.topic().to_owned());
+                pre_vgroup_id = offset.vgroup_id();
+                pre_offset = offset.offset();
+            }
+        }
+
+        consumer.unsubscribe().await;
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        taos.exec_many([
+            "drop database test_1741138531",
+            "drop topic topic_1741091352",
+            "drop database test_1741091352",
+        ])
+        .await?;
+
         Ok(())
     }
 

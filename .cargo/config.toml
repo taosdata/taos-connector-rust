@@ -5,9 +5,16 @@ rustflags = [
 
     # Style Group
     "-Aclippy::missing_safety_doc",
+    "-Aclippy::ptr_eq",
 
     # Suspicious Group
-    # "-Aclippy::missing_transmute_annotations",
+    "-Aclippy::incompatible_msrv",
+    "-Aclippy::missing_transmute_annotations",
+    "-Aclippy::macro_metavars_in_unsafe",
+
+    # Perf Group
+    "-Aclippy::result_large_err",
+    "-Aclippy::large_enum_variant",
 
     # Cargo Group
     "-Wclippy::negative_feature_names",
@@ -31,7 +38,6 @@ rustflags = [
     "-Wclippy::path_buf_push_overwrite",
     "-Wclippy::redundant_clone",
     "-Wclippy::redundant_pub_crate",
-    # "-Wclippy::set_contains_or_insert",
     "-Wclippy::significant_drop_in_scrutinee",
     "-Wclippy::string_lit_as_bytes",
     "-Wclippy::suspicious_operation_groupings",
@@ -43,7 +49,6 @@ rustflags = [
     "-Wclippy::unnecessary_struct_initialization",
     "-Wclippy::unused_peekable",
     "-Wclippy::unused_rounding",
-    # "-Wclippy::while_float",
 
     # Pedantic Group
     "-Wclippy::bool_to_int_with_if",
@@ -118,7 +123,6 @@ rustflags = [
     # Restriction Group
     "-Wclippy::alloc_instead_of_core",
     "-Wclippy::big_endian_bytes",
-    # "-Wclippy::cfg_not_test",
     "-Wclippy::dbg_macro",
     "-Wclippy::default_union_representation",
     "-Wclippy::empty_drop",
@@ -127,7 +131,6 @@ rustflags = [
     "-Wclippy::exit",
     "-Wclippy::filetype_is_file",
     "-Wclippy::float_cmp_const",
-    "-Wclippy::fn_to_numeric_cast_any",
     "-Wclippy::get_unwrap",
     "-Wclippy::host_endian_bytes",
     "-Wclippy::impl_trait_in_params",
@@ -140,10 +143,7 @@ rustflags = [
     "-Wclippy::multiple_inherent_impl",
     "-Wclippy::mutex_atomic",
     "-Wclippy::needless_raw_strings",
-    # "-Wclippy::pathbuf_init_then_push",
     "-Wclippy::partial_pub_fields",
-    "-Wclippy::print_stderr",
-    "-Wclippy::print_stdout",
     "-Wclippy::pub_without_shorthand",
     "-Wclippy::rc_buffer",
     "-Wclippy::rc_mutex",
@@ -152,10 +152,8 @@ rustflags = [
     "-Wclippy::separated_literal_suffix",
     "-Wclippy::string_lit_chars_any",
     "-Wclippy::string_slice",
-    "-Wclippy::string_to_string",
     "-Wclippy::tests_outside_test_module",
     "-Wclippy::unnecessary_self_imports",
     "-Wclippy::unneeded_field_pattern",
-    "-Wclippy::use_debug",
     "-Wclippy::verbose_file_reads",
 ]

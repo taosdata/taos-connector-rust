@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::bail;
 use byteorder::{ByteOrder, LittleEndian};
+use faststr::FastStr;
 use flume::Sender;
 use futures::channel::oneshot;
 use futures::stream::SplitStream;
@@ -409,7 +410,13 @@ async fn read_queries(
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     },
-                    // Block type is for binary.
+                    WsRecvData::ValidateSql { .. } | WsRecvData::CheckServerStatus { .. } => {
+                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                            let _ = sender.send(ok.map(|_| data));
+                        } else {
+                            tracing::warn!("req_id {req_id} not detected, message might be lost");
+                        }
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -565,9 +572,6 @@ async fn read_queries(
                 queries_sender.scan(|k, _| {
                     keys.push(*k);
                 });
-                // queries_sender.for_each_async(|k, _| {
-                //     keys.push(*k);
-                // }).await;
                 for k in keys {
                     if let Some((_, sender)) = queries_sender.remove(&k) {
                         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "close signal received")));
@@ -585,11 +589,6 @@ async fn read_queries(
     queries_sender.scan(|k, _| {
         keys.push(*k);
     });
-    // queries_sender
-    //     .for_each_async(|k, _| {
-    //         keys.push(*k);
-    //     })
-    //     .await;
     for k in keys {
         if let Some((_, sender)) = queries_sender.remove(&k) {
             let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
@@ -621,7 +620,7 @@ pub fn is_support_binary_sql(v1: &str) -> bool {
 }
 
 impl WsTaos {
-    /// Build TDengine websocket client from dsn.
+    /// Build TDengine WebSocket client from dsn.
     ///
     /// ```text
     /// ws://localhost:6041/
@@ -711,9 +710,7 @@ impl WsTaos {
                             ok?;
                             break;
                         }
-                        WsRecvData::Version { .. } => {
-                            continue;
-                        }
+                        WsRecvData::Version { .. } => {}
                         data => {
                             return Err(RawError::from_string(format!(
                                 "Unexpected login result: {data:?}"
@@ -763,6 +760,7 @@ impl WsTaos {
                         let _ = sender.flush().await;
                     }
                     _ = rx.changed() => {
+                        let _= sender.send(Message::Close(None)).await;
                         let _ = sender.close().await;
                         tracing::trace!("close sender task");
                         break;
@@ -786,7 +784,6 @@ impl WsTaos {
                                 break;
                             }
                         }
-                        // dbg!(&msg);
                     }
                 }
             }
@@ -1135,24 +1132,62 @@ impl WsTaos {
     }
 
     pub async fn s_put(&self, sml: &SmlData) -> RawResult<()> {
-        let action = WsSend::Insert {
+        let req = WsSend::Insert {
             protocol: sml.protocol() as u8,
             precision: sml.precision().into(),
             data: sml.data().join("\n"),
             ttl: sml.ttl(),
             req_id: sml.req_id(),
+            table_name_key: sml.table_name_key().cloned(),
         };
-        tracing::trace!("put send: {:?}", action);
-        let req = self.sender.send_recv(action).await?;
-
-        match req {
-            WsRecvData::Insert(res) => {
-                tracing::trace!("put resp : {:?}", res);
+        tracing::trace!("sml req: {req:?}");
+        match self.sender.send_recv(req).await? {
+            WsRecvData::Insert(resp) => {
+                tracing::trace!("sml resp: {resp:?}");
                 Ok(())
             }
-            _ => {
-                unreachable!()
+            _ => unreachable!(),
+        }
+    }
+
+    pub async fn validate_sql(&self, sql: &str) -> RawResult<()> {
+        let mut req = Vec::with_capacity(30 + sql.len());
+        let req_id = generate_req_id();
+        req.write_u64_le(req_id).map_err(Error::from)?;
+        req.write_u64_le(0).map_err(Error::from)?;
+        req.write_u64_le(10).map_err(Error::from)?;
+        req.write_u16_le(1).map_err(Error::from)?;
+        req.write_u32_le(sql.len() as _).map_err(Error::from)?;
+        req.write_all(sql.as_bytes()).map_err(Error::from)?;
+
+        match self.sender.send_recv(WsSend::Binary(req)).await? {
+            WsRecvData::ValidateSql { result_code, .. } => {
+                if result_code != 0 {
+                    Err(RawError::new(result_code, "validate sql error"))
+                } else {
+                    Ok(())
+                }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    pub async fn check_server_status(
+        &self,
+        fqdn: Option<FastStr>,
+        port: i32,
+    ) -> RawResult<(i32, String)> {
+        let req = WsSend::CheckServerStatus {
+            req_id: generate_req_id(),
+            fqdn,
+            port,
+        };
+
+        match self.sender.send_recv(req).await? {
+            WsRecvData::CheckServerStatus {
+                status, details, ..
+            } => Ok((status, details)),
+            _ => unreachable!(),
         }
     }
 
@@ -1330,9 +1365,6 @@ impl AsyncFetchable for ResultSet {
                 }
             }
         }
-        // let future = self.fetch().boxed();
-        // // .poll_unpin(cx)
-        // todo!()
     }
 }
 
@@ -1823,4 +1855,25 @@ mod tests {
         client.exec(format!("drop database {db}")).await?;
         Ok(())
     }
+
+    // #[tokio::test]
+    // async fn test_validate_sql() -> anyhow::Result<()> {
+    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+    //     taos.validate_sql("create database if not exists test_1741338182")
+    //         .await?;
+    //     let _ = taos.validate_sql("select * from t0").await.unwrap_err();
+    //     Ok(())
+    // }
+
+    // #[tokio::test]
+    // async fn test_check_server_status() -> anyhow::Result<()> {
+    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+    //     let (stauts, details) = taos
+    //         .check_server_status(Some("127.0.0.1".to_string()), 6030)
+    //         .await?;
+    //     println!("status: {}, details: {}", stauts, details);
+    //     let (stauts, details) = taos.check_server_status(None, 0).await?;
+    //     println!("status: {}, details: {}", stauts, details);
+    //     Ok(())
+    // }
 }

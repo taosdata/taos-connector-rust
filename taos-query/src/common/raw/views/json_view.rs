@@ -21,6 +21,7 @@ impl IsColumnView for View {
     fn ty(&self) -> Ty {
         Ty::Json
     }
+
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         Self::from_iter::<String, _, _, _>(
             iter.map(|v| v.to_str().map(|v| v.into_owned()))
@@ -32,6 +33,10 @@ impl IsColumnView for View {
 impl JsonView {
     pub fn len(&self) -> usize {
         self.offsets.len()
+    }
+
+    pub fn as_raw_ptr(&self) -> *const u8 {
+        self.data.as_ptr() as _
     }
 
     /// Check if the value at `row` index is NULL or not.

@@ -1,17 +1,18 @@
-/target
-USER_MANUAL.md TODO.md
-TDengine
-.vscode
 /conf
 /docs
-cobertura.xml
-lcov.info
-tarpaulin-report.html
-tarpaulin-report.json
-rust-toolchain
-sync.sh
+/target
+.cache-cargo
 .cargo/*
 !.cargo/config.toml
-.cache-cargo
-default.profraw
 .idea
+.vscode
+*.log*
+TDengine
+USER_MANUAL.md TODO.md
+cobertura.xml
+default.profraw
+lcov.info
+rust-toolchain
+sync.sh
+tarpaulin-report.html
+tarpaulin-report.json

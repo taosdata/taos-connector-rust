@@ -1,17 +1,17 @@
 #![cfg_attr(nightly, feature(error_generic_member_access))]
+
 use std::any::Any;
 use std::borrow::Cow;
 use std::fmt::{self, Debug, Display};
 use std::str::FromStr;
 
+pub use code::Code;
 use mdsn::DsnError;
 use source::Inner;
 use thiserror::Error;
 
 mod code;
 mod source;
-
-pub use code::Code;
 
 /// The `Error` type, a wrapper around raw libtaos.so client errors or
 /// dynamic error types that could be integrated into [anyhow::Error].
@@ -38,8 +38,8 @@ pub use code::Code;
 /// ```
 ///
 /// # Display representations
-#[derive(Error)]
 #[must_use]
+#[derive(Error)]
 pub struct Error {
     /// Error code, will be displayed when code is not 0xFFFF.
     code: Code,
@@ -204,6 +204,7 @@ impl Error {
     pub const fn code(&self) -> Code {
         self.code
     }
+
     #[inline]
     pub fn message(&self) -> String {
         self.source.to_string()
@@ -332,7 +333,6 @@ impl Error {
 /// # let message = "message";
 /// let err = Error::from(anyhow::format_err!("Error here: {}", message));
 /// ```
-///
 #[macro_export]
 macro_rules! format_err {
     (code = $c:expr, raw = $arg:expr, context = $arg2:expr) => {
@@ -347,12 +347,6 @@ macro_rules! format_err {
     (code = $c:expr, context = $($arg2:tt)*) => {
         $crate::Error::from($c).context(format!($($arg2)*))
     };
-    // // (code = $c:expr, raw = $arg:literal, context = $arg2:literal) => {
-    // //     $crate::Error::new_with_context($c, format!($arg), format!($arg2))
-    // // };
-    // // (code = $c:expr, raw = $arg:literal, context = $arg2:expr) => {
-    // //     $crate::Error::new_with_context($c, format!($arg), $arg2)
-    // // };
     (code = $c:expr, raw = $arg:literal, context = $($arg2:tt)*) => {
         $crate::Error::new_with_context($c, format!($arg), $crate::__priv_format!($($arg2)*))
     };
@@ -374,7 +368,6 @@ macro_rules! format_err {
     (raw = $($arg:tt)*) => {
         compile_error!("`raw` error message must be used along with an error code!")
     };
-
     ($c:expr, raw = $arg:expr) => {
         $crate::Error::new($c, $arg)
     };
@@ -400,6 +393,7 @@ macro_rules! format_err {
         $crate::Error::from_string(format!($($arg)*))
     };
 }
+
 #[macro_export]
 macro_rules! __priv_format {
     ($msg:literal $(,)?) => {
@@ -437,101 +431,106 @@ impl serde::de::Error for Error {
     }
 }
 
-#[test]
-fn test_format_err() {
-    let code = 0xF000;
-    let raw = "Nothing";
-    let context = "Error";
-    let err = dbg!(format_err!(code, raw = raw, context = context));
-    assert_eq!(err.to_string(), "[0xF000] Error: Internal error: `Nothing`");
-    let err = dbg!(format_err!(code, raw = raw));
-    assert_eq!(err.to_string(), "[0xF000] Internal error: `Nothing`");
-    let err = dbg!(format_err!(code, context = context));
-    assert_eq!(err.to_string(), "[0xF000] Error");
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let err = dbg!(format_err!(code = 0xF000, context = "Error here"));
-    assert_eq!(err.to_string(), "[0xF000] Error here");
-    let err = dbg!(format_err!(0x6789, context = "Error here: {}", 1));
-    assert_eq!(err.to_string(), "[0x6789] Error here: 1");
-    let err = dbg!(format_err!(code = 0x6789, context = "Error here: {}", 1));
-    assert_eq!(err.to_string(), "[0x6789] Error here: 1");
+    #[test]
+    fn test_format_err() {
+        let code = 0xF000;
+        let raw = "Nothing";
+        let context = "Error";
+        let err = dbg!(format_err!(code, raw = raw, context = context));
+        assert_eq!(err.to_string(), "[0xF000] Error: Internal error: `Nothing`");
+        let err = dbg!(format_err!(code, raw = raw));
+        assert_eq!(err.to_string(), "[0xF000] Internal error: `Nothing`");
+        let err = dbg!(format_err!(code, context = context));
+        assert_eq!(err.to_string(), "[0xF000] Error");
 
-    let err = dbg!(format_err!(code = 0x6789, raw = "Error here: {}", 1));
-    assert_eq!(err.to_string(), "[0x6789] Internal error: `Error here: 1`");
+        let err = dbg!(format_err!(code = 0xF000, context = "Error here"));
+        assert_eq!(err.to_string(), "[0xF000] Error here");
+        let err = dbg!(format_err!(0x6789, context = "Error here: {}", 1));
+        assert_eq!(err.to_string(), "[0x6789] Error here: 1");
+        let err = dbg!(format_err!(code = 0x6789, context = "Error here: {}", 1));
+        assert_eq!(err.to_string(), "[0x6789] Error here: 1");
 
-    let err = dbg!(format_err!(0x6789, raw = "Error here: {}", 1));
-    assert_eq!(err.to_string(), "[0x6789] Internal error: `Error here: 1`");
+        let err = dbg!(format_err!(code = 0x6789, raw = "Error here: {}", 1));
+        assert_eq!(err.to_string(), "[0x6789] Internal error: `Error here: 1`");
 
-    let err = dbg!(format_err!(
-        code = 0x6789,
-        raw = ("Error here: {}", 1),
-        context = ("Query error with {:?}", "sql"),
-    ));
-    assert_eq!(
-        err.to_string(),
-        "[0x6789] Query error with \"sql\": Internal error: `Error here: 1`"
-    );
+        let err = dbg!(format_err!(0x6789, raw = "Error here: {}", 1));
+        assert_eq!(err.to_string(), "[0x6789] Internal error: `Error here: 1`");
 
-    let err = dbg!(format_err!("Error here"));
-    assert_eq!(err.to_string(), "Error here");
+        let err = dbg!(format_err!(
+            code = 0x6789,
+            raw = ("Error here: {}", 1),
+            context = ("Query error with {:?}", "sql"),
+        ));
+        assert_eq!(
+            err.to_string(),
+            "[0x6789] Query error with \"sql\": Internal error: `Error here: 1`"
+        );
 
-    let err = dbg!(format_err!(0x2603));
-    assert_eq!(
-        err.to_string(),
-        "[0x2603] Internal error: `Table does not exist`"
-    );
+        let err = dbg!(format_err!("Error here"));
+        assert_eq!(err.to_string(), "Error here");
 
-    let err = dbg!(format_err!(0x6789));
-    assert_eq!(err.to_string(), "[0x6789] Unknown error");
+        let err = dbg!(format_err!(0x2603));
+        assert_eq!(
+            err.to_string(),
+            "[0x2603] Internal error: `Table does not exist`"
+        );
 
-    let err = dbg!(format_err!(0x6789, context = "Error here"));
-    assert_eq!(err.to_string(), "[0x6789] Error here");
-}
+        let err = dbg!(format_err!(0x6789));
+        assert_eq!(err.to_string(), "[0x6789] Unknown error");
 
-#[test]
-fn test_bail() {
-    fn use_bail() -> Result<()> {
-        bail!(code = 0x2603, context = "Failed to insert into table `abc`");
+        let err = dbg!(format_err!(0x6789, context = "Error here"));
+        assert_eq!(err.to_string(), "[0x6789] Error here");
     }
-    let err = use_bail();
-    dbg!(&err);
-    assert!(err.is_err());
-    println!("{:?}", err.unwrap_err());
 
-    println!("{:?}", Error::any(use_bail().unwrap_err()));
-}
+    #[test]
+    fn test_bail() {
+        fn use_bail() -> Result<()> {
+            bail!(code = 0x2603, context = "Failed to insert into table `abc`");
+        }
+        let err = use_bail();
+        dbg!(&err);
+        assert!(err.is_err());
+        println!("{:?}", err.unwrap_err());
 
-#[test]
-fn test_display() {
-    let err = Error::new(Code::SUCCESS, "Success").context("nothing");
-    assert!(dbg!(format!("{}", err)).contains("[0x0000] nothing"));
-    let result = std::panic::catch_unwind(|| {
+        println!("{:?}", Error::any(use_bail().unwrap_err()));
+    }
+
+    #[test]
+    fn test_display() {
         let err = Error::new(Code::SUCCESS, "Success").context("nothing");
-        panic!("{:?}", err);
-    });
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_error() {
-    let err = Error::new(Code::SUCCESS, "success");
-    assert_eq!(err.code(), Code::SUCCESS);
-    assert_eq!(err.message(), "Internal error: `success`");
-
-    let _ = Error::from_code(1);
-    assert_eq!(Error::from_string("any").to_string(), "any");
-    assert_eq!(Error::from_string("any").to_string(), "any");
-
-    fn raise_error() -> Result<()> {
-        Err(Error::from_any(DsnError::InvalidDriver("mq".to_string())))
+        assert!(dbg!(format!("{}", err)).contains("[0x0000] nothing"));
+        let result = std::panic::catch_unwind(|| {
+            let err = Error::new(Code::SUCCESS, "Success").context("nothing");
+            panic!("{:?}", err);
+        });
+        assert!(result.is_err());
     }
-    assert_eq!(raise_error().unwrap_err().to_string(), "invalid driver mq");
-}
 
-#[cfg(feature = "serde")]
-#[test]
-fn test_serde_error() {
-    use serde::de::Error as DeError;
+    #[test]
+    fn test_error() {
+        let err = Error::new(Code::SUCCESS, "success");
+        assert_eq!(err.code(), Code::SUCCESS);
+        assert_eq!(err.message(), "Internal error: `success`");
 
-    let _ = Error::custom("");
+        let _ = Error::from_code(1);
+        assert_eq!(Error::from_string("any").to_string(), "any");
+        assert_eq!(Error::from_string("any").to_string(), "any");
+
+        fn raise_error() -> Result<()> {
+            Err(Error::from_any(DsnError::InvalidDriver("mq".to_string())))
+        }
+        assert_eq!(raise_error().unwrap_err().to_string(), "invalid driver mq");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde_error() {
+        use serde::de::Error as DeError;
+
+        let _ = Error::custom("");
+    }
 }

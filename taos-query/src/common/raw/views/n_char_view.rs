@@ -60,6 +60,10 @@ impl NCharView {
         self.offsets.len()
     }
 
+    pub fn as_raw_ptr(&self) -> *const u8 {
+        self.data.as_ptr() as _
+    }
+
     /// Check if the value at `row` index is NULL or not.
     pub fn is_null(&self, row: usize) -> bool {
         if row < self.len() {
@@ -112,18 +116,9 @@ impl NCharView {
         let offset = self.offsets.get_unchecked(row);
         if offset >= 0 {
             self.nchar_to_utf8();
-            //     // let me: &mut Self = unsafe { std::mem::transmute(&self) };
-            //     let is_chars = &mut *self.is_chars.get();
-            //     *is_chars = false;
-            //     Some(
-            //         InlineNChar::<u16>::from_ptr(self.data.as_ptr().offset(*offset as isize))
-            //             .into_inline_str(),
-            //     )
-            // } else {
             Some(InlineStr::<u16>::from_ptr(
                 self.data.as_ptr().offset(offset as isize),
             ))
-            // }
         } else {
             None
         }
@@ -215,12 +210,10 @@ impl NCharView {
 
     /// Write column data as raw bytes.
     pub(crate) fn write_raw_into<W: std::io::Write>(&self, mut wtr: W) -> std::io::Result<usize> {
-        // if self.layout.borrow().nchar_is_decoded() {
         let mut offsets = Vec::new();
         let mut bytes: Vec<u8> = Vec::new();
         for v in self.iter() {
             if let Some(v) = v {
-                // dbg!(v);
                 let chars = v.chars().collect_vec();
                 offsets.push(bytes.len() as i32);
                 let chars = unsafe {
@@ -229,14 +222,12 @@ impl NCharView {
                         chars.len() * std::mem::size_of::<char>(),
                     )
                 };
-                // dbg!(chars);
                 bytes.write_inlined_bytes::<2>(chars).unwrap();
             } else {
                 offsets.push(-1);
             }
         }
         unsafe {
-            // dbg!(&offsets);
             let offsets_bytes = std::slice::from_raw_parts(
                 offsets.as_ptr() as *const u8,
                 offsets.len() * std::mem::size_of::<i32>(),
@@ -245,11 +236,6 @@ impl NCharView {
             wtr.write_all(&bytes)?;
             Ok(offsets_bytes.len() + bytes.len())
         }
-        // }
-        // let offsets = self.offsets.as_bytes();
-        // wtr.write_all(offsets)?;
-        // wtr.write_all(&self.data)?;
-        // Ok(offsets.len() + self.data.len())
     }
 
     pub fn from_iter<

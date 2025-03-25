@@ -3,7 +3,6 @@ name = "taos-ws-sys"
 version = "0.2.1"
 edition = "2021"
 publish = false
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
 name = "taosws"
@@ -12,25 +11,37 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 anyhow = "1"
 bytes = "1.1.0"
+cargo_metadata = "0.18.1"
+chrono-tz = "0.10"
+ctor = "0.2.9"
+dashmap = "6.1.0"
+dlopen2 = "0.7"
+faststr = "0.2.31"
+futures = { version = "0.3", features = ["executor"] }
+lazy_static = "1.4.0"
+once_cell = "1.20.2"
 pretty_env_logger = "0.5.0"
 serde_json = "1"
 taos-error = { path = "../taos-error" }
+taos-log = { path = "../taos-log" }
 taos-query = { path = "../taos-query" }
 taos-ws = { path = "../taos-ws" }
-futures = { version = "0.3", features = ["executor"] }
+tokio = "1"
 tracing = { version = "0.1", features = ["log"] }
+tracing-log = "0.2.0"
+tracing-subscriber = { version = "0.3.18", default-features = false, features = [
+    "env-filter",
+] }
 
 [build-dependencies]
 cbindgen = "0.27.0"
-
-[dev-dependencies]
-pretty_env_logger = "0.5.0"
+syn = { version = "2.0.91", features = ["full", "visit"] }
 
 [features]
 default = ["rustls", "rustls-ring-crypto-provider"]
 
-native-tls-vendored = ["taos-ws/native-tls-vendored"]
 native-tls = ["taos-ws/native-tls"]
+native-tls-vendored = ["taos-ws/native-tls-vendored"]
 rustls = ["taos-ws/rustls"]
 rustls-ring-crypto-provider = ["rustls", "taos-ws/rustls-ring-crypto-provider"]
 rustls-aws-lc-crypto-provider = [

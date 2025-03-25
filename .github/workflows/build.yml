@@ -2,9 +2,6 @@ name: Build
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
 
 env:
   TOOLS_BUILD_TYPE: Release
@@ -63,7 +60,7 @@ jobs:
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "main"
+          ref: "3.0"
 
       - name: Prepare development tools
         run: |
@@ -71,7 +68,7 @@ jobs:
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
 
-      - name: Checkout Rust connector
+      - name: Build TDengine
         env:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
@@ -87,7 +84,7 @@ jobs:
           path: TDengine/tools/taosws-rs/target/
           key: ${{ runner.os }}-cargo-target-${{ steps.setup-rust.outputs.cachekey }}
 
-      - name: Build & Install TDengine
+      - name: Install TDengine
         run: |
           cd TDengine/release/
           make -j8 || exit 1

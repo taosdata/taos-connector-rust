@@ -138,6 +138,7 @@ impl<M, D> MessageSet<M, D> {
     pub fn has_meta(&self) -> bool {
         matches!(self, &MessageSet::Meta(_) | &MessageSet::MetaData(_, _))
     }
+
     pub fn has_data(&self) -> bool {
         matches!(self, &MessageSet::Data(_) | &MessageSet::MetaData(_, _))
     }
@@ -414,6 +415,7 @@ pub trait AsAsyncConsumer: Sized + Send + Sync {
     }
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()>;
+
     async fn commit_all(&self) -> RawResult<()>;
 
     async fn commit_offset(

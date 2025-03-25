@@ -96,6 +96,11 @@ impl TmqInit {
         self.enable_batch_meta = None;
         self
     }
+
+    pub(super) fn disable_auto_commit(mut self) -> Self {
+        self.auto_commit = "false".to_string();
+        self
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
@@ -114,7 +119,7 @@ pub enum TmqSend {
         #[serde(flatten)]
         conn: WsConnReq,
         #[serde(flatten)]
-        req: Box<TmqInit>,
+        req: TmqInit,
         topics: Vec<String>,
     },
     Unsubscribe {
@@ -136,6 +141,8 @@ pub enum TmqSend {
     Position(OffsetArgs),
     CommitOffset(OffsetSeekArgs),
 }
+
+impl ToMessage for TmqSend {}
 
 unsafe impl Send for TmqSend {}
 unsafe impl Sync for TmqSend {}
@@ -299,5 +306,3 @@ fn test_serde_recv_data() {
     let d: TmqRecv = serde_json::from_str(json).unwrap();
     let _ = dbg!(d.ok());
 }
-
-impl ToMessage for TmqSend {}

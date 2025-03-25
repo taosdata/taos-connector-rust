@@ -4,6 +4,7 @@ use std::ops::{Deref, DerefMut};
 use bytes::{Bytes, BytesMut};
 
 const ITEM_SIZE: usize = std::mem::size_of::<i32>();
+
 /// A [i32] slice offsets, which will represent the value is NULL (if offset is `-1`) or not.
 #[derive(Clone)]
 pub struct Offsets(pub(super) Bytes);
@@ -23,11 +24,6 @@ impl Debug for Offsets {
 impl Offsets {
     pub fn from_offsets<T: ExactSizeIterator<Item = i32>>(iter: T) -> Self {
         OffsetsMut::from_offsets(iter).into_offsets()
-    }
-
-    /// As a i32 slice.
-    pub fn as_slice(&self) -> &[i32] {
-        unsafe { std::slice::from_raw_parts(self.0.as_ptr() as *const i32, self.len()) }
     }
 
     pub fn iter(&self) -> OffsetsIter {
@@ -56,14 +52,16 @@ impl Offsets {
         &self,
         range: std::ops::Range<usize>,
     ) -> (Self, Option<(i32, Option<i32>)>) {
-        let len = range.len();
         use std::alloc::{alloc, Layout};
+
+        let len = range.len();
         let ptr = alloc(Layout::from_size_align_unchecked(
             len * ITEM_SIZE,
             ITEM_SIZE,
         ));
         ptr.write_bytes(0, len * ITEM_SIZE);
         let slice = ptr as *mut i32;
+
         let mut offset0 = None;
         let start = range.start;
         for i in range.clone() {
@@ -93,7 +91,9 @@ impl Offsets {
         if offset0 == offset1 {
             offset1.take();
         }
+
         let bytes: Box<[u8]> = Box::from_raw(std::slice::from_raw_parts_mut(ptr, len * ITEM_SIZE));
+
         (
             Self(bytes.into()),
             offset0.map(|offset0| (offset0, offset1)),

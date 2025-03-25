@@ -11,33 +11,26 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+pub use common::RawBlock;
+use common::*;
+pub use iter::*;
 pub use mdsn::{value_is_true, Address, Dsn, DsnError, IntoDsn};
+pub use prelude::sync::{Fetchable, Queryable};
+pub use prelude::{AsyncFetchable, AsyncQueryable};
 pub use serde::de::value::Error as DeError;
-
-mod error;
+pub use taos_error::Error as RawError;
+use util::Edition;
 
 pub mod common;
 mod de;
 pub mod helpers;
-
 mod iter;
-pub mod util;
-
-pub use common::RawBlock;
-use common::*;
-pub use iter::*;
-
+pub mod prelude;
 pub mod stmt;
 pub mod stmt2;
-
 pub mod tmq;
+pub mod util;
 
-pub mod prelude;
-
-pub use prelude::sync::{Fetchable, Queryable};
-pub use prelude::{AsyncFetchable, AsyncQueryable};
-pub use taos_error::Error as RawError;
-use util::Edition;
 pub type RawResult<T> = std::result::Result<T, RawError>;
 
 lazy_static::lazy_static! {
