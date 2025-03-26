@@ -60,7 +60,7 @@ jobs:
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "3.0"
+          ref: "main"
 
       - name: Prepare development tools
         run: |
