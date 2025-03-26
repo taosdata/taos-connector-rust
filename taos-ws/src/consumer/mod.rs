@@ -2380,7 +2380,7 @@ mod tests {
     #[tokio::test]
     async fn test_consumer_cloud() -> anyhow::Result<()> {
         use taos_query::prelude::*;
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
 
         let dsn = std::env::var("TDENGINE_ClOUD_DSN");
         if dsn.is_err() {
@@ -2536,7 +2536,7 @@ mod tests {
 
         use taos_query::prelude::*;
 
-        std::env::set_var("RUST_LOG", "trace");
+        unsafe { std::env::set_var("RUST_LOG", "trace") };
 
         let dsn = env::var("TDENGINE_CLOUD_DSN")
             .expect("TDENGINE_CLOUD_DSN environment variable not set");
@@ -2643,7 +2643,7 @@ mod tests {
         )?;
         let mut consumer = builder.build_consumer().await?;
         consumer.subscribe(["test_ws_tmq_poll_lost"]).await?;
-        std::env::set_var("TEST_POLLING_LOST", "1");
+        unsafe { std::env::set_var("TEST_POLLING_LOST", "1") };
 
         {
             let sleep = tokio::time::sleep(Duration::from_millis(400));

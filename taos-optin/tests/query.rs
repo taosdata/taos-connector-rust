@@ -6,7 +6,7 @@ use taos_query::util::hex::*;
 
 #[test]
 fn ws_sync_json() -> anyhow::Result<()> {
-    std::env::set_var("RUST_LOG", "debug");
+    unsafe { std::env::set_var("RUST_LOG", "debug") };
     // pretty_env_logger::init();
     use taos_query::prelude::sync::*;
 

@@ -1746,8 +1746,10 @@ unsafe fn schemaless_insert_raw(
 
 #[cfg(test)]
 pub fn init_env() {
-    std::env::set_var("LIBTAOSWS_LOG_LEVEL", "info");
-    unsafe { ws_enable_log("info\0".as_ptr() as *const c_char) };
+    unsafe {
+        std::env::set_var("LIBTAOSWS_LOG_LEVEL", "info");
+        ws_enable_log("info\0".as_ptr() as *const c_char);
+    }
 }
 
 #[cfg(test)]

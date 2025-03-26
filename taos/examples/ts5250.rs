@@ -13,7 +13,7 @@ struct Opts {
 }
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    std::env::set_var("RUST_LOG", "trace");
+    unsafe { std::env::set_var("RUST_LOG", "trace") };
     pretty_env_logger::init();
     let opts = Opts::parse();
     let pool = TaosBuilder::from_dsn(&opts.target)?.pool()?;
