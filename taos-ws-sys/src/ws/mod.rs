@@ -286,7 +286,7 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
 
     let cfg = config::CONFIG.read().unwrap();
     if let Some(timezone) = cfg.timezone() {
-        std::env::set_var("TZ", timezone.name());
+        unsafe { std::env::set_var("TZ", timezone.name()) };
     }
 
     let mut layers = Vec::new();

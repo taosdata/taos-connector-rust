@@ -800,7 +800,7 @@ mod tests {
     fn sync_json_test(dsn: &str, db: &str) -> RawResult<()> {
         use taos_query::prelude::sync::*;
 
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // pretty_env_logger::init();
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
         assert_eq!(client.exec(format!("drop database if exists {db}"))?, 0);
@@ -913,7 +913,7 @@ mod tests {
     #[test]
     fn test_put_line() -> RawResult<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
         // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
@@ -983,7 +983,7 @@ mod tests {
     #[test]
     fn test_put_telnet() -> RawResult<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
         // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
@@ -1057,7 +1057,7 @@ mod tests {
     #[test]
     fn test_put_json() -> RawResult<()> {
         // std::env::set_var("RUST_LOG", "taos=trace");
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
         // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
@@ -1123,7 +1123,7 @@ mod tests {
 
         use crate::TmqBuilder;
 
-        std::env::set_var("RUST_LOG", "taos=trace");
+        unsafe { std::env::set_var("RUST_LOG", "taos=trace") };
         // pretty_env_logger::init();
 
         let taos = TaosBuilder::from_dsn("http://localhost:6041")?.build()?;
@@ -1232,7 +1232,7 @@ mod async_tests {
     #[tokio::test()]
     #[ignore]
     async fn test_recycle() -> RawResult<()> {
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
         // pretty_env_logger::init();
         let builder = TaosBuilder::from_dsn("taos+ws://localhost:6041/")?;
         let pool = builder.pool()?;
@@ -1446,7 +1446,7 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_is_enterprise_edition() -> RawResult<()> {
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         tracing::debug!("dsn: {:?}", &dsn);
@@ -1459,7 +1459,7 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_is_enterprise_edition_ws() -> RawResult<()> {
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
         // pretty_env_logger::init();
 
         let dsn =
@@ -1474,7 +1474,7 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_get_edition() -> RawResult<()> {
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
@@ -1489,7 +1489,7 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_get_edition_ws() -> RawResult<()> {
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
@@ -1505,7 +1505,7 @@ mod async_tests {
     #[tokio::test]
     #[ignore]
     async fn test_get_edition_cloud() -> RawResult<()> {
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
@@ -1520,7 +1520,7 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_assert_enterprise_edition() -> RawResult<()> {
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
@@ -1537,7 +1537,7 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_assert_enterprise_edition_ws() -> RawResult<()> {
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
@@ -1555,7 +1555,7 @@ mod async_tests {
     #[tokio::test]
     #[ignore]
     async fn test_assert_enterprise_edition_cloud() -> RawResult<()> {
-        std::env::set_var("RUST_LOG", "taos=debug");
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
         // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());

@@ -38,6 +38,7 @@ lazy_static::lazy_static! {
 pub struct ApiEntry {
     lib: Arc<Library>,
     version: String,
+    taos_init: unsafe extern "C" fn() -> c_int,
     taos_cleanup: unsafe extern "C" fn(),
     taos_get_client_info: unsafe extern "C" fn() -> *const c_char,
     taos_options: unsafe extern "C" fn(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int,
@@ -551,6 +552,7 @@ impl ApiEntry {
                 lib.symbol("taos_get_client_info")?;
             let version = CStr::from_ptr(taos_get_client_info()).to_str().unwrap();
             symbol!(
+                taos_init,
                 taos_cleanup,
                 taos_options,
                 taos_connect,
@@ -727,6 +729,7 @@ impl ApiEntry {
             Ok(Self {
                 lib,
                 version: version.to_string(),
+                taos_init,
                 taos_cleanup,
                 taos_get_client_info,
                 taos_options,
@@ -1839,6 +1842,7 @@ mod tests {
     #[test]
     fn test_raw_taos() {
         let c = Arc::new(ApiEntry::open_default().unwrap());
+        unsafe { (c.taos_init)() };
         let taos = RawTaos::new(c, 1 as _).unwrap();
         let raw = raw_data_t {
             raw: std::ptr::null_mut(),

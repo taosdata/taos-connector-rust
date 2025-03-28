@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
         let client = TaosBuilder::from_dsn("taosws://localhost:6041/")?.build()?;
@@ -385,7 +385,7 @@ mod tests {
 
     // #[tokio::test]
     async fn _ws_select_from_meters() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "info");
+        unsafe { std::env::set_var("RUST_LOG", "info") };
         // pretty_env_logger::init_timed();
         use taos_query::prelude::*;
         let dsn = "taos+ws:///test";
@@ -407,7 +407,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // pretty_env_logger::init();
         use futures::TryStreamExt;
         use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};

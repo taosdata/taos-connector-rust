@@ -1456,7 +1456,7 @@ mod tests {
 
     #[test]
     fn test_is_support_binary_sql() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
 
         let version_a: &str = "3.3.0.0";
         let version_b: &str = "3.3.3.0";
@@ -1472,7 +1472,7 @@ mod tests {
     #[tokio::test]
     async fn test_client() -> anyhow::Result<()> {
         use futures::TryStreamExt;
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         // pretty_env_logger::init();
@@ -1514,7 +1514,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_cloud() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // pretty_env_logger::init();
         let dsn = std::env::var("TDENGINE_ClOUD_DSN");
         if dsn.is_err() {
@@ -1540,7 +1540,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_show_databases() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         use futures::TryStreamExt;
         // let _ = pretty_env_logger::try_init_timed();
         let dsn =
@@ -1572,7 +1572,7 @@ mod tests {
         dbg!(&raw);
 
         use futures::TryStreamExt;
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         let dsn =
             std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         // pretty_env_logger::init();
@@ -1625,7 +1625,7 @@ mod tests {
         dbg!(&raw);
 
         use futures::TryStreamExt;
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         let dsn = std::env::var("TDENGINE_TEST_DSN").unwrap_or("http://localhost:6041".to_string());
         // pretty_env_logger::init();
 
@@ -1670,7 +1670,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn ws_persistent_connection() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "trace");
+        unsafe { std::env::set_var("RUST_LOG", "trace") };
         pretty_env_logger::init();
         let client = WsTaos::from_dsn("taosws://localhost:6041/").await?;
         let db = "ws_persistent_connection";
@@ -1737,7 +1737,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_async_data_flow() -> anyhow::Result<()> {
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // pretty_env_logger::init();
         let client = WsTaos::from_dsn("taosws://localhost:6041/").await?;
         let db = "ws_async_data_flow";

@@ -2572,7 +2572,7 @@ mod async_tests {
 
         use crate::TaosBuilder;
 
-        std::env::set_var("RUST_LOG", "TRACE");
+        unsafe { std::env::set_var("RUST_LOG", "TRACE") };
         let _ = pretty_env_logger::formatted_timed_builder()
             .parse_default_env()
             .try_init();
@@ -2672,7 +2672,7 @@ mod async_tests {
 
         use crate::TaosBuilder;
 
-        std::env::set_var("RUST_LOG", "TRACE");
+        unsafe { std::env::set_var("RUST_LOG", "TRACE") };
         let _ = pretty_env_logger::formatted_timed_builder()
             .parse_default_env()
             .try_init();

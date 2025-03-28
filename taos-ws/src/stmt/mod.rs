@@ -801,7 +801,7 @@ mod tests {
         taos.exec(format!("create table {db}.ctb (ts timestamp, v int)"))
             .await?;
 
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // pretty_env_logger::init();
         let dsn_stmt = format!("{dsn}/{db}", dsn = dsn, db = db);
         let mut client = Stmt::from_dsn(dsn_stmt).await?;
@@ -838,7 +838,7 @@ mod tests {
         ))
         .await?;
 
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // pretty_env_logger::init();
         let stmt_dsn = format!("{dsn}/{db}", dsn = dsn, db = db);
         let mut client = Stmt::from_dsn(&stmt_dsn).await?;
@@ -884,7 +884,7 @@ mod tests {
         taos.exec("create table ws_stmt_sj2.stb (ts timestamp, v int) tags(tj json)")
             .await?;
 
-        std::env::set_var("RUST_LOG", "trace");
+        unsafe { std::env::set_var("RUST_LOG", "trace") };
         // pretty_env_logger::init();
         let mut client = Stmt::from_dsn("taos+ws://localhost:6041/ws_stmt_sj2").await?;
         let stmt = client
@@ -951,7 +951,7 @@ mod tests {
         taos.exec("create table t1 using stb tags(0)").await?;
         taos.exec("insert into t1 values(1640000000000, 0)").await?;
 
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // only init for debug
         // pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
@@ -993,7 +993,7 @@ mod tests {
         taos.exec("create table t1 using stb tags(0)").await?;
         taos.exec("insert into t1 values(1640000000000, 0)").await?;
 
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // only init for debug
         // pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
@@ -1051,7 +1051,7 @@ mod tests {
         ))
         .await?;
 
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // only init for debug
         // pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
@@ -1109,7 +1109,7 @@ mod tests {
         taos.exec("create table stmt_s.stb (ts timestamp, v int) tags(t1 int)")
             .await?;
 
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         let mut client = Stmt::from_dsn("taos+ws://localhost:6041/stmt_s").await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")

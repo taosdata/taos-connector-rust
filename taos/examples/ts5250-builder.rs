@@ -6,7 +6,7 @@ use taos::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    std::env::set_var("RUST_LOG", "trace");
+    unsafe { std::env::set_var("RUST_LOG", "trace") };
     pretty_env_logger::init();
 
     let taos = TaosBuilder::from_dsn("taos://localhost:6030")?
