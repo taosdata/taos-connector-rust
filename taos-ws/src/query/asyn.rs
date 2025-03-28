@@ -169,6 +169,8 @@ pub struct ResultSet {
     pub(crate) completed: bool,
     pub(crate) metrics: QueryMetrics,
     pub(crate) blocks_buffer: Option<flume::Receiver<RawResult<(RawBlock, Duration)>>>,
+    pub(crate) fields_precisions: Option<Vec<i64>>,
+    pub(crate) fields_scales: Option<Vec<i64>>,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -1096,6 +1098,8 @@ impl WsTaos {
                 completed: false,
                 metrics: QueryMetrics::default(),
                 blocks_buffer,
+                fields_precisions: resp.fields_precisions,
+                fields_scales: resp.fields_scales,
             })
         } else {
             Ok(ResultSet {
@@ -1115,6 +1119,8 @@ impl WsTaos {
                 completed: true,
                 metrics: QueryMetrics::default(),
                 blocks_buffer: None,
+                fields_precisions: None,
+                fields_scales: None,
             })
         }
     }
@@ -1314,6 +1320,14 @@ impl ResultSet {
 
     pub fn affected_rows64(&self) -> i64 {
         self.affected_rows as _
+    }
+
+    pub fn fields_precisions(&self) -> Option<&[i64]> {
+        self.fields_precisions.as_deref()
+    }
+
+    pub fn fields_scales(&self) -> Option<&[i64]> {
+        self.fields_scales.as_deref()
     }
 }
 

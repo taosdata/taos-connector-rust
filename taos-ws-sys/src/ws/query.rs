@@ -20,7 +20,7 @@ use crate::ws::error::{
 };
 use crate::ws::{
     config, ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, __taos_async_fn_t, TAOS,
-    TAOS_RES, TAOS_ROW,
+    TAOS_FIELD, TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
 };
 
 pub const TSDB_DATA_TYPE_NULL: usize = 0;
@@ -45,19 +45,11 @@ pub const TSDB_DATA_TYPE_BLOB: usize = 18;
 pub const TSDB_DATA_TYPE_MEDIUMBLOB: usize = 19;
 pub const TSDB_DATA_TYPE_BINARY: usize = TSDB_DATA_TYPE_VARCHAR;
 pub const TSDB_DATA_TYPE_GEOMETRY: usize = 20;
-pub const TSDB_DATA_TYPE_MAX: usize = 21;
+pub const TSDB_DATA_TYPE_DECIMAL64: usize = 21;
+pub const TSDB_DATA_TYPE_MAX: usize = 22;
 
 #[allow(non_camel_case_types)]
 pub type __taos_notify_fn_t = extern "C" fn(param: *mut c_void, ext: *mut c_void, r#type: c_int);
-
-#[repr(C)]
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_FIELD {
-    pub name: [c_char; 65],
-    pub r#type: i8,
-    pub bytes: i32,
-}
 
 #[repr(C)]
 #[allow(non_snake_case)]
@@ -269,6 +261,25 @@ pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIEL
         }
         None => {
             error!("taos_fetch_fields failed, res is null");
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null"));
+            ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FIELD_E {
+    debug!("taos_fetch_fields_e start, res: {res:?}");
+    match (res as *mut TaosMaybeError<ResultSet>)
+        .as_mut()
+        .and_then(|rs| rs.deref_mut())
+    {
+        Some(rs) => {
+            debug!("taos_fetch_fields_e succ, rs: {rs:?}");
+            rs.get_fields_e()
+        }
+        None => {
+            error!("taos_fetch_fields_e failed, res is null");
             set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null"));
             ptr::null_mut()
         }
@@ -1161,6 +1172,7 @@ pub struct QueryResultSet {
     rs: taos_ws::ResultSet,
     block: Option<Block>,
     fields: Vec<TAOS_FIELD>,
+    fields_e: Vec<TAOS_FIELD_E>,
     row: Row,
     #[allow(dead_code)]
     row_data_ptr: TAOS_ROW,
@@ -1193,6 +1205,7 @@ impl QueryResultSet {
             rs,
             block: None,
             fields: Vec::new(),
+            fields_e: Vec::new(),
             row,
             row_data_ptr,
             row_data_ptr_ptr,
@@ -1265,6 +1278,19 @@ impl ResultSetOperations for QueryResultSet {
                 .extend(self.rs.fields().iter().map(TAOS_FIELD::from));
         }
         self.fields.as_mut_ptr()
+    }
+
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E {
+        if self.fields_e.len() != self.rs.num_of_fields() {
+            self.fields_e.clear();
+            let precisions = self.rs.fields_precisions().unwrap();
+            let scales = self.rs.fields_scales().unwrap();
+            for (i, field) in self.rs.fields().iter().enumerate() {
+                self.fields_e
+                    .push(TAOS_FIELD_E::new(field, precisions[i] as _, scales[i] as _));
+            }
+        }
+        self.fields_e.as_mut_ptr()
     }
 
     unsafe fn fetch_raw_block(
@@ -2730,4 +2756,55 @@ mod tests {
     //         println!("status: {status:?}, details: {details:?}");
     //     }
     // }
+
+    #[test]
+    fn test_taos_fetch_fields_e() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1743154970",
+                    "create database test_1743154970",
+                    "use test_1743154970",
+                    "create table t0 (ts timestamp, c1 int, c2 decimal(10, 2), c3 decimal(38, 20))",
+                    "insert into t0 values (now, 1, 1234.56, 1234567890.123456789)",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields_e(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 4);
+
+            let fields = slice::from_raw_parts(fields, num_fields as _);
+
+            assert_eq!(fields[0].r#type, TSDB_DATA_TYPE_TIMESTAMP as i8);
+            assert_eq!(fields[0].bytes, 8);
+
+            assert_eq!(fields[1].r#type, TSDB_DATA_TYPE_INT as i8);
+            assert_eq!(fields[1].bytes, 4);
+
+            assert_eq!(fields[2].r#type, TSDB_DATA_TYPE_DECIMAL64 as i8);
+            assert_eq!(fields[2].bytes, 8);
+            assert_eq!(fields[2].precision, 10);
+            assert_eq!(fields[2].scale, 2);
+
+            assert_eq!(fields[3].r#type, TSDB_DATA_TYPE_DECIMAL as i8);
+            assert_eq!(fields[3].bytes, 16);
+            assert_eq!(fields[3].precision, 38);
+            assert_eq!(fields[3].scale, 20);
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1743154970");
+            taos_close(taos);
+        }
+    }
 }

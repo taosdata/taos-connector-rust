@@ -18,8 +18,6 @@ use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
 use tracing::{debug, instrument};
 
-use crate::ws::query::TAOS_FIELD;
-
 mod config;
 pub mod error;
 pub mod query;
@@ -72,6 +70,48 @@ pub struct SafePtr<T>(pub T);
 
 unsafe impl<T> Send for SafePtr<T> {}
 unsafe impl<T> Sync for SafePtr<T> {}
+
+#[repr(C)]
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_FIELD_E {
+    pub name: [c_char; 65],
+    pub r#type: i8,
+    pub precision: u8,
+    pub scale: u8,
+    pub bytes: i32,
+}
+
+impl TAOS_FIELD_E {
+    pub fn new(field: &Field, precision: u8, scale: u8) -> Self {
+        let mut name = [0 as c_char; 65];
+        let field_name = field.name();
+        unsafe {
+            ptr::copy_nonoverlapping(
+                field_name.as_ptr(),
+                name.as_mut_ptr() as _,
+                field_name.len(),
+            );
+        };
+
+        Self {
+            name,
+            r#type: field.ty() as _,
+            precision,
+            scale,
+            bytes: field.bytes() as _,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_FIELD {
+    pub name: [c_char; 65],
+    pub r#type: i8,
+    pub bytes: i32,
+}
 
 impl From<&Field> for TAOS_FIELD {
     fn from(field: &Field) -> Self {
@@ -357,6 +397,8 @@ pub trait ResultSetOperations {
 
     fn get_fields(&mut self) -> *mut TAOS_FIELD;
 
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E;
+
     unsafe fn fetch_raw_block(
         &mut self,
         ptr: *mut *mut c_void,
@@ -467,6 +509,14 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.get_fields(),
             ResultSet::Schemaless(rs) => rs.get_fields(),
             ResultSet::Tmq(rs) => rs.get_fields(),
+        }
+    }
+
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E {
+        match self {
+            ResultSet::Query(rs) => rs.get_fields_e(),
+            ResultSet::Schemaless(rs) => rs.get_fields_e(),
+            ResultSet::Tmq(rs) => rs.get_fields_e(),
         }
     }
 
