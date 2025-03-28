@@ -17,7 +17,7 @@ pub struct UTinyIntView {
 
 impl IsColumnView for View {
     fn ty(&self) -> Ty {
-        Ty::USmallInt
+        Ty::UTinyInt
     }
 
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
