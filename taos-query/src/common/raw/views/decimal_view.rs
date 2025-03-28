@@ -1,15 +1,19 @@
+use std::ffi::c_void;
 use std::marker::PhantomData;
 
 use bytes::Bytes;
 
 use super::{NullBits, NullsIter};
-use crate::common::{self, BorrowedValue, Ty};
+use crate::common::{BorrowedValue, Ty};
+use crate::decimal::{Decimal, DecimalAllowedTy};
 
-type Item<T> = common::decimal::Decimal<T>;
 type View<T> = DecimalView<T>;
 
 #[derive(Debug, Clone)]
-pub struct DecimalView<T> {
+pub struct DecimalView<T>
+where
+    T: DecimalAllowedTy,
+{
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
     pub(crate) precision: u8,
@@ -17,7 +21,10 @@ pub struct DecimalView<T> {
     pub(crate) _p: PhantomData<T>,
 }
 
-impl<T> DecimalView<T> {
+impl<T> DecimalView<T>
+where
+    T: DecimalAllowedTy,
+{
     const ITEM_SIZE: usize = std::mem::size_of::<T>();
 
     pub fn precision_and_scale(&self) -> (u8, u8) {
@@ -62,11 +69,11 @@ impl<T> DecimalView<T> {
     }
 
     /// Get nullable value at `row` index.
-    pub unsafe fn get_unchecked(&self, row: usize) -> Option<Item<T>> {
+    pub unsafe fn get_unchecked(&self, row: usize) -> Option<Decimal<T>> {
         if self.nulls.is_null_unchecked(row) {
             None
         } else {
-            Some(Item {
+            Some(Decimal {
                 data: self.get_raw_data_at(row).read_unaligned(),
                 precision: self.precision,
                 scale: self.scale,
@@ -106,7 +113,7 @@ impl<T> DecimalView<T> {
     }
 
     /// Convert data to a vector of all nullable values.
-    pub fn to_vec(&self) -> Vec<Option<Item<T>>> {
+    pub fn to_vec(&self) -> Vec<Option<Decimal<T>>> {
         self.iter().collect()
     }
 
@@ -145,6 +152,18 @@ impl<T> DecimalView<T> {
             precision: self.precision,
             scale: self.scale,
             _p: PhantomData,
+        }
+    }
+
+    pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
+        if self.nulls.is_null_unchecked(row) {
+            (T::ty(), Self::ITEM_SIZE as _, std::ptr::null())
+        } else {
+            (
+                T::ty(),
+                Self::ITEM_SIZE as _,
+                self.get_raw_data_at(row) as _,
+            )
         }
     }
 }
@@ -217,13 +236,19 @@ impl DecimalView<i64> {
     impl_from_iter!(i64);
 }
 
-pub struct DecimalViewIter<'a, T> {
+pub struct DecimalViewIter<'a, T>
+where
+    T: DecimalAllowedTy,
+{
     view: &'a DecimalView<T>,
     row: usize,
 }
 
-impl<T> Iterator for DecimalViewIter<'_, T> {
-    type Item = Option<Item<T>>;
+impl<T> Iterator for DecimalViewIter<'_, T>
+where
+    T: DecimalAllowedTy,
+{
+    type Item = Option<Decimal<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.row < self.view.len() {

@@ -19,7 +19,8 @@ use crate::ws::error::{
     errno, errstr, format_errno, set_err_and_get_code, TaosError, TaosMaybeError, EMPTY,
 };
 use crate::ws::{
-    ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD, TAOS_RES, TAOS_ROW,
+    ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES,
+    TAOS_ROW,
 };
 
 #[allow(non_camel_case_types)]
@@ -1443,6 +1444,10 @@ impl ResultSetOperations for TmqResultSet {
 
     fn get_fields(&mut self) -> *mut TAOS_FIELD {
         self.fields.as_mut_ptr()
+    }
+
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E {
+        ptr::null_mut()
     }
 
     unsafe fn fetch_raw_block(
