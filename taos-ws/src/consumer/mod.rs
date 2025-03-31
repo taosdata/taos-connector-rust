@@ -989,6 +989,12 @@ static AVAILABLE_PARAMS: Lazy<HashSet<&str>> = Lazy::new(|| {
     params.insert("replica");
     params.insert("msg.consume.rawdata");
     params.insert("timeout");
+    params.insert("max_queue_length");
+    params.insert("busy_threshold");
+    params.insert("max_errors_in_window");
+    params.insert("busy_threshold");
+    params.insert("compression");
+    params.insert("health_check_window_in_second");
     params
 });
 
