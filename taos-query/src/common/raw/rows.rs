@@ -453,9 +453,8 @@ mod tests {
 
     use serde::Deserialize;
 
-    use crate::common::Precision;
-
     use super::*;
+    use crate::common::Precision;
 
     #[test]
     fn deserialize_decimal_test() -> anyhow::Result<()> {

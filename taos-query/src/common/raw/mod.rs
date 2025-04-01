@@ -1744,9 +1744,8 @@ fn test_from_v2() {
 mod tests {
     use bytes::{BufMut, BytesMut};
 
-    use crate::common::decimal::Decimal;
-
     use super::*;
+    use crate::common::decimal::Decimal;
 
     #[test]
     fn parse_decimal64_raw_block_test() -> anyhow::Result<()> {

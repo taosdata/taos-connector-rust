@@ -6,7 +6,8 @@ use bigdecimal::{BigDecimal, Zero};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use super::{decimal::Decimal, Timestamp, Ty};
+use super::decimal::Decimal;
+use super::{Timestamp, Ty};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BorrowedValue<'b> {
