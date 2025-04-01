@@ -173,9 +173,8 @@ impl crate::util::AsyncInlinable for RawData {
 
 #[cfg(test)]
 mod tests {
-    use crate::util::AsyncInlinable;
-
     use super::*;
+    use crate::util::AsyncInlinable;
     #[tokio::test]
     async fn test_raw_data_async_io() {
         use std::io::Cursor;
