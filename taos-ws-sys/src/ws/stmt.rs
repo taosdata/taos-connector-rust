@@ -767,7 +767,7 @@ pub unsafe extern "C" fn taos_stmt_get_param(
         .as_ref()
         .map_or(0, |fields| fields.len());
 
-    if idx < 0 || idx >= col_cnt as _ {
+    if idx < 0 || (idx as usize) >= col_cnt {
         maybe_err.with_err(Some(TaosError::new(
             Code::INVALID_PARA,
             "idx is out of range",
