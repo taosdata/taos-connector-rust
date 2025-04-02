@@ -19,7 +19,8 @@ use crate::ws::error::{
     errno, errstr, format_errno, set_err_and_get_code, TaosError, TaosMaybeError, EMPTY,
 };
 use crate::ws::{
-    ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD, TAOS_RES, TAOS_ROW,
+    ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES,
+    TAOS_ROW,
 };
 
 #[allow(non_camel_case_types)]
@@ -1445,6 +1446,10 @@ impl ResultSetOperations for TmqResultSet {
         self.fields.as_mut_ptr()
     }
 
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E {
+        ptr::null_mut()
+    }
+
     unsafe fn fetch_raw_block(
         &mut self,
         ptr: *mut *mut c_void,
@@ -1470,7 +1475,7 @@ impl ResultSetOperations for TmqResultSet {
             self.row.current_row = 0;
         }
 
-        match self.block.as_ref() {
+        match self.block.as_mut() {
             Some(block) => {
                 if block.nrows() == 0 {
                     return Ok(ptr::null_mut());
@@ -1489,7 +1494,7 @@ impl ResultSetOperations for TmqResultSet {
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
-        if let Some(block) = &self.block {
+        if let Some(block) = self.block.as_mut() {
             if row < block.nrows() && col < block.ncols() {
                 return block.get_raw_value_unchecked(row, col);
             }

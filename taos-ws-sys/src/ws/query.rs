@@ -20,7 +20,7 @@ use crate::ws::error::{
 };
 use crate::ws::{
     config, ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, __taos_async_fn_t, TAOS,
-    TAOS_RES, TAOS_ROW,
+    TAOS_FIELD, TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
 };
 
 pub const TSDB_DATA_TYPE_NULL: usize = 0;
@@ -45,19 +45,11 @@ pub const TSDB_DATA_TYPE_BLOB: usize = 18;
 pub const TSDB_DATA_TYPE_MEDIUMBLOB: usize = 19;
 pub const TSDB_DATA_TYPE_BINARY: usize = TSDB_DATA_TYPE_VARCHAR;
 pub const TSDB_DATA_TYPE_GEOMETRY: usize = 20;
-pub const TSDB_DATA_TYPE_MAX: usize = 21;
+pub const TSDB_DATA_TYPE_DECIMAL64: usize = 21;
+pub const TSDB_DATA_TYPE_MAX: usize = 22;
 
 #[allow(non_camel_case_types)]
 pub type __taos_notify_fn_t = extern "C" fn(param: *mut c_void, ext: *mut c_void, r#type: c_int);
-
-#[repr(C)]
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_FIELD {
-    pub name: [c_char; 65],
-    pub r#type: i8,
-    pub bytes: i32,
-}
 
 #[repr(C)]
 #[allow(non_snake_case)]
@@ -276,6 +268,25 @@ pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIEL
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FIELD_E {
+    debug!("taos_fetch_fields_e start, res: {res:?}");
+    match (res as *mut TaosMaybeError<ResultSet>)
+        .as_mut()
+        .and_then(|rs| rs.deref_mut())
+    {
+        Some(rs) => {
+            debug!("taos_fetch_fields_e succ, rs: {rs:?}");
+            rs.get_fields_e()
+        }
+        None => {
+            error!("taos_fetch_fields_e failed, res is null");
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null"));
+            ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c_int {
     debug!("taos_select_db start, taos: {taos:?}, db: {db:?}");
 
@@ -402,6 +413,10 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                 Ty::NChar => {
                     let data = row[i].offset(-2) as *const InlineNChar;
                     write_to_cstr(&mut size, str.add(len), &(*data).to_string())
+                }
+                Ty::Decimal | Ty::Decimal64 => {
+                    let data = CStr::from_ptr(row[i] as *mut c_char).to_str().unwrap();
+                    write_to_cstr(&mut size, str.add(len), data)
                 }
                 _ => 0,
             }
@@ -809,7 +824,7 @@ pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
     };
 
     if let ResultSet::Query(rs) = rs {
-        if let Some(block) = rs.block.as_ref() {
+        if let Some(block) = rs.block.as_mut() {
             let lengths = if rs.has_called_fetch_row {
                 let mut lengths = Vec::with_capacity(block.ncols());
                 for col in 0..block.ncols() {
@@ -1161,6 +1176,7 @@ pub struct QueryResultSet {
     rs: taos_ws::ResultSet,
     block: Option<Block>,
     fields: Vec<TAOS_FIELD>,
+    fields_e: Vec<TAOS_FIELD_E>,
     row: Row,
     #[allow(dead_code)]
     row_data_ptr: TAOS_ROW,
@@ -1193,6 +1209,7 @@ impl QueryResultSet {
             rs,
             block: None,
             fields: Vec::new(),
+            fields_e: Vec::new(),
             row,
             row_data_ptr,
             row_data_ptr_ptr,
@@ -1267,6 +1284,19 @@ impl ResultSetOperations for QueryResultSet {
         self.fields.as_mut_ptr()
     }
 
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E {
+        if self.fields_e.len() != self.rs.num_of_fields() {
+            self.fields_e.clear();
+            let precisions = self.rs.fields_precisions().unwrap();
+            let scales = self.rs.fields_scales().unwrap();
+            for (i, field) in self.rs.fields().iter().enumerate() {
+                self.fields_e
+                    .push(TAOS_FIELD_E::new(field, precisions[i] as _, scales[i] as _));
+            }
+        }
+        self.fields_e.as_mut_ptr()
+    }
+
     unsafe fn fetch_raw_block(
         &mut self,
         ptr: *mut *mut c_void,
@@ -1312,7 +1342,7 @@ impl ResultSetOperations for QueryResultSet {
             self.row.current_row = 0;
         }
 
-        if let Some(block) = self.block.as_ref() {
+        if let Some(block) = self.block.as_mut() {
             if block.nrows() == 0 {
                 return Ok(ptr::null_mut());
             }
@@ -1330,7 +1360,7 @@ impl ResultSetOperations for QueryResultSet {
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
-        if let Some(block) = &self.block {
+        if let Some(block) = self.block.as_mut() {
             if row < block.nrows() && col < block.ncols() {
                 return block.get_raw_value_unchecked(row, col);
             }
@@ -1683,9 +1713,10 @@ mod tests {
                     "create table t0 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, \
                     c5 bigint, c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, \
                     c9 bigint unsigned, c10 float, c11 double, c12 varchar(20), c13 nchar(10), \
-                    c14 varbinary(10), c15 geometry(50))",
-                    "insert into t0 values (now, true, 1, 1, 1, 1, 1, 1, 1, 1, 1.1, 1.1, \
-                    'hello world', 'hello', 'hello', 'POINT(1 1)')",
+                    c14 varbinary(10), c15 geometry(50), c16 decimal(10, 3), c17 decimal(38, 10))",
+                    "insert into t0 values (1743557474107, true, 1, 1, 1, 1, 1, 1, 1, 1, 1.1, 1.1, \
+                    'hello world', 'hello', 'hello', 'POINT(1 1)', 12345.123, \
+                    12345678901234567890.123456789)",
                 ],
             );
 
@@ -1699,12 +1730,15 @@ mod tests {
             assert!(!fields.is_null());
 
             let num_fields = taos_num_fields(res);
-            assert_eq!(num_fields, 16);
+            assert_eq!(num_fields, 18);
 
             let mut str = vec![0 as c_char; 1024];
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            assert_eq!(len, 110);
-            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+            assert_eq!(len, 152);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()),
+                c"1743557474107 1 1 1 1 1 1 1 1 1 1.1 1.1 hello world \xf3\x86\x95\xa8 68656c6c6f 0101000000000000000000f03f000000000000f03f 12345.123 12345678901234567890.1234567890",
+            );
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1741657731");
@@ -2730,4 +2764,55 @@ mod tests {
     //         println!("status: {status:?}, details: {details:?}");
     //     }
     // }
+
+    #[test]
+    fn test_taos_fetch_fields_e() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1743154970",
+                    "create database test_1743154970",
+                    "use test_1743154970",
+                    "create table t0 (ts timestamp, c1 int, c2 decimal(10, 2), c3 decimal(38, 20))",
+                    "insert into t0 values (now, 1, 1234.56, 1234567890.123456789)",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields_e(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 4);
+
+            let fields = slice::from_raw_parts(fields, num_fields as _);
+
+            assert_eq!(fields[0].r#type, TSDB_DATA_TYPE_TIMESTAMP as i8);
+            assert_eq!(fields[0].bytes, 8);
+
+            assert_eq!(fields[1].r#type, TSDB_DATA_TYPE_INT as i8);
+            assert_eq!(fields[1].bytes, 4);
+
+            assert_eq!(fields[2].r#type, TSDB_DATA_TYPE_DECIMAL64 as i8);
+            assert_eq!(fields[2].bytes, 8);
+            assert_eq!(fields[2].precision, 10);
+            assert_eq!(fields[2].scale, 2);
+
+            assert_eq!(fields[3].r#type, TSDB_DATA_TYPE_DECIMAL as i8);
+            assert_eq!(fields[3].bytes, 16);
+            assert_eq!(fields[3].precision, 38);
+            assert_eq!(fields[3].scale, 20);
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1743154970");
+            taos_close(taos);
+        }
+    }
 }

@@ -794,7 +794,7 @@ impl WsResultSetTrait for WsSqlResultSet {
             self.row.current_row = 0;
         }
 
-        if let Some(block) = self.block.as_ref() {
+        if let Some(block) = self.block.as_mut() {
             if block.nrows() == 0 {
                 return Ok(std::ptr::null());
             }
@@ -813,7 +813,7 @@ impl WsResultSetTrait for WsSqlResultSet {
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
         tracing::trace!("try to get raw value at ({row}, {col})");
-        match self.block.as_ref() {
+        match self.block.as_mut() {
             Some(block) => {
                 if row < block.nrows() && col < block.ncols() {
                     let res = block.get_raw_value_unchecked(row, col);
