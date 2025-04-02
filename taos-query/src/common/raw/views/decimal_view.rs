@@ -189,10 +189,8 @@ where
 {
     fn drop(&mut self) {
         if let Some(buf) = self.buf.as_mut() {
-            for ptr in buf.iter() {
-                if let Some(ptr) = ptr {
-                    let _ = unsafe { CString::from_raw(*ptr as *mut c_char) };
-                }
+            for ptr in buf.iter().flatten() {
+                let _ = unsafe { CString::from_raw(*ptr as *mut c_char) };
             }
         }
     }
