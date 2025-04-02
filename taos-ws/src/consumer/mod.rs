@@ -989,6 +989,12 @@ static AVAILABLE_PARAMS: Lazy<HashSet<&str>> = Lazy::new(|| {
     params.insert("replica");
     params.insert("msg.consume.rawdata");
     params.insert("timeout");
+    params.insert("max_queue_length");
+    params.insert("max_errors_in_window");
+    params.insert("busy_threshold");
+    params.insert("compression");
+    params.insert("health_check_window_in_second");
+    params.insert("td.connect.websocket.scheme");
     params
 });
 
@@ -2885,6 +2891,49 @@ mod tests {
         taos.exec_many([
             "drop topic topic_1741674686",
             "drop database test_1741674686",
+        ])
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_filter_td_connect_websocket_scheme_config() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1743505369",
+            "drop database if exists test_1743505369",
+            "create database test_1743505369 wal_retention_period 3600",
+            "create topic topic_1743505369 with meta as database test_1743505369",
+            "use test_1743505369",
+            "create table meters(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint, \
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16), c11 tinyint unsigned, \
+            c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned) tags(t1 int)",
+            "create table d0 using meters tags(1000)",
+            "create table d1 using meters tags(null)",
+            "insert into d0 values(now, null, null, null, null, null, null, null, null, null, null, \
+            null, null, null, null) \
+            d1 values(now, true, -2, -3, -4, -5, '2022-02-02 02:02:02.222', -0.1, -0.12345678910, \
+            'abc 和我', 'Unicode + 涛思', 254, 65534, 1, 1)",
+        ])
+        .await?;
+
+        let builder = TmqBuilder::new(
+            "ws://localhost:6041?td.connect.websocket.scheme=ws&group.id=0&auto.offset.reset=earliest",
+        )?;
+
+        let mut consumer = builder.build_consumer().await?;
+        consumer.subscribe(["topic_1743505369"]).await?;
+        consumer.unsubscribe().await;
+
+        taos.exec_many([
+            "drop topic topic_1743505369",
+            "drop database test_1743505369",
         ])
         .await?;
 

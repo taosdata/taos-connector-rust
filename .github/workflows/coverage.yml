@@ -63,6 +63,14 @@ jobs:
           (github.event_name == 'push' && steps.cache-server-push.outputs.cache-hit != 'true')
         run: sudo apt install -y libgeos-dev
 
+      - name: Get CMake
+        uses: lukka/get-cmake@latest
+        if: >
+          (github.event_name == 'workflow_dispatch' && steps.cache-server-manually.outputs.cache-hit != 'true') ||
+          (github.event_name == 'push' && steps.cache-server-push.outputs.cache-hit != 'true')
+        with:
+          cmakeVersion: 3.31.6
+
       - name: Install TDengine
         if: >
           (github.event_name == 'workflow_dispatch' && steps.cache-server-manually.outputs.cache-hit != 'true') ||
