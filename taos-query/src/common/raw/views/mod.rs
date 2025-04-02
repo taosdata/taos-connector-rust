@@ -604,7 +604,10 @@ impl ColumnView {
     /// Get pointer to value.
     /// FIXME: for Decimal/Decimal64 type, we can not get complete data from data ptr, we also need precision/scale in schema
     #[inline]
-    pub(super) unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
+    pub(super) unsafe fn get_raw_value_unchecked(
+        &mut self,
+        row: usize,
+    ) -> (Ty, u32, *const c_void) {
         match self {
             ColumnView::Bool(view) => view.get_raw_value_unchecked(row),
             ColumnView::TinyInt(view) => view.get_raw_value_unchecked(row),

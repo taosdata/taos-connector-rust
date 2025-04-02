@@ -1,5 +1,6 @@
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void, CString};
 use std::marker::PhantomData;
+use std::ptr;
 
 use bytes::Bytes;
 
@@ -19,6 +20,7 @@ where
     pub(crate) precision: u8,
     pub(crate) scale: u8,
     pub(crate) _p: PhantomData<T>,
+    buf: Option<Vec<Option<*mut c_char>>>,
 }
 
 impl<T> DecimalView<T>
@@ -26,6 +28,18 @@ where
     T: DecimalAllowedTy,
 {
     const ITEM_SIZE: usize = std::mem::size_of::<T>();
+
+    /// Create a new decimal view.
+    pub fn new(nulls: NullBits, data: Bytes, precision: u8, scale: u8) -> Self {
+        Self {
+            nulls,
+            data,
+            precision,
+            scale,
+            _p: PhantomData,
+            buf: None,
+        }
+    }
 
     pub fn precision_and_scale(&self) -> (u8, u8) {
         (self.precision, self.scale)
@@ -98,13 +112,7 @@ where
         let data = self
             .data
             .slice(range.start * item_size..range.end * item_size);
-        Some(Self {
-            nulls,
-            data,
-            precision: self.precision,
-            scale: self.scale,
-            _p: PhantomData,
-        })
+        Some(Self::new(nulls, data, self.precision, self.scale))
     }
 
     /// A iterator to nullable values of current row.
@@ -146,24 +154,46 @@ where
             .copied()
             .collect();
 
-        View {
-            nulls,
-            data,
-            precision: self.precision,
-            scale: self.scale,
-            _p: PhantomData,
-        }
+        Self::new(nulls, data, self.precision, self.scale)
     }
 
-    pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
-        if self.nulls.is_null_unchecked(row) {
-            (T::ty(), Self::ITEM_SIZE as _, std::ptr::null())
+    /// Get raw value at `row` index.
+    pub unsafe fn get_raw_value_unchecked(&mut self, row: usize) -> (Ty, u32, *const c_void) {
+        let ptr = if self.nulls.is_null_unchecked(row) {
+            ptr::null()
         } else {
-            (
-                T::ty(),
-                Self::ITEM_SIZE as _,
-                self.get_raw_data_at(row) as _,
-            )
+            if self.buf.is_none() {
+                self.buf = Some(vec![None; self.len()]);
+            }
+
+            let buf = self.buf.as_mut().unwrap();
+            if buf[row].is_none() {
+                let data =
+                    (self.data.as_ptr().add(row * Self::ITEM_SIZE) as *const T).read_unaligned();
+                let dec = Decimal::new(data, self.precision, self.scale);
+                let str = dec.as_bigdecimal().to_string();
+                let cstr = CString::new(str).unwrap();
+                buf[row] = Some(cstr.into_raw());
+            }
+
+            buf[row].unwrap() as *const c_void
+        };
+
+        (T::ty(), Self::ITEM_SIZE as _, ptr)
+    }
+}
+
+impl<T> Drop for DecimalView<T>
+where
+    T: DecimalAllowedTy,
+{
+    fn drop(&mut self) {
+        if let Some(buf) = self.buf.as_mut() {
+            for ptr in buf.iter() {
+                if let Some(ptr) = ptr {
+                    let _ = unsafe { CString::from_raw(*ptr as *mut c_char) };
+                }
+            }
         }
     }
 }
@@ -213,6 +243,7 @@ macro_rules! impl_from_iter {
                 precision,
                 scale,
                 _p: PhantomData,
+                buf: None,
             }
         }
     };

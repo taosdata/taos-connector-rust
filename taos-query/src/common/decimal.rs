@@ -9,7 +9,7 @@ mod private {
     impl DecimalAllowedTy for i128 {}
 }
 
-pub trait DecimalAllowedTy: private::DecimalAllowedTy + Copy {
+pub trait DecimalAllowedTy: private::DecimalAllowedTy + Copy + Into<BigInt> {
     fn ty() -> Ty;
 }
 
@@ -56,12 +56,7 @@ where
     pub fn precision_and_scale(&self) -> (u8, u8) {
         (self.precision, self.scale)
     }
-}
 
-impl<T> Decimal<T>
-where
-    T: Into<BigInt> + DecimalAllowedTy,
-{
     pub(crate) fn as_bigdecimal(&self) -> bigdecimal::BigDecimal {
         BigDecimal::from_bigint(self.data.into(), self.scale as _)
     }
@@ -89,7 +84,7 @@ from_bigdecimal!(i64);
 
 impl<T> std::fmt::Display for Decimal<T>
 where
-    T: DecimalAllowedTy + Into<BigInt>,
+    T: DecimalAllowedTy,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.as_bigdecimal().fmt(f)

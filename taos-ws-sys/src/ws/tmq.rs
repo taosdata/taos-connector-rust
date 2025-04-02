@@ -1475,7 +1475,7 @@ impl ResultSetOperations for TmqResultSet {
             self.row.current_row = 0;
         }
 
-        match self.block.as_ref() {
+        match self.block.as_mut() {
             Some(block) => {
                 if block.nrows() == 0 {
                     return Ok(ptr::null_mut());
@@ -1494,7 +1494,7 @@ impl ResultSetOperations for TmqResultSet {
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
-        if let Some(block) = &self.block {
+        if let Some(block) = self.block.as_mut() {
             if row < block.nrows() && col < block.ncols() {
                 return block.get_raw_value_unchecked(row, col);
             }

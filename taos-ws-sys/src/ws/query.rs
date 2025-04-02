@@ -414,6 +414,10 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                     let data = row[i].offset(-2) as *const InlineNChar;
                     write_to_cstr(&mut size, str.add(len), &(*data).to_string())
                 }
+                Ty::Decimal | Ty::Decimal64 => {
+                    let data = CStr::from_ptr(row[i] as *mut c_char).to_str().unwrap();
+                    write_to_cstr(&mut size, str.add(len), data)
+                }
                 _ => 0,
             }
         };
@@ -820,7 +824,7 @@ pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
     };
 
     if let ResultSet::Query(rs) = rs {
-        if let Some(block) = rs.block.as_ref() {
+        if let Some(block) = rs.block.as_mut() {
             let lengths = if rs.has_called_fetch_row {
                 let mut lengths = Vec::with_capacity(block.ncols());
                 for col in 0..block.ncols() {
@@ -1338,7 +1342,7 @@ impl ResultSetOperations for QueryResultSet {
             self.row.current_row = 0;
         }
 
-        if let Some(block) = self.block.as_ref() {
+        if let Some(block) = self.block.as_mut() {
             if block.nrows() == 0 {
                 return Ok(ptr::null_mut());
             }
@@ -1356,7 +1360,7 @@ impl ResultSetOperations for QueryResultSet {
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
-        if let Some(block) = &self.block {
+        if let Some(block) = self.block.as_mut() {
             if row < block.nrows() && col < block.ncols() {
                 return block.get_raw_value_unchecked(row, col);
             }
@@ -1709,9 +1713,10 @@ mod tests {
                     "create table t0 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, \
                     c5 bigint, c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, \
                     c9 bigint unsigned, c10 float, c11 double, c12 varchar(20), c13 nchar(10), \
-                    c14 varbinary(10), c15 geometry(50))",
-                    "insert into t0 values (now, true, 1, 1, 1, 1, 1, 1, 1, 1, 1.1, 1.1, \
-                    'hello world', 'hello', 'hello', 'POINT(1 1)')",
+                    c14 varbinary(10), c15 geometry(50), c16 decimal(10, 3), c17 decimal(38, 10))",
+                    "insert into t0 values (1743557474107, true, 1, 1, 1, 1, 1, 1, 1, 1, 1.1, 1.1, \
+                    'hello world', 'hello', 'hello', 'POINT(1 1)', 12345.123, \
+                    12345678901234567890.123456789)",
                 ],
             );
 
@@ -1725,12 +1730,15 @@ mod tests {
             assert!(!fields.is_null());
 
             let num_fields = taos_num_fields(res);
-            assert_eq!(num_fields, 16);
+            assert_eq!(num_fields, 18);
 
             let mut str = vec![0 as c_char; 1024];
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            assert_eq!(len, 110);
-            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+            assert_eq!(len, 152);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()),
+                c"1743557474107 1 1 1 1 1 1 1 1 1 1.1 1.1 hello world \xf3\x86\x95\xa8 68656c6c6f 0101000000000000000000f03f000000000000f03f 12345.123 12345678901234567890.1234567890",
+            );
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1741657731");
