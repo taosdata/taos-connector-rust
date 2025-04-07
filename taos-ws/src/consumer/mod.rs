@@ -2881,7 +2881,8 @@ mod tests {
             "ws://localhost:6041?group.id=10&client.id=1&auto.offset.reset=earliest&\
             experimental.snapshot.enable=false&msg.with.table.name=true&enable.auto.commit=false&\
             auto.commit.interval.ms=5000&msg.enable.batchmeta=1&msg.consume.excluded=1&\
-            msg.consume.rawdata=1&timeout=200ms&td.connect.ip=localhost&enable.replay=false",
+            msg.consume.rawdata=1&timeout=200ms&td.connect.ip=localhost&enable.replay=false&\
+            compress&interval=5s&any_other_config_without_dot=value1",
         )?;
 
         let mut consumer = builder.build_consumer().await?;
