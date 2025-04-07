@@ -1117,7 +1117,7 @@ impl TmqBuilder {
             let filtered: std::collections::HashMap<_, _> = dsn
                 .params
                 .iter()
-                .filter(|(key, _)| !AVAILABLE_PARAMS.contains(key.as_str()))
+                .filter(|(key, _)| !AVAILABLE_PARAMS.contains(key.as_str()) && key.contains('.'))
                 .map(|(key, val)| (key.clone(), val.clone()))
                 .collect();
 
