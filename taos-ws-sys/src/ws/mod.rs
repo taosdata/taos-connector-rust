@@ -359,6 +359,8 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
 
     LogTracer::init()?;
 
+    debug!("taos_init, config: {cfg:?}");
+
     Ok(())
 }
 
