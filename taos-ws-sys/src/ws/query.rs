@@ -1166,6 +1166,8 @@ async fn check_server_status(fqdn: Option<FastStr>, port: i32) -> TaosResult<(i3
         format!("ws://{host}:6041")
     };
 
+    debug!("check_server_status, dsn: {dsn}");
+
     let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
     let (status, details) = taos.client().check_server_status(fqdn, port).await?;
     Ok((status, details))
