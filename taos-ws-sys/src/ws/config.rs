@@ -5,7 +5,6 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::{OnceLock, RwLock};
 
-use chrono_tz::Tz;
 use faststr::FastStr;
 use taos_error::Code;
 use tracing::level_filters::LevelFilter;
@@ -19,7 +18,7 @@ pub struct Config {
     pub log_dir: Option<FastStr>,
     pub log_level: Option<LevelFilter>,
     pub log_output_to_screen: Option<bool>,
-    pub timezone: Option<Tz>,
+    pub timezone: Option<FastStr>,
     pub first_ep: Option<FastStr>,
     pub second_ep: Option<FastStr>,
     pub fqdn: Option<FastStr>,
@@ -30,8 +29,8 @@ pub static CONFIG: RwLock<Config> = RwLock::new(Config::const_new());
 
 // FIXME
 #[allow(dead_code)]
-pub fn get_global_timezone() -> Option<Tz> {
-    CONFIG.read().unwrap().timezone
+pub fn get_global_timezone() -> Option<FastStr> {
+    CONFIG.read().unwrap().timezone.clone()
 }
 #[allow(dead_code)]
 pub fn get_global_log_dir() -> FastStr {
@@ -87,7 +86,7 @@ pub fn init() -> Result<(), String> {
             config.set_log_output_to_screen(e == "1");
         }
         if let Ok(e) = std::env::var("TAOS_TIMEZONE") {
-            config.set_timezone(Tz::from_str(&e).unwrap());
+            config.set_timezone(e);
         }
         if let Ok(e) = std::env::var("TAOS_FIRST_EP") {
             config.set_first_ep(e);
@@ -156,8 +155,8 @@ impl Config {
 
     // FIXME
     #[allow(dead_code)]
-    pub fn timezone(&self) -> Option<Tz> {
-        self.timezone
+    pub fn timezone(&self) -> Option<&FastStr> {
+        self.timezone.as_ref()
     }
 
     pub fn first_ep(&self) -> Option<&FastStr> {
@@ -225,9 +224,9 @@ impl Config {
     pub fn set_log_output_to_screen(&mut self, log_output_to_screen: bool) {
         self.log_output_to_screen = Some(log_output_to_screen);
     }
-    pub fn set_timezone(&mut self, timezone: Tz) {
+    pub fn set_timezone<T: Into<FastStr>>(&mut self, timezone: T) {
         if self.timezone.is_none() {
-            self.timezone = Some(timezone);
+            self.timezone = Some(timezone.into());
         }
     }
     pub fn set_first_ep<T: Into<FastStr>>(&mut self, first_ep: T) {
@@ -314,6 +313,7 @@ impl Config {
             server_port: None,
         }
     }
+
     fn new(filename: &Path) -> Result<Config, TaosError> {
         read_config_file(filename)
             .map_err(|_| {
@@ -323,10 +323,14 @@ impl Config {
                 )
             })
             .and_then(|lines| {
-                parse_config(lines).map_err(|_| {
+                parse_config(lines).map_err(|err| {
                     TaosError::new(
                         Code::INVALID_PARA,
-                        &format!("failed to parse config file: {}", filename.display()),
+                        &format!(
+                            "failed to parse config file: {}, err: {:?}",
+                            filename.display(),
+                            err
+                        ),
                     )
                 })
             })
@@ -394,11 +398,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
                 },
                 "logDir" => config.log_dir = Some(value.to_string().into()),
                 "debugFlag" => config.set_debug_flag_str(value),
-                "timezone" => {
-                    config.timezone = Some(Tz::from_str(value).map_err(|_| {
-                        ConfigError::Parse(format!("failed to parse timezone: {value}"))
-                    })?);
-                }
+                "timezone" => config.set_timezone::<FastStr>(value.to_string().into()),
                 "firstEp" => config.first_ep = Some(value.to_string().into()),
                 "secondEp" => config.second_ep = Some(value.to_string().into()),
                 "fqdn" => config.fqdn = Some(value.to_string().into()),
@@ -426,7 +426,7 @@ mod tests {
         assert_eq!(config.log_dir.as_deref().unwrap(), "/path/to/logDir/");
         assert_eq!(config.log_level.unwrap(), LevelFilter::DEBUG);
         assert_eq!(config.log_output_to_screen.unwrap(), true);
-        assert_eq!(config.timezone, Some(Tz::Asia__Shanghai));
+        assert_eq!(config.timezone.as_deref().unwrap(), "Asia/Shanghai");
         assert_eq!(config.first_ep.as_deref().unwrap(), "hostname:7030");
         assert_eq!(config.second_ep.as_deref().unwrap(), "hostname:16030");
         assert_eq!(config.fqdn.as_deref().unwrap(), "hostname");

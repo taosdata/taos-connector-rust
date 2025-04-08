@@ -256,18 +256,8 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
             }
             let tz = CStr::from_ptr(arg as _);
             if let Ok(tz) = tz.to_str() {
-                match tz.parse() {
-                    Ok(tz) => {
-                        c.set_timezone(tz);
-                        0
-                    }
-                    Err(err) => {
-                        return set_err_and_get_code(TaosError::new(
-                            Code::INVALID_PARA,
-                            &format!("taos timezone `{tz}` is invalid, err: {err}"),
-                        ));
-                    }
-                }
+                c.set_timezone(tz);
+                0
             } else {
                 return set_err_and_get_code(TaosError::new(
                     Code::INVALID_PARA,
@@ -326,7 +316,7 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
 
     let cfg = config::CONFIG.read().unwrap();
     if let Some(timezone) = cfg.timezone() {
-        unsafe { std::env::set_var("TZ", timezone.name()) };
+        unsafe { std::env::set_var("TZ", timezone.as_str()) };
     }
 
     let mut layers = Vec::new();
