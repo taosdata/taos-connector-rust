@@ -64,6 +64,7 @@ jobs:
 
       - name: Prepare development tools
         run: |
+          sudo apt update
           sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config -y
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
