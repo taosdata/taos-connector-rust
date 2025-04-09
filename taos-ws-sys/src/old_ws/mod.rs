@@ -9,7 +9,6 @@ use std::thread;
 use std::time::Duration;
 
 use bytes::Bytes;
-use cargo_metadata::MetadataCommand;
 use taos_error::Code;
 use taos_query::common::{
     Field, Precision, RawBlock as Block, SchemalessPrecision, SchemalessProtocol, SmlDataBuilder,
@@ -1167,31 +1166,9 @@ pub unsafe extern "C" fn ws_select_db(taos: *mut WS_TAOS, db: *const c_char) -> 
 /// If the query is update query or not
 pub unsafe extern "C" fn ws_get_client_info() -> *const c_char {
     static VERSION_INFO: OnceLock<CString> = OnceLock::new();
-
-    let metadata = match MetadataCommand::new().no_deps().exec().ok() {
-        Some(m) => m,
-        _ => {
-            set_error_and_get_code(WsError::new(Code::FAILED, "Metadata Command error"));
-            return std::ptr::null();
-        }
-    };
-
-    let package = match metadata
-        .packages
-        .into_iter()
-        .find(|p| p.name == "taos-ws-sys")
-    {
-        Some(x) => x,
-        _ => {
-            set_error_and_get_code(WsError::new(Code::FAILED, "find package error"));
-            return std::ptr::null();
-        }
-    };
-
-    let version = package.version.to_string();
-    let version = CString::new(version).unwrap();
-    VERSION_INFO.set(version).unwrap();
-    VERSION_INFO.get().unwrap().as_ptr()
+    VERSION_INFO
+        .get_or_init(|| CString::new(env!("CARGO_PKG_VERSION")).unwrap())
+        .as_ptr()
 }
 
 #[no_mangle]
@@ -1769,6 +1746,10 @@ mod tests {
         unsafe {
             let pclient_info = ws_get_client_info();
             dbg!(CStr::from_ptr(pclient_info));
+            assert_eq!(
+                CStr::from_ptr(pclient_info).to_str().unwrap(),
+                env!("CARGO_PKG_VERSION")
+            );
         }
     }
 
