@@ -1178,25 +1178,6 @@ impl WsTaos {
         }
     }
 
-    pub async fn check_server_status(
-        &self,
-        fqdn: Option<FastStr>,
-        port: i32,
-    ) -> RawResult<(i32, String)> {
-        let req = WsSend::CheckServerStatus {
-            req_id: generate_req_id(),
-            fqdn,
-            port,
-        };
-
-        match self.sender.send_recv(req).await? {
-            WsRecvData::CheckServerStatus {
-                status, details, ..
-            } => Ok((status, details)),
-            _ => unreachable!(),
-        }
-    }
-
     pub fn version(&self) -> &str {
         &self.sender.version.version
     }
@@ -1448,6 +1429,49 @@ impl AsyncQueryable for WsTaos {
     async fn put(&self, data: &SmlData) -> RawResult<()> {
         self.s_put(data).in_current_span().await
     }
+}
+
+pub async fn check_server_status<T>(dsn: &str, fqdn: T, port: i32) -> RawResult<(i32, String)>
+where
+    T: Into<Option<FastStr>>,
+{
+    let builder = TaosBuilder::from_dsn(dsn)?;
+    let ws = builder.build_stream(builder.to_query_url()).await?;
+    let (mut sender, mut reader) = ws.split();
+
+    let req = WsSend::CheckServerStatus {
+        req_id: generate_req_id(),
+        fqdn: fqdn.into(),
+        port,
+    };
+
+    sender.send(req.to_msg()).await.map_err(Error::from)?;
+
+    while let Some(Ok(message)) = reader.next().await {
+        if let Message::Text(text) = message {
+            let resp: WsRecv = serde_json::from_str(&text)
+                .map_err(|e| RawError::from_string(format!("failed to parse JSON: {e:?}")))?;
+
+            let (_, data, ok) = resp.ok();
+            if let WsRecvData::CheckServerStatus {
+                status, details, ..
+            } = data
+            {
+                ok?;
+                return Ok((status, details));
+            } else {
+                return Err(RawError::from_string(
+                    "unexpected response data type".to_string(),
+                ));
+            }
+        } else {
+            return Err(RawError::from_string(format!(
+                "unexpected message type: {message:?}"
+            )));
+        }
+    }
+
+    Ok((0, String::new()))
 }
 
 #[cfg(test)]
@@ -1870,24 +1894,27 @@ mod tests {
         Ok(())
     }
 
-    // #[tokio::test]
-    // async fn test_validate_sql() -> anyhow::Result<()> {
-    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
-    //     taos.validate_sql("create database if not exists test_1741338182")
-    //         .await?;
-    //     let _ = taos.validate_sql("select * from t0").await.unwrap_err();
-    //     Ok(())
-    // }
+    #[tokio::test]
+    async fn test_validate_sql() -> anyhow::Result<()> {
+        let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+        taos.validate_sql("create database if not exists test_1741338182")
+            .await?;
+        let _ = taos.validate_sql("select * from t0").await.unwrap_err();
+        Ok(())
+    }
 
-    // #[tokio::test]
-    // async fn test_check_server_status() -> anyhow::Result<()> {
-    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
-    //     let (stauts, details) = taos
-    //         .check_server_status(Some("127.0.0.1".to_string()), 6030)
-    //         .await?;
-    //     println!("status: {}, details: {}", stauts, details);
-    //     let (stauts, details) = taos.check_server_status(None, 0).await?;
-    //     println!("status: {}, details: {}", stauts, details);
-    //     Ok(())
-    // }
+    #[tokio::test]
+    async fn test_check_server_status() -> anyhow::Result<()> {
+        let dsn = "ws://localhost:6041";
+
+        let (status, details) = check_server_status(dsn, Some("127.0.0.1".into()), 6030).await?;
+        assert_eq!(status, 2);
+        println!("status: {status}, details: {details}");
+
+        let (status, details) = check_server_status(dsn, None, 0).await?;
+        assert_eq!(status, 2);
+        println!("status: {status}, details: {details}");
+
+        Ok(())
+    }
 }

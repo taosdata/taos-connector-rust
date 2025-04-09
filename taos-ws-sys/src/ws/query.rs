@@ -73,7 +73,7 @@ pub struct TAOS_DB_ROUTE_INFO {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum TSDB_SERVER_STATUS {
     TSDB_SRV_STATUS_UNAVAILABLE = 0,
@@ -1133,26 +1133,6 @@ pub unsafe extern "C" fn taos_check_server_status(
 
     debug!("taos_check_server_status, fqdn: {fqdn:?}, port: {port}");
 
-    let (status, ds) = match block_in_place_or_global(check_server_status(fqdn, port)) {
-        Ok(res) => res,
-        Err(err) => {
-            error!("taos_check_server_status failed, err: {err:?}");
-            set_err_and_get_code(err);
-            return TSDB_SERVER_STATUS::TSDB_SRV_STATUS_UNAVAILABLE;
-        }
-    };
-
-    debug!("taos_check_server_status succ, status: {status}, details: {ds:?}");
-
-    let len = ds.len().min(maxlen as usize);
-    ptr::copy_nonoverlapping(ds.as_ptr() as _, details, len);
-    status.into()
-}
-
-async fn check_server_status(fqdn: Option<FastStr>, port: i32) -> TaosResult<(i32, String)> {
-    use taos_query::AsyncTBuilder;
-    use taos_ws::TaosBuilder;
-
     let mut host = FastStr::from_static_str("localhost");
     if let Some(ep) = config::get_global_first_ep() {
         host = ep;
@@ -1166,11 +1146,23 @@ async fn check_server_status(fqdn: Option<FastStr>, port: i32) -> TaosResult<(i3
         format!("ws://{host}:6041")
     };
 
-    debug!("check_server_status, dsn: {dsn}");
+    debug!("taos_check_server_status, dsn: {dsn}");
 
-    let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
-    let (status, details) = taos.client().check_server_status(fqdn, port).await?;
-    Ok((status, details))
+    let (status, ds) =
+        match block_in_place_or_global(taos_ws::query::check_server_status(&dsn, fqdn, port)) {
+            Ok(res) => res,
+            Err(err) => {
+                error!("taos_check_server_status failed, err: {err:?}");
+                set_err_and_get_code(err.into());
+                return TSDB_SERVER_STATUS::TSDB_SRV_STATUS_UNAVAILABLE;
+            }
+        };
+
+    debug!("taos_check_server_status succ, status: {status}, details: {ds:?}");
+
+    let len = ds.len().min(maxlen as usize);
+    ptr::copy_nonoverlapping(ds.as_ptr() as _, details, len);
+    status.into()
 }
 
 #[derive(Debug)]
@@ -2362,15 +2354,15 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_taos_validate_sql() {
-    //     unsafe {
-    //         let taos = test_connect();
-    //         let sql = c"create database if not exists test_1741339814";
-    //         let code = taos_validate_sql(taos, sql.as_ptr());
-    //         assert_eq!(code, 0);
-    //     }
-    // }
+    #[test]
+    fn test_taos_validate_sql() {
+        unsafe {
+            let taos = test_connect();
+            let sql = c"create database if not exists test_1741339814";
+            let code = taos_validate_sql(taos, sql.as_ptr());
+            assert_eq!(code, 0);
+        }
+    }
 
     #[test]
     fn test_taos_fetch_raw_block_a() {
@@ -2745,27 +2737,29 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_taos_check_server_status() {
-    //     unsafe {
-    //         let max_len = 20;
-    //         let mut details = vec![0 as c_char; max_len];
-    //         let fqdn = c"localhost";
-    //         let status =
-    //             taos_check_server_status(fqdn.as_ptr(), 6030, details.as_mut_ptr(), max_len as _);
-    //         let details = CStr::from_ptr(details.as_ptr());
-    //         println!("status: {status:?}, details: {details:?}");
-    //     }
+    #[test]
+    fn test_taos_check_server_status() {
+        unsafe {
+            let max_len = 20;
+            let mut details = vec![0 as c_char; max_len];
+            let fqdn = c"localhost";
+            let status =
+                taos_check_server_status(fqdn.as_ptr(), 6030, details.as_mut_ptr(), max_len as _);
+            assert_eq!(status, TSDB_SERVER_STATUS::TSDB_SRV_STATUS_SERVICE_OK);
+            let details = CStr::from_ptr(details.as_ptr());
+            println!("status: {status:?}, details: {details:?}");
+        }
 
-    //     unsafe {
-    //         let max_len = 20;
-    //         let mut details = vec![0 as c_char; max_len];
-    //         let status =
-    //             taos_check_server_status(ptr::null(), 0, details.as_mut_ptr(), max_len as _);
-    //         let details = CStr::from_ptr(details.as_ptr());
-    //         println!("status: {status:?}, details: {details:?}");
-    //     }
-    // }
+        unsafe {
+            let max_len = 20;
+            let mut details = vec![0 as c_char; max_len];
+            let status =
+                taos_check_server_status(ptr::null(), 0, details.as_mut_ptr(), max_len as _);
+            assert_eq!(status, TSDB_SERVER_STATUS::TSDB_SRV_STATUS_SERVICE_OK);
+            let details = CStr::from_ptr(details.as_ptr());
+            println!("status: {status:?}, details: {details:?}");
+        }
+    }
 
     #[test]
     fn test_taos_fetch_fields_e() {
