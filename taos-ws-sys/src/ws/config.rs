@@ -428,7 +428,7 @@ mod tests {
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
             assert_eq!(config.log_output_to_screen(), true);
-            assert_eq!(config.timezone(), Some(Tz::Asia__Shanghai));
+            assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
             assert_eq!(config.first_ep(), Some(&FastStr::from("hostname:7030")));
             assert_eq!(config.second_ep(), Some(&FastStr::from("hostname:16030")));
             assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
@@ -442,7 +442,7 @@ mod tests {
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
             assert_eq!(config.log_output_to_screen(), true);
-            assert_eq!(config.timezone(), Some(Tz::Asia__Shanghai));
+            assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
             assert_eq!(config.first_ep(), Some(&FastStr::from("hostname:7030")));
             assert_eq!(config.second_ep(), Some(&FastStr::from("hostname:16030")));
             assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
@@ -484,7 +484,7 @@ mod tests {
 
         init()?;
 
-        assert_eq!(get_global_timezone(), Some(Tz::UTC));
+        assert_eq!(get_global_timezone(), Some(FastStr::from("UTC")));
         assert_eq!(get_global_log_dir(), FastStr::from("/var/log/taos"));
         assert_eq!(get_global_log_level(), LevelFilter::TRACE);
         assert_eq!(get_global_log_output_to_screen(), false);
