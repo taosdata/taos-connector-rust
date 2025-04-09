@@ -1447,7 +1447,7 @@ where
 
     sender.send(req.to_msg()).await.map_err(Error::from)?;
 
-    while let Some(Ok(message)) = reader.next().await {
+    if let Some(Ok(message)) = reader.next().await {
         if let Message::Text(text) = message {
             let resp: WsRecv = serde_json::from_str(&text)
                 .map_err(|e| RawError::from_string(format!("failed to parse JSON: {e:?}")))?;
@@ -1459,16 +1459,14 @@ where
             {
                 ok?;
                 return Ok((status, details));
-            } else {
-                return Err(RawError::from_string(
-                    "unexpected response data type".to_string(),
-                ));
             }
-        } else {
-            return Err(RawError::from_string(format!(
-                "unexpected message type: {message:?}"
-            )));
+            return Err(RawError::from_string(
+                "unexpected response data type".to_string(),
+            ));
         }
+        return Err(RawError::from_string(format!(
+            "unexpected message type: {message:?}"
+        )));
     }
 
     Ok((0, String::new()))
