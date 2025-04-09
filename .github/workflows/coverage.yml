@@ -61,7 +61,8 @@ jobs:
         if: >
           (github.event_name == 'workflow_dispatch' && steps.cache-server-manually.outputs.cache-hit != 'true') ||
           (github.event_name == 'push' && steps.cache-server-push.outputs.cache-hit != 'true')
-        run: sudo apt install -y libgeos-dev
+        run: |
+          sudo apt update && sudo apt install -y libgeos-dev
 
       - name: Get CMake
         uses: lukka/get-cmake@latest
@@ -169,6 +170,7 @@ jobs:
 
       - name: Prepare development tools
         run: |
+          sudo apt update
           sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config libgflags2.2 libgflags-dev libgeos-dev -y
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
