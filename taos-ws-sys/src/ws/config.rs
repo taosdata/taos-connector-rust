@@ -455,7 +455,7 @@ mod tests {
     #[test]
     fn test_init() -> Result<(), String> {
         unsafe {
-            let timezone = c"UTC";
+            let timezone = c"Asia/Shanghai";
             let code = taos_options(TSDB_OPTION::TSDB_OPTION_TIMEZONE, timezone.as_ptr() as _);
             assert_eq!(code, 0);
 
@@ -465,18 +465,18 @@ mod tests {
         }
 
         unsafe {
+            set_var("RUST_LOG", "warn");
             set_var("TAOS_LOG_DIR", "/var/log/taos");
-            set_var("RUST_LOG", "debug");
-            set_var("TAOS_DEBUG_FLAG", "131");
             set_var("TAOS_DEBUG_FLAG", "135");
             set_var("TAOS_DEBUG_FLAG", "143");
             set_var("TAOS_DEBUG_FLAG", "199");
             set_var("TAOS_DEBUG_FLAG", "207");
+            set_var("TAOS_DEBUG_FLAG", "131");
             set_var("TAOS_LOG_OUTPUT_TO_SCREEN", "0");
             set_var("TAOS_TIMEZONE", "Asia/Shanghai");
-            set_var("TAOS_FIRST_EP", "hostname:6030");
+            set_var("TAOS_FIRST_EP", "localhost");
             set_var("TAOS_SECOND_EP", "hostname:16030");
-            set_var("TAOS_FQDN", "hostname");
+            set_var("TAOS_FQDN", "localhost");
             set_var("TAOS_SERVER_PORT", "6030");
             set_var("TAOS_COMPRESSION", "false");
             set_var("TAOS_CONFIG_DIR", "./tests");
@@ -484,17 +484,17 @@ mod tests {
 
         init()?;
 
-        assert_eq!(get_global_timezone(), Some(FastStr::from("UTC")));
+        assert_eq!(get_global_timezone(), Some(FastStr::from("Asia/Shanghai")));
         assert_eq!(get_global_log_dir(), FastStr::from("/var/log/taos"));
-        assert_eq!(get_global_log_level(), LevelFilter::TRACE);
+        assert_eq!(get_global_log_level(), LevelFilter::WARN);
         assert_eq!(get_global_log_output_to_screen(), false);
         assert_eq!(get_global_compression(), false);
-        assert_eq!(get_global_first_ep(), Some(FastStr::from("hostname:6030")));
+        assert_eq!(get_global_first_ep(), Some(FastStr::from("localhost")));
         assert_eq!(
             get_global_second_ep(),
             Some(FastStr::from("hostname:16030"))
         );
-        assert_eq!(get_global_fqdn(), Some(FastStr::from("hostname")));
+        assert_eq!(get_global_fqdn(), Some(FastStr::from("localhost")));
         assert_eq!(get_global_server_port(), 6030);
 
         Ok(())

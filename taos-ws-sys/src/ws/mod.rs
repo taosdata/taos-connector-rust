@@ -16,7 +16,7 @@ use taos_query::TBuilder;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
-use tracing::{debug, instrument};
+use tracing::{debug, error, instrument};
 
 mod config;
 pub mod error;
@@ -145,6 +145,7 @@ pub unsafe extern "C" fn taos_connect(
     match connect(ip, user, pass, db, port) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
         Err(err) => {
+            error!("taos_connect failed, err: {err:?}");
             set_err_and_get_code(err);
             ptr::null_mut()
         }
