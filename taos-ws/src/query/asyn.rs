@@ -265,6 +265,7 @@ pub enum WS_ERROR_NO {
     RECV_MESSAGE_TIMEOUT = 0xE004,
     IO_ERROR = 0xE005,
     UNAUTHORIZED = 0xE006,
+    DE_ERROR = 0xE007,
 }
 
 impl WS_ERROR_NO {
@@ -283,6 +284,7 @@ impl Error {
             Error::TungsteniteError(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
             Error::FlumeSendError(_) => Code::new(WS_ERROR_NO::CONN_CLOSED as _),
+            Error::DeError(_) => Code::new(WS_ERROR_NO::DE_ERROR as _),
             _ => Code::FAILED,
         }
     }
@@ -656,7 +658,7 @@ impl WsTaos {
                         Ok(Message::Text(text)) => {
                             let v: WsRecv = serde_json::from_str(&text).map_err(|err| {
                                 RawError::any(err)
-                                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                    .with_code(WS_ERROR_NO::DE_ERROR.as_code())
                                     .context("Parser text as json error")
                             })?;
                             let (_req_id, data, ok) = v.ok();

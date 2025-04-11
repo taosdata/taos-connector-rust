@@ -13,6 +13,7 @@ use taos_log::QidManager;
 use taos_query::common::{Field, Precision, Ty};
 use taos_query::util::generate_req_id;
 use taos_query::TBuilder;
+use taos_ws::query::asyn::WS_ERROR_NO;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
@@ -145,8 +146,11 @@ pub unsafe extern "C" fn taos_connect(
 ) -> *mut TAOS {
     match connect(ip, user, pass, db, port) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
-        Err(err) => {
+        Err(mut err) => {
             error!("taos_connect failed, err: {err:?}");
+            if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
+                err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
+            }
             set_err_and_get_code(err);
             ptr::null_mut()
         }
@@ -654,6 +658,28 @@ mod tests {
 
             let taos = taos_connect(ptr::null(), ptr::null(), ptr::null(), invalid_utf8_ptr, 0);
             assert!(taos.is_null());
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_unable_to_establish_connection() {
+        unsafe {
+            let taos = taos_connect(
+                c"invalid_host".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                ptr::null(),
+                6041,
+            );
+            assert!(taos.is_null());
+
+            let code = taos_errno(ptr::null_mut());
+            let errstr = taos_errstr(ptr::null_mut());
+            assert_eq!(Code::from(code), Code::new(0x000B));
+            assert_eq!(
+                CStr::from_ptr(errstr).to_str().unwrap(),
+                "Unable to establish connection"
+            );
         }
     }
 
