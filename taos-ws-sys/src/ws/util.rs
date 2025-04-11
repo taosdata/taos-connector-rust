@@ -5,8 +5,7 @@ use libc::{setlocale, LC_CTYPE};
 pub fn get_system_locale() -> String {
     #[cfg(target_os = "windows")]
     {
-        let locale_cstr = c"en_US.UTF-8";
-        let locale_ptr = unsafe { setlocale(LC_CTYPE, locale_cstr.as_ptr()) };
+        let locale_ptr = unsafe { setlocale(LC_CTYPE, c"en_US.UTF-8".as_ptr()) };
         if !locale_ptr.is_null() {
             return "en_US.UTF-8".to_string();
         }
@@ -15,8 +14,7 @@ pub fn get_system_locale() -> String {
 
     #[cfg(not(target_os = "windows"))]
     {
-        let locale_cstr = c"";
-        let locale_ptr = unsafe { setlocale(LC_CTYPE, locale_cstr.as_ptr()) };
+        let locale_ptr = unsafe { setlocale(LC_CTYPE, c"".as_ptr()) };
         if !locale_ptr.is_null() {
             if let Ok(locale) = unsafe { CStr::from_ptr(locale_ptr).to_str() } {
                 return locale.to_string();
