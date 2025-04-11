@@ -149,6 +149,8 @@ impl Stmt2 {
             fields_names,
             fields_types,
             fields_lengths,
+            fields_precisions,
+            fields_scales,
             timing,
             ..
         } = resp
@@ -203,6 +205,8 @@ impl Stmt2 {
                 completed: false,
                 metrics: QueryMetrics::default(),
                 blocks_buffer: Some(raw_block_rx),
+                fields_precisions,
+                fields_scales,
             });
         }
 

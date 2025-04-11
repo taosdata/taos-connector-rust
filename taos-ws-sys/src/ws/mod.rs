@@ -13,12 +13,11 @@ use taos_log::QidManager;
 use taos_query::common::{Field, Precision, Ty};
 use taos_query::util::generate_req_id;
 use taos_query::TBuilder;
+use taos_ws::query::asyn::WS_ERROR_NO;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
-use tracing::{debug, instrument};
-
-use crate::ws::query::TAOS_FIELD;
+use tracing::{debug, error, instrument};
 
 mod config;
 pub mod error;
@@ -28,6 +27,7 @@ pub mod stmt;
 pub mod stmt2;
 pub mod stub;
 pub mod tmq;
+pub mod util;
 
 pub type TAOS = c_void;
 
@@ -73,6 +73,48 @@ pub struct SafePtr<T>(pub T);
 unsafe impl<T> Send for SafePtr<T> {}
 unsafe impl<T> Sync for SafePtr<T> {}
 
+#[repr(C)]
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_FIELD_E {
+    pub name: [c_char; 65],
+    pub r#type: i8,
+    pub precision: u8,
+    pub scale: u8,
+    pub bytes: i32,
+}
+
+impl TAOS_FIELD_E {
+    pub fn new(field: &Field, precision: u8, scale: u8) -> Self {
+        let mut name = [0 as c_char; 65];
+        let field_name = field.name();
+        unsafe {
+            ptr::copy_nonoverlapping(
+                field_name.as_ptr(),
+                name.as_mut_ptr() as _,
+                field_name.len(),
+            );
+        };
+
+        Self {
+            name,
+            r#type: field.ty() as _,
+            precision,
+            scale,
+            bytes: field.bytes() as _,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_FIELD {
+    pub name: [c_char; 65],
+    pub r#type: i8,
+    pub bytes: i32,
+}
+
 impl From<&Field> for TAOS_FIELD {
     fn from(field: &Field) -> Self {
         let mut name = [0 as c_char; 65];
@@ -104,7 +146,11 @@ pub unsafe extern "C" fn taos_connect(
 ) -> *mut TAOS {
     match connect(ip, user, pass, db, port) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
-        Err(err) => {
+        Err(mut err) => {
+            error!("taos_connect failed, err: {err:?}");
+            if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
+                err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
+            }
             set_err_and_get_code(err);
             ptr::null_mut()
         }
@@ -216,18 +262,8 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
             }
             let tz = CStr::from_ptr(arg as _);
             if let Ok(tz) = tz.to_str() {
-                match tz.parse() {
-                    Ok(tz) => {
-                        c.set_timezone(tz);
-                        0
-                    }
-                    Err(err) => {
-                        return set_err_and_get_code(TaosError::new(
-                            Code::INVALID_PARA,
-                            &format!("taos timezone `{tz}` is invalid, err: {err}"),
-                        ));
-                    }
-                }
+                c.set_timezone(tz);
+                0
             } else {
                 return set_err_and_get_code(TaosError::new(
                     Code::INVALID_PARA,
@@ -262,13 +298,11 @@ impl From<u64> for Qid {
 #[no_mangle]
 pub extern "C" fn taos_init() -> c_int {
     static ONCE: OnceLock<c_int> = OnceLock::new();
-    *ONCE.get_or_init(|| match taos_init_impl() {
-        Ok(_) => 0,
-        Err(err) => {
-            // set_err_and_get_code(TaosError::new(Code::FAILED, &err.to_string()));
-            // -1
-            0
+    *ONCE.get_or_init(|| {
+        if let Err(e) = taos_init_impl() {
+            error!("taos_init failed, err: {e:?}");
         }
+        0
     })
 }
 
@@ -280,13 +314,22 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::Layer;
 
+    unsafe {
+        let locale = util::get_system_locale();
+        let locale = std::ffi::CString::new(locale).unwrap();
+        let locale_ptr = libc::setlocale(libc::LC_CTYPE, locale.as_ptr());
+        if locale_ptr.is_null() {
+            return Err(TaosError::new(Code::FAILED, "setlocale failed").into());
+        }
+    }
+
     if let Err(err) = config::init() {
         return Err(TaosError::new(Code::FAILED, &err).into());
     }
 
     let cfg = config::CONFIG.read().unwrap();
     if let Some(timezone) = cfg.timezone() {
-        unsafe { std::env::set_var("TZ", timezone.name()) };
+        unsafe { std::env::set_var("TZ", timezone.as_str()) };
     }
 
     let mut layers = Vec::new();
@@ -318,6 +361,8 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry().with(layers).init();
 
     LogTracer::init()?;
+
+    debug!("taos_init, config: {cfg:?}");
 
     Ok(())
 }
@@ -356,6 +401,8 @@ pub trait ResultSetOperations {
     fn num_of_fields(&self) -> i32;
 
     fn get_fields(&mut self) -> *mut TAOS_FIELD;
+
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E;
 
     unsafe fn fetch_raw_block(
         &mut self,
@@ -467,6 +514,14 @@ impl ResultSetOperations for ResultSet {
             ResultSet::Query(rs) => rs.get_fields(),
             ResultSet::Schemaless(rs) => rs.get_fields(),
             ResultSet::Tmq(rs) => rs.get_fields(),
+        }
+    }
+
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E {
+        match self {
+            ResultSet::Query(rs) => rs.get_fields_e(),
+            ResultSet::Schemaless(rs) => rs.get_fields_e(),
+            ResultSet::Tmq(rs) => rs.get_fields_e(),
         }
     }
 
@@ -603,6 +658,28 @@ mod tests {
 
             let taos = taos_connect(ptr::null(), ptr::null(), ptr::null(), invalid_utf8_ptr, 0);
             assert!(taos.is_null());
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_unable_to_establish_connection() {
+        unsafe {
+            let taos = taos_connect(
+                c"invalid_host".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                ptr::null(),
+                6041,
+            );
+            assert!(taos.is_null());
+
+            let code = taos_errno(ptr::null_mut());
+            let errstr = taos_errstr(ptr::null_mut());
+            assert_eq!(Code::from(code), Code::new(0x000B));
+            assert_eq!(
+                CStr::from_ptr(errstr).to_str().unwrap(),
+                "Unable to establish connection"
+            );
         }
     }
 

@@ -169,6 +169,8 @@ pub struct ResultSet {
     pub(crate) completed: bool,
     pub(crate) metrics: QueryMetrics,
     pub(crate) blocks_buffer: Option<flume::Receiver<RawResult<(RawBlock, Duration)>>>,
+    pub(crate) fields_precisions: Option<Vec<i64>>,
+    pub(crate) fields_scales: Option<Vec<i64>>,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -263,6 +265,7 @@ pub enum WS_ERROR_NO {
     RECV_MESSAGE_TIMEOUT = 0xE004,
     IO_ERROR = 0xE005,
     UNAUTHORIZED = 0xE006,
+    DE_ERROR = 0xE007,
 }
 
 impl WS_ERROR_NO {
@@ -281,6 +284,7 @@ impl Error {
             Error::TungsteniteError(_) => Code::new(WS_ERROR_NO::WEBSOCKET_ERROR as _),
             Error::SendTimeoutError(_) => Code::new(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT as _),
             Error::FlumeSendError(_) => Code::new(WS_ERROR_NO::CONN_CLOSED as _),
+            Error::DeError(_) => Code::new(WS_ERROR_NO::DE_ERROR as _),
             _ => Code::FAILED,
         }
     }
@@ -654,7 +658,7 @@ impl WsTaos {
                         Ok(Message::Text(text)) => {
                             let v: WsRecv = serde_json::from_str(&text).map_err(|err| {
                                 RawError::any(err)
-                                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                    .with_code(WS_ERROR_NO::DE_ERROR.as_code())
                                     .context("Parser text as json error")
                             })?;
                             let (_req_id, data, ok) = v.ok();
@@ -1096,6 +1100,8 @@ impl WsTaos {
                 completed: false,
                 metrics: QueryMetrics::default(),
                 blocks_buffer,
+                fields_precisions: resp.fields_precisions,
+                fields_scales: resp.fields_scales,
             })
         } else {
             Ok(ResultSet {
@@ -1115,6 +1121,8 @@ impl WsTaos {
                 completed: true,
                 metrics: QueryMetrics::default(),
                 blocks_buffer: None,
+                fields_precisions: None,
+                fields_scales: None,
             })
         }
     }
@@ -1168,25 +1176,6 @@ impl WsTaos {
                     Ok(())
                 }
             }
-            _ => unreachable!(),
-        }
-    }
-
-    pub async fn check_server_status(
-        &self,
-        fqdn: Option<FastStr>,
-        port: i32,
-    ) -> RawResult<(i32, String)> {
-        let req = WsSend::CheckServerStatus {
-            req_id: generate_req_id(),
-            fqdn,
-            port,
-        };
-
-        match self.sender.send_recv(req).await? {
-            WsRecvData::CheckServerStatus {
-                status, details, ..
-            } => Ok((status, details)),
             _ => unreachable!(),
         }
     }
@@ -1315,6 +1304,14 @@ impl ResultSet {
     pub fn affected_rows64(&self) -> i64 {
         self.affected_rows as _
     }
+
+    pub fn fields_precisions(&self) -> Option<&[i64]> {
+        self.fields_precisions.as_deref()
+    }
+
+    pub fn fields_scales(&self) -> Option<&[i64]> {
+        self.fields_scales.as_deref()
+    }
 }
 
 impl AsyncFetchable for ResultSet {
@@ -1434,6 +1431,47 @@ impl AsyncQueryable for WsTaos {
     async fn put(&self, data: &SmlData) -> RawResult<()> {
         self.s_put(data).in_current_span().await
     }
+}
+
+pub async fn check_server_status<T>(dsn: &str, fqdn: T, port: i32) -> RawResult<(i32, String)>
+where
+    T: Into<Option<FastStr>>,
+{
+    let builder = TaosBuilder::from_dsn(dsn)?;
+    let ws = builder.build_stream(builder.to_query_url()).await?;
+    let (mut sender, mut reader) = ws.split();
+
+    let req = WsSend::CheckServerStatus {
+        req_id: generate_req_id(),
+        fqdn: fqdn.into(),
+        port,
+    };
+
+    sender.send(req.to_msg()).await.map_err(Error::from)?;
+
+    if let Some(Ok(message)) = reader.next().await {
+        if let Message::Text(text) = message {
+            let resp: WsRecv = serde_json::from_str(&text)
+                .map_err(|e| RawError::from_string(format!("failed to parse JSON: {e:?}")))?;
+
+            let (_, data, ok) = resp.ok();
+            if let WsRecvData::CheckServerStatus {
+                status, details, ..
+            } = data
+            {
+                ok?;
+                return Ok((status, details));
+            }
+            return Err(RawError::from_string(
+                "unexpected response data type".to_string(),
+            ));
+        }
+        return Err(RawError::from_string(format!(
+            "unexpected message type: {message:?}"
+        )));
+    }
+
+    Ok((0, String::new()))
 }
 
 #[cfg(test)]
@@ -1856,24 +1894,27 @@ mod tests {
         Ok(())
     }
 
-    // #[tokio::test]
-    // async fn test_validate_sql() -> anyhow::Result<()> {
-    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
-    //     taos.validate_sql("create database if not exists test_1741338182")
-    //         .await?;
-    //     let _ = taos.validate_sql("select * from t0").await.unwrap_err();
-    //     Ok(())
-    // }
+    #[tokio::test]
+    async fn test_validate_sql() -> anyhow::Result<()> {
+        let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+        taos.validate_sql("create database if not exists test_1741338182")
+            .await?;
+        let _ = taos.validate_sql("select * from t0").await.unwrap_err();
+        Ok(())
+    }
 
-    // #[tokio::test]
-    // async fn test_check_server_status() -> anyhow::Result<()> {
-    //     let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
-    //     let (stauts, details) = taos
-    //         .check_server_status(Some("127.0.0.1".to_string()), 6030)
-    //         .await?;
-    //     println!("status: {}, details: {}", stauts, details);
-    //     let (stauts, details) = taos.check_server_status(None, 0).await?;
-    //     println!("status: {}, details: {}", stauts, details);
-    //     Ok(())
-    // }
+    #[tokio::test]
+    async fn test_check_server_status() -> anyhow::Result<()> {
+        let dsn = "ws://localhost:6041";
+
+        let (status, details) = check_server_status(dsn, Some("127.0.0.1".into()), 6030).await?;
+        assert_eq!(status, 2);
+        println!("status: {status}, details: {details}");
+
+        let (status, details) = check_server_status(dsn, None, 0).await?;
+        assert_eq!(status, 2);
+        println!("status: {status}, details: {details}");
+
+        Ok(())
+    }
 }
