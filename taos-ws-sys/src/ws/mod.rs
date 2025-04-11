@@ -26,6 +26,7 @@ pub mod stmt;
 pub mod stmt2;
 pub mod stub;
 pub mod tmq;
+pub mod util;
 
 pub type TAOS = c_void;
 
@@ -293,13 +294,11 @@ impl From<u64> for Qid {
 #[no_mangle]
 pub extern "C" fn taos_init() -> c_int {
     static ONCE: OnceLock<c_int> = OnceLock::new();
-    *ONCE.get_or_init(|| match taos_init_impl() {
-        Ok(_) => 0,
-        Err(err) => {
-            // set_err_and_get_code(TaosError::new(Code::FAILED, &err.to_string()));
-            // -1
-            0
+    *ONCE.get_or_init(|| {
+        if let Err(e) = taos_init_impl() {
+            error!("taos_init failed, err: {e:?}");
         }
+        0
     })
 }
 
@@ -310,6 +309,15 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::Layer;
+
+    unsafe {
+        let locale = util::get_system_locale();
+        let locale = std::ffi::CString::new(locale).unwrap();
+        let locale_ptr = libc::setlocale(libc::LC_CTYPE, locale.as_ptr());
+        if locale_ptr.is_null() {
+            return Err(TaosError::new(Code::FAILED, "setlocale failed").into());
+        }
+    }
 
     if let Err(err) = config::init() {
         return Err(TaosError::new(Code::FAILED, &err).into());
