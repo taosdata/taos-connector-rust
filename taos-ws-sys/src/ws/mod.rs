@@ -645,4 +645,17 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_taos_options_release_arg_memory() {
+        unsafe {
+            let arg = CString::new("/etc/taos").unwrap();
+            let code = taos_options(TSDB_OPTION::TSDB_OPTION_CONFIGDIR, arg.as_ptr() as *const _);
+            assert_eq!(code, 0);
+            drop(arg);
+            let config = config::CONFIG.read().unwrap();
+            let cfg_dir = config.config_dir.as_ref();
+            assert_eq!(cfg_dir, Some(&"/etc/taos".to_string()));
+        }
+    }
 }
