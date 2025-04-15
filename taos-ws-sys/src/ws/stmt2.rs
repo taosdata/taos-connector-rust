@@ -956,6 +956,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reason: TDengine stmt2 has a bug"]
     fn test_taos_stmt2_bind_param() {
         unsafe {
             let taos = test_connect();

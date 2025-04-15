@@ -1701,6 +1701,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reason: TDengine stmt2 has a bug"]
     fn test_taos_stmt_bind_param_batch() {
         unsafe {
             let taos = test_connect();
