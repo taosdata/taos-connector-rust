@@ -14,7 +14,7 @@ use super::error::TaosError;
 
 #[derive(Debug, Clone, Default)]
 pub struct Config {
-    pub config_dir: Option<String>,
+    pub config_dir: Option<FastStr>,
     pub compression: Option<bool>,
     pub log_dir: Option<FastStr>,
     pub log_level: Option<LevelFilter>,
@@ -247,7 +247,7 @@ impl Config {
         );
     }
 
-    pub fn set_config_dir<T: Into<String>>(&mut self, cfg_dir: T) {
+    pub fn set_config_dir<T: Into<FastStr>>(&mut self, cfg_dir: T) {
         self.config_dir = Some(cfg_dir.into());
     }
 

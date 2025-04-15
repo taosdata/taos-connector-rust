@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use error::{set_err_and_get_code, TaosError};
+use faststr::FastStr;
 use query::QueryResultSet;
 use sml::SchemalessResultSet;
 use taos_error::Code;
@@ -198,7 +199,7 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
             }
             let dir = CStr::from_ptr(arg as _);
             if let Ok(dir) = dir.to_str() {
-                c.set_config_dir(dir);
+                c.set_config_dir(FastStr::new(dir));
                 0
             } else {
                 return set_err_and_get_code(TaosError::new(
@@ -655,7 +656,7 @@ mod tests {
             drop(arg);
             let config = config::CONFIG.read().unwrap();
             let cfg_dir = config.config_dir.as_ref();
-            assert_eq!(cfg_dir, Some(&"/etc/taos".to_string()));
+            assert_eq!(cfg_dir, Some(&FastStr::from("/etc/taos")));
         }
     }
 }
