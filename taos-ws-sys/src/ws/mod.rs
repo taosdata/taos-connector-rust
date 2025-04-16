@@ -198,7 +198,7 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
             }
             let dir = CStr::from_ptr(arg as _);
             if let Ok(dir) = dir.to_str() {
-                c.set_config_dir(dir);
+                c.set_config_dir(faststr::FastStr::new(dir));
                 0
             } else {
                 return set_err_and_get_code(TaosError::new(
@@ -643,6 +643,19 @@ mod tests {
                 TSDB_OPTION::TSDB_OPTION_TIMEZONE,
                 CString::new("invalid_timezone").unwrap().as_ptr() as *const c_void,
             );
+        }
+    }
+
+    #[test]
+    fn test_taos_options_release_arg_memory() {
+        unsafe {
+            let arg = CString::new("/etc/taos").unwrap();
+            let code = taos_options(TSDB_OPTION::TSDB_OPTION_CONFIGDIR, arg.as_ptr() as *const _);
+            assert_eq!(code, 0);
+            drop(arg);
+            let config = config::CONFIG.read().unwrap();
+            let cfg_dir = config.config_dir.as_ref();
+            assert_eq!(cfg_dir, Some(&faststr::FastStr::from("/etc/taos")));
         }
     }
 }
