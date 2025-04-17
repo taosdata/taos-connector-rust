@@ -11,10 +11,7 @@ use crate::decimal::{Decimal, DecimalAllowedTy};
 type View<T> = DecimalView<T>;
 
 #[derive(Debug, Clone)]
-pub struct DecimalView<T>
-where
-    T: DecimalAllowedTy,
-{
+pub struct DecimalView<T: DecimalAllowedTy> {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
     pub(crate) precision: u8,
@@ -23,10 +20,7 @@ where
     buf: Option<Vec<Option<*mut c_char>>>,
 }
 
-impl<T> DecimalView<T>
-where
-    T: DecimalAllowedTy,
-{
+impl<T: DecimalAllowedTy> DecimalView<T> {
     const ITEM_SIZE: usize = std::mem::size_of::<T>();
 
     /// Create a new decimal view.
@@ -183,10 +177,7 @@ where
     }
 }
 
-impl<T> Drop for DecimalView<T>
-where
-    T: DecimalAllowedTy,
-{
+impl<T: DecimalAllowedTy> Drop for DecimalView<T> {
     fn drop(&mut self) {
         if let Some(buf) = self.buf.as_mut() {
             for ptr in buf.iter().flatten() {
@@ -265,18 +256,12 @@ impl DecimalView<i64> {
     impl_from_iter!(i64);
 }
 
-pub struct DecimalViewIter<'a, T>
-where
-    T: DecimalAllowedTy,
-{
+pub struct DecimalViewIter<'a, T: DecimalAllowedTy> {
     view: &'a DecimalView<T>,
     row: usize,
 }
 
-impl<T> Iterator for DecimalViewIter<'_, T>
-where
-    T: DecimalAllowedTy,
-{
+impl<T: DecimalAllowedTy> Iterator for DecimalViewIter<'_, T> {
     type Item = Option<Decimal<T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
