@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::ffi::{c_char, c_void, CString};
 use std::marker::PhantomData;
 use std::ptr;
@@ -17,7 +18,7 @@ pub struct DecimalView<T: DecimalAllowedTy> {
     pub(crate) precision: u8,
     pub(crate) scale: u8,
     pub(crate) _p: PhantomData<T>,
-    buf: Option<Vec<Option<*mut c_char>>>,
+    buf: RefCell<Option<Vec<Option<*mut c_char>>>>,
 }
 
 impl<T: DecimalAllowedTy> DecimalView<T> {
@@ -31,7 +32,7 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
             precision,
             scale,
             _p: PhantomData,
-            buf: None,
+            buf: RefCell::new(None),
         }
     }
 
@@ -152,15 +153,16 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
     }
 
     /// Get raw value at `row` index.
-    pub unsafe fn get_raw_value_unchecked(&mut self, row: usize) -> (Ty, u32, *const c_void) {
+    pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
         let ptr = if self.nulls.is_null_unchecked(row) {
             ptr::null()
         } else {
-            if self.buf.is_none() {
-                self.buf = Some(vec![None; self.len()]);
+            let mut buf_borrow = self.buf.borrow_mut();
+            if buf_borrow.is_none() {
+                *buf_borrow = Some(vec![None; self.len()]);
             }
 
-            let buf = self.buf.as_mut().unwrap();
+            let buf = buf_borrow.as_mut().unwrap();
             if buf[row].is_none() {
                 let data =
                     (self.data.as_ptr().add(row * Self::ITEM_SIZE) as *const T).read_unaligned();
@@ -179,7 +181,7 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
 
 impl<T: DecimalAllowedTy> Drop for DecimalView<T> {
     fn drop(&mut self) {
-        if let Some(buf) = self.buf.as_mut() {
+        if let Some(buf) = self.buf.borrow().as_ref() {
             for ptr in buf.iter().flatten() {
                 let _ = unsafe { CString::from_raw(*ptr as *mut c_char) };
             }
@@ -201,39 +203,36 @@ macro_rules! impl_from_iter {
                     None => (true, 0),
                 })
                 .unzip();
-            Self {
-                nulls: NullBits::from_iter(nulls),
-                data: bytes::Bytes::from({
-                    let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
-                    std::mem::forget(values);
 
-                    let item_size = std::mem::size_of::<$ty>();
+            let nulls = NullBits::from_iter(nulls);
+            let data = bytes::Bytes::from({
+                let (ptr, len, cap) = (values.as_mut_ptr(), values.len(), values.capacity());
+                std::mem::forget(values);
 
-                    #[cfg(target_endian = "little")]
-                    unsafe {
+                let item_size = std::mem::size_of::<$ty>();
+
+                #[cfg(target_endian = "little")]
+                unsafe {
+                    Vec::from_raw_parts(ptr as *mut u8, len * item_size, cap * item_size)
+                }
+
+                #[cfg(target_endian = "big")]
+                {
+                    let mut bytes = unsafe {
                         Vec::from_raw_parts(ptr as *mut u8, len * item_size, cap * item_size)
+                    };
+                    for i in (0..bytes.len()).step_by(item_size) {
+                        let j = i + item_size;
+                        let val = <$ty>::from_ne_bytes(
+                            &bytes[i..j].try_into().expect("slice with incorrect length"),
+                        );
+                        bytes[i..j].copy_from_slice(&val.to_le_bytes());
                     }
+                    bytes
+                }
+            });
 
-                    #[cfg(target_endian = "big")]
-                    {
-                        let mut bytes = unsafe {
-                            Vec::from_raw_parts(ptr as *mut u8, len * item_size, cap * item_size)
-                        };
-                        for i in (0..bytes.len()).step_by(item_size) {
-                            let j = i + item_size;
-                            let val = <$ty>::from_ne_bytes(
-                                &bytes[i..j].try_into().expect("slice with incorrect length"),
-                            );
-                            bytes[i..j].copy_from_slice(&val.to_le_bytes());
-                        }
-                        bytes
-                    }
-                }),
-                precision,
-                scale,
-                _p: PhantomData,
-                buf: None,
-            }
+            Self::new(nulls, data, precision, scale)
         }
     };
 }

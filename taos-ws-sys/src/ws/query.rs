@@ -824,7 +824,7 @@ pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
     };
 
     if let ResultSet::Query(rs) = rs {
-        if let Some(block) = rs.block.as_mut() {
+        if let Some(block) = rs.block.as_ref() {
             let lengths = if rs.has_called_fetch_row {
                 let mut lengths = Vec::with_capacity(block.ncols());
                 for col in 0..block.ncols() {
@@ -1336,7 +1336,7 @@ impl ResultSetOperations for QueryResultSet {
             self.row.current_row = 0;
         }
 
-        if let Some(block) = self.block.as_mut() {
+        if let Some(block) = self.block.as_ref() {
             if block.nrows() == 0 {
                 return Ok(ptr::null_mut());
             }
@@ -1354,7 +1354,7 @@ impl ResultSetOperations for QueryResultSet {
     }
 
     unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
-        if let Some(block) = self.block.as_mut() {
+        if let Some(block) = self.block.as_ref() {
             if row < block.nrows() && col < block.ncols() {
                 return block.get_raw_value_unchecked(row, col);
             }

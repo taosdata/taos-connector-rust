@@ -842,11 +842,11 @@ impl RawBlock {
     /// `(row, col)` should not exceed the block limit.
     #[inline]
     pub unsafe fn get_raw_value_unchecked(
-        &mut self,
+        &self,
         row: usize,
         col: usize,
     ) -> (Ty, u32, *const c_void) {
-        let view = self.columns.get_unchecked_mut(col);
+        let view = self.columns.get_unchecked(col);
         view.get_raw_value_unchecked(row)
     }
 
@@ -1620,7 +1620,7 @@ fn test_v2_full() {
 
 #[test]
 fn test_v2_null() {
-    let mut raw = RawBlock::parse_from_raw_block_v2(
+    let raw = RawBlock::parse_from_raw_block_v2(
         [0x2, 0].as_slice(),
         &[Field::new("b", Ty::Bool, 1)],
         &[1],
@@ -1636,7 +1636,7 @@ fn test_v2_null() {
     let (_ty, _len, null) = unsafe { raw.get_raw_value_unchecked(1, 0) };
     assert!(!null.is_null());
 
-    let mut raw = RawBlock::parse_from_raw_block_v2(
+    let raw = RawBlock::parse_from_raw_block_v2(
         [0x80].as_slice(),
         &[Field::new("b", Ty::TinyInt, 1)],
         &[1],
@@ -1647,7 +1647,7 @@ fn test_v2_null() {
     let (_ty, _len, null) = unsafe { raw.get_raw_value_unchecked(0, 0) };
     assert!(null.is_null());
 
-    let mut raw = RawBlock::parse_from_raw_block_v2(
+    let raw = RawBlock::parse_from_raw_block_v2(
         [0, 0, 0, 0x80].as_slice(),
         &[Field::new("a", Ty::Int, 4)],
         &[4],
@@ -1658,7 +1658,7 @@ fn test_v2_null() {
     let (_ty, _len, null) = unsafe { raw.get_raw_value_unchecked(0, 0) };
     assert!(null.is_null());
 
-    let mut raw = RawBlock::parse_from_raw_block_v2(
+    let raw = RawBlock::parse_from_raw_block_v2(
         [0, 0, 0xf0, 0x7f].as_slice(),
         &[Field::new("a", Ty::Float, 4)],
         &[4],
