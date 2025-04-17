@@ -1,7 +1,7 @@
-use std::cell::RefCell;
 use std::ffi::{c_char, c_void, CString};
 use std::marker::PhantomData;
 use std::ptr;
+use std::sync::OnceLock;
 
 use bytes::Bytes;
 
@@ -18,7 +18,7 @@ pub struct DecimalView<T: DecimalAllowedTy> {
     pub(crate) precision: u8,
     pub(crate) scale: u8,
     pub(crate) _p: PhantomData<T>,
-    buf: RefCell<Option<Vec<Option<*mut c_char>>>>,
+    buf: OnceLock<Vec<*mut c_char>>,
 }
 
 impl<T: DecimalAllowedTy> DecimalView<T> {
@@ -32,7 +32,7 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
             precision,
             scale,
             _p: PhantomData,
-            buf: RefCell::new(None),
+            buf: OnceLock::new(),
         }
     }
 
@@ -154,36 +154,31 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
 
     /// Get raw value at `row` index.
     pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
-        let ptr = if self.nulls.is_null_unchecked(row) {
-            ptr::null()
-        } else {
-            let mut buf_borrow = self.buf.borrow_mut();
-            if buf_borrow.is_none() {
-                *buf_borrow = Some(vec![None; self.len()]);
+        let buf = self.buf.get_or_init(|| {
+            let mut buf = vec![ptr::null_mut(); self.len()];
+            for i in 0..self.len() {
+                if !self.nulls.is_null_unchecked(i) {
+                    let data = self.get_raw_data_at(i).read_unaligned();
+                    let dec = Decimal::new(data, self.precision, self.scale);
+                    let str = dec.as_bigdecimal().to_string();
+                    let cstr = CString::new(str).unwrap();
+                    buf[i] = cstr.into_raw();
+                }
             }
+            buf
+        });
 
-            let buf = buf_borrow.as_mut().unwrap();
-            if buf[row].is_none() {
-                let data =
-                    (self.data.as_ptr().add(row * Self::ITEM_SIZE) as *const T).read_unaligned();
-                let dec = Decimal::new(data, self.precision, self.scale);
-                let str = dec.as_bigdecimal().to_string();
-                let cstr = CString::new(str).unwrap();
-                buf[row] = Some(cstr.into_raw());
-            }
-
-            buf[row].unwrap() as *const c_void
-        };
-
-        (T::ty(), Self::ITEM_SIZE as _, ptr)
+        (T::ty(), Self::ITEM_SIZE as _, buf[row] as _)
     }
 }
 
 impl<T: DecimalAllowedTy> Drop for DecimalView<T> {
     fn drop(&mut self) {
-        if let Some(buf) = self.buf.borrow().as_ref() {
-            for ptr in buf.iter().flatten() {
-                let _ = unsafe { CString::from_raw(*ptr as *mut c_char) };
+        if let Some(buf) = self.buf.get() {
+            for ptr in buf.iter() {
+                if !ptr.is_null() {
+                    let _ = unsafe { CString::from_raw(*ptr) };
+                }
             }
         }
     }
