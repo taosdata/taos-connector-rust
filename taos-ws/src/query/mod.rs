@@ -11,6 +11,7 @@ use taos_query::AsyncQueryable;
 use crate::TaosBuilder;
 
 pub mod asyn;
+pub use asyn::check_server_status;
 pub(crate) mod infra;
 
 #[derive(Debug)]

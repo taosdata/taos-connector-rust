@@ -135,6 +135,8 @@ pub struct WsQueryResp {
     pub precision: Precision,
     #[serde_as(as = "serde_with::DurationNanoSeconds")]
     pub timing: Duration,
+    pub fields_precisions: Option<Vec<i64>>,
+    pub fields_scales: Option<Vec<i64>>,
 }
 
 #[serde_as]
@@ -279,6 +281,10 @@ pub enum WsRecvData {
         precision: Precision,
         #[serde(default)]
         timing: u64,
+        #[serde(default)]
+        fields_precisions: Option<Vec<i64>>,
+        #[serde(default)]
+        fields_scales: Option<Vec<i64>>,
     },
     Stmt2Close {
         #[serde(default)]

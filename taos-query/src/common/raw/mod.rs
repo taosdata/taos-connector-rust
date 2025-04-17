@@ -478,13 +478,7 @@ impl RawBlock {
                     let decimal_schema = schema.len;
                     let precision = ((decimal_schema >> 8) & 0xFF) as _;
                     let scale = (decimal_schema & 0xFF) as _;
-                    $ty(DecimalView {
-                        nulls: NullBits(nulls),
-                        data,
-                        precision,
-                        scale,
-                        _p: std::marker::PhantomData,
-                    })
+                    $ty(DecimalView::new(NullBits(nulls), data, precision, scale))
                 }};
             }
 
