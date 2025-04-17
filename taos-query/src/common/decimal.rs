@@ -28,19 +28,13 @@ impl DecimalAllowedTy for i128 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Decimal<T>
-where
-    T: DecimalAllowedTy,
-{
+pub struct Decimal<T: DecimalAllowedTy> {
     pub(crate) data: T,
     pub(crate) precision: u8,
     pub(crate) scale: u8,
 }
 
-impl<T> Decimal<T>
-where
-    T: DecimalAllowedTy,
-{
+impl<T: DecimalAllowedTy> Decimal<T> {
     pub fn new(data: T, precision: u8, scale: u8) -> Self {
         Self {
             data,
@@ -82,10 +76,7 @@ macro_rules! from_bigdecimal {
 from_bigdecimal!(i128);
 from_bigdecimal!(i64);
 
-impl<T> std::fmt::Display for Decimal<T>
-where
-    T: DecimalAllowedTy,
-{
+impl<T: DecimalAllowedTy> std::fmt::Display for Decimal<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.as_bigdecimal().fmt(f)
     }
