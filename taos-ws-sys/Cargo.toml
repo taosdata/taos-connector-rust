@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [lib]
-name = "taosws"
+name = "taos"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
