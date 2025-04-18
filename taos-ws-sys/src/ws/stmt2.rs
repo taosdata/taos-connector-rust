@@ -185,11 +185,11 @@ pub unsafe fn taos_stmt2_bind_param(
 }
 
 pub unsafe fn taos_stmt2_bind_param_a(
-    stmt: *mut TAOS_STMT2,
-    bindv: *mut TAOS_STMT2_BINDV,
-    col_idx: i32,
-    fp: __taos_async_fn_t,
-    param: *mut c_void,
+    _stmt: *mut TAOS_STMT2,
+    _bindv: *mut TAOS_STMT2_BINDV,
+    _col_idx: i32,
+    _fp: __taos_async_fn_t,
+    _param: *mut c_void,
 ) -> c_int {
     0
 }

@@ -1356,7 +1356,7 @@ impl ResultSetOperations for TmqResultSet {
         Ok(())
     }
 
-    unsafe fn fetch_block(&mut self, rows: *mut TAOS_ROW, num: *mut c_int) -> Result<(), Error> {
+    unsafe fn fetch_block(&mut self, _rows: *mut TAOS_ROW, _num: *mut c_int) -> Result<(), Error> {
         todo!()
     }
 

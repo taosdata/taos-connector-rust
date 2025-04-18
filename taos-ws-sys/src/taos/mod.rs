@@ -1,5 +1,3 @@
-#![allow(unused_variables)]
-
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
 

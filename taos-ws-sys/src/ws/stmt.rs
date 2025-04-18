@@ -1174,7 +1174,7 @@ impl TAOS_MULTI_BIND {
             ($ty:ty, $from:expr) => {{
                 let buf = self.buffer as *const $ty;
                 let mut vals = vec![None; num];
-                for i in 0..num {
+                for _ in 0..num {
                     if let Some(is_nulls) = is_nulls {
                         for i in 0..num {
                             if is_nulls[i] == 0 {
@@ -2127,8 +2127,6 @@ mod tests {
             let mut is_null = vec![0];
             let c1 = new_bind!(Ty::Int, buffer, length, is_null);
 
-            let ts_start = 1739521477831i64;
-
             for i in 0..num_of_sub_table {
                 test_exec(taos, format!("create table d{i} using s0 tags({i})"));
 
@@ -2192,8 +2190,6 @@ mod tests {
             let mut length = vec![4];
             let mut is_null = vec![0];
             let c1 = new_bind!(Ty::Int, buffer, length, is_null);
-
-            let ts_start = 1739521477831i64;
 
             for i in 0..num_of_sub_table {
                 test_exec(taos, format!("create table d{i} using s0 tags({i})"));
@@ -2268,6 +2264,7 @@ mod tests {
             assert_eq!(code, 0);
 
             let code = taos_stmt_add_batch(stmt);
+            assert_eq!(code, 0);
 
             let tbname = c"d1";
             let code = taos_stmt_set_tbname(stmt, tbname.as_ptr());

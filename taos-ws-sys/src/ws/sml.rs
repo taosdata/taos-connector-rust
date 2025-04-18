@@ -482,15 +482,15 @@ impl ResultSetOperations for SchemalessResultSet {
 
     unsafe fn fetch_raw_block(
         &mut self,
-        ptr: *mut *mut c_void,
-        rows: *mut i32,
+        _ptr: *mut *mut c_void,
+        _rows: *mut i32,
     ) -> Result<(), Error> {
         Err(Error::CommonError(
             "schemaless result set does not support fetch block".to_owned(),
         ))
     }
 
-    unsafe fn fetch_block(&mut self, rows: *mut TAOS_ROW, num: *mut c_int) -> Result<(), Error> {
+    unsafe fn fetch_block(&mut self, _rows: *mut TAOS_ROW, _num: *mut c_int) -> Result<(), Error> {
         todo!()
     }
 
@@ -500,7 +500,7 @@ impl ResultSetOperations for SchemalessResultSet {
         ))
     }
 
-    unsafe fn get_raw_value(&mut self, row: usize, col: usize) -> (Ty, u32, *const c_void) {
+    unsafe fn get_raw_value(&mut self, _row: usize, _col: usize) -> (Ty, u32, *const c_void) {
         (Ty::Null, 0, ptr::null())
     }
 
@@ -610,7 +610,6 @@ mod tests {
             let mut total_rows = 0;
             let protocol = TSDB_SML_PROTOCOL_TYPE::TSDB_SML_LINE_PROTOCOL as i32;
             let precision = TSDB_SML_TIMESTAMP_TYPE::TSDB_SML_TIMESTAMP_MILLI_SECONDS as i32;
-            let ttl = 0;
 
             let res =
                 taos_schemaless_insert_raw(taos, lines, len, &mut total_rows, protocol, precision);
@@ -641,7 +640,6 @@ mod tests {
             let mut total_rows = 0;
             let protocol = TSDB_SML_PROTOCOL_TYPE::TSDB_SML_JSON_PROTOCOL as i32;
             let precision = TSDB_SML_TIMESTAMP_TYPE::TSDB_SML_TIMESTAMP_MILLI_SECONDS as i32;
-            let ttl = 0;
 
             let res =
                 taos_schemaless_insert_raw(taos, lines, len, &mut total_rows, protocol, precision);

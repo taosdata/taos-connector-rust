@@ -2001,7 +2001,7 @@ mod tests {
                     let fields = taos_fetch_fields(res);
                     if num_of_row > 0 {
                         assert_eq!(num_of_row, 4);
-                        for i in 0..num_of_row {
+                        for _ in 0..num_of_row {
                             let row = taos_fetch_row(res);
                             let mut str = vec![0 as c_char; 1024];
                             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
@@ -2061,7 +2061,7 @@ mod tests {
                     let num_fields = taos_num_fields(res);
                     let fields = taos_fetch_fields(res);
                     if num_of_row > 0 {
-                        for i in 0..num_of_row {
+                        for _ in 0..num_of_row {
                             let row = taos_fetch_row(res);
                             let mut str = vec![0 as c_char; 1024];
                             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
@@ -2413,8 +2413,6 @@ mod tests {
                                 if offsets[r] == -1 {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
-                                    let len = ptr::read_unaligned(ptr);
                                     let val =
                                         rows[c].offset((offsets[r] + 2) as isize) as *mut c_char;
                                     let val = CStr::from_ptr(val).to_str().unwrap();
@@ -2577,8 +2575,6 @@ mod tests {
                                 if offsets[r] == -1 {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
-                                    let len = ptr::read_unaligned(ptr);
                                     let val =
                                         rows[c].offset((offsets[r] + 2) as isize) as *mut c_char;
                                     let val = CStr::from_ptr(val).to_str().unwrap();
