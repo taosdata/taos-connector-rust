@@ -1,9 +1,8 @@
 use std::ffi::{c_char, c_int, c_ulong, c_void};
-use std::sync::atomic::Ordering;
 
 use tracing::instrument;
 
-use crate::taos::{CAPI, DRIVER, TAOS, TAOS_FIELD_E, TAOS_RES};
+use crate::taos::{driver, CAPI, TAOS, TAOS_FIELD_E, TAOS_RES};
 use crate::ws::stmt;
 
 #[allow(non_camel_case_types)]
@@ -33,7 +32,7 @@ pub struct TAOS_MULTI_BIND {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_init(taos)
     } else {
         (CAPI.stmt_api.taos_stmt_init)(taos)
@@ -43,7 +42,7 @@ pub unsafe extern "C" fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_init_with_reqid(taos: *mut TAOS, reqid: i64) -> *mut TAOS_STMT {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_init_with_reqid(taos, reqid)
     } else {
         (CAPI.stmt_api.taos_stmt_init_with_reqid)(taos, reqid)
@@ -56,7 +55,7 @@ pub unsafe extern "C" fn taos_stmt_init_with_options(
     taos: *mut TAOS,
     options: *mut TAOS_STMT_OPTIONS,
 ) -> *mut TAOS_STMT {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_init_with_options(taos, options)
     } else {
         (CAPI.stmt_api.taos_stmt_init_with_options)(taos, options)
@@ -70,7 +69,7 @@ pub unsafe extern "C" fn taos_stmt_prepare(
     sql: *const c_char,
     length: c_ulong,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_prepare(stmt, sql, length)
     } else {
         (CAPI.stmt_api.taos_stmt_prepare)(stmt, sql, length)
@@ -84,7 +83,7 @@ pub unsafe extern "C" fn taos_stmt_set_tbname_tags(
     name: *const c_char,
     tags: *mut TAOS_MULTI_BIND,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_set_tbname_tags(stmt, name, tags)
     } else {
         (CAPI.stmt_api.taos_stmt_set_tbname_tags)(stmt, name, tags)
@@ -94,7 +93,7 @@ pub unsafe extern "C" fn taos_stmt_set_tbname_tags(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_set_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_set_tbname(stmt, name)
     } else {
         (CAPI.stmt_api.taos_stmt_set_tbname)(stmt, name)
@@ -107,7 +106,7 @@ pub unsafe extern "C" fn taos_stmt_set_tags(
     stmt: *mut TAOS_STMT,
     tags: *mut TAOS_MULTI_BIND,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_set_tags(stmt, tags)
     } else {
         (CAPI.stmt_api.taos_stmt_set_tags)(stmt, tags)
@@ -120,7 +119,7 @@ pub unsafe extern "C" fn taos_stmt_set_sub_tbname(
     stmt: *mut TAOS_STMT,
     name: *const c_char,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_set_sub_tbname(stmt, name)
     } else {
         (CAPI.stmt_api.taos_stmt_set_sub_tbname)(stmt, name)
@@ -135,7 +134,7 @@ pub unsafe extern "C" fn taos_stmt_get_tag_fields(
     fieldNum: *mut c_int,
     fields: *mut *mut TAOS_FIELD_E,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_get_tag_fields(stmt, fieldNum, fields)
     } else {
         (CAPI.stmt_api.taos_stmt_get_tag_fields)(stmt, fieldNum, fields)
@@ -150,7 +149,7 @@ pub unsafe extern "C" fn taos_stmt_get_col_fields(
     fieldNum: *mut c_int,
     fields: *mut *mut TAOS_FIELD_E,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_get_col_fields(stmt, fieldNum, fields)
     } else {
         (CAPI.stmt_api.taos_stmt_get_col_fields)(stmt, fieldNum, fields)
@@ -160,7 +159,7 @@ pub unsafe extern "C" fn taos_stmt_get_col_fields(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_FIELD_E) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_reclaim_fields(stmt, fields);
     } else {
         (CAPI.stmt_api.taos_stmt_reclaim_fields)(stmt, fields);
@@ -170,7 +169,7 @@ pub unsafe extern "C" fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: 
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_is_insert(stmt, insert)
     } else {
         (CAPI.stmt_api.taos_stmt_is_insert)(stmt, insert)
@@ -180,7 +179,7 @@ pub unsafe extern "C" fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut 
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_num_params(stmt, nums)
     } else {
         (CAPI.stmt_api.taos_stmt_num_params)(stmt, nums)
@@ -195,7 +194,7 @@ pub unsafe extern "C" fn taos_stmt_get_param(
     r#type: *mut c_int,
     bytes: *mut c_int,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_get_param(stmt, idx, r#type, bytes)
     } else {
         (CAPI.stmt_api.taos_stmt_get_param)(stmt, idx, r#type, bytes)
@@ -208,7 +207,7 @@ pub unsafe extern "C" fn taos_stmt_bind_param(
     stmt: *mut TAOS_STMT,
     bind: *mut TAOS_MULTI_BIND,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_bind_param(stmt, bind)
     } else {
         (CAPI.stmt_api.taos_stmt_bind_param)(stmt, bind)
@@ -221,7 +220,7 @@ pub unsafe extern "C" fn taos_stmt_bind_param_batch(
     stmt: *mut TAOS_STMT,
     bind: *mut TAOS_MULTI_BIND,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_bind_param_batch(stmt, bind)
     } else {
         (CAPI.stmt_api.taos_stmt_bind_param_batch)(stmt, bind)
@@ -236,7 +235,7 @@ pub unsafe extern "C" fn taos_stmt_bind_single_param_batch(
     bind: *mut TAOS_MULTI_BIND,
     colIdx: c_int,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_bind_single_param_batch(stmt, bind, colIdx)
     } else {
         (CAPI.stmt_api.taos_stmt_bind_single_param_batch)(stmt, bind, colIdx)
@@ -246,7 +245,7 @@ pub unsafe extern "C" fn taos_stmt_bind_single_param_batch(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_add_batch(stmt)
     } else {
         (CAPI.stmt_api.taos_stmt_add_batch)(stmt)
@@ -256,7 +255,7 @@ pub unsafe extern "C" fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_execute(stmt)
     } else {
         (CAPI.stmt_api.taos_stmt_execute)(stmt)
@@ -266,7 +265,7 @@ pub unsafe extern "C" fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_use_result(stmt)
     } else {
         (CAPI.stmt_api.taos_stmt_use_result)(stmt)
@@ -276,7 +275,7 @@ pub unsafe extern "C" fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_close(stmt: *mut TAOS_STMT) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_close(stmt)
     } else {
         (CAPI.stmt_api.taos_stmt_close)(stmt)
@@ -286,7 +285,7 @@ pub unsafe extern "C" fn taos_stmt_close(stmt: *mut TAOS_STMT) -> c_int {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *mut c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_errstr(stmt)
     } else {
         (CAPI.stmt_api.taos_stmt_errstr)(stmt)
@@ -296,7 +295,7 @@ pub unsafe extern "C" fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *mut c_char {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_affected_rows(stmt)
     } else {
         (CAPI.stmt_api.taos_stmt_affected_rows)(stmt)
@@ -306,7 +305,7 @@ pub unsafe extern "C" fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int 
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt::taos_stmt_affected_rows_once(stmt)
     } else {
         (CAPI.stmt_api.taos_stmt_affected_rows_once)(stmt)

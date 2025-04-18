@@ -1,10 +1,9 @@
 use std::ffi::{c_char, c_int, c_void};
-use std::sync::atomic::Ordering;
 
 use tracing::instrument;
 
 use crate::taos::{
-    __taos_async_fn_t, CAPI, DRIVER, TAOS, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
+    __taos_async_fn_t, driver, CAPI, TAOS, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
 };
 use crate::ws::{error, query, stub};
 
@@ -104,7 +103,7 @@ pub enum TSDB_SERVER_STATUS {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_data_type(r#type)
     } else {
         (CAPI.query_api.taos_data_type)(r#type)
@@ -114,7 +113,7 @@ pub unsafe extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_query(taos, sql)
     } else {
         (CAPI.query_api.taos_query)(taos, sql)
@@ -129,7 +128,7 @@ pub unsafe extern "C" fn taos_query_with_reqid(
     sql: *const c_char,
     reqId: i64,
 ) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_query_with_reqid(taos, sql, reqId)
     } else {
         (CAPI.query_api.taos_query_with_reqid)(taos, sql, reqId)
@@ -139,7 +138,7 @@ pub unsafe extern "C" fn taos_query_with_reqid(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_fetch_row(res)
     } else {
         (CAPI.query_api.taos_fetch_row)(res)
@@ -149,7 +148,7 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_result_precision(res)
     } else {
         (CAPI.query_api.taos_result_precision)(res)
@@ -159,7 +158,7 @@ pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_free_result(res);
     } else {
         (CAPI.query_api.taos_free_result)(res);
@@ -169,7 +168,7 @@ pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_kill_query(taos: *mut TAOS) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_kill_query(taos);
     } else {
         (CAPI.query_api.taos_kill_query)(taos);
@@ -179,7 +178,7 @@ pub unsafe extern "C" fn taos_kill_query(taos: *mut TAOS) {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_field_count(res)
     } else {
         (CAPI.query_api.taos_field_count)(res)
@@ -189,7 +188,7 @@ pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_num_fields(res: *mut TAOS_RES) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_num_fields(res)
     } else {
         (CAPI.query_api.taos_num_fields)(res)
@@ -199,7 +198,7 @@ pub unsafe extern "C" fn taos_num_fields(res: *mut TAOS_RES) -> c_int {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_affected_rows(res: *mut TAOS_RES) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_affected_rows(res)
     } else {
         (CAPI.query_api.taos_affected_rows)(res)
@@ -209,7 +208,7 @@ pub unsafe extern "C" fn taos_affected_rows(res: *mut TAOS_RES) -> c_int {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_affected_rows64(res)
     } else {
         (CAPI.query_api.taos_affected_rows64)(res)
@@ -219,7 +218,7 @@ pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIELD {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_fetch_fields(res)
     } else {
         (CAPI.query_api.taos_fetch_fields)(res)
@@ -229,7 +228,7 @@ pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIEL
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FIELD_E {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_fetch_fields_e(res)
     } else {
         (CAPI.query_api.taos_fetch_fields_e)(res)
@@ -239,7 +238,7 @@ pub unsafe extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FI
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_select_db(taos, db)
     } else {
         (CAPI.query_api.taos_select_db)(taos, db)
@@ -254,7 +253,7 @@ pub unsafe extern "C" fn taos_print_row(
     fields: *mut TAOS_FIELD,
     num_fields: c_int,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_print_row(str, row, fields, num_fields)
     } else {
         (CAPI.query_api.taos_print_row)(str, row, fields, num_fields)
@@ -270,7 +269,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
     fields: *mut TAOS_FIELD,
     num_fields: c_int,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_print_row_with_size(str, size, row, fields, num_fields)
     } else {
         (CAPI.query_api.taos_print_row_with_size)(str, size, row, fields, num_fields)
@@ -280,7 +279,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_stop_query(res);
     } else {
         (CAPI.query_api.taos_stop_query)(res);
@@ -290,7 +289,7 @@ pub unsafe extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) -> bool {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_is_null(res, row, col)
     } else {
         (CAPI.query_api.taos_is_null)(res, row, col)
@@ -306,7 +305,7 @@ pub unsafe extern "C" fn taos_is_null_by_column(
     result: *mut bool,
     rows: *mut c_int,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_is_null_by_column(res, columnIndex, result, rows)
     } else {
         (CAPI.query_api.taos_is_null_by_column)(res, columnIndex, result, rows)
@@ -316,7 +315,7 @@ pub unsafe extern "C" fn taos_is_null_by_column(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_is_update_query(res)
     } else {
         (CAPI.query_api.taos_is_update_query)(res)
@@ -326,7 +325,7 @@ pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_fetch_block(res, rows)
     } else {
         (CAPI.query_api.taos_fetch_block)(res, rows)
@@ -341,7 +340,7 @@ pub unsafe extern "C" fn taos_fetch_block_s(
     numOfRows: *mut c_int,
     rows: *mut TAOS_ROW,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_fetch_block_s(res, numOfRows, rows)
     } else {
         (CAPI.query_api.taos_fetch_block_s)(res, numOfRows, rows)
@@ -356,7 +355,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block(
     numOfRows: *mut c_int,
     pData: *mut *mut c_void,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_fetch_raw_block(res, numOfRows, pData)
     } else {
         (CAPI.query_api.taos_fetch_raw_block)(res, numOfRows, pData)
@@ -370,7 +369,7 @@ pub unsafe extern "C" fn taos_get_column_data_offset(
     res: *mut TAOS_RES,
     columnIndex: c_int,
 ) -> *mut c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_get_column_data_offset(res, columnIndex)
     } else {
         (CAPI.query_api.taos_get_column_data_offset)(res, columnIndex)
@@ -380,7 +379,7 @@ pub unsafe extern "C" fn taos_get_column_data_offset(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_validate_sql(taos, sql)
     } else {
         (CAPI.query_api.taos_validate_sql)(taos, sql)
@@ -390,7 +389,7 @@ pub unsafe extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) 
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_reset_current_db(taos: *mut TAOS) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_reset_current_db(taos);
     } else {
         (CAPI.query_api.taos_reset_current_db)(taos);
@@ -400,7 +399,7 @@ pub unsafe extern "C" fn taos_reset_current_db(taos: *mut TAOS) {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_fetch_lengths(res)
     } else {
         (CAPI.query_api.taos_fetch_lengths)(res)
@@ -410,7 +409,7 @@ pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_result_block(res)
     } else {
         (CAPI.query_api.taos_result_block)(res)
@@ -420,7 +419,7 @@ pub unsafe extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW 
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_get_server_info(taos)
     } else {
         (CAPI.query_api.taos_get_server_info)(taos)
@@ -430,7 +429,7 @@ pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char 
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_get_client_info()
     } else {
         (CAPI.query_api.taos_get_client_info)()
@@ -445,7 +444,7 @@ pub unsafe extern "C" fn taos_get_current_db(
     len: c_int,
     required: *mut c_int,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_get_current_db(taos, database, len, required)
     } else {
         (CAPI.query_api.taos_get_current_db)(taos, database, len, required)
@@ -460,7 +459,7 @@ pub unsafe extern "C" fn taos_query_a(
     fp: __taos_async_fn_t,
     param: *mut c_void,
 ) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_query_a(taos, sql, fp, param);
     } else {
         (CAPI.query_api.taos_query_a)(taos, sql, fp, param);
@@ -476,7 +475,7 @@ pub unsafe extern "C" fn taos_query_a_with_reqid(
     param: *mut c_void,
     reqid: i64,
 ) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_query_a_with_reqid(taos, sql, fp, param, reqid);
     } else {
         (CAPI.query_api.taos_query_a_with_reqid)(taos, sql, fp, param, reqid);
@@ -490,7 +489,7 @@ pub unsafe extern "C" fn taos_fetch_rows_a(
     fp: __taos_async_fn_t,
     param: *mut c_void,
 ) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_fetch_rows_a(res, fp, param);
     } else {
         (CAPI.query_api.taos_fetch_rows_a)(res, fp, param);
@@ -504,7 +503,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block_a(
     fp: __taos_async_fn_t,
     param: *mut c_void,
 ) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_fetch_raw_block_a(res, fp, param);
     } else {
         (CAPI.query_api.taos_fetch_raw_block_a)(res, fp, param);
@@ -514,7 +513,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block_a(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_get_raw_block(res)
     } else {
         (CAPI.query_api.taos_get_raw_block)(res)
@@ -529,7 +528,7 @@ pub unsafe extern "C" fn taos_get_db_route_info(
     db: *const c_char,
     dbInfo: *mut TAOS_DB_ROUTE_INFO,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_get_db_route_info(taos, db, dbInfo)
     } else {
         (CAPI.query_api.taos_get_db_route_info)(taos, db, dbInfo)
@@ -545,7 +544,7 @@ pub unsafe extern "C" fn taos_get_table_vgId(
     table: *const c_char,
     vgId: *mut c_int,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_get_table_vgId(taos, db, table, vgId)
     } else {
         (CAPI.query_api.taos_get_table_vgId)(taos, db, table, vgId)
@@ -562,7 +561,7 @@ pub unsafe extern "C" fn taos_get_tables_vgId(
     tableNum: c_int,
     vgId: *mut c_int,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_get_tables_vgId(taos, db, table, tableNum, vgId)
     } else {
         (CAPI.query_api.taos_get_tables_vgId)(taos, db, table, tableNum, vgId)
@@ -576,7 +575,7 @@ pub unsafe extern "C" fn taos_load_table_info(
     taos: *mut TAOS,
     tableNameList: *const c_char,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_load_table_info(taos, tableNameList)
     } else {
         (CAPI.query_api.taos_load_table_info)(taos, tableNameList)
@@ -587,7 +586,7 @@ pub unsafe extern "C" fn taos_load_table_info(
 #[allow(non_snake_case)]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_set_hb_quit(quitByKill: i8) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_set_hb_quit(quitByKill);
     } else {
         (CAPI.query_api.taos_set_hb_quit)(quitByKill);
@@ -602,7 +601,7 @@ pub unsafe extern "C" fn taos_set_notify_cb(
     param: *mut c_void,
     r#type: c_int,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_set_notify_cb(taos, fp, param, r#type)
     } else {
         (CAPI.query_api.taos_set_notify_cb)(taos, fp, param, r#type)
@@ -616,7 +615,7 @@ pub unsafe extern "C" fn taos_fetch_whitelist_a(
     fp: __taos_async_whitelist_fn_t,
     param: *mut c_void,
 ) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_fetch_whitelist_a(taos, fp, param);
     } else {
         (CAPI.query_api.taos_fetch_whitelist_a)(taos, fp, param);
@@ -626,7 +625,7 @@ pub unsafe extern "C" fn taos_fetch_whitelist_a(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_set_conn_mode(taos: *mut TAOS, mode: c_int, value: c_int) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_set_conn_mode(taos, mode, value)
     } else {
         (CAPI.query_api.taos_set_conn_mode)(taos, mode, value)
@@ -636,7 +635,7 @@ pub unsafe extern "C" fn taos_set_conn_mode(taos: *mut TAOS, mode: c_int, value:
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_set_config(config: *const c_char) -> setConfRet {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_set_config(config)
     } else {
         (CAPI.query_api.taos_set_config)(config)
@@ -651,7 +650,7 @@ pub unsafe extern "C" fn taos_check_server_status(
     details: *mut c_char,
     maxlen: i32,
 ) -> TSDB_SERVER_STATUS {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         query::taos_check_server_status(fqdn, port, details, maxlen)
     } else {
         (CAPI.query_api.taos_check_server_status)(fqdn, port, details, maxlen)
@@ -666,7 +665,7 @@ pub unsafe extern "C" fn taos_write_crashinfo(
     sigInfo: *mut c_void,
     context: *mut c_void,
 ) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_write_crashinfo(signum, sigInfo, context);
     } else {
         (CAPI.query_api.taos_write_crashinfo)(signum, sigInfo, context);
@@ -676,7 +675,7 @@ pub unsafe extern "C" fn taos_write_crashinfo(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn getBuildInfo() -> *const c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::getBuildInfo()
     } else {
         (CAPI.query_api.getBuildInfo)()
@@ -686,7 +685,7 @@ pub unsafe extern "C" fn getBuildInfo() -> *const c_char {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         error::taos_errno(res)
     } else {
         (CAPI.query_api.taos_errno)(res)
@@ -696,7 +695,7 @@ pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         error::taos_errstr(res)
     } else {
         (CAPI.query_api.taos_errstr)(res)

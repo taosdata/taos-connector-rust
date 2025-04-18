@@ -1,6 +1,6 @@
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Once};
 
 use taos_error::Code;
 use tracing::instrument;
@@ -18,6 +18,27 @@ pub mod tmq;
 
 /// The default driver is native.
 static DRIVER: AtomicBool = AtomicBool::new(false);
+
+#[inline]
+fn set_driver(driver: bool) {
+    DRIVER.store(driver, Ordering::Relaxed);
+}
+
+#[inline]
+fn driver() -> bool {
+    DRIVER.load(Ordering::Relaxed)
+}
+
+fn init_driver_from_env() {
+    static DRIVER_INIT: Once = Once::new();
+    DRIVER_INIT.call_once(|| {
+        let driver = match std::env::var("TAOS_DRIVER") {
+            Ok(value) if value == "websocket" => true,
+            _ => false,
+        };
+        set_driver(driver);
+    });
+}
 
 static CAPI: LazyLock<ApiEntry> = LazyLock::new(|| match ApiEntry::open_default() {
     Ok(api) => api,
@@ -86,7 +107,7 @@ pub struct TAOS_FIELD_E {
 pub unsafe extern "C" fn taos_init() -> c_int {
     init_driver_from_env();
 
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         ws::taos_init()
     } else {
         (CAPI.basic_api.taos_init)()
@@ -96,7 +117,7 @@ pub unsafe extern "C" fn taos_init() -> c_int {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_cleanup() {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_cleanup();
     } else {
         (CAPI.basic_api.taos_cleanup)();
@@ -114,7 +135,7 @@ pub unsafe extern "C" fn taos_connect(
 ) -> *mut TAOS {
     init_driver_from_env();
 
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         ws::taos_connect(ip, user, pass, db, port)
     } else {
         (CAPI.basic_api.taos_connect)(ip, user, pass, db, port)
@@ -130,7 +151,7 @@ pub unsafe extern "C" fn taos_connect_auth(
     db: *const c_char,
     port: u16,
 ) -> *mut TAOS {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_connect_auth(ip, user, auth, db, port)
     } else {
         (CAPI.basic_api.taos_connect_auth)(ip, user, auth, db, port)
@@ -140,7 +161,7 @@ pub unsafe extern "C" fn taos_connect_auth(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         ws::taos_close(taos);
     } else {
         (CAPI.basic_api.taos_close)(taos);
@@ -155,26 +176,19 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
     }
 
     if option == TSDB_OPTION::TSDB_OPTION_DRIVER {
-        if let Ok(driver) = CStr::from_ptr(arg as _).to_str() {
-            match driver {
-                "native" => DRIVER.store(false, Ordering::Relaxed),
-                "websocket" => DRIVER.store(true, Ordering::Relaxed),
-                _ => {
-                    return set_err_and_get_code(TaosError::new(
-                        Code::INVALID_PARA,
-                        "arg is invalid driver",
-                    ));
-                }
-            }
-        } else {
-            return set_err_and_get_code(TaosError::new(
-                Code::INVALID_PARA,
-                "arg is invalid utf-8",
-            ));
-        }
+        let driver = match CStr::from_ptr(arg as _).to_str() {
+            Ok("native") => false,
+            Ok("websocket") => true,
+            _ => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "arg is invalid")),
+        };
+
+        static DRIVER_INIT: Once = Once::new();
+        DRIVER_INIT.call_once(|| {
+            set_driver(driver);
+        });
     }
 
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         ws::taos_options(option, arg)
     } else {
         (CAPI.basic_api.taos_options)(option, arg)
@@ -189,25 +203,9 @@ pub unsafe extern "C" fn taos_options_connection(
     arg: *const c_void,
     varargs: ...
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_options_connection(taos, option, arg)
     } else {
         (CAPI.basic_api.taos_options_connection)(taos, option, arg)
     }
-}
-
-fn init_driver_from_env() {
-    let driver = match std::env::var("TAOS_DRIVER") {
-        Ok(value) => match value.as_str() {
-            "native" => false,
-            "websocket" => true,
-            _ => {
-                eprintln!("Invalid TAOS_DRIVER value: {value}. Defaulting to native.");
-                false
-            }
-        },
-        Err(_) => false,
-    };
-
-    DRIVER.store(driver, Ordering::Relaxed);
 }

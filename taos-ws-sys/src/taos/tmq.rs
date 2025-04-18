@@ -1,9 +1,8 @@
 use std::ffi::{c_char, c_void};
-use std::sync::atomic::Ordering;
 
 use tracing::instrument;
 
-use crate::taos::{CAPI, DRIVER, TAOS, TAOS_FIELD, TAOS_RES};
+use crate::taos::{driver, CAPI, TAOS, TAOS_FIELD, TAOS_RES};
 use crate::ws::{stub, tmq};
 
 #[allow(non_camel_case_types)]
@@ -60,7 +59,7 @@ pub struct tmq_raw_data {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_conf_new() -> *mut tmq_conf_t {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_conf_new()
     } else {
         (CAPI.tmq_api.tmq_conf_new)()
@@ -74,7 +73,7 @@ pub unsafe extern "C" fn tmq_conf_set(
     key: *const c_char,
     value: *const c_char,
 ) -> tmq_conf_res_t {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_conf_set(conf, key, value)
     } else {
         (CAPI.tmq_api.tmq_conf_set)(conf, key, value)
@@ -84,7 +83,7 @@ pub unsafe extern "C" fn tmq_conf_set(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_conf_destroy(conf: *mut tmq_conf_t) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_conf_destroy(conf);
     } else {
         (CAPI.tmq_api.tmq_conf_destroy)(conf);
@@ -98,7 +97,7 @@ pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
     cb: tmq_commit_cb,
     param: *mut c_void,
 ) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_conf_set_auto_commit_cb(conf, cb, param);
     } else {
         (CAPI.tmq_api.tmq_conf_set_auto_commit_cb)(conf, cb, param);
@@ -108,7 +107,7 @@ pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_list_new() -> *mut tmq_list_t {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_list_new()
     } else {
         (CAPI.tmq_api.tmq_list_new)()
@@ -118,7 +117,7 @@ pub unsafe extern "C" fn tmq_list_new() -> *mut tmq_list_t {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_list_append(list: *mut tmq_list_t, value: *const c_char) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_list_append(list, value)
     } else {
         (CAPI.tmq_api.tmq_list_append)(list, value)
@@ -128,7 +127,7 @@ pub unsafe extern "C" fn tmq_list_append(list: *mut tmq_list_t, value: *const c_
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_list_destroy(list: *mut tmq_list_t) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_list_destroy(list);
     } else {
         (CAPI.tmq_api.tmq_list_destroy)(list);
@@ -138,7 +137,7 @@ pub unsafe extern "C" fn tmq_list_destroy(list: *mut tmq_list_t) {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_list_get_size(list)
     } else {
         (CAPI.tmq_api.tmq_list_get_size)(list)
@@ -148,7 +147,7 @@ pub unsafe extern "C" fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *mut c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_list_to_c_array(list)
     } else {
         (CAPI.tmq_api.tmq_list_to_c_array)(list)
@@ -163,7 +162,7 @@ pub unsafe extern "C" fn tmq_consumer_new(
     errstr: *mut c_char,
     errstrLen: i32,
 ) -> *mut tmq_t {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_consumer_new(conf, errstr, errstrLen)
     } else {
         (CAPI.tmq_api.tmq_consumer_new)(conf, errstr, errstrLen)
@@ -173,7 +172,7 @@ pub unsafe extern "C" fn tmq_consumer_new(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_subscribe(tmq: *mut tmq_t, topic_list: *const tmq_list_t) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_subscribe(tmq, topic_list)
     } else {
         (CAPI.tmq_api.tmq_subscribe)(tmq, topic_list)
@@ -183,7 +182,7 @@ pub unsafe extern "C" fn tmq_subscribe(tmq: *mut tmq_t, topic_list: *const tmq_l
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_unsubscribe(tmq: *mut tmq_t) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_unsubscribe(tmq)
     } else {
         (CAPI.tmq_api.tmq_unsubscribe)(tmq)
@@ -193,7 +192,7 @@ pub unsafe extern "C" fn tmq_unsubscribe(tmq: *mut tmq_t) -> i32 {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq_list_t) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_subscription(tmq, topics)
     } else {
         (CAPI.tmq_api.tmq_subscription)(tmq, topics)
@@ -203,7 +202,7 @@ pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_consumer_poll(tmq, timeout)
     } else {
         (CAPI.tmq_api.tmq_consumer_poll)(tmq, timeout)
@@ -213,7 +212,7 @@ pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mu
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_consumer_close(tmq)
     } else {
         (CAPI.tmq_api.tmq_consumer_close)(tmq)
@@ -223,7 +222,7 @@ pub unsafe extern "C" fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_commit_sync(tmq: *mut tmq_t, msg: *const TAOS_RES) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_commit_sync(tmq, msg)
     } else {
         (CAPI.tmq_api.tmq_commit_sync)(tmq, msg)
@@ -238,7 +237,7 @@ pub unsafe extern "C" fn tmq_commit_async(
     cb: tmq_commit_cb,
     param: *mut c_void,
 ) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_commit_async(tmq, msg, cb, param);
     } else {
         (CAPI.tmq_api.tmq_commit_async)(tmq, msg, cb, param);
@@ -254,7 +253,7 @@ pub unsafe extern "C" fn tmq_commit_offset_sync(
     vgId: i32,
     offset: i64,
 ) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_commit_offset_sync(tmq, pTopicName, vgId, offset)
     } else {
         (CAPI.tmq_api.tmq_commit_offset_sync)(tmq, pTopicName, vgId, offset)
@@ -272,7 +271,7 @@ pub unsafe extern "C" fn tmq_commit_offset_async(
     cb: tmq_commit_cb,
     param: *mut c_void,
 ) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_commit_offset_async(tmq, pTopicName, vgId, offset, cb, param);
     } else {
         (CAPI.tmq_api.tmq_commit_offset_async)(tmq, pTopicName, vgId, offset, cb, param);
@@ -288,7 +287,7 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
     assignment: *mut *mut tmq_topic_assignment,
     numOfAssignment: *mut i32,
 ) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_get_topic_assignment(tmq, pTopicName, assignment, numOfAssignment)
     } else {
         (CAPI.tmq_api.tmq_get_topic_assignment)(tmq, pTopicName, assignment, numOfAssignment)
@@ -299,7 +298,7 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
 #[allow(non_snake_case)]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_free_assignment(pAssignment);
     } else {
         (CAPI.tmq_api.tmq_free_assignment)(pAssignment);
@@ -315,7 +314,7 @@ pub unsafe extern "C" fn tmq_offset_seek(
     vgId: i32,
     offset: i64,
 ) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_offset_seek(tmq, pTopicName, vgId, offset)
     } else {
         (CAPI.tmq_api.tmq_offset_seek)(tmq, pTopicName, vgId, offset)
@@ -330,7 +329,7 @@ pub unsafe extern "C" fn tmq_position(
     pTopicName: *const c_char,
     vgId: i32,
 ) -> i64 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_position(tmq, pTopicName, vgId)
     } else {
         (CAPI.tmq_api.tmq_position)(tmq, pTopicName, vgId)
@@ -345,7 +344,7 @@ pub unsafe extern "C" fn tmq_committed(
     pTopicName: *const c_char,
     vgId: i32,
 ) -> i64 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_committed(tmq, pTopicName, vgId)
     } else {
         (CAPI.tmq_api.tmq_committed)(tmq, pTopicName, vgId)
@@ -355,7 +354,7 @@ pub unsafe extern "C" fn tmq_committed(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_get_connect(tmq: *mut tmq_t) -> *mut TAOS {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::tmq_get_connect(tmq)
     } else {
         (CAPI.tmq_api.tmq_get_connect)(tmq)
@@ -365,7 +364,7 @@ pub unsafe extern "C" fn tmq_get_connect(tmq: *mut tmq_t) -> *mut TAOS {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_get_table_name(res)
     } else {
         (CAPI.tmq_api.tmq_get_table_name)(res)
@@ -375,7 +374,7 @@ pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_get_res_type(res)
     } else {
         (CAPI.tmq_api.tmq_get_res_type)(res)
@@ -385,7 +384,7 @@ pub unsafe extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_get_topic_name(res)
     } else {
         (CAPI.tmq_api.tmq_get_topic_name)(res)
@@ -395,7 +394,7 @@ pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_get_db_name(res)
     } else {
         (CAPI.tmq_api.tmq_get_db_name)(res)
@@ -405,7 +404,7 @@ pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_get_vgroup_id(res)
     } else {
         (CAPI.tmq_api.tmq_get_vgroup_id)(res)
@@ -415,7 +414,7 @@ pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_get_vgroup_offset(res)
     } else {
         (CAPI.tmq_api.tmq_get_vgroup_offset)(res)
@@ -425,7 +424,7 @@ pub unsafe extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_err2str(code: i32) -> *const c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         tmq::tmq_err2str(code)
     } else {
         (CAPI.tmq_api.tmq_err2str)(code)
@@ -435,7 +434,7 @@ pub unsafe extern "C" fn tmq_err2str(code: i32) -> *const c_char {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_get_raw(res: *mut TAOS_RES, raw: *mut tmq_raw_data) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::tmq_get_raw(res, raw)
     } else {
         (CAPI.tmq_api.tmq_get_raw)(res, raw)
@@ -445,7 +444,7 @@ pub unsafe extern "C" fn tmq_get_raw(res: *mut TAOS_RES, raw: *mut tmq_raw_data)
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_write_raw(taos: *mut TAOS, raw: tmq_raw_data) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::tmq_write_raw(taos, raw)
     } else {
         (CAPI.tmq_api.tmq_write_raw)(taos, raw)
@@ -461,7 +460,7 @@ pub unsafe extern "C" fn taos_write_raw_block(
     pData: *mut c_char,
     tbname: *const c_char,
 ) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_write_raw_block(taos, numOfRows, pData, tbname)
     } else {
         (CAPI.tmq_api.taos_write_raw_block)(taos, numOfRows, pData, tbname)
@@ -478,7 +477,7 @@ pub unsafe extern "C" fn taos_write_raw_block_with_reqid(
     tbname: *const c_char,
     reqid: i64,
 ) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_write_raw_block_with_reqid(taos, numOfRows, pData, tbname, reqid)
     } else {
         (CAPI.tmq_api.taos_write_raw_block_with_reqid)(taos, numOfRows, pData, tbname, reqid)
@@ -496,7 +495,7 @@ pub unsafe extern "C" fn taos_write_raw_block_with_fields(
     fields: *mut TAOS_FIELD,
     numFields: i32,
 ) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_write_raw_block_with_fields(taos, rows, pData, tbname, fields, numFields)
     } else {
         (CAPI.tmq_api.taos_write_raw_block_with_fields)(
@@ -517,7 +516,7 @@ pub unsafe extern "C" fn taos_write_raw_block_with_fields_with_reqid(
     numFields: i32,
     reqid: i64,
 ) -> i32 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::taos_write_raw_block_with_fields_with_reqid(
             taos, rows, pData, tbname, fields, numFields, reqid,
         )
@@ -531,7 +530,7 @@ pub unsafe extern "C" fn taos_write_raw_block_with_fields_with_reqid(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_free_raw(raw: tmq_raw_data) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::tmq_free_raw(raw);
     } else {
         (CAPI.tmq_api.tmq_free_raw)(raw);
@@ -541,7 +540,7 @@ pub unsafe extern "C" fn tmq_free_raw(raw: tmq_raw_data) {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_get_json_meta(res: *mut TAOS_RES) -> *const c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::tmq_get_json_meta(res)
     } else {
         (CAPI.tmq_api.tmq_get_json_meta)(res)
@@ -552,7 +551,7 @@ pub unsafe extern "C" fn tmq_get_json_meta(res: *mut TAOS_RES) -> *const c_char 
 #[allow(non_snake_case)]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn tmq_free_json_meta(jsonMeta: *mut c_char) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stub::tmq_free_json_meta(jsonMeta);
     } else {
         (CAPI.tmq_api.tmq_free_json_meta)(jsonMeta);

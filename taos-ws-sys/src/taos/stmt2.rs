@@ -1,9 +1,8 @@
 use std::ffi::{c_char, c_int, c_ulong, c_void};
-use std::sync::atomic::Ordering;
 
 use tracing::instrument;
 
-use crate::taos::{__taos_async_fn_t, CAPI, DRIVER, TAOS, TAOS_RES};
+use crate::taos::{__taos_async_fn_t, driver, CAPI, TAOS, TAOS_RES};
 use crate::ws::stmt2;
 
 #[allow(non_camel_case_types)]
@@ -59,7 +58,7 @@ pub unsafe extern "C" fn taos_stmt2_init(
     taos: *mut TAOS,
     option: *mut TAOS_STMT2_OPTION,
 ) -> *mut TAOS_STMT2 {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt2::taos_stmt2_init(taos, option)
     } else {
         (CAPI.stmt2_api.taos_stmt2_init)(taos, option)
@@ -73,7 +72,7 @@ pub unsafe extern "C" fn taos_stmt2_prepare(
     sql: *const c_char,
     length: c_ulong,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt2::taos_stmt2_prepare(stmt, sql, length)
     } else {
         (CAPI.stmt2_api.taos_stmt2_prepare)(stmt, sql, length)
@@ -87,7 +86,7 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
     bindv: *mut TAOS_STMT2_BINDV,
     col_idx: i32,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt2::taos_stmt2_bind_param(stmt, bindv, col_idx)
     } else {
         (CAPI.stmt2_api.taos_stmt2_bind_param)(stmt, bindv, col_idx)
@@ -103,7 +102,7 @@ pub unsafe extern "C" fn taos_stmt2_bind_param_a(
     fp: __taos_async_fn_t,
     param: *mut c_void,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt2::taos_stmt2_bind_param_a(stmt, bindv, col_idx, fp, param)
     } else {
         (CAPI.stmt2_api.taos_stmt2_bind_param_a)(stmt, bindv, col_idx, fp, param)
@@ -116,7 +115,7 @@ pub unsafe extern "C" fn taos_stmt2_exec(
     stmt: *mut TAOS_STMT2,
     affected_rows: *mut c_int,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt2::taos_stmt2_exec(stmt, affected_rows)
     } else {
         (CAPI.stmt2_api.taos_stmt2_exec)(stmt, affected_rows)
@@ -126,7 +125,7 @@ pub unsafe extern "C" fn taos_stmt2_exec(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt2::taos_stmt2_close(stmt)
     } else {
         (CAPI.stmt2_api.taos_stmt2_close)(stmt)
@@ -136,7 +135,7 @@ pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mut c_int) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt2::taos_stmt2_is_insert(stmt, insert)
     } else {
         (CAPI.stmt2_api.taos_stmt2_is_insert)(stmt, insert)
@@ -150,7 +149,7 @@ pub unsafe extern "C" fn taos_stmt2_get_fields(
     count: *mut c_int,
     fields: *mut *mut TAOS_FIELD_ALL,
 ) -> c_int {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt2::taos_stmt2_get_fields(stmt, count, fields)
     } else {
         (CAPI.stmt2_api.taos_stmt2_get_fields)(stmt, count, fields)
@@ -163,7 +162,7 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
     stmt: *mut TAOS_STMT2,
     fields: *mut TAOS_FIELD_ALL,
 ) {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt2::taos_stmt2_free_fields(stmt, fields);
     } else {
         (CAPI.stmt2_api.taos_stmt2_free_fields)(stmt, fields);
@@ -173,7 +172,7 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt2::taos_stmt2_result(stmt)
     } else {
         (CAPI.stmt2_api.taos_stmt2_result)(stmt)
@@ -183,7 +182,7 @@ pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_R
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_stmt2_error(stmt: *mut TAOS_STMT2) -> *mut c_char {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         stmt2::taos_stmt2_error(stmt)
     } else {
         (CAPI.stmt2_api.taos_stmt2_error)(stmt)

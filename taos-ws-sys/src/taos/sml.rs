@@ -1,9 +1,8 @@
 use std::ffi::{c_char, c_int};
-use std::sync::atomic::Ordering;
 
 use tracing::instrument;
 
-use crate::taos::{CAPI, DRIVER, TAOS, TAOS_RES};
+use crate::taos::{driver, CAPI, TAOS, TAOS_RES};
 use crate::ws::sml;
 
 #[repr(C)]
@@ -37,7 +36,7 @@ pub unsafe extern "C" fn taos_schemaless_insert(
     protocol: c_int,
     precision: c_int,
 ) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         sml::taos_schemaless_insert(taos, lines, numLines, protocol, precision)
     } else {
         (CAPI.sml_api.taos_schemaless_insert)(taos, lines, numLines, protocol, precision)
@@ -55,7 +54,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_with_reqid(
     precision: c_int,
     reqid: i64,
 ) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         sml::taos_schemaless_insert_with_reqid(taos, lines, numLines, protocol, precision, reqid)
     } else {
         (CAPI.sml_api.taos_schemaless_insert_with_reqid)(
@@ -75,7 +74,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw(
     protocol: c_int,
     precision: c_int,
 ) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         sml::taos_schemaless_insert_raw(taos, lines, len, totalRows, protocol, precision)
     } else {
         (CAPI.sml_api.taos_schemaless_insert_raw)(taos, lines, len, totalRows, protocol, precision)
@@ -94,7 +93,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_with_reqid(
     precision: c_int,
     reqid: i64,
 ) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         sml::taos_schemaless_insert_raw_with_reqid(
             taos, lines, len, totalRows, protocol, precision, reqid,
         )
@@ -116,7 +115,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_ttl(
     precision: c_int,
     ttl: i32,
 ) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         sml::taos_schemaless_insert_ttl(taos, lines, numLines, protocol, precision, ttl)
     } else {
         (CAPI.sml_api.taos_schemaless_insert_ttl)(taos, lines, numLines, protocol, precision, ttl)
@@ -135,7 +134,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid(
     ttl: i32,
     reqid: i64,
 ) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         sml::taos_schemaless_insert_ttl_with_reqid(
             taos, lines, numLines, protocol, precision, ttl, reqid,
         )
@@ -158,7 +157,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl(
     precision: c_int,
     ttl: i32,
 ) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         sml::taos_schemaless_insert_raw_ttl(taos, lines, len, totalRows, protocol, precision, ttl)
     } else {
         (CAPI.sml_api.taos_schemaless_insert_raw_ttl)(
@@ -180,7 +179,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid(
     ttl: i32,
     reqid: i64,
 ) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         sml::taos_schemaless_insert_raw_ttl_with_reqid(
             taos, lines, len, totalRows, protocol, precision, ttl, reqid,
         )
@@ -205,7 +204,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
     reqid: i64,
     tbnameKey: *mut c_char,
 ) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         sml::taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
             taos, lines, len, totalRows, protocol, precision, ttl, reqid, tbnameKey,
         )
@@ -231,7 +230,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid_tbname_key(
     reqid: i64,
     tbnameKey: *mut c_char,
 ) -> *mut TAOS_RES {
-    if DRIVER.load(Ordering::Relaxed) {
+    if driver() {
         sml::taos_schemaless_insert_ttl_with_reqid_tbname_key(
             taos, lines, numLines, protocol, precision, ttl, reqid, tbnameKey,
         )
