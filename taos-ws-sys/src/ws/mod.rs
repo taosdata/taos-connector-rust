@@ -186,10 +186,10 @@ pub unsafe fn taos_options(option: TSDB_OPTION, arg: *const c_void) -> c_int {
                 c.set_config_dir(faststr::FastStr::new(dir));
                 0
             } else {
-                return set_err_and_get_code(TaosError::new(
+                set_err_and_get_code(TaosError::new(
                     Code::INVALID_PARA,
                     "taos cfg dir is invalid CStr",
-                ));
+                ))
             }
         }
         TSDB_OPTION::TSDB_OPTION_TIMEZONE => {
@@ -204,10 +204,10 @@ pub unsafe fn taos_options(option: TSDB_OPTION, arg: *const c_void) -> c_int {
                 c.set_timezone(tz);
                 0
             } else {
-                return set_err_and_get_code(TaosError::new(
+                set_err_and_get_code(TaosError::new(
                     Code::INVALID_PARA,
                     "taos timezone is invalid CStr",
-                ));
+                ))
             }
         }
         _ => 0,
