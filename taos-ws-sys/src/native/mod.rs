@@ -3,25 +3,27 @@
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_ulong, c_void};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use dlopen2::raw::Library;
-use query::{
+
+use crate::taos::query::{
     __taos_async_whitelist_fn_t, __taos_notify_fn_t, setConfRet, TAOS_DB_ROUTE_INFO,
     TSDB_SERVER_STATUS,
 };
-use stmt::{TAOS_MULTI_BIND, TAOS_STMT, TAOS_STMT_OPTIONS};
-use stmt2::{TAOS_FIELD_ALL, TAOS_STMT2, TAOS_STMT2_BINDV, TAOS_STMT2_OPTION};
-use tmq::{
+use crate::taos::stmt::{TAOS_MULTI_BIND, TAOS_STMT, TAOS_STMT_OPTIONS};
+use crate::taos::stmt2::{TAOS_FIELD_ALL, TAOS_STMT2, TAOS_STMT2_BINDV, TAOS_STMT2_OPTION};
+use crate::taos::tmq::{
     tmq_commit_cb, tmq_conf_res_t, tmq_conf_t, tmq_list_t, tmq_raw_data, tmq_res_t, tmq_t,
     tmq_topic_assignment,
 };
+use crate::taos::{
+    __taos_async_fn_t, TAOS, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES, TAOS_ROW, TSDB_OPTION,
+    TSDB_OPTION_CONNECTION,
+};
 
-use crate::taos::*;
-
-lazy_static::lazy_static! {
-    static ref RAW_LIBRARIES: Mutex<HashMap<PathBuf, Arc<Library>>> = Mutex::new(HashMap::new());
-}
+static RAW_LIBRARIES: LazyLock<Mutex<HashMap<PathBuf, Arc<Library>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub struct ApiEntry {
     #[allow(dead_code)]

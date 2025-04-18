@@ -1,7 +1,7 @@
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::LazyLock;
 
-use once_cell::sync::Lazy;
 use taos_error::Code;
 use tracing::instrument;
 use ws::error::{set_err_and_get_code, TaosError};
@@ -16,9 +16,10 @@ pub mod stmt;
 pub mod stmt2;
 pub mod tmq;
 
-pub static DRIVER: AtomicBool = AtomicBool::new(true);
+/// The default driver is native.
+static DRIVER: AtomicBool = AtomicBool::new(false);
 
-static CAPI: Lazy<ApiEntry> = Lazy::new(|| match ApiEntry::open_default() {
+static CAPI: LazyLock<ApiEntry> = LazyLock::new(|| match ApiEntry::open_default() {
     Ok(api) => api,
     Err(err) => panic!("Can't open {} library: {:?}", default_lib_name(), err),
 });
@@ -83,6 +84,8 @@ pub struct TAOS_FIELD_E {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_init() -> c_int {
+    init_driver_from_env();
+
     if DRIVER.load(Ordering::Relaxed) {
         ws::taos_init()
     } else {
@@ -109,6 +112,8 @@ pub unsafe extern "C" fn taos_connect(
     db: *const c_char,
     port: u16,
 ) -> *mut TAOS {
+    init_driver_from_env();
+
     if DRIVER.load(Ordering::Relaxed) {
         ws::taos_connect(ip, user, pass, db, port)
     } else {
@@ -189,4 +194,20 @@ pub unsafe extern "C" fn taos_options_connection(
     } else {
         (CAPI.basic_api.taos_options_connection)(taos, option, arg)
     }
+}
+
+fn init_driver_from_env() {
+    let driver = match std::env::var("TAOS_DRIVER") {
+        Ok(value) => match value.as_str() {
+            "native" => false,
+            "websocket" => true,
+            _ => {
+                eprintln!("Invalid TAOS_DRIVER value: {value}. Defaulting to native.");
+                false
+            }
+        },
+        Err(_) => false,
+    };
+
+    DRIVER.store(driver, Ordering::Relaxed);
 }

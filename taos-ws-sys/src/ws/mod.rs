@@ -85,6 +85,8 @@ pub unsafe fn taos_connect(
     db: *const c_char,
     port: u16,
 ) -> *mut TAOS {
+    taos_init();
+
     match connect(ip, user, pass, db, port) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
         Err(mut err) => {
