@@ -1,6 +1,5 @@
 language = "C"
 cpp_compat = true
-include_guard = "TDENGINE_TAOS_H"
 header = """
 /*
  * Copyright (c) 2024 TAOS Data, Inc. <jhtao@taosdata.com>
@@ -16,3 +15,15 @@ header = """
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */"""
+
+include_guard = "TDENGINE_TAOS_H"
+after_includes = """
+
+#if defined(_WIN32) || defined(_WIN64)
+#define DLL_EXPORT __declspec(dllexport)
+#else
+#define DLL_EXPORT
+#endif"""
+
+[fn]
+prefix = "DLL_EXPORT"
