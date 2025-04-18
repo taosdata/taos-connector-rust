@@ -32,10 +32,7 @@ fn driver() -> bool {
 fn init_driver_from_env() {
     static DRIVER_INIT: Once = Once::new();
     DRIVER_INIT.call_once(|| {
-        let driver = match std::env::var("TAOS_DRIVER") {
-            Ok(value) if value == "websocket" => true,
-            _ => false,
-        };
+        let driver = matches!(std::env::var("TAOS_DRIVER"), Ok(value) if value == "websocket");
         set_driver(driver);
     });
 }
