@@ -15,89 +15,23 @@ use taos_ws::query::Error;
 use taos_ws::{Consumer, Offset, TmqBuilder};
 use tracing::{debug, error, warn, Instrument};
 
+use crate::taos::tmq::{
+    tmq_commit_cb, tmq_conf_res_t, tmq_conf_t, tmq_list_t, tmq_res_t, tmq_t, tmq_topic_assignment,
+};
+use crate::taos::{TAOS_FIELD_E, TAOS_RES};
 use crate::ws::error::{
     errno, errstr, format_errno, set_err_and_get_code, TaosError, TaosMaybeError, EMPTY,
 };
-use crate::ws::{
-    ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES,
-    TAOS_ROW,
-};
+use crate::ws::{ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD, TAOS_ROW};
 
-#[allow(non_camel_case_types)]
-pub type tmq_t = c_void;
-
-#[allow(non_camel_case_types)]
-pub type tmq_conf_t = c_void;
-
-#[allow(non_camel_case_types)]
-pub type tmq_list_t = c_void;
-
-#[allow(non_camel_case_types)]
-pub type tmq_commit_cb = extern "C" fn(tmq: *mut tmq_t, code: i32, param: *mut c_void);
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq, Eq)]
-pub enum tmq_conf_res_t {
-    TMQ_CONF_UNKNOWN = -2,
-    TMQ_CONF_INVALID = -1,
-    TMQ_CONF_OK = 0,
-}
-
-#[repr(C)]
-#[allow(non_snake_case)]
-#[allow(non_camel_case_types)]
-#[derive(Debug)]
-pub struct tmq_topic_assignment {
-    pub vgId: i32,
-    pub currentOffset: i64,
-    pub begin: i64,
-    pub end: i64,
-}
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq, Eq)]
-pub enum tmq_res_t {
-    TMQ_RES_INVALID = -1,
-    TMQ_RES_DATA = 1,
-    TMQ_RES_TABLE_META = 2,
-    TMQ_RES_METADATA = 3,
-}
-
-#[repr(C)]
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub struct tmq_raw_data {
-    pub raw: *mut c_void,
-    pub raw_len: u32,
-    pub raw_type: u16,
-}
-
-pub const TSDB_CLIENT_ID_LEN: usize = 256;
-pub const TSDB_CGROUP_LEN: usize = 193;
-pub const TSDB_USER_LEN: usize = 24;
-pub const TSDB_FQDN_LEN: usize = 128;
-pub const TSDB_PASSWORD_LEN: usize = 32;
-pub const TSDB_VERSION_LEN: usize = 32;
-
-pub const TSDB_ACCT_ID_LEN: usize = 11;
-pub const TSDB_DB_NAME_LEN: usize = 65;
-pub const TSDB_NAME_DELIMITER_LEN: usize = 1;
-pub const TSDB_DB_FNAME_LEN: usize = TSDB_ACCT_ID_LEN + TSDB_DB_NAME_LEN + TSDB_NAME_DELIMITER_LEN;
-
-pub const TSDB_MAX_REPLICA: usize = 5;
-
-#[no_mangle]
-pub extern "C" fn tmq_conf_new() -> *mut tmq_conf_t {
+pub fn tmq_conf_new() -> *mut tmq_conf_t {
     let tmq_conf: TaosMaybeError<TmqConf> = TmqConf::new().into();
     let tmq_conf = Box::into_raw(Box::new(tmq_conf)) as _;
     debug!("tmq_conf_new, tmq_conf: {tmq_conf:?}");
     tmq_conf
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_conf_set(
+pub unsafe fn tmq_conf_set(
     conf: *mut tmq_conf_t,
     key: *const c_char,
     value: *const c_char,
@@ -219,16 +153,14 @@ unsafe fn conf_set(
     }
 }
 
-#[no_mangle]
-pub extern "C" fn tmq_conf_destroy(conf: *mut tmq_conf_t) {
+pub fn tmq_conf_destroy(conf: *mut tmq_conf_t) {
     debug!("tmq_conf_destroy, conf: {conf:?}");
     if !conf.is_null() {
         let _ = unsafe { Box::from_raw(conf as *mut TaosMaybeError<TmqConf>) };
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
+pub unsafe fn tmq_conf_set_auto_commit_cb(
     conf: *mut tmq_conf_t,
     cb: tmq_commit_cb,
     param: *mut c_void,
@@ -256,15 +188,13 @@ pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
     }
 }
 
-#[no_mangle]
-pub extern "C" fn tmq_list_new() -> *mut tmq_list_t {
+pub fn tmq_list_new() -> *mut tmq_list_t {
     let tmq_list: TaosMaybeError<TmqList> = TmqList::new().into();
     debug!("tmq_list_new, tmq_list: {tmq_list:?}");
     Box::into_raw(Box::new(tmq_list)) as _
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_list_append(list: *mut tmq_list_t, value: *const c_char) -> i32 {
+pub unsafe fn tmq_list_append(list: *mut tmq_list_t, value: *const c_char) -> i32 {
     debug!("tmq_list_append start, list: {list:?}, value: {value:?}");
 
     if list.is_null() || value.is_null() {
@@ -299,8 +229,7 @@ unsafe fn list_append(list: *mut tmq_list_t, value: *const c_char) -> TaosResult
     }
 }
 
-#[no_mangle]
-pub extern "C" fn tmq_list_destroy(list: *mut tmq_list_t) {
+pub fn tmq_list_destroy(list: *mut tmq_list_t) {
     debug!("tmq_list_destroy start, list: {list:?}");
     if !list.is_null() {
         let list = unsafe { Box::from_raw(list as *mut TaosMaybeError<TmqList>) };
@@ -308,8 +237,7 @@ pub extern "C" fn tmq_list_destroy(list: *mut tmq_list_t) {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
+pub unsafe fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
     debug!("tmq_list_get_size start, list: {list:?}");
     match (list as *mut TaosMaybeError<TmqList>)
         .as_mut()
@@ -326,8 +254,7 @@ pub unsafe extern "C" fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *mut c_char {
+pub unsafe fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *mut c_char {
     debug!("tmq_list_to_c_array start, list: {list:?}");
 
     match (list as *const TaosMaybeError<TmqList>)
@@ -356,9 +283,8 @@ pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *m
     }
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn tmq_consumer_new(
+pub unsafe fn tmq_consumer_new(
     conf: *mut tmq_conf_t,
     errstr: *mut c_char,
     errstrLen: i32,
@@ -469,8 +395,7 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_subscribe(tmq: *mut tmq_t, topic_list: *const tmq_list_t) -> i32 {
+pub unsafe fn tmq_subscribe(tmq: *mut tmq_t, topic_list: *const tmq_list_t) -> i32 {
     debug!("tmq_subscribe start, tmq: {tmq:?}, topic_list: {topic_list:?}");
 
     let tmq_list = match (topic_list as *const TaosMaybeError<TmqList>)
@@ -512,8 +437,7 @@ pub unsafe extern "C" fn tmq_subscribe(tmq: *mut tmq_t, topic_list: *const tmq_l
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_unsubscribe(tmq: *mut tmq_t) -> i32 {
+pub unsafe fn tmq_unsubscribe(tmq: *mut tmq_t) -> i32 {
     debug!("tmq_unsubscribe start, tmq: {tmq:?}");
 
     match (tmq as *mut TaosMaybeError<Tmq>)
@@ -534,8 +458,7 @@ pub unsafe extern "C" fn tmq_unsubscribe(tmq: *mut tmq_t) -> i32 {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq_list_t) -> i32 {
+pub unsafe fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq_list_t) -> i32 {
     debug!("tmq_subscription start, tmq: {tmq:?}, topics: {topics:?}");
 
     if topics.is_null() {
@@ -572,8 +495,7 @@ pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mut TAOS_RES {
+pub unsafe fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mut TAOS_RES {
     debug!("tmq_consumer_poll start, tmq: {tmq:?}, timeout: {timeout}");
 
     if tmq.is_null() {
@@ -668,8 +590,7 @@ unsafe fn consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Option<
     }
 }
 
-#[no_mangle]
-pub extern "C" fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
+pub fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
     debug!("tmq_consumer_close, tmq: {tmq:?}");
     if tmq.is_null() {
         error!("tmq_consumer_close failed, err: tmq is null");
@@ -679,8 +600,7 @@ pub extern "C" fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
     0
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_commit_sync(tmq: *mut tmq_t, msg: *const TAOS_RES) -> i32 {
+pub unsafe fn tmq_commit_sync(tmq: *mut tmq_t, msg: *const TAOS_RES) -> i32 {
     debug!("tmq_commit_sync start, tmq: {tmq:?}, msg: {msg:?}");
 
     if tmq.is_null() {
@@ -734,8 +654,7 @@ unsafe fn commit_sync(tmq: *mut tmq_t, res: *const TAOS_RES) -> TaosResult<()> {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_commit_async(
+pub unsafe fn tmq_commit_async(
     tmq: *mut tmq_t,
     msg: *const TAOS_RES,
     cb: tmq_commit_cb,
@@ -823,9 +742,8 @@ pub unsafe extern "C" fn tmq_commit_async(
     debug!("tmq_commit_async succ");
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn tmq_commit_offset_sync(
+pub unsafe fn tmq_commit_offset_sync(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
     vgId: i32,
@@ -881,9 +799,8 @@ pub unsafe extern "C" fn tmq_commit_offset_sync(
     }
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn tmq_commit_offset_async(
+pub unsafe fn tmq_commit_offset_async(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
     vgId: i32,
@@ -976,9 +893,8 @@ pub unsafe extern "C" fn tmq_commit_offset_async(
 
 static TOPIC_ASSIGNMETN_MAP: Lazy<DashMap<usize, usize>> = Lazy::new(DashMap::new);
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn tmq_get_topic_assignment(
+pub unsafe fn tmq_get_topic_assignment(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
     assignment: *mut *mut tmq_topic_assignment,
@@ -1026,9 +942,8 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
     }
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
+pub unsafe fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
     debug!("tmq_free_assignment start, p_assignment: {pAssignment:?}");
     if pAssignment.is_null() {
         error!("tmq_free_assignment failed, p_assignment is null");
@@ -1043,9 +958,8 @@ pub unsafe extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignm
     }
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn tmq_offset_seek(
+pub unsafe fn tmq_offset_seek(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
     vgId: i32,
@@ -1107,13 +1021,8 @@ pub unsafe extern "C" fn tmq_offset_seek(
     }
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn tmq_position(
-    tmq: *mut tmq_t,
-    pTopicName: *const c_char,
-    vgId: i32,
-) -> i64 {
+pub unsafe fn tmq_position(tmq: *mut tmq_t, pTopicName: *const c_char, vgId: i32) -> i64 {
     debug!(
         "tmq_position start, tmq: {:?}, p_topic_name: {:?}, vg_id: {}",
         tmq,
@@ -1168,13 +1077,8 @@ pub unsafe extern "C" fn tmq_position(
     }
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn tmq_committed(
-    tmq: *mut tmq_t,
-    pTopicName: *const c_char,
-    vgId: i32,
-) -> i64 {
+pub unsafe fn tmq_committed(tmq: *mut tmq_t, pTopicName: *const c_char, vgId: i32) -> i64 {
     debug!(
         "tmq_committed start, tmq: {:?}, p_topic_name: {:?}, vg_id: {}",
         tmq,
@@ -1229,8 +1133,7 @@ pub unsafe extern "C" fn tmq_committed(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
+pub unsafe fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_table_name start, res: {res:?}");
     match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
@@ -1247,8 +1150,7 @@ pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char
     }
 }
 
-#[no_mangle]
-pub extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
+pub fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
     debug!("tmq_get_res_type start, res: {res:?}");
     if res.is_null() {
         debug!("tmq_get_res_type succ, res is null");
@@ -1258,8 +1160,7 @@ pub extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
     tmq_res_t::TMQ_RES_DATA
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char {
+pub unsafe fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_topic_name start, res: {res:?}");
     match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
@@ -1276,8 +1177,7 @@ pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
+pub unsafe fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_db_name start, res: {res:?}");
     match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
@@ -1294,8 +1194,7 @@ pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
+pub unsafe fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
     debug!("tmq_get_vgroup_id start, res: {res:?}");
     match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
@@ -1312,8 +1211,7 @@ pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
+pub unsafe fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
     debug!("tmq_get_vgroup_offset start, res: {res:?}");
     match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
@@ -1330,8 +1228,7 @@ pub unsafe extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn tmq_err2str(code: i32) -> *const c_char {
+pub unsafe fn tmq_err2str(code: i32) -> *const c_char {
     debug!("tmq_err2str, code: {code}");
 
     let err = match code {
