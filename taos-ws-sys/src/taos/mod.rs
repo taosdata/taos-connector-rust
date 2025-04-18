@@ -1,10 +1,12 @@
 #![allow(unused_variables)]
 
-use std::ffi::{c_char, c_int, c_void};
+use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use once_cell::sync::Lazy;
+use taos_error::Code;
 use tracing::instrument;
+use ws::error::{set_err_and_get_code, TaosError};
 
 use crate::native::{default_lib_name, ApiEntry};
 use crate::ws;
@@ -145,15 +147,21 @@ pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
-    use std::ffi::CStr;
-
-    use taos_error::Code;
-    use ws::error::{set_err_and_get_code, TaosError};
+    if arg.is_null() {
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "arg is null"));
+    }
 
     if option == TSDB_OPTION::TSDB_OPTION_DRIVER {
         if let Ok(driver) = CStr::from_ptr(arg as _).to_str() {
-            if driver == "native" {
-                DRIVER.store(false, Ordering::Relaxed);
+            match driver {
+                "native" => DRIVER.store(false, Ordering::Relaxed),
+                "websocket" => DRIVER.store(true, Ordering::Relaxed),
+                _ => {
+                    return set_err_and_get_code(TaosError::new(
+                        Code::INVALID_PARA,
+                        "arg is invalid driver",
+                    ));
+                }
             }
         } else {
             return set_err_and_get_code(TaosError::new(
