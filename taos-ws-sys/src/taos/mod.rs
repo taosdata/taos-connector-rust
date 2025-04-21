@@ -207,6 +207,43 @@ pub unsafe extern "C" fn taos_options_connection(
 }
 
 #[cfg(test)]
+pub(crate) unsafe fn test_connect() -> *mut TAOS {
+    let taos = taos_connect(
+        c"localhost".as_ptr(),
+        c"root".as_ptr(),
+        c"taosdata".as_ptr(),
+        std::ptr::null(),
+        0,
+    );
+    assert!(!taos.is_null());
+    taos
+}
+
+#[cfg(test)]
+pub(crate) unsafe fn test_exec<S: AsRef<str>>(taos: *mut TAOS, sql: S) {
+    let sql = std::ffi::CString::new(sql.as_ref()).unwrap();
+    let res = query::taos_query(taos, sql.as_ptr());
+    if res.is_null() {
+        let code = query::taos_errno(res);
+        let err = query::taos_errstr(res);
+        println!("code: {}, err: {:?}", code, CStr::from_ptr(err));
+    }
+    assert!(!res.is_null());
+    query::taos_free_result(res);
+}
+
+#[cfg(test)]
+pub(crate) unsafe fn test_exec_many<T, S>(taos: *mut TAOS, sqls: S)
+where
+    T: AsRef<str>,
+    S: IntoIterator<Item = T>,
+{
+    for sql in sqls {
+        test_exec(taos, sql);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::ptr;
 
