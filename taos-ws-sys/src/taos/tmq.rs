@@ -1,7 +1,5 @@
 use std::ffi::{c_char, c_void};
 
-use tracing::instrument;
-
 use crate::taos::{driver, CAPI, TAOS, TAOS_FIELD, TAOS_RES};
 use crate::ws::{stub, tmq};
 
@@ -57,7 +55,7 @@ pub struct tmq_raw_data {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_conf_new() -> *mut tmq_conf_t {
     if driver() {
         tmq::tmq_conf_new()
@@ -67,7 +65,7 @@ pub unsafe extern "C" fn tmq_conf_new() -> *mut tmq_conf_t {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_conf_set(
     conf: *mut tmq_conf_t,
     key: *const c_char,
@@ -81,7 +79,7 @@ pub unsafe extern "C" fn tmq_conf_set(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_conf_destroy(conf: *mut tmq_conf_t) {
     if driver() {
         tmq::tmq_conf_destroy(conf);
@@ -91,7 +89,7 @@ pub unsafe extern "C" fn tmq_conf_destroy(conf: *mut tmq_conf_t) {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
     conf: *mut tmq_conf_t,
     cb: tmq_commit_cb,
@@ -105,7 +103,7 @@ pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_list_new() -> *mut tmq_list_t {
     if driver() {
         tmq::tmq_list_new()
@@ -115,7 +113,7 @@ pub unsafe extern "C" fn tmq_list_new() -> *mut tmq_list_t {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_list_append(list: *mut tmq_list_t, value: *const c_char) -> i32 {
     if driver() {
         tmq::tmq_list_append(list, value)
@@ -125,7 +123,7 @@ pub unsafe extern "C" fn tmq_list_append(list: *mut tmq_list_t, value: *const c_
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_list_destroy(list: *mut tmq_list_t) {
     if driver() {
         tmq::tmq_list_destroy(list);
@@ -135,7 +133,7 @@ pub unsafe extern "C" fn tmq_list_destroy(list: *mut tmq_list_t) {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
     if driver() {
         tmq::tmq_list_get_size(list)
@@ -145,7 +143,7 @@ pub unsafe extern "C" fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *mut c_char {
     if driver() {
         tmq::tmq_list_to_c_array(list)
@@ -156,7 +154,7 @@ pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *m
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_consumer_new(
     conf: *mut tmq_conf_t,
     errstr: *mut c_char,
@@ -170,7 +168,7 @@ pub unsafe extern "C" fn tmq_consumer_new(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_subscribe(tmq: *mut tmq_t, topic_list: *const tmq_list_t) -> i32 {
     if driver() {
         tmq::tmq_subscribe(tmq, topic_list)
@@ -180,7 +178,7 @@ pub unsafe extern "C" fn tmq_subscribe(tmq: *mut tmq_t, topic_list: *const tmq_l
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_unsubscribe(tmq: *mut tmq_t) -> i32 {
     if driver() {
         tmq::tmq_unsubscribe(tmq)
@@ -190,7 +188,7 @@ pub unsafe extern "C" fn tmq_unsubscribe(tmq: *mut tmq_t) -> i32 {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq_list_t) -> i32 {
     if driver() {
         tmq::tmq_subscription(tmq, topics)
@@ -200,7 +198,7 @@ pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mut TAOS_RES {
     if driver() {
         tmq::tmq_consumer_poll(tmq, timeout)
@@ -210,7 +208,7 @@ pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mu
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
     if driver() {
         tmq::tmq_consumer_close(tmq)
@@ -220,7 +218,7 @@ pub unsafe extern "C" fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_commit_sync(tmq: *mut tmq_t, msg: *const TAOS_RES) -> i32 {
     if driver() {
         tmq::tmq_commit_sync(tmq, msg)
@@ -230,7 +228,7 @@ pub unsafe extern "C" fn tmq_commit_sync(tmq: *mut tmq_t, msg: *const TAOS_RES) 
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_commit_async(
     tmq: *mut tmq_t,
     msg: *const TAOS_RES,
@@ -246,7 +244,7 @@ pub unsafe extern "C" fn tmq_commit_async(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_commit_offset_sync(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
@@ -262,7 +260,7 @@ pub unsafe extern "C" fn tmq_commit_offset_sync(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_commit_offset_async(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
@@ -280,7 +278,7 @@ pub unsafe extern "C" fn tmq_commit_offset_async(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_get_topic_assignment(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
@@ -296,7 +294,7 @@ pub unsafe extern "C" fn tmq_get_topic_assignment(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
     if driver() {
         tmq::tmq_free_assignment(pAssignment);
@@ -307,7 +305,7 @@ pub unsafe extern "C" fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignm
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_offset_seek(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
@@ -323,7 +321,7 @@ pub unsafe extern "C" fn tmq_offset_seek(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_position(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
@@ -338,7 +336,7 @@ pub unsafe extern "C" fn tmq_position(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_committed(
     tmq: *mut tmq_t,
     pTopicName: *const c_char,
@@ -352,7 +350,7 @@ pub unsafe extern "C" fn tmq_committed(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_get_connect(tmq: *mut tmq_t) -> *mut TAOS {
     if driver() {
         stub::tmq_get_connect(tmq)
@@ -362,7 +360,7 @@ pub unsafe extern "C" fn tmq_get_connect(tmq: *mut tmq_t) -> *mut TAOS {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
     if driver() {
         tmq::tmq_get_table_name(res)
@@ -372,7 +370,7 @@ pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
     if driver() {
         tmq::tmq_get_res_type(res)
@@ -382,7 +380,7 @@ pub unsafe extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char {
     if driver() {
         tmq::tmq_get_topic_name(res)
@@ -392,7 +390,7 @@ pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
     if driver() {
         tmq::tmq_get_db_name(res)
@@ -402,7 +400,7 @@ pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
     if driver() {
         tmq::tmq_get_vgroup_id(res)
@@ -412,7 +410,7 @@ pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
     if driver() {
         tmq::tmq_get_vgroup_offset(res)
@@ -422,7 +420,7 @@ pub unsafe extern "C" fn tmq_get_vgroup_offset(res: *mut TAOS_RES) -> i64 {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_err2str(code: i32) -> *const c_char {
     if driver() {
         tmq::tmq_err2str(code)
@@ -432,7 +430,7 @@ pub unsafe extern "C" fn tmq_err2str(code: i32) -> *const c_char {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_get_raw(res: *mut TAOS_RES, raw: *mut tmq_raw_data) -> i32 {
     if driver() {
         stub::tmq_get_raw(res, raw)
@@ -442,7 +440,7 @@ pub unsafe extern "C" fn tmq_get_raw(res: *mut TAOS_RES, raw: *mut tmq_raw_data)
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_write_raw(taos: *mut TAOS, raw: tmq_raw_data) -> i32 {
     if driver() {
         stub::tmq_write_raw(taos, raw)
@@ -453,7 +451,7 @@ pub unsafe extern "C" fn tmq_write_raw(taos: *mut TAOS, raw: tmq_raw_data) -> i3
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_write_raw_block(
     taos: *mut TAOS,
     numOfRows: i32,
@@ -469,7 +467,7 @@ pub unsafe extern "C" fn taos_write_raw_block(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_write_raw_block_with_reqid(
     taos: *mut TAOS,
     numOfRows: i32,
@@ -486,7 +484,7 @@ pub unsafe extern "C" fn taos_write_raw_block_with_reqid(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_write_raw_block_with_fields(
     taos: *mut TAOS,
     rows: i32,
@@ -506,7 +504,7 @@ pub unsafe extern "C" fn taos_write_raw_block_with_fields(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_write_raw_block_with_fields_with_reqid(
     taos: *mut TAOS,
     rows: i32,
@@ -528,7 +526,7 @@ pub unsafe extern "C" fn taos_write_raw_block_with_fields_with_reqid(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_free_raw(raw: tmq_raw_data) {
     if driver() {
         stub::tmq_free_raw(raw);
@@ -538,7 +536,7 @@ pub unsafe extern "C" fn tmq_free_raw(raw: tmq_raw_data) {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_get_json_meta(res: *mut TAOS_RES) -> *const c_char {
     if driver() {
         stub::tmq_get_json_meta(res)
@@ -549,7 +547,7 @@ pub unsafe extern "C" fn tmq_get_json_meta(res: *mut TAOS_RES) -> *const c_char 
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn tmq_free_json_meta(jsonMeta: *mut c_char) {
     if driver() {
         stub::tmq_free_json_meta(jsonMeta);

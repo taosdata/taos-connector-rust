@@ -1,7 +1,5 @@
 use std::ffi::{c_char, c_int, c_ulong, c_void};
 
-use tracing::instrument;
-
 use crate::taos::{__taos_async_fn_t, driver, CAPI, TAOS, TAOS_RES};
 use crate::ws::stmt2;
 
@@ -53,7 +51,7 @@ pub struct TAOS_FIELD_ALL {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stmt2_init(
     taos: *mut TAOS,
     option: *mut TAOS_STMT2_OPTION,
@@ -66,7 +64,7 @@ pub unsafe extern "C" fn taos_stmt2_init(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stmt2_prepare(
     stmt: *mut TAOS_STMT2,
     sql: *const c_char,
@@ -80,7 +78,7 @@ pub unsafe extern "C" fn taos_stmt2_prepare(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stmt2_bind_param(
     stmt: *mut TAOS_STMT2,
     bindv: *mut TAOS_STMT2_BINDV,
@@ -94,7 +92,7 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stmt2_bind_param_a(
     stmt: *mut TAOS_STMT2,
     bindv: *mut TAOS_STMT2_BINDV,
@@ -110,7 +108,7 @@ pub unsafe extern "C" fn taos_stmt2_bind_param_a(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stmt2_exec(
     stmt: *mut TAOS_STMT2,
     affected_rows: *mut c_int,
@@ -123,7 +121,7 @@ pub unsafe extern "C" fn taos_stmt2_exec(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
     if driver() {
         stmt2::taos_stmt2_close(stmt)
@@ -133,7 +131,7 @@ pub unsafe extern "C" fn taos_stmt2_close(stmt: *mut TAOS_STMT2) -> c_int {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mut c_int) -> c_int {
     if driver() {
         stmt2::taos_stmt2_is_insert(stmt, insert)
@@ -143,7 +141,7 @@ pub unsafe extern "C" fn taos_stmt2_is_insert(stmt: *mut TAOS_STMT2, insert: *mu
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stmt2_get_fields(
     stmt: *mut TAOS_STMT2,
     count: *mut c_int,
@@ -157,7 +155,7 @@ pub unsafe extern "C" fn taos_stmt2_get_fields(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stmt2_free_fields(
     stmt: *mut TAOS_STMT2,
     fields: *mut TAOS_FIELD_ALL,
@@ -170,7 +168,7 @@ pub unsafe extern "C" fn taos_stmt2_free_fields(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_RES {
     if driver() {
         stmt2::taos_stmt2_result(stmt)
@@ -180,7 +178,7 @@ pub unsafe extern "C" fn taos_stmt2_result(stmt: *mut TAOS_STMT2) -> *mut TAOS_R
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stmt2_error(stmt: *mut TAOS_STMT2) -> *mut c_char {
     if driver() {
         stmt2::taos_stmt2_error(stmt)

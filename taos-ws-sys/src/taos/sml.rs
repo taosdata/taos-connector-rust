@@ -1,7 +1,5 @@
 use std::ffi::{c_char, c_int};
 
-use tracing::instrument;
-
 use crate::taos::{driver, CAPI, TAOS, TAOS_RES};
 use crate::ws::sml;
 
@@ -28,7 +26,7 @@ pub enum TSDB_SML_TIMESTAMP_TYPE {
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_schemaless_insert(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
@@ -45,7 +43,7 @@ pub unsafe extern "C" fn taos_schemaless_insert(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_schemaless_insert_with_reqid(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
@@ -65,7 +63,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_with_reqid(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_schemaless_insert_raw(
     taos: *mut TAOS,
     lines: *mut c_char,
@@ -83,7 +81,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_schemaless_insert_raw_with_reqid(
     taos: *mut TAOS,
     lines: *mut c_char,
@@ -106,7 +104,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_with_reqid(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_schemaless_insert_ttl(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
@@ -124,7 +122,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_ttl(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid(
     taos: *mut TAOS,
     lines: *mut *mut c_char,
@@ -147,7 +145,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl(
     taos: *mut TAOS,
     lines: *mut c_char,
@@ -168,7 +166,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid(
     taos: *mut TAOS,
     lines: *mut c_char,
@@ -192,7 +190,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
     taos: *mut TAOS,
     lines: *mut c_char,
@@ -219,7 +217,7 @@ pub unsafe extern "C" fn taos_schemaless_insert_raw_ttl_with_reqid_tbname_key(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_schemaless_insert_ttl_with_reqid_tbname_key(
     taos: *mut TAOS,
     lines: *mut *mut c_char,

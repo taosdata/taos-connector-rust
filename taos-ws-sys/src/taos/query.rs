@@ -1,7 +1,5 @@
 use std::ffi::{c_char, c_int, c_void};
 
-use tracing::instrument;
-
 use crate::taos::{
     __taos_async_fn_t, driver, CAPI, TAOS, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
 };
@@ -101,7 +99,7 @@ pub enum TSDB_SERVER_STATUS {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
     if driver() {
         query::taos_data_type(r#type)
@@ -111,7 +109,7 @@ pub unsafe extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES {
     if driver() {
         query::taos_query(taos, sql)
@@ -122,7 +120,7 @@ pub unsafe extern "C" fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_query_with_reqid(
     taos: *mut TAOS,
     sql: *const c_char,
@@ -136,7 +134,7 @@ pub unsafe extern "C" fn taos_query_with_reqid(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
     if driver() {
         query::taos_fetch_row(res)
@@ -146,7 +144,7 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
     if driver() {
         query::taos_result_precision(res)
@@ -156,7 +154,7 @@ pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
     if driver() {
         query::taos_free_result(res);
@@ -166,7 +164,7 @@ pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_kill_query(taos: *mut TAOS) {
     if driver() {
         stub::taos_kill_query(taos);
@@ -176,7 +174,7 @@ pub unsafe extern "C" fn taos_kill_query(taos: *mut TAOS) {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
     if driver() {
         query::taos_field_count(res)
@@ -186,7 +184,7 @@ pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_num_fields(res: *mut TAOS_RES) -> c_int {
     if driver() {
         query::taos_num_fields(res)
@@ -196,7 +194,7 @@ pub unsafe extern "C" fn taos_num_fields(res: *mut TAOS_RES) -> c_int {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_affected_rows(res: *mut TAOS_RES) -> c_int {
     if driver() {
         query::taos_affected_rows(res)
@@ -206,7 +204,7 @@ pub unsafe extern "C" fn taos_affected_rows(res: *mut TAOS_RES) -> c_int {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
     if driver() {
         query::taos_affected_rows64(res)
@@ -216,7 +214,7 @@ pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIELD {
     if driver() {
         query::taos_fetch_fields(res)
@@ -226,7 +224,7 @@ pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIEL
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FIELD_E {
     if driver() {
         query::taos_fetch_fields_e(res)
@@ -236,7 +234,7 @@ pub unsafe extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FI
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c_int {
     if driver() {
         query::taos_select_db(taos, db)
@@ -246,7 +244,7 @@ pub unsafe extern "C" fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_print_row(
     str: *mut c_char,
     row: TAOS_ROW,
@@ -261,7 +259,7 @@ pub unsafe extern "C" fn taos_print_row(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_print_row_with_size(
     str: *mut c_char,
     size: u32,
@@ -277,7 +275,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
     if driver() {
         query::taos_stop_query(res);
@@ -287,7 +285,7 @@ pub unsafe extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) -> bool {
     if driver() {
         query::taos_is_null(res, row, col)
@@ -298,7 +296,7 @@ pub unsafe extern "C" fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) ->
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_is_null_by_column(
     res: *mut TAOS_RES,
     columnIndex: c_int,
@@ -313,7 +311,7 @@ pub unsafe extern "C" fn taos_is_null_by_column(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
     if driver() {
         query::taos_is_update_query(res)
@@ -323,7 +321,7 @@ pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int {
     if driver() {
         query::taos_fetch_block(res, rows)
@@ -334,7 +332,7 @@ pub unsafe extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_RO
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_fetch_block_s(
     res: *mut TAOS_RES,
     numOfRows: *mut c_int,
@@ -349,7 +347,7 @@ pub unsafe extern "C" fn taos_fetch_block_s(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_fetch_raw_block(
     res: *mut TAOS_RES,
     numOfRows: *mut c_int,
@@ -364,7 +362,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_get_column_data_offset(
     res: *mut TAOS_RES,
     columnIndex: c_int,
@@ -377,7 +375,7 @@ pub unsafe extern "C" fn taos_get_column_data_offset(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int {
     if driver() {
         query::taos_validate_sql(taos, sql)
@@ -387,7 +385,7 @@ pub unsafe extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) 
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_reset_current_db(taos: *mut TAOS) {
     if driver() {
         stub::taos_reset_current_db(taos);
@@ -397,7 +395,7 @@ pub unsafe extern "C" fn taos_reset_current_db(taos: *mut TAOS) {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
     if driver() {
         query::taos_fetch_lengths(res)
@@ -407,7 +405,7 @@ pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
     if driver() {
         query::taos_result_block(res)
@@ -417,7 +415,7 @@ pub unsafe extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW 
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char {
     if driver() {
         query::taos_get_server_info(taos)
@@ -427,7 +425,7 @@ pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char 
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
     if driver() {
         query::taos_get_client_info()
@@ -437,7 +435,7 @@ pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_get_current_db(
     taos: *mut TAOS,
     database: *mut c_char,
@@ -452,7 +450,7 @@ pub unsafe extern "C" fn taos_get_current_db(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_query_a(
     taos: *mut TAOS,
     sql: *const c_char,
@@ -467,7 +465,7 @@ pub unsafe extern "C" fn taos_query_a(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_query_a_with_reqid(
     taos: *mut TAOS,
     sql: *const c_char,
@@ -483,7 +481,7 @@ pub unsafe extern "C" fn taos_query_a_with_reqid(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_fetch_rows_a(
     res: *mut TAOS_RES,
     fp: __taos_async_fn_t,
@@ -497,7 +495,7 @@ pub unsafe extern "C" fn taos_fetch_rows_a(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_fetch_raw_block_a(
     res: *mut TAOS_RES,
     fp: __taos_async_fn_t,
@@ -511,7 +509,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block_a(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
     if driver() {
         query::taos_get_raw_block(res)
@@ -522,7 +520,7 @@ pub unsafe extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_get_db_route_info(
     taos: *mut TAOS,
     db: *const c_char,
@@ -537,7 +535,7 @@ pub unsafe extern "C" fn taos_get_db_route_info(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_get_table_vgId(
     taos: *mut TAOS,
     db: *const c_char,
@@ -553,7 +551,7 @@ pub unsafe extern "C" fn taos_get_table_vgId(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_get_tables_vgId(
     taos: *mut TAOS,
     db: *const c_char,
@@ -570,7 +568,7 @@ pub unsafe extern "C" fn taos_get_tables_vgId(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_load_table_info(
     taos: *mut TAOS,
     tableNameList: *const c_char,
@@ -584,7 +582,7 @@ pub unsafe extern "C" fn taos_load_table_info(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_set_hb_quit(quitByKill: i8) {
     if driver() {
         stub::taos_set_hb_quit(quitByKill);
@@ -594,7 +592,7 @@ pub unsafe extern "C" fn taos_set_hb_quit(quitByKill: i8) {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_set_notify_cb(
     taos: *mut TAOS,
     fp: __taos_notify_fn_t,
@@ -609,7 +607,7 @@ pub unsafe extern "C" fn taos_set_notify_cb(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_fetch_whitelist_a(
     taos: *mut TAOS,
     fp: __taos_async_whitelist_fn_t,
@@ -623,7 +621,7 @@ pub unsafe extern "C" fn taos_fetch_whitelist_a(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_set_conn_mode(taos: *mut TAOS, mode: c_int, value: c_int) -> c_int {
     if driver() {
         stub::taos_set_conn_mode(taos, mode, value)
@@ -633,7 +631,7 @@ pub unsafe extern "C" fn taos_set_conn_mode(taos: *mut TAOS, mode: c_int, value:
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_set_config(config: *const c_char) -> setConfRet {
     if driver() {
         stub::taos_set_config(config)
@@ -643,7 +641,7 @@ pub unsafe extern "C" fn taos_set_config(config: *const c_char) -> setConfRet {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_check_server_status(
     fqdn: *const c_char,
     port: i32,
@@ -659,7 +657,7 @@ pub unsafe extern "C" fn taos_check_server_status(
 
 #[no_mangle]
 #[allow(non_snake_case)]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_write_crashinfo(
     signum: c_int,
     sigInfo: *mut c_void,
@@ -673,7 +671,7 @@ pub unsafe extern "C" fn taos_write_crashinfo(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn getBuildInfo() -> *const c_char {
     if driver() {
         stub::getBuildInfo()
@@ -683,7 +681,7 @@ pub unsafe extern "C" fn getBuildInfo() -> *const c_char {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
     if driver() {
         error::taos_errno(res)
@@ -693,7 +691,7 @@ pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
     if driver() {
         error::taos_errstr(res)

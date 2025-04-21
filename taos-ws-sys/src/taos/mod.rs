@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Once};
 
 use taos_error::Code;
-use tracing::instrument;
 use ws::error::{set_err_and_get_code, TaosError};
 
 use crate::native::{default_lib_name, ApiEntry};
@@ -100,7 +99,8 @@ pub struct TAOS_FIELD_E {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_init() -> c_int {
     init_driver_from_env();
 
@@ -112,7 +112,7 @@ pub unsafe extern "C" fn taos_init() -> c_int {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_cleanup() {
     if driver() {
         stub::taos_cleanup();
@@ -122,7 +122,7 @@ pub unsafe extern "C" fn taos_cleanup() {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_connect(
     ip: *const c_char,
     user: *const c_char,
@@ -140,7 +140,7 @@ pub unsafe extern "C" fn taos_connect(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_connect_auth(
     ip: *const c_char,
     user: *const c_char,
@@ -156,7 +156,7 @@ pub unsafe extern "C" fn taos_connect_auth(
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
     if driver() {
         ws::taos_close(taos);
@@ -166,7 +166,7 @@ pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
     if arg.is_null() {
         return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "arg is null"));
@@ -193,12 +193,12 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
 }
 
 #[no_mangle]
-#[instrument(level = "debug", ret)]
+#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_options_connection(
     taos: *mut TAOS,
     option: TSDB_OPTION_CONNECTION,
     arg: *const c_void,
-    varargs: ...
+    _varargs: ...
 ) -> c_int {
     if driver() {
         stub::taos_options_connection(taos, option, arg)
