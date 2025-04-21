@@ -100,7 +100,6 @@ pub struct TAOS_FIELD_E {
 
 #[no_mangle]
 #[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
-#[cfg_attr(not(test), tracing::instrument(level = "debug", ret))]
 pub unsafe extern "C" fn taos_init() -> c_int {
     init_driver_from_env();
 
@@ -204,5 +203,60 @@ pub unsafe extern "C" fn taos_options_connection(
         stub::taos_options_connection(taos, option, arg)
     } else {
         (CAPI.basic_api.taos_options_connection)(taos, option, arg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ptr;
+
+    use super::*;
+
+    #[test]
+    fn test_api() {
+        unsafe {
+            let code = taos_init();
+            assert_eq!(code, 0);
+
+            let code = taos_options(
+                TSDB_OPTION::TSDB_OPTION_TIMEZONE,
+                c"Asia/Shanghai".as_ptr() as *const _,
+            );
+            assert_eq!(code, 0);
+
+            let taos = taos_connect(
+                c"localhost".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                ptr::null(),
+                0,
+            );
+            assert!(!taos.is_null());
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_TIMEZONE,
+                c"Asia/Shanghai".as_ptr() as *const _,
+            );
+            assert_eq!(code, 0);
+
+            taos_close(taos);
+
+            let taos = taos_connect_auth(
+                c"localhost".as_ptr(),
+                c"root".as_ptr(),
+                c"dcc5bed04851fec854c035b2e40263b6".as_ptr(),
+                ptr::null(),
+                0,
+            );
+            if driver() {
+                assert_eq!(taos, ptr::null_mut());
+            } else {
+                assert!(!taos.is_null());
+                taos_close(taos);
+            }
+
+            taos_cleanup();
+        }
     }
 }
