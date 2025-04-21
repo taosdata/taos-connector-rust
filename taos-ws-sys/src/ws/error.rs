@@ -25,7 +25,7 @@ pub unsafe fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
     debug!("taos_errstr, res: {res:?}");
     if res.is_null() {
         if errno() == 0 {
-            return EMPTY.as_ptr();
+            return SUCCESS.as_ptr();
         }
         return errstr();
     }
@@ -34,11 +34,11 @@ pub unsafe fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
         .and_then(TaosMaybeError::errstr)
     {
         Some(err) => err,
-        None => EMPTY.as_ptr(),
+        None => SUCCESS.as_ptr(),
     }
 }
 
-pub const EMPTY: &CStr = c"";
+pub const SUCCESS: &CStr = c"success";
 pub const MAX_ERRSTR_LEN: usize = 4096;
 
 thread_local! {
