@@ -1851,13 +1851,12 @@ mod tests {
                                 }
                             }
                             TSDB_DATA_TYPE_VARCHAR => {
-                                let offsets = taos_get_column_data_offset(res, c as _);
-                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
-                                if offsets[r] == -1 {
+                                let offsets_ptr = taos_get_column_data_offset(res, c as _);
+                                let offset = ptr::read_unaligned(offsets_ptr.offset(r as _));
+                                if offset == -1 {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val =
-                                        rows[c].offset((offsets[r] + 2) as isize) as *mut c_char;
+                                    let val = rows[c].offset((offset + 2) as isize) as *mut c_char;
                                     let val = CStr::from_ptr(val).to_str().unwrap();
                                     println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
@@ -1936,13 +1935,12 @@ mod tests {
                                 }
                             }
                             TSDB_DATA_TYPE_VARCHAR => {
-                                let offsets = taos_get_column_data_offset(res, c as _);
-                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
-                                if offsets[r] == -1 {
+                                let offsets_ptr = taos_get_column_data_offset(res, c as _);
+                                let offset = ptr::read_unaligned(offsets_ptr.offset(r as _));
+                                if offset == -1 {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val =
-                                        rows[c].offset((offsets[r] + 2) as isize) as *mut c_char;
+                                    let val = rows[c].offset((offset + 2) as isize) as *mut c_char;
                                     let val = CStr::from_ptr(val).to_str().unwrap();
                                     println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
@@ -1954,7 +1952,6 @@ mod tests {
             }
 
             taos_free_result(res);
-
             test_exec(taos, "drop database test_1741779708");
             taos_close(taos);
         }
@@ -2102,28 +2099,27 @@ mod tests {
                                 }
                             }
                             TSDB_DATA_TYPE_VARCHAR => {
-                                let offsets = taos_get_column_data_offset(res, c as _);
-                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
-                                if offsets[r] == -1 {
+                                let offsets_ptr = taos_get_column_data_offset(res, c as _);
+                                let offset = ptr::read_unaligned(offsets_ptr.offset(r as _));
+                                if offset == -1 {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val =
-                                        rows[c].offset((offsets[r] + 2) as isize) as *mut c_char;
+                                    let val = rows[c].offset((offset + 2) as isize) as *mut c_char;
                                     let val = CStr::from_ptr(val).to_str().unwrap();
                                     println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_NCHAR => {
-                                let offsets = taos_get_column_data_offset(res, c as _);
-                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
-                                if offsets[r] == -1 {
+                                let offsets_ptr = taos_get_column_data_offset(res, c as _);
+                                let offset = ptr::read_unaligned(offsets_ptr.offset(r as _));
+                                if offset == -1 {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
+                                    let ptr = rows[c].offset(offset as isize) as *const i16;
                                     let len = ptr::read_unaligned(ptr);
                                     let mut bytes = Vec::with_capacity(len as _);
                                     for i in 0..(len / 4) as i32 {
-                                        let val = rows[c].offset((offsets[r] + 2 + i * 4) as isize)
+                                        let val = rows[c].offset((offset + 2 + i * 4) as isize)
                                             as *mut u32;
                                         let val = ptr::read_unaligned(val);
                                         bytes.push(val);
@@ -2132,27 +2128,27 @@ mod tests {
                                 }
                             }
                             TSDB_DATA_TYPE_VARBINARY => {
-                                let offsets = taos_get_column_data_offset(res, c as _);
-                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
-                                if offsets[r] == -1 {
+                                let offsets_ptr = taos_get_column_data_offset(res, c as _);
+                                let offset = ptr::read_unaligned(offsets_ptr.offset(r as _));
+                                if offset == -1 {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
+                                    let ptr = rows[c].offset(offset as isize) as *const i16;
                                     let len = ptr::read_unaligned(ptr);
-                                    let val = rows[c].offset((offsets[r] + 2) as isize) as *mut u8;
+                                    let val = rows[c].offset((offset + 2) as isize) as *mut u8;
                                     let val = slice::from_raw_parts(val, len as usize);
                                     println!("col: {}, row: {}, val: {:?}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_GEOMETRY => {
-                                let offsets = taos_get_column_data_offset(res, c as _);
-                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
-                                if offsets[r] == -1 {
+                                let offsets_ptr = taos_get_column_data_offset(res, c as _);
+                                let offset = ptr::read_unaligned(offsets_ptr.offset(r as _));
+                                if offset == -1 {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
+                                    let ptr = rows[c].offset(offset as isize) as *const i16;
                                     let len = ptr::read_unaligned(ptr);
-                                    let val = rows[c].offset((offsets[r] + 2) as isize) as *mut u8;
+                                    let val = rows[c].offset((offset + 2) as isize) as *mut u8;
                                     let val = slice::from_raw_parts(val, len as usize);
                                     println!("col: {}, row: {}, val: {:?}", c, r, val);
                                 }
