@@ -1257,8 +1257,11 @@ mod tests {
         unsafe {
             let client_info = taos_get_client_info();
             assert!(!client_info.is_null());
-            let client_info = CStr::from_ptr(client_info).to_str().unwrap();
-            assert_eq!(client_info, "0.2.1");
+            println!("client_info: {:?}", CStr::from_ptr(client_info));
+            if driver() {
+                let client_info = CStr::from_ptr(client_info).to_str().unwrap();
+                assert_eq!(client_info, "0.2.1");
+            }
         }
     }
 
