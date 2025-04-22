@@ -2186,6 +2186,8 @@ mod tests {
 
     #[test]
     fn test_taos_check_server_status() {
+        unsafe { taos_init() };
+
         unsafe {
             let max_len = 20;
             let mut details = vec![0 as c_char; max_len];
