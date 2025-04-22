@@ -54,13 +54,16 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # defaults:
+    #   run:
+    #     shell: sh
     steps:
       - name: Checkout TDengine
         uses: actions/checkout@v4
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "main"
+          ref: "test/sun"
 
       - name: Prepare development tools
         run: |
@@ -78,15 +81,24 @@ jobs:
         id: setup-rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: cargo test
+        run: |
+          cargo --version
+          echo $PATH
+          which cargo
+          echo $SHELL
+
       - name: Build TDengine
         env:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
+          cargo --version
           cd TDengine
           echo use commit ${BRANCH_NAME}
           sed -iE "/ExternalProject_Add(ext_taosws/,/GIT_TAG.*/s#GIT_TAG.*#GIT_TAG ${BRANCH_NAME}#" tools/CMakeLists.txt
           mkdir release && cd release
           cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
+          cargo --version
 
       - uses: actions/cache@v4
         id: cache-rust-target
@@ -95,13 +107,29 @@ jobs:
           key: ${{ runner.os }}-cargo-target-${{ steps.setup-rust.outputs.cachekey }}
 
       - name: Install TDengine
+        shell: bash
         run: |
+          cargo --version
+          echo $PATH
+          which cargo
+          # echo $GITHUB_PATH
+          # echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          # echo $GITHUB_PATH
+          echo $SHELL
+          echo "gaga"
+          /bin/sh -c "echo $PATH"
+          /bin/bash -c "echo $PATH"
+          /bin/sh -c "cargo --version"
+          /bin/bash -c "cargo --version"
+
           cd TDengine/release/
           make -j8 || exit 1
           sudo make install
+          echo $SHELL
           nohup sudo taosd > /dev/null 2>&1 &
           sleep 5
           nohup sudo taosadapter > /dev/null 2>&1 &
+          cargo --version
 
       - name: Run examples
         run: |
