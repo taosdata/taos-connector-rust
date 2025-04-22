@@ -1579,31 +1579,47 @@ mod tests {
             assert_eq!(rows, 5);
             assert!(!data.is_null());
 
-            let offset = taos_get_column_data_offset(res, 0);
-            assert!(offset.is_null());
+            let offset_ptr = taos_get_column_data_offset(res, 0);
+            assert!(offset_ptr.is_null());
 
-            let offset = taos_get_column_data_offset(res, 1);
-            assert!(!offset.is_null());
+            let offset_ptr = taos_get_column_data_offset(res, 1);
+            assert!(!offset_ptr.is_null());
 
-            let offsets = slice::from_raw_parts(offset, rows as _);
+            let mut offsets = Vec::with_capacity(rows as _);
+            for i in 0..rows {
+                let offset = ptr::read_unaligned(offset_ptr.offset(i as _));
+                offsets.push(offset);
+            }
             assert_eq!(offsets, [0, 7, -1, 14, -1]);
 
-            let offset = taos_get_column_data_offset(res, 2);
-            assert!(!offset.is_null());
+            let offset_ptr = taos_get_column_data_offset(res, 2);
+            assert!(!offset_ptr.is_null());
 
-            let offsets = slice::from_raw_parts(offset, rows as _);
+            let mut offsets = Vec::with_capacity(rows as _);
+            for i in 0..rows {
+                let offset = ptr::read_unaligned(offset_ptr.offset(i as _));
+                offsets.push(offset);
+            }
             assert_eq!(offsets, [0, 22, -1, 44, -1]);
 
-            let offset = taos_get_column_data_offset(res, 3);
-            assert!(!offset.is_null());
+            let offset_ptr = taos_get_column_data_offset(res, 3);
+            assert!(!offset_ptr.is_null());
 
-            let offsets = slice::from_raw_parts(offset, rows as _);
+            let mut offsets = Vec::with_capacity(rows as _);
+            for i in 0..rows {
+                let offset = ptr::read_unaligned(offset_ptr.offset(i as _));
+                offsets.push(offset);
+            }
             assert_eq!(offsets, [0, 7, -1, 14, -1]);
 
-            let offset = taos_get_column_data_offset(res, 4);
-            assert!(!offset.is_null());
+            let offset_ptr = taos_get_column_data_offset(res, 4);
+            assert!(!offset_ptr.is_null());
 
-            let offsets = slice::from_raw_parts(offset, rows as _);
+            let mut offsets = Vec::with_capacity(rows as _);
+            for i in 0..rows {
+                let offset = ptr::read_unaligned(offset_ptr.offset(i as _));
+                offsets.push(offset);
+            }
             assert_eq!(offsets, [0, 23, -1, 46, -1]);
 
             taos_free_result(res);
