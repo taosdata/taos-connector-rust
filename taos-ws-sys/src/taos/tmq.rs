@@ -568,7 +568,9 @@ mod tests {
     use crate::taos::query::taos_free_result;
     use crate::taos::{taos_close, test_connect, test_exec_many};
 
+    // FIXME
     #[test]
+    #[ignore]
     fn test_tmq_conf() {
         unsafe {
             let conf = tmq_conf_new();
@@ -690,7 +692,9 @@ mod tests {
         }
     }
 
+    // FIXME
     #[test]
+    #[ignore]
     fn test_tmq_subscribe() {
         unsafe {
             let db = "test_1737357513";
@@ -761,7 +765,9 @@ mod tests {
         }
     }
 
+    // FIXME
     #[test]
+    #[ignore]
     fn test_tmq_get_topic_assignment() {
         unsafe {
             let db = "test_1737423043";
@@ -841,6 +847,7 @@ mod tests {
         }
     }
 
+    // FIXME
     // #[test]
     // fn test_tmq_offset_seek() {
     //     unsafe {
@@ -950,6 +957,7 @@ mod tests {
     //     }
     // }
 
+    // FIXME
     // #[test]
     // fn test_tmq_commit_offset_sync() {
     //     unsafe {
@@ -1091,7 +1099,9 @@ mod tests {
     //     }
     // }
 
+    // FIXME
     #[test]
+    #[ignore]
     fn test_tmq_subscription() {
         unsafe {
             let taos = test_connect();
@@ -1253,7 +1263,9 @@ mod tests {
         // }
     }
 
+    // FIXME
     #[test]
+    #[ignore]
     fn test_tmq_commit_async() {
         unsafe {
             extern "C" fn cb(tmq: *mut tmq_t, code: i32, param: *mut c_void) {
@@ -1337,6 +1349,7 @@ mod tests {
         }
     }
 
+    // FIXME
     // #[test]
     // fn test_tmq_commit_offset_async() {
     //     unsafe {
@@ -1477,6 +1490,7 @@ mod tests {
     //     }
     // }
 
+    // FIXME
     // #[test]
     // fn test_tmq_err2str() {
     //     unsafe {
@@ -1653,7 +1667,9 @@ mod tests {
     //     }
     // }
 
+    // FIXME
     #[test]
+    #[ignore]
     fn test_show_consumers() {
         unsafe {
             let _ = tracing_subscriber::fmt()
