@@ -54,6 +54,8 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    env:
+      PATH: /home/runner/.cargo/bin:$PATH
     # defaults:
     #   run:
     #     shell: sh
