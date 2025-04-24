@@ -60,6 +60,13 @@ pub(crate) struct WsQuerySender {
 
 const SEND_TIMEOUT: Duration = Duration::from_millis(1000);
 
+#[allow(unused)]
+fn test() {
+    let numbers = vec![1, 2, 3];
+    let first = numbers.get(0).unwrap();
+    println!("first: {first}");
+}
+
 impl WsQuerySender {
     fn req_id(&self) -> ReqId {
         self.req_id
