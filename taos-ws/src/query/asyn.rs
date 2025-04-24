@@ -62,9 +62,9 @@ const SEND_TIMEOUT: Duration = Duration::from_millis(1000);
 
 #[allow(unused)]
 fn test() {
-    let numbers = vec![1, 2, 3];
-    let first = numbers.get(0).unwrap();
-    println!("first: {first}");
+    let num: u32 = 0x12345678;
+    let bytes: [u8; 4] = unsafe { std::mem::transmute(num) };
+    println!("{bytes:?}");
 }
 
 impl WsQuerySender {
