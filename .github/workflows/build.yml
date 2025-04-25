@@ -65,7 +65,7 @@ jobs:
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "main"
+          ref: "test/sun"
 
       - name: Prepare development tools
         run: |
@@ -94,6 +94,7 @@ jobs:
         env:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
+          free -h
           cargo --version
           cd TDengine
           echo use commit ${BRANCH_NAME}
