@@ -54,8 +54,8 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    env:
-      PATH: /home/runner/.cargo/bin:$PATH
+    # env:
+    #   PATH: /home/runner/.cargo/bin:$PATH
     # defaults:
     #   run:
     #     shell: sh
@@ -65,7 +65,7 @@ jobs:
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "test/sun"
+          ref: "main"
 
       - name: Prepare development tools
         run: |
