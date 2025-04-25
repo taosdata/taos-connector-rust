@@ -125,7 +125,7 @@ jobs:
           /bin/bash -c "cargo --version"
 
           cd TDengine/release/
-          make -j8 || exit 1
+          make || exit 1
           sudo make install
           echo $SHELL
           nohup sudo taosd > /dev/null 2>&1 &
