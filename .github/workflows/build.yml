@@ -86,7 +86,7 @@ jobs:
           echo use commit ${BRANCH_NAME}
           sed -iE "/ExternalProject_Add(ext_taosws/,/GIT_TAG.*/s#GIT_TAG.*#GIT_TAG ${BRANCH_NAME}#" tools/CMakeLists.txt
           mkdir release && cd release
-          cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
+          cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=false -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
 
       - name: Setup Debug Session
         uses: mxschmitt/action-tmate@v3
