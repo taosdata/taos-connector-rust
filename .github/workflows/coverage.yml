@@ -195,8 +195,7 @@ jobs:
 
       - name: Generate code coverage
         run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          sudo RUST_BACKTRACE=1 cargo llvm-cov -j 2 --workspace --lcov --output-path lcov.info
+          sudo RUST_BACKTRACE=1 /home/runner/.cargo/bin/cargo llvm-cov -j 2 --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
