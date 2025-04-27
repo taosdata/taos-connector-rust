@@ -188,7 +188,9 @@ jobs:
           sleep 1
 
       - name: Generate code coverage
-        run: sudo RUST_BACKTRACE=1 cargo llvm-cov -j 2 --workspace --lcov --output-path lcov.info
+        run: |
+          sudo mkdir -p /var/log/taos
+          RUST_BACKTRACE=1 cargo llvm-cov -j 2 --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
