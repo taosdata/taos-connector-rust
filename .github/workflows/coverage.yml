@@ -195,6 +195,10 @@ jobs:
 
       - name: Generate code coverage
         run: |
+          sudo curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo sh -s -- -y
+          # echo "$HOME/.cargo/bin" >> $PATH
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          sudo ~/.cargo/bin/cargo install cargo-llvm-cov
           sudo RUST_BACKTRACE=1 /home/runner/.cargo/bin/cargo llvm-cov -j 2 --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
