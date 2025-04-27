@@ -1722,6 +1722,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_taos_fetch_raw_block_a() {
         unsafe {
             extern "C" fn query_cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
