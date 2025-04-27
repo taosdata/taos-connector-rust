@@ -16,7 +16,7 @@ pub mod stmt2;
 pub mod tmq;
 
 /// The default driver is native.
-static DRIVER: AtomicBool = AtomicBool::new(false);
+static DRIVER: AtomicBool = AtomicBool::new(true);
 
 #[inline]
 fn set_driver(driver: bool) {
