@@ -93,11 +93,11 @@ jobs:
       #   with:
       #     detached: true
 
-      # - uses: actions/cache@v4
-      #   id: cache-rust-target
-      #   with:
-      #     path: TDengine/tools/taosws-rs/target/
-      #     key: ${{ runner.os }}-cargo-target-${{ steps.setup-rust.outputs.cachekey }}
+      - uses: actions/cache@v4
+        id: cache-rust-target
+        with:
+          path: TDengine/tools/taosws-rs/target/
+          key: ${{ runner.os }}-cargo-target-${{ steps.setup-rust.outputs.cachekey }}
 
       - name: Install TDengine
         run: |
