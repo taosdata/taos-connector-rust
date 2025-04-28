@@ -188,7 +188,7 @@ jobs:
           sleep 1
 
       - name: Generate code coverage
-        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov.info
+        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov.info --no-fail-fast
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
