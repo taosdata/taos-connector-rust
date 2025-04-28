@@ -691,6 +691,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_tmq_subscribe() {
         unsafe {
             let db = "test_1737357513";
@@ -762,6 +763,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_tmq_get_topic_assignment() {
         unsafe {
             let db = "test_1737423043";

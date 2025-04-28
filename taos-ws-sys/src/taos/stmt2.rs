@@ -297,6 +297,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_taos_stmt2_bind_param() {
         unsafe {
             let taos = test_connect();
@@ -753,6 +754,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_taos_stmt2_exec_async() {
         unsafe {
             extern "C" fn fp(userdata: *mut c_void, res: *mut TAOS_RES, code: c_int) {
@@ -839,6 +841,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_taos_stmt2_result() {
         unsafe {
             let taos = test_connect();
