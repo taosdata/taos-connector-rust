@@ -172,6 +172,8 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
     }
 
     if option == TSDB_OPTION::TSDB_OPTION_DRIVER {
+        init_driver_from_env();
+
         let driver = match CStr::from_ptr(arg as _).to_str() {
             Ok("native") => false,
             Ok("websocket") => true,
