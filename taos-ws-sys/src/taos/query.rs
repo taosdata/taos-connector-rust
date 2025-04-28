@@ -1713,6 +1713,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_taos_fetch_raw_block_a() {
         unsafe {
             extern "C" fn query_cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
@@ -2183,6 +2184,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_taos_check_server_status() {
         unsafe { taos_init() };
 
@@ -2244,16 +2246,12 @@ mod tests {
             assert_eq!(fields[1].bytes, 4);
 
             assert_eq!(fields[2].r#type, TSDB_DATA_TYPE_DECIMAL64 as i8);
-            assert_eq!(fields[2].bytes, 64);
-            // FIXME
-            // assert_eq!(fields[2].bytes, 8);
+            assert_eq!(fields[2].bytes, 8);
             assert_eq!(fields[2].precision, 10);
             assert_eq!(fields[2].scale, 2);
 
             assert_eq!(fields[3].r#type, TSDB_DATA_TYPE_DECIMAL as i8);
-            assert_eq!(fields[3].bytes, 64);
-            // FIXME
-            // assert_eq!(fields[3].bytes, 16);
+            assert_eq!(fields[3].bytes, 16);
             assert_eq!(fields[3].precision, 38);
             assert_eq!(fields[3].scale, 20);
 

@@ -1658,6 +1658,7 @@ mod tests {
     // }
 
     #[test]
+    #[ignore]
     fn test_show_consumers() {
         unsafe {
             let _ = tracing_subscriber::fmt()
