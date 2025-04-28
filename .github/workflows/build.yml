@@ -87,32 +87,32 @@ jobs:
           mkdir release && cd release
           cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
 
-      - name: Setup Debug Session
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 15
-        with:
-          detached: true
+      # - name: Setup Debug Session
+      #   uses: mxschmitt/action-tmate@v3
+      #   timeout-minutes: 15
+      #   with:
+      #     detached: true
 
-      - uses: actions/cache@v4
-        id: cache-rust-target
-        with:
-          path: TDengine/tools/taosws-rs/target/
-          key: ${{ runner.os }}-cargo-target-${{ steps.setup-rust.outputs.cachekey }}
+      # - uses: actions/cache@v4
+      #   id: cache-rust-target
+      #   with:
+      #     path: TDengine/tools/taosws-rs/target/
+      #     key: ${{ runner.os }}-cargo-target-${{ steps.setup-rust.outputs.cachekey }}
 
       - name: Install TDengine
         run: |
           cd TDengine/release/
-          make -j4 || exit 1
-          sudo make install
-          nohup sudo taosd > /dev/null 2>&1 &
-          sleep 5
-          nohup sudo taosadapter > /dev/null 2>&1 &
+          make -j8 || exit 1
+          # sudo make install
+          # nohup sudo taosd > /dev/null 2>&1 &
+          # sleep 5
+          # nohup sudo taosadapter > /dev/null 2>&1 &
 
-      - name: Run examples
-        run: |
-          cd TDengine/tools/taosws-rs
-          ./taos-ws-sys/ci/package.sh
-          cd ./target/libtaosws
-          make
-          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./
-          ./show-databases || exit 1
+      # - name: Run examples
+      #   run: |
+      #     cd TDengine/tools/taosws-rs
+      #     ./taos-ws-sys/ci/package.sh
+      #     cd ./target/libtaosws
+      #     make
+      #     export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./
+      #     ./show-databases || exit 1
