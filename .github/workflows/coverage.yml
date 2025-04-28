@@ -116,7 +116,7 @@ jobs:
           EOF
           tar -zcvf server.tar.gz ./release
 
-  coverage-run1:
+  coverage-default-driver:
     runs-on: ubuntu-latest
     needs: build-tdengine
     steps:
@@ -188,16 +188,16 @@ jobs:
           sleep 1
 
       - name: Generate code coverage
-        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov.info --no-fail-fast
+        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov-default-driver.info --no-fail-fast
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report-1
-          path: lcov_run1.info
+          name: coverage-default-driver
+          path: lcov-default-driver.info
           retention-days: 1
 
-  coverage-run2:
+  coverage-native-driver:
     runs-on: ubuntu-latest
     needs: build-tdengine
     steps:
@@ -271,35 +271,35 @@ jobs:
       - name: Generate code coverage
         run: |
           export TAOS_DRIVER=native
-          RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov.info --no-fail-fast
+          RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov-native-driver.info --no-fail-fast
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report-2
-          path: lcov_run2.info
+          name: coverage-native-driver
+          path: lcov-native-driver.info
           retention-days: 1
 
   merge-and-upload:
     runs-on: ubuntu-latest
-    needs: [coverage-run1, coverage-run2]
+    needs: [coverage-default-driver, coverage-native-driver]
     steps:
       - name: Install lcov
         run: sudo apt install lcov -y
 
-      - name: Download coverage report 1
+      - name: Download default driver coverage report
         uses: actions/download-artifact@v4
         with:
-          name: coverage-report-1
+          name: coverage-default-driver
 
-      - name: Download coverage report 2
+      - name: Download native driver coverage report
         uses: actions/download-artifact@v4
         with:
-          name: coverage-report-2
+          name: coverage-native-driver
 
       - name: Merge coverage reports
         run: |
-          lcov -a lcov_run1.info -a lcov_run2.info -o lcov.info
+          lcov -a lcov-default-driver.info -a lcov-native-driver.info -o lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
