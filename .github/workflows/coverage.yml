@@ -190,6 +190,117 @@ jobs:
       - name: Generate code coverage
         run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov.info --no-fail-fast
 
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-1
+          path: lcov_run1.info
+          retention-days: 1
+
+  coverage-run2:
+    runs-on: ubuntu-latest
+    needs: build-tdengine
+    steps:
+      - name: Get cache server by push
+        if: github.event_name == 'push'
+        id: get-cache-server-push
+        uses: actions/cache@v4
+        with:
+          path: server.tar.gz
+          key: ${{ runner.os }}-build-main-${{ needs.build-tdengine.outputs.commit_id }}
+          restore-keys: ${{ runner.os }}-build-main-
+
+      - name: Get cache server manually
+        if: github.event_name == 'workflow_dispatch'
+        id: get-cache-server-manually
+        uses: actions/cache@v4
+        with:
+          path: server.tar.gz
+          key: ${{ runner.os }}-build-${{ inputs.tdengine_branch }}-${{ needs.build-tdengine.outputs.commit_id }}
+          restore-keys: ${{ runner.os }}-build-${{ inputs.tdengine_branch }}-
+
+      - name: Install TDengine
+        run: |
+          tar -zxvf server.tar.gz
+          cd release && sudo sh install.sh
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        id: setup-rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.78.0
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@cargo-nextest
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ steps.setup-rust.outputs.rustc_hash }}
+
+      - uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
+
+      - name: Prepare development tools
+        run: |
+          sudo apt update
+          sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config libgflags2.2 libgflags-dev libgeos-dev -y
+          sudo timedatectl set-timezone Asia/Shanghai
+          sudo date
+
+      - name: Copy taos.cfg
+        run: |
+          sudo mkdir -p /etc/taos
+          sudo cp ./.github/workflows/taos.cfg /etc/taos/taos.cfg
+
+      - name: Start TDengine
+        run: |
+          mkdir -p /tmp/taos/v3/log /tmp/taos/v3/data
+          taosd &
+          TAOS_ADAPTER_LOG_PATH=/tmp/taos/v3/log taosadapter &
+          sleep 1
+
+      - name: Generate code coverage
+        run: |
+          export TAOS_DRIVER=native
+          RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov.info --no-fail-fast
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-2
+          path: lcov_run2.info
+          retention-days: 1
+
+  merge-and-upload:
+    runs-on: ubuntu-latest
+    needs: [coverage, coverage-run2]
+    steps:
+      - name: Install lcov
+        run: sudo apt install lcov -y
+
+      - name: Download coverage report 1
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report-1
+
+      - name: Download coverage report 2
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report-2
+
+      - name: Merge coverage reports
+        run: |
+          lcov -a lcov_run1.info -a lcov_run2.info -o lcov.info
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
