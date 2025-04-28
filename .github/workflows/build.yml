@@ -73,9 +73,9 @@ jobs:
         with:
           cmakeVersion: 3.31.6
 
-      - name: Set up Rust
-        id: setup-rust
-        uses: dtolnay/rust-toolchain@stable
+      # - name: Set up Rust
+      #   id: setup-rust
+      #   uses: dtolnay/rust-toolchain@stable
 
       - name: Build TDengine
         env:
