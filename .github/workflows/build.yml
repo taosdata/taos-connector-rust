@@ -67,7 +67,7 @@ jobs:
           sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config -y
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
-          cargo --version
+          sudo cargo --version
       - name: Get CMake
         uses: lukka/get-cmake@latest
         with:
