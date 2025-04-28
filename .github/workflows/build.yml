@@ -48,7 +48,6 @@ jobs:
         run: |
           cargo build -p taos --no-default-features --features ws-rustls
           cargo build -p taos-ws-sys
-
       - name: Run Clippy
         run: cargo clippy -- -D warnings
 
@@ -68,15 +67,14 @@ jobs:
           sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config -y
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
-
       - name: Get CMake
         uses: lukka/get-cmake@latest
         with:
           cmakeVersion: 3.31.6
 
-      - name: Set up Rust
-        id: setup-rust
-        uses: dtolnay/rust-toolchain@stable
+      # - name: Set up Rust
+      #   id: setup-rust
+      #   uses: dtolnay/rust-toolchain@stable
 
       - name: Build TDengine
         env:
@@ -86,7 +84,6 @@ jobs:
           echo use commit ${BRANCH_NAME}
           mkdir release && cd release
           cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
-
       # - name: Setup Debug Session
       #   uses: mxschmitt/action-tmate@v3
       #   timeout-minutes: 15
@@ -103,16 +100,15 @@ jobs:
         run: |
           cd TDengine/release/
           make -j8 || exit 1
-          # sudo make install
-          # nohup sudo taosd > /dev/null 2>&1 &
-          # sleep 5
-          # nohup sudo taosadapter > /dev/null 2>&1 &
-
-      # - name: Run examples
-      #   run: |
-      #     cd TDengine/tools/taosws-rs
-      #     ./taos-ws-sys/ci/package.sh
-      #     cd ./target/libtaosws
-      #     make
-      #     export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./
-      #     ./show-databases || exit 1
+          sudo make install
+          nohup sudo taosd > /dev/null 2>&1 &
+          sleep 5
+          nohup sudo taosadapter > /dev/null 2>&1 &
+      - name: Run examples
+        run: |
+          cd TDengine/tools/taosws-rs
+          ./taos-ws-sys/ci/package.sh
+          cd ./target/libtaosws
+          make
+          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./
+          ./show-databases || exit 1
