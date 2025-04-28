@@ -252,9 +252,7 @@ mod tests {
     use crate::taos::sml::{TSDB_SML_PROTOCOL_TYPE, TSDB_SML_TIMESTAMP_TYPE};
     use crate::taos::{taos_close, test_connect, test_exec, test_exec_many};
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_sml_insert_raw() {
         unsafe {
             let taos = test_connect();
@@ -459,9 +457,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_sml_telnet() {
         unsafe {
             let taos = test_connect();

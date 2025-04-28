@@ -976,9 +976,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_taos_print_row() {
         unsafe {
             let taos = test_connect();
@@ -1107,9 +1105,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_taos_stop_query() {
         unsafe {
             let taos = test_connect();
@@ -1300,9 +1296,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_taos_get_current_db_without_db() {
         unsafe {
             let taos = test_connect();
@@ -1380,9 +1374,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_taos_query_a() {
         unsafe {
             extern "C" fn cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
@@ -1491,7 +1483,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_taos_fetch_rows_a_() {
         unsafe {
             extern "C" fn fetch_rows_cb(taos: *mut c_void, res: *mut TAOS_RES, num_of_row: c_int) {
@@ -1722,7 +1713,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_taos_fetch_raw_block_a() {
         unsafe {
             extern "C" fn query_cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
@@ -1791,9 +1781,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_taos_get_raw_block() {
         unsafe {
             let taos = test_connect();
@@ -1902,9 +1890,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_taos_fetch_block_s() {
         unsafe {
             let taos = test_connect();

@@ -453,9 +453,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_taos_stmt_init_with_options() {
         unsafe {
             let taos = test_connect();
@@ -486,9 +484,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_taos_stmt_use_result() {
         unsafe {
             let taos = test_connect();
@@ -566,9 +562,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_taos_stmt_bind_param_batch() {
         unsafe {
             let taos = test_connect();
@@ -1022,9 +1016,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_stmt_stb_insert() {
         unsafe {
             let taos = test_connect();
@@ -1155,9 +1147,7 @@ mod tests {
         }
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_taos_stmt_bind_single_param_batch() {
         unsafe {
             let taos = test_connect();
