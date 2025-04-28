@@ -157,8 +157,8 @@ jobs:
         with:
           toolchain: 1.78.0
 
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@cargo-nextest
 
       - uses: actions/cache@v4
         with:
@@ -194,14 +194,7 @@ jobs:
           sleep 1
 
       - name: Generate code coverage
-        run: |
-          # sudo curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo sh -s -- -y
-          # echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          # sudo ~/.cargo/bin/cargo install cargo-llvm-cov
-          # sudo ~/.cargo/bin/cargo install cargo-nextest
-          # sudo RUST_BACKTRACE=1 /home/runner/.cargo/bin/cargo llvm-cov nextest run -j 2 --workspace --lcov --output-path lcov.info
-          cargo install cargo-nextest
-          RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov.info
+        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
