@@ -347,9 +347,7 @@ mod tests {
         };
     }
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_stmt() {
         unsafe {
             let taos = test_connect();

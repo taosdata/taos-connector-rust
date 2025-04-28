@@ -568,9 +568,7 @@ mod tests {
     use crate::taos::query::taos_free_result;
     use crate::taos::{taos_close, test_connect, test_exec_many};
 
-    // FIXME
     #[test]
-    #[ignore]
     fn test_tmq_conf() {
         unsafe {
             let conf = tmq_conf_new();

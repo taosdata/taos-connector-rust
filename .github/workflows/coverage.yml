@@ -201,7 +201,7 @@ jobs:
           # sudo ~/.cargo/bin/cargo install cargo-nextest
           # sudo RUST_BACKTRACE=1 /home/runner/.cargo/bin/cargo llvm-cov nextest run -j 2 --workspace --lcov --output-path lcov.info
           cargo install cargo-nextest
-          RUST_BACKTRACE=1 cargo llvm-cov nextest run -j 2 --workspace --lcov --output-path lcov.info
+          RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
