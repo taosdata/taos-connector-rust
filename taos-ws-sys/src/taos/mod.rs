@@ -31,8 +31,16 @@ fn driver() -> bool {
 fn init_driver_from_env() {
     static DRIVER_INIT: Once = Once::new();
     DRIVER_INIT.call_once(|| {
-        let driver = matches!(std::env::var("TAOS_DRIVER"), Ok(value) if value == "websocket");
-        set_driver(driver);
+        if let Ok(driver) = std::env::var("TAOS_DRIVER") {
+            match driver.as_str() {
+                "websocket" => set_driver(true),
+                "native" => set_driver(false),
+                _ => {
+                    tracing::warn!("Invalid TAOS_DRIVER value: {driver}");
+                    set_driver(true);
+                }
+            }
+        }
     });
 }
 
