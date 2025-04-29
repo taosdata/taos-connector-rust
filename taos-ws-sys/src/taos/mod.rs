@@ -258,6 +258,7 @@ mod tests {
     use std::ptr;
 
     use super::*;
+    use crate::taos::query::{taos_errno, taos_errstr};
 
     #[test]
     fn test_api() {
@@ -304,6 +305,28 @@ mod tests {
             }
 
             taos_cleanup();
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_unable_to_establish_connection() {
+        unsafe {
+            let taos = taos_connect(
+                c"invalid_host".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                ptr::null(),
+                0,
+            );
+            assert!(taos.is_null());
+
+            let code = taos_errno(ptr::null_mut());
+            let errstr = taos_errstr(ptr::null_mut());
+            assert_eq!(Code::from(code), Code::new(0x000B));
+            assert_eq!(
+                CStr::from_ptr(errstr).to_str().unwrap(),
+                "Unable to establish connection"
+            );
         }
     }
 }
