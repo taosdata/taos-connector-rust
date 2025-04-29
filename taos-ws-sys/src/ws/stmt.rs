@@ -1,3 +1,4 @@
+use std::alloc::{alloc, dealloc, Layout};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_ulong, CStr};
 use std::{ptr, slice};
@@ -9,7 +10,7 @@ use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_ws::query::{BindType, Stmt2Field};
 use taos_ws::{Stmt2, Taos};
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use crate::taos::stmt::{TAOS_MULTI_BIND, TAOS_STMT, TAOS_STMT_OPTIONS};
 use crate::taos::{TAOS_FIELD_E, TAOS_RES};
@@ -26,8 +27,6 @@ struct TaosStmt {
     stb_insert: bool,
     tag_fields: Option<Vec<Stmt2Field>>,
     col_fields: Option<Vec<Stmt2Field>>,
-    tag_fields_addr: Option<usize>,
-    col_fields_addr: Option<usize>,
     bind_params: Vec<Stmt2BindParam>,
     tbname: Option<String>,
     tags: Option<Vec<Value>>,
@@ -42,8 +41,6 @@ impl TaosStmt {
             stb_insert,
             tag_fields: None,
             col_fields: None,
-            tag_fields_addr: None,
-            col_fields_addr: None,
             bind_params: Vec::new(),
             tbname: None,
             tags: None,
@@ -100,6 +97,19 @@ impl TaosStmt {
         }
 
         Ok(())
+    }
+}
+
+struct StmtFields {
+    len: usize,
+    fields: [TAOS_FIELD_E; 0],
+}
+
+impl StmtFields {
+    unsafe fn alloc(len: usize) -> *mut StmtFields {
+        let total_size = size_of::<StmtFields>() + len * size_of::<TAOS_FIELD_E>();
+        let layout = Layout::from_size_align_unchecked(total_size, align_of::<StmtFields>());
+        alloc(layout) as _
     }
 }
 
@@ -419,14 +429,27 @@ pub unsafe fn taos_stmt_get_tag_fields(
 
     debug!("taos_stmt_get_tag_fields, fields: {tag_fields:?}");
 
-    *fieldNum = tag_fields.len() as _;
+    let len = tag_fields.len();
+
+    *fieldNum = len as _;
+    *fields = ptr::null_mut();
 
     if !tag_fields.is_empty() {
-        *fields = Box::into_raw(tag_fields.into_boxed_slice()) as _;
-        taos_stmt.tag_fields_addr = Some(*fields as usize);
+        let ptr = StmtFields::alloc(len);
+        if ptr.is_null() {
+            error!("taos_stmt_get_tag_fields failed, alloc null");
+            maybe_err.with_err(Some(TaosError::new(Code::FAILED, "alloc failed")));
+            return format_errno(Code::FAILED.into());
+        }
+
+        (*ptr).len = len;
+        let fields_ptr = (*ptr).fields.as_mut_ptr();
+        ptr::copy_nonoverlapping(tag_fields.as_ptr(), fields_ptr, len);
+
+        *fields = fields_ptr;
     }
 
-    debug!("taos_stmt_get_tag_fields succ, taos_stmt: {taos_stmt:?}");
+    trace!("taos_stmt_get_tag_fields succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.clear_err();
     clear_err_and_ret_succ()
@@ -493,14 +516,27 @@ pub unsafe fn taos_stmt_get_col_fields(
 
     debug!("taos_stmt_get_col_fields, fields: {col_fields:?}");
 
-    *fieldNum = col_fields.len() as _;
+    let len = col_fields.len();
+
+    *fieldNum = len as _;
+    *fields = ptr::null_mut();
 
     if !col_fields.is_empty() {
-        *fields = Box::into_raw(col_fields.into_boxed_slice()) as _;
-        taos_stmt.col_fields_addr = Some(*fields as usize);
+        let ptr = StmtFields::alloc(len);
+        if ptr.is_null() {
+            error!("taos_stmt_get_col_fields failed, alloc null");
+            maybe_err.with_err(Some(TaosError::new(Code::FAILED, "alloc failed")));
+            return format_errno(Code::FAILED.into());
+        }
+
+        (*ptr).len = len;
+        let fields_ptr = (*ptr).fields.as_mut_ptr();
+        ptr::copy_nonoverlapping(col_fields.as_ptr(), fields_ptr, len);
+
+        *fields = fields_ptr;
     }
 
-    debug!("taos_stmt_get_col_fields succ, taos_stmt: {taos_stmt:?}");
+    trace!("taos_stmt_get_col_fields succ, taos_stmt: {taos_stmt:?}");
 
     maybe_err.clear_err();
     clear_err_and_ret_succ()
@@ -517,51 +553,20 @@ pub unsafe fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_F
         }
     };
 
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
-            return;
-        }
-    };
-
     if fields.is_null() {
         maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fields is null")));
         return;
     }
 
-    if let Some(addr) = taos_stmt.tag_fields_addr {
-        if addr == fields as usize {
-            let len = taos_stmt
-                .tag_fields
-                .as_ref()
-                .map_or(0, |fields| fields.len());
-            let _ = Vec::from_raw_parts(fields, len, len);
-            taos_stmt.tag_fields_addr = None;
-            maybe_err.clear_err();
-            clear_err_and_ret_succ();
-            return;
-        }
-    }
+    let ptr = (fields as *mut u8).sub(size_of::<StmtFields>()) as *mut StmtFields;
+    let len = (*ptr).len;
+    let total_size = size_of::<StmtFields>() + len * size_of::<TAOS_FIELD_E>();
+    let layout = Layout::from_size_align_unchecked(total_size, align_of::<StmtFields>());
+    dealloc(ptr as *mut u8, layout);
 
-    if let Some(addr) = taos_stmt.col_fields_addr {
-        if addr == fields as usize {
-            let len = taos_stmt
-                .col_fields
-                .as_ref()
-                .map_or(0, |fields| fields.len());
-            let _ = Vec::from_raw_parts(fields, len, len);
-            taos_stmt.col_fields_addr = None;
-            maybe_err.clear_err();
-            clear_err_and_ret_succ();
-            return;
-        }
-    }
-
-    maybe_err.with_err(Some(TaosError::new(
-        Code::INVALID_PARA,
-        "fields is invalid",
-    )));
+    debug!("taos_stmt_reclaim_fields succ");
+    maybe_err.clear_err();
+    clear_err_and_ret_succ();
 }
 
 pub unsafe fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int {
