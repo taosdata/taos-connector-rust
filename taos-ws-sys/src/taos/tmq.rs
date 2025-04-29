@@ -559,14 +559,16 @@ pub unsafe extern "C" fn tmq_free_json_meta(jsonMeta: *mut c_char) {
 #[cfg(test)]
 mod tests {
     use std::ffi::{CStr, CString};
-    use std::ptr;
     use std::str::FromStr;
     use std::thread::sleep;
     use std::time::Duration;
+    use std::{ptr, slice};
 
     use super::*;
-    use crate::taos::query::taos_free_result;
-    use crate::taos::{taos_close, taos_init, test_connect, test_exec_many};
+    use crate::taos::query::{
+        taos_fetch_fields, taos_fetch_row, taos_free_result, taos_num_fields, taos_print_row,
+    };
+    use crate::taos::{taos_close, taos_init, test_connect, test_exec, test_exec_many};
 
     #[test]
     fn test_tmq_conf() {
@@ -763,7 +765,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_tmq_get_topic_assignment() {
         unsafe {
             let db = "test_1737423043";
@@ -843,257 +844,255 @@ mod tests {
         }
     }
 
-    // FIXME
-    // #[test]
-    // fn test_tmq_offset_seek() {
-    //     unsafe {
-    //         let db = "test_1737440249";
-    //         let topic = "topic_1737440249";
+    #[test]
+    fn test_tmq_offset_seek() {
+        unsafe {
+            let db = "test_1737440249";
+            let topic = "topic_1737440249";
 
-    //         let taos = test_connect();
-    //         test_exec_many(
-    //             taos,
-    //             &[
-    //                 &format!("drop topic if exists {topic}"),
-    //                 &format!("drop database if exists {db}"),
-    //                 &format!("create database {db}"),
-    //                 &format!("use {db}"),
-    //                 "create table t0 (ts timestamp, c1 int)",
-    //                 "insert into t0 values (now, 1)",
-    //                 &format!("create topic {topic} as select * from t0"),
-    //             ],
-    //         );
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    &format!("drop topic if exists {topic}"),
+                    &format!("drop database if exists {db}"),
+                    &format!("create database {db}"),
+                    &format!("use {db}"),
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (now, 1)",
+                    &format!("create topic {topic} as select * from t0"),
+                ],
+            );
 
-    //         let conf = tmq_conf_new();
-    //         assert!(!conf.is_null());
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
 
-    //         let key = c"group.id".as_ptr();
-    //         let value = c"1".as_ptr();
-    //         let res = tmq_conf_set(conf, key, value);
-    //         assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+            let key = c"group.id".as_ptr();
+            let value = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
-    //         let mut errstr = [0; 256];
-    //         let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
-    //         assert!(!consumer.is_null());
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
 
-    //         let list = tmq_list_new();
-    //         assert!(!list.is_null());
+            let list = tmq_list_new();
+            assert!(!list.is_null());
 
-    //         let value = CString::from_str(topic).unwrap();
-    //         let errno = tmq_list_append(list, value.as_ptr());
-    //         assert_eq!(errno, 0);
+            let value = CString::from_str(topic).unwrap();
+            let errno = tmq_list_append(list, value.as_ptr());
+            assert_eq!(errno, 0);
 
-    //         let errno = tmq_subscribe(consumer, list);
-    //         assert_eq!(errno, 0);
+            let errno = tmq_subscribe(consumer, list);
+            assert_eq!(errno, 0);
 
-    //         tmq_conf_destroy(conf);
-    //         tmq_list_destroy(list);
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
 
-    //         let topic_name = CString::from_str(topic).unwrap();
-    //         let mut assignment = ptr::null_mut();
-    //         let mut num_of_assignment = 0;
+            let topic_name = CString::from_str(topic).unwrap();
+            let mut assignment = ptr::null_mut();
+            let mut num_of_assignment = 0;
 
-    //         let errno = tmq_get_topic_assignment(
-    //             consumer,
-    //             topic_name.as_ptr(),
-    //             &mut assignment,
-    //             &mut num_of_assignment,
-    //         );
-    //         assert_eq!(errno, 0);
+            let errno = tmq_get_topic_assignment(
+                consumer,
+                topic_name.as_ptr(),
+                &mut assignment,
+                &mut num_of_assignment,
+            );
+            assert_eq!(errno, 0);
 
-    //         let (_, len) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
-    //         let assigns = Vec::from_raw_parts(assignment, len, len);
+            let assigns = slice::from_raw_parts(assignment, num_of_assignment as _);
+            for assign in assigns {
+                let offset = tmq_position(consumer, topic_name.as_ptr(), assign.vgId);
+                assert!(offset >= 0);
 
-    //         for assign in assigns {
-    //             let offset = tmq_position(consumer, topic_name.as_ptr(), assign.vgId);
-    //             assert!(offset >= 0);
+                let errno =
+                    tmq_offset_seek(consumer, topic_name.as_ptr(), assign.vgId, assign.begin);
+                assert_eq!(errno, 0);
+            }
 
-    //             let errno =
-    //                 tmq_offset_seek(consumer, topic_name.as_ptr(), assign.vgId, assign.begin);
-    //             assert_eq!(errno, 0);
-    //         }
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                if res.is_null() {
+                    break;
+                }
 
-    //         loop {
-    //             let res = tmq_consumer_poll(consumer, 1000);
-    //             if res.is_null() {
-    //                 break;
-    //             }
+                let row = taos_fetch_row(res);
+                assert!(!row.is_null());
 
-    //             let row = taos_fetch_row(res);
-    //             assert!(!row.is_null());
+                let fields = taos_fetch_fields(res);
+                assert!(!fields.is_null());
 
-    //             let fields = taos_fetch_fields(res);
-    //             assert!(!fields.is_null());
+                let num_fields = taos_num_fields(res);
+                assert_eq!(num_fields, 2);
 
-    //             let num_fields = taos_num_fields(res);
-    //             assert_eq!(num_fields, 2);
+                let mut str = vec![0 as c_char; 1024];
+                let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+                println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
 
-    //             let mut str = vec![0 as c_char; 1024];
-    //             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-    //             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+                let errno = tmq_commit_sync(consumer, res);
+                assert_eq!(errno, 0);
 
-    //             let errno = tmq_commit_sync(consumer, res);
-    //             assert_eq!(errno, 0);
+                taos_free_result(res);
+            }
 
-    //             taos_free_result(res);
-    //         }
+            let errno = tmq_unsubscribe(consumer);
+            assert_eq!(errno, 0);
 
-    //         let errno = tmq_unsubscribe(consumer);
-    //         assert_eq!(errno, 0);
+            let errno = tmq_consumer_close(consumer);
+            assert_eq!(errno, 0);
 
-    //         let errno = tmq_consumer_close(consumer);
-    //         assert_eq!(errno, 0);
+            test_exec_many(
+                taos,
+                &[format!("drop topic {topic}"), format!("drop database {db}")],
+            );
 
-    //         test_exec_many(
-    //             taos,
-    //             &[format!("drop topic {topic}"), format!("drop database {db}")],
-    //         );
+            taos_close(taos);
+        }
+    }
 
-    //         taos_close(taos);
-    //     }
-    // }
+    #[test]
+    fn test_tmq_commit_offset_sync() {
+        unsafe {
+            let db = "test_1737444552";
+            let topic = "topic_1737444552";
+            let table = "t0";
 
-    // FIXME
-    // #[test]
-    // fn test_tmq_commit_offset_sync() {
-    //     unsafe {
-    //         let db = "test_1737444552";
-    //         let topic = "topic_1737444552";
-    //         let table = "t0";
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    &format!("drop topic if exists {topic}"),
+                    &format!("drop database if exists {db}"),
+                    &format!("create database {db}"),
+                    &format!("create topic {topic} as database {db}"),
+                    &format!("use {db}"),
+                    &format!("create table {table} (ts timestamp, c1 int)"),
+                    &format!("insert into {table} values (now, 1)"),
+                    &format!("insert into {table} values (now, 2)"),
+                ],
+            );
 
-    //         let taos = test_connect();
-    //         test_exec_many(
-    //             taos,
-    //             &[
-    //                 &format!("drop topic if exists {topic}"),
-    //                 &format!("drop database if exists {db}"),
-    //                 &format!("create database {db}"),
-    //                 &format!("use {db}"),
-    //                 &format!("create table {table} (ts timestamp, c1 int)"),
-    //                 &format!("insert into {table} values (now, 1)"),
-    //                 &format!("insert into {table} values (now, 2)"),
-    //                 &format!("create topic {topic} as database {db}"),
-    //             ],
-    //         );
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
 
-    //         let conf = tmq_conf_new();
-    //         assert!(!conf.is_null());
+            let key = c"group.id".as_ptr();
+            let value = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
-    //         let key = c"group.id".as_ptr();
-    //         let value = c"1".as_ptr();
-    //         let res = tmq_conf_set(conf, key, value);
-    //         assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
-    //         let key = c"auto.offset.reset".as_ptr();
-    //         let value = c"earliest".as_ptr();
-    //         let res = tmq_conf_set(conf, key, value);
-    //         assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
 
-    //         let mut errstr = [0; 256];
-    //         let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
-    //         assert!(!consumer.is_null());
+            let list = tmq_list_new();
+            assert!(!list.is_null());
 
-    //         let list = tmq_list_new();
-    //         assert!(!list.is_null());
+            let value = CString::from_str(topic).unwrap();
+            let errno = tmq_list_append(list, value.as_ptr());
+            assert_eq!(errno, 0);
 
-    //         let value = CString::from_str(topic).unwrap();
-    //         let errno = tmq_list_append(list, value.as_ptr());
-    //         assert_eq!(errno, 0);
+            let errno = tmq_subscribe(consumer, list);
+            assert_eq!(errno, 0);
 
-    //         let errno = tmq_subscribe(consumer, list);
-    //         assert_eq!(errno, 0);
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
 
-    //         tmq_conf_destroy(conf);
-    //         tmq_list_destroy(list);
+            let topic_name = CString::from_str(topic).unwrap();
+            let mut assignment = ptr::null_mut();
+            let mut num_of_assignment = 0;
 
-    //         let topic_name = CString::from_str(topic).unwrap();
-    //         let mut assignment = ptr::null_mut();
-    //         let mut num_of_assignment = 0;
+            let errno = tmq_get_topic_assignment(
+                consumer,
+                topic_name.as_ptr(),
+                &mut assignment,
+                &mut num_of_assignment,
+            );
+            assert_eq!(errno, 0);
 
-    //         let errno = tmq_get_topic_assignment(
-    //             consumer,
-    //             topic_name.as_ptr(),
-    //             &mut assignment,
-    //             &mut num_of_assignment,
-    //         );
-    //         assert_eq!(errno, 0);
+            let mut vg_ids = Vec::new();
+            let assigns = slice::from_raw_parts(assignment, num_of_assignment as _);
+            for assign in assigns {
+                vg_ids.push(assign.vgId);
+            }
 
-    //         let (_, len) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
-    //         let assigns = Vec::from_raw_parts(assignment, len, len);
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                if res.is_null() {
+                    break;
+                }
 
-    //         let mut vg_ids = Vec::new();
-    //         for assign in &assigns {
-    //             vg_ids.push(assign.vgId);
-    //         }
+                let table_name = tmq_get_table_name(res);
+                if driver() {
+                    assert!(!table_name.is_null());
+                    assert_eq!(
+                        CStr::from_ptr(table_name),
+                        CString::new(table).unwrap().as_c_str()
+                    );
+                } else {
+                    assert!(table_name.is_null());
+                }
 
-    //         loop {
-    //             let res = tmq_consumer_poll(consumer, 1000);
-    //             if res.is_null() {
-    //                 break;
-    //             }
+                let db_name = tmq_get_db_name(res);
+                assert!(!db_name.is_null());
+                assert_eq!(
+                    CStr::from_ptr(db_name),
+                    CString::new(db).unwrap().as_c_str()
+                );
 
-    //             let table_name = tmq_get_table_name(res);
-    //             assert!(!table_name.is_null());
-    //             assert_eq!(
-    //                 CStr::from_ptr(table_name),
-    //                 CString::new(table).unwrap().as_c_str()
-    //             );
+                let res_type = tmq_get_res_type(res);
+                assert_eq!(res_type, tmq_res_t::TMQ_RES_DATA);
 
-    //             let db_name = tmq_get_db_name(res);
-    //             assert!(!db_name.is_null());
-    //             assert_eq!(
-    //                 CStr::from_ptr(db_name),
-    //                 CString::new(db).unwrap().as_c_str()
-    //             );
+                let topic_name = tmq_get_topic_name(res);
+                assert!(!topic_name.is_null());
+                assert_eq!(
+                    CStr::from_ptr(topic_name),
+                    CString::new(topic).unwrap().as_c_str()
+                );
 
-    //             let res_type = tmq_get_res_type(res);
-    //             assert_eq!(res_type, tmq_res_t::TMQ_RES_DATA);
+                let vg_id = tmq_get_vgroup_id(res);
+                assert!(vg_ids.contains(&vg_id));
 
-    //             let topic_name = tmq_get_topic_name(res);
-    //             assert!(!topic_name.is_null());
-    //             assert_eq!(
-    //                 CStr::from_ptr(topic_name),
-    //                 CString::new(topic).unwrap().as_c_str()
-    //             );
+                let offset = tmq_get_vgroup_offset(res);
+                assert_eq!(offset, 0);
 
-    //             let vg_id = tmq_get_vgroup_id(res);
-    //             assert!(vg_ids.contains(&vg_id));
+                let mut current_offset = 0;
+                for assign in assigns {
+                    if assign.vgId == vg_id {
+                        current_offset = assign.currentOffset;
+                        println!("current_offset: {current_offset}");
+                        break;
+                    }
+                }
 
-    //             let offset = tmq_get_vgroup_offset(res);
-    //             assert_eq!(offset, 0);
+                let errno = tmq_commit_offset_sync(consumer, topic_name, vg_id, current_offset);
+                assert_eq!(errno, 0);
 
-    //             let mut current_offset = 0;
-    //             for assign in &assigns {
-    //                 if assign.vgId == vg_id {
-    //                     current_offset = assign.currentOffset;
-    //                     println!("current_offset: {current_offset}");
-    //                     break;
-    //                 }
-    //             }
+                let committed_offset = tmq_committed(consumer, topic_name, vg_id);
+                assert_eq!(committed_offset, current_offset);
 
-    //             let errno = tmq_commit_offset_sync(consumer, topic_name, vg_id, current_offset);
-    //             assert_eq!(errno, 0);
+                taos_free_result(res);
+            }
 
-    //             let committed_offset = tmq_committed(consumer, topic_name, vg_id);
-    //             assert_eq!(committed_offset, current_offset);
+            let errno = tmq_unsubscribe(consumer);
+            assert_eq!(errno, 0);
 
-    //             taos_free_result(res);
-    //         }
+            let errno = tmq_consumer_close(consumer);
+            assert_eq!(errno, 0);
 
-    //         let errno = tmq_unsubscribe(consumer);
-    //         assert_eq!(errno, 0);
+            test_exec_many(
+                taos,
+                &[format!("drop topic {topic}"), format!("drop database {db}")],
+            );
 
-    //         let errno = tmq_consumer_close(consumer);
-    //         assert_eq!(errno, 0);
-
-    //         test_exec_many(
-    //             taos,
-    //             &[format!("drop topic {topic}"), format!("drop database {db}")],
-    //         );
-
-    //         taos_close(taos);
-    //     }
-    // }
+            taos_close(taos);
+        }
+    }
 
     #[test]
     fn test_tmq_subscription() {
@@ -1341,146 +1340,143 @@ mod tests {
         }
     }
 
-    // FIXME
-    // #[test]
-    // fn test_tmq_commit_offset_async() {
-    //     unsafe {
-    //         extern "C" fn cb(tmq: *mut tmq_t, code: i32, param: *mut c_void) {
-    //             unsafe {
-    //                 assert!(!tmq.is_null());
-    //                 assert_eq!(code, 0);
+    #[test]
+    fn test_tmq_commit_offset_async() {
+        unsafe {
+            extern "C" fn cb(tmq: *mut tmq_t, code: i32, param: *mut c_void) {
+                unsafe {
+                    assert!(!tmq.is_null());
+                    assert_eq!(code, 0);
 
-    //                 assert!(!param.is_null());
-    //                 assert_eq!("hello", CStr::from_ptr(param as *const _).to_str().unwrap());
-    //             }
-    //         }
+                    assert!(!param.is_null());
+                    assert_eq!("hello", CStr::from_ptr(param as *const _).to_str().unwrap());
+                }
+            }
 
-    //         let db = "test_1741271535";
-    //         let topic = "topic_1741271535";
-    //         let table = "t0";
+            let db = "test_1741271535";
+            let topic = "topic_1741271535";
+            let table = "t0";
 
-    //         let taos = test_connect();
-    //         test_exec_many(
-    //             taos,
-    //             &[
-    //                 &format!("drop topic if exists {topic}"),
-    //                 &format!("drop database if exists {db}"),
-    //                 &format!("create database {db}"),
-    //                 &format!("use {db}"),
-    //                 &format!("create table {table} (ts timestamp, c1 int)"),
-    //                 &format!("insert into {table} values (now, 1)"),
-    //                 &format!("insert into {table} values (now, 2)"),
-    //                 &format!("create topic {topic} as database {db}"),
-    //             ],
-    //         );
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    &format!("drop topic if exists {topic}"),
+                    &format!("drop database if exists {db}"),
+                    &format!("create database {db}"),
+                    &format!("use {db}"),
+                    &format!("create table {table} (ts timestamp, c1 int)"),
+                    &format!("insert into {table} values (now, 1)"),
+                    &format!("insert into {table} values (now, 2)"),
+                    &format!("create topic {topic} as database {db}"),
+                ],
+            );
 
-    //         let conf = tmq_conf_new();
-    //         assert!(!conf.is_null());
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
 
-    //         let key = c"group.id".as_ptr();
-    //         let value = c"1".as_ptr();
-    //         let res = tmq_conf_set(conf, key, value);
-    //         assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+            let key = c"group.id".as_ptr();
+            let value = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
-    //         let key = c"auto.offset.reset".as_ptr();
-    //         let value = c"earliest".as_ptr();
-    //         let res = tmq_conf_set(conf, key, value);
-    //         assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
-    //         let mut errstr = [0; 256];
-    //         let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
-    //         assert!(!consumer.is_null());
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
 
-    //         let list = tmq_list_new();
-    //         assert!(!list.is_null());
+            let list = tmq_list_new();
+            assert!(!list.is_null());
 
-    //         let value = CString::from_str(topic).unwrap();
-    //         let errno = tmq_list_append(list, value.as_ptr());
-    //         assert_eq!(errno, 0);
+            let value = CString::from_str(topic).unwrap();
+            let errno = tmq_list_append(list, value.as_ptr());
+            assert_eq!(errno, 0);
 
-    //         let errno = tmq_subscribe(consumer, list);
-    //         assert_eq!(errno, 0);
+            let errno = tmq_subscribe(consumer, list);
+            assert_eq!(errno, 0);
 
-    //         tmq_conf_destroy(conf);
-    //         tmq_list_destroy(list);
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
 
-    //         let topic_name = CString::from_str(topic).unwrap();
-    //         let mut assignment = ptr::null_mut();
-    //         let mut num_of_assignment = 0;
+            let topic_name = CString::from_str(topic).unwrap();
+            let mut assignment = ptr::null_mut();
+            let mut num_of_assignment = 0;
 
-    //         let errno = tmq_get_topic_assignment(
-    //             consumer,
-    //             topic_name.as_ptr(),
-    //             &mut assignment,
-    //             &mut num_of_assignment,
-    //         );
-    //         assert_eq!(errno, 0);
+            let errno = tmq_get_topic_assignment(
+                consumer,
+                topic_name.as_ptr(),
+                &mut assignment,
+                &mut num_of_assignment,
+            );
+            assert_eq!(errno, 0);
 
-    //         let (_, len) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
-    //         let assigns = Vec::from_raw_parts(assignment, len, len);
+            let mut vg_ids = Vec::new();
+            let assigns = slice::from_raw_parts(assignment, num_of_assignment as _);
+            for assign in assigns {
+                vg_ids.push(assign.vgId);
+            }
 
-    //         let mut vg_ids = Vec::new();
-    //         for assign in &assigns {
-    //             vg_ids.push(assign.vgId);
-    //         }
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                if res.is_null() {
+                    break;
+                }
 
-    //         loop {
-    //             let res = tmq_consumer_poll(consumer, 1000);
-    //             if res.is_null() {
-    //                 break;
-    //             }
+                let topic_name = tmq_get_topic_name(res);
+                assert!(!topic_name.is_null());
+                assert_eq!(
+                    CStr::from_ptr(topic_name),
+                    CString::new(topic).unwrap().as_c_str()
+                );
 
-    //             let topic_name = tmq_get_topic_name(res);
-    //             assert!(!topic_name.is_null());
-    //             assert_eq!(
-    //                 CStr::from_ptr(topic_name),
-    //                 CString::new(topic).unwrap().as_c_str()
-    //             );
+                let vg_id = tmq_get_vgroup_id(res);
+                assert!(vg_ids.contains(&vg_id));
 
-    //             let vg_id = tmq_get_vgroup_id(res);
-    //             assert!(vg_ids.contains(&vg_id));
+                let mut current_offset = 0;
+                for assign in assigns {
+                    if assign.vgId == vg_id {
+                        current_offset = assign.currentOffset;
+                        println!("current_offset: {current_offset}");
+                        break;
+                    }
+                }
 
-    //             let mut current_offset = 0;
-    //             for assign in &assigns {
-    //                 if assign.vgId == vg_id {
-    //                     current_offset = assign.currentOffset;
-    //                     println!("current_offset: {current_offset}");
-    //                     break;
-    //                 }
-    //             }
+                let param = c"hello";
+                tmq_commit_offset_async(
+                    consumer,
+                    topic_name,
+                    vg_id,
+                    current_offset,
+                    cb,
+                    param.as_ptr() as _,
+                );
 
-    //             let param = c"hello";
-    //             tmq_commit_offset_async(
-    //                 consumer,
-    //                 topic_name,
-    //                 vg_id,
-    //                 current_offset,
-    //                 cb,
-    //                 param.as_ptr() as _,
-    //             );
+                sleep(Duration::from_secs(1));
 
-    //             sleep(Duration::from_secs(1));
+                let committed_offset = tmq_committed(consumer, topic_name, vg_id);
+                assert_eq!(committed_offset, current_offset);
 
-    //             let committed_offset = tmq_committed(consumer, topic_name, vg_id);
-    //             assert_eq!(committed_offset, current_offset);
+                taos_free_result(res);
+            }
 
-    //             taos_free_result(res);
-    //         }
+            let errno = tmq_unsubscribe(consumer);
+            assert_eq!(errno, 0);
 
-    //         let errno = tmq_unsubscribe(consumer);
-    //         assert_eq!(errno, 0);
+            let errno = tmq_consumer_close(consumer);
+            assert_eq!(errno, 0);
 
-    //         let errno = tmq_consumer_close(consumer);
-    //         assert_eq!(errno, 0);
+            test_exec_many(
+                taos,
+                &[format!("drop topic {topic}"), format!("drop database {db}")],
+            );
 
-    //         test_exec_many(
-    //             taos,
-    //             &[format!("drop topic {topic}"), format!("drop database {db}")],
-    //         );
-
-    //         taos_close(taos);
-    //     }
-    // }
+            taos_close(taos);
+        }
+    }
 
     #[test]
     fn test_tmq_err2str() {
@@ -1497,156 +1493,154 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_poll_auto_commit() {
-    //     unsafe {
-    //         extern "C" fn cb(tmq: *mut tmq_t, code: i32, param: *mut c_void) {
-    //             unsafe {
-    //                 println!("call auto commit callback");
+    #[test]
+    fn test_poll_auto_commit() {
+        unsafe {
+            extern "C" fn cb(tmq: *mut tmq_t, code: i32, param: *mut c_void) {
+                unsafe {
+                    println!("call auto commit callback");
 
-    //                 assert!(!tmq.is_null());
-    //                 assert_eq!(code, 0);
+                    assert!(!tmq.is_null());
+                    assert_eq!(code, 0);
 
-    //                 assert!(!param.is_null());
-    //                 assert_eq!("hello", CStr::from_ptr(param as *const _).to_str().unwrap());
-    //             }
-    //         }
+                    assert!(!param.is_null());
+                    assert_eq!("hello", CStr::from_ptr(param as *const _).to_str().unwrap());
+                }
+            }
 
-    //         let taos = test_connect();
-    //         test_exec_many(
-    //             taos,
-    //             [
-    //                 "drop topic if exists topic_1741333066",
-    //                 "drop database if exists test_1741333066",
-    //                 "create database test_1741333066 wal_retention_period 3600",
-    //                 "use test_1741333066",
-    //                 "create table t0 (ts timestamp, c1 int)",
-    //                 "create topic topic_1741333066 as select * from t0",
-    //             ],
-    //         );
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                [
+                    "drop topic if exists topic_1741333066",
+                    "drop database if exists test_1741333066",
+                    "create database test_1741333066 wal_retention_period 3600",
+                    "use test_1741333066",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "create topic topic_1741333066 as select * from t0",
+                ],
+            );
 
-    //         let num = 9000;
-    //         let ts = 1741336467000i64;
-    //         for i in 0..num {
-    //             test_exec(taos, format!("insert into t0 values ({}, 1)", ts + i));
-    //         }
+            let num = 9000;
+            let ts = 1741336467000i64;
+            for i in 0..num {
+                test_exec(taos, format!("insert into t0 values ({}, 1)", ts + i));
+            }
 
-    //         test_exec_many(
-    //             taos,
-    //             [
-    //                 "drop database if exists test_1741333142",
-    //                 "create database test_1741333142 wal_retention_period 3600",
-    //                 "use test_1741333142",
-    //             ],
-    //         );
+            test_exec_many(
+                taos,
+                [
+                    "drop database if exists test_1741333142",
+                    "create database test_1741333142 wal_retention_period 3600",
+                    "use test_1741333142",
+                ],
+            );
 
-    //         let conf = tmq_conf_new();
-    //         assert!(!conf.is_null());
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
 
-    //         let key = c"group.id".as_ptr();
-    //         let val = c"10".as_ptr();
-    //         let res = tmq_conf_set(conf, key, val);
-    //         assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+            let key = c"group.id".as_ptr();
+            let val = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
-    //         let key = c"auto.offset.reset".as_ptr();
-    //         let val = c"earliest".as_ptr();
-    //         let res = tmq_conf_set(conf, key, val);
-    //         assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+            let key = c"auto.offset.reset".as_ptr();
+            let val = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
-    //         let key = c"enable.auto.commit".as_ptr();
-    //         let val = c"true".as_ptr();
-    //         let res = tmq_conf_set(conf, key, val);
-    //         assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+            let key = c"enable.auto.commit".as_ptr();
+            let val = c"true".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
-    //         let key = c"auto.commit.interval.ms".as_ptr();
-    //         let val = c"1".as_ptr();
-    //         let res = tmq_conf_set(conf, key, val);
-    //         assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+            let key = c"auto.commit.interval.ms".as_ptr();
+            let val = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, val);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
-    //         let param = c"hello";
-    //         tmq_conf_set_auto_commit_cb(conf, cb, param.as_ptr() as _);
+            let param = c"hello";
+            tmq_conf_set_auto_commit_cb(conf, cb, param.as_ptr() as _);
 
-    //         let mut errstr = [0; 256];
-    //         let tmq = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
-    //         assert!(!tmq.is_null());
+            let mut errstr = [0; 256];
+            let tmq = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!tmq.is_null());
 
-    //         let list = tmq_list_new();
-    //         assert!(!list.is_null());
+            let list = tmq_list_new();
+            assert!(!list.is_null());
 
-    //         let value = CString::from_str("topic_1741333066").unwrap();
-    //         let code = tmq_list_append(list, value.as_ptr());
-    //         assert_eq!(code, 0);
+            let value = CString::from_str("topic_1741333066").unwrap();
+            let code = tmq_list_append(list, value.as_ptr());
+            assert_eq!(code, 0);
 
-    //         let code = tmq_subscribe(tmq, list);
-    //         assert_eq!(code, 0);
+            let code = tmq_subscribe(tmq, list);
+            assert_eq!(code, 0);
 
-    //         tmq_conf_destroy(conf);
-    //         tmq_list_destroy(list);
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
 
-    //         let topic = CString::from_str("topic_1741333066").unwrap();
-    //         let mut assignment = ptr::null_mut();
-    //         let mut num_of_assignment = 0;
+            let topic = CString::from_str("topic_1741333066").unwrap();
+            let mut assignment = ptr::null_mut();
+            let mut num_of_assignment = 0;
 
-    //         let code = tmq_get_topic_assignment(
-    //             tmq,
-    //             topic.as_ptr(),
-    //             &mut assignment,
-    //             &mut num_of_assignment,
-    //         );
-    //         assert_eq!(code, 0);
+            let code = tmq_get_topic_assignment(
+                tmq,
+                topic.as_ptr(),
+                &mut assignment,
+                &mut num_of_assignment,
+            );
+            assert_eq!(code, 0);
 
-    //         let (_, len) = TOPIC_ASSIGNMETN_MAP.remove(&(assignment as usize)).unwrap();
-    //         let assigns = Vec::from_raw_parts(assignment, len, len);
+            let mut vg_ids = Vec::new();
+            let assigns = slice::from_raw_parts(assignment, num_of_assignment as _);
+            for assign in assigns {
+                vg_ids.push(assign.vgId);
+            }
 
-    //         let mut vg_ids = Vec::new();
-    //         for assign in &assigns {
-    //             vg_ids.push(assign.vgId);
-    //         }
+            let topic = topic.as_ptr();
+            let mut pre_vg_id = None;
+            let mut pre_offset = 0;
 
-    //         let topic = topic.as_ptr();
-    //         let mut pre_vg_id = None;
-    //         let mut pre_offset = 0;
+            loop {
+                let res = tmq_consumer_poll(tmq, 1000);
+                println!("poll res: {res:?}");
+                if res.is_null() {
+                    break;
+                }
 
-    //         loop {
-    //             let res = tmq_consumer_poll(tmq, 1000);
-    //             println!("poll res: {res:?}");
-    //             if res.is_null() {
-    //                 break;
-    //             }
+                let vg_id = tmq_get_vgroup_id(res);
+                assert!(vg_ids.contains(&vg_id));
 
-    //             let vg_id = tmq_get_vgroup_id(res);
-    //             assert!(vg_ids.contains(&vg_id));
+                if let Some(pre_vg_id) = pre_vg_id {
+                    let offset = tmq_committed(tmq, topic, pre_vg_id);
+                    assert!(offset >= pre_offset);
+                }
 
-    //             if let Some(pre_vg_id) = pre_vg_id {
-    //                 let offset = tmq_committed(tmq, topic, pre_vg_id);
-    //                 assert!(offset >= pre_offset);
-    //             }
+                pre_vg_id = Some(vg_id);
+                pre_offset = tmq_get_vgroup_offset(res);
 
-    //             pre_vg_id = Some(vg_id);
-    //             pre_offset = tmq_get_vgroup_offset(res);
+                taos_free_result(res);
+            }
 
-    //             taos_free_result(res);
-    //         }
+            let code = tmq_unsubscribe(tmq);
+            assert_eq!(code, 0);
 
-    //         let code = tmq_unsubscribe(tmq);
-    //         assert_eq!(code, 0);
+            let code = tmq_consumer_close(tmq);
+            assert_eq!(code, 0);
 
-    //         let code = tmq_consumer_close(tmq);
-    //         assert_eq!(code, 0);
+            sleep(Duration::from_secs(3));
 
-    //         sleep(Duration::from_secs(3));
+            test_exec_many(
+                taos,
+                [
+                    "drop topic topic_1741333066",
+                    "drop database test_1741333066",
+                ],
+            );
 
-    //         test_exec_many(
-    //             taos,
-    //             [
-    //                 "drop topic topic_1741333066",
-    //                 "drop database test_1741333066",
-    //             ],
-    //         );
-
-    //         taos_close(taos);
-    //     }
-    // }
+            taos_close(taos);
+        }
+    }
 
     #[test]
     #[ignore]

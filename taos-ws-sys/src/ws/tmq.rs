@@ -1,11 +1,10 @@
+use std::alloc::{alloc, dealloc, Layout};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
-use dashmap::DashMap;
-use once_cell::sync::Lazy;
 use taos_error::Code;
 use taos_query::common::{Precision, RawBlock as Block, Ty};
 use taos_query::tmq::{self, AsConsumer, IsData, IsOffset};
@@ -13,7 +12,7 @@ use taos_query::{global_tokio_runtime, Dsn, TBuilder};
 use taos_ws::consumer::Data;
 use taos_ws::query::Error;
 use taos_ws::{Consumer, Offset, TmqBuilder};
-use tracing::{debug, error, warn, Instrument};
+use tracing::{debug, error, trace, warn, Instrument};
 
 use crate::taos::tmq::{
     tmq_commit_cb, tmq_conf_res_t, tmq_conf_t, tmq_list_t, tmq_res_t, tmq_t, tmq_topic_assignment,
@@ -889,8 +888,6 @@ pub unsafe fn tmq_commit_offset_async(
     debug!("tmq_commit_offset_async succ");
 }
 
-static TOPIC_ASSIGNMETN_MAP: Lazy<DashMap<usize, usize>> = Lazy::new(DashMap::new);
-
 #[allow(non_snake_case)]
 pub unsafe fn tmq_get_topic_assignment(
     tmq: *mut tmq_t,
@@ -911,12 +908,31 @@ pub unsafe fn tmq_get_topic_assignment(
                         *assignment = ptr::null_mut();
                         *numOfAssignment = 0;
                     } else {
-                        let (_, assigns) = assigns.first().unwrap().clone();
+                        let (_, assigns) = assigns.first().unwrap();
                         let len = assigns.len();
-                        debug!("tmq_get_topic_assignment, assigns: {assigns:?}, len: {len}");
-                        *numOfAssignment = len as _;
-                        *assignment = Box::into_raw(assigns.into_boxed_slice()) as _;
-                        TOPIC_ASSIGNMETN_MAP.insert(*assignment as usize, len);
+                        trace!("tmq_get_topic_assignment, assigns: {assigns:?}, len: {len}");
+
+                        let total_size =
+                            size_of::<usize>() + len * size_of::<tmq_topic_assignment>();
+                        let layout =
+                            Layout::from_size_align(total_size, align_of::<usize>()).unwrap();
+                        let header_ptr = alloc(layout);
+
+                        if header_ptr.is_null() {
+                            error!("tmq_get_topic_assignment failed, alloc null");
+                            return set_err_and_get_code(TaosError::new(
+                                Code::FAILED,
+                                "alloc failed",
+                            ));
+                        } else {
+                            *(header_ptr as *mut usize) = len;
+                            let assigns_ptr =
+                                header_ptr.add(size_of::<usize>()) as *mut tmq_topic_assignment;
+                            ptr::copy_nonoverlapping(assigns.as_ptr() as _, assigns_ptr, len);
+
+                            *assignment = assigns_ptr;
+                            *numOfAssignment = len as _;
+                        }
                     }
                     debug!("tmq_get_topic_assignment succ",);
                     0
@@ -948,12 +964,13 @@ pub unsafe fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
         return;
     }
 
-    if let Some((_, len)) = TOPIC_ASSIGNMETN_MAP.remove(&(pAssignment as usize)) {
-        let assigns = Vec::from_raw_parts(pAssignment, len, len);
-        debug!("tmq_free_assignment succ, assigns: {assigns:?}, len: {len}");
-    } else {
-        error!("tmq_free_assignment failed, err: p_assignment is invalid");
-    }
+    let header_ptr = (pAssignment as *mut u8).sub(size_of::<usize>());
+    let len = *(header_ptr as *const usize);
+    let total_size = size_of::<usize>() + len * size_of::<tmq_topic_assignment>();
+    let layout = Layout::from_size_align_unchecked(total_size, align_of::<usize>());
+    dealloc(header_ptr as *mut u8, layout);
+
+    debug!("tmq_free_assignment succ");
 }
 
 #[allow(non_snake_case)]
@@ -1131,6 +1148,7 @@ pub unsafe fn tmq_committed(tmq: *mut tmq_t, pTopicName: *const c_char, vgId: i3
     }
 }
 
+// FIXME: inconsistent with native behavior
 pub unsafe fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_table_name start, res: {res:?}");
     match (res as *const TaosMaybeError<ResultSet>)
@@ -1148,6 +1166,7 @@ pub unsafe fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
     }
 }
 
+// FIXME: inconsistent with native behavior
 pub fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
     debug!("tmq_get_res_type start, res: {res:?}");
     if res.is_null() {
