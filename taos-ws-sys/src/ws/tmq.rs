@@ -924,15 +924,15 @@ pub unsafe fn tmq_get_topic_assignment(
                                 Code::FAILED,
                                 "alloc failed",
                             ));
-                        } else {
-                            *(header_ptr as *mut usize) = len;
-                            let assigns_ptr =
-                                header_ptr.add(size_of::<usize>()) as *mut tmq_topic_assignment;
-                            ptr::copy_nonoverlapping(assigns.as_ptr() as _, assigns_ptr, len);
-
-                            *assignment = assigns_ptr;
-                            *numOfAssignment = len as _;
                         }
+
+                        *(header_ptr as *mut usize) = len;
+                        let assigns_ptr =
+                            header_ptr.add(size_of::<usize>()) as *mut tmq_topic_assignment;
+                        ptr::copy_nonoverlapping(assigns.as_ptr() as _, assigns_ptr, len);
+
+                        *assignment = assigns_ptr;
+                        *numOfAssignment = len as _;
                     }
                     debug!("tmq_get_topic_assignment succ",);
                     0
@@ -968,7 +968,7 @@ pub unsafe fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
     let len = *(header_ptr as *const usize);
     let total_size = size_of::<usize>() + len * size_of::<tmq_topic_assignment>();
     let layout = Layout::from_size_align_unchecked(total_size, align_of::<usize>());
-    dealloc(header_ptr as *mut u8, layout);
+    dealloc(header_ptr, layout);
 
     debug!("tmq_free_assignment succ");
 }
