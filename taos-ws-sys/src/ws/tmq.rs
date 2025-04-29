@@ -915,10 +915,9 @@ pub unsafe fn tmq_get_topic_assignment(
                         let total_size =
                             size_of::<usize>() + len * size_of::<tmq_topic_assignment>();
                         let layout =
-                            Layout::from_size_align(total_size, align_of::<usize>()).unwrap();
-                        let header_ptr = alloc(layout);
-
-                        if header_ptr.is_null() {
+                            Layout::from_size_align_unchecked(total_size, align_of::<usize>());
+                        let ptr = alloc(layout);
+                        if ptr.is_null() {
                             error!("tmq_get_topic_assignment failed, alloc null");
                             return set_err_and_get_code(TaosError::new(
                                 Code::FAILED,
@@ -926,9 +925,8 @@ pub unsafe fn tmq_get_topic_assignment(
                             ));
                         }
 
-                        *(header_ptr as *mut usize) = len;
-                        let assigns_ptr =
-                            header_ptr.add(size_of::<usize>()) as *mut tmq_topic_assignment;
+                        *(ptr as *mut usize) = len;
+                        let assigns_ptr = ptr.add(size_of::<usize>()) as *mut tmq_topic_assignment;
                         ptr::copy_nonoverlapping(assigns.as_ptr() as _, assigns_ptr, len);
 
                         *assignment = assigns_ptr;
@@ -964,11 +962,11 @@ pub unsafe fn tmq_free_assignment(pAssignment: *mut tmq_topic_assignment) {
         return;
     }
 
-    let header_ptr = (pAssignment as *mut u8).sub(size_of::<usize>());
-    let len = *(header_ptr as *const usize);
+    let ptr = (pAssignment as *mut u8).sub(size_of::<usize>());
+    let len = *(ptr as *const usize);
     let total_size = size_of::<usize>() + len * size_of::<tmq_topic_assignment>();
     let layout = Layout::from_size_align_unchecked(total_size, align_of::<usize>());
-    dealloc(header_ptr, layout);
+    dealloc(ptr, layout);
 
     debug!("tmq_free_assignment succ");
 }
