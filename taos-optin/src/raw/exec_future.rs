@@ -61,7 +61,7 @@ impl Future for ExecFuture<'_, '_> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let state = self.state.as_ref();
 
-        if let Some((result, cost)) = state.result.take() {
+        if let Some((result, cost)) = { state.result.borrow_mut().take() } {
             let d = state.time.elapsed();
             tracing::trace!("Waken {:?} after callback received", d - cost);
             Poll::Ready(result)
