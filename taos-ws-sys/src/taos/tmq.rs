@@ -566,7 +566,7 @@ mod tests {
 
     use super::*;
     use crate::taos::query::taos_free_result;
-    use crate::taos::{taos_close, test_connect, test_exec_many};
+    use crate::taos::{taos_close, taos_init, test_connect, test_exec_many};
 
     #[test]
     fn test_tmq_conf() {
@@ -1482,31 +1482,20 @@ mod tests {
     //     }
     // }
 
-    // FIXME
-    // #[test]
-    // fn test_tmq_err2str() {
-    //     unsafe {
-    //         let errstr = tmq_err2str(0);
-    //         assert_eq!(CStr::from_ptr(errstr).to_str().unwrap(), "success");
-    //     }
+    #[test]
+    fn test_tmq_err2str() {
+        unsafe { taos_init() };
 
-    //     unsafe {
-    //         let errstr = tmq_err2str(-1);
-    //         assert_eq!(CStr::from_ptr(errstr).to_str().unwrap(), "fail");
-    //     }
+        unsafe {
+            let errstr = tmq_err2str(0);
+            assert_eq!(CStr::from_ptr(errstr).to_str().unwrap(), "success");
+        }
 
-    //     unsafe {
-    //         set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid para"));
-    //         let errstr = tmq_err2str(format_errno(Code::INVALID_PARA.into()));
-    //         assert_eq!(CStr::from_ptr(errstr).to_str().unwrap(), "invalid para");
-    //     }
-
-    //     unsafe {
-    //         set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "invalid para"));
-    //         let errstr = tmq_err2str(format_errno(Code::COLUMN_EXISTS.into()));
-    //         assert_eq!(CStr::from_ptr(errstr).to_str().unwrap(), "");
-    //     }
-    // }
+        unsafe {
+            let errstr = tmq_err2str(-1);
+            assert_eq!(CStr::from_ptr(errstr).to_str().unwrap(), "fail");
+        }
+    }
 
     // #[test]
     // fn test_poll_auto_commit() {
