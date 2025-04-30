@@ -845,8 +845,7 @@ pub unsafe fn taos_get_current_db(
 
     if db.is_null() {
         taos_free_result(res);
-        error!("taos_get_current_db failed, get db failed");
-        return set_err_and_get_code(TaosError::new(Code::FAILED, "get db failed"));
+        return clear_err_and_ret_succ();
     }
 
     if len_actual < len as u32 {

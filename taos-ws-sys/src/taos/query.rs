@@ -1061,6 +1061,10 @@ mod tests {
 
             let mut str = vec![0 as c_char; 1024];
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            // len: 134
+            println!("len: {len}");
+            // str: 1743557474107 1 1 1 1 1 1 1 1 1 1.1 1.1 hello world hello \x68656C6C6F
+            println!("str: {}", CStr::from_ptr(str.as_ptr()).to_str().unwrap());
             assert_eq!(len, 152);
             assert_eq!(
                 CStr::from_ptr(str.as_ptr()),
@@ -1107,7 +1111,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_taos_stop_query() {
         unsafe {
             let taos = test_connect();
@@ -1126,7 +1129,7 @@ mod tests {
             assert!(!res.is_null());
 
             taos_stop_query(res);
-            let errno = taos_errno(ptr::null_mut());
+            let errno = taos_errno(res);
             assert_eq!(errno, 0);
 
             taos_free_result(res);
@@ -1299,16 +1302,15 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_taos_get_current_db_without_db() {
         unsafe {
             let taos = test_connect();
             let mut db = vec![0 as c_char; 1024];
             let mut required = 0;
             let code = taos_get_current_db(taos, db.as_mut_ptr(), db.len() as _, &mut required);
-            assert!(code != 0);
-            let errstr = taos_errstr(ptr::null_mut());
-            println!("errstr: {:?}", CStr::from_ptr(errstr));
+            assert_eq!(code, 0);
+            assert_eq!(required, 0);
+            assert_eq!(CStr::from_ptr(db.as_ptr()), c"");
             taos_close(taos);
         }
     }
