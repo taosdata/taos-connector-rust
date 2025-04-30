@@ -110,6 +110,7 @@ impl Drop for TaosStmt {
     }
 }
 
+#[repr(C)]
 struct StmtFields {
     len: usize,
     fields: [TAOS_FIELD_E; 0],
