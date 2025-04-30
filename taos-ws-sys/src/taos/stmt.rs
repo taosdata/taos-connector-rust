@@ -1204,6 +1204,9 @@ mod tests {
             let code = taos_stmt_bind_single_param_batch(stmt, &mut c1, 1);
             assert_eq!(code, 0);
 
+            let code = taos_stmt_add_batch(stmt);
+            assert_eq!(code, 0);
+
             let code = taos_stmt_execute(stmt);
             assert_eq!(code, 0);
 
