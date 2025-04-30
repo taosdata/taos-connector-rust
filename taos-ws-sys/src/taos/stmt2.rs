@@ -809,7 +809,8 @@ mod tests {
             let code = taos_stmt2_exec(stmt2, ptr::null_mut());
             assert_eq!(code, 0);
 
-            let res = rx.recv().unwrap();
+            let res: *mut c_void = rx.recv().unwrap();
+            assert!(!res.is_null());
 
             let row = taos_fetch_row(res);
             assert!(!row.is_null());
