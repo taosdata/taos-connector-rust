@@ -123,6 +123,295 @@ impl StmtFields {
     }
 }
 
+impl TAOS_MULTI_BIND {
+    fn to_value(&self) -> Value {
+        debug!("to_value, bind: {self:?}");
+
+        if !self.is_null.is_null() && unsafe { self.is_null.read() != 0 } {
+            let val = Value::Null(self.ty());
+            debug!("to_value, value: {val:?}");
+            return val;
+        }
+
+        assert!(!self.length.is_null());
+        assert!(!self.buffer.is_null());
+
+        let val = match self.ty() {
+            Ty::Null => Value::Null(self.ty()),
+            Ty::Bool => unsafe { Value::Bool(*(self.buffer as *const _)) },
+            Ty::TinyInt => unsafe { Value::TinyInt(*(self.buffer as *const _)) },
+            Ty::SmallInt => unsafe { Value::SmallInt(*(self.buffer as *const _)) },
+            Ty::Int => unsafe { Value::Int(*(self.buffer as *const _)) },
+            Ty::BigInt => unsafe { Value::BigInt(*(self.buffer as *const _)) },
+            Ty::UTinyInt => unsafe { Value::UTinyInt(*(self.buffer as *const _)) },
+            Ty::USmallInt => unsafe { Value::USmallInt(*(self.buffer as *const _)) },
+            Ty::UInt => unsafe { Value::UInt(*(self.buffer as *const _)) },
+            Ty::UBigInt => unsafe { Value::UBigInt(*(self.buffer as *const _)) },
+            Ty::Float => unsafe { Value::Float(*(self.buffer as *const _)) },
+            Ty::Double => unsafe { Value::Double(*(self.buffer as *const _)) },
+            Ty::Timestamp => unsafe {
+                Value::Timestamp(Timestamp::Milliseconds(*(self.buffer as *const _)))
+            },
+            Ty::VarChar => unsafe {
+                let slice = slice::from_raw_parts(self.buffer as _, self.length.read() as _);
+                let val = str::from_utf8_unchecked(slice).to_owned();
+                Value::VarChar(val)
+            },
+            Ty::NChar => unsafe {
+                let slice = slice::from_raw_parts(self.buffer as _, self.length.read() as _);
+                let val = str::from_utf8_unchecked(slice).to_owned();
+                Value::NChar(val)
+            },
+            Ty::Json => unsafe {
+                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
+                let val = serde_json::from_slice(slice).unwrap();
+                Value::Json(val)
+            },
+            Ty::VarBinary => unsafe {
+                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
+                Value::VarBinary(slice.into())
+            },
+            Ty::Geometry => unsafe {
+                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
+                Value::Geometry(slice.into())
+            },
+            _ => todo!(),
+        };
+
+        debug!("to_value, value: {val:?}");
+
+        val
+    }
+
+    fn to_column_view(&self) -> ColumnView {
+        debug!("to_column_view, bind: {self:?}");
+
+        let ty = self.ty();
+        let num = self.num as usize;
+        let lens = unsafe { slice::from_raw_parts(self.length, num) };
+
+        let mut is_nulls = None;
+        if !self.is_null.is_null() {
+            is_nulls = Some(unsafe { slice::from_raw_parts(self.is_null, num) });
+        }
+
+        debug!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}");
+
+        macro_rules! view {
+            ($ty:ty, $from:expr) => {{
+                let buf = self.buffer as *const $ty;
+                let mut vals = vec![None; num];
+                for _ in 0..num {
+                    if let Some(is_nulls) = is_nulls {
+                        for i in 0..num {
+                            if is_nulls[i] == 0 {
+                                vals[i] = Some(ptr::read_unaligned(buf.add(i)));
+                            }
+                        }
+                    } else {
+                        for i in 0..num {
+                            vals[i] = Some(ptr::read_unaligned(buf.add(i)));
+                        }
+                    }
+                }
+                $from(vals)
+            }};
+        }
+
+        let view = unsafe {
+            match ty {
+                Ty::Bool => view!(bool, ColumnView::from_bools),
+                Ty::TinyInt => view!(i8, ColumnView::from_tiny_ints),
+                Ty::SmallInt => view!(i16, ColumnView::from_small_ints),
+                Ty::Int => view!(i32, ColumnView::from_ints),
+                Ty::BigInt => view!(i64, ColumnView::from_big_ints),
+                Ty::UTinyInt => view!(u8, ColumnView::from_unsigned_tiny_ints),
+                Ty::USmallInt => view!(u16, ColumnView::from_unsigned_small_ints),
+                Ty::UInt => view!(u32, ColumnView::from_unsigned_ints),
+                Ty::UBigInt => view!(u64, ColumnView::from_unsigned_big_ints),
+                Ty::Float => view!(f32, ColumnView::from_floats),
+                Ty::Double => view!(f64, ColumnView::from_doubles),
+                Ty::Timestamp => view!(i64, ColumnView::from_millis_timestamp),
+                Ty::VarChar => {
+                    if let Some(is_nulls) = is_nulls {
+                        let vals = (0..num)
+                            .zip(is_nulls)
+                            .map(|(i, is_null)| {
+                                if *is_null != 0 {
+                                    None
+                                } else {
+                                    let ptr = (self.buffer as *const u8)
+                                        .offset(self.buffer_length as isize * i as isize);
+                                    let len = *self.length.add(i) as usize;
+                                    let bytes = slice::from_raw_parts(ptr, len);
+                                    Some(str::from_utf8_unchecked(bytes))
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        ColumnView::from_varchar::<&str, _, _, _>(vals)
+                    } else {
+                        let vals = (0..num)
+                            .map(|i| {
+                                let ptr = (self.buffer as *const u8)
+                                    .offset(self.buffer_length as isize * i as isize);
+                                let len = *self.length.add(i) as usize;
+                                let bytes = slice::from_raw_parts(ptr, len);
+                                std::str::from_utf8_unchecked(bytes)
+                            })
+                            .collect::<Vec<_>>();
+                        ColumnView::from_varchar::<&str, _, _, _>(vals)
+                    }
+                }
+                Ty::NChar => {
+                    if let Some(is_nulls) = is_nulls {
+                        let vals = (0..num)
+                            .zip(is_nulls)
+                            .map(|(i, is_null)| {
+                                if *is_null != 0 {
+                                    None
+                                } else {
+                                    let ptr = (self.buffer as *const u8)
+                                        .offset(self.buffer_length as isize * i as isize);
+                                    let len = *self.length.add(i) as usize;
+                                    let bytes = slice::from_raw_parts(ptr, len);
+                                    Some(std::str::from_utf8_unchecked(bytes))
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        ColumnView::from_nchar::<&str, _, _, _>(vals)
+                    } else {
+                        let vals = (0..num)
+                            .map(|i| {
+                                let ptr = (self.buffer as *const u8)
+                                    .offset(self.buffer_length as isize * i as isize);
+                                let len = *self.length.add(i) as usize;
+                                let bytes = slice::from_raw_parts(ptr, len);
+                                std::str::from_utf8_unchecked(bytes)
+                            })
+                            .collect::<Vec<_>>();
+                        ColumnView::from_nchar::<&str, _, _, _>(vals)
+                    }
+                }
+                Ty::VarBinary => {
+                    if let Some(is_nulls) = is_nulls {
+                        let vals = (0..num)
+                            .zip(is_nulls)
+                            .map(|(i, is_null)| {
+                                if *is_null != 0 {
+                                    None
+                                } else {
+                                    let ptr = (self.buffer as *const u8)
+                                        .offset(self.buffer_length as isize * i as isize);
+                                    let len = *self.length.add(i) as usize;
+                                    Some(slice::from_raw_parts(ptr, len))
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        ColumnView::from_bytes::<&[u8], _, _, _>(vals)
+                    } else {
+                        let vals = (0..num)
+                            .map(|i| {
+                                let ptr = (self.buffer as *const u8)
+                                    .offset(self.buffer_length as isize * i as isize);
+                                let len = *self.length.add(i) as usize;
+                                slice::from_raw_parts(ptr, len)
+                            })
+                            .collect::<Vec<_>>();
+                        ColumnView::from_bytes::<&[u8], _, _, _>(vals)
+                    }
+                }
+                Ty::Geometry => {
+                    if let Some(is_nulls) = is_nulls {
+                        let vals = (0..num)
+                            .zip(is_nulls)
+                            .map(|(i, is_null)| {
+                                if *is_null != 0 {
+                                    None
+                                } else {
+                                    let ptr = (self.buffer as *const u8)
+                                        .offset(self.buffer_length as isize * i as isize);
+                                    let len = *self.length.add(i) as usize;
+                                    Some(slice::from_raw_parts(ptr, len))
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        ColumnView::from_geobytes::<&[u8], _, _, _>(vals)
+                    } else {
+                        let vals = (0..num)
+                            .map(|i| {
+                                let ptr = (self.buffer as *const u8)
+                                    .offset(self.buffer_length as isize * i as isize);
+                                let len = *self.length.add(i) as usize;
+                                slice::from_raw_parts(ptr, len)
+                            })
+                            .collect::<Vec<_>>();
+                        ColumnView::from_geobytes::<&[u8], _, _, _>(vals)
+                    }
+                }
+                _ => todo!(),
+            }
+        };
+
+        debug!("to_column_view, view: {view:?}");
+
+        view
+    }
+
+    fn ty(&self) -> Ty {
+        self.buffer_type.into()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_primitives<T: taos_query::common::itypes::IValue>(
+        values: &[T],
+        nulls: &[bool],
+        lens: &[i32],
+    ) -> Self {
+        Self {
+            buffer_type: T::TY as _,
+            buffer: values.as_ptr() as _,
+            buffer_length: std::mem::size_of::<T>(),
+            length: lens.as_ptr() as _,
+            is_null: nulls.as_ptr() as _,
+            num: values.len() as _,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_timestamps(values: &[i64], nulls: &[bool], lens: &[i32]) -> Self {
+        Self {
+            buffer_type: Ty::Timestamp as _,
+            buffer: values.as_ptr() as _,
+            buffer_length: std::mem::size_of::<i64>(),
+            length: lens.as_ptr() as _,
+            is_null: nulls.as_ptr() as _,
+            num: values.len() as _,
+        }
+    }
+}
+
+impl From<&Stmt2Field> for TAOS_FIELD_E {
+    fn from(field: &Stmt2Field) -> Self {
+        let field_name = field.name.as_str();
+        let mut name = [0 as c_char; 65];
+        unsafe {
+            ptr::copy_nonoverlapping(
+                field_name.as_ptr(),
+                name.as_mut_ptr() as _,
+                field_name.len(),
+            );
+        };
+
+        Self {
+            name,
+            r#type: field.field_type,
+            precision: field.precision,
+            scale: field.scale,
+            bytes: field.bytes,
+        }
+    }
+}
+
 pub unsafe fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT {
     taos_stmt_init_with_reqid(taos, generate_req_id() as _)
 }
@@ -1114,293 +1403,4 @@ pub unsafe fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c_int {
     );
 
     stmt2.affected_rows_once() as _
-}
-
-impl TAOS_MULTI_BIND {
-    fn to_value(&self) -> Value {
-        debug!("to_value, bind: {self:?}");
-
-        if !self.is_null.is_null() && unsafe { self.is_null.read() != 0 } {
-            let val = Value::Null(self.ty());
-            debug!("to_value, value: {val:?}");
-            return val;
-        }
-
-        assert!(!self.length.is_null());
-        assert!(!self.buffer.is_null());
-
-        let val = match self.ty() {
-            Ty::Null => Value::Null(self.ty()),
-            Ty::Bool => unsafe { Value::Bool(*(self.buffer as *const _)) },
-            Ty::TinyInt => unsafe { Value::TinyInt(*(self.buffer as *const _)) },
-            Ty::SmallInt => unsafe { Value::SmallInt(*(self.buffer as *const _)) },
-            Ty::Int => unsafe { Value::Int(*(self.buffer as *const _)) },
-            Ty::BigInt => unsafe { Value::BigInt(*(self.buffer as *const _)) },
-            Ty::UTinyInt => unsafe { Value::UTinyInt(*(self.buffer as *const _)) },
-            Ty::USmallInt => unsafe { Value::USmallInt(*(self.buffer as *const _)) },
-            Ty::UInt => unsafe { Value::UInt(*(self.buffer as *const _)) },
-            Ty::UBigInt => unsafe { Value::UBigInt(*(self.buffer as *const _)) },
-            Ty::Float => unsafe { Value::Float(*(self.buffer as *const _)) },
-            Ty::Double => unsafe { Value::Double(*(self.buffer as *const _)) },
-            Ty::Timestamp => unsafe {
-                Value::Timestamp(Timestamp::Milliseconds(*(self.buffer as *const _)))
-            },
-            Ty::VarChar => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as _, self.length.read() as _);
-                let val = str::from_utf8_unchecked(slice).to_owned();
-                Value::VarChar(val)
-            },
-            Ty::NChar => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as _, self.length.read() as _);
-                let val = str::from_utf8_unchecked(slice).to_owned();
-                Value::NChar(val)
-            },
-            Ty::Json => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                let val = serde_json::from_slice(slice).unwrap();
-                Value::Json(val)
-            },
-            Ty::VarBinary => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                Value::VarBinary(slice.into())
-            },
-            Ty::Geometry => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                Value::Geometry(slice.into())
-            },
-            _ => todo!(),
-        };
-
-        debug!("to_value, value: {val:?}");
-
-        val
-    }
-
-    fn to_column_view(&self) -> ColumnView {
-        debug!("to_column_view, bind: {self:?}");
-
-        let ty = self.ty();
-        let num = self.num as usize;
-        let lens = unsafe { slice::from_raw_parts(self.length, num) };
-
-        let mut is_nulls = None;
-        if !self.is_null.is_null() {
-            is_nulls = Some(unsafe { slice::from_raw_parts(self.is_null, num) });
-        }
-
-        debug!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}");
-
-        macro_rules! view {
-            ($ty:ty, $from:expr) => {{
-                let buf = self.buffer as *const $ty;
-                let mut vals = vec![None; num];
-                for _ in 0..num {
-                    if let Some(is_nulls) = is_nulls {
-                        for i in 0..num {
-                            if is_nulls[i] == 0 {
-                                vals[i] = Some(ptr::read_unaligned(buf.add(i)));
-                            }
-                        }
-                    } else {
-                        for i in 0..num {
-                            vals[i] = Some(ptr::read_unaligned(buf.add(i)));
-                        }
-                    }
-                }
-                $from(vals)
-            }};
-        }
-
-        let view = unsafe {
-            match ty {
-                Ty::Bool => view!(bool, ColumnView::from_bools),
-                Ty::TinyInt => view!(i8, ColumnView::from_tiny_ints),
-                Ty::SmallInt => view!(i16, ColumnView::from_small_ints),
-                Ty::Int => view!(i32, ColumnView::from_ints),
-                Ty::BigInt => view!(i64, ColumnView::from_big_ints),
-                Ty::UTinyInt => view!(u8, ColumnView::from_unsigned_tiny_ints),
-                Ty::USmallInt => view!(u16, ColumnView::from_unsigned_small_ints),
-                Ty::UInt => view!(u32, ColumnView::from_unsigned_ints),
-                Ty::UBigInt => view!(u64, ColumnView::from_unsigned_big_ints),
-                Ty::Float => view!(f32, ColumnView::from_floats),
-                Ty::Double => view!(f64, ColumnView::from_doubles),
-                Ty::Timestamp => view!(i64, ColumnView::from_millis_timestamp),
-                Ty::VarChar => {
-                    if let Some(is_nulls) = is_nulls {
-                        let vals = (0..num)
-                            .zip(is_nulls)
-                            .map(|(i, is_null)| {
-                                if *is_null != 0 {
-                                    None
-                                } else {
-                                    let ptr = (self.buffer as *const u8)
-                                        .offset(self.buffer_length as isize * i as isize);
-                                    let len = *self.length.add(i) as usize;
-                                    let bytes = slice::from_raw_parts(ptr, len);
-                                    Some(str::from_utf8_unchecked(bytes))
-                                }
-                            })
-                            .collect::<Vec<_>>();
-                        ColumnView::from_varchar::<&str, _, _, _>(vals)
-                    } else {
-                        let vals = (0..num)
-                            .map(|i| {
-                                let ptr = (self.buffer as *const u8)
-                                    .offset(self.buffer_length as isize * i as isize);
-                                let len = *self.length.add(i) as usize;
-                                let bytes = slice::from_raw_parts(ptr, len);
-                                std::str::from_utf8_unchecked(bytes)
-                            })
-                            .collect::<Vec<_>>();
-                        ColumnView::from_varchar::<&str, _, _, _>(vals)
-                    }
-                }
-                Ty::NChar => {
-                    if let Some(is_nulls) = is_nulls {
-                        let vals = (0..num)
-                            .zip(is_nulls)
-                            .map(|(i, is_null)| {
-                                if *is_null != 0 {
-                                    None
-                                } else {
-                                    let ptr = (self.buffer as *const u8)
-                                        .offset(self.buffer_length as isize * i as isize);
-                                    let len = *self.length.add(i) as usize;
-                                    let bytes = slice::from_raw_parts(ptr, len);
-                                    Some(std::str::from_utf8_unchecked(bytes))
-                                }
-                            })
-                            .collect::<Vec<_>>();
-                        ColumnView::from_nchar::<&str, _, _, _>(vals)
-                    } else {
-                        let vals = (0..num)
-                            .map(|i| {
-                                let ptr = (self.buffer as *const u8)
-                                    .offset(self.buffer_length as isize * i as isize);
-                                let len = *self.length.add(i) as usize;
-                                let bytes = slice::from_raw_parts(ptr, len);
-                                std::str::from_utf8_unchecked(bytes)
-                            })
-                            .collect::<Vec<_>>();
-                        ColumnView::from_nchar::<&str, _, _, _>(vals)
-                    }
-                }
-                Ty::VarBinary => {
-                    if let Some(is_nulls) = is_nulls {
-                        let vals = (0..num)
-                            .zip(is_nulls)
-                            .map(|(i, is_null)| {
-                                if *is_null != 0 {
-                                    None
-                                } else {
-                                    let ptr = (self.buffer as *const u8)
-                                        .offset(self.buffer_length as isize * i as isize);
-                                    let len = *self.length.add(i) as usize;
-                                    Some(slice::from_raw_parts(ptr, len))
-                                }
-                            })
-                            .collect::<Vec<_>>();
-                        ColumnView::from_bytes::<&[u8], _, _, _>(vals)
-                    } else {
-                        let vals = (0..num)
-                            .map(|i| {
-                                let ptr = (self.buffer as *const u8)
-                                    .offset(self.buffer_length as isize * i as isize);
-                                let len = *self.length.add(i) as usize;
-                                slice::from_raw_parts(ptr, len)
-                            })
-                            .collect::<Vec<_>>();
-                        ColumnView::from_bytes::<&[u8], _, _, _>(vals)
-                    }
-                }
-                Ty::Geometry => {
-                    if let Some(is_nulls) = is_nulls {
-                        let vals = (0..num)
-                            .zip(is_nulls)
-                            .map(|(i, is_null)| {
-                                if *is_null != 0 {
-                                    None
-                                } else {
-                                    let ptr = (self.buffer as *const u8)
-                                        .offset(self.buffer_length as isize * i as isize);
-                                    let len = *self.length.add(i) as usize;
-                                    Some(slice::from_raw_parts(ptr, len))
-                                }
-                            })
-                            .collect::<Vec<_>>();
-                        ColumnView::from_geobytes::<&[u8], _, _, _>(vals)
-                    } else {
-                        let vals = (0..num)
-                            .map(|i| {
-                                let ptr = (self.buffer as *const u8)
-                                    .offset(self.buffer_length as isize * i as isize);
-                                let len = *self.length.add(i) as usize;
-                                slice::from_raw_parts(ptr, len)
-                            })
-                            .collect::<Vec<_>>();
-                        ColumnView::from_geobytes::<&[u8], _, _, _>(vals)
-                    }
-                }
-                _ => todo!(),
-            }
-        };
-
-        debug!("to_column_view, view: {view:?}");
-
-        view
-    }
-
-    fn ty(&self) -> Ty {
-        self.buffer_type.into()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_primitives<T: taos_query::common::itypes::IValue>(
-        values: &[T],
-        nulls: &[bool],
-        lens: &[i32],
-    ) -> Self {
-        Self {
-            buffer_type: T::TY as _,
-            buffer: values.as_ptr() as _,
-            buffer_length: std::mem::size_of::<T>(),
-            length: lens.as_ptr() as _,
-            is_null: nulls.as_ptr() as _,
-            num: values.len() as _,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_timestamps(values: &[i64], nulls: &[bool], lens: &[i32]) -> Self {
-        Self {
-            buffer_type: Ty::Timestamp as _,
-            buffer: values.as_ptr() as _,
-            buffer_length: std::mem::size_of::<i64>(),
-            length: lens.as_ptr() as _,
-            is_null: nulls.as_ptr() as _,
-            num: values.len() as _,
-        }
-    }
-}
-
-impl From<&Stmt2Field> for TAOS_FIELD_E {
-    fn from(field: &Stmt2Field) -> Self {
-        let field_name = field.name.as_str();
-        let mut name = [0 as c_char; 65];
-        unsafe {
-            ptr::copy_nonoverlapping(
-                field_name.as_ptr(),
-                name.as_mut_ptr() as _,
-                field_name.len(),
-            );
-        };
-
-        Self {
-            name,
-            r#type: field.field_type,
-            precision: field.precision,
-            scale: field.scale,
-            bytes: field.bytes,
-        }
-    }
 }
