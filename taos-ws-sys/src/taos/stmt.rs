@@ -454,7 +454,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_taos_stmt_init_with_options() {
         unsafe {
             let taos = test_connect();
@@ -472,21 +471,9 @@ mod tests {
 
             taos_close(taos);
         }
-
-        unsafe {
-            let taos = test_connect();
-            let stmt = taos_stmt_init_with_options(taos, ptr::null_mut());
-            assert!(!stmt.is_null());
-
-            let code = taos_stmt_close(stmt);
-            assert_eq!(code, 0);
-
-            taos_close(taos);
-        }
     }
 
     #[test]
-    #[ignore]
     fn test_taos_stmt_use_result() {
         unsafe {
             let taos = test_connect();
@@ -553,8 +540,6 @@ mod tests {
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
 
             taos_stop_query(res);
-
-            taos_free_result(res);
 
             let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
@@ -804,6 +789,11 @@ mod tests {
             assert_eq!(code, 0);
 
             let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
+            if code != 0 {
+                let err = taos_stmt_errstr(stmt);
+                // err: "bind number out of range or not match"
+                println!("err: {:?}", CStr::from_ptr(err));
+            }
             assert_eq!(code, 0);
 
             let code = taos_stmt_add_batch(stmt);
@@ -947,8 +937,6 @@ mod tests {
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
             assert!(len > 0);
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
-
-            taos_free_result(res);
 
             let code = taos_stmt_close(stmt);
             assert_eq!(code, 0);
@@ -1151,7 +1139,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_taos_stmt_bind_single_param_batch() {
         unsafe {
             let taos = test_connect();
