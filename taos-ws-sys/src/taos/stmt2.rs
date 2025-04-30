@@ -191,6 +191,7 @@ pub unsafe extern "C" fn taos_stmt2_error(stmt: *mut TAOS_STMT2) -> *mut c_char 
 mod tests {
     use std::ffi::CStr;
     use std::ptr;
+    use std::sync::mpsc;
 
     use taos_query::common::Ty;
 
@@ -297,7 +298,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_taos_stmt2_bind_param() {
         unsafe {
             let taos = test_connect();
@@ -676,8 +676,6 @@ mod tests {
             assert!(len > 0);
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
 
-            taos_free_result(res);
-
             let code = taos_stmt2_close(stmt2);
             assert_eq!(code, 0);
 
@@ -754,32 +752,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_taos_stmt2_exec_async() {
         unsafe {
-            extern "C" fn fp(userdata: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+            extern "C" fn fp(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
                 unsafe {
                     assert_eq!(code, 0);
-                    assert!(!res.is_null());
-
-                    let userdata = CStr::from_ptr(userdata as _);
-                    assert_eq!(userdata, c"hello, world");
-
-                    let row = taos_fetch_row(res);
-                    assert!(!row.is_null());
-
-                    let fields = taos_fetch_fields(res);
-                    assert!(!fields.is_null());
-
-                    let num_fields = taos_num_fields(res);
-                    assert_eq!(num_fields, 2);
-
-                    let mut str = vec![0 as c_char; 1024];
-                    let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-                    assert!(len > 0);
-                    println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
-
-                    taos_free_result(res);
+                    let tx = param as *mut mpsc::Sender<*mut TAOS_RES>;
+                    let _ = (*tx).send(res).unwrap();
                 }
             }
 
@@ -795,13 +774,13 @@ mod tests {
                 ],
             );
 
-            let userdata = c"hello, world";
+            let (mut tx, rx) = mpsc::channel();
             let mut option = TAOS_STMT2_OPTION {
                 reqid: 1001,
                 singleStbInsert: true,
                 singleTableBindOnce: false,
                 asyncExecFn: fp,
-                userdata: userdata.as_ptr() as _,
+                userdata: &mut tx as *mut _ as *mut _,
             };
             let stmt2 = taos_stmt2_init(taos, &mut option);
             assert!(!stmt2.is_null());
@@ -830,6 +809,22 @@ mod tests {
             let code = taos_stmt2_exec(stmt2, ptr::null_mut());
             assert_eq!(code, 0);
 
+            let res = rx.recv().unwrap();
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert!(len > 0);
+            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
             std::thread::sleep(std::time::Duration::from_secs(1));
 
             let code = taos_stmt2_close(stmt2);
@@ -841,7 +836,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_taos_stmt2_result() {
         unsafe {
             let taos = test_connect();
@@ -918,8 +912,6 @@ mod tests {
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
 
             taos_stop_query(res);
-
-            taos_free_result(res);
 
             let code = taos_stmt2_close(stmt2);
             assert_eq!(code, 0);
