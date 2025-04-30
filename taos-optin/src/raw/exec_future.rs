@@ -109,7 +109,9 @@ impl Future for ExecFuture<'_, '_> {
                     } else {
                         debug_assert!(!res.is_null());
                         assert_ne!(res as usize, 1, "res should not be 1");
-                        Ok((s.api.taos_affected_rows)(res) as usize)
+                        let affected_rows = (s.api.taos_affected_rows)(res) as usize;
+                        s.api.free_result(res);
+                        Ok(affected_rows)
                     };
 
                     s.result.borrow_mut().replace((result, cost));
