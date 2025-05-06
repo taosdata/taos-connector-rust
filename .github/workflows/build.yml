@@ -100,7 +100,7 @@ jobs:
         run: |
           cd TDengine/release/
           make -j4 || exit 1
-          sudo make install
+          make install
           nohup sudo taosd > /dev/null 2>&1 &
           sleep 5
           nohup sudo taosadapter > /dev/null 2>&1 &
