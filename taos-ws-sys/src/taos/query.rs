@@ -977,7 +977,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_taos_print_row() {
         unsafe {
             let taos = test_connect();
@@ -1040,10 +1039,9 @@ mod tests {
                     "create table t0 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, \
                     c5 bigint, c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, \
                     c9 bigint unsigned, c10 float, c11 double, c12 varchar(20), c13 nchar(10), \
-                    c14 varbinary(10), c15 geometry(50), c16 decimal(10, 3), c17 decimal(38, 10))",
+                    c14 varbinary(10), c15 decimal(10, 3), c16 decimal(38, 10))",
                     "insert into t0 values (1743557474107, true, 1, 1, 1, 1, 1, 1, 1, 1, 1.1, 1.1, \
-                    'hello world', 'hello', 'hello', 'POINT(1 1)', 12345.123, \
-                    12345678901234567890.123456789)",
+                    'hello world', 'hello', 'hello', 12345.123, 12345678901234567890.123456789)",
                 ],
             );
 
@@ -1057,22 +1055,53 @@ mod tests {
             assert!(!fields.is_null());
 
             let num_fields = taos_num_fields(res);
-            assert_eq!(num_fields, 18);
+            assert_eq!(num_fields, 17);
 
             let mut str = vec![0 as c_char; 1024];
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            // len: 134
-            println!("len: {len}");
-            // str: 1743557474107 1 1 1 1 1 1 1 1 1 1.1 1.1 hello world hello \x68656C6C6F
-            println!("str: {}", CStr::from_ptr(str.as_ptr()).to_str().unwrap());
-            assert_eq!(len, 152);
+            assert_eq!(len, 112);
             assert_eq!(
                 CStr::from_ptr(str.as_ptr()),
-                c"1743557474107 1 1 1 1 1 1 1 1 1 1.1 1.1 hello world \xf3\x86\x95\xa8 68656c6c6f 0101000000000000000000f03f000000000000f03f 12345.123 12345678901234567890.1234567890",
+                c"1743557474107 1 1 1 1 1 1 1 1 1 1.1 1.1 hello world hello \\x68656C6C6F 12345.123 12345678901234567890.1234567890"
             );
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1741657731");
+            taos_close(taos);
+        }
+
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1746517776",
+                    "create database test_1746517776",
+                    "use test_1746517776",
+                    "create table t0 (ts timestamp, c1 int, c2 geometry(50), c3 int)",
+                    "insert into t0 values (1741660079228, 1, 'POINT(1 1)', 1)",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 4);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(len, 39);
+            assert_eq!(CStr::from_ptr(str.as_ptr()), c"1741660079228 1 \x01\x01",);
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1746517776");
             taos_close(taos);
         }
     }
@@ -1803,9 +1832,15 @@ mod tests {
             let res = taos_query(taos, c"select * from t0".as_ptr());
             assert!(!res.is_null());
 
-            let _block = taos_get_raw_block(res);
-            // FIXME
-            // assert!(!block.is_null());
+            let mut num_of_rows = 0;
+            let mut data = ptr::null_mut();
+            let code = taos_fetch_raw_block(res, &mut num_of_rows, &mut data);
+            assert_eq!(code, 0);
+            assert_eq!(num_of_rows, 1);
+            assert!(!data.is_null());
+
+            let block = taos_get_raw_block(res);
+            assert!(!block.is_null());
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1741489408");
@@ -2231,9 +2266,6 @@ mod tests {
             let res = taos_query(taos, c"select * from t0".as_ptr());
             assert!(!res.is_null());
 
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
-
             let fields = taos_fetch_fields_e(res);
             assert!(!fields.is_null());
 
@@ -2249,14 +2281,12 @@ mod tests {
             assert_eq!(fields[1].bytes, 4);
 
             assert_eq!(fields[2].r#type, TSDB_DATA_TYPE_DECIMAL64 as i8);
-            // FIXME: 64
-            // assert_eq!(fields[2].bytes, 8);
+            assert_eq!(fields[2].bytes, 8);
             assert_eq!(fields[2].precision, 10);
             assert_eq!(fields[2].scale, 2);
 
             assert_eq!(fields[3].r#type, TSDB_DATA_TYPE_DECIMAL as i8);
-            // FIXME: 64
-            // assert_eq!(fields[3].bytes, 16);
+            assert_eq!(fields[3].bytes, 16);
             assert_eq!(fields[3].precision, 38);
             assert_eq!(fields[3].scale, 20);
 

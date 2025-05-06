@@ -7,7 +7,7 @@ use bytes::Bytes;
 use faststr::FastStr;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
-use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr};
+use taos_query::util::{generate_req_id, hex, InlineBytes, InlineStr};
 use taos_query::{
     block_in_place_or_global, global_tokio_runtime, Fetchable, Queryable, RawBlock as Block,
 };
@@ -263,7 +263,7 @@ pub unsafe fn taos_print_row_with_size(
     fields: *mut TAOS_FIELD,
     num_fields: c_int,
 ) -> c_int {
-    unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &str) -> i32 {
+    unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &[u8]) -> i32 {
         if content.len() > *size {
             return -1;
         }
@@ -294,7 +294,7 @@ pub unsafe fn taos_print_row_with_size(
         }
 
         let write_len = if row[i].is_null() {
-            write_to_cstr(&mut size, str.add(len), "NULL")
+            write_to_cstr(&mut size, str.add(len), b"NULL")
         } else {
             macro_rules! read_and_write {
                 ($ty:ty) => {{
@@ -302,7 +302,7 @@ pub unsafe fn taos_print_row_with_size(
                     write_to_cstr(
                         &mut size,
                         str.add(len as usize),
-                        format!("{value}").as_str(),
+                        format!("{value}").as_str().as_bytes(),
                     )
                 }};
             }
@@ -323,25 +323,22 @@ pub unsafe fn taos_print_row_with_size(
                     write_to_cstr(
                         &mut size,
                         str.add(len),
-                        format!("{}", value as i32).as_str(),
+                        format!("{}", value as i32).as_str().as_bytes(),
                     )
                 }
-                Ty::VarBinary | Ty::Geometry => {
+                Ty::VarBinary => {
                     let data = row[i].offset(-2) as *const InlineBytes;
                     let data = Bytes::from((*data).as_bytes());
-                    write_to_cstr(&mut size, str.add(len), &hex::bytes_to_hex_string(data))
+                    let content = format!("\\x{}", hex::bytes_to_hex_string(data).to_uppercase());
+                    write_to_cstr(&mut size, str.add(len), content.as_bytes())
                 }
-                Ty::VarChar => {
+                Ty::VarChar | Ty::NChar | Ty::Geometry => {
                     let data = row[i].offset(-2) as *const InlineStr;
-                    write_to_cstr(&mut size, str.add(len), (*data).as_str())
-                }
-                Ty::NChar => {
-                    let data = row[i].offset(-2) as *const InlineNChar;
-                    write_to_cstr(&mut size, str.add(len), &(*data).to_string())
+                    write_to_cstr(&mut size, str.add(len), (*data).as_bytes())
                 }
                 Ty::Decimal | Ty::Decimal64 => {
                     let data = CStr::from_ptr(row[i] as *mut c_char).to_str().unwrap();
-                    write_to_cstr(&mut size, str.add(len), data)
+                    write_to_cstr(&mut size, str.add(len), data.as_bytes())
                 }
                 _ => 0,
             }
@@ -1002,12 +999,30 @@ pub unsafe fn taos_fetch_rows_a(res: *mut TAOS_RES, fp: __taos_async_fn_t, param
 }
 
 pub unsafe fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
+    unsafe fn handle_error(message: &str) -> *const c_void {
+        error!("taos_get_raw_block failed, {message}");
+        set_err_and_get_code(TaosError::new(Code::INVALID_PARA, message));
+        return ptr::null();
+    }
+
     debug!("taos_get_raw_block start, res: {res:?}");
-    let mut num_of_rows = 0;
-    let mut data = ptr::null_mut();
-    taos_fetch_raw_block(res, &mut num_of_rows, &mut data);
-    debug!("taos_get_raw_block succ, data: {data:?}");
-    data
+
+    let maybe_err = match (res as *mut TaosMaybeError<ResultSet>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return handle_error("res is null"),
+    };
+
+    let rs = match maybe_err.deref_mut() {
+        Some(rs) => rs,
+        None => return handle_error("res is invalid"),
+    };
+
+    if let ResultSet::Query(rs) = rs {
+        debug!("taos_get_raw_block succ, rs: {rs:?}");
+        rs.get_raw_block()
+    } else {
+        handle_error("rs is invalid")
+    }
 }
 
 pub unsafe fn taos_check_server_status(
@@ -1129,6 +1144,13 @@ impl QueryResultSet {
         }
 
         Ok(0)
+    }
+
+    pub fn get_raw_block(&self) -> *const c_void {
+        if let Some(block) = self.block.as_ref() {
+            return block.as_raw_bytes().as_ptr() as _;
+        }
+        ptr::null()
     }
 }
 

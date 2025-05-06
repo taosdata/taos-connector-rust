@@ -88,8 +88,7 @@ macro_rules! _impl_inline_str {
                 }
 
                 #[inline]
-                #[rustversion::attr(nightly, const)]
-                pub fn as_bytes(&self) -> &[u8] {
+                pub const fn as_bytes(&self) -> &[u8] {
                     if self.len() == 0 {
                         return &[]
                     }
@@ -97,8 +96,7 @@ macro_rules! _impl_inline_str {
                 }
 
                 #[inline]
-                #[rustversion::attr(nightly, const)]
-                pub fn as_str(&self) -> &str {
+                pub const fn as_str(&self) -> &str {
                     unsafe { std::str::from_utf8_unchecked(self.as_bytes()) }
                 }
 
