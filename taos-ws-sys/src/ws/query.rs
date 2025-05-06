@@ -1002,7 +1002,7 @@ pub unsafe fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
     unsafe fn handle_error(message: &str) -> *const c_void {
         error!("taos_get_raw_block failed, {message}");
         set_err_and_get_code(TaosError::new(Code::INVALID_PARA, message));
-        return ptr::null();
+        ptr::null()
     }
 
     debug!("taos_get_raw_block start, res: {res:?}");
