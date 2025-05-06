@@ -74,12 +74,6 @@ jobs:
         with:
           cmakeVersion: 3.31.6
 
-      - name: Set up Rust
-        id: setup-rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.78.0
-
       - name: Build TDengine
         env:
           BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
@@ -99,7 +93,7 @@ jobs:
       - name: Install TDengine
         run: |
           cd TDengine/release/
-          make -j4 || exit 1
+          make -j8 || exit 1
           make install
           nohup sudo taosd > /dev/null 2>&1 &
           sleep 5
