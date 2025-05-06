@@ -101,7 +101,7 @@ jobs:
 
       - name: Run examples
         run: |
-          cd TDengine/tools/taosws-rs
+          cd TDengine/release/tools/ext_taosws-prefix/src/ext_taosws
           ./taos-ws-sys/ci/package.sh
           cd ./target/libtaosws
           make
