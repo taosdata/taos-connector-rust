@@ -1047,17 +1047,15 @@ pub unsafe fn taos_check_server_status(
     debug!("taos_check_server_status, fqdn: {fqdn:?}, port: {port}");
 
     let mut host = FastStr::from_static_str("localhost");
+    // FIXME: use adapterList
     if let Some(ep) = config::get_global_first_ep() {
         host = ep;
     } else if let Some(ep) = config::get_global_second_ep() {
         host = ep;
     }
 
-    let dsn = if host.contains(":") {
-        format!("ws://{host}")
-    } else {
-        format!("ws://{host}:6041")
-    };
+    let host = host.split_once(':').map_or(host.as_str(), |(host, _)| host);
+    let dsn = format!("ws://{host}:6041");
 
     debug!("taos_check_server_status, dsn: {dsn}");
 
