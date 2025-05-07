@@ -284,6 +284,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [coverage-default-driver, coverage-native-driver]
     steps:
+      - name: Setup Debug Session
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 15
+        with:
+          detached: true
+
       - name: Install lcov
         run: sudo apt install lcov -y
 
