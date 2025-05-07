@@ -301,6 +301,13 @@ jobs:
         run: |
           lcov -a lcov-default-driver.info -a lcov-native-driver.info -o lcov.info
 
+      - name: Debug merged coverage file
+        run: |
+          ls -l
+          cat lcov-default-driver.info
+          cat lcov-native-driver.info
+          cat lcov.info
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
