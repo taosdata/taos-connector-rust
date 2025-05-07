@@ -1076,6 +1076,13 @@ pub unsafe fn taos_stmt_bind_param(stmt: *mut TAOS_STMT, bind: *mut TAOS_MULTI_B
     };
 
     let binds = slice::from_raw_parts(bind, col_cnt);
+    if binds.len() > 1 {
+        maybe_err.with_err(Some(TaosError::new(
+            Code::INVALID_PARA,
+            "bind number out of range or not match",
+        )));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
     let mut cols = Vec::with_capacity(col_cnt);
     for bind in binds {

@@ -550,7 +550,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_taos_stmt_bind_param_batch() {
         unsafe {
             let taos = test_connect();
@@ -679,103 +678,86 @@ mod tests {
                 t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15, t16, t17,
             ];
 
-            let mut buffer = vec![
-                1739521477831i64,
-                1739521477832,
-                1739521477833,
-                1739521477834,
-            ];
-            let mut length = vec![8, 8, 8, 8];
-            let mut is_null = vec![0, 0, 0, 0];
+            let mut buffer = vec![1739521477831i64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
             let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
 
-            let mut buffer = vec![1i8, 1, 0, 0];
-            let mut length = vec![1, 1, 1, 1];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![1i8];
+            let mut length = vec![1];
+            let mut is_null = vec![0];
             let c1 = new_bind!(Ty::Bool, buffer, length, is_null);
 
-            let mut buffer = vec![23i8, 0, -23, 0];
-            let mut length = vec![1, 1, 1, 1];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![23i8];
+            let mut length = vec![1];
+            let mut is_null = vec![0];
             let c2 = new_bind!(Ty::TinyInt, buffer, length, is_null);
 
-            let mut buffer = vec![34i16, 0, -34, 0];
-            let mut length = vec![2, 2, 2, 2];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![34i16];
+            let mut length = vec![2];
+            let mut is_null = vec![0];
             let c3 = new_bind!(Ty::SmallInt, buffer, length, is_null);
 
-            let mut buffer = vec![45i32, 46, -45, 0];
-            let mut length = vec![4, 4, 4, 4];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![45i32];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
             let c4 = new_bind!(Ty::Int, buffer, length, is_null);
 
-            let mut buffer = vec![56i64, 57, -56, 0];
-            let mut length = vec![8, 8, 8, 8];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![56i64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
             let c5 = new_bind!(Ty::BigInt, buffer, length, is_null);
 
-            let mut buffer = vec![67u8, 68, 67, 0];
-            let mut length = vec![1, 1, 1, 1];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![67u8];
+            let mut length = vec![1];
+            let mut is_null = vec![0];
             let c6 = new_bind!(Ty::UTinyInt, buffer, length, is_null);
 
-            let mut buffer = vec![78u16, 79, 78, 0];
-            let mut length = vec![2, 2, 2, 2];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![78u16];
+            let mut length = vec![2];
+            let mut is_null = vec![0];
             let c7 = new_bind!(Ty::USmallInt, buffer, length, is_null);
 
-            let mut buffer = vec![89u32, 90, 89, 0];
-            let mut length = vec![4, 4, 4, 4];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![89u32];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
             let c8 = new_bind!(Ty::UInt, buffer, length, is_null);
 
-            let mut buffer = vec![100u64, 101, 100, 0];
-            let mut length = vec![8, 8, 8, 8];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![100u64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
             let c9 = new_bind!(Ty::UBigInt, buffer, length, is_null);
 
-            let mut buffer = vec![1.23f32, 1.24, -1.23, 0.0];
-            let mut length = vec![4, 4, 4, 4];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![1.23f32];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
             let c10 = new_bind!(Ty::Float, buffer, length, is_null);
 
-            let mut buffer = vec![2345.67f64, 2345.68, -2345.67, 0.0];
-            let mut length = vec![8, 8, 8, 8];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![2345.67f64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
             let c11 = new_bind!(Ty::Double, buffer, length, is_null);
 
-            let mut buffer = vec![
-                104u8, 101, 108, 108, 111, 0, 0, 0, 0, 0, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0,
-                104, 101, 108, 108, 111, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ];
-            let mut length = vec![5, 5, 10, 0];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![104u8, 101, 108, 108, 111];
+            let mut length = vec![5];
+            let mut is_null = vec![0];
             let c12 = new_bind!(Ty::VarChar, buffer, length, is_null);
 
-            let mut buffer = vec![
-                104u8, 101, 108, 108, 111, 0, 0, 0, 0, 0, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0,
-                104, 101, 108, 108, 111, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ];
-            let mut length = vec![5, 5, 10, 0];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![104u8, 101, 108, 108, 111];
+            let mut length = vec![5];
+            let mut is_null = vec![0];
             let c13 = new_bind!(Ty::NChar, buffer, length, is_null);
 
-            let mut buffer = vec![
-                104u8, 101, 108, 108, 111, 0, 0, 0, 0, 0, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0,
-                104, 101, 108, 108, 111, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ];
-            let mut length = vec![5, 5, 10, 0];
-            let mut is_null = vec![0, 0, 0, 1];
+            let mut buffer = vec![104u8, 101, 108, 108, 111];
+            let mut length = vec![5];
+            let mut is_null = vec![0];
             let c14 = new_bind!(Ty::VarBinary, buffer, length, is_null);
 
             let mut buffer = vec![
-                1u8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0,
+                1u8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63,
             ];
-            let mut length = vec![21, 0, 21, 0];
-            let mut is_null = vec![0, 1, 0, 1];
+            let mut length = vec![21];
+            let mut is_null = vec![0];
             let c15 = new_bind!(Ty::Geometry, buffer, length, is_null);
 
             let mut cols = vec![
@@ -789,11 +771,6 @@ mod tests {
             assert_eq!(code, 0);
 
             let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
-            if code != 0 {
-                let err = taos_stmt_errstr(stmt);
-                // err: "bind number out of range or not match"
-                println!("err: {:?}", CStr::from_ptr(err));
-            }
             assert_eq!(code, 0);
 
             let code = taos_stmt_add_batch(stmt);
@@ -892,14 +869,17 @@ mod tests {
             let code = taos_stmt_set_tbname_tags(stmt, tbname2.as_ptr(), tags.as_mut_ptr());
             assert_eq!(code, 0);
 
-            let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
+            let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
+            assert_eq!(code, 0);
+
+            let code = taos_stmt_add_batch(stmt);
             assert_eq!(code, 0);
 
             let code = taos_stmt_execute(stmt);
             assert_eq!(code, 0);
 
             let affected_rows = taos_stmt_affected_rows(stmt);
-            assert_eq!(affected_rows, 8);
+            assert_eq!(affected_rows, 5);
 
             let sql = c"select * from s0 where c4 > ?";
             let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
@@ -993,6 +973,9 @@ mod tests {
             let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
             assert_eq!(code, 0);
 
+            let code = taos_stmt_add_batch(stmt);
+            assert_eq!(code, 0);
+
             let code = taos_stmt_execute(stmt);
             assert_eq!(code, 0);
 
@@ -1004,6 +987,52 @@ mod tests {
 
             test_exec(taos, "drop database test_1740573608");
             taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt_bind_param_with_number_err() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1746609484",
+                    "create database test_1746609484",
+                    "use test_1746609484",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt = taos_stmt_init(taos);
+            assert!(!stmt.is_null());
+
+            let sql = c"insert into t0 values(?, ?)";
+            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![
+                1739521477831i64,
+                1739521477832,
+                1739521477833,
+                1739521477834,
+            ];
+            let mut length = vec![8, 8, 8, 8];
+            let ts = new_bind_without_is_null!(Ty::Timestamp, buffer, length);
+
+            let mut buffer = vec![45i32, 46, -45, 0];
+            let mut length = vec![4, 4, 4, 4];
+            let c1 = new_bind_without_is_null!(Ty::Int, buffer, length);
+
+            let mut cols = vec![ts, c1];
+            let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
+            assert_ne!(code, 0);
+
+            let errstr = taos_stmt_errstr(stmt);
+            assert_eq!(
+                CStr::from_ptr(errstr),
+                c"bind number out of range or not match"
+            );
         }
     }
 
