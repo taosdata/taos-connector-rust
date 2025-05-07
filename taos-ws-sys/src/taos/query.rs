@@ -744,6 +744,17 @@ mod tests {
     }
 
     #[test]
+    fn test_taos_query_with_reqid() {
+        unsafe {
+            let taos = test_connect();
+            let res = taos_query_with_reqid(taos, c"show databases".as_ptr(), 1001);
+            assert!(!res.is_null());
+            taos_free_result(res);
+            taos_close(taos);
+        }
+    }
+
+    #[test]
     fn test_taos_fetch_row() {
         unsafe {
             let taos = test_connect();
@@ -1107,6 +1118,48 @@ mod tests {
     }
 
     #[test]
+    fn test_taos_print_row_with_size() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1746604549",
+                    "create database test_1746604549",
+                    "use test_1746604549",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (1741660079228, 1)",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len =
+                taos_print_row_with_size(str.as_mut_ptr(), str.len() as _, row, fields, num_fields);
+            assert_eq!(len, 15);
+            assert_eq!(
+                "1741660079228 1",
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
+            );
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1746604549");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
     fn test_write_to_cstr() {
         unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &str) -> i32 {
             if content.len() > *size {
@@ -1288,6 +1341,7 @@ mod tests {
     #[test]
     fn test_taos_get_client_info() {
         unsafe {
+            taos_init();
             let client_info = taos_get_client_info();
             assert!(!client_info.is_null());
             println!("client_info: {:?}", CStr::from_ptr(client_info));
@@ -1453,8 +1507,57 @@ mod tests {
             println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
 
             taos_free_result(res);
-
             test_exec(taos, "drop database test_1740664844");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_query_a_with_reqid() {
+        unsafe {
+            extern "C" fn cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+                unsafe {
+                    assert_eq!(code, 0);
+                    let tx = param as *mut mpsc::Sender<*mut TAOS_RES>;
+                    let _ = (*tx).send(res).unwrap();
+                }
+            }
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1746604953",
+                    "create database test_1746604953",
+                    "use test_1746604953",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (now, 1)",
+                ],
+            );
+
+            let sql = c"select * from t0";
+            let (mut tx, rx) = mpsc::channel();
+            taos_query_a_with_reqid(taos, sql.as_ptr(), cb, &mut tx as *mut _ as *mut _, 1001);
+
+            let res: *mut c_void = rx.recv().unwrap();
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert!(len > 0);
+            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1746604953");
             taos_close(taos);
         }
     }
@@ -2326,6 +2429,117 @@ mod tests {
         unsafe {
             let taos = test_connect();
             taos_reset_current_db(taos);
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_get_db_route_info() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1746605822",
+                    "create database test_1746605822",
+                ],
+            );
+
+            let mut db_info = TAOS_DB_ROUTE_INFO {
+                routeVersion: 0,
+                hashPrefix: 0,
+                hashSuffix: 0,
+                hashMethod: 0,
+                vgNum: 0,
+                vgHash: ptr::null_mut(),
+            };
+            let code = taos_get_db_route_info(taos, c"test_1746605822".as_ptr(), &mut db_info);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1746605822");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_taos_get_table_vgId() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1746606176",
+                    "create database test_1746606176",
+                    "use test_1746606176",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let mut vg_id = 0;
+            let code = taos_get_table_vgId(
+                taos,
+                c"test_1746606176".as_ptr(),
+                c"t0".as_ptr(),
+                &mut vg_id,
+            );
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1746606176");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_taos_get_tables_vgId() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1746606506",
+                    "create database test_1746606506",
+                    "use test_1746606506",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let mut table = vec![c"t0".as_ptr()];
+            let mut vg_id = 0;
+            let code = taos_get_tables_vgId(
+                taos,
+                c"test_1746606506".as_ptr(),
+                table.as_mut_ptr(),
+                table.len() as _,
+                &mut vg_id,
+            );
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1746606506");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_load_table_info() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1746607008",
+                    "create database test_1746607008",
+                    "use test_1746607008",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let table_name_list = c"t0";
+            let code = taos_load_table_info(taos, table_name_list.as_ptr());
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1746607008");
             taos_close(taos);
         }
     }

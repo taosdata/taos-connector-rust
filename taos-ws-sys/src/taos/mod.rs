@@ -15,7 +15,7 @@ pub mod stmt;
 pub mod stmt2;
 pub mod tmq;
 
-/// The default driver is native.
+/// The default driver is websocket.
 static DRIVER: AtomicBool = AtomicBool::new(true);
 
 #[inline]
