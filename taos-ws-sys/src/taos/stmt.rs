@@ -1033,6 +1033,9 @@ mod tests {
                 CStr::from_ptr(errstr),
                 c"bind number out of range or not match"
             );
+
+            test_exec(taos, "drop database test_1746609484");
+            taos_close(taos);
         }
     }
 

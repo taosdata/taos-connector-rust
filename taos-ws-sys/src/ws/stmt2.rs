@@ -8,7 +8,7 @@ use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, global_tokio_runtime};
 use taos_ws::query::{BindType, Stmt2Field};
 use taos_ws::{Stmt2, Taos};
-use tracing::{debug, error, Instrument};
+use tracing::{debug, error, trace, Instrument};
 
 use crate::taos::stmt2::{
     TAOS_FIELD_ALL, TAOS_STMT2, TAOS_STMT2_BIND, TAOS_STMT2_BINDV, TAOS_STMT2_OPTION,
@@ -517,7 +517,7 @@ pub unsafe fn taos_stmt2_bind_param(
         }
     };
 
-    debug!("taos_stmt2_bind_param, params: {params:?}");
+    trace!("taos_stmt2_bind_param, params: {params:?}");
 
     match stmt2.bind(&params) {
         Ok(_) => {
@@ -534,12 +534,83 @@ pub unsafe fn taos_stmt2_bind_param(
 }
 
 pub unsafe fn taos_stmt2_bind_param_a(
-    _stmt: *mut TAOS_STMT2,
-    _bindv: *mut TAOS_STMT2_BINDV,
-    _col_idx: i32,
-    _fp: __taos_async_fn_t,
-    _param: *mut c_void,
+    stmt: *mut TAOS_STMT2,
+    bindv: *mut TAOS_STMT2_BINDV,
+    col_idx: i32,
+    fp: __taos_async_fn_t,
+    param: *mut c_void,
 ) -> c_int {
+    debug!("taos_stmt2_bind_param_a start, stmt: {stmt:?}, bindv: {bindv:?}, col_idx: {col_idx}, fp: {fp:?}, param: {param:?}");
+
+    if stmt.is_null() {
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
+    }
+    if bindv.is_null() {
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "bindv is null"));
+    }
+    let cb = fp as *const ();
+    if cb.is_null() {
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "fp is null"));
+    }
+
+    let stmt = SafePtr(stmt);
+    let bindv = SafePtr(bindv);
+    let param = SafePtr(param);
+
+    global_tokio_runtime().spawn(
+        async move {
+            use taos_query::stmt2::Stmt2AsyncBindable;
+
+            let stmt = stmt;
+            let bindv = bindv;
+            let param = param;
+
+            let stmt = stmt.0;
+            let bindv = bindv.0;
+
+            let maybe_err = (stmt as *mut TaosMaybeError<TaosStmt2>).as_mut().unwrap();
+            let stmt2 = match maybe_err.deref_mut() {
+                Some(taos_stmt2) => &mut taos_stmt2.stmt2,
+                None => {
+                    error!("taos_stmt2_bind_param_a async failed, err: stmt is invalid");
+                    maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+                    fp(param.0, ptr::null_mut(), Code::INVALID_PARA.into());
+                    return;
+                }
+            };
+
+            let bindv = bindv.as_ref().unwrap();
+            let params = match bindv.to_bind_params(stmt2) {
+                Ok(params) => params,
+                Err(err) => {
+                    error!("taos_stmt2_bind_param_a async failed, err: {err:?}");
+                    let code = err.code();
+                    maybe_err.with_err(Some(err));
+                    fp(param.0, ptr::null_mut(), code.into());
+                    return;
+                }
+            };
+
+            trace!("taos_stmt2_bind_param_a, params: {params:?}");
+
+            match Stmt2AsyncBindable::bind(stmt2, &params).await {
+                Ok(_) => {
+                    debug!("taos_stmt2_bind_param_a async succ");
+                    maybe_err.clear_err();
+                    fp(param.0, ptr::null_mut(), 0);
+                }
+                Err(err) => {
+                    error!("taos_stmt2_bind_param_a async failed, err: {err:?}");
+                    maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+                    fp(param.0, ptr::null_mut(), err.code().into());
+                }
+            }
+        }
+        .in_current_span(),
+    );
+
+    debug!("taos_stmt2_bind_param_a succ");
+
     0
 }
 

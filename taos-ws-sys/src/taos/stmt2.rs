@@ -752,6 +752,75 @@ mod tests {
     }
 
     #[test]
+    fn test_taos_stmt2_bind_param_a() {
+        extern "C" fn cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
+            unsafe {
+                assert_eq!(code, 0);
+                let tx = param as *mut mpsc::Sender<*mut TAOS_RES>;
+                let _ = (*tx).send(res).unwrap();
+            }
+        }
+
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1746618150",
+                    "create database test_1746618150",
+                    "use test_1746618150",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into t0 values(?, ?)";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![1739521477831i64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
+            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+
+            let mut buffer = vec![99];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let mut col = vec![ts, c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: cols.len() as _,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let (mut tx, rx) = mpsc::channel();
+            let code =
+                taos_stmt2_bind_param_a(stmt2, &mut bindv, -1, cb, &mut tx as *mut _ as *mut _);
+            assert_eq!(code, 0);
+
+            let res: *mut c_void = rx.recv().unwrap();
+            assert!(res.is_null());
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+            assert_eq!(affected_rows, 1);
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1746618150");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
     fn test_taos_stmt2_exec_async() {
         unsafe {
             extern "C" fn fp(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
