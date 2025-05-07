@@ -187,12 +187,6 @@ jobs:
           TAOS_ADAPTER_LOG_PATH=/tmp/taos/v3/log taosadapter &
           sleep 1
 
-      - name: Setup Debug Session
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 15
-        with:
-          detached: true
-
       - name: Generate code coverage
         run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov-default-driver.info --no-fail-fast
 
