@@ -190,12 +190,20 @@ jobs:
       - name: Generate code coverage
         run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov-default-driver.info --no-fail-fast
 
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
         with:
-          name: coverage-default-driver
-          path: lcov-default-driver.info
-          retention-days: 1
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov-default-driver.info
+          fail_ci_if_error: true
+          verbose: true
+
+      # - name: Upload coverage report
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: coverage-default-driver
+      #     path: lcov-default-driver.info
+      #     retention-days: 1
 
   coverage-native-driver:
     runs-on: ubuntu-latest
@@ -273,51 +281,52 @@ jobs:
           export TAOS_DRIVER=native
           RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --lcov --output-path lcov-native-driver.info --no-fail-fast
 
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-native-driver
-          path: lcov-native-driver.info
-          retention-days: 1
-
-  merge-and-upload:
-    runs-on: ubuntu-latest
-    needs: [coverage-default-driver, coverage-native-driver]
-    steps:
-      - name: Setup Debug Session
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 15
-        with:
-          detached: true
-
-      - name: Install lcov
-        run: sudo apt install lcov -y
-
-      - name: Download default driver coverage report
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-default-driver
-
-      - name: Download native driver coverage report
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-native-driver
-
-      - name: Merge coverage reports
-        run: |
-          lcov -a lcov-default-driver.info -a lcov-native-driver.info -o lcov.info
-
-      - name: Debug merged coverage file
-        run: |
-          ls -l
-          cat lcov-default-driver.info
-          cat lcov-native-driver.info
-          cat lcov.info
-
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov-default-driver.info
+          files: lcov-native-driver.info
           fail_ci_if_error: true
           verbose: true
+
+      # - name: Upload coverage report
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: coverage-native-driver
+      #     path: lcov-native-driver.info
+      #     retention-days: 1
+
+  # merge-and-upload:
+  #   runs-on: ubuntu-latest
+  #   needs: [coverage-default-driver, coverage-native-driver]
+  #   steps:
+  #     - name: Setup Debug Session
+  #       uses: mxschmitt/action-tmate@v3
+  #       timeout-minutes: 15
+  #       with:
+  #         detached: true
+
+  #     - name: Install lcov
+  #       run: sudo apt install lcov -y
+
+  #     - name: Download default driver coverage report
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: coverage-default-driver
+
+  #     - name: Download native driver coverage report
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: coverage-native-driver
+
+  #     - name: Merge coverage reports
+  #       run: |
+  #         lcov -a lcov-default-driver.info -a lcov-native-driver.info -o lcov.info
+
+  #     - name: Upload coverage to Codecov
+  #       uses: codecov/codecov-action@v5
+  #       with:
+  #         token: ${{ secrets.CODECOV_TOKEN }}
+  #         files: lcov-default-driver.info
+  #         fail_ci_if_error: true
+  #         verbose: true
