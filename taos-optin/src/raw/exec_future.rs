@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::ffi::{c_char, CStr};
 use std::future::Future;
 use std::os::raw::{c_int, c_void};
@@ -10,6 +9,8 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
+use crossbeam::atomic::AtomicCell;
+use pin_project_lite::pin_project;
 use taos_query::prelude::RawError;
 
 use super::ApiEntry;
@@ -17,10 +18,16 @@ use crate::into_c_str::IntoCStr;
 use crate::types::TAOS_RES;
 use crate::RawTaos;
 
-pub struct ExecFuture<'f, 'a> {
-    raw: &'f RawTaos,
-    sql: Cow<'a, CStr>,
-    state: Rc<State>,
+pin_project! {
+    /// A future that will resolve when the query is complete.
+    ///
+    /// This future will resolve to the number of affected rows or an error.
+    /// The future will be resolved when the callback is called.
+    pub struct ExecFuture<'f, 'a> {
+        raw: &'f RawTaos,
+        sql: Cow<'a, CStr>,
+        state: Rc<State>,
+    }
 }
 
 unsafe impl Send for ExecFuture<'_, '_> {}
@@ -28,7 +35,7 @@ unsafe impl Send for ExecFuture<'_, '_> {}
 /// Shared state between the future and the waiting thread
 struct State {
     api: Arc<ApiEntry>,
-    result: RefCell<Option<(Result<usize, RawError>, Duration)>>,
+    result: AtomicCell<Option<(Result<usize, RawError>, Duration)>>,
     waiting: AtomicBool,
     time: Instant,
 }
@@ -37,7 +44,7 @@ impl State {
     pub fn new(api: Arc<ApiEntry>) -> Self {
         State {
             api,
-            result: RefCell::new(None),
+            result: AtomicCell::new(None),
             waiting: AtomicBool::new(false),
             time: Instant::now(),
         }
@@ -54,14 +61,14 @@ struct AsyncQueryParam {
 }
 
 impl Unpin for State {}
-impl Unpin for ExecFuture<'_, '_> {}
 
 impl Future for ExecFuture<'_, '_> {
     type Output = Result<usize, RawError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let state = self.state.as_ref();
+        let this = self.project();
+        let state = this.state;
 
-        if let Some((result, cost)) = { state.result.borrow_mut().take() } {
+        if let Some((result, cost)) = state.result.take() {
             let d = state.time.elapsed();
             tracing::trace!("Waken {:?} after callback received", d - cost);
             Poll::Ready(result)
@@ -86,36 +93,37 @@ impl Future for ExecFuture<'_, '_> {
                 }
                 let param = Box::from_raw(param as *mut AsyncQueryParam);
                 if let Some(state) = param.state.upgrade() {
-                    // let state = param.read();
-                    let s = state.as_ref();
-                    let cost = s.time.elapsed();
-                    tracing::trace!("Received query callback in {:?}", cost);
-                    if res.is_null() && code == 0 {
-                        unreachable!("query callback should be ok or error");
+                    {
+                        let s = state.as_ref();
+                        let cost = s.time.elapsed();
+                        tracing::trace!("Received query callback in {:?}", cost);
+                        if res.is_null() && code == 0 {
+                            unreachable!("query callback should be ok or error");
+                        }
+
+                        let result = if code != 0 {
+                            let str = s.api.err_str(res);
+                            let err = RawError::new_with_context(
+                                code,
+                                str,
+                                format!(
+                                    "Error while querying with sql \"{}\"",
+                                    CStr::from_ptr(param.sql).to_string_lossy()
+                                ),
+                            );
+                            s.api.free_result(res);
+                            Err(err)
+                        } else {
+                            debug_assert!(!res.is_null());
+                            assert_ne!(res as usize, 1, "res should not be 1");
+                            let affected_rows = (s.api.taos_affected_rows)(res) as usize;
+                            s.api.free_result(res);
+                            Ok(affected_rows)
+                        };
+
+                        s.result.store(Some((result, cost)));
+                        s.waiting.store(false, Ordering::SeqCst);
                     }
-
-                    let result = if code != 0 {
-                        let str = s.api.err_str(res);
-                        let err = RawError::new_with_context(
-                            code,
-                            str,
-                            format!(
-                                "Error while querying with sql \"{}\"",
-                                CStr::from_ptr(param.sql).to_string_lossy()
-                            ),
-                        );
-                        s.api.free_result(res);
-                        Err(err)
-                    } else {
-                        debug_assert!(!res.is_null());
-                        assert_ne!(res as usize, 1, "res should not be 1");
-                        let affected_rows = (s.api.taos_affected_rows)(res) as usize;
-                        s.api.free_result(res);
-                        Ok(affected_rows)
-                    };
-
-                    s.result.borrow_mut().replace((result, cost));
-                    s.waiting.store(false, Ordering::SeqCst);
                     param.waker.wake();
                 } else {
                     tracing::trace!("Query callback received but no listener");
@@ -123,12 +131,12 @@ impl Future for ExecFuture<'_, '_> {
             }
 
             let param = Box::new(AsyncQueryParam {
-                state: Rc::downgrade(&self.state),
-                sql: self.sql.as_ptr() as _,
+                state: Rc::downgrade(state),
+                sql: this.sql.as_ptr() as _,
                 waker: cx.waker().clone(),
             });
-            self.raw.query_a(
-                self.sql.as_ref(),
+            this.raw.query_a(
+                this.sql.as_ref(),
                 taos_optin_exec_future_callback as _,
                 Box::into_raw(param) as *mut _,
             );
