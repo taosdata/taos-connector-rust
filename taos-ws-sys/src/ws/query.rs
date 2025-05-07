@@ -577,21 +577,15 @@ pub unsafe fn taos_fetch_raw_block_a(
             let rs = maybe_err.deref_mut().unwrap();
             if let ResultSet::Query(qrs) = rs {
                 match qrs.rs.fetch_raw_block() {
-                    Ok(block) => match qrs.fetch_rows() {
-                        Ok(rows) => {
-                            debug!("taos_fetch_raw_block_a callback succ");
-                            qrs.block = block;
-                            fp(param.0, res.0, rows as _);
-                        }
-                        Err(err) => {
-                            error!("taos_fetch_raw_block_a callback failed, err: {err:?}");
-                            maybe_err.with_err(Some(TaosError::new(err.errno(), &err.errstr())));
-                            let code = format_errno(err.errno().into());
-                            fp(param.0, res.0, code);
-                        }
-                    },
+                    Ok(block) => {
+                        let rows = block.as_ref().map_or(0, |block| block.nrows());
+                        qrs.block = block;
+                        debug!("taos_fetch_raw_block_a callback succ, rows: {rows}");
+                        fp(param.0, res.0, rows as _);
+                    }
                     Err(err) => {
                         error!("taos_fetch_raw_block_a callback failed, err: {err:?}");
+                        maybe_err.with_err(Some(TaosError::new(err.code(), &err.message())));
                         let code = format_errno(err.code().into());
                         fp(param.0, res.0, code);
                     }
