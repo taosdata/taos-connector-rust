@@ -408,10 +408,10 @@ mod tests {
     #[test]
     fn test_new_config() {
         let config = Config::new("./tests/taos.cfg".as_ref()).unwrap();
-        assert_eq!(config.compression(), true);
+        assert!(config.compression());
         assert_eq!(config.log_dir.as_deref().unwrap(), "/path/to/logDir/");
         assert_eq!(config.log_level.unwrap(), LevelFilter::DEBUG);
-        assert_eq!(config.log_output_to_screen.unwrap(), true);
+        assert!(config.log_output_to_screen.unwrap());
         assert_eq!(config.timezone.as_deref().unwrap(), "Asia/Shanghai");
         assert_eq!(config.first_ep.as_deref().unwrap(), "hostname:7030");
         assert_eq!(config.second_ep.as_deref().unwrap(), "hostname:16030");
@@ -424,10 +424,10 @@ mod tests {
         {
             let mut config = Config::const_new();
             config.read_config("./tests")?;
-            assert_eq!(config.compression(), true);
+            assert!(config.compression());
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
-            assert_eq!(config.log_output_to_screen(), true);
+            assert!(config.log_output_to_screen());
             assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
             assert_eq!(config.first_ep(), Some(&FastStr::from("hostname:7030")));
             assert_eq!(config.second_ep(), Some(&FastStr::from("hostname:16030")));
@@ -438,10 +438,10 @@ mod tests {
         {
             let mut config = Config::const_new();
             config.read_config("./tests/taos.cfg")?;
-            assert_eq!(config.compression(), true);
+            assert!(config.compression());
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
-            assert_eq!(config.log_output_to_screen(), true);
+            assert!(config.log_output_to_screen());
             assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
             assert_eq!(config.first_ep(), Some(&FastStr::from("hostname:7030")));
             assert_eq!(config.second_ep(), Some(&FastStr::from("hostname:16030")));
@@ -487,8 +487,8 @@ mod tests {
         assert_eq!(get_global_timezone(), Some(FastStr::from("Asia/Shanghai")));
         assert_eq!(get_global_log_dir(), FastStr::from("/var/log/taos"));
         assert_eq!(get_global_log_level(), LevelFilter::WARN);
-        assert_eq!(get_global_log_output_to_screen(), false);
-        assert_eq!(get_global_compression(), false);
+        assert!(!get_global_log_output_to_screen());
+        assert!(!get_global_compression());
         assert_eq!(get_global_first_ep(), Some(FastStr::from("localhost")));
         assert_eq!(
             get_global_second_ep(),
@@ -503,12 +503,12 @@ mod tests {
     #[test]
     fn test_config_error() {
         let cfg_err = ConfigError::Parse("xxx".to_string());
-        assert_eq!(format!("{}", cfg_err), "Config parse error: xxx");
+        assert_eq!(format!("{cfg_err}"), "Config parse error: xxx");
         assert!(cfg_err.source().is_none());
 
-        let io_err = io::Error::new(io::ErrorKind::Other, "xxx");
+        let io_err = io::Error::other("xxx".to_string());
         let cfg_err = ConfigError::from(io_err);
-        assert_eq!(format!("{}", cfg_err), "Config IO error: xxx");
+        assert_eq!(format!("{cfg_err}"), "Config IO error: xxx");
         assert_eq!(cfg_err.source().unwrap().to_string(), "xxx");
     }
 }

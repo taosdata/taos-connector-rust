@@ -5,10 +5,9 @@ use std::ptr;
 use taos_error::Code;
 use tracing::debug;
 
-use crate::ws::TAOS_RES;
+use crate::taos::TAOS_RES;
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
+pub unsafe fn taos_errno(res: *mut TAOS_RES) -> c_int {
     debug!("taos_errno, res: {res:?}");
     if res.is_null() {
         return errno();
@@ -22,12 +21,11 @@ pub unsafe extern "C" fn taos_errno(res: *mut TAOS_RES) -> c_int {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
+pub unsafe fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
     debug!("taos_errstr, res: {res:?}");
     if res.is_null() {
         if errno() == 0 {
-            return EMPTY.as_ptr();
+            return SUCCESS.as_ptr();
         }
         return errstr();
     }
@@ -36,11 +34,11 @@ pub unsafe extern "C" fn taos_errstr(res: *mut TAOS_RES) -> *const c_char {
         .and_then(TaosMaybeError::errstr)
     {
         Some(err) => err,
-        None => EMPTY.as_ptr(),
+        None => SUCCESS.as_ptr(),
     }
 }
 
-pub const EMPTY: &CStr = c"";
+pub const SUCCESS: &CStr = c"success";
 pub const MAX_ERRSTR_LEN: usize = 4096;
 
 thread_local! {
@@ -96,7 +94,7 @@ pub fn clear_err_and_ret_succ() -> i32 {
 
 #[derive(Debug)]
 pub struct TaosMaybeError<T> {
-    err: Option<TaosError>,
+    err: RefCell<Option<TaosError>>,
     data: *mut T,
     type_id: &'static str,
 }
@@ -105,20 +103,20 @@ unsafe impl<T> Send for TaosMaybeError<T> {}
 unsafe impl<T> Sync for TaosMaybeError<T> {}
 
 impl<T> TaosMaybeError<T> {
-    pub fn with_err(&mut self, err: Option<TaosError>) {
-        self.err = err;
+    pub fn with_err(&self, err: Option<TaosError>) {
+        self.err.replace(err);
     }
 
-    pub fn clear_err(&mut self) {
-        self.err = None;
+    pub fn clear_err(&self) {
+        self.err.replace(None);
     }
 
     pub fn errno(&self) -> Option<i32> {
-        self.err.as_ref().map(|err| err.code.into())
+        self.err.borrow().as_ref().map(|err| err.code.into())
     }
 
     pub fn errstr(&self) -> Option<*const c_char> {
-        self.err.as_ref().map(|err| err.message.as_ptr())
+        self.err.borrow().as_ref().map(|err| err.message.as_ptr())
     }
 
     pub fn deref(&self) -> Option<&T> {
@@ -142,7 +140,7 @@ impl<T> Drop for TaosMaybeError<T> {
 impl<T> From<T> for TaosMaybeError<T> {
     fn from(value: T) -> Self {
         Self {
-            err: None,
+            err: RefCell::new(None),
             data: Box::into_raw(Box::new(value)),
             type_id: std::any::type_name::<T>(),
         }
@@ -152,7 +150,7 @@ impl<T> From<T> for TaosMaybeError<T> {
 impl<T> From<Box<T>> for TaosMaybeError<T> {
     fn from(value: Box<T>) -> Self {
         Self {
-            err: None,
+            err: RefCell::new(None),
             data: Box::into_raw(value),
             type_id: std::any::type_name::<T>(),
         }
@@ -166,12 +164,12 @@ where
     fn from(value: Result<T, E>) -> Self {
         match value {
             Ok(val) => Self {
-                err: None,
+                err: RefCell::new(None),
                 data: Box::into_raw(Box::new(val)),
                 type_id: std::any::type_name::<T>(),
             },
             Err(err) => Self {
-                err: Some(err.into()),
+                err: RefCell::new(Some(err.into())),
                 data: ptr::null_mut(),
                 type_id: std::any::type_name::<T>(),
             },
@@ -186,12 +184,12 @@ where
     fn from(value: Result<Box<T>, E>) -> Self {
         match value {
             Ok(val) => Self {
-                err: None,
+                err: RefCell::new(None),
                 data: Box::into_raw(val),
                 type_id: std::any::type_name::<T>(),
             },
             Err(err) => Self {
-                err: Some(err.into()),
+                err: RefCell::new(Some(err.into())),
                 data: ptr::null_mut(),
                 type_id: std::any::type_name::<T>(),
             },

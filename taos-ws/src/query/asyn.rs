@@ -1447,10 +1447,13 @@ where
         port,
     };
 
-    sender.send(req.to_msg()).await.map_err(Error::from)?;
+    let msg = req.to_msg();
+    tracing::trace!("check_server_status, req: {}", msg.to_string());
+    sender.send(msg).await.map_err(Error::from)?;
 
     if let Some(Ok(message)) = reader.next().await {
         if let Message::Text(text) = message {
+            tracing::trace!("check_server_status, resp: {text}");
             let resp: WsRecv = serde_json::from_str(&text)
                 .map_err(|e| RawError::from_string(format!("failed to parse JSON: {e:?}")))?;
 

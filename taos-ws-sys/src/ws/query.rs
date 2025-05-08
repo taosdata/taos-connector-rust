@@ -7,7 +7,7 @@ use bytes::Bytes;
 use faststr::FastStr;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
-use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr};
+use taos_query::util::{generate_req_id, hex, InlineBytes, InlineStr};
 use taos_query::{
     block_in_place_or_global, global_tokio_runtime, Fetchable, Queryable, RawBlock as Block,
 };
@@ -15,73 +15,12 @@ use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
 use tracing::{debug, error, Instrument};
 
+use crate::taos::query::TSDB_SERVER_STATUS;
+use crate::taos::{__taos_async_fn_t, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES};
 use crate::ws::error::{
     clear_err_and_ret_succ, format_errno, set_err_and_get_code, TaosError, TaosMaybeError,
 };
-use crate::ws::{
-    config, ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, __taos_async_fn_t, TAOS,
-    TAOS_FIELD, TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
-};
-
-pub const TSDB_DATA_TYPE_NULL: usize = 0;
-pub const TSDB_DATA_TYPE_BOOL: usize = 1;
-pub const TSDB_DATA_TYPE_TINYINT: usize = 2;
-pub const TSDB_DATA_TYPE_SMALLINT: usize = 3;
-pub const TSDB_DATA_TYPE_INT: usize = 4;
-pub const TSDB_DATA_TYPE_BIGINT: usize = 5;
-pub const TSDB_DATA_TYPE_FLOAT: usize = 6;
-pub const TSDB_DATA_TYPE_DOUBLE: usize = 7;
-pub const TSDB_DATA_TYPE_VARCHAR: usize = 8;
-pub const TSDB_DATA_TYPE_TIMESTAMP: usize = 9;
-pub const TSDB_DATA_TYPE_NCHAR: usize = 10;
-pub const TSDB_DATA_TYPE_UTINYINT: usize = 11;
-pub const TSDB_DATA_TYPE_USMALLINT: usize = 12;
-pub const TSDB_DATA_TYPE_UINT: usize = 13;
-pub const TSDB_DATA_TYPE_UBIGINT: usize = 14;
-pub const TSDB_DATA_TYPE_JSON: usize = 15;
-pub const TSDB_DATA_TYPE_VARBINARY: usize = 16;
-pub const TSDB_DATA_TYPE_DECIMAL: usize = 17;
-pub const TSDB_DATA_TYPE_BLOB: usize = 18;
-pub const TSDB_DATA_TYPE_MEDIUMBLOB: usize = 19;
-pub const TSDB_DATA_TYPE_BINARY: usize = TSDB_DATA_TYPE_VARCHAR;
-pub const TSDB_DATA_TYPE_GEOMETRY: usize = 20;
-pub const TSDB_DATA_TYPE_DECIMAL64: usize = 21;
-pub const TSDB_DATA_TYPE_MAX: usize = 22;
-
-#[allow(non_camel_case_types)]
-pub type __taos_notify_fn_t = extern "C" fn(param: *mut c_void, ext: *mut c_void, r#type: c_int);
-
-#[repr(C)]
-#[allow(non_snake_case)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_VGROUP_HASH_INFO {
-    pub vgId: i32,
-    pub hashBegin: u32,
-    pub hashEnd: u32,
-}
-
-#[repr(C)]
-#[allow(non_snake_case)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_DB_ROUTE_INFO {
-    pub routeVersion: i32,
-    pub hashPrefix: i16,
-    pub hashSuffix: i16,
-    pub hashMethod: i8,
-    pub vgNum: i32,
-    pub vgHash: *mut TAOS_VGROUP_HASH_INFO,
-}
-
-#[repr(C)]
-#[derive(Debug, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub enum TSDB_SERVER_STATUS {
-    TSDB_SRV_STATUS_UNAVAILABLE = 0,
-    TSDB_SRV_STATUS_NETWORK_OK = 1,
-    TSDB_SRV_STATUS_SERVICE_OK = 2,
-    TSDB_SRV_STATUS_SERVICE_DEGRADED = 3,
-    TSDB_SRV_STATUS_EXTING = 4,
-}
+use crate::ws::{config, ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS, TAOS_ROW};
 
 impl From<i32> for TSDB_SERVER_STATUS {
     fn from(value: i32) -> Self {
@@ -95,14 +34,12 @@ impl From<i32> for TSDB_SERVER_STATUS {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES {
+pub unsafe fn taos_query(taos: *mut TAOS, sql: *const c_char) -> *mut TAOS_RES {
     taos_query_with_reqid(taos, sql, generate_req_id() as _)
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_query_with_reqid(
+pub unsafe fn taos_query_with_reqid(
     taos: *mut TAOS,
     sql: *const c_char,
     reqId: i64,
@@ -133,8 +70,7 @@ unsafe fn query(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> TaosResult<
     Ok(ResultSet::Query(QueryResultSet::new(rs)))
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
+pub unsafe fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
     fn handle_error(code: Code, msg: &str) -> TAOS_ROW {
         error!("taos_fetch_row failed, code: {code:?}, msg: {msg}");
         set_err_and_get_code(TaosError::new(code, msg));
@@ -162,8 +98,7 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
+pub unsafe fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
     debug!("taos_result_precision start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
@@ -180,16 +115,14 @@ pub unsafe extern "C" fn taos_result_precision(res: *mut TAOS_RES) -> c_int {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
+pub unsafe fn taos_free_result(res: *mut TAOS_RES) {
     debug!("taos_free_result, res: {res:?}");
     if !res.is_null() {
         let _ = Box::from_raw(res as *mut TaosMaybeError<ResultSet>);
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
+pub unsafe fn taos_field_count(res: *mut TAOS_RES) -> c_int {
     debug!("taos_field_count start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
@@ -207,13 +140,11 @@ pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_num_fields(res: *mut TAOS_RES) -> c_int {
+pub unsafe fn taos_num_fields(res: *mut TAOS_RES) -> c_int {
     taos_field_count(res)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_affected_rows(res: *mut TAOS_RES) -> c_int {
+pub unsafe fn taos_affected_rows(res: *mut TAOS_RES) -> c_int {
     debug!("taos_affected_rows start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
@@ -230,8 +161,7 @@ pub unsafe extern "C" fn taos_affected_rows(res: *mut TAOS_RES) -> c_int {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
+pub unsafe fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
     debug!("taos_affected_rows64 start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
@@ -248,8 +178,7 @@ pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIELD {
+pub unsafe fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIELD {
     debug!("taos_fetch_fields start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
@@ -267,8 +196,7 @@ pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIEL
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FIELD_E {
+pub unsafe fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FIELD_E {
     debug!("taos_fetch_fields_e start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
@@ -286,8 +214,7 @@ pub unsafe extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FI
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c_int {
+pub unsafe fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c_int {
     debug!("taos_select_db start, taos: {taos:?}, db: {db:?}");
 
     let taos = match (taos as *mut Taos).as_mut() {
@@ -320,8 +247,7 @@ pub unsafe extern "C" fn taos_select_db(taos: *mut TAOS, db: *const c_char) -> c
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_print_row(
+pub unsafe fn taos_print_row(
     str: *mut c_char,
     row: TAOS_ROW,
     fields: *mut TAOS_FIELD,
@@ -330,15 +256,14 @@ pub unsafe extern "C" fn taos_print_row(
     taos_print_row_with_size(str, i32::MAX as _, row, fields, num_fields)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_print_row_with_size(
+pub unsafe fn taos_print_row_with_size(
     str: *mut c_char,
     size: u32,
     row: TAOS_ROW,
     fields: *mut TAOS_FIELD,
     num_fields: c_int,
 ) -> c_int {
-    unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &str) -> i32 {
+    unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &[u8]) -> i32 {
         if content.len() > *size {
             return -1;
         }
@@ -369,7 +294,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
         }
 
         let write_len = if row[i].is_null() {
-            write_to_cstr(&mut size, str.add(len), "NULL")
+            write_to_cstr(&mut size, str.add(len), b"NULL")
         } else {
             macro_rules! read_and_write {
                 ($ty:ty) => {{
@@ -377,7 +302,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                     write_to_cstr(
                         &mut size,
                         str.add(len as usize),
-                        format!("{value}").as_str(),
+                        format!("{value}").as_str().as_bytes(),
                     )
                 }};
             }
@@ -398,25 +323,22 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                     write_to_cstr(
                         &mut size,
                         str.add(len),
-                        format!("{}", value as i32).as_str(),
+                        format!("{}", value as i32).as_str().as_bytes(),
                     )
                 }
-                Ty::VarBinary | Ty::Geometry => {
+                Ty::VarBinary => {
                     let data = row[i].offset(-2) as *const InlineBytes;
                     let data = Bytes::from((*data).as_bytes());
-                    write_to_cstr(&mut size, str.add(len), &hex::bytes_to_hex_string(data))
+                    let content = format!("\\x{}", hex::bytes_to_hex_string(data).to_uppercase());
+                    write_to_cstr(&mut size, str.add(len), content.as_bytes())
                 }
-                Ty::VarChar => {
+                Ty::VarChar | Ty::NChar | Ty::Geometry => {
                     let data = row[i].offset(-2) as *const InlineStr;
-                    write_to_cstr(&mut size, str.add(len), (*data).as_str())
-                }
-                Ty::NChar => {
-                    let data = row[i].offset(-2) as *const InlineNChar;
-                    write_to_cstr(&mut size, str.add(len), &(*data).to_string())
+                    write_to_cstr(&mut size, str.add(len), (*data).as_bytes())
                 }
                 Ty::Decimal | Ty::Decimal64 => {
                     let data = CStr::from_ptr(row[i] as *mut c_char).to_str().unwrap();
-                    write_to_cstr(&mut size, str.add(len), data)
+                    write_to_cstr(&mut size, str.add(len), data.as_bytes())
                 }
                 _ => 0,
             }
@@ -435,8 +357,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
     len as _
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
+pub unsafe fn taos_stop_query(res: *mut TAOS_RES) {
     debug!("taos_stop_query start, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
@@ -453,8 +374,7 @@ pub unsafe extern "C" fn taos_stop_query(res: *mut TAOS_RES) {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) -> bool {
+pub unsafe fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) -> bool {
     debug!("taos_is_null start, res: {res:?}, row: {row}, col: {col}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
@@ -472,9 +392,8 @@ pub unsafe extern "C" fn taos_is_null(res: *mut TAOS_RES, row: i32, col: i32) ->
     }
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_is_null_by_column(
+pub unsafe fn taos_is_null_by_column(
     res: *mut TAOS_RES,
     columnIndex: c_int,
     result: *mut bool,
@@ -526,8 +445,7 @@ pub unsafe extern "C" fn taos_is_null_by_column(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
+pub unsafe fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
     debug!("taos_is_update_query, res: {res:?}");
     match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
@@ -538,8 +456,7 @@ pub unsafe extern "C" fn taos_is_update_query(res: *mut TAOS_RES) -> bool {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int {
+pub unsafe fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_ROW) -> c_int {
     debug!("taos_fetch_block start, res: {res:?}, rows: {rows:?}");
     let mut num_of_rows = 0;
     let _ = taos_fetch_block_s(res, &mut num_of_rows, rows);
@@ -547,9 +464,8 @@ pub unsafe extern "C" fn taos_fetch_block(res: *mut TAOS_RES, rows: *mut TAOS_RO
     num_of_rows
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_fetch_block_s(
+pub unsafe fn taos_fetch_block_s(
     res: *mut TAOS_RES,
     numOfRows: *mut c_int,
     rows: *mut TAOS_ROW,
@@ -587,9 +503,8 @@ pub unsafe extern "C" fn taos_fetch_block_s(
     }
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_fetch_raw_block(
+pub unsafe fn taos_fetch_raw_block(
     res: *mut TAOS_RES,
     numOfRows: *mut c_int,
     pData: *mut *mut c_void,
@@ -625,8 +540,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_fetch_raw_block_a(
+pub unsafe fn taos_fetch_raw_block_a(
     res: *mut TAOS_RES,
     fp: __taos_async_fn_t,
     param: *mut c_void,
@@ -664,12 +578,14 @@ pub unsafe extern "C" fn taos_fetch_raw_block_a(
             if let ResultSet::Query(qrs) = rs {
                 match qrs.rs.fetch_raw_block() {
                     Ok(block) => {
-                        debug!("taos_fetch_raw_block_a callback succ");
+                        let rows = block.as_ref().map_or(0, |block| block.nrows());
                         qrs.block = block;
-                        fp(param.0, res.0, 0);
+                        debug!("taos_fetch_raw_block_a callback succ, rows: {rows}");
+                        fp(param.0, res.0, rows as _);
                     }
                     Err(err) => {
                         error!("taos_fetch_raw_block_a callback failed, err: {err:?}");
+                        maybe_err.with_err(Some(TaosError::new(err.code(), &err.message())));
                         let code = format_errno(err.code().into());
                         fp(param.0, res.0, code);
                     }
@@ -687,8 +603,7 @@ pub unsafe extern "C" fn taos_fetch_raw_block_a(
     debug!("taos_fetch_raw_block_a succ");
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
+pub unsafe fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW {
     debug!("taos_result_block start, res: {res:?}");
 
     if res.is_null() {
@@ -723,12 +638,8 @@ pub unsafe extern "C" fn taos_result_block(res: *mut TAOS_RES) -> *mut TAOS_ROW 
     ptr::null_mut()
 }
 
-#[no_mangle]
 #[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_get_column_data_offset(
-    res: *mut TAOS_RES,
-    columnIndex: c_int,
-) -> *mut c_int {
+pub unsafe fn taos_get_column_data_offset(res: *mut TAOS_RES, columnIndex: c_int) -> *mut c_int {
     debug!("taos_get_column_data_offset start, res: {res:?}, column_index: {columnIndex}");
 
     if res.is_null() || columnIndex < 0 {
@@ -768,8 +679,7 @@ pub unsafe extern "C" fn taos_get_column_data_offset(
     ptr::null_mut()
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int {
+pub unsafe fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) -> c_int {
     debug!("taos_validate_sql start, taos: {taos:?}, sql: {sql:?}");
 
     if taos.is_null() {
@@ -805,8 +715,7 @@ pub unsafe extern "C" fn taos_validate_sql(taos: *mut TAOS, sql: *const c_char) 
     0
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
+pub unsafe fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
     debug!("taos_fetch_lengths start, res: {res:?}");
 
     if res.is_null() {
@@ -862,8 +771,7 @@ pub unsafe extern "C" fn taos_fetch_lengths(res: *mut TAOS_RES) -> *mut c_int {
     ptr::null_mut()
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char {
+pub unsafe fn taos_get_server_info(taos: *mut TAOS) -> *const c_char {
     debug!("taos_get_server_info start, taos: {taos:?}");
 
     static SERVER_INFO: OnceLock<CString> = OnceLock::new();
@@ -886,8 +794,7 @@ pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char 
     server_info.as_ptr()
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
+pub unsafe fn taos_get_client_info() -> *const c_char {
     debug!("taos_get_client_info");
     static VERSION: OnceLock<CString> = OnceLock::new();
     VERSION
@@ -898,8 +805,7 @@ pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
         .as_ptr()
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_get_current_db(
+pub unsafe fn taos_get_current_db(
     taos: *mut TAOS,
     database: *mut c_char,
     len: c_int,
@@ -938,8 +844,7 @@ pub unsafe extern "C" fn taos_get_current_db(
 
     if db.is_null() {
         taos_free_result(res);
-        error!("taos_get_current_db failed, get db failed");
-        return set_err_and_get_code(TaosError::new(Code::FAILED, "get db failed"));
+        return clear_err_and_ret_succ();
     }
 
     if len_actual < len as u32 {
@@ -957,17 +862,15 @@ pub unsafe extern "C" fn taos_get_current_db(
     code
 }
 
-#[no_mangle]
-pub extern "C" fn taos_data_type(r#type: c_int) -> *const c_char {
+pub fn taos_data_type(r#type: c_int) -> *const c_char {
     debug!("taos_data_type, type: {}", r#type);
     match Ty::from_u8_option(r#type as _) {
         Some(ty) => ty.tsdb_name(),
-        None => ptr::null(),
+        None => c"UNKNOWN".as_ptr(),
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_query_a(
+pub unsafe fn taos_query_a(
     taos: *mut TAOS,
     sql: *const c_char,
     fp: __taos_async_fn_t,
@@ -976,8 +879,7 @@ pub unsafe extern "C" fn taos_query_a(
     taos_query_a_with_reqid(taos, sql, fp, param, generate_req_id() as _);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_query_a_with_reqid(
+pub unsafe fn taos_query_a_with_reqid(
     taos: *mut TAOS,
     sql: *const c_char,
     fp: __taos_async_fn_t,
@@ -1039,12 +941,7 @@ pub unsafe extern "C" fn taos_query_a_with_reqid(
     debug!("taos_query_a_with_reqid succ");
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_fetch_rows_a(
-    res: *mut TAOS_RES,
-    fp: __taos_async_fn_t,
-    param: *mut c_void,
-) {
+pub unsafe fn taos_fetch_rows_a(res: *mut TAOS_RES, fp: __taos_async_fn_t, param: *mut c_void) {
     debug!("taos_fetch_rows_a start, res: {res:?}, fp: {fp:?}, param: {param:?}");
 
     let res = SafePtr(res);
@@ -1095,18 +992,34 @@ pub unsafe extern "C" fn taos_fetch_rows_a(
     debug!("taos_fetch_rows_a succ");
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
+pub unsafe fn taos_get_raw_block(res: *mut TAOS_RES) -> *const c_void {
+    unsafe fn handle_error(message: &str) -> *const c_void {
+        error!("taos_get_raw_block failed, {message}");
+        set_err_and_get_code(TaosError::new(Code::INVALID_PARA, message));
+        ptr::null()
+    }
+
     debug!("taos_get_raw_block start, res: {res:?}");
-    let mut num_of_rows = 0;
-    let mut data = ptr::null_mut();
-    taos_fetch_raw_block(res, &mut num_of_rows, &mut data);
-    debug!("taos_get_raw_block succ, data: {data:?}");
-    data
+
+    let maybe_err = match (res as *mut TaosMaybeError<ResultSet>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return handle_error("res is null"),
+    };
+
+    let rs = match maybe_err.deref_mut() {
+        Some(rs) => rs,
+        None => return handle_error("res is invalid"),
+    };
+
+    if let ResultSet::Query(rs) = rs {
+        debug!("taos_get_raw_block succ, rs: {rs:?}");
+        rs.get_raw_block()
+    } else {
+        handle_error("rs is invalid")
+    }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_check_server_status(
+pub unsafe fn taos_check_server_status(
     fqdn: *const c_char,
     mut port: i32,
     details: *mut c_char,
@@ -1134,17 +1047,15 @@ pub unsafe extern "C" fn taos_check_server_status(
     debug!("taos_check_server_status, fqdn: {fqdn:?}, port: {port}");
 
     let mut host = FastStr::from_static_str("localhost");
+    // FIXME: use adapterList
     if let Some(ep) = config::get_global_first_ep() {
         host = ep;
     } else if let Some(ep) = config::get_global_second_ep() {
         host = ep;
     }
 
-    let dsn = if host.contains(":") {
-        format!("ws://{host}")
-    } else {
-        format!("ws://{host}:6041")
-    };
+    let host = host.split_once(':').map_or(host.as_str(), |(host, _)| host);
+    let dsn = format!("ws://{host}:6041");
 
     debug!("taos_check_server_status, dsn: {dsn}");
 
@@ -1225,6 +1136,13 @@ impl QueryResultSet {
         }
 
         Ok(0)
+    }
+
+    pub fn get_raw_block(&self) -> *const c_void {
+        if let Some(block) = self.block.as_ref() {
+            return block.as_raw_bytes().as_ptr() as _;
+        }
+        ptr::null()
     }
 }
 
@@ -1368,1447 +1286,5 @@ impl ResultSetOperations for QueryResultSet {
 
     fn stop_query(&mut self) {
         taos_query::block_in_place_or_global(self.rs.stop());
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::thread::sleep;
-    use std::{ptr, vec};
-
-    use taos_query::common::Precision;
-
-    use super::*;
-    use crate::ws::error::{taos_errno, taos_errstr};
-    use crate::ws::{taos_close, taos_connect, test_connect, test_exec, test_exec_many};
-
-    #[test]
-    fn test_taos_query() {
-        let taos = test_connect();
-        test_exec_many(
-            taos,
-            &[
-                "drop database if exists test_1737102397",
-                "create database test_1737102397",
-                "use test_1737102397",
-                "create table t0 (ts timestamp, c1 int)",
-                "insert into t0 values (now, 1)",
-                "select * from t0",
-                "create table s0 (ts timestamp, c1 int) tags (t1 int)",
-                "create table d0 using s0 tags(1)",
-                "insert into d0 values (now, 1)",
-                "select * from d0",
-                "insert into d1 using s0 tags(2) values(now, 1)",
-                "select * from d1",
-                "select * from s0",
-                "drop database test_1737102397",
-            ],
-        );
-
-        unsafe { taos_close(taos) };
-    }
-
-    #[test]
-    fn test_taos_fetch_row() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102398",
-                    "create database test_1737102398",
-                    "use test_1737102398",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
-
-            taos_free_result(res);
-            test_exec(taos, "drop database test_1737102398");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_result_precision() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102399",
-                    "create database test_1737102399",
-                    "use test_1737102399",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let precision: Precision = taos_result_precision(res).into();
-            assert_eq!(precision, Precision::Millisecond);
-
-            taos_free_result(res);
-            test_exec(taos, "drop database test_1737102399");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_field_count() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102400",
-                    "create database test_1737102400",
-                    "use test_1737102400",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let count = taos_field_count(res);
-            assert_eq!(count, 2);
-
-            taos_free_result(res);
-            test_exec(taos, "drop database test_1737102400");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_num_fields() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102401",
-                    "create database test_1737102401",
-                    "use test_1737102401",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let num = taos_num_fields(res);
-            assert_eq!(num, 2);
-
-            taos_free_result(res);
-            test_exec(taos, "drop database test_1737102401");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_affected_rows() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102402",
-                    "create database test_1737102402",
-                    "use test_1737102402",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let rows = taos_affected_rows(res);
-            assert_eq!(rows, 0);
-
-            taos_free_result(res);
-
-            let res = taos_query(taos, c"insert into t0 values (now, 2)".as_ptr());
-            assert!(!res.is_null());
-
-            let rows = taos_affected_rows(res);
-            assert_eq!(rows, 1);
-
-            taos_free_result(res);
-
-            test_exec(taos, "drop database test_1737102402");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_affected_rows64() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102403",
-                    "create database test_1737102403",
-                    "use test_1737102403",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let rows = taos_affected_rows64(res);
-            assert_eq!(rows, 0);
-
-            taos_free_result(res);
-
-            let res = taos_query(taos, c"insert into t0 values (now, 2)".as_ptr());
-            assert!(!res.is_null());
-
-            let rows = taos_affected_rows(res);
-            assert_eq!(rows, 1);
-
-            taos_free_result(res);
-
-            test_exec(taos, "drop database test_1737102403");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_fetch_fields() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102404",
-                    "create database test_1737102404",
-                    "use test_1737102404",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let fields = taos_fetch_fields(res);
-            assert!(!fields.is_null());
-
-            taos_free_result(res);
-            test_exec(taos, "drop database test_1737102404");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_select_db() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102405",
-                    "create database test_1737102405",
-                ],
-            );
-
-            let res = taos_select_db(taos, c"test_1737102405".as_ptr());
-            assert_eq!(res, 0);
-
-            test_exec_many(
-                taos,
-                &[
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                    "drop database test_1737102405",
-                ],
-            );
-
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_print_row() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102406",
-                    "create database test_1737102406",
-                    "use test_1737102406",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (1741660079228, 1)",
-                    "insert into t0 values (1741660080229, 0)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
-
-            let fields = taos_fetch_fields(res);
-            assert!(!fields.is_null());
-
-            let num_fields = taos_num_fields(res);
-            assert_eq!(num_fields, 2);
-
-            let mut str = vec![0 as c_char; 1024];
-            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            assert_eq!(len, 15);
-            assert_eq!(
-                "1741660079228 1",
-                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
-            );
-
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
-
-            let mut str = vec![0 as c_char; 1024];
-            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            assert_eq!(len, 15);
-            assert_eq!(
-                "1741660080229 0",
-                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
-            );
-
-            taos_free_result(res);
-            test_exec(taos, "drop database test_1737102406");
-
-            taos_close(taos);
-        }
-
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1741657731",
-                    "create database test_1741657731",
-                    "use test_1741657731",
-                    "create table t0 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, \
-                    c5 bigint, c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, \
-                    c9 bigint unsigned, c10 float, c11 double, c12 varchar(20), c13 nchar(10), \
-                    c14 varbinary(10), c15 geometry(50), c16 decimal(10, 3), c17 decimal(38, 10))",
-                    "insert into t0 values (1743557474107, true, 1, 1, 1, 1, 1, 1, 1, 1, 1.1, 1.1, \
-                    'hello world', 'hello', 'hello', 'POINT(1 1)', 12345.123, \
-                    12345678901234567890.123456789)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
-
-            let fields = taos_fetch_fields(res);
-            assert!(!fields.is_null());
-
-            let num_fields = taos_num_fields(res);
-            assert_eq!(num_fields, 18);
-
-            let mut str = vec![0 as c_char; 1024];
-            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            assert_eq!(len, 152);
-            assert_eq!(
-                CStr::from_ptr(str.as_ptr()),
-                c"1743557474107 1 1 1 1 1 1 1 1 1 1.1 1.1 hello world \xf3\x86\x95\xa8 68656c6c6f 0101000000000000000000f03f000000000000f03f 12345.123 12345678901234567890.1234567890",
-            );
-
-            taos_free_result(res);
-            test_exec(taos, "drop database test_1741657731");
-
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_write_to_cstr() {
-        unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &str) -> i32 {
-            if content.len() > *size {
-                return -1;
-            }
-            let cstr = content.as_ptr() as *const c_char;
-            ptr::copy_nonoverlapping(cstr, str, content.len());
-            *size -= content.len();
-            content.len() as _
-        }
-
-        unsafe {
-            let mut len = 0;
-            let mut size = 1024;
-            let mut str = vec![0 as c_char; size];
-            let length = write_to_cstr(&mut size, str.as_mut_ptr().add(len), "hello world");
-            assert_eq!(length, 11);
-            assert_eq!(
-                "hello world",
-                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
-            );
-
-            len += length as usize;
-            let length = write_to_cstr(&mut size, str.as_mut_ptr().add(len), "hello\0world");
-            assert_eq!(length, 11);
-            assert_eq!(
-                "hello worldhello",
-                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
-            );
-        }
-    }
-
-    #[test]
-    fn test_taos_stop_query() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102407",
-                    "create database test_1737102407",
-                    "use test_1737102407",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            taos_stop_query(res);
-            let errno = taos_errno(ptr::null_mut());
-            assert_eq!(errno, 0);
-
-            taos_free_result(res);
-            test_exec(taos, "drop database test_1737102407");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_is_null() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102408",
-                    "create database test_1737102408",
-                    "use test_1737102408",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let is_null = taos_is_null(res, 0, 0);
-            assert!(is_null);
-
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
-
-            let is_null = taos_is_null(res, 0, 0);
-            assert!(!is_null);
-
-            let is_null = taos_is_null(ptr::null_mut(), 0, 0);
-            assert!(is_null);
-
-            taos_free_result(res);
-            test_exec(taos, "drop database test_1737102408");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_is_update_query() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102409",
-                    "create database test_1737102409",
-                    "use test_1737102409",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"insert into t0 values (now, 2)".as_ptr());
-            assert!(!res.is_null());
-
-            let is_update = taos_is_update_query(res);
-            assert!(is_update);
-
-            taos_free_result(res);
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let is_update = taos_is_update_query(res);
-            assert!(!is_update);
-
-            taos_free_result(res);
-
-            let is_update = taos_is_update_query(ptr::null_mut());
-            assert!(is_update);
-
-            test_exec(taos, "drop database test_1737102409");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_fetch_raw_block() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102410",
-                    "create database test_1737102410",
-                    "use test_1737102410",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let mut rows = 0;
-            let mut data = ptr::null_mut();
-            let code = taos_fetch_raw_block(res, &mut rows, &mut data);
-            assert_eq!(code, 0);
-            assert_eq!(rows, 1);
-            assert!(!data.is_null());
-
-            taos_free_result(res);
-            test_exec(taos, "drop database test_1737102410");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_get_server_info() {
-        unsafe {
-            let taos = test_connect();
-            let server_info = taos_get_server_info(taos);
-            assert!(!server_info.is_null());
-            let server_info = CStr::from_ptr(server_info).to_str().unwrap();
-            println!("server_info: {server_info}");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_get_client_info() {
-        unsafe {
-            let client_info = taos_get_client_info();
-            assert!(!client_info.is_null());
-            let client_info = CStr::from_ptr(client_info).to_str().unwrap();
-            assert_eq!(client_info, "0.2.1");
-        }
-    }
-
-    #[test]
-    fn test_taos_get_current_db() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1737102411",
-                    "create database test_1737102411",
-                ],
-            );
-            taos_close(taos);
-
-            let taos = taos_connect(
-                c"localhost".as_ptr(),
-                c"root".as_ptr(),
-                c"taosdata".as_ptr(),
-                c"test_1737102411".as_ptr(),
-                6041,
-            );
-            assert!(!taos.is_null());
-
-            let mut db = vec![0 as c_char; 1024];
-            let mut required = 0;
-            let code = taos_get_current_db(taos, db.as_mut_ptr(), db.len() as _, &mut required);
-            assert_eq!(code, 0);
-            println!("db: {:?}", CStr::from_ptr(db.as_ptr()));
-
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_get_current_db_without_db() {
-        unsafe {
-            let taos = test_connect();
-            let mut db = vec![0 as c_char; 1024];
-            let mut required = 0;
-            let code = taos_get_current_db(taos, db.as_mut_ptr(), db.len() as _, &mut required);
-            assert!(code != 0);
-            let errstr = taos_errstr(ptr::null_mut());
-            println!("errstr: {:?}", CStr::from_ptr(errstr));
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_data_type() {
-        unsafe {
-            let type_null_ptr = taos_data_type(0);
-            let type_null = CStr::from_ptr(type_null_ptr);
-            assert_eq!(type_null, c"TSDB_DATA_TYPE_NULL");
-
-            let type_geo_ptr = taos_data_type(20);
-            let type_geo = CStr::from_ptr(type_geo_ptr);
-            assert_eq!(type_geo, c"TSDB_DATA_TYPE_GEOMETRY");
-
-            let type_invalid = taos_data_type(100);
-            assert_eq!(type_invalid, ptr::null(),);
-        }
-    }
-
-    #[test]
-    fn test_taos_is_null_by_column() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1740644681",
-                    "create database test_1740644681",
-                    "use test_1740644681",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now+1s, 1)",
-                    "insert into t0 values (now+2s, null)",
-                    "insert into t0 values (now+3s, 2)",
-                    "insert into t0 values (now+4s, null)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let mut rows = 0;
-            let mut data = ptr::null_mut();
-            let code = taos_fetch_raw_block(res, &mut rows, &mut data);
-            assert_eq!(code, 0);
-            assert_eq!(rows, 4);
-            assert!(!data.is_null());
-
-            let mut rows = 100;
-            let mut result = vec![false; rows as _];
-            let code = taos_is_null_by_column(res, 1, result.as_mut_ptr(), &mut rows);
-            assert_eq!(code, 0);
-            assert_eq!(rows, 4);
-
-            assert!(!result[0]);
-            assert!(result[1]);
-            assert!(!result[2]);
-            assert!(result[3]);
-
-            taos_free_result(res);
-
-            test_exec(taos, "drop database test_1740644681");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_query_a() {
-        unsafe {
-            extern "C" fn cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
-                unsafe {
-                    assert_eq!(code, 0);
-                    assert_eq!(CStr::from_ptr(param as _), c"hello, world");
-                    assert!(!res.is_null());
-
-                    let row = taos_fetch_row(res);
-                    assert!(!row.is_null());
-
-                    let fields = taos_fetch_fields(res);
-                    assert!(!fields.is_null());
-
-                    let num_fields = taos_num_fields(res);
-                    assert_eq!(num_fields, 2);
-
-                    let mut str = vec![0 as c_char; 1024];
-                    let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-                    assert!(len > 0);
-                    println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
-
-                    taos_free_result(res);
-                }
-            }
-
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1740664844",
-                    "create database test_1740664844",
-                    "use test_1740664844",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let sql = c"select * from t0";
-            let param = c"hello, world";
-            taos_query_a(taos, sql.as_ptr(), cb, param.as_ptr() as _);
-
-            test_exec(taos, "drop database test_1740664844");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_fetch_rows_a() {
-        unsafe {
-            extern "C" fn fetch_rows_cb(taos: *mut c_void, res: *mut TAOS_RES, num_of_row: c_int) {
-                unsafe {
-                    println!("fetch_rows_cb, num_of_row: {}", num_of_row);
-                    let num_fields = taos_num_fields(res);
-                    let fields = taos_fetch_fields(res);
-                    if num_of_row > 0 {
-                        assert_eq!(num_of_row, 4);
-                        for i in 0..num_of_row {
-                            let row = taos_fetch_row(res);
-                            let mut str = vec![0 as c_char; 1024];
-                            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-                            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
-                        }
-                        taos_fetch_rows_a(res, fetch_rows_cb, taos);
-                    } else {
-                        println!("fetch_rows_cb, no more data");
-                        taos_free_result(res);
-                    }
-                }
-            }
-
-            extern "C" fn query_cb(taos: *mut c_void, res: *mut TAOS_RES, code: c_int) {
-                unsafe {
-                    println!("query_cb");
-                    if code == 0 && !res.is_null() {
-                        taos_fetch_rows_a(res, fetch_rows_cb, taos);
-                    } else {
-                        taos_free_result(res);
-                    }
-                }
-            }
-
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1740731669",
-                    "create database test_1740731669",
-                    "use test_1740731669",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                    "insert into t0 values (now+1s, 2)",
-                    "insert into t0 values (now+2s, 3)",
-                    "insert into t0 values (now+3s, 4)",
-                ],
-            );
-
-            let sql = c"select * from t0";
-            taos_query_a(taos, sql.as_ptr(), query_cb, taos);
-
-            sleep(Duration::from_secs(1));
-
-            test_exec(taos, "drop database test_1740731669");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    #[ignore]
-    fn test_taos_fetch_rows_a_() {
-        unsafe {
-            extern "C" fn fetch_rows_cb(taos: *mut c_void, res: *mut TAOS_RES, num_of_row: c_int) {
-                unsafe {
-                    println!("fetch_rows_cb, num_of_row: {}", num_of_row);
-                    let num_fields = taos_num_fields(res);
-                    let fields = taos_fetch_fields(res);
-                    if num_of_row > 0 {
-                        for i in 0..num_of_row {
-                            let row = taos_fetch_row(res);
-                            let mut str = vec![0 as c_char; 1024];
-                            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-                            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
-                        }
-                        taos_fetch_rows_a(res, fetch_rows_cb, taos);
-                    } else {
-                        println!("fetch_rows_cb, no more data");
-                        taos_free_result(res);
-                    }
-                }
-            }
-
-            extern "C" fn query_cb(taos: *mut c_void, res: *mut TAOS_RES, code: c_int) {
-                unsafe {
-                    println!("query_cb");
-                    if code == 0 && !res.is_null() {
-                        taos_fetch_rows_a(res, fetch_rows_cb, taos);
-                    } else {
-                        taos_free_result(res);
-                    }
-                }
-            }
-
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1740732937",
-                    "create database test_1740732937",
-                    "use test_1740732937",
-                    "create table t0 (ts timestamp, c1 int)",
-                ],
-            );
-
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis();
-
-            let num = 7000;
-            for i in 0..num {
-                let sql = format!("insert into t0 values ({}, {})", ts + i, i);
-                test_exec(taos, &sql);
-            }
-
-            let sql = c"select * from t0";
-            taos_query_a(taos, sql.as_ptr(), query_cb, taos);
-
-            sleep(Duration::from_secs(5));
-
-            test_exec(taos, "drop database test_1740732937");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_get_column_data_offset() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1740785939",
-                    "create database test_1740785939",
-                    "use test_1740785939",
-                    "create table t0 (ts timestamp, c1 varchar(20), c2 nchar(20), c3 varbinary(20), c4 geometry(50))",
-                    "insert into t0 values (now+1s, 'hello', 'hello', 'hello', 'POINT(1.0 1.0)')",
-                    "insert into t0 values (now+2s, 'world', 'world', 'world', 'POINT(2.0 2.0)')",
-                    "insert into t0 values (now+3s, null, null, null, null)",
-                    "insert into t0 values (now+4s, 'hello, world', 'hello, world', 'hello, world', 'POINT(3.0 3.0)')",
-                    "insert into t0 values (now+5s, null, null, null, null)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let mut rows = 0;
-            let mut data = ptr::null_mut();
-            let code = taos_fetch_raw_block(res, &mut rows, &mut data);
-            assert_eq!(code, 0);
-            assert_eq!(rows, 5);
-            assert!(!data.is_null());
-
-            let offset = taos_get_column_data_offset(res, 0);
-            assert!(offset.is_null());
-
-            let offset = taos_get_column_data_offset(res, 1);
-            assert!(!offset.is_null());
-
-            let offsets = slice::from_raw_parts(offset, rows as _);
-            assert_eq!(offsets, [0, 7, -1, 14, -1]);
-
-            let offset = taos_get_column_data_offset(res, 2);
-            assert!(!offset.is_null());
-
-            // TODO: confirm the offsets
-            let offsets = slice::from_raw_parts(offset, rows as _);
-            assert_eq!(offsets, [0, 22, -1, 44, -1]);
-
-            let offset = taos_get_column_data_offset(res, 3);
-            assert!(!offset.is_null());
-
-            let offsets = slice::from_raw_parts(offset, rows as _);
-            assert_eq!(offsets, [0, 7, -1, 14, -1]);
-
-            let offset = taos_get_column_data_offset(res, 4);
-            assert!(!offset.is_null());
-
-            let offsets = slice::from_raw_parts(offset, rows as _);
-            assert_eq!(offsets, [0, 23, -1, 46, -1]);
-
-            taos_free_result(res);
-
-            test_exec(taos, "drop database test_1740785939");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_fetch_lengths() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1740838806",
-                    "create database test_1740838806",
-                    "use test_1740838806",
-                    "create table t0 (ts timestamp, c1 bool, c2 int, c3 varchar(10), c4 nchar(15))",
-                    "insert into t0 values (now, 1, 2025, 'hello', 'helloworld')",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let mut rows = 0;
-            let mut data = ptr::null_mut();
-            let code = taos_fetch_raw_block(res, &mut rows, &mut data);
-            assert_eq!(code, 0);
-            assert_eq!(rows, 1);
-            assert!(!data.is_null());
-
-            let lengths = taos_fetch_lengths(res);
-            assert!(!lengths.is_null());
-
-            // TODO: confirm the lengths
-            let lengths = slice::from_raw_parts(lengths, 5);
-            assert_eq!(lengths, [8, 1, 4, 12, 62]);
-
-            taos_free_result(res);
-
-            test_exec(taos, "drop database test_1740838806");
-            taos_close(taos);
-        }
-
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1740841972",
-                    "create database test_1740841972",
-                    "use test_1740841972",
-                    "create table t0 (ts timestamp, c1 bool, c2 int, c3 varchar(10), c4 nchar(15))",
-                    "insert into t0 values (now, 1, 2025, 'hello', 'helloworld')",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let mut rows = 0;
-            let mut data = ptr::null_mut();
-            let code = taos_fetch_raw_block(res, &mut rows, &mut data);
-            assert_eq!(code, 0);
-            assert_eq!(rows, 1);
-            assert!(!data.is_null());
-
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
-
-            let lengths = taos_fetch_lengths(res);
-            assert!(!lengths.is_null());
-
-            let lengths = slice::from_raw_parts(lengths, 5);
-            assert_eq!(lengths, [8, 1, 4, 5, 10]);
-
-            taos_free_result(res);
-
-            test_exec(taos, "drop database test_1740841972");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_validate_sql() {
-        unsafe {
-            let taos = test_connect();
-            let sql = c"create database if not exists test_1741339814";
-            let code = taos_validate_sql(taos, sql.as_ptr());
-            assert_eq!(code, 0);
-        }
-    }
-
-    #[test]
-    fn test_taos_fetch_raw_block_a() {
-        unsafe {
-            extern "C" fn cb(param: *mut c_void, res: *mut TAOS_RES, code: c_int) {
-                unsafe {
-                    assert_eq!(code, 0);
-                    assert!(!res.is_null());
-                    assert!(!param.is_null());
-                    assert_eq!(CStr::from_ptr(param as _), c"hello");
-
-                    let row = taos_result_block(res);
-                    assert!(!row.is_null());
-
-                    let fields = taos_fetch_fields(res);
-                    assert!(!fields.is_null());
-
-                    let num_fields = taos_num_fields(res);
-                    assert_eq!(num_fields, 2);
-
-                    let mut str = vec![0 as c_char; 1024];
-                    let len = taos_print_row(str.as_mut_ptr(), *row, fields, num_fields);
-                    assert!(len > 0);
-                    println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
-                }
-            }
-
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1741443150",
-                    "create database test_1741443150",
-                    "use test_1741443150",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 1)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let param = c"hello";
-            taos_fetch_raw_block_a(res, cb, param.as_ptr() as _);
-
-            sleep(Duration::from_secs(1));
-
-            taos_free_result(res);
-
-            test_exec(taos, "drop database test_1741443150");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_get_raw_block() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1741489408",
-                    "create database test_1741489408",
-                    "use test_1741489408",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values (now, 2025)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let block = taos_get_raw_block(res);
-            assert!(!block.is_null());
-
-            taos_free_result(res);
-
-            test_exec(taos, "drop database test_1741489408");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_fetch_block_s() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1741779708",
-                    "create database test_1741779708",
-                    "use test_1741779708",
-                    "create table t0 (ts timestamp, c1 int, c2 varchar(20))",
-                    "insert into t0 values (1741780784749, 2025, 'hello')",
-                    "insert into t0 values (1741780784750, 999, null)",
-                    "insert into t0 values (1741780784751, null, 'world')",
-                    "insert into t0 values (1741780784752, null, null)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let num_fields = taos_num_fields(res);
-            let fields = taos_fetch_fields(res);
-            let fields = slice::from_raw_parts(fields, num_fields as _);
-
-            loop {
-                let mut num_of_rows = 0;
-                let mut rows = ptr::null_mut();
-                let code = taos_fetch_block_s(res, &mut num_of_rows, &mut rows);
-                assert_eq!(code, 0);
-                println!("num_of_rows: {}", num_of_rows);
-
-                if num_of_rows == 0 {
-                    break;
-                }
-
-                let rows = slice::from_raw_parts(rows, num_fields as _);
-
-                for (c, field) in fields.iter().enumerate() {
-                    for r in 0..num_of_rows as usize {
-                        match field.r#type as usize {
-                            TSDB_DATA_TYPE_TIMESTAMP => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset((r * 8) as isize) as *mut i64;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_INT => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut i32;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_VARCHAR => {
-                                let offsets = taos_get_column_data_offset(res, c as _);
-                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
-                                if offsets[r] == -1 {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
-                                    let len = ptr::read_unaligned(ptr);
-                                    let val =
-                                        rows[c].offset((offsets[r] + 2) as isize) as *mut c_char;
-                                    let val = CStr::from_ptr(val).to_str().unwrap();
-                                    println!("col: {}, row: {}, val: {}", c, r, val);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
-            taos_free_result(res);
-
-            test_exec(taos, "drop database test_1741779708");
-            taos_close(taos);
-        }
-
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1741782821",
-                    "create database test_1741782821",
-                    "use test_1741782821",
-                    "create table t0 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, \
-                    c5 bigint, c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, \
-                    c9 bigint unsigned, c10 float, c11 double, c12 varchar(10), c13 nchar(10), \
-                    c14 varbinary(10), c15 geometry(50))",
-                    "insert into t0 values (1741780784752, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.1, 1.1, \
-                    'hello', 'hello', 'hello', 'POINT(1 1)')",
-                    "insert into t0 values (1741780784753, null, null, null, null, null, null, \
-                    null, null, null, null, null, null, null, null, null)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let num_fields = taos_num_fields(res);
-            let fields = taos_fetch_fields(res);
-            let fields = slice::from_raw_parts(fields, num_fields as _);
-
-            loop {
-                let mut num_of_rows = 0;
-                let mut rows = ptr::null_mut();
-                let code = taos_fetch_block_s(res, &mut num_of_rows, &mut rows);
-                assert_eq!(code, 0);
-                println!("num_of_rows: {}", num_of_rows);
-
-                if num_of_rows == 0 {
-                    break;
-                }
-
-                let rows = slice::from_raw_parts(rows, num_fields as _);
-
-                for (c, field) in fields.iter().enumerate() {
-                    for r in 0..num_of_rows as usize {
-                        match field.r#type as usize {
-                            TSDB_DATA_TYPE_TIMESTAMP => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset((r * 8) as isize) as *mut i64;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_BOOL => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset(r as isize) as *mut bool;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_TINYINT => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset(r as isize) as *mut i8;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_SMALLINT => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset(r as isize) as *mut i16;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_INT => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut i32;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_BIGINT => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut i64;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_UTINYINT => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset(r as isize) as *mut u8;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_USMALLINT => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset(r as isize) as *mut u16;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_UINT => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut u32;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_UBIGINT => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut u64;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_FLOAT => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut f32;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_DOUBLE => {
-                                if taos_is_null(res, r as _, c as _) {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let val = rows[c].offset((r * 8) as isize) as *mut f64;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_VARCHAR => {
-                                let offsets = taos_get_column_data_offset(res, c as _);
-                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
-                                if offsets[r] == -1 {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
-                                    let len = ptr::read_unaligned(ptr);
-                                    let val =
-                                        rows[c].offset((offsets[r] + 2) as isize) as *mut c_char;
-                                    let val = CStr::from_ptr(val).to_str().unwrap();
-                                    println!("col: {}, row: {}, val: {}", c, r, val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_NCHAR => {
-                                let offsets = taos_get_column_data_offset(res, c as _);
-                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
-                                if offsets[r] == -1 {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
-                                    let len = ptr::read_unaligned(ptr);
-                                    let mut bytes = Vec::with_capacity(len as _);
-                                    for i in 0..(len / 4) as i32 {
-                                        let val = rows[c].offset((offsets[r] + 2 + i * 4) as isize)
-                                            as *mut u32;
-                                        let val = ptr::read_unaligned(val);
-                                        bytes.push(val);
-                                    }
-                                    println!("col: {}, row: {}, val: {:?}", c, r, bytes);
-                                }
-                            }
-                            TSDB_DATA_TYPE_VARBINARY => {
-                                let offsets = taos_get_column_data_offset(res, c as _);
-                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
-                                if offsets[r] == -1 {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
-                                    let len = ptr::read_unaligned(ptr);
-                                    let val = rows[c].offset((offsets[r] + 2) as isize) as *mut u8;
-                                    let val = slice::from_raw_parts(val, len as usize);
-                                    println!("col: {}, row: {}, val: {:?}", c, r, val);
-                                }
-                            }
-                            TSDB_DATA_TYPE_GEOMETRY => {
-                                let offsets = taos_get_column_data_offset(res, c as _);
-                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
-                                if offsets[r] == -1 {
-                                    println!("col: {}, row: {}, val: NULL", c, r);
-                                } else {
-                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
-                                    let len = ptr::read_unaligned(ptr);
-                                    let val = rows[c].offset((offsets[r] + 2) as isize) as *mut u8;
-                                    let val = slice::from_raw_parts(val, len as usize);
-                                    println!("col: {}, row: {}, val: {:?}", c, r, val);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
-            taos_free_result(res);
-
-            test_exec(taos, "drop database test_1741782821");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_taos_check_server_status() {
-        unsafe {
-            let max_len = 20;
-            let mut details = vec![0 as c_char; max_len];
-            let fqdn = c"localhost";
-            let status =
-                taos_check_server_status(fqdn.as_ptr(), 6030, details.as_mut_ptr(), max_len as _);
-            assert_eq!(status, TSDB_SERVER_STATUS::TSDB_SRV_STATUS_SERVICE_OK);
-            let details = CStr::from_ptr(details.as_ptr());
-            println!("status: {status:?}, details: {details:?}");
-        }
-
-        unsafe {
-            let max_len = 20;
-            let mut details = vec![0 as c_char; max_len];
-            let status =
-                taos_check_server_status(ptr::null(), 0, details.as_mut_ptr(), max_len as _);
-            assert_eq!(status, TSDB_SERVER_STATUS::TSDB_SRV_STATUS_SERVICE_OK);
-            let details = CStr::from_ptr(details.as_ptr());
-            println!("status: {status:?}, details: {details:?}");
-        }
-    }
-
-    #[test]
-    fn test_taos_fetch_fields_e() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1743154970",
-                    "create database test_1743154970",
-                    "use test_1743154970",
-                    "create table t0 (ts timestamp, c1 int, c2 decimal(10, 2), c3 decimal(38, 20))",
-                    "insert into t0 values (now, 1, 1234.56, 1234567890.123456789)",
-                ],
-            );
-
-            let res = taos_query(taos, c"select * from t0".as_ptr());
-            assert!(!res.is_null());
-
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
-
-            let fields = taos_fetch_fields_e(res);
-            assert!(!fields.is_null());
-
-            let num_fields = taos_num_fields(res);
-            assert_eq!(num_fields, 4);
-
-            let fields = slice::from_raw_parts(fields, num_fields as _);
-
-            assert_eq!(fields[0].r#type, TSDB_DATA_TYPE_TIMESTAMP as i8);
-            assert_eq!(fields[0].bytes, 8);
-
-            assert_eq!(fields[1].r#type, TSDB_DATA_TYPE_INT as i8);
-            assert_eq!(fields[1].bytes, 4);
-
-            assert_eq!(fields[2].r#type, TSDB_DATA_TYPE_DECIMAL64 as i8);
-            assert_eq!(fields[2].bytes, 8);
-            assert_eq!(fields[2].precision, 10);
-            assert_eq!(fields[2].scale, 2);
-
-            assert_eq!(fields[3].r#type, TSDB_DATA_TYPE_DECIMAL as i8);
-            assert_eq!(fields[3].bytes, 16);
-            assert_eq!(fields[3].precision, 38);
-            assert_eq!(fields[3].scale, 20);
-
-            taos_free_result(res);
-            test_exec(taos, "drop database test_1743154970");
-            taos_close(taos);
-        }
     }
 }

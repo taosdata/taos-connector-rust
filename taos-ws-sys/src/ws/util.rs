@@ -31,7 +31,7 @@ mod tests {
     #[test]
     fn test_get_system_locale() {
         let locale = get_system_locale();
-        println!("system locale: {}", locale);
+        println!("system locale: {locale}");
         #[cfg(not(target_os = "windows"))]
         assert!(!locale.is_empty());
     }

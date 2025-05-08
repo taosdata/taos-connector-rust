@@ -151,7 +151,7 @@ mod tests {
         // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
         let client = TaosBuilder::from_dsn("taosws://localhost:6041/")?.build()?;
-        let db = "ws_sync_json";
+        let db = "ws_sync_json_1745828350";
         assert_eq!(client.exec(format!("drop database if exists {db}"))?, 0);
         assert_eq!(client.exec(format!("create database {db} keep 36500"))?, 0);
         assert_eq!(

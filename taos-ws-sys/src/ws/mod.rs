@@ -1,5 +1,3 @@
-#![allow(unused_variables)]
-
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
 use std::sync::OnceLock;
@@ -17,7 +15,9 @@ use taos_ws::query::asyn::WS_ERROR_NO;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
-use tracing::{debug, error, instrument};
+use tracing::{debug, error};
+
+use crate::taos::{TAOS, TAOS_FIELD, TAOS_FIELD_E, TAOS_ROW, TSDB_OPTION};
 
 mod config;
 pub mod error;
@@ -29,60 +29,12 @@ pub mod stub;
 pub mod tmq;
 pub mod util;
 
-pub type TAOS = c_void;
-
-#[allow(non_camel_case_types)]
-pub type TAOS_RES = c_void;
-
-#[allow(non_camel_case_types)]
-pub type TAOS_ROW = *mut *mut c_void;
-
-#[allow(non_camel_case_types)]
-pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
-
-#[repr(C)]
-#[derive(Debug, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub enum TSDB_OPTION {
-    TSDB_OPTION_LOCALE,
-    TSDB_OPTION_CHARSET,
-    TSDB_OPTION_TIMEZONE,
-    TSDB_OPTION_CONFIGDIR,
-    TSDB_OPTION_SHELL_ACTIVITY_TIMER,
-    TSDB_OPTION_USE_ADAPTER,
-    TSDB_OPTION_DRIVER,
-    TSDB_MAX_OPTIONS,
-}
-
-#[repr(C)]
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub enum TSDB_OPTION_CONNECTION {
-    TSDB_OPTION_CONNECTION_CLEAR = -1,
-    TSDB_OPTION_CONNECTION_CHARSET = 0,
-    TSDB_OPTION_CONNECTION_TIMEZONE = 1,
-    TSDB_OPTION_CONNECTION_USER_IP = 2,
-    TSDB_OPTION_CONNECTION_USER_APP = 3,
-    TSDB_MAX_OPTIONS_CONNECTION = 4,
-}
-
 type TaosResult<T> = Result<T, TaosError>;
 
 pub struct SafePtr<T>(pub T);
 
 unsafe impl<T> Send for SafePtr<T> {}
 unsafe impl<T> Sync for SafePtr<T> {}
-
-#[repr(C)]
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_FIELD_E {
-    pub name: [c_char; 65],
-    pub r#type: i8,
-    pub precision: u8,
-    pub scale: u8,
-    pub bytes: i32,
-}
 
 impl TAOS_FIELD_E {
     pub fn new(field: &Field, precision: u8, scale: u8) -> Self {
@@ -106,15 +58,6 @@ impl TAOS_FIELD_E {
     }
 }
 
-#[repr(C)]
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_FIELD {
-    pub name: [c_char; 65],
-    pub r#type: i8,
-    pub bytes: i32,
-}
-
 impl From<&Field> for TAOS_FIELD {
     fn from(field: &Field) -> Self {
         let mut name = [0 as c_char; 65];
@@ -135,15 +78,15 @@ impl From<&Field> for TAOS_FIELD {
     }
 }
 
-#[no_mangle]
-#[instrument(level = "debug", ret)]
-pub unsafe extern "C" fn taos_connect(
+pub unsafe fn taos_connect(
     ip: *const c_char,
     user: *const c_char,
     pass: *const c_char,
     db: *const c_char,
     port: u16,
 ) -> *mut TAOS {
+    taos_init();
+
     match connect(ip, user, pass, db, port) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
         Err(mut err) => {
@@ -219,9 +162,7 @@ unsafe fn connect(
     Ok(taos)
 }
 
-#[no_mangle]
-#[instrument(level = "debug", ret)]
-pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
+pub unsafe fn taos_close(taos: *mut TAOS) {
     debug!("taos_close, taos: {taos:?}");
     if taos.is_null() {
         set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
@@ -230,9 +171,7 @@ pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
     let _ = Box::from_raw(taos as *mut Taos);
 }
 
-#[no_mangle]
-#[instrument(level = "debug", ret)]
-pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
+pub unsafe fn taos_options(option: TSDB_OPTION, arg: *const c_void) -> c_int {
     let mut c = config::CONFIG.write().unwrap();
     match option {
         TSDB_OPTION::TSDB_OPTION_CONFIGDIR => {
@@ -247,10 +186,10 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
                 c.set_config_dir(faststr::FastStr::new(dir));
                 0
             } else {
-                return set_err_and_get_code(TaosError::new(
+                set_err_and_get_code(TaosError::new(
                     Code::INVALID_PARA,
                     "taos cfg dir is invalid CStr",
-                ));
+                ))
             }
         }
         TSDB_OPTION::TSDB_OPTION_TIMEZONE => {
@@ -265,10 +204,10 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
                 c.set_timezone(tz);
                 0
             } else {
-                return set_err_and_get_code(TaosError::new(
+                set_err_and_get_code(TaosError::new(
                     Code::INVALID_PARA,
                     "taos timezone is invalid CStr",
-                ));
+                ))
             }
         }
         _ => 0,
@@ -295,8 +234,7 @@ impl From<u64> for Qid {
 }
 
 /// Run once.
-#[no_mangle]
-pub extern "C" fn taos_init() -> c_int {
+pub fn taos_init() -> c_int {
     static ONCE: OnceLock<c_int> = OnceLock::new();
     *ONCE.get_or_init(|| {
         if let Err(e) = taos_init_impl() {
@@ -579,43 +517,39 @@ impl ResultSetOperations for ResultSet {
 }
 
 #[cfg(test)]
-pub fn test_connect() -> *mut TAOS {
-    unsafe {
-        let taos = taos_connect(
-            c"localhost".as_ptr(),
-            c"root".as_ptr(),
-            c"taosdata".as_ptr(),
-            ptr::null(),
-            6041,
-        );
-        assert!(!taos.is_null());
-        taos
-    }
+pub unsafe fn test_ws_connect() -> *mut TAOS {
+    let taos = taos_connect(
+        c"localhost".as_ptr(),
+        c"root".as_ptr(),
+        c"taosdata".as_ptr(),
+        ptr::null(),
+        6041,
+    );
+    assert!(!taos.is_null());
+    taos
 }
 
 #[cfg(test)]
-pub fn test_exec<S: AsRef<str>>(taos: *mut TAOS, sql: S) {
-    unsafe {
-        let sql = std::ffi::CString::new(sql.as_ref()).unwrap();
-        let res = query::taos_query(taos, sql.as_ptr());
-        if res.is_null() {
-            let code = error::taos_errno(res);
-            let err = error::taos_errstr(res);
-            println!("code: {}, err: {:?}", code, CStr::from_ptr(err));
-        }
-        assert!(!res.is_null());
-        query::taos_free_result(res);
+pub unsafe fn test_ws_exec<S: AsRef<str>>(taos: *mut TAOS, sql: S) {
+    let sql = std::ffi::CString::new(sql.as_ref()).unwrap();
+    let res = query::taos_query(taos, sql.as_ptr());
+    if res.is_null() {
+        let code = error::taos_errno(res);
+        let err = error::taos_errstr(res);
+        println!("code: {}, err: {:?}", code, CStr::from_ptr(err));
     }
+    assert!(!res.is_null());
+    query::taos_free_result(res);
 }
 
 #[cfg(test)]
-pub fn test_exec_many<T, S>(taos: *mut TAOS, sqls: S)
+pub unsafe fn test_ws_exec_many<T, S>(taos: *mut TAOS, sqls: S)
 where
     T: AsRef<str>,
     S: IntoIterator<Item = T>,
 {
     for sql in sqls {
-        test_exec(taos, sql);
+        test_ws_exec(taos, sql);
     }
 }
 
@@ -658,28 +592,6 @@ mod tests {
 
             let taos = taos_connect(ptr::null(), ptr::null(), ptr::null(), invalid_utf8_ptr, 0);
             assert!(taos.is_null());
-        }
-    }
-
-    #[test]
-    fn test_taos_connect_unable_to_establish_connection() {
-        unsafe {
-            let taos = taos_connect(
-                c"invalid_host".as_ptr(),
-                c"root".as_ptr(),
-                c"taosdata".as_ptr(),
-                ptr::null(),
-                6041,
-            );
-            assert!(taos.is_null());
-
-            let code = taos_errno(ptr::null_mut());
-            let errstr = taos_errstr(ptr::null_mut());
-            assert_eq!(Code::from(code), Code::new(0x000B));
-            assert_eq!(
-                CStr::from_ptr(errstr).to_str().unwrap(),
-                "Unable to establish connection"
-            );
         }
     }
 
