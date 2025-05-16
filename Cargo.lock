@@ -3837,6 +3837,7 @@ dependencies = [
  "bytes",
  "cfg-if",
  "criterion",
+ "crossbeam",
  "dashmap",
  "faststr",
  "flume",
