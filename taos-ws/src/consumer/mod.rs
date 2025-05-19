@@ -79,6 +79,7 @@ impl WsTmqSender {
                 message.map_err(WsTmqError::from)??
             }
         };
+        tracing::trace!("recv data: {:?}", data);
         Ok(data)
     }
 }
