@@ -21,7 +21,7 @@ use taos_query::tmq::{
     AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsData, IsOffset,
     MessageSet, SyncOnAsync, Timeout, VGroupId,
 };
-use taos_query::util::{AsyncInlinable, Edition, InlinableRead};
+use taos_query::util::{generate_req_id, AsyncInlinable, Edition, InlinableRead};
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, RawResult, TBuilder};
 use thiserror::Error;
 use tokio::sync::{oneshot, watch, Mutex};
@@ -560,9 +560,8 @@ impl Consumer {
         }
 
         loop {
-            let req_id = self.sender.req_id();
             let action = TmqSend::Poll {
-                req_id,
+                req_id: generate_req_id(),
                 blocking_time: 500,
             };
 
