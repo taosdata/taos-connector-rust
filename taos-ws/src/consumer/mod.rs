@@ -62,6 +62,7 @@ impl WsTmqSender {
         let (tx, rx) = oneshot::channel();
 
         self.queries.insert(req_id, tx);
+        tracing::info!("aaaa send_recv, req_id: {}", req_id);
 
         self.sender
             .send_timeout(msg.to_msg(), send_timeout)
@@ -70,13 +71,14 @@ impl WsTmqSender {
 
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
+        tracing::info!("bbbb send_recv, req_id: {}", req_id);
         let data = tokio::select! {
             _ = &mut sleep, if !sleep.is_elapsed() => {
                tracing::trace!("poll timed out");
                Err(WsTmqError::QueryTimeout("poll".to_string()))?
             }
             message = rx => {
-                tracing::trace!("poll message: {:?}", message);
+                tracing::trace!("xxxxa poll message: {:?}", message);
                 message.map_err(WsTmqError::from)??
             }
         };
