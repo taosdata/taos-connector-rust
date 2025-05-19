@@ -76,6 +76,7 @@ impl WsTmqSender {
                Err(WsTmqError::QueryTimeout("poll".to_string()))?
             }
             message = rx => {
+                tracing::trace!("poll message: {:?}", message);
                 message.map_err(WsTmqError::from)??
             }
         };
@@ -1335,12 +1336,13 @@ impl TmqBuilder {
                                                         }
                                                     }
                                                 }
-                                                tracing::info!("poll bbbb");
+                                                tracing::info!("poll bbbb, ok: {:?}", ok);
                                                 if let Err(Ok(data)) = sender.send(ok.map(|_|recv)) {
                                                     tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data);
                                                     if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
                                                         if !have_message {
                                                             polling_mutex2.store(false, Ordering::Release);
+                                                            tracing::info!("poll eeee");
                                                             continue;
                                                         }
                                                     }
