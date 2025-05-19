@@ -567,6 +567,7 @@ impl Consumer {
             };
 
             let data = self.sender.send_recv(action).await?;
+            tracing::trace!("poll data, data: {data:?}");
             match data {
                 TmqRecvData::Poll(TmqPoll {
                     message_id,
