@@ -642,9 +642,11 @@ impl Consumer {
         tokio::pin!(sleep);
         tokio::select! {
             _ = &mut sleep, if !sleep.is_elapsed() => {
+                tracing::trace!("ffffsdf poll timed out");
                Ok(None)
             }
             message = self.poll_wait() => {
+                tracing::trace!("ffffsdf poll message: {:?}", message);
                 Ok(Some(message?))
             }
         }
