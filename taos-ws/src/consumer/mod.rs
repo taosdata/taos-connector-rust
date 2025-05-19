@@ -653,6 +653,7 @@ impl Consumer {
         tokio::select! {
             _ = &mut sleep, if !sleep.is_elapsed() => {
                 tracing::trace!("ffffsdf poll timed out");
+                self.polling_mutex.store(false, Ordering::Release);
                Ok(None)
             }
             message = self.poll_wait() => {
