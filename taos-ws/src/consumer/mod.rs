@@ -478,6 +478,7 @@ impl WsMessageSet {
 
 impl Consumer {
     async fn poll_wait(&self) -> RawResult<(Offset, MessageSet<Meta, Data>)> {
+        tracing::trace!("asdf poll_wait, auto_commit");
         if self.auto_commit {
             let mut guard = self.auto_commit_offset.lock().await;
             if let Some(offset) = guard.0.take() {
@@ -528,7 +529,7 @@ impl Consumer {
                                 raw_blocks: Arc::new(Mutex::new(None)),
                             };
 
-                            tracing::trace!("Got message in {}ms", dur.as_millis());
+                            tracing::trace!("Got message2 in {}ms", dur.as_millis());
 
                             // Release the lock
                             self.polling_mutex.store(false, Ordering::Release);
@@ -599,7 +600,7 @@ impl Consumer {
                             raw_blocks: Arc::new(Mutex::new(None)),
                         };
 
-                        tracing::trace!("Got message in {}ms", dur.as_millis());
+                        tracing::trace!("Got message1 in {}ms", dur.as_millis());
 
                         // Release the lock
                         self.polling_mutex.store(false, Ordering::Release);
@@ -639,6 +640,7 @@ impl Consumer {
         timeout: Duration,
     ) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
         let sleep = tokio::time::sleep(timeout);
+        tracing::trace!("ffffsdf poll timeout: {:?}", timeout);
         tokio::pin!(sleep);
         tokio::select! {
             _ = &mut sleep, if !sleep.is_elapsed() => {
@@ -754,6 +756,7 @@ impl AsAsyncConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
+        tracing::info!("jkll recv_timeout, timeout: {:?}", timeout);
         match timeout {
             Timeout::Never | Timeout::None => self.poll_timeout(Duration::MAX).await,
             Timeout::Duration(timeout) => self.poll_timeout(timeout).await,
