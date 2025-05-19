@@ -1320,6 +1320,7 @@ impl TmqBuilder {
                                             }
                                         },
                                         TmqRecvData::Poll(_) => {
+                                            tracing::info!("poll aaaa: {:?}", req_id);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 #[cfg(test)]
@@ -1334,6 +1335,7 @@ impl TmqBuilder {
                                                         }
                                                     }
                                                 }
+                                                tracing::info!("poll bbbb");
                                                 if let Err(Ok(data)) = sender.send(ok.map(|_|recv)) {
                                                     tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data);
                                                     if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
@@ -1360,9 +1362,11 @@ impl TmqBuilder {
                                                     polling_mutex2.store(true, Ordering::Release);
                                                 }
                                             }  else {
+                                                tracing::info!("poll cccc");
                                                 if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &recv {
                                                     if !have_message {
                                                         polling_mutex2.store(false, Ordering::Release);
+                                                        tracing::info!("poll dddd");
                                                         continue;
                                                     }
                                                 }
