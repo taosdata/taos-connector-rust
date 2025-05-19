@@ -57,6 +57,7 @@ impl WsTmqSender {
     }
 
     async fn send_recv_timeout(&self, msg: TmqSend, timeout: Duration) -> RawResult<TmqRecvData> {
+        tracing::trace!("send_recv, msgasdfasdfasdf: {:?}", msg);
         let send_timeout = Duration::from_millis(5000);
         let req_id = msg.req_id();
         let (tx, rx) = oneshot::channel();
@@ -64,10 +65,9 @@ impl WsTmqSender {
         self.queries.insert(req_id, tx);
         tracing::info!("aaaa send_recv, req_id: {}", req_id);
 
-        self.sender
-            .send_timeout(msg.to_msg(), send_timeout)
-            .await
-            .map_err(WsTmqError::from)?;
+        let safdasdf = self.sender.send_timeout(msg.to_msg(), send_timeout).await;
+        tracing::trace!("send_recv, safdasdf: {:?}", safdasdf);
+        safdasdf.map_err(WsTmqError::from)?;
 
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
@@ -495,12 +495,16 @@ impl Consumer {
 
         let elapsed = tokio::time::Instant::now();
 
+        tracing::trace!("poll_wait sdafsdf1");
         let is_in_polling =
             self.polling_mutex
                 .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed);
 
+        tracing::trace!("poll_wait sdafsdf111, is_in_polling: {:?}", is_in_polling);
         if is_in_polling.is_err() {
+            tracing::trace!("poll_wait sdafsdf2");
             if let Ok(data) = self.cache.recv_async().await {
+                tracing::trace!("poll_wait sdafsdf3");
                 match data {
                     TmqRecvData::Poll(TmqPoll {
                         message_id,
@@ -532,6 +536,7 @@ impl Consumer {
                             tracing::trace!("Got message2 in {}ms", dur.as_millis());
 
                             // Release the lock
+                            tracing::trace!("poll_wait sdafsdf4");
                             self.polling_mutex.store(false, Ordering::Release);
 
                             if self.auto_commit {
@@ -564,12 +569,14 @@ impl Consumer {
             }
         }
 
+        tracing::trace!("poll_wait sdafsdf555555");
         loop {
             let action = TmqSend::Poll {
                 req_id: generate_req_id(),
                 blocking_time: 500,
             };
 
+            tracing::trace!("poll_wait sdafsdf7778723");
             let data = self.sender.send_recv(action).await?;
             tracing::trace!("poll data, data: {data:?}");
             match data {
@@ -603,6 +610,7 @@ impl Consumer {
                         tracing::trace!("Got message1 in {}ms", dur.as_millis());
 
                         // Release the lock
+                        tracing::trace!("poll_wait sdafsdfasdf9999");
                         self.polling_mutex.store(false, Ordering::Release);
 
                         if self.auto_commit {
@@ -2954,4 +2962,9 @@ mod tests {
 
         Ok(())
     }
+}
+
+#[test]
+fn test_asdfasdf() {
+    println!("h ");
 }
