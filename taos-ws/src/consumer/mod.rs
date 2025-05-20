@@ -73,13 +73,14 @@ impl WsTmqSender {
         tokio::pin!(sleep);
         tracing::info!("bbbb send_recv, req_id: {}", req_id); // 532
         let data = tokio::select! {
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-               tracing::trace!("poll timed out");
-               Err(WsTmqError::QueryTimeout("poll".to_string()))?
-            }
+            biased;
             message = rx => {
                 tracing::trace!("xxxxa poll message: {:?}", message); // 506
                 message.map_err(WsTmqError::from)??
+            }
+            _ = &mut sleep, if !sleep.is_elapsed() => {
+               tracing::trace!("poll timed out");
+               Err(WsTmqError::QueryTimeout("poll".to_string()))?
             }
             else => {
                 tracing::warn!("Received message after cancellation");
@@ -659,14 +660,15 @@ impl Consumer {
         tracing::trace!("ffffsdf poll timeout: {:?}", timeout);
         tokio::pin!(sleep);
         tokio::select! {
+            biased;
+            message = self.poll_wait() => {
+                tracing::trace!("ffffsdf poll message: {:?}", message);
+                Ok(Some(message?))
+            }
             _ = &mut sleep, if !sleep.is_elapsed() => {
                 tracing::trace!("ffffsdf poll timed out");
                 self.polling_mutex.store(false, Ordering::Release);
                Ok(None)
-            }
-            message = self.poll_wait() => {
-                tracing::trace!("ffffsdf poll message: {:?}", message);
-                Ok(Some(message?))
             }
         }
     }
