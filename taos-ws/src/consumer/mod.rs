@@ -1356,35 +1356,36 @@ impl TmqBuilder {
                                                     }
                                                 }
                                                 tracing::info!("poll bbbb, ok: {:?}", ok); // 550
-                                                if let Err(Ok(data)) = sender.send(ok.map(|_|recv)) {
-                                                    tracing::info!("poll casdfccccc, data: {:?}", data);
-                                                    tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data); // 11
-                                                    if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
-                                                        if !have_message {
-                                                            polling_mutex2.store(false, Ordering::Release);
-                                                            tracing::info!("poll eeee"); // 10
-                                                            continue;
-                                                        }
-                                                    }
-
-                                                    if let Err(err) = cache_tx.send(data) {
-                                                        tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
-
-                                                        let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                                        for k in keys {
-                                                            if let Some((_, sender)) = queries_sender.remove(&k) {
-                                                                let _ = sender.send(Err(RawError::new(
-                                                                    WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                                    "Consumer messages lost",
-                                                                )));
+                                                match sender.send(ok.map(|_|recv)) {
+                                                    Err(Ok(data)) => {
+                                                        tracing::info!("poll casdfccccc, data: {:?}", data);
+                                                        tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data); // 11
+                                                        if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
+                                                            if !have_message {
+                                                                polling_mutex2.store(false, Ordering::Release);
+                                                                tracing::info!("poll eeee"); // 10
+                                                                continue;
                                                             }
                                                         }
-                                                        break 'ws;
+
+                                                        if let Err(err) = cache_tx.send(data) {
+                                                            tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
+
+                                                            let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                            for k in keys {
+                                                                if let Some((_, sender)) = queries_sender.remove(&k) {
+                                                                    let _ = sender.send(Err(RawError::new(
+                                                                        WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                                        "Consumer messages lost",
+                                                                    )));
+                                                                }
+                                                            }
+                                                            break 'ws;
+                                                        }
+                                                        tracing::info!("poll ffffasdfas");
+                                                        polling_mutex2.store(true, Ordering::Release);
                                                     }
-                                                    tracing::info!("poll ffffasdfas");
-                                                    polling_mutex2.store(true, Ordering::Release);
-                                                } else {
-                                                    tracing::info!("poll ccccccasdfasdfsda");
+                                                    e => tracing::info!("poll casdfccccc, e: {:?}", e),
                                                 }
                                             }  else {
                                                 tracing::info!("poll cccc");
