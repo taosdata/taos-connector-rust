@@ -69,24 +69,24 @@ impl WsTmqSender {
         tracing::trace!("send_recv, safdasdf: {:?}", safdasdf);
         safdasdf.map_err(WsTmqError::from)?;
 
-        let sleep = tokio::time::sleep(timeout);
-        tokio::pin!(sleep);
+        // let sleep = tokio::time::sleep(timeout);
+        // tokio::pin!(sleep);
         tracing::info!("bbbb send_recv, req_id: {}", req_id); // 532
-        let data = tokio::select! {
-            biased;
-            message = rx => {
-                tracing::trace!("xxxxa poll message: {:?}", message); // 506
-                message.map_err(WsTmqError::from)??
-            }
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-               tracing::trace!("poll timed out");
-               Err(WsTmqError::QueryTimeout("poll".to_string()))?
-            }
-            else => {
-                tracing::warn!("Received message after cancellation");
-                Err(WsTmqError::QueryTimeout("poll".to_string()))?
-            }
-        };
+        let data = rx.await;
+        tracing::trace!("xxxxa poll message111: {:?}", data);
+        let data = data.map_err(WsTmqError::from)??;
+        tracing::trace!("xxxxa poll message222: {:?}", data);
+        // let data = tokio::select! {
+        //     biased;
+        //     message = rx => {
+        //         tracing::trace!("xxxxa poll message: {:?}", message); // 506
+        //         message.map_err(WsTmqError::from)??
+        //     }
+        //     _ = &mut sleep, if !sleep.is_elapsed() => {
+        //        tracing::trace!("poll timed outasdfasdf");
+        //        Err(WsTmqError::QueryTimeout("poll".to_string()))?
+        //     }
+        // };
         tracing::trace!("recv data: {:?}", data); // 506
         Ok(data)
     }
