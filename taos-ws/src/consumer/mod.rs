@@ -81,6 +81,10 @@ impl WsTmqSender {
                 tracing::trace!("xxxxa poll message: {:?}", message); // 526
                 message.map_err(WsTmqError::from)??
             }
+            else => {
+                tracing::warn!("Received message after cancellation");
+                Err(WsTmqError::QueryTimeout("poll".to_string()))?
+            }
         };
         tracing::trace!("recv data: {:?}", data);
         Ok(data)
