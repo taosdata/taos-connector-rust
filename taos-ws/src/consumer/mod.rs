@@ -1357,6 +1357,7 @@ impl TmqBuilder {
                                                 }
                                                 tracing::info!("poll bbbb, ok: {:?}", ok); // 550
                                                 if let Err(Ok(data)) = sender.send(ok.map(|_|recv)) {
+                                                    tracing::info!("poll casdfccccc, data: {:?}", data);
                                                     tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data); // 11
                                                     if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
                                                         if !have_message {
@@ -1382,6 +1383,8 @@ impl TmqBuilder {
                                                     }
                                                     tracing::info!("poll ffffasdfas");
                                                     polling_mutex2.store(true, Ordering::Release);
+                                                } else {
+                                                    tracing::info!("poll ccccccasdfasdfsda");
                                                 }
                                             }  else {
                                                 tracing::info!("poll cccc");
