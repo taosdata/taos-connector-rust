@@ -78,7 +78,7 @@ impl WsTmqSender {
                Err(WsTmqError::QueryTimeout("poll".to_string()))?
             }
             message = rx => {
-                tracing::trace!("xxxxa poll message: {:?}", message);
+                tracing::trace!("xxxxa poll message: {:?}", message); // 526
                 message.map_err(WsTmqError::from)??
             }
         };
@@ -579,9 +579,9 @@ impl Consumer {
                 blocking_time: 500,
             };
 
-            tracing::trace!("poll_wait sdafsdf7778723");
+            tracing::trace!("poll_wait sdafsdf7778723"); // 550
             let data = self.sender.send_recv(action).await?;
-            tracing::trace!("poll data, data: {data:?}");
+            tracing::trace!("poll data, data: {data:?}"); // 526
             match data {
                 TmqRecvData::Poll(TmqPoll {
                     message_id,
@@ -1340,7 +1340,7 @@ impl TmqBuilder {
                                             }
                                         },
                                         TmqRecvData::Poll(_) => {
-                                            tracing::info!("poll aaaa: {:?}", req_id);
+                                            tracing::info!("poll aaaa: {:?}", req_id); // 550
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 #[cfg(test)]
@@ -1355,13 +1355,13 @@ impl TmqBuilder {
                                                         }
                                                     }
                                                 }
-                                                tracing::info!("poll bbbb, ok: {:?}", ok);
+                                                tracing::info!("poll bbbb, ok: {:?}", ok); // 550
                                                 if let Err(Ok(data)) = sender.send(ok.map(|_|recv)) {
-                                                    tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data);
+                                                    tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data); // 11
                                                     if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
                                                         if !have_message {
                                                             polling_mutex2.store(false, Ordering::Release);
-                                                            tracing::info!("poll eeee");
+                                                            tracing::info!("poll eeee"); // 10
                                                             continue;
                                                         }
                                                     }
@@ -1380,6 +1380,7 @@ impl TmqBuilder {
                                                         }
                                                         break 'ws;
                                                     }
+                                                    tracing::info!("poll ffffasdfas");
                                                     polling_mutex2.store(true, Ordering::Release);
                                                 }
                                             }  else {
