@@ -57,7 +57,7 @@ impl WsTmqSender {
     }
 
     async fn send_recv_timeout(&self, msg: TmqSend, timeout: Duration) -> RawResult<TmqRecvData> {
-        tracing::trace!("send_recv, msgasdfasdfasdf: {:?}", msg);
+        tracing::trace!("send_recv, msgasdfasdfasdf: {:?}", msg); // 532
         let send_timeout = Duration::from_millis(5000);
         let req_id = msg.req_id();
         let (tx, rx) = oneshot::channel();
@@ -71,14 +71,14 @@ impl WsTmqSender {
 
         let sleep = tokio::time::sleep(timeout);
         tokio::pin!(sleep);
-        tracing::info!("bbbb send_recv, req_id: {}", req_id);
+        tracing::info!("bbbb send_recv, req_id: {}", req_id); // 532
         let data = tokio::select! {
             _ = &mut sleep, if !sleep.is_elapsed() => {
                tracing::trace!("poll timed out");
                Err(WsTmqError::QueryTimeout("poll".to_string()))?
             }
             message = rx => {
-                tracing::trace!("xxxxa poll message: {:?}", message); // 526
+                tracing::trace!("xxxxa poll message: {:?}", message); // 506
                 message.map_err(WsTmqError::from)??
             }
             else => {
@@ -86,7 +86,7 @@ impl WsTmqSender {
                 Err(WsTmqError::QueryTimeout("poll".to_string()))?
             }
         };
-        tracing::trace!("recv data: {:?}", data);
+        tracing::trace!("recv data: {:?}", data); // 506
         Ok(data)
     }
 }
@@ -578,8 +578,9 @@ impl Consumer {
 
         tracing::trace!("poll_wait sdafsdf555555");
         loop {
+            let req_id = self.sender.req_id();
             let action = TmqSend::Poll {
-                req_id: generate_req_id(),
+                req_id,
                 blocking_time: 500,
             };
 
