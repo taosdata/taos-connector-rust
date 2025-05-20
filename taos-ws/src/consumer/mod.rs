@@ -307,6 +307,7 @@ impl WsMessageBase {
     }
 
     async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
+        tracing::info!("fetch_raw_block_new, message_id: {}", self.message_id);
         let raw_blocks_option = &mut *self.raw_blocks.lock().await;
         if let Some(raw_blocks) = raw_blocks_option {
             if !raw_blocks.is_empty() {
@@ -325,11 +326,13 @@ impl WsMessageBase {
         if let TmqRecvData::Bytes(bytes) = data {
             let raw = RawBlock::parse_from_multi_raw_block(bytes)
                 .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
+            tracing::trace!("fetch_raw_block_new, block: {:?}", raw.len());
             if !raw.is_empty() {
                 raw_blocks_option.replace(raw);
                 return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
             }
         }
+        tracing::warn!("fetch_raw_block_new, no raw blocks");
         Ok(None)
     }
 
