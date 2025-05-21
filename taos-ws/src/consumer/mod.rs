@@ -24,7 +24,7 @@ use taos_query::tmq::{
 use taos_query::util::{AsyncInlinable, Edition, InlinableRead};
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, RawResult, TBuilder};
 use thiserror::Error;
-use tokio::sync::{oneshot, watch, Mutex};
+use tokio::sync::{mpsc, oneshot, watch, Mutex};
 use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::tungstenite::Error as WsError;
@@ -34,8 +34,8 @@ use crate::query::asyn::{is_support_binary_sql, WS_ERROR_NO};
 use crate::query::infra::{ToMessage, WsConnReq, WsRecv, WsRecvData, WsSend};
 use crate::TaosBuilder;
 
-type WsSender = tokio::sync::mpsc::Sender<Message>;
-type WsTmqAgent = Arc<HashMap<ReqId, oneshot::Sender<RawResult<TmqRecvData>>>>;
+type WsSender = mpsc::Sender<Message>;
+type WsTmqAgent = Arc<HashMap<ReqId, mpsc::Sender<RawResult<TmqRecvData>>>>;
 
 #[derive(Debug, Clone)]
 struct WsTmqSender {
@@ -59,7 +59,7 @@ impl WsTmqSender {
     async fn send_recv_timeout(&self, msg: TmqSend, timeout: Duration) -> RawResult<TmqRecvData> {
         let send_timeout = Duration::from_millis(5000);
         let req_id = msg.req_id();
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = mpsc::channel(1);
 
         self.queries.insert(req_id, tx);
 
@@ -75,8 +75,12 @@ impl WsTmqSender {
                tracing::trace!("poll timed out");
                Err(WsTmqError::QueryTimeout("poll".to_string()))?
             }
-            message = rx => {
-                message.map_err(WsTmqError::from)??
+            message = rx.recv() => {
+                if let Some(message) = message {
+                    message.map_err(WsTmqError::from)?
+                } else {
+                    Err(WsTmqError::QueryTimeout("recv".to_string()))?
+                }
             }
         };
         Ok(data)
@@ -1218,7 +1222,7 @@ impl TmqBuilder {
             Err(_) => "2.x".to_string(),
         };
 
-        let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new());
+        let queries = Arc::new(HashMap::<ReqId, mpsc::Sender<_>>::new());
 
         let queries_sender = queries.clone();
         let msg_handler = queries.clone();
@@ -1303,7 +1307,7 @@ impl TmqBuilder {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 // We don't care about the result of the sender for subscribe
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("subscribe message received but no receiver alive");
                                             }
@@ -1313,7 +1317,7 @@ impl TmqBuilder {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 // We don't care about the result of the sender for unsubscribe
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("unsubscribe message received but no receiver alive");
                                             }
@@ -1333,30 +1337,32 @@ impl TmqBuilder {
                                                         }
                                                     }
                                                 }
-                                                if let Err(Ok(data)) = sender.send(ok.map(|_|recv)) {
-                                                    tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data);
-                                                    if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
-                                                        if !have_message {
-                                                            polling_mutex2.store(false, Ordering::Release);
-                                                            continue;
-                                                        }
-                                                    }
-
-                                                    if let Err(err) = cache_tx.send(data) {
-                                                        tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
-
-                                                        let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                                        for k in keys {
-                                                            if let Some((_, sender)) = queries_sender.remove(&k) {
-                                                                let _ = sender.send(Err(RawError::new(
-                                                                    WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                                    "Consumer messages lost",
-                                                                )));
+                                                if let Err(err) = sender.send(ok.map(|_|recv)).await {
+                                                    if let Ok(data) = err.0 {
+                                                        tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data);
+                                                        if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
+                                                            if !have_message {
+                                                                polling_mutex2.store(false, Ordering::Release);
+                                                                continue;
                                                             }
                                                         }
-                                                        break 'ws;
+
+                                                        if let Err(err) = cache_tx.send(data) {
+                                                            tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
+
+                                                            let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                            for k in keys {
+                                                                if let Some((_, sender)) = queries_sender.remove(&k) {
+                                                                    let _ = sender.send(Err(RawError::new(
+                                                                        WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                                        "Consumer messages lost",
+                                                                    ))).await;
+                                                                }
+                                                            }
+                                                            break 'ws;
+                                                        }
+                                                        polling_mutex2.store(true, Ordering::Release);
                                                     }
-                                                    polling_mutex2.store(true, Ordering::Release);
                                                 }
                                             }  else {
                                                 if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &recv {
@@ -1374,7 +1380,7 @@ impl TmqBuilder {
                                                             let _ = sender.send(Err(RawError::new(
                                                                 WS_ERROR_NO::CONN_CLOSED.as_code(),
                                                                 "Consumer messages lost",
-                                                            )));
+                                                            ))).await;
                                                         }
                                                     }
                                                     break 'ws;
@@ -1386,7 +1392,7 @@ impl TmqBuilder {
                                             tracing::trace!("fetch json meta data: {:?}", data);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                if let Err(err) = sender.send(ok.map(|_|recv)) {
+                                                if let Err(err) = sender.send(ok.map(|_|recv)).await {
                                                     tracing::warn!(req_id, kind = "fetch_json_meta", "fetch json meta message received but no receiver alive: {:?}", err);
                                                 }
                                             }  else {
@@ -1396,7 +1402,7 @@ impl TmqBuilder {
                                         TmqRecvData::FetchRaw { .. }=> {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                if let Err(err) = sender.send(ok.map(|_|recv)) {
+                                                if let Err(err) = sender.send(ok.map(|_|recv)).await {
                                                     tracing::warn!(req_id, kind = "fetch_raw_meta", "fetch raw meta message received but no receiver alive: {:?}", err);
                                                 }
                                             }  else {
@@ -1408,7 +1414,7 @@ impl TmqBuilder {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 // We don't care about the result of the sender for commit
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("poll message received but no receiver alive");
                                             }
@@ -1418,7 +1424,7 @@ impl TmqBuilder {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 // We don't care about the result of the sender for fetch
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("poll message received but no receiver alive");
                                             }
@@ -1428,7 +1434,7 @@ impl TmqBuilder {
                                                 let _ = sender.send(Err(RawError::new(
                                                     WS_ERROR_NO::WEBSOCKET_ERROR.as_code(),
                                                     format!("WebSocket internal error: {:?}", &text)
-                                                )));
+                                                ))).await;
                                             }
                                             break 'ws;
                                         }
@@ -1436,7 +1442,7 @@ impl TmqBuilder {
                                             tracing::trace!("assignment done: {:?}", assignment);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("assignment message received but no receiver alive");
                                             }
@@ -1445,7 +1451,7 @@ impl TmqBuilder {
                                             tracing::trace!("seek done: req_id {:?} timing {:?}", &req_id, timing);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("seek message received but no receiver alive");
                                             }
@@ -1454,7 +1460,7 @@ impl TmqBuilder {
                                             tracing::trace!("committed done: {:?}", committed);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("committed message received but no receiver alive");
                                             }
@@ -1463,7 +1469,7 @@ impl TmqBuilder {
                                             tracing::trace!("position done: {:?}", position);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("position message received but no receiver alive");
                                             }
@@ -1471,7 +1477,7 @@ impl TmqBuilder {
                                         TmqRecvData::CommitOffset { timing }=> {
                                             tracing::trace!("commit offset done: {:?}", timing);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             } else {
                                                 tracing::warn!("commit offset message received but no receiver alive");
                                             }
@@ -1502,7 +1508,7 @@ impl TmqBuilder {
 
                                     if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                         tracing::trace!("send data to fetches with id {}", req_id);
-                                        if sender.send(Ok(TmqRecvData::Bytes(part.into()))).is_err() {
+                                        if sender.send(Ok(TmqRecvData::Bytes(part.into()))).await.is_err() {
                                             tracing::warn!(req_id, kind = "binary", "req_id {req_id} not detected, message might be lost");
                                         }
                                     } else {
@@ -1520,7 +1526,7 @@ impl TmqBuilder {
                                     };
                                     for k in keys {
                                         if let Some((_, sender)) = queries_sender.remove(&k) {
-                                            let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.clone())));
+                                            let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.clone()))).await;
                                         }
                                     }
                                     break 'ws;
@@ -1547,7 +1553,7 @@ impl TmqBuilder {
                                         let _ = sender.send(Err(RawError::new(
                                             WS_ERROR_NO::CONN_CLOSED.as_code(),
                                             format!("WebSocket internal error: {err}")
-                                        )));
+                                        ))).await;
                                     }
                                 }
                                 break 'ws;
