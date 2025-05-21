@@ -1342,7 +1342,7 @@ impl TmqBuilder {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 // We don't care about the result of the sender for subscribe
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("subscribe message received but no receiver alive");
                                             }
@@ -1352,7 +1352,7 @@ impl TmqBuilder {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 // We don't care about the result of the sender for unsubscribe
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("unsubscribe message received but no receiver alive");
                                             }
@@ -1465,6 +1465,7 @@ impl TmqBuilder {
                                                     }
                                                     break 'ws;
                                                 }
+                                                tracing::info!("asdfsadfasdfasdf");
                                                 polling_mutex2.store(true, Ordering::Release);
                                             }
                                         },
@@ -1494,7 +1495,7 @@ impl TmqBuilder {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 // We don't care about the result of the sender for commit
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("poll message received but no receiver alive");
                                             }
@@ -1504,7 +1505,7 @@ impl TmqBuilder {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
                                                 // We don't care about the result of the sender for fetch
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("poll message received but no receiver alive");
                                             }
@@ -1514,7 +1515,7 @@ impl TmqBuilder {
                                                 let _ = sender.send(Err(RawError::new(
                                                     WS_ERROR_NO::WEBSOCKET_ERROR.as_code(),
                                                     format!("WebSocket internal error: {:?}", &text)
-                                                )));
+                                                ))).await;
                                             }
                                             break 'ws;
                                         }
@@ -1522,7 +1523,7 @@ impl TmqBuilder {
                                             tracing::trace!("assignment done: {:?}", assignment);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("assignment message received but no receiver alive");
                                             }
@@ -1531,7 +1532,7 @@ impl TmqBuilder {
                                             tracing::trace!("seek done: req_id {:?} timing {:?}", &req_id, timing);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("seek message received but no receiver alive");
                                             }
@@ -1540,7 +1541,7 @@ impl TmqBuilder {
                                             tracing::trace!("committed done: {:?}", committed);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("committed message received but no receiver alive");
                                             }
@@ -1549,7 +1550,7 @@ impl TmqBuilder {
                                             tracing::trace!("position done: {:?}", position);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id)
                                             {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             }  else {
                                                 tracing::warn!("position message received but no receiver alive");
                                             }
@@ -1557,7 +1558,7 @@ impl TmqBuilder {
                                         TmqRecvData::CommitOffset { timing }=> {
                                             tracing::trace!("commit offset done: {:?}", timing);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             } else {
                                                 tracing::warn!("commit offset message received but no receiver alive");
                                             }
@@ -1606,7 +1607,7 @@ impl TmqBuilder {
                                     };
                                     for k in keys {
                                         if let Some((_, sender)) = queries_sender.remove(&k) {
-                                            let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.clone())));
+                                            let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.clone()))).await;
                                         }
                                     }
                                     break 'ws;
@@ -1633,7 +1634,7 @@ impl TmqBuilder {
                                         let _ = sender.send(Err(RawError::new(
                                             WS_ERROR_NO::CONN_CLOSED.as_code(),
                                             format!("WebSocket internal error: {err}")
-                                        )));
+                                        ))).await;
                                     }
                                 }
                                 break 'ws;
