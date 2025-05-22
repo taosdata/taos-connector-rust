@@ -298,6 +298,15 @@ struct WsMessageBase {
 }
 
 impl WsMessageBase {
+    fn new(is_support_fetch_raw: bool, sender: WsTmqSender, message_id: MessageId) -> Self {
+        Self {
+            is_support_fetch_raw,
+            sender,
+            message_id,
+            raw_blocks: Arc::new(Mutex::new(None)),
+        }
+    }
+
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
         if self.is_support_fetch_raw {
             self.fetch_raw_block_new().await
@@ -477,12 +486,60 @@ impl WsMessageSet {
 }
 
 impl Consumer {
-    async fn poll_wait(&self) -> RawResult<(Offset, MessageSet<Meta, Data>)> {
+    pub(crate) async fn poll_timeout(
+        &self,
+        timeout: Duration,
+    ) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
+        let sleep = tokio::time::sleep(timeout);
+        tokio::pin!(sleep);
+        tokio::select! {
+            biased;
+            message = self.poll(timeout) => {
+                message
+            }
+            _ = &mut sleep, if !sleep.is_elapsed() => {
+               Ok(None)
+            }
+        }
+    }
+
+    async fn poll(&self, timeout: Duration) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
+        self.auto_commit().await;
+
+        let elapsed = tokio::time::Instant::now();
+
+        if self
+            .polling_mutex
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            if let Ok(data) = self.cache.recv_async().await {
+                return Ok(self.parse_data(data, elapsed).await);
+            }
+        }
+
+        let blocking_time = match timeout.as_secs() {
+            s if s > 2 => timeout.as_millis() / 2,
+            _ => timeout.as_millis(),
+        };
+
+        let req = TmqSend::Poll {
+            req_id: self.sender.req_id(),
+            blocking_time: blocking_time as _,
+            message_id: self.message_id.load(Ordering::Relaxed),
+        };
+
+        let data = self.sender.send_recv(req).await?;
+        Ok(self.parse_data(data, elapsed).await)
+    }
+
+    async fn auto_commit(&self) {
         if self.auto_commit {
             let mut guard = self.auto_commit_offset.lock().await;
             if let Some(offset) = guard.0.take() {
                 let now = Instant::now();
-                if now - guard.1 > Duration::from_millis(self.auto_commit_interval_ms.unwrap()) {
+                let interval = Duration::from_millis(self.auto_commit_interval_ms.unwrap());
+                if now - guard.1 > interval {
                     guard.1 = now;
                     tracing::trace!("poll auto commit, commit offset: {offset:?}");
                     if let Err(err) = AsAsyncConsumer::commit(self, offset).await {
@@ -491,163 +548,70 @@ impl Consumer {
                 }
             }
         }
-
-        let elapsed = tokio::time::Instant::now();
-
-        let is_in_polling =
-            self.polling_mutex
-                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed);
-
-        if is_in_polling.is_err() {
-            if let Ok(data) = self.cache.recv_async().await {
-                match data {
-                    TmqRecvData::Poll(TmqPoll {
-                        message_id,
-                        database,
-                        have_message,
-                        topic,
-                        vgroup_id,
-                        message_type,
-                        offset,
-                        timing,
-                    }) => {
-                        if have_message {
-                            let dur = elapsed.elapsed();
-                            let offset = Offset {
-                                message_id,
-                                database,
-                                topic,
-                                vgroup_id,
-                                offset,
-                                timing,
-                            };
-                            let message = WsMessageBase {
-                                is_support_fetch_raw: self.support_fetch_raw,
-                                sender: self.sender.clone(),
-                                message_id,
-                                raw_blocks: Arc::new(Mutex::new(None)),
-                            };
-
-                            tracing::trace!("Got message in {}ms", dur.as_millis());
-
-                            // Release the lock
-                            self.polling_mutex.store(false, Ordering::Release);
-
-                            if self.auto_commit {
-                                tracing::trace!("poll auto commit, set offset: {offset:?}");
-                                let mut guard = self.auto_commit_offset.lock().await;
-                                guard.0.replace(offset.clone());
-                            }
-
-                            return match message_type {
-                                MessageType::Meta => Ok((offset, MessageSet::Meta(Meta(message)))),
-                                MessageType::Data => Ok((offset, MessageSet::Data(Data(message)))),
-                                MessageType::MetaData => Ok((
-                                    offset,
-                                    MessageSet::MetaData(
-                                        Meta(message),
-                                        Data(WsMessageBase {
-                                            is_support_fetch_raw: self.support_fetch_raw,
-                                            sender: self.sender.clone(),
-                                            message_id,
-                                            raw_blocks: Arc::new(Mutex::new(None)),
-                                        }),
-                                    ),
-                                )),
-                                MessageType::Invalid => unreachable!(),
-                            };
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-            }
-        }
-
-        loop {
-            let req_id = self.sender.req_id();
-            let action = TmqSend::Poll {
-                req_id,
-                blocking_time: 500,
-            };
-
-            let data = self.sender.send_recv(action).await?;
-            match data {
-                TmqRecvData::Poll(TmqPoll {
-                    message_id,
-                    database,
-                    have_message,
-                    topic,
-                    vgroup_id,
-                    message_type,
-                    offset,
-                    timing,
-                }) => {
-                    if have_message {
-                        let dur = elapsed.elapsed();
-                        let offset = Offset {
-                            message_id,
-                            database,
-                            topic,
-                            vgroup_id,
-                            offset,
-                            timing,
-                        };
-                        let message = WsMessageBase {
-                            is_support_fetch_raw: self.support_fetch_raw,
-                            sender: self.sender.clone(),
-                            message_id,
-                            raw_blocks: Arc::new(Mutex::new(None)),
-                        };
-
-                        tracing::trace!("Got message in {}ms", dur.as_millis());
-
-                        // Release the lock
-                        self.polling_mutex.store(false, Ordering::Release);
-
-                        if self.auto_commit {
-                            tracing::trace!("poll auto commit, set offset: {offset:?}");
-                            let mut guard = self.auto_commit_offset.lock().await;
-                            guard.0.replace(offset.clone());
-                        }
-
-                        break match message_type {
-                            MessageType::Meta => Ok((offset, MessageSet::Meta(Meta(message)))),
-                            MessageType::Data => Ok((offset, MessageSet::Data(Data(message)))),
-                            MessageType::MetaData => Ok((
-                                offset,
-                                MessageSet::MetaData(
-                                    Meta(message),
-                                    Data(WsMessageBase {
-                                        is_support_fetch_raw: self.support_fetch_raw,
-                                        sender: self.sender.clone(),
-                                        message_id,
-                                        raw_blocks: Arc::new(Mutex::new(None)),
-                                    }),
-                                ),
-                            )),
-                            MessageType::Invalid => unreachable!(),
-                        };
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
     }
 
-    pub(crate) async fn poll_timeout(
+    async fn parse_data(
         &self,
-        timeout: Duration,
-    ) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
-        let sleep = tokio::time::sleep(timeout);
-        tokio::pin!(sleep);
-        tokio::select! {
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-               Ok(None)
+        data: TmqRecvData,
+        elapsed: tokio::time::Instant,
+    ) -> Option<(Offset, MessageSet<Meta, Data>)> {
+        if let TmqRecvData::Poll(TmqPoll {
+            message_id,
+            database,
+            have_message,
+            topic,
+            vgroup_id,
+            message_type,
+            offset,
+            timing,
+        }) = data
+        {
+            tracing::trace!("Got message in {}ms", elapsed.elapsed().as_millis());
+
+            if !have_message {
+                return None;
             }
-            message = self.poll_wait() => {
-                Ok(Some(message?))
+
+            let offset = Offset {
+                message_id,
+                database,
+                topic,
+                vgroup_id,
+                offset,
+                timing,
+            };
+
+            if self.auto_commit {
+                tracing::trace!("poll auto commit, set offset: {offset:?}");
+                let mut guard = self.auto_commit_offset.lock().await;
+                guard.0.replace(offset.clone());
             }
+
+            let message =
+                WsMessageBase::new(self.support_fetch_raw, self.sender.clone(), message_id);
+
+            self.message_id.store(message_id, Ordering::Relaxed);
+            self.polling_mutex.store(false, Ordering::Release);
+
+            return match message_type {
+                MessageType::Meta => Some((offset, MessageSet::Meta(Meta(message)))),
+                MessageType::Data => Some((offset, MessageSet::Data(Data(message)))),
+                MessageType::MetaData => Some((
+                    offset,
+                    MessageSet::MetaData(
+                        Meta(message),
+                        Data(WsMessageBase::new(
+                            self.support_fetch_raw,
+                            self.sender.clone(),
+                            message_id,
+                        )),
+                    ),
+                )),
+                MessageType::Invalid => unreachable!(),
+            };
         }
+
+        unreachable!()
     }
 }
 
@@ -1591,6 +1555,7 @@ impl TmqBuilder {
                 .as_deref()
                 .and_then(|s| s.parse::<u64>().ok()),
             auto_commit_offset: Arc::new(Mutex::new((None, Instant::now()))),
+            message_id: AtomicU64::new(0),
         })
     }
 }
@@ -1610,6 +1575,7 @@ pub struct Consumer {
     auto_commit: bool,
     auto_commit_interval_ms: Option<u64>,
     auto_commit_offset: Arc<Mutex<(Option<Offset>, Instant)>>,
+    message_id: AtomicU64,
 }
 
 impl Drop for Consumer {
