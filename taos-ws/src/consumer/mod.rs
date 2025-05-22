@@ -530,6 +530,7 @@ impl Consumer {
         };
 
         let data = self.sender.send_recv(req).await?;
+        tracing::trace!("poll data: {data:?}");
         Ok(self.parse_data(data, elapsed).await)
     }
 
