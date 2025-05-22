@@ -1282,33 +1282,30 @@ impl TmqBuilder {
                                                     }
                                                 }
                                                 if let Err(err) = sender.send(ok.map(|_|recv)).await {
-                                                    match err.0 {
-                                                        Ok(data) => {
-                                                            tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {data:?}");
-                                                            if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
-                                                                if !have_message {
-                                                                    polling_mutex2.store(false, Ordering::Release);
-                                                                    continue;
-                                                                }
+                                                    if let Ok(data) = err.0 {
+                                                        tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {data:?}");
+                                                        if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
+                                                            if !have_message {
+                                                                polling_mutex2.store(false, Ordering::Release);
+                                                                continue;
                                                             }
-
-                                                            if let Err(err) = cache_tx.send(data) {
-                                                                tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
-                                                                let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                                                for k in keys {
-                                                                    if let Some((_, sender)) = queries_sender.remove(&k) {
-                                                                        let _ = sender.send(Err(RawError::new(
-                                                                            WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                                            "Consumer messages lost",
-                                                                        ))).await;
-                                                                    }
-                                                                }
-                                                                break 'ws;
-                                                            }
-
-                                                            polling_mutex2.store(true, Ordering::Release);
                                                         }
-                                                        Err(err) => tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive"),
+
+                                                        if let Err(err) = cache_tx.send(data) {
+                                                            tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
+                                                            let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                            for k in keys {
+                                                                if let Some((_, sender)) = queries_sender.remove(&k) {
+                                                                    let _ = sender.send(Err(RawError::new(
+                                                                        WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                                        "Consumer messages lost",
+                                                                    ))).await;
+                                                                }
+                                                            }
+                                                            break 'ws;
+                                                        }
+
+                                                        polling_mutex2.store(true, Ordering::Release);
                                                     }
                                                 }
                                             }  else {
