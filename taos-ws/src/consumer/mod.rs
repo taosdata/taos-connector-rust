@@ -48,42 +48,21 @@ struct WsTmqSender {
 
 impl WsTmqSender {
     fn req_id(&self) -> ReqId {
-        self.req_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        self.req_id.fetch_add(1, Ordering::SeqCst)
     }
 
     async fn send_recv(&self, msg: TmqSend) -> RawResult<TmqRecvData> {
-        self.send_recv_timeout(msg, Duration::MAX).await
-    }
-
-    async fn send_recv_timeout(&self, msg: TmqSend, timeout: Duration) -> RawResult<TmqRecvData> {
-        let send_timeout = Duration::from_millis(5000);
-        let req_id = msg.req_id();
         let (tx, mut rx) = mpsc::channel(1);
+        self.queries.insert(msg.req_id(), tx);
 
-        self.queries.insert(req_id, tx);
+        let timeout = Duration::from_millis(5000);
 
         self.sender
-            .send_timeout(msg.to_msg(), send_timeout)
+            .send_timeout(msg.to_msg(), timeout)
             .await
             .map_err(WsTmqError::from)?;
 
-        let sleep = tokio::time::sleep(timeout);
-        tokio::pin!(sleep);
-        let data = tokio::select! {
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-               tracing::trace!("poll timed out");
-               Err(WsTmqError::QueryTimeout("poll".to_string()))?
-            }
-            message = rx.recv() => {
-                if let Some(message) = message {
-                    message.map_err(WsTmqError::from)?
-                } else {
-                    Err(WsTmqError::QueryTimeout("recv".to_string()))?
-                }
-            }
-        };
-        Ok(data)
+        rx.recv().await.ok_or(WsTmqError::ChannelClosedError)?
     }
 }
 
@@ -1303,30 +1282,33 @@ impl TmqBuilder {
                                                     }
                                                 }
                                                 if let Err(err) = sender.send(ok.map(|_|recv)).await {
-                                                    if let Ok(data) = err.0 {
-                                                        tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data);
-                                                        if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
-                                                            if !have_message {
-                                                                polling_mutex2.store(false, Ordering::Release);
-                                                                continue;
-                                                            }
-                                                        }
-
-                                                        if let Err(err) = cache_tx.send(data) {
-                                                            tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
-
-                                                            let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                                            for k in keys {
-                                                                if let Some((_, sender)) = queries_sender.remove(&k) {
-                                                                    let _ = sender.send(Err(RawError::new(
-                                                                        WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                                        "Consumer messages lost",
-                                                                    ))).await;
+                                                    match err.0 {
+                                                        Ok(data) => {
+                                                            tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {data:?}");
+                                                            if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
+                                                                if !have_message {
+                                                                    polling_mutex2.store(false, Ordering::Release);
+                                                                    continue;
                                                                 }
                                                             }
-                                                            break 'ws;
+
+                                                            if let Err(err) = cache_tx.send(data) {
+                                                                tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
+                                                                let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                                for k in keys {
+                                                                    if let Some((_, sender)) = queries_sender.remove(&k) {
+                                                                        let _ = sender.send(Err(RawError::new(
+                                                                            WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                                            "Consumer messages lost",
+                                                                        ))).await;
+                                                                    }
+                                                                }
+                                                                break 'ws;
+                                                            }
+
+                                                            polling_mutex2.store(true, Ordering::Release);
                                                         }
-                                                        polling_mutex2.store(true, Ordering::Release);
+                                                        Err(err) => tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive"),
                                                     }
                                                 }
                                             }  else {
@@ -1637,6 +1619,8 @@ pub enum WsTmqError {
     TaosError(#[from] RawError),
     #[error("Receive timeout in {0}")]
     QueryTimeout(String),
+    #[error("channel closed")]
+    ChannelClosedError,
 }
 
 unsafe impl Send for WsTmqError {}
