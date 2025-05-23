@@ -353,6 +353,7 @@ impl WsMessageBase {
         }
         todo!()
     }
+
     async fn fetch_json_meta(&self) -> RawResult<JsonMeta> {
         let req_id = self.sender.req_id();
         let msg = TmqSend::FetchJsonMeta(MessageArgs {
@@ -366,6 +367,7 @@ impl WsMessageBase {
         }
         unreachable!()
     }
+
     async fn fetch_raw_meta(&self) -> RawResult<RawMeta> {
         let req_id = self.sender.req_id();
         let msg = TmqSend::FetchRaw(MessageArgs {
@@ -377,11 +379,9 @@ impl WsMessageBase {
             let message_type = bytes.as_ref().read_u64().unwrap();
             debug_assert_eq!(message_type, 3, "should be meta message type");
             let mut slice = &bytes.iter().as_slice()[8..];
-            // let len = bytes.as_re
             let raw = RawMeta::read_inlined(&mut slice)
                 .await
                 .map_err(|err| RawError::from_string(format!("read raw meta error: {err:?}")))?;
-            // let raw = RawMeta::new(bytes.slice(8..)); // first u64 is message type.
             return Ok(raw);
         }
         unreachable!()
@@ -390,15 +390,6 @@ impl WsMessageBase {
 
 #[derive(Debug)]
 pub struct Meta(WsMessageBase);
-
-// impl WsMetaMessage {
-//     pub async fn as_raw_meta(&self) -> Result<RawMeta> {
-//         self.0.fetch_raw_meta().await
-//     }
-//     pub async fn as_json_meta(&self) -> Result<JsonMeta> {
-//         self.0.fetch_json_meta().await
-//     }
-// }
 
 #[async_trait::async_trait]
 impl IsAsyncMeta for Meta {
@@ -490,11 +481,9 @@ impl Consumer {
 
         let elapsed = tokio::time::Instant::now();
 
-        if let Ok(data) = self.cache.recv_async().await {
-            if let Some(data) = data {
-                tracing::trace!("poll data from cache: {data:?}");
-                return Ok(self.parse_data(data, elapsed).await);
-            }
+        if let Ok(Some(data)) = self.cache.recv_async().await {
+            tracing::trace!("poll data from cache: {data:?}");
+            return Ok(self.parse_data(data, elapsed).await);
         }
 
         let blocking_time = match timeout.as_secs() {
@@ -1158,8 +1147,10 @@ impl TmqBuilder {
                             let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
-                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                        format!("WebSocket internal error: {err}"))));
+                                    let _ = sender.send(Err(RawError::new(
+                                        WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                        format!("WebSocket internal error: {err}"),
+                                    ))).await;
                                 }
                             }
                         }
@@ -1176,8 +1167,10 @@ impl TmqBuilder {
                             let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
-                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                        format!("WebSocket internal error: {err}"))));
+                                    let _ = sender.send(Err(RawError::new(
+                                        WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                        format!("WebSocket internal error: {err}",
+                                    )))).await;
                                 }
                             }
                         }
@@ -1210,25 +1203,22 @@ impl TmqBuilder {
                                     match &recv {
                                         TmqRecvData::Subscribe => {
                                             tracing::trace!("subscribe with: {:?}", req_id);
-
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                                 // We don't care about the result of the sender for subscribe
                                                 let _ = sender.send(ok.map(|_|recv)).await;
-                                            }  else {
+                                            } else {
                                                 tracing::warn!("subscribe message received but no receiver alive");
                                             }
-                                        },
+                                        }
                                         TmqRecvData::Unsubscribe => {
                                             tracing::trace!("unsubscribe with: {:?} success", req_id);
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                                 // We don't care about the result of the sender for unsubscribe
                                                 let _ = sender.send(ok.map(|_|recv)).await;
-                                            }  else {
+                                            } else {
                                                 tracing::warn!("unsubscribe message received but no receiver alive");
                                             }
-                                        },
+                                        }
                                         TmqRecvData::Poll(_) => {
                                             let data = match queries_sender.remove(&req_id) {
                                                 Some((_, sender)) => {
@@ -1360,7 +1350,6 @@ impl TmqBuilder {
                                                 tracing::warn!("commit offset message received but no receiver alive");
                                             }
                                         }
-
                                         _ => unreachable!("unknown tmq response"),
                                     }
                                 }
