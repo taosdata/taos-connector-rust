@@ -492,6 +492,7 @@ impl Consumer {
 
         if let Ok(data) = self.cache.recv_async().await {
             if let Some(data) = data {
+                tracing::trace!("poll data from cache: {data:?}");
                 return Ok(self.parse_data(data, elapsed).await);
             }
         }
