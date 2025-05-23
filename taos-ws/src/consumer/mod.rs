@@ -490,8 +490,7 @@ impl Consumer {
 
         let elapsed = tokio::time::Instant::now();
 
-        let mut guard = self.cache.lock().await;
-        if let Some(data) = guard.recv().await {
+        if let Ok(data) = self.cache.recv_async().await {
             if let Some(data) = data {
                 return Ok(self.parse_data(data, elapsed).await);
             }
@@ -699,8 +698,7 @@ impl AsAsyncConsumer for Consumer {
     }
 
     async fn commit_all(&self) -> RawResult<()> {
-        let guard = self.cache.lock().await;
-        if guard.is_empty() {
+        if !self.cache.is_empty() {
             return Err(RawError::from_string(
                 "polling data is in queue, can't commit all",
             ));
@@ -1194,8 +1192,8 @@ impl TmqBuilder {
             }
         });
 
-        let (cache_tx, cache_rx) = mpsc::channel(1);
-        let _ = cache_tx.send(None).await;
+        let (cache_tx, cache_rx) = flume::bounded(1);
+        let _ = cache_tx.send(None);
 
         tokio::spawn(async move {
             let instant = Instant::now();
@@ -1261,7 +1259,7 @@ impl TmqBuilder {
                                             };
 
                                             tracing::trace!("poll end: {data:?}");
-                                            if let Err(err) = cache_tx.send(data).await {
+                                            if let Err(err) = cache_tx.send(data) {
                                                 tracing::error!("poll end notification failed, break the connection, err: {err:?}");
                                                 let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
                                                 for key in keys {
@@ -1461,7 +1459,7 @@ impl TmqBuilder {
             timeout: self.timeout,
             topics: vec![],
             support_fetch_raw: is_support_binary_sql(&version),
-            cache: Mutex::new(cache_rx),
+            cache: cache_rx,
             auto_commit: self.conf.auto_commit == "true",
             auto_commit_interval_ms: self
                 .conf
@@ -1483,7 +1481,7 @@ pub struct Consumer {
     timeout: Timeout,
     topics: Vec<String>,
     support_fetch_raw: bool,
-    cache: Mutex<mpsc::Receiver<Option<TmqRecvData>>>,
+    cache: flume::Receiver<Option<TmqRecvData>>,
     auto_commit: bool,
     auto_commit_interval_ms: Option<u64>,
     auto_commit_offset: Arc<Mutex<(Option<Offset>, Instant)>>,
