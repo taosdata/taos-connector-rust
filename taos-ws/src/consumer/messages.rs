@@ -276,8 +276,6 @@ pub struct TmqRecv {
     pub message: Option<String>,
     #[serde(default)]
     pub req_id: ReqId,
-    // #[serde(flatten)]
-    // pub args: TmqArgs,
     #[serde(flatten)]
     pub data: TmqRecvData,
 }
