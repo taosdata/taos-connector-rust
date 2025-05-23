@@ -24,20 +24,15 @@ async fn main() -> anyhow::Result<()> {
         let mut consumer = tmq.build().await?;
         consumer.subscribe(["topic_1747812142"]).await?;
 
-        let now = chrono::Local::now();
-        let millis = now.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
-        println!("poll start: {}", millis);
-
-        let mut cnt = 0;
-        let timeout = Timeout::Duration(Duration::from_secs(10));
+        println!("poll start");
         let start = std::time::Instant::now();
 
+        let timeout = Timeout::Duration(Duration::from_secs(2));
         while let Some((offset, _message)) = consumer.recv_timeout(timeout).await? {
-            cnt += 1;
             consumer.commit(offset).await?;
         }
 
-        println!("Received {} messages in {:?}", cnt, start.elapsed());
+        println!("poll end, elapsed: {:?}", start.elapsed());
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
@@ -69,7 +64,7 @@ async fn write_data() -> anyhow::Result<()> {
 
     taos.exec_many(["use test_1747812142"]).await?;
 
-    let num = 5_0000;
+    let num = 50000;
     let mut sqls = Vec::with_capacity(1000);
 
     let ts = SystemTime::now()
