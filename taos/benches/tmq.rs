@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
     ])
     .await?;
 
-    let poll_handle: JoinHandle<Result<(), RawError>> = tokio::spawn(async {
+    let poll_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async {
         let tmq = TmqBuilder::from_dsn("ws://localhost:6041/?group.id=10")?;
         let mut consumer = tmq.build().await?;
         consumer.subscribe(["topic_1747812142"]).await?;
@@ -34,8 +34,6 @@ async fn main() -> anyhow::Result<()> {
 
         println!("poll end, elapsed: {:?}", start.elapsed());
 
-        tokio::time::sleep(Duration::from_secs(3)).await;
-
         consumer.unsubscribe().await;
 
         Ok(())
@@ -48,8 +46,8 @@ async fn main() -> anyhow::Result<()> {
         Ok(())
     });
 
-    poll_handle.await??;
     write_handle.await??;
+    poll_handle.await??;
 
     Ok(())
 }
