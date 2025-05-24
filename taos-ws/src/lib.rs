@@ -569,7 +569,7 @@ mod lib_tests {
     use tracing::*;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    use crate::query::infra::{ToMessage, WsRecv, WsSend};
+    use crate::query::messages::{ToMessage, WsRecv, WsSend};
     use crate::*;
 
     #[cfg(feature = "_with_crypto_provider")]
