@@ -50,6 +50,12 @@ struct Version {
     is_support_binary_sql: bool,
 }
 
+impl Version {
+    fn is_v3(&self) -> bool {
+        self.version.starts_with('3')
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct WsQuerySender {
     version: Version,
@@ -134,8 +140,8 @@ impl WsQuerySender {
 
 #[derive(Debug)]
 pub struct WsTaos {
-    close_signal: watch::Sender<bool>,
     sender: Arc<WsQuerySender>,
+    close_signal: watch::Sender<bool>,
 }
 
 impl Drop for WsTaos {
@@ -314,14 +320,107 @@ impl From<Error> for RawError {
     }
 }
 
-#[instrument(skip_all)]
-async fn read_queries(
+async fn run(
+    mut ws_stream_sender: WsStreamSender,
+    mut ws_stream_reader: WsStreamReader,
+    query_sender: Arc<WsQuerySender>,
+    msg_reader: Receiver<Message>,
+    mut close_reader: watch::Receiver<bool>,
+    info: TaosBuilder,
+) -> RawResult<()> {
+    loop {
+        let (err_tx, mut err_rx) = mpsc::channel(2);
+        let (close_tx, close_rx) = watch::channel(false);
+
+        let send_handle = tokio::spawn(send_messages(
+            ws_stream_sender,
+            msg_reader.clone(),
+            err_tx.clone(),
+            close_rx.clone(),
+        ));
+
+        let recv_handle = tokio::spawn(read_messages(
+            ws_stream_reader,
+            query_sender.queries.clone(),
+            query_sender.results.clone(),
+            query_sender.sender.clone(),
+            query_sender.version.is_v3(),
+            close_rx,
+            err_tx,
+        ));
+
+        tokio::select! {
+            err = err_rx.recv() => {
+                if let Some(err) = err {
+                    if !is_disconnect_error(&err) {
+                        handle_error(query_sender.queries.clone(), &err).await;
+                        break;
+                    }
+                }
+            }
+            _ = close_reader.changed() => {
+                tracing::trace!("close reader task");
+                let _ = close_tx.send(true);
+                break;
+            }
+            _ = send_handle => break,
+            _ = recv_handle => break,
+        }
+
+        (ws_stream_sender, ws_stream_reader) = reconnect(&info).await?;
+    }
+
+    Ok(())
+}
+
+async fn send_messages(
+    mut ws_stream_sender: WsStreamSender,
+    msg_reader: Receiver<Message>,
+    err_sender: mpsc::Sender<WsError>,
+    mut close_reader: watch::Receiver<bool>,
+) {
+    let mut interval = time::interval(Duration::from_secs(53));
+
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                if let Err(err) = ws_stream_sender.send(Message::Ping(b"TAOS".to_vec())).await {
+                    tracing::error!("Write websocket ping error: {}", err);
+                    err_sender.send(err).await.unwrap();
+                    break;
+                }
+                let _ = ws_stream_sender.flush().await;
+            }
+            _ = close_reader.changed() => {
+                let _= ws_stream_sender.send(Message::Close(None)).await;
+                let _ = ws_stream_sender.close().await;
+                tracing::trace!("close sender task");
+                break;
+            }
+            msg = msg_reader.recv_async() => {
+                match msg {
+                    Ok(msg) => {
+                        if let Err(err) = ws_stream_sender.send(msg).await {
+                            tracing::error!("Write websocket error: {}", err);
+                            err_sender.send(err).await.unwrap();
+                            break;
+                        }
+                    }
+                    Err(_) => break, // TODO: handle error
+                }
+            }
+        }
+    }
+}
+
+async fn read_messages(
     mut reader: WsStreamReader,
     queries_sender: QueryAgent,
     fetches_sender: Arc<QueryResMapper>,
     ws2: WsSender,
     is_v3: bool,
     mut close_listener: watch::Receiver<bool>,
+    err_sender: mpsc::Sender<WsError>,
 ) {
     let parse_frame = |frame: Message| {
         match frame {
@@ -568,11 +667,13 @@ async fn read_queries(
                     }
                     Err(e) => {
                         tracing::error!("reader err: {e:?}");
+                        err_sender.send(e).await.unwrap();
                         break;
                     }
                 }
             }
             _ = close_listener.changed() => {
+                // TODO: handle close signal
                 tracing::trace!("close reader task");
                 let mut keys = Vec::with_capacity(queries_sender.len());
                 queries_sender.scan(|k, _| {
@@ -598,104 +699,6 @@ async fn read_queries(
     for k in keys {
         if let Some((_, sender)) = queries_sender.remove(&k) {
             let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
-        }
-    }
-}
-
-async fn run(
-    mut ws_stream_sender: WsStreamSender,
-    mut ws_stream_reader: WsStreamReader,
-    query_sender: Arc<WsQuerySender>,
-    msg_reader: Receiver<Message>,
-    mut close_reader: watch::Receiver<bool>,
-    info: TaosBuilder,
-) -> RawResult<()> {
-    loop {
-        let (err_tx, mut err_rx) = mpsc::channel(2);
-        let (close_tx, close_rx) = watch::channel(false);
-
-        let send_task = tokio::spawn(send_messages(
-            ws_stream_sender,
-            msg_reader.clone(),
-            query_sender.queries.clone(),
-            err_tx.clone(),
-            close_rx.clone(),
-        ));
-
-        let recv_task = tokio::spawn(read_messages(ws_stream_reader, err_tx, close_rx));
-
-        tokio::select! {
-            err = err_rx.recv() => {
-                if let Some(err) = err {
-                    if !is_disconnect_error(&err) {
-                        handle_error(query_sender.queries.clone(), &err).await;
-                        break;
-                    }
-                }
-            }
-            _ = close_reader.changed() => {
-                tracing::trace!("close reader task");
-                let _ = close_tx.send(true);
-                break;
-            }
-            _ = send_task => break,
-            _ = recv_task => break,
-        }
-
-        (ws_stream_sender, ws_stream_reader) = reconnect(&info).await?;
-    }
-
-    Ok(())
-}
-
-async fn send_messages(
-    mut ws_stream_sender: WsStreamSender,
-    msg_reader: Receiver<Message>,
-    queries: QueryAgent,
-    err_sender: mpsc::Sender<WsError>,
-    mut close_reader: watch::Receiver<bool>,
-) {
-    let mut interval = time::interval(Duration::from_secs(53));
-
-    loop {
-        tokio::select! {
-            _ = interval.tick() => {
-                if let Err(err) = ws_stream_sender.send(Message::Ping(b"TAOS".to_vec())).await {
-                    tracing::error!("Write websocket ping error: {}", err);
-                    err_sender.send(err).await.unwrap();
-                    break;
-                }
-                let _ = ws_stream_sender.flush().await;
-            }
-            _ = close_reader.changed() => {
-                let _= ws_stream_sender.send(Message::Close(None)).await;
-                let _ = ws_stream_sender.close().await;
-                tracing::trace!("close sender task");
-                break;
-            }
-            msg = msg_reader.recv_async() => {
-                match msg {
-                    Ok(msg) => {
-                        if let Err(err) = ws_stream_sender.send(msg).await {
-                            tracing::error!("Write websocket error: {}", err);
-                            err_sender.send(err).await.unwrap();
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        }
-    }
-}
-
-async fn read_messages(
-    ws_rx: WsStreamReader,
-    err_tx: mpsc::Sender<WsError>,
-    mut close_rx: watch::Receiver<bool>,
-) {
-    tokio::select! {
-        _ = close_rx.changed() => {
         }
     }
 }
@@ -728,14 +731,6 @@ async fn handle_error(queries3: QueryAgent, err: &WsError) {
         }
     }
 }
-
-// fn is_read_disconnect_error(item: &Result<Message, WsError>) -> bool {
-//     if let Err(e) = item {
-//         Self::is_write_disconnect_error(e)
-//     } else {
-//         false
-//     }
-// }
 
 pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
     let nums1: Vec<u32> = v1
@@ -885,7 +880,7 @@ impl WsTaos {
         Self::from_wsinfo(&info).await
     }
 
-    pub(crate) async fn _from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
+    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
         let ws_stream = info.build_stream(info.to_query_url()).await?;
         let (mut ws_stream_tx, mut ws_stream_rx) = ws_stream.split();
 
@@ -921,222 +916,6 @@ impl WsTaos {
         ));
 
         Ok(ws_taos)
-    }
-
-    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        // let ws = info.build_stream(info.to_query_url()).await?;
-
-        // let req_id = 0;
-        // let (mut sender, mut reader) = ws.split();
-
-        // // send version req
-        // let version = WsSend::Version;
-        // sender.send(version.to_msg()).await.map_err(|err| {
-        //     RawError::any(err)
-        //         .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
-        //         .context("Send version request message error")
-        // })?;
-        // let duration = Duration::from_secs(8);
-        // let version_future = async {
-        //     let max_non_version = 5;
-        //     let mut count = 0;
-        //     loop {
-        //         count += 1;
-        //         if let Some(message) = reader.next().await {
-        //             match message {
-        //                 Ok(Message::Text(text)) => {
-        //                     let v: WsRecv = serde_json::from_str(&text).map_err(|err| {
-        //                         RawError::any(err)
-        //                             .with_code(WS_ERROR_NO::DE_ERROR.as_code())
-        //                             .context("Parser text as json error")
-        //                     })?;
-        //                     let (_req_id, data, ok) = v.ok();
-        //                     match data {
-        //                         WsRecvData::Version { version } => {
-        //                             ok?;
-        //                             return Ok(version);
-        //                         }
-        //                         _ => return Ok("2.x".to_string()),
-        //                     }
-        //                 }
-        //                 Ok(Message::Ping(bytes)) => {
-        //                     sender.send(Message::Pong(bytes)).await.map_err(|err| {
-        //                         RawError::any(err)
-        //                             .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
-        //                             .context("Send pong message error")
-        //                     })?;
-        //                     if count >= max_non_version {
-        //                         return Ok("2.x".to_string());
-        //                     }
-        //                     count += 1;
-        //                 }
-        //                 _ => return Ok("2.x".to_string()),
-        //             }
-        //         } else {
-        //             bail!("Expect version message, but got nothing");
-        //         }
-        //     }
-        // }
-        // .in_current_span();
-        // let version = match tokio::time::timeout(duration, version_future).await {
-        //     Ok(Ok(version)) => version,
-        //     Ok(Err(err)) => {
-        //         return Err(RawError::any(err).context("Version fetching error"));
-        //     }
-        //     Err(_) => "2.x".to_string(),
-        // };
-        // let is_v3 = !version.starts_with('2');
-        // let is_support_binary_sql = is_v3 && is_support_binary_sql(&version);
-
-        // // send conn req
-        // let login = WsSend::Conn {
-        //     req_id,
-        //     req: info.to_conn_request(),_
-        // };
-        // sender.send(login.to_msg()).await.maperr(Error::from)?;
-        // while let Some(Ok(message)) = reader.next().await {
-        //     match message {
-        //         Message::Text(text) => {
-        //             let v: WsRecv = serde_json::from_str(&text).unwrap();
-        //             let (_req_id, data, ok) = v.ok();
-        //             match data {
-        //                 WsRecvData::Conn => {
-        //                     ok?;
-        //                     break;
-        //                 }
-        //                 WsRecvData::Version { .. } => {}
-        //                 data => {
-        //                     return Err(RawError::from_string(format!(
-        //                         "Unexpected login result: {data:?}"
-        //                     )))
-        //                 }
-        //             }
-        //         }
-        //         Message::Ping(bytes) => {
-        //             sender
-        //                 .send(Message::Pong(bytes))
-        //                 .await
-        //                 .map_err(RawError::from_any)?;
-        //         }
-        //         _ => {
-        //             return Err(RawError::from_string(format!(
-        //                 "unexpected message on login: {message:?}"
-        //             )));
-        //         }
-        //     }
-        // }
-
-        // // HashMap<ReqId, oneshot::Sender<RawResult<WsRecvData>>>
-        // let queries2 = Arc::new(QueryInner::new());
-        // let queries2_cloned = queries2.clone();
-        // let queries3 = queries2.clone();
-
-        // // HashMap<ResId, ReqId>
-        // let fetches_sender = Arc::new(QueryResMapper::new());
-        // let results = fetches_sender.clone();
-
-        // // reserve
-        // let (ws, msg_recv) = flume::bounded(64);
-        // let ws2 = ws.clone();
-
-        // // Connection watcher
-        // let (tx, mut rx) = watch::channel(false);
-        // let close_listener = rx.clone();
-
-        // tokio::spawn(async move {
-        //     let mut interval = time::interval(Duration::from_secs(53));
-
-        //     loop {
-        //         tokio::select! {
-        //             _ = interval.tick() => {
-        //                 if let Err(err) = sender.send(Message::Ping(b"TAOS".to_vec())).await {
-        //                     tracing::error!("Write websocket ping error: {}", err);
-        //                     break;
-        //                 }
-        //                 let _ = sender.flush().await;
-        //             }
-        //             _ = rx.changed() => {
-        //                 let _= sender.send(Message::Close(None)).await;
-        //                 let _ = sender.close().await;
-        //                 tracing::trace!("close sender task");
-        //                 break;
-        //             }
-        //             msg = msg_recv.recv_async() => {
-        //                 match msg {
-        //                     Ok(msg) => {
-        //                         // send ws req
-        //                         if let Err(err) = sender.send(msg).await {
-        //                             tracing::error!("Write websocket error: {}", err);
-        //                             let mut keys = Vec::new();
-        //                             queries3.scan(|k, _| keys.push(*k));
-        //                             for k in keys {
-        //                                 if let Some((_, sender)) = queries3.remove_async(&k).await {
-        //                                     // send conn closed err
-        //                                     let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
-        //                                 }
-        //                             }
-        //                             break;
-        //                         }
-        //                     }
-        //                     Err(_) => {
-        //                         break;
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }.in_current_span());
-
-        // // recv ws resp
-        // tokio::spawn(read_queries(
-        //     reader,
-        //     queries2,
-        //     fetches_sender,
-        //     ws2,
-        //     is_v3,
-        //     close_listener,
-        // ));
-
-        // // update
-        // let manager = Arc::new(Manager {
-        //     sender: ws.clone(),
-        //     queries: queries2_cloned.clone(),
-        // });
-
-        // let (tx, mut rx) = watch::channel(false);
-        // let close_listener = rx.clone();
-
-        // let (msg_tx, msg_rx) = flume::bounded(64);
-        // // let ws2 = ws.clone();
-        // let msg_rx = msg_rx.clone();
-
-        // let queries2 = Arc::new(QueryInner::new());
-        // let queries2_cloned = queries2.clone();
-
-        // let fetches_sender = Arc::new(QueryResMapper::new());
-        // let results = fetches_sender.clone();
-
-        // let sender = Arc::new(WsQuerySender {
-        //     version: Version {
-        //         version: "".to_string(),
-        //         is_support_binary_sql: true,
-        //     },
-        //     req_id: Arc::default(),
-        //     sender: msg_tx,
-        //     queries: queries2_cloned,
-        //     results,
-        // });
-
-        // let mut ws_taos = WsTaos {
-        //     close_signal: tx,
-        //     sender: sender.clone(),
-        //     // manager: manager.clone(),
-        // };
-
-        // tokio::spawn(run(sender, info.clone()));
-
-        // Ok(ws_taos)
-        todo!()
     }
 
     pub async fn write_meta(&self, raw: &RawMeta) -> RawResult<()> {
