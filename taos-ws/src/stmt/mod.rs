@@ -16,7 +16,7 @@ use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 use tokio::sync::{oneshot, watch};
 use tokio_tungstenite::tungstenite::protocol::Message;
 
-use crate::query::infra::ToMessage;
+use crate::query::messages::ToMessage;
 use crate::{Taos, TaosBuilder};
 
 mod messages;

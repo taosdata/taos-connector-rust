@@ -31,7 +31,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{instrument, trace, Instrument};
 
-use super::infra::*;
+use super::messages::*;
 use super::TaosBuilder;
 
 type WsSender = flume::Sender<Message>;

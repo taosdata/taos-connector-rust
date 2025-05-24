@@ -10,7 +10,7 @@ use taos_query::common::{Field, Precision, Ty};
 use taos_query::prelude::RawError;
 use taos_query::tmq::{Assignment, VGroupId};
 
-use crate::query::infra::{ToMessage, WsConnReq};
+use crate::query::messages::{ToMessage, WsConnReq};
 
 pub type ReqId = u64;
 

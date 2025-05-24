@@ -31,7 +31,7 @@ use tokio_tungstenite::tungstenite::Error as WsError;
 use tracing::warn;
 
 use crate::query::asyn::{is_support_binary_sql, WS_ERROR_NO};
-use crate::query::infra::{ToMessage, WsConnReq, WsRecv, WsRecvData, WsSend};
+use crate::query::messages::{ToMessage, WsConnReq, WsRecv, WsRecvData, WsSend};
 use crate::TaosBuilder;
 
 type WsSender = mpsc::Sender<Message>;

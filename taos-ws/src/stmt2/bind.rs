@@ -3,7 +3,7 @@ use taos_query::common::{BorrowedValue, ColumnView, Value};
 use taos_query::stmt2::Stmt2BindParam;
 use taos_query::RawResult;
 
-use crate::query::infra::{BindType, ReqId, Stmt2Field, StmtId};
+use crate::query::messages::{BindType, ReqId, Stmt2Field, StmtId};
 
 const REQ_ID_POS: usize = 0;
 const STMT_ID_POS: usize = REQ_ID_POS + 8;
@@ -508,7 +508,7 @@ mod tests {
     use taos_query::common::{ColumnView, Timestamp, Ty, Value};
 
     use super::{bind_params_to_bytes, Stmt2BindParam};
-    use crate::query::infra::BindType;
+    use crate::query::messages::BindType;
     use crate::stmt2::Stmt2Field;
 
     #[test]

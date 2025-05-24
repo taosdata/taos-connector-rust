@@ -382,7 +382,7 @@ impl ToMessage for WsSend {}
 #[cfg(test)]
 mod tests {
     use super::BindType;
-    use crate::query::infra::{WsRecv, WsSend};
+    use crate::query::messages::{WsRecv, WsSend};
     use crate::query::WsConnReq;
     use crate::TaosBuilder;
 
