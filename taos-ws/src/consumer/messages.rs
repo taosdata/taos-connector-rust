@@ -128,6 +128,7 @@ pub enum TmqSend {
     Poll {
         req_id: ReqId,
         blocking_time: i64,
+        message_id: MessageId,
     },
     FetchJsonMeta(MessageArgs),
     FetchRaw(MessageArgs),
@@ -275,8 +276,6 @@ pub struct TmqRecv {
     pub message: Option<String>,
     #[serde(default)]
     pub req_id: ReqId,
-    // #[serde(flatten)]
-    // pub args: TmqArgs,
     #[serde(flatten)]
     pub data: TmqRecvData,
 }

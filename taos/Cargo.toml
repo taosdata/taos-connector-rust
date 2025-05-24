@@ -75,6 +75,10 @@ name = "stmt_interlace"
 harness = false
 name = "stmt2_interlace"
 
+[[bench]]
+harness = false
+name = "tmq"
+
 [features]
 deadpool = ["taos-query/deadpool"]
 default = ["ws-rustls", "optin", "deadpool"]

@@ -5,7 +5,7 @@ mod messages;
 use std::collections::{HashSet, VecDeque};
 use std::fmt::Debug;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -24,7 +24,7 @@ use taos_query::tmq::{
 use taos_query::util::{AsyncInlinable, Edition, InlinableRead};
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, RawResult, TBuilder};
 use thiserror::Error;
-use tokio::sync::{oneshot, watch, Mutex};
+use tokio::sync::{mpsc, oneshot, watch, Mutex};
 use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::tungstenite::Error as WsError;
@@ -34,8 +34,8 @@ use crate::query::asyn::{is_support_binary_sql, WS_ERROR_NO};
 use crate::query::infra::{ToMessage, WsConnReq, WsRecv, WsRecvData, WsSend};
 use crate::TaosBuilder;
 
-type WsSender = tokio::sync::mpsc::Sender<Message>;
-type WsTmqAgent = Arc<HashMap<ReqId, oneshot::Sender<RawResult<TmqRecvData>>>>;
+type WsSender = mpsc::Sender<Message>;
+type WsTmqAgent = Arc<HashMap<ReqId, mpsc::Sender<RawResult<TmqRecvData>>>>;
 
 #[derive(Debug, Clone)]
 struct WsTmqSender {
@@ -48,38 +48,21 @@ struct WsTmqSender {
 
 impl WsTmqSender {
     fn req_id(&self) -> ReqId {
-        self.req_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        self.req_id.fetch_add(1, Ordering::SeqCst)
     }
 
     async fn send_recv(&self, msg: TmqSend) -> RawResult<TmqRecvData> {
-        self.send_recv_timeout(msg, Duration::MAX).await
-    }
+        let (tx, mut rx) = mpsc::channel(1);
+        self.queries.insert(msg.req_id(), tx);
 
-    async fn send_recv_timeout(&self, msg: TmqSend, timeout: Duration) -> RawResult<TmqRecvData> {
-        let send_timeout = Duration::from_millis(5000);
-        let req_id = msg.req_id();
-        let (tx, rx) = oneshot::channel();
-
-        self.queries.insert(req_id, tx);
+        let timeout = Duration::from_millis(5000);
 
         self.sender
-            .send_timeout(msg.to_msg(), send_timeout)
+            .send_timeout(msg.to_msg(), timeout)
             .await
             .map_err(WsTmqError::from)?;
 
-        let sleep = tokio::time::sleep(timeout);
-        tokio::pin!(sleep);
-        let data = tokio::select! {
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-               tracing::trace!("poll timed out");
-               Err(WsTmqError::QueryTimeout("poll".to_string()))?
-            }
-            message = rx => {
-                message.map_err(WsTmqError::from)??
-            }
-        };
-        Ok(data)
+        rx.recv().await.ok_or(WsTmqError::ChannelClosedError)?
     }
 }
 
@@ -294,6 +277,15 @@ struct WsMessageBase {
 }
 
 impl WsMessageBase {
+    fn new(is_support_fetch_raw: bool, sender: WsTmqSender, message_id: MessageId) -> Self {
+        Self {
+            is_support_fetch_raw,
+            sender,
+            message_id,
+            raw_blocks: Arc::new(Mutex::new(None)),
+        }
+    }
+
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
         if self.is_support_fetch_raw {
             self.fetch_raw_block_new().await
@@ -361,6 +353,7 @@ impl WsMessageBase {
         }
         todo!()
     }
+
     async fn fetch_json_meta(&self) -> RawResult<JsonMeta> {
         let req_id = self.sender.req_id();
         let msg = TmqSend::FetchJsonMeta(MessageArgs {
@@ -374,6 +367,7 @@ impl WsMessageBase {
         }
         unreachable!()
     }
+
     async fn fetch_raw_meta(&self) -> RawResult<RawMeta> {
         let req_id = self.sender.req_id();
         let msg = TmqSend::FetchRaw(MessageArgs {
@@ -385,11 +379,9 @@ impl WsMessageBase {
             let message_type = bytes.as_ref().read_u64().unwrap();
             debug_assert_eq!(message_type, 3, "should be meta message type");
             let mut slice = &bytes.iter().as_slice()[8..];
-            // let len = bytes.as_re
             let raw = RawMeta::read_inlined(&mut slice)
                 .await
                 .map_err(|err| RawError::from_string(format!("read raw meta error: {err:?}")))?;
-            // let raw = RawMeta::new(bytes.slice(8..)); // first u64 is message type.
             return Ok(raw);
         }
         unreachable!()
@@ -398,15 +390,6 @@ impl WsMessageBase {
 
 #[derive(Debug)]
 pub struct Meta(WsMessageBase);
-
-// impl WsMetaMessage {
-//     pub async fn as_raw_meta(&self) -> Result<RawMeta> {
-//         self.0.fetch_raw_meta().await
-//     }
-//     pub async fn as_json_meta(&self) -> Result<JsonMeta> {
-//         self.0.fetch_json_meta().await
-//     }
-// }
 
 #[async_trait::async_trait]
 impl IsAsyncMeta for Meta {
@@ -473,12 +456,59 @@ impl WsMessageSet {
 }
 
 impl Consumer {
-    async fn poll_wait(&self) -> RawResult<(Offset, MessageSet<Meta, Data>)> {
+    pub(crate) async fn poll_timeout(
+        &self,
+        timeout: Duration,
+    ) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
+        tracing::trace!("poll_timeout: {timeout:?}");
+        let sleep = tokio::time::sleep(timeout);
+        tokio::pin!(sleep);
+        tokio::select! {
+            biased;
+            message = self.poll(timeout) => {
+                tracing::trace!("poll_timeout message: {message:?}");
+                message
+            }
+            _ = &mut sleep, if !sleep.is_elapsed() => {
+                tracing::trace!("poll_timeout timeout");
+                Ok(None)
+            }
+        }
+    }
+
+    async fn poll(&self, timeout: Duration) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
+        self.auto_commit().await;
+
+        let elapsed = tokio::time::Instant::now();
+
+        if let Ok(Some(data)) = self.cache.recv_async().await {
+            tracing::trace!("poll data from cache: {data:?}");
+            return Ok(self.parse_data(data, elapsed).await);
+        }
+
+        let blocking_time = match timeout.as_secs() {
+            s if s > 2 => timeout.as_millis() / 2,
+            _ => timeout.as_millis(),
+        };
+
+        let req = TmqSend::Poll {
+            req_id: self.sender.req_id(),
+            blocking_time: blocking_time as _,
+            message_id: self.message_id.load(Ordering::Relaxed),
+        };
+
+        let data = self.sender.send_recv(req).await?;
+        tracing::trace!("poll data: {data:?}");
+        Ok(self.parse_data(data, elapsed).await)
+    }
+
+    async fn auto_commit(&self) {
         if self.auto_commit {
             let mut guard = self.auto_commit_offset.lock().await;
             if let Some(offset) = guard.0.take() {
                 let now = Instant::now();
-                if now - guard.1 > Duration::from_millis(self.auto_commit_interval_ms.unwrap()) {
+                let interval = Duration::from_millis(self.auto_commit_interval_ms.unwrap());
+                if now - guard.1 > interval {
                     guard.1 = now;
                     tracing::trace!("poll auto commit, commit offset: {offset:?}");
                     if let Err(err) = AsAsyncConsumer::commit(self, offset).await {
@@ -487,163 +517,69 @@ impl Consumer {
                 }
             }
         }
-
-        let elapsed = tokio::time::Instant::now();
-
-        let is_in_polling =
-            self.polling_mutex
-                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed);
-
-        if is_in_polling.is_err() {
-            if let Ok(data) = self.cache.recv_async().await {
-                match data {
-                    TmqRecvData::Poll(TmqPoll {
-                        message_id,
-                        database,
-                        have_message,
-                        topic,
-                        vgroup_id,
-                        message_type,
-                        offset,
-                        timing,
-                    }) => {
-                        if have_message {
-                            let dur = elapsed.elapsed();
-                            let offset = Offset {
-                                message_id,
-                                database,
-                                topic,
-                                vgroup_id,
-                                offset,
-                                timing,
-                            };
-                            let message = WsMessageBase {
-                                is_support_fetch_raw: self.support_fetch_raw,
-                                sender: self.sender.clone(),
-                                message_id,
-                                raw_blocks: Arc::new(Mutex::new(None)),
-                            };
-
-                            tracing::trace!("Got message in {}ms", dur.as_millis());
-
-                            // Release the lock
-                            self.polling_mutex.store(false, Ordering::Release);
-
-                            if self.auto_commit {
-                                tracing::trace!("poll auto commit, set offset: {offset:?}");
-                                let mut guard = self.auto_commit_offset.lock().await;
-                                guard.0.replace(offset.clone());
-                            }
-
-                            return match message_type {
-                                MessageType::Meta => Ok((offset, MessageSet::Meta(Meta(message)))),
-                                MessageType::Data => Ok((offset, MessageSet::Data(Data(message)))),
-                                MessageType::MetaData => Ok((
-                                    offset,
-                                    MessageSet::MetaData(
-                                        Meta(message),
-                                        Data(WsMessageBase {
-                                            is_support_fetch_raw: self.support_fetch_raw,
-                                            sender: self.sender.clone(),
-                                            message_id,
-                                            raw_blocks: Arc::new(Mutex::new(None)),
-                                        }),
-                                    ),
-                                )),
-                                MessageType::Invalid => unreachable!(),
-                            };
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-            }
-        }
-
-        loop {
-            let req_id = self.sender.req_id();
-            let action = TmqSend::Poll {
-                req_id,
-                blocking_time: 500,
-            };
-
-            let data = self.sender.send_recv(action).await?;
-            match data {
-                TmqRecvData::Poll(TmqPoll {
-                    message_id,
-                    database,
-                    have_message,
-                    topic,
-                    vgroup_id,
-                    message_type,
-                    offset,
-                    timing,
-                }) => {
-                    if have_message {
-                        let dur = elapsed.elapsed();
-                        let offset = Offset {
-                            message_id,
-                            database,
-                            topic,
-                            vgroup_id,
-                            offset,
-                            timing,
-                        };
-                        let message = WsMessageBase {
-                            is_support_fetch_raw: self.support_fetch_raw,
-                            sender: self.sender.clone(),
-                            message_id,
-                            raw_blocks: Arc::new(Mutex::new(None)),
-                        };
-
-                        tracing::trace!("Got message in {}ms", dur.as_millis());
-
-                        // Release the lock
-                        self.polling_mutex.store(false, Ordering::Release);
-
-                        if self.auto_commit {
-                            tracing::trace!("poll auto commit, set offset: {offset:?}");
-                            let mut guard = self.auto_commit_offset.lock().await;
-                            guard.0.replace(offset.clone());
-                        }
-
-                        break match message_type {
-                            MessageType::Meta => Ok((offset, MessageSet::Meta(Meta(message)))),
-                            MessageType::Data => Ok((offset, MessageSet::Data(Data(message)))),
-                            MessageType::MetaData => Ok((
-                                offset,
-                                MessageSet::MetaData(
-                                    Meta(message),
-                                    Data(WsMessageBase {
-                                        is_support_fetch_raw: self.support_fetch_raw,
-                                        sender: self.sender.clone(),
-                                        message_id,
-                                        raw_blocks: Arc::new(Mutex::new(None)),
-                                    }),
-                                ),
-                            )),
-                            MessageType::Invalid => unreachable!(),
-                        };
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
     }
 
-    pub(crate) async fn poll_timeout(
+    async fn parse_data(
         &self,
-        timeout: Duration,
-    ) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
-        let sleep = tokio::time::sleep(timeout);
-        tokio::pin!(sleep);
-        tokio::select! {
-            _ = &mut sleep, if !sleep.is_elapsed() => {
-               Ok(None)
+        data: TmqRecvData,
+        elapsed: tokio::time::Instant,
+    ) -> Option<(Offset, MessageSet<Meta, Data>)> {
+        if let TmqRecvData::Poll(TmqPoll {
+            message_id,
+            database,
+            have_message,
+            topic,
+            vgroup_id,
+            message_type,
+            offset,
+            timing,
+        }) = data
+        {
+            tracing::trace!("Got message in {}ms", elapsed.elapsed().as_millis());
+
+            if !have_message {
+                return None;
             }
-            message = self.poll_wait() => {
-                Ok(Some(message?))
+
+            let offset = Offset {
+                message_id,
+                database,
+                topic,
+                vgroup_id,
+                offset,
+                timing,
+            };
+
+            if self.auto_commit {
+                tracing::trace!("poll auto commit, set offset: {offset:?}");
+                let mut guard = self.auto_commit_offset.lock().await;
+                guard.0.replace(offset.clone());
             }
+
+            self.message_id.store(message_id, Ordering::Relaxed);
+
+            let message =
+                WsMessageBase::new(self.support_fetch_raw, self.sender.clone(), message_id);
+
+            return match message_type {
+                MessageType::Meta => Some((offset, MessageSet::Meta(Meta(message)))),
+                MessageType::Data => Some((offset, MessageSet::Data(Data(message)))),
+                MessageType::MetaData => Some((
+                    offset,
+                    MessageSet::MetaData(
+                        Meta(message),
+                        Data(WsMessageBase::new(
+                            self.support_fetch_raw,
+                            self.sender.clone(),
+                            message_id,
+                        )),
+                    ),
+                )),
+                MessageType::Invalid => unreachable!(),
+            };
         }
+
+        unreachable!()
     }
 }
 
@@ -658,20 +594,19 @@ impl AsAsyncConsumer for Consumer {
         topics: I,
     ) -> RawResult<()> {
         self.topics = topics.into_iter().map(Into::into).collect_vec();
-        let req_id = self.sender.req_id();
         let action = TmqSend::Subscribe {
-            req_id,
+            req_id: self.sender.req_id(),
             req: self.tmq_conf.clone().disable_auto_commit(),
             topics: self.topics.clone(),
             conn: self.conn.clone(),
         };
         if let Err(err) = self.sender.send_recv(action).await {
-            tracing::error!("subscribe error: {:?}", err);
+            tracing::error!("subscribe error: {err:?}");
             if self.tmq_conf.enable_batch_meta.is_none() {
                 return Err(err);
             }
-            let code: i32 = err.code().into();
 
+            let code: i32 = err.code().into();
             if code & 0xFFFF == 0xFFFE {
                 // subscribe conf error -2.
                 let action = TmqSend::Subscribe {
@@ -699,20 +634,18 @@ impl AsAsyncConsumer for Consumer {
                         .collect_vec()
                 })
                 .collect_vec();
+
             let topic_name = &self.topics[0];
+
             for offset in offsets {
                 let vgroup_id = offset[0] as i32;
                 let offset = offset[1];
                 tracing::trace!(
-                    "topic {} seeking to offset {} for vgroup {}",
-                    &topic_name,
-                    offset,
-                    vgroup_id
+                    "topic {topic_name} seeking to offset {offset} for vgroup {vgroup_id}"
                 );
 
-                let req_id = self.sender.req_id();
                 let action = TmqSend::Seek(OffsetSeekArgs {
-                    req_id,
+                    req_id: self.sender.req_id(),
                     topic: topic_name.to_string(),
                     vgroup_id,
                     offset,
@@ -734,7 +667,7 @@ impl AsAsyncConsumer for Consumer {
         tracing::trace!("unsubscribe {} start", req_id);
         let action = TmqSend::Unsubscribe { req_id };
         if let Err(err) = self.sender.send_recv(action).await {
-            tracing::warn!("unsubscribe error: {:?}", err);
+            tracing::warn!("unsubscribe error: {err:?}");
         }
         drop(self);
     }
@@ -755,33 +688,25 @@ impl AsAsyncConsumer for Consumer {
     }
 
     async fn commit_all(&self) -> RawResult<()> {
-        if self.polling_mutex.load(Ordering::Acquire) {
+        if !self.cache.is_empty() {
             return Err(RawError::from_string(
                 "polling data is in queue, can't commit all",
             ));
         }
-        let req_id = self.sender.req_id();
+
         let action = TmqSend::Commit(MessageArgs {
-            req_id,
+            req_id: self.sender.req_id(),
             message_id: 0,
         });
-
         let _ = self.sender.send_recv(action).await?;
         Ok(())
     }
 
     async fn commit(&self, offset: Self::Offset) -> RawResult<()> {
-        if self.polling_mutex.load(Ordering::Acquire) {
-            return Err(RawError::from_string(
-                "polling data is in queue, can't commit current message",
-            ));
-        }
-        let req_id = self.sender.req_id();
         let action = TmqSend::Commit(MessageArgs {
-            req_id,
+            req_id: self.sender.req_id(),
             message_id: offset.message_id,
         });
-
         let _ = self.sender.send_recv(action).await?;
         Ok(())
     }
@@ -792,53 +717,41 @@ impl AsAsyncConsumer for Consumer {
         vgroup_id: VGroupId,
         offset: i64,
     ) -> RawResult<()> {
-        let req_id = self.sender.req_id();
         let action = TmqSend::CommitOffset(OffsetSeekArgs {
-            req_id,
+            req_id: self.sender.req_id(),
             topic: topic_name.to_string(),
             vgroup_id,
             offset,
         });
-
         let _ = self.sender.send_recv(action).await?;
         Ok(())
     }
 
     async fn list_topics(&self) -> RawResult<Vec<String>> {
-        let topics = self.topics.clone();
-        Ok(topics)
+        Ok(self.topics.clone())
     }
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
-        let topics = self.topics.clone();
-        tracing::trace!("topics: {:?}", topics);
-
-        let mut ret = Vec::new();
-        for topic in topics {
+        tracing::trace!("topics: {:?}", self.topics);
+        let mut res = Vec::new();
+        for topic in self.topics.clone() {
             let assignments = self.topic_assignment(&topic).await;
-            ret.push((topic, assignments));
+            res.push((topic, assignments));
         }
-
-        Some(ret)
+        Some(res)
     }
 
     async fn topic_assignment(&self, topic: &str) -> Vec<Assignment> {
-        let req_id = self.sender.req_id();
         let action = TmqSend::Assignment(TopicAssignmentArgs {
-            req_id,
+            req_id: self.sender.req_id(),
             topic: topic.to_string(),
         });
-
-        let recv = self.sender.send_recv(action).await.ok();
-        match recv {
+        match self.sender.send_recv(action).await.ok() {
             Some(TmqRecvData::Assignment(TopicAssignment { assignment, timing })) => {
-                tracing::trace!("timing: {:?}", timing);
-                tracing::trace!("assignment: {:?}", assignment);
+                tracing::trace!("assignment: {assignment:?}, timing: {timing:?}");
                 assignment
             }
-            _ => {
-                vec![]
-            }
+            _ => vec![],
         }
     }
 
@@ -848,54 +761,44 @@ impl AsAsyncConsumer for Consumer {
         vgroup_id: VGroupId,
         offset: i64,
     ) -> RawResult<()> {
-        let req_id = self.sender.req_id();
         let action = TmqSend::Seek(OffsetSeekArgs {
-            req_id,
+            req_id: self.sender.req_id(),
             topic: topic.to_string(),
             vgroup_id,
             offset,
         });
-
         let _ = self.sender.send_recv(action).await?;
         Ok(())
     }
 
     async fn committed(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
-        let req_id = self.sender.req_id();
         let action = TmqSend::Committed(OffsetArgs {
-            req_id,
+            req_id: self.sender.req_id(),
             topic_vgroup_ids: vec![OffsetInnerArgs {
                 topic: topic.to_string(),
                 vgroup_id,
             }],
         });
-
         let data = self.sender.send_recv(action).await?;
         if let TmqRecvData::Committed { committed } = data {
-            let offset = committed[0];
-            Ok(offset)
-        } else {
-            Ok(0)
+            return Ok(committed[0]);
         }
+        unreachable!()
     }
 
     async fn position(&self, topic: &str, vgroup_id: VGroupId) -> RawResult<i64> {
-        let req_id = self.sender.req_id();
         let action = TmqSend::Position(OffsetArgs {
-            req_id,
+            req_id: self.sender.req_id(),
             topic_vgroup_ids: vec![OffsetInnerArgs {
                 topic: topic.to_string(),
                 vgroup_id,
             }],
         });
-
         let data = self.sender.send_recv(action).await?;
         if let TmqRecvData::Position { position } = data {
-            let offset = position[0];
-            Ok(offset)
-        } else {
-            Ok(0)
+            return Ok(position[0]);
         }
+        unreachable!()
     }
 
     fn default_timeout(&self) -> Timeout {
@@ -905,9 +808,7 @@ impl AsAsyncConsumer for Consumer {
 
 impl AsConsumer for Consumer {
     type Offset = Offset;
-
     type Meta = Meta;
-
     type Data = Data;
 
     fn subscribe<T: Into<String>, I: IntoIterator<Item = T> + Send>(
@@ -1218,7 +1119,7 @@ impl TmqBuilder {
             Err(_) => "2.x".to_string(),
         };
 
-        let queries = Arc::new(HashMap::<ReqId, tokio::sync::oneshot::Sender<_>>::new());
+        let queries = Arc::new(HashMap::<ReqId, mpsc::Sender<_>>::new());
 
         let queries_sender = queries.clone();
         let msg_handler = queries.clone();
@@ -1246,8 +1147,10 @@ impl TmqBuilder {
                             let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
-                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                        format!("WebSocket internal error: {err}"))));
+                                    let _ = sender.send(Err(RawError::new(
+                                        WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                        format!("WebSocket internal error: {err}"),
+                                    ))).await;
                                 }
                             }
                         }
@@ -1264,8 +1167,10 @@ impl TmqBuilder {
                             let keys = msg_handler.iter().map(|r| *r.key()).collect_vec();
                             for k in keys {
                                 if let Some((_, sender)) = msg_handler.remove(&k) {
-                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                        format!("WebSocket internal error: {err}"))));
+                                    let _ = sender.send(Err(RawError::new(
+                                        WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                        format!("WebSocket internal error: {err}",
+                                    )))).await;
                                 }
                             }
                         }
@@ -1282,8 +1187,7 @@ impl TmqBuilder {
         });
 
         let (cache_tx, cache_rx) = flume::bounded(1);
-        let polling_mutex = Arc::new(AtomicBool::new(false));
-        let polling_mutex2 = polling_mutex.clone();
+        let _ = cache_tx.send(None);
 
         tokio::spawn(async move {
             let instant = Instant::now();
@@ -1299,184 +1203,153 @@ impl TmqBuilder {
                                     match &recv {
                                         TmqRecvData::Subscribe => {
                                             tracing::trace!("subscribe with: {:?}", req_id);
-
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                                 // We don't care about the result of the sender for subscribe
-                                                let _ = sender.send(ok.map(|_|recv));
-                                            }  else {
+                                                let _ = sender.send(ok.map(|_|recv)).await;
+                                            } else {
                                                 tracing::warn!("subscribe message received but no receiver alive");
                                             }
-                                        },
+                                        }
                                         TmqRecvData::Unsubscribe => {
                                             tracing::trace!("unsubscribe with: {:?} success", req_id);
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                                 // We don't care about the result of the sender for unsubscribe
-                                                let _ = sender.send(ok.map(|_|recv));
-                                            }  else {
+                                                let _ = sender.send(ok.map(|_|recv)).await;
+                                            } else {
                                                 tracing::warn!("unsubscribe message received but no receiver alive");
                                             }
-                                        },
+                                        }
                                         TmqRecvData::Poll(_) => {
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
-                                                #[cfg(test)]
-                                                #[allow(static_mut_refs)]
-                                                {
-                                                    if std::env::var("TEST_POLLING_LOST").is_ok() {
-                                                        static mut POLLING_LOST_IDX: u64 = 0;
-                                                        unsafe {
-                                                            POLLING_LOST_IDX += 1;
-                                                            tokio::time::sleep(Duration::from_millis(500)).await;
-                                                            tracing::warn!(lost = POLLING_LOST_IDX, "polling lost");
-                                                        }
-                                                    }
-                                                }
-                                                if let Err(Ok(data)) = sender.send(ok.map(|_|recv)) {
-                                                    tracing::warn!(req_id, kind = "poll", "poll message received but no receiver alive: {:?}", data);
-                                                    if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &data {
-                                                        if !have_message {
-                                                            polling_mutex2.store(false, Ordering::Release);
-                                                            continue;
-                                                        }
-                                                    }
-
-                                                    if let Err(err) = cache_tx.send(data) {
-                                                        tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
-
-                                                        let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                                        for k in keys {
-                                                            if let Some((_, sender)) = queries_sender.remove(&k) {
-                                                                let _ = sender.send(Err(RawError::new(
-                                                                    WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                                    "Consumer messages lost",
-                                                                )));
+                                            let data = match queries_sender.remove(&req_id) {
+                                                Some((_, sender)) => {
+                                                    #[cfg(test)]
+                                                    #[allow(static_mut_refs)]
+                                                    {
+                                                        if std::env::var("TEST_POLLING_LOST").is_ok() {
+                                                            static mut POLLING_LOST_IDX: u64 = 0;
+                                                            unsafe {
+                                                                POLLING_LOST_IDX += 1;
+                                                                tokio::time::sleep(Duration::from_millis(500)).await;
+                                                                tracing::warn!(lost = POLLING_LOST_IDX, "polling lost");
                                                             }
                                                         }
-                                                        break 'ws;
                                                     }
-                                                    polling_mutex2.store(true, Ordering::Release);
-                                                }
-                                            }  else {
-                                                if let TmqRecvData::Poll(TmqPoll {have_message, ..}) = &recv {
-                                                    if !have_message {
-                                                        polling_mutex2.store(false, Ordering::Release);
-                                                        continue;
-                                                    }
-                                                }
-                                                if let Err(err) = cache_tx.send(recv) {
-                                                    tracing::error!(req_id, %err, kind = "poll", "poll message received but no receiver alive, message may lost, break the connection");
 
-                                                    let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                                    for k in keys {
-                                                        if let Some((_, sender)) = queries_sender.remove(&k) {
-                                                            let _ = sender.send(Err(RawError::new(
-                                                                WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                                "Consumer messages lost",
-                                                            )));
-                                                        }
+                                                    match sender.send(ok.map(|_| recv)).await {
+                                                        Ok(_) => None,
+                                                        Err(err) => match err.0 {
+                                                            Ok(data) => Some(data),
+                                                            Err(err) => {
+                                                                tracing::warn!("poll message received, err: {err:?}");
+                                                                None
+                                                            }
+                                                        },
                                                     }
-                                                    break 'ws;
+                                                },
+                                                None => Some(recv),
+                                            };
+
+                                            tracing::trace!("poll end: {data:?}");
+                                            if let Err(err) = cache_tx.send(data) {
+                                                tracing::error!("poll end notification failed, break the connection, err: {err:?}");
+                                                let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                for key in keys {
+                                                    if let Some((_, sender)) = queries_sender.remove(&key) {
+                                                        let _ = sender.send(Err(RawError::new(
+                                                            WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                            "Consumer messages lost",
+                                                        ))).await;
+                                                    }
                                                 }
-                                                polling_mutex2.store(true, Ordering::Release);
+                                                break 'ws;
                                             }
-                                        },
-                                        TmqRecvData::FetchJsonMeta { data }=> {
+                                        }
+                                        TmqRecvData::FetchJsonMeta { data } => {
                                             tracing::trace!("fetch json meta data: {:?}", data);
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
-                                                if let Err(err) = sender.send(ok.map(|_|recv)) {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                if let Err(err) = sender.send(ok.map(|_|recv)).await {
                                                     tracing::warn!(req_id, kind = "fetch_json_meta", "fetch json meta message received but no receiver alive: {:?}", err);
                                                 }
-                                            }  else {
-                                                tracing::warn!("poll message received but no receiver alive");
+                                            } else {
+                                                tracing::warn!("fetch json meta message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::FetchRaw { .. }=> {
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
-                                                if let Err(err) = sender.send(ok.map(|_|recv)) {
+                                        TmqRecvData::FetchRaw { .. } => {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                if let Err(err) = sender.send(ok.map(|_|recv)).await {
                                                     tracing::warn!(req_id, kind = "fetch_raw_meta", "fetch raw meta message received but no receiver alive: {:?}", err);
                                                 }
-                                            }  else {
-                                                tracing::warn!("poll message received but no receiver alive");
+                                            } else {
+                                                tracing::warn!("fetch raw message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::Commit=> {
+                                        TmqRecvData::Commit => {
                                             tracing::trace!("commit done: {:?}", recv);
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                                 // We don't care about the result of the sender for commit
-                                                let _ = sender.send(ok.map(|_|recv));
-                                            }  else {
-                                                tracing::warn!("poll message received but no receiver alive");
+                                                let _ = sender.send(ok.map(|_|recv)).await;
+                                            } else {
+                                                tracing::warn!("commit message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::Fetch(fetch)=> {
+                                        TmqRecvData::Fetch(fetch) => {
                                             tracing::trace!("fetch done: {:?}", fetch);
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                                 // We don't care about the result of the sender for fetch
-                                                let _ = sender.send(ok.map(|_|recv));
-                                            }  else {
-                                                tracing::warn!("poll message received but no receiver alive");
+                                                let _ = sender.send(ok.map(|_|recv)).await;
+                                            } else {
+                                                tracing::warn!("fetch message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::FetchBlock{ .. }=> {
+                                        TmqRecvData::FetchBlock{ .. } => {
                                             if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                                 let _ = sender.send(Err(RawError::new(
                                                     WS_ERROR_NO::WEBSOCKET_ERROR.as_code(),
                                                     format!("WebSocket internal error: {:?}", &text)
-                                                )));
+                                                ))).await;
                                             }
                                             break 'ws;
                                         }
-                                        TmqRecvData::Assignment(assignment)=> {
+                                        TmqRecvData::Assignment(assignment) => {
                                             tracing::trace!("assignment done: {:?}", assignment);
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
-                                                let _ = sender.send(ok.map(|_|recv));
-                                            }  else {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                let _ = sender.send(ok.map(|_|recv)).await;
+                                            } else {
                                                 tracing::warn!("assignment message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::Seek { timing }=> {
+                                        TmqRecvData::Seek { timing } => {
                                             tracing::trace!("seek done: req_id {:?} timing {:?}", &req_id, timing);
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
-                                                let _ = sender.send(ok.map(|_|recv));
-                                            }  else {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                let _ = sender.send(ok.map(|_|recv)).await;
+                                            } else {
                                                 tracing::warn!("seek message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::Committed { committed }=> {
+                                        TmqRecvData::Committed { committed } => {
                                             tracing::trace!("committed done: {:?}", committed);
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
-                                                let _ = sender.send(ok.map(|_|recv));
-                                            }  else {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                let _ = sender.send(ok.map(|_|recv)).await;
+                                            } else {
                                                 tracing::warn!("committed message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::Position { position }=> {
+                                        TmqRecvData::Position { position } => {
                                             tracing::trace!("position done: {:?}", position);
-                                            if let Some((_, sender)) = queries_sender.remove(&req_id)
-                                            {
-                                                let _ = sender.send(ok.map(|_|recv));
-                                            }  else {
+                                            if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                                let _ = sender.send(ok.map(|_|recv)).await;
+                                            } else {
                                                 tracing::warn!("position message received but no receiver alive");
                                             }
                                         }
-                                        TmqRecvData::CommitOffset { timing }=> {
+                                        TmqRecvData::CommitOffset { timing } => {
                                             tracing::trace!("commit offset done: {:?}", timing);
                                             if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                                let _ = sender.send(ok.map(|_|recv));
+                                                let _ = sender.send(ok.map(|_|recv)).await;
                                             } else {
                                                 tracing::warn!("commit offset message received but no receiver alive");
                                             }
                                         }
-
                                         _ => unreachable!("unknown tmq response"),
                                     }
                                 }
@@ -1502,7 +1375,7 @@ impl TmqBuilder {
 
                                     if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                         tracing::trace!("send data to fetches with id {}", req_id);
-                                        if sender.send(Ok(TmqRecvData::Bytes(part.into()))).is_err() {
+                                        if sender.send(Ok(TmqRecvData::Bytes(part.into()))).await.is_err() {
                                             tracing::warn!(req_id, kind = "binary", "req_id {req_id} not detected, message might be lost");
                                         }
                                     } else {
@@ -1520,7 +1393,7 @@ impl TmqBuilder {
                                     };
                                     for k in keys {
                                         if let Some((_, sender)) = queries_sender.remove(&k) {
-                                            let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.clone())));
+                                            let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.clone()))).await;
                                         }
                                     }
                                     break 'ws;
@@ -1547,7 +1420,7 @@ impl TmqBuilder {
                                         let _ = sender.send(Err(RawError::new(
                                             WS_ERROR_NO::CONN_CLOSED.as_code(),
                                             format!("WebSocket internal error: {err}")
-                                        )));
+                                        ))).await;
                                     }
                                 }
                                 break 'ws;
@@ -1576,7 +1449,6 @@ impl TmqBuilder {
             timeout: self.timeout,
             topics: vec![],
             support_fetch_raw: is_support_binary_sql(&version),
-            polling_mutex,
             cache: cache_rx,
             auto_commit: self.conf.auto_commit == "true",
             auto_commit_interval_ms: self
@@ -1585,6 +1457,7 @@ impl TmqBuilder {
                 .as_deref()
                 .and_then(|s| s.parse::<u64>().ok()),
             auto_commit_offset: Arc::new(Mutex::new((None, Instant::now()))),
+            message_id: AtomicU64::new(0),
         })
     }
 }
@@ -1598,12 +1471,11 @@ pub struct Consumer {
     timeout: Timeout,
     topics: Vec<String>,
     support_fetch_raw: bool,
-    /// Polling, if true, the consumer will wait for the message to be consumed.
-    polling_mutex: Arc<AtomicBool>,
-    cache: flume::Receiver<TmqRecvData>,
+    cache: flume::Receiver<Option<TmqRecvData>>,
     auto_commit: bool,
     auto_commit_interval_ms: Option<u64>,
     auto_commit_offset: Arc<Mutex<(Option<Offset>, Instant)>>,
+    message_id: AtomicU64,
 }
 
 impl Drop for Consumer {
@@ -1664,6 +1536,8 @@ pub enum WsTmqError {
     TaosError(#[from] RawError),
     #[error("Receive timeout in {0}")]
     QueryTimeout(String),
+    #[error("channel closed")]
+    ChannelClosedError,
 }
 
 unsafe impl Send for WsTmqError {}
