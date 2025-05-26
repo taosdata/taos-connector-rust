@@ -359,7 +359,11 @@ mod tests {
         stmt2.prepare("select * from t0 where c1 > ?")?;
 
         let cols = vec![ColumnView::from_ints(vec![100])];
-        let param = Stmt2BindParam::new(None, None, Some(cols));
+        let param = Stmt2BindParam {
+            table_name: None,
+            tags: None,
+            columns: Some(cols),
+        };
         let affected = stmt2.bind(&[param])?.exec()?;
         assert_eq!(affected, 0);
         assert_eq!(stmt2.affected_rows(), 0);
@@ -655,7 +659,11 @@ mod async_tests {
         stmt2.prepare("select * from t0 where c1 > ?").await?;
 
         let cols = vec![ColumnView::from_ints(vec![100])];
-        let param = Stmt2BindParam::new(None, None, Some(cols));
+        let param = Stmt2BindParam {
+            table_name: None,
+            tags: None,
+            columns: Some(cols),
+        };
         let affected = stmt2.bind(&[param]).await?.exec().await?;
         assert_eq!(affected, 0);
         assert_eq!(stmt2.affected_rows().await, 0);

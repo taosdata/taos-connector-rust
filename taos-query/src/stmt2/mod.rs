@@ -39,9 +39,9 @@ where
 
 #[derive(Clone, Debug)]
 pub struct Stmt2BindParam {
-    table_name: Option<String>,
-    tags: Option<Vec<Value>>,
-    columns: Option<Vec<ColumnView>>,
+    pub table_name: Option<String>,
+    pub tags: Option<Vec<Value>>,
+    pub columns: Option<Vec<ColumnView>>,
 }
 
 impl Stmt2BindParam {
