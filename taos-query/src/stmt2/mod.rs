@@ -11,6 +11,23 @@ where
 
     fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self>;
 
+    /// Batch bind parameters.
+    ///
+    /// # Note
+    /// Developers must ensure that the lengths of `table_names`, `tags_list`, and `columns_list`
+    /// in `param` are consistent. Otherwise, it may lead to undefined behavior or runtime errors.
+    fn bind_batch(&mut self, param: Stmt2BatchBindParam) -> RawResult<&mut Self> {
+        let params = param
+            .table_names
+            .into_iter()
+            .zip(param.tags_list.into_iter())
+            .zip(param.columns_list.into_iter())
+            .map(|((table_name, tags), columns)| Stmt2BindParam::new(table_name, tags, columns))
+            .collect::<Vec<_>>();
+
+        self.bind(&params)
+    }
+
     fn exec(&mut self) -> RawResult<usize>;
 
     fn affected_rows(&self) -> usize;
@@ -29,6 +46,23 @@ where
     async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self>;
 
     async fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self>;
+
+    /// Batch bind parameters.
+    ///
+    /// # Note
+    /// Developers must ensure that the lengths of `table_names`, `tags_list`, and `columns_list`
+    /// in `param` are consistent. Otherwise, it may lead to undefined behavior or runtime errors.
+    async fn bind_batch(&mut self, param: Stmt2BatchBindParam) -> RawResult<&mut Self> {
+        let params = param
+            .table_names
+            .into_iter()
+            .zip(param.tags_list.into_iter())
+            .zip(param.columns_list.into_iter())
+            .map(|((table_name, tags), columns)| Stmt2BindParam::new(table_name, tags, columns))
+            .collect::<Vec<_>>();
+
+        self.bind(&params).await
+    }
 
     async fn exec(&mut self) -> RawResult<usize>;
 
@@ -79,5 +113,50 @@ impl Stmt2BindParam {
 
     pub fn columns(&self) -> Option<&Vec<ColumnView>> {
         self.columns.as_ref()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Stmt2BatchBindParam {
+    table_names: Vec<Option<String>>,
+    tags_list: Vec<Option<Vec<Value>>>,
+    columns_list: Vec<Option<Vec<ColumnView>>>,
+}
+
+impl Stmt2BatchBindParam {
+    pub fn new(
+        table_names: Vec<Option<String>>,
+        tags_list: Vec<Option<Vec<Value>>>,
+        columns_list: Vec<Option<Vec<ColumnView>>>,
+    ) -> Self {
+        Self {
+            table_names,
+            tags_list,
+            columns_list,
+        }
+    }
+
+    pub fn with_table_names(&mut self, table_names: Vec<Option<String>>) {
+        self.table_names = table_names;
+    }
+
+    pub fn table_names(&self) -> &Vec<Option<String>> {
+        &self.table_names
+    }
+
+    pub fn with_tags_list(&mut self, tags_list: Vec<Option<Vec<Value>>>) {
+        self.tags_list = tags_list;
+    }
+
+    pub fn tags_list(&self) -> &Vec<Option<Vec<Value>>> {
+        &self.tags_list
+    }
+
+    pub fn with_columns_list(&mut self, columns_list: Vec<Option<Vec<ColumnView>>>) {
+        self.columns_list = columns_list;
+    }
+
+    pub fn columns_list(&self) -> &Vec<Option<Vec<ColumnView>>> {
+        &self.columns_list
     }
 }

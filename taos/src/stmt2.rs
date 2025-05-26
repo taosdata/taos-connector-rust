@@ -111,7 +111,7 @@ impl taos_query::stmt2::Stmt2AsyncBindable<super::Taos> for Stmt2 {
 mod tests {
     use serde::Deserialize;
     use taos_query::common::ColumnView;
-    use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
+    use taos_query::stmt2::{Stmt2BatchBindParam, Stmt2BindParam, Stmt2Bindable};
     use taos_query::{Queryable, TBuilder};
 
     use super::Stmt2;
@@ -383,13 +383,68 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_stmt2_bind_batch() -> anyhow::Result<()> {
+        let db = "stmt2_202505262125";
+        let dsn = "ws://localhost:6041";
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build()?;
+        taos.exec_many([
+            &format!("drop database if exists {db}"),
+            &format!("create database {db}"),
+            &format!("use {db}"),
+            "create stable s0 (ts timestamp, c1 int, c2 bool) tags (t1 int)",
+        ])?;
+
+        let param = Stmt2BatchBindParam::new(
+            vec![
+                Some("d0".to_string()),
+                Some("d1".to_string()),
+                Some("d2".to_string()),
+            ],
+            vec![
+                Some(vec![Value::Int(100)]),
+                Some(vec![Value::Int(100)]),
+                Some(vec![Value::Int(100)]),
+            ],
+            vec![
+                Some(vec![
+                    ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
+                    ColumnView::from_ints(vec![99, 100]),
+                    ColumnView::from_bools(vec![true, false]),
+                ]),
+                Some(vec![
+                    ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
+                    ColumnView::from_ints(vec![99, 100]),
+                    ColumnView::from_bools(vec![true, false]),
+                ]),
+                Some(vec![
+                    ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
+                    ColumnView::from_ints(vec![99, 100]),
+                    ColumnView::from_bools(vec![true, false]),
+                ]),
+            ],
+        );
+
+        let affected = Stmt2::init(&taos)?
+            .prepare("insert into s0 (tbname, t1, ts, c1, c2) values(?, ?, ?, ?, ?)")?
+            .bind_batch(param)?
+            .exec()?;
+
+        assert_eq!(affected, 6);
+
+        taos.exec(format!("drop database {db}"))?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod async_tests {
     use serde::Deserialize;
     use taos_query::common::ColumnView;
-    use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BindParam};
+    use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BatchBindParam, Stmt2BindParam};
     use taos_query::{AsyncQueryable, AsyncTBuilder};
 
     use super::Stmt2;
@@ -680,6 +735,66 @@ mod async_tests {
 
         assert_eq!(rows[0].c1, 101);
         assert_eq!(rows[1].c1, 102);
+
+        taos.exec(format!("drop database {db}")).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2_bind_batch() -> anyhow::Result<()> {
+        let db = "stmt2_202505262118";
+        let dsn = "ws://localhost:6041";
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        taos.exec_many([
+            &format!("drop database if exists {db}"),
+            &format!("create database {db}"),
+            &format!("use {db}"),
+            "create stable s0 (ts timestamp, c1 int, c2 bool) tags (t1 int)",
+        ])
+        .await?;
+
+        let param = Stmt2BatchBindParam::new(
+            vec![
+                Some("d0".to_string()),
+                Some("d1".to_string()),
+                Some("d2".to_string()),
+            ],
+            vec![
+                Some(vec![Value::Int(100)]),
+                Some(vec![Value::Int(100)]),
+                Some(vec![Value::Int(100)]),
+            ],
+            vec![
+                Some(vec![
+                    ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
+                    ColumnView::from_ints(vec![99, 100]),
+                    ColumnView::from_bools(vec![true, false]),
+                ]),
+                Some(vec![
+                    ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
+                    ColumnView::from_ints(vec![99, 100]),
+                    ColumnView::from_bools(vec![true, false]),
+                ]),
+                Some(vec![
+                    ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
+                    ColumnView::from_ints(vec![99, 100]),
+                    ColumnView::from_bools(vec![true, false]),
+                ]),
+            ],
+        );
+
+        let affected = Stmt2::init(&taos)
+            .await?
+            .prepare("insert into s0 (tbname, t1, ts, c1, c2) values(?, ?, ?, ?, ?)")
+            .await?
+            .bind_batch(param)
+            .await?
+            .exec()
+            .await?;
+
+        assert_eq!(affected, 6);
 
         taos.exec(format!("drop database {db}")).await?;
 
