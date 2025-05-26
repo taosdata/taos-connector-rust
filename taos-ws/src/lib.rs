@@ -43,7 +43,22 @@ impl Default for Retries {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
+struct RetryBackoff {
+    retry_backoff_ms: u64,
+    retry_backoff_max_ms: u64,
+}
+
+impl RetryBackoff {
+    fn new(retry_backoff_ms: u64, retry_backoff_max_ms: u64) -> Self {
+        Self {
+            retry_backoff_ms,
+            retry_backoff_max_ms,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct TaosBuilder {
     https: Arc<AtomicBool>,
     addr: String,
@@ -53,6 +68,7 @@ pub struct TaosBuilder {
     conn_mode: Option<u32>,
     compression: bool,
     conn_retries: Retries,
+    retry_backoff: RetryBackoff,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -381,6 +397,16 @@ impl TaosBuilder {
             .remove("conn_retries")
             .map_or_else(Retries::default, |s| Retries(s.parse::<u32>().unwrap_or(5)));
 
+        let retry_backoff_ms = dsn
+            .remove("retry_backoff_ms")
+            .map_or(100, |s| s.parse::<u64>().unwrap_or(100));
+
+        let retry_backoff_max_ms = dsn
+            .remove("retry_backoff_max_ms")
+            .map_or(1000, |s| s.parse::<u64>().unwrap_or(1000));
+
+        let retry_backoff = RetryBackoff::new(retry_backoff_ms, retry_backoff_max_ms);
+
         if let Some(token) = token {
             Ok(TaosBuilder {
                 https,
@@ -391,6 +417,7 @@ impl TaosBuilder {
                 conn_mode,
                 compression,
                 conn_retries,
+                retry_backoff,
             })
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
@@ -404,6 +431,7 @@ impl TaosBuilder {
                 conn_mode,
                 compression,
                 conn_retries,
+                retry_backoff,
             })
         }
     }
