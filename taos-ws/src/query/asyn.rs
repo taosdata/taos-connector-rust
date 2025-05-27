@@ -415,7 +415,7 @@ async fn send_messages(
                     Ok(msg) => {
                         let trya = msg.trya();
                         let req_id = msg.req_id();
-                        let message = msg.to_message();
+                        let message = msg.too_message();
                         if trya {
                             let _res = cache.insert(req_id, message.clone());
                         }
@@ -432,6 +432,7 @@ async fn send_messages(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn read_messages(
     mut reader: WsStreamReader,
     queries_sender: QueryAgent,
@@ -1163,7 +1164,6 @@ impl WsTaos {
                             _ => unreachable!("fetch action result error"),
                         };
                         if fetch_resp.completed {
-                            println!("Fetch completed for result id: {}", res_id);
                             drop(tx);
                             break;
                         }
@@ -1173,7 +1173,6 @@ impl WsTaos {
                         };
 
                         let fetch_block = WsSend::FetchBlock(args);
-                        println!("Fetching block for result id: {}", res_id);
                         match sender.send_recv(fetch_block).await {
                             Ok(WsRecvData::Block { timing, raw }) => {
                                 metrics.time_cost_in_fetch += now.elapsed();
@@ -1200,7 +1199,6 @@ impl WsTaos {
                             }
                             Ok(_) => {}
                             Err(err) => {
-                                println!("Fetch error for result id: {}", res_id);
                                 metrics.time_cost_in_fetch += now.elapsed();
                                 if tx.send_async(Err(err)).await.is_err() {
                                     break;

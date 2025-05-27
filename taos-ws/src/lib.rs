@@ -41,6 +41,7 @@ const RETRY_BACKOFF_MAX_MS_DEFAULT: u64 = 1000;
 #[derive(Debug, Clone, Copy)]
 pub struct Retries(u32);
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct RetryBackoff {
     retry_backoff_ms: u64,
@@ -57,6 +58,7 @@ pub struct TaosBuilder {
     conn_mode: Option<u32>,
     compression: bool,
     conn_retries: Retries,
+    #[allow(dead_code)]
     retry_backoff: RetryBackoff,
 }
 

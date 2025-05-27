@@ -394,7 +394,7 @@ pub enum ToMsgEnum {
 }
 
 impl ToMsgEnum {
-    pub(crate) fn to_message(self) -> Message {
+    pub(crate) fn too_message(self) -> Message {
         match self {
             ToMsgEnum::Message(msg) => msg,
             ToMsgEnum::WsSend(ws_send) => match ws_send {
@@ -415,9 +415,9 @@ impl ToMsgEnum {
         match self {
             ToMsgEnum::Message(_) => false,
             ToMsgEnum::WsSend(ws_send) => match ws_send {
-                WsSend::Insert { .. } => true,
-                WsSend::Query { .. } => true,
-                WsSend::CheckServerStatus { .. } => true,
+                WsSend::Insert { .. } | WsSend::Query { .. } | WsSend::CheckServerStatus { .. } => {
+                    true
+                }
                 WsSend::Binary(bytes) => {
                     let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
                     match action {
