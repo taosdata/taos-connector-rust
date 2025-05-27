@@ -622,20 +622,18 @@ async fn read_messages(
                                         "req_id {res_id} not detected, message might be lost"
                                     );
                                 }
+                            } else if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                tracing::trace!("send data to fetches with id {}", res_id);
+                                sender
+                                    .send(Ok(WsRecvData::BlockV2 {
+                                        timing,
+                                        raw: block[offset..].to_vec(),
+                                    }))
+                                    .unwrap();
                             } else {
-                                if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                    tracing::trace!("send data to fetches with id {}", res_id);
-                                    sender
-                                        .send(Ok(WsRecvData::BlockV2 {
-                                            timing,
-                                            raw: block[offset..].to_vec(),
-                                        }))
-                                        .unwrap();
-                                } else {
-                                    tracing::warn!(
-                                        "req_id {res_id} not detected, message might be lost"
-                                    );
-                                }
+                                tracing::warn!(
+                                    "req_id {res_id} not detected, message might be lost"
+                                );
                             }
                         } else {
                             tracing::warn!("result id {res_id} not found");

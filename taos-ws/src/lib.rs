@@ -34,28 +34,17 @@ pub enum WsAuth {
     Plain(String, String),
 }
 
+const RETRIES_DEFAULT: u32 = 5;
+const RETRY_BACKOFF_MS_DEFAULT: u64 = 100;
+const RETRY_BACKOFF_MAX_MS_DEFAULT: u64 = 1000;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Retries(u32);
-
-impl Default for Retries {
-    fn default() -> Self {
-        Self(5)
-    }
-}
 
 #[derive(Debug, Clone)]
 struct RetryBackoff {
     retry_backoff_ms: u64,
     retry_backoff_max_ms: u64,
-}
-
-impl RetryBackoff {
-    fn new(retry_backoff_ms: u64, retry_backoff_max_ms: u64) -> Self {
-        Self {
-            retry_backoff_ms,
-            retry_backoff_max_ms,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -353,11 +342,13 @@ impl TaosBuilder {
 
     pub fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
+
         let https = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "http", _) | ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => false,
             ("wss" | "https", _) | ("taos" | "taosws" | "tmq", Some("wss" | "https")) => true,
             _ => Err(DsnError::InvalidDriver(dsn.to_string()))?,
         };
+
         let https = Arc::new(AtomicBool::new(https));
 
         let conn_mode = match dsn.params.get("conn_mode") {
@@ -395,17 +386,25 @@ impl TaosBuilder {
 
         let conn_retries = dsn
             .remove("conn_retries")
-            .map_or_else(Retries::default, |s| Retries(s.parse::<u32>().unwrap_or(5)));
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(RETRIES_DEFAULT);
+
+        let conn_retries = Retries(conn_retries);
 
         let retry_backoff_ms = dsn
             .remove("retry_backoff_ms")
-            .map_or(100, |s| s.parse::<u64>().unwrap_or(100));
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(RETRY_BACKOFF_MS_DEFAULT);
 
         let retry_backoff_max_ms = dsn
             .remove("retry_backoff_max_ms")
-            .map_or(1000, |s| s.parse::<u64>().unwrap_or(1000));
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(RETRY_BACKOFF_MAX_MS_DEFAULT);
 
-        let retry_backoff = RetryBackoff::new(retry_backoff_ms, retry_backoff_max_ms);
+        let retry_backoff = RetryBackoff {
+            retry_backoff_ms,
+            retry_backoff_max_ms,
+        };
 
         if let Some(token) = token {
             Ok(TaosBuilder {
