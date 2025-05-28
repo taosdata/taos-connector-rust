@@ -374,6 +374,7 @@ async fn run(
         cache.scan(|key, _| keys.push(*key));
         for key in keys {
             if let Some((_, msg)) = cache.remove_async(&key).await {
+                // 缓存中的数据放在后面了
                 let _res = query_sender
                     .sender
                     .send_async(ToMsgEnum::Message(msg))

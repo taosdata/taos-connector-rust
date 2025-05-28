@@ -500,6 +500,13 @@ impl TaosBuilder {
         }
     }
 
+    pub(crate) async fn reconnect(
+        &self,
+        taos: &mut Taos,
+    ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+        todo!()
+    }
+
     pub(crate) async fn build_stream(
         &self,
         url: String,
