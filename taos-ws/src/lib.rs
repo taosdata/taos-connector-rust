@@ -34,16 +34,21 @@ pub enum WsAuth {
     Plain(String, String),
 }
 
+const RETRIES_DEFAULT: u32 = 5;
+const RETRY_BACKOFF_MS_DEFAULT: u64 = 100;
+const RETRY_BACKOFF_MAX_MS_DEFAULT: u64 = 1000;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Retries(u32);
 
-impl Default for Retries {
-    fn default() -> Self {
-        Self(5)
-    }
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct RetryBackoff {
+    retry_backoff_ms: u64,
+    retry_backoff_max_ms: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct TaosBuilder {
     https: Arc<AtomicBool>,
     addr: String,
@@ -53,6 +58,8 @@ pub struct TaosBuilder {
     conn_mode: Option<u32>,
     compression: bool,
     conn_retries: Retries,
+    #[allow(dead_code)]
+    retry_backoff: RetryBackoff,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -337,11 +344,13 @@ impl TaosBuilder {
 
     pub fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
+
         let https = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "http", _) | ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => false,
             ("wss" | "https", _) | ("taos" | "taosws" | "tmq", Some("wss" | "https")) => true,
             _ => Err(DsnError::InvalidDriver(dsn.to_string()))?,
         };
+
         let https = Arc::new(AtomicBool::new(https));
 
         let conn_mode = match dsn.params.get("conn_mode") {
@@ -379,7 +388,25 @@ impl TaosBuilder {
 
         let conn_retries = dsn
             .remove("conn_retries")
-            .map_or_else(Retries::default, |s| Retries(s.parse::<u32>().unwrap_or(5)));
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(RETRIES_DEFAULT);
+
+        let conn_retries = Retries(conn_retries);
+
+        let retry_backoff_ms = dsn
+            .remove("retry_backoff_ms")
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(RETRY_BACKOFF_MS_DEFAULT);
+
+        let retry_backoff_max_ms = dsn
+            .remove("retry_backoff_max_ms")
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(RETRY_BACKOFF_MAX_MS_DEFAULT);
+
+        let retry_backoff = RetryBackoff {
+            retry_backoff_ms,
+            retry_backoff_max_ms,
+        };
 
         if let Some(token) = token {
             Ok(TaosBuilder {
@@ -391,6 +418,7 @@ impl TaosBuilder {
                 conn_mode,
                 compression,
                 conn_retries,
+                retry_backoff,
             })
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
@@ -404,6 +432,7 @@ impl TaosBuilder {
                 conn_mode,
                 compression,
                 conn_retries,
+                retry_backoff,
             })
         }
     }
@@ -469,6 +498,13 @@ impl TaosBuilder {
                 mode,
             },
         }
+    }
+
+    pub(crate) async fn reconnect(
+        &self,
+        taos: &mut Taos,
+    ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+        todo!()
     }
 
     pub(crate) async fn build_stream(
@@ -569,7 +605,7 @@ mod lib_tests {
     use tracing::*;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    use crate::query::infra::{ToMessage, WsRecv, WsSend};
+    use crate::query::messages::{ToMessage, WsRecv, WsSend};
     use crate::*;
 
     #[cfg(feature = "_with_crypto_provider")]

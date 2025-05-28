@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 pub(crate) use asyn::WsTaos;
 pub use asyn::{Error, ResultSet};
-pub(crate) use infra::WsConnReq;
-pub use infra::{BindType, Stmt2Field};
+pub(crate) use messages::WsConnReq;
+pub use messages::{BindType, Stmt2Field};
 use taos_query::common::{RawMeta, SmlData};
 use taos_query::prelude::RawResult;
 use taos_query::AsyncQueryable;
@@ -12,7 +12,7 @@ use crate::TaosBuilder;
 
 pub mod asyn;
 pub use asyn::check_server_status;
-pub(crate) mod infra;
+pub(crate) mod messages;
 
 #[derive(Debug)]
 pub struct Taos {
