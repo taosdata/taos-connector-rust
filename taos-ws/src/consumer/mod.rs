@@ -479,13 +479,6 @@ impl Consumer {
     async fn poll(&self, timeout: Duration) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
         self.auto_commit().await;
 
-        let elapsed = tokio::time::Instant::now();
-
-        if let Ok(Some(data)) = self.cache.recv_async().await {
-            tracing::trace!("poll data from cache: {data:?}");
-            return Ok(self.parse_data(data, elapsed).await);
-        }
-
         let blocking_time = match timeout.as_secs() {
             s if s > 2 => timeout.as_millis() / 2,
             _ => timeout.as_millis(),
@@ -497,9 +490,14 @@ impl Consumer {
             message_id: self.message_id.load(Ordering::Relaxed),
         };
 
+        let elapsed = tokio::time::Instant::now();
         let data = self.sender.send_recv(req).await?;
-        tracing::trace!("poll data: {data:?}");
-        Ok(self.parse_data(data, elapsed).await)
+        tracing::trace!(
+            "poll received data: {:?}, elapsed: {}ms",
+            data,
+            elapsed.elapsed().as_millis()
+        );
+        Ok(self.parse_data(data).await)
     }
 
     async fn auto_commit(&self) {
@@ -519,11 +517,7 @@ impl Consumer {
         }
     }
 
-    async fn parse_data(
-        &self,
-        data: TmqRecvData,
-        elapsed: tokio::time::Instant,
-    ) -> Option<(Offset, MessageSet<Meta, Data>)> {
+    async fn parse_data(&self, data: TmqRecvData) -> Option<(Offset, MessageSet<Meta, Data>)> {
         if let TmqRecvData::Poll(TmqPoll {
             message_id,
             database,
@@ -535,8 +529,6 @@ impl Consumer {
             timing,
         }) = data
         {
-            tracing::trace!("Got message in {}ms", elapsed.elapsed().as_millis());
-
             if !have_message {
                 return None;
             }
@@ -688,12 +680,6 @@ impl AsAsyncConsumer for Consumer {
     }
 
     async fn commit_all(&self) -> RawResult<()> {
-        if !self.cache.is_empty() {
-            return Err(RawError::from_string(
-                "polling data is in queue, can't commit all",
-            ));
-        }
-
         let action = TmqSend::Commit(MessageArgs {
             req_id: self.sender.req_id(),
             message_id: 0,
@@ -1186,9 +1172,6 @@ impl TmqBuilder {
             }
         });
 
-        let (cache_tx, cache_rx) = flume::bounded(1);
-        let _ = cache_tx.send(None);
-
         tokio::spawn(async move {
             let instant = Instant::now();
             'ws: loop {
@@ -1220,7 +1203,7 @@ impl TmqBuilder {
                                             }
                                         }
                                         TmqRecvData::Poll(_) => {
-                                            let data = match queries_sender.remove(&req_id) {
+                                            match queries_sender.remove(&req_id) {
                                                 Some((_, sender)) => {
                                                     #[cfg(test)]
                                                     #[allow(static_mut_refs)]
@@ -1235,33 +1218,11 @@ impl TmqBuilder {
                                                         }
                                                     }
 
-                                                    match sender.send(ok.map(|_| recv)).await {
-                                                        Ok(_) => None,
-                                                        Err(err) => match err.0 {
-                                                            Ok(data) => Some(data),
-                                                            Err(err) => {
-                                                                tracing::warn!("poll message received, err: {err:?}");
-                                                                None
-                                                            }
-                                                        },
+                                                    if let Err(err) = sender.send(ok.map(|_| recv)).await {
+                                                        tracing::warn!(req_id, "poll message received but no receiver alive, err: {err:?}");
                                                     }
                                                 },
-                                                None => Some(recv),
-                                            };
-
-                                            tracing::trace!("poll end: {data:?}");
-                                            if let Err(err) = cache_tx.send(data) {
-                                                tracing::error!("poll end notification failed, break the connection, err: {err:?}");
-                                                let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
-                                                for key in keys {
-                                                    if let Some((_, sender)) = queries_sender.remove(&key) {
-                                                        let _ = sender.send(Err(RawError::new(
-                                                            WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                            "Consumer messages lost",
-                                                        ))).await;
-                                                    }
-                                                }
-                                                break 'ws;
+                                                None => tracing::warn!(req_id, "poll message received but no sender alive"),
                                             }
                                         }
                                         TmqRecvData::FetchJsonMeta { data } => {
@@ -1449,7 +1410,6 @@ impl TmqBuilder {
             timeout: self.timeout,
             topics: vec![],
             support_fetch_raw: is_support_binary_sql(&version),
-            cache: cache_rx,
             auto_commit: self.conf.auto_commit == "true",
             auto_commit_interval_ms: self
                 .conf
@@ -1471,7 +1431,6 @@ pub struct Consumer {
     timeout: Timeout,
     topics: Vec<String>,
     support_fetch_raw: bool,
-    cache: flume::Receiver<Option<TmqRecvData>>,
     auto_commit: bool,
     auto_commit_interval_ms: Option<u64>,
     auto_commit_offset: Arc<Mutex<(Option<Offset>, Instant)>>,
