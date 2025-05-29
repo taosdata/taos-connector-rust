@@ -1,3 +1,4 @@
+use std::alloc::{alloc, dealloc, Layout};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_ulong, c_void, CStr};
 use std::{ptr, slice};
@@ -9,38 +10,16 @@ use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_ws::query::{BindType, Stmt2Field};
 use taos_ws::{Stmt2, Taos};
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
+use crate::taos::stmt::{TAOS_MULTI_BIND, TAOS_STMT, TAOS_STMT_OPTIONS};
+use crate::taos::{TAOS_FIELD_E, TAOS_RES};
 use crate::ws::error::{
     clear_err_and_ret_succ, format_errno, set_err_and_get_code, taos_errstr, TaosError,
     TaosMaybeError,
 };
-use crate::ws::query::QueryResultSet;
-use crate::ws::{ResultSet, TaosResult, TAOS, TAOS_FIELD_E, TAOS_RES};
-
-#[allow(non_camel_case_types)]
-pub type TAOS_STMT = c_void;
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-#[allow(non_snake_case)]
-pub struct TAOS_STMT_OPTIONS {
-    pub reqId: i64,
-    pub singleStbInsert: bool,
-    pub singleTableBindOnce: bool,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_MULTI_BIND {
-    pub buffer_type: c_int,
-    pub buffer: *mut c_void,
-    pub buffer_length: usize,
-    pub length: *mut i32,
-    pub is_null: *mut c_char,
-    pub num: c_int,
-}
+use crate::ws::query::{taos_free_result, QueryResultSet};
+use crate::ws::{ResultSet, TaosResult, TAOS};
 
 #[derive(Debug)]
 struct TaosStmt {
@@ -48,13 +27,12 @@ struct TaosStmt {
     stb_insert: bool,
     tag_fields: Option<Vec<Stmt2Field>>,
     col_fields: Option<Vec<Stmt2Field>>,
-    tag_fields_addr: Option<usize>,
-    col_fields_addr: Option<usize>,
     bind_params: Vec<Stmt2BindParam>,
     tbname: Option<String>,
     tags: Option<Vec<Value>>,
     cols: Option<Vec<ColumnView>>,
     single_cols: Option<HashMap<usize, ColumnView>>,
+    res: Option<*mut c_void>,
 }
 
 impl TaosStmt {
@@ -64,13 +42,12 @@ impl TaosStmt {
             stb_insert,
             tag_fields: None,
             col_fields: None,
-            tag_fields_addr: None,
-            col_fields_addr: None,
             bind_params: Vec::new(),
             tbname: None,
             tags: None,
             cols: None,
             single_cols: None,
+            res: None,
         }
     }
 
@@ -125,1030 +102,26 @@ impl TaosStmt {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT {
-    taos_stmt_init_with_reqid(taos, generate_req_id() as _)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_init_with_reqid(taos: *mut TAOS, reqid: i64) -> *mut TAOS_STMT {
-    debug!("taos_stmt_init_with_reqid start, taos: {taos:?}, reqid: {reqid}");
-    let taos_stmt: TaosMaybeError<TaosStmt> = match stmt_init(taos, reqid as _, false, false) {
-        Ok(taos_stmt) => taos_stmt.into(),
-        Err(err) => {
-            error!("taos_stmt_init_with_reqid failed, err: {err:?}");
-            set_err_and_get_code(err);
-            return ptr::null_mut();
-        }
-    };
-    debug!("taos_stmt_init_with_reqid, taos_stmt: {taos_stmt:?}");
-    let res = Box::into_raw(Box::new(taos_stmt)) as _;
-    debug!("taos_stmt_init_with_reqid succ, res: {res:?}");
-    res
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_init_with_options(
-    taos: *mut TAOS,
-    options: *mut TAOS_STMT_OPTIONS,
-) -> *mut TAOS_STMT {
-    debug!("taos_stmt_init_with_options start, taos: {taos:?}, options: {options:?}");
-    let (req_id, single_stb_insert, single_table_bind_once) = match options.as_ref() {
-        Some(options) => (
-            options.reqId as u64,
-            options.singleStbInsert,
-            options.singleTableBindOnce,
-        ),
-        None => (generate_req_id(), false, false),
-    };
-
-    let taos_stmt: TaosMaybeError<TaosStmt> =
-        match stmt_init(taos, req_id, single_stb_insert, single_table_bind_once) {
-            Ok(taos_stmt) => taos_stmt.into(),
-            Err(err) => {
-                error!("taos_stmt_init_with_options failed, err: {err:?}");
-                set_err_and_get_code(err);
-                return ptr::null_mut();
-            }
-        };
-    debug!("taos_stmt_init_with_options, taos_stmt: {taos_stmt:?}");
-    let res = Box::into_raw(Box::new(taos_stmt)) as _;
-    debug!("taos_stmt_init_with_options succ, res: {res:?}");
-    res
-}
-
-unsafe fn stmt_init(
-    taos: *mut TAOS,
-    req_id: u64,
-    single_stb_insert: bool,
-    single_table_bind_once: bool,
-) -> TaosResult<TaosStmt> {
-    debug!("stmt_init start, req_id: {req_id}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}");
-
-    let taos = (taos as *mut Taos)
-        .as_mut()
-        .ok_or(TaosError::new(Code::FAILED, "taos is null"))?;
-
-    let mut stmt2 = Stmt2::new(taos.client());
-
-    block_in_place_or_global(stmt2.init_with_options(
-        req_id,
-        single_stb_insert,
-        single_table_bind_once,
-    ))?;
-
-    let taos_stmt = TaosStmt::new(stmt2, single_stb_insert && single_table_bind_once);
-    debug!("stmt_init succ, taos_stmt: {taos_stmt:?}");
-    Ok(taos_stmt)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_prepare(
-    stmt: *mut TAOS_STMT,
-    sql: *const c_char,
-    length: c_ulong,
-) -> c_int {
-    debug!("taos_stmt_prepare start, stmt: {stmt:?}, sql: {sql:?}, length: {length}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
-            return format_errno(Code::INVALID_PARA.into());
-        }
-    };
-
-    if sql.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "sql is null")));
-        return format_errno(Code::INVALID_PARA.into());
-    }
-
-    let sql = if length > 0 {
-        // TODO: check utf-8
-        str::from_utf8_unchecked(slice::from_raw_parts(sql as _, length as _))
-    } else {
-        match CStr::from_ptr(sql).to_str() {
-            Ok(sql) => sql,
-            Err(_) => {
-                maybe_err.with_err(Some(TaosError::new(
-                    Code::INVALID_PARA,
-                    "sql is invalid utf-8",
-                )));
-                return format_errno(Code::INVALID_PARA.into());
-            }
-        }
-    };
-
-    debug!("taos_stmt_prepare, sql: {sql}");
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    if let Err(err) = stmt2.prepare(sql) {
-        error!("taos_stmt_prepare failed, err: {err:?}");
-        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-        return format_errno(err.code().into());
-    }
-
-    if stmt2.is_insert().unwrap() {
-        let mut tag_fields = Vec::new();
-        let mut col_fields = Vec::new();
-
-        for field in stmt2.fields().unwrap() {
-            if field.bind_type == BindType::Tag {
-                tag_fields.push(field.clone());
-            } else if field.bind_type == BindType::Column {
-                col_fields.push(field.clone());
-            }
-        }
-
-        taos_stmt.tag_fields = Some(tag_fields);
-        taos_stmt.col_fields = Some(col_fields);
-    }
-
-    debug!("taos_stmt_prepare succ, taos_stmt: {taos_stmt:?}");
-
-    maybe_err.clear_err();
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_set_tbname_tags(
-    stmt: *mut TAOS_STMT,
-    name: *const c_char,
-    tags: *mut TAOS_MULTI_BIND,
-) -> c_int {
-    debug!("taos_stmt_set_tbname_tags, stmt: {stmt:?}, name: {name:?}, tags: {tags:?}");
-    let code = taos_stmt_set_tbname(stmt, name);
-    if code != 0 {
-        return code;
-    }
-    taos_stmt_set_tags(stmt, tags)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_set_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int {
-    debug!("taos_stmt_set_tbname start, stmt: {stmt:?}, name: {name:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
-            return format_errno(Code::INVALID_PARA.into());
-        }
-    };
-
-    let name = match CStr::from_ptr(name).to_str() {
-        Ok(name) => name,
-        Err(_) => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::INVALID_PARA,
-                "name is invalid utf-8",
-            )));
-            return format_errno(Code::INVALID_PARA.into());
-        }
-    };
-
-    taos_stmt.set_tbname(name.to_owned());
-
-    debug!("taos_stmt_set_tbname succ, taos_stmt: {taos_stmt:?}");
-
-    maybe_err.clear_err();
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_set_tags(
-    stmt: *mut TAOS_STMT,
-    tags: *mut TAOS_MULTI_BIND,
-) -> c_int {
-    debug!("taos_stmt_set_tags start, stmt: {stmt:?}, tags: {tags:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
-            return format_errno(Code::INVALID_PARA.into());
-        }
-    };
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    match stmt2.is_insert() {
-        Some(true) => {}
-        Some(false) => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_set_tags can only be called for insertion",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-        None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_prepare is not called",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-    }
-
-    let tag_cnt = taos_stmt
-        .tag_fields
-        .as_ref()
-        .map_or(0, |fields| fields.len());
-
-    let binds = slice::from_raw_parts(tags, tag_cnt);
-
-    let mut tags = Vec::with_capacity(tag_cnt);
-    for bind in binds {
-        tags.push(bind.to_value());
-    }
-
-    taos_stmt.set_tags(tags);
-
-    debug!("taos_stmt_set_tags succ, taos_stmt: {taos_stmt:?}");
-
-    maybe_err.clear_err();
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_set_sub_tbname(
-    stmt: *mut TAOS_STMT,
-    name: *const c_char,
-) -> c_int {
-    taos_stmt_set_tbname(stmt, name)
-}
-
-#[no_mangle]
-#[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_stmt_get_tag_fields(
-    stmt: *mut TAOS_STMT,
-    fieldNum: *mut c_int,
-    fields: *mut *mut TAOS_FIELD_E,
-) -> c_int {
-    debug!("taos_stmt_get_tag_fields start, stmt: {stmt:?}, field_num: {fieldNum:?}, fields: {fields:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
-            return format_errno(Code::INVALID_PARA.into());
-        }
-    };
-
-    if fieldNum.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fieldNum is null")));
-        return format_errno(Code::INVALID_PARA.into());
-    }
-
-    if fields.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fields is null")));
-        return format_errno(Code::INVALID_PARA.into());
-    }
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    match stmt2.is_insert() {
-        Some(true) => {}
-        Some(false) => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_get_tag_fields can only be called for insertion",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-        None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_prepare is not called",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-    }
-
-    let tag_fields: Vec<TAOS_FIELD_E> = taos_stmt
-        .tag_fields
-        .as_ref()
-        .unwrap()
-        .iter()
-        .map(|field| field.into())
-        .collect();
-
-    debug!("taos_stmt_get_tag_fields, fields: {tag_fields:?}");
-
-    *fieldNum = tag_fields.len() as _;
-
-    if !tag_fields.is_empty() {
-        *fields = Box::into_raw(tag_fields.into_boxed_slice()) as _;
-        taos_stmt.tag_fields_addr = Some(*fields as usize);
-    }
-
-    debug!("taos_stmt_get_tag_fields succ, taos_stmt: {taos_stmt:?}");
-
-    maybe_err.clear_err();
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-#[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_stmt_get_col_fields(
-    stmt: *mut TAOS_STMT,
-    fieldNum: *mut c_int,
-    fields: *mut *mut TAOS_FIELD_E,
-) -> c_int {
-    debug!("taos_stmt_get_col_fields start, stmt: {stmt:?}, field_num: {fieldNum:?}, fields: {fields:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
-            return format_errno(Code::INVALID_PARA.into());
-        }
-    };
-
-    if fieldNum.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fieldNum is null")));
-        return format_errno(Code::INVALID_PARA.into());
-    }
-
-    if fields.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fields is null")));
-        return format_errno(Code::INVALID_PARA.into());
-    }
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    match stmt2.is_insert() {
-        Some(true) => {}
-        Some(false) => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_get_col_fields can only be called for insertion",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-        None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_prepare is not called",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-    }
-
-    let col_fields: Vec<TAOS_FIELD_E> = taos_stmt
-        .col_fields
-        .as_ref()
-        .unwrap()
-        .iter()
-        .map(|field| field.into())
-        .collect();
-
-    debug!("taos_stmt_get_col_fields, fields: {col_fields:?}");
-
-    *fieldNum = col_fields.len() as _;
-
-    if !col_fields.is_empty() {
-        *fields = Box::into_raw(col_fields.into_boxed_slice()) as _;
-        taos_stmt.col_fields_addr = Some(*fields as usize);
-    }
-
-    debug!("taos_stmt_get_col_fields succ, taos_stmt: {taos_stmt:?}");
-
-    maybe_err.clear_err();
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_FIELD_E) {
-    debug!("taos_stmt_reclaim_fields start, stmt: {stmt:?}, fields: {fields:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => {
-            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
-            return;
-        }
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
-            return;
-        }
-    };
-
-    if fields.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fields is null")));
-        return;
-    }
-
-    if let Some(addr) = taos_stmt.tag_fields_addr {
-        if addr == fields as usize {
-            let len = taos_stmt
-                .tag_fields
-                .as_ref()
-                .map_or(0, |fields| fields.len());
-            let _ = Vec::from_raw_parts(fields, len, len);
-            taos_stmt.tag_fields_addr = None;
-            maybe_err.clear_err();
-            clear_err_and_ret_succ();
-            return;
-        }
-    }
-
-    if let Some(addr) = taos_stmt.col_fields_addr {
-        if addr == fields as usize {
-            let len = taos_stmt
-                .col_fields
-                .as_ref()
-                .map_or(0, |fields| fields.len());
-            let _ = Vec::from_raw_parts(fields, len, len);
-            taos_stmt.col_fields_addr = None;
-            maybe_err.clear_err();
-            clear_err_and_ret_succ();
-            return;
-        }
-    }
-
-    maybe_err.with_err(Some(TaosError::new(
-        Code::INVALID_PARA,
-        "fields is invalid",
-    )));
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int {
-    debug!("taos_stmt_is_insert start, stmt: {stmt:?}, insert: {insert:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
-            return format_errno(Code::INVALID_PARA.into());
-        }
-    };
-
-    if insert.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "insert is null")));
-        return format_errno(Code::INVALID_PARA.into());
-    }
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    if stmt2.is_insert().is_none() {
-        maybe_err.with_err(Some(TaosError::new(
-            Code::FAILED,
-            "taos_stmt_prepare is not called",
-        )));
-        return format_errno(Code::FAILED.into());
-    }
-
-    let is_insert = stmt2.is_insert().unwrap();
-    *insert = is_insert as _;
-
-    debug!("taos_stmt_is_insert succ, is_insert: {is_insert}");
-
-    maybe_err.clear_err();
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_int {
-    debug!("taos_stmt_num_params start, stmt: {stmt:?}, nums: {nums:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
-            return format_errno(Code::INVALID_PARA.into());
-        }
-    };
-
-    if nums.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "nums is null")));
-        return format_errno(Code::INVALID_PARA.into());
-    }
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    match stmt2.is_insert() {
-        Some(true) => {
-            *nums = taos_stmt
-                .col_fields
-                .as_ref()
-                .map_or(0, |fields| fields.len() as _);
-        }
-        Some(false) => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_num_params can only be called for insertion",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-        None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_prepare is not called",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-    }
-
-    debug!("taos_stmt_num_params succ");
-
-    maybe_err.clear_err();
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_get_param(
-    stmt: *mut TAOS_STMT,
-    idx: c_int,
-    r#type: *mut c_int,
-    bytes: *mut c_int,
-) -> c_int {
-    debug!(
-        "taos_stmt_get_param start, stmt: {stmt:?}, idx: {idx}, type: {type:?}, bytes: {bytes:?}"
-    );
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
-            return format_errno(Code::INVALID_PARA.into());
-        }
-    };
-
-    if r#type.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "type is null")));
-        return format_errno(Code::INVALID_PARA.into());
-    }
-
-    if bytes.is_null() {
-        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "bytes is null")));
-        return format_errno(Code::INVALID_PARA.into());
-    }
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    match stmt2.is_insert() {
-        Some(true) => {}
-        Some(false) => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_get_param can only be called for insertion",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-        None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_prepare is not called",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-    }
-
-    let col_cnt = taos_stmt
-        .col_fields
-        .as_ref()
-        .map_or(0, |fields| fields.len());
-
-    if idx < 0 || (idx as usize) >= col_cnt {
-        maybe_err.with_err(Some(TaosError::new(
-            Code::INVALID_PARA,
-            "idx is out of range",
-        )));
-        return format_errno(Code::INVALID_PARA.into());
-    }
-
-    let field = taos_stmt
-        .col_fields
-        .as_ref()
-        .unwrap()
-        .get(idx as usize)
-        .unwrap();
-
-    *r#type = field.field_type as _;
-    *bytes = field.bytes as _;
-
-    debug!("taos_stmt_get_param succ, field: {field:?}");
-
-    maybe_err.clear_err();
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_bind_param(
-    stmt: *mut TAOS_STMT,
-    bind: *mut TAOS_MULTI_BIND,
-) -> c_int {
-    debug!("taos_stmt_bind_param start, stmt: {stmt:?}, bind: {bind:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
-    };
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    let col_cnt = match stmt2.is_insert() {
-        Some(true) => taos_stmt
-            .col_fields
-            .as_ref()
-            .map_or(0, |fields| fields.len()),
-        Some(false) => stmt2.fields_count().unwrap_or(0),
-        None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_prepare is not called",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-    };
-
-    let binds = slice::from_raw_parts(bind, col_cnt);
-
-    let mut cols = Vec::with_capacity(col_cnt);
-    for bind in binds {
-        cols.push(bind.to_column_view());
-    }
-
-    taos_stmt.set_cols(cols);
-
-    if taos_stmt.stb_insert {
-        if let Err(err) = taos_stmt.move_to_bind_params() {
-            error!("taos_stmt_bind_param failed, err: {err:?}");
-            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-            return format_errno(err.code().into());
-        }
-    }
-
-    debug!("taos_stmt_bind_param succ, taos_stmt: {taos_stmt:?}");
-
-    maybe_err.with_err(None);
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_bind_param_batch(
-    stmt: *mut TAOS_STMT,
-    bind: *mut TAOS_MULTI_BIND,
-) -> c_int {
-    debug!("taos_stmt_bind_param_batch start, stmt: {stmt:?}, bind: {bind:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
-    };
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    match stmt2.is_insert() {
-        Some(true) => {}
-        Some(false) => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_bind_param_batch can only be called for insertion",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-        None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_prepare is not called",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-    }
-
-    let col_cnt = taos_stmt
-        .col_fields
-        .as_ref()
-        .map_or(0, |fields| fields.len());
-
-    let binds = slice::from_raw_parts(bind, col_cnt);
-
-    let mut cols = Vec::with_capacity(col_cnt);
-    for bind in binds {
-        cols.push(bind.to_column_view());
-    }
-
-    taos_stmt.set_cols(cols);
-
-    if taos_stmt.stb_insert {
-        if let Err(err) = taos_stmt.move_to_bind_params() {
-            error!("taos_stmt_bind_param_batch failed, err: {err:?}");
-            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-            return format_errno(err.code().into());
-        }
-    }
-
-    debug!("taos_stmt_bind_param_batch succ, taos_stmt: {taos_stmt:?}");
-
-    maybe_err.with_err(None);
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-#[allow(non_snake_case)]
-pub unsafe extern "C" fn taos_stmt_bind_single_param_batch(
-    stmt: *mut TAOS_STMT,
-    bind: *mut TAOS_MULTI_BIND,
-    colIdx: c_int,
-) -> c_int {
-    debug!(
-        "taos_stmt_bind_single_param_batch start, stmt: {stmt:?}, bind: {bind:?}, col_idx: {colIdx}"
-    );
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
-            return format_errno(Code::INVALID_PARA.into());
-        }
-    };
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    match stmt2.is_insert() {
-        Some(true) => {}
-        Some(false) => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_bind_single_param_batch can only be called for insertion",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-        None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_bind_single_param_batch is not called",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-    }
-
-    let view = match bind.as_ref() {
-        Some(bind) => bind.to_column_view(),
-        None => {
-            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "bind is null")));
-            return format_errno(Code::INVALID_PARA.into());
-        }
-    };
-
-    debug!("taos_stmt_bind_single_param_batch, idx: {colIdx}, view: {view:?}");
-
-    taos_stmt.set_single_col(colIdx as _, view);
-
-    debug!("taos_stmt_bind_single_param_batch succ, taos_stmt: {taos_stmt:?}");
-    maybe_err.with_err(None);
-    0
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
-    debug!("taos_stmt_add_batch start, stmt: {stmt:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
-    };
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    match stmt2.is_insert() {
-        Some(true) => {}
-        Some(false) => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_add_batch can only be called for insertion",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-        None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_prepare is not called",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-    }
-
-    if let Err(err) = taos_stmt.move_to_bind_params() {
-        error!("taos_stmt_add_batch failed, err: {err:?}");
-        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-        return format_errno(err.code().into());
-    }
-
-    debug!("taos_stmt_add_batch succ, taos_stmt: {taos_stmt:?}");
-
-    maybe_err.with_err(None);
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
-    debug!("taos_stmt_execute start, stmt: {stmt:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let taos_stmt = match maybe_err.deref_mut() {
-        Some(taos_stmt) => taos_stmt,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
-    };
-
-    if let Err(err) = taos_stmt.move_to_bind_params() {
-        error!("taos_stmt_execute failed, err: {err:?}");
-        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-        return format_errno(err.code().into());
-    }
-
-    debug!("taos_stmt_execute, taos_stmt: {taos_stmt:?}");
-
-    let stmt2 = &mut taos_stmt.stmt2;
-
-    let params = std::mem::take(&mut taos_stmt.bind_params);
-    debug!("taos_stmt_execute, params: {params:?}");
-
-    if let Err(err) = stmt2.bind(&params) {
-        error!("taos_stmt_execute failed, err: {err:?}");
-        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-        return format_errno(err.code().into());
-    }
-
-    match stmt2.exec() {
-        Ok(_) => {
-            debug!("taos_stmt_execute succ");
-            maybe_err.clear_err();
-            clear_err_and_ret_succ()
-        }
-        Err(err) => {
-            error!("taos_stmt_execute failed, err: {err:?}");
-            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-            format_errno(err.code().into())
+impl Drop for TaosStmt {
+    fn drop(&mut self) {
+        if let Some(res) = self.res.take() {
+            unsafe { taos_free_result(res) };
         }
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS_RES {
-    debug!("taos_stmt_use_result start, stmt: {stmt:?}");
+#[repr(C)]
+struct StmtFields {
+    len: usize,
+    fields: [TAOS_FIELD_E; 0],
+}
 
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => {
-            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
-            return ptr::null_mut();
-        }
-    };
-
-    let stmt2 = match maybe_err.deref_mut() {
-        Some(taos_stmt) => &mut taos_stmt.stmt2,
-        None => {
-            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid"));
-            return ptr::null_mut();
-        }
-    };
-
-    match stmt2.result_set() {
-        Ok(rs) => {
-            let rs: TaosMaybeError<ResultSet> = ResultSet::Query(QueryResultSet::new(rs)).into();
-            debug!("taos_stmt_use_result succ, result_set: {rs:?}");
-            maybe_err.clear_err();
-            clear_err_and_ret_succ();
-            Box::into_raw(Box::new(rs)) as _
-        }
-        Err(err) => {
-            error!("taos_stmt_use_result failed, err: {err:?}");
-            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
-            ptr::null_mut()
-        }
+impl StmtFields {
+    unsafe fn alloc(len: usize) -> *mut StmtFields {
+        let total_size = size_of::<StmtFields>() + len * size_of::<TAOS_FIELD_E>();
+        let layout = Layout::from_size_align_unchecked(total_size, align_of::<StmtFields>());
+        alloc(layout) as _
     }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_close(stmt: *mut TAOS_STMT) -> c_int {
-    debug!("taos_stmt_close, stmt: {stmt:?}");
-    if stmt.is_null() {
-        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
-    }
-    let _ = Box::from_raw(stmt as *mut TaosMaybeError<TaosStmt>);
-    clear_err_and_ret_succ()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *mut c_char {
-    taos_errstr(stmt as _) as _
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int {
-    debug!("taos_stmt_affected_rows start, stmt: {stmt:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let stmt2 = match maybe_err.deref_mut() {
-        Some(taos_stmt) => &mut taos_stmt.stmt2,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
-    };
-
-    debug!(
-        "taos_stmt_affected_rows succ, affected_rows: {}",
-        stmt2.affected_rows()
-    );
-
-    stmt2.affected_rows() as _
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c_int {
-    debug!("taos_stmt_affected_rows_once start, stmt: {stmt:?}");
-
-    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
-        Some(maybe_err) => maybe_err,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
-    };
-
-    let stmt2 = match maybe_err.deref_mut() {
-        Some(taos_stmt) => &mut taos_stmt.stmt2,
-        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
-    };
-
-    debug!(
-        "taos_stmt_affected_rows_once succ, affected_rows_once: {}",
-        stmt2.affected_rows_once(),
-    );
-
-    stmt2.affected_rows_once() as _
 }
 
 impl TAOS_MULTI_BIND {
@@ -1229,7 +202,7 @@ impl TAOS_MULTI_BIND {
             ($ty:ty, $from:expr) => {{
                 let buf = self.buffer as *const $ty;
                 let mut vals = vec![None; num];
-                for i in 0..num {
+                for _ in 0..num {
                     if let Some(is_nulls) = is_nulls {
                         for i in 0..num {
                             if is_nulls[i] == 0 {
@@ -1390,7 +363,7 @@ impl TAOS_MULTI_BIND {
     }
 
     #[cfg(test)]
-    fn from_primitives<T: taos_query::common::itypes::IValue>(
+    pub(crate) fn from_primitives<T: taos_query::common::itypes::IValue>(
         values: &[T],
         nulls: &[bool],
         lens: &[i32],
@@ -1406,7 +379,7 @@ impl TAOS_MULTI_BIND {
     }
 
     #[cfg(test)]
-    fn from_timestamps(values: &[i64], nulls: &[bool], lens: &[i32]) -> Self {
+    pub(crate) fn from_timestamps(values: &[i64], nulls: &[bool], lens: &[i32]) -> Self {
         Self {
             buffer_type: Ty::Timestamp as _,
             buffer: values.as_ptr() as _,
@@ -1440,920 +413,1002 @@ impl From<&Stmt2Field> for TAOS_FIELD_E {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::ffi::CString;
+pub unsafe fn taos_stmt_init(taos: *mut TAOS) -> *mut TAOS_STMT {
+    taos_stmt_init_with_reqid(taos, generate_req_id() as _)
+}
 
-    use super::*;
-    use crate::ws::query::*;
-    use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
+pub unsafe fn taos_stmt_init_with_reqid(taos: *mut TAOS, reqid: i64) -> *mut TAOS_STMT {
+    debug!("taos_stmt_init_with_reqid start, taos: {taos:?}, reqid: {reqid}");
+    let taos_stmt: TaosMaybeError<TaosStmt> = match stmt_init(taos, reqid as _, false, false) {
+        Ok(taos_stmt) => taos_stmt.into(),
+        Err(err) => {
+            error!("taos_stmt_init_with_reqid failed, err: {err:?}");
+            set_err_and_get_code(err);
+            return ptr::null_mut();
+        }
+    };
+    debug!("taos_stmt_init_with_reqid, taos_stmt: {taos_stmt:?}");
+    let res = Box::into_raw(Box::new(taos_stmt)) as _;
+    debug!("taos_stmt_init_with_reqid succ, res: {res:?}");
+    res
+}
 
-    macro_rules! new_bind {
-        ($ty:expr, $buffer:ident, $length:ident, $is_null:ident) => {
-            TAOS_MULTI_BIND {
-                buffer_type: $ty as _,
-                buffer: $buffer.as_mut_ptr() as _,
-                buffer_length: *$length.iter().max().unwrap() as _,
-                length: $length.as_mut_ptr(),
-                is_null: $is_null.as_mut_ptr(),
-                num: $is_null.len() as _,
+pub unsafe fn taos_stmt_init_with_options(
+    taos: *mut TAOS,
+    options: *mut TAOS_STMT_OPTIONS,
+) -> *mut TAOS_STMT {
+    debug!("taos_stmt_init_with_options start, taos: {taos:?}, options: {options:?}");
+
+    if options.is_null() {
+        set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "options is null"));
+        return ptr::null_mut();
+    }
+
+    let options = &*options;
+    let taos_stmt: TaosMaybeError<TaosStmt> = match stmt_init(
+        taos,
+        options.reqId as _,
+        options.singleStbInsert,
+        options.singleTableBindOnce,
+    ) {
+        Ok(taos_stmt) => taos_stmt.into(),
+        Err(err) => {
+            error!("taos_stmt_init_with_options failed, err: {err:?}");
+            set_err_and_get_code(err);
+            return ptr::null_mut();
+        }
+    };
+    debug!("taos_stmt_init_with_options, taos_stmt: {taos_stmt:?}");
+    let res = Box::into_raw(Box::new(taos_stmt)) as _;
+    debug!("taos_stmt_init_with_options succ, res: {res:?}");
+    res
+}
+
+unsafe fn stmt_init(
+    taos: *mut TAOS,
+    req_id: u64,
+    single_stb_insert: bool,
+    single_table_bind_once: bool,
+) -> TaosResult<TaosStmt> {
+    debug!("stmt_init start, req_id: {req_id}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}");
+
+    let taos = (taos as *mut Taos)
+        .as_mut()
+        .ok_or(TaosError::new(Code::FAILED, "taos is null"))?;
+
+    let mut stmt2 = Stmt2::new(taos.client());
+
+    block_in_place_or_global(stmt2.init_with_options(
+        req_id,
+        single_stb_insert,
+        single_table_bind_once,
+    ))?;
+
+    let taos_stmt = TaosStmt::new(stmt2, single_stb_insert && single_table_bind_once);
+    debug!("stmt_init succ, taos_stmt: {taos_stmt:?}");
+    Ok(taos_stmt)
+}
+
+pub unsafe fn taos_stmt_prepare(
+    stmt: *mut TAOS_STMT,
+    sql: *const c_char,
+    length: c_ulong,
+) -> c_int {
+    debug!("taos_stmt_prepare start, stmt: {stmt:?}, sql: {sql:?}, length: {length}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    if sql.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "sql is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    let sql = if length > 0 {
+        // TODO: check utf-8
+        str::from_utf8_unchecked(slice::from_raw_parts(sql as _, length as _))
+    } else {
+        match CStr::from_ptr(sql).to_str() {
+            Ok(sql) => sql,
+            Err(_) => {
+                maybe_err.with_err(Some(TaosError::new(
+                    Code::INVALID_PARA,
+                    "sql is invalid utf-8",
+                )));
+                return format_errno(Code::INVALID_PARA.into());
             }
-        };
+        }
+    };
+
+    debug!("taos_stmt_prepare, sql: {sql}");
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    if let Err(err) = stmt2.prepare(sql) {
+        error!("taos_stmt_prepare failed, err: {err:?}");
+        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+        return format_errno(err.code().into());
     }
 
-    macro_rules! new_bind_without_is_null {
-        ($ty:expr, $buffer:ident, $length:ident) => {
-            TAOS_MULTI_BIND {
-                buffer_type: $ty as _,
-                buffer: $buffer.as_mut_ptr() as _,
-                buffer_length: *$length.iter().max().unwrap() as _,
-                length: $length.as_mut_ptr(),
-                is_null: ptr::null_mut(),
-                num: $length.len() as _,
+    if stmt2.is_insert().unwrap() {
+        let mut tag_fields = Vec::new();
+        let mut col_fields = Vec::new();
+
+        for field in stmt2.fields().unwrap() {
+            if field.bind_type == BindType::Tag {
+                tag_fields.push(field.clone());
+            } else if field.bind_type == BindType::Column {
+                col_fields.push(field.clone());
             }
-        };
+        }
+
+        taos_stmt.tag_fields = Some(tag_fields);
+        taos_stmt.col_fields = Some(col_fields);
     }
 
-    #[test]
-    fn test_stmt() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1740472346",
-                    "create database test_1740472346",
-                    "use test_1740472346",
-                    "create table s0 (ts timestamp, c1 int) tags (t1 int)",
-                ],
-            );
+    debug!("taos_stmt_prepare succ, taos_stmt: {taos_stmt:?}");
 
-            let stmt = taos_stmt_init(taos);
-            assert!(!stmt.is_null());
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
 
-            let sql = c"insert into ? using s0 tags (?) values (?, ?)";
-            let len = sql.to_bytes().len();
-            let code = taos_stmt_prepare(stmt, sql.as_ptr(), len as _);
-            assert_eq!(code, 0);
+pub unsafe fn taos_stmt_set_tbname_tags(
+    stmt: *mut TAOS_STMT,
+    name: *const c_char,
+    tags: *mut TAOS_MULTI_BIND,
+) -> c_int {
+    debug!("taos_stmt_set_tbname_tags, stmt: {stmt:?}, name: {name:?}, tags: {tags:?}");
+    let code = taos_stmt_set_tbname(stmt, name);
+    if code != 0 {
+        return code;
+    }
+    taos_stmt_set_tags(stmt, tags)
+}
 
-            let name = c"d0";
-            let mut tags = vec![TAOS_MULTI_BIND::from_primitives(&[99], &[false], &[4])];
-            let code = taos_stmt_set_tbname_tags(stmt, name.as_ptr(), tags.as_mut_ptr());
-            assert_eq!(code, 0);
+pub unsafe fn taos_stmt_set_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int {
+    debug!("taos_stmt_set_tbname start, stmt: {stmt:?}, name: {name:?}");
 
-            let code = taos_stmt_set_tbname(stmt, name.as_ptr());
-            assert_eq!(code, 0);
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
 
-            let code = taos_stmt_set_sub_tbname(stmt, name.as_ptr());
-            assert_eq!(code, 0);
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
 
-            let code = taos_stmt_set_tags(stmt, tags.as_mut_ptr());
-            assert_eq!(code, 0);
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(name) => name,
+        Err(_) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::INVALID_PARA,
+                "name is invalid utf-8",
+            )));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
 
-            let mut field_num = 0;
-            let mut fields = ptr::null_mut();
-            let code = taos_stmt_get_tag_fields(stmt, &mut field_num, &mut fields);
-            assert_eq!(code, 0);
-            assert_eq!(field_num, 1);
+    taos_stmt.set_tbname(name.to_owned());
 
-            taos_stmt_reclaim_fields(stmt, fields);
+    debug!("taos_stmt_set_tbname succ, taos_stmt: {taos_stmt:?}");
 
-            let mut field_num = 0;
-            let mut fields = ptr::null_mut();
-            let code = taos_stmt_get_col_fields(stmt, &mut field_num, &mut fields);
-            assert_eq!(code, 0);
-            assert_eq!(field_num, 2);
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
 
-            taos_stmt_reclaim_fields(stmt, fields);
+pub unsafe fn taos_stmt_set_tags(stmt: *mut TAOS_STMT, tags: *mut TAOS_MULTI_BIND) -> c_int {
+    debug!("taos_stmt_set_tags start, stmt: {stmt:?}, tags: {tags:?}");
 
-            let mut insert = 0;
-            let code = taos_stmt_is_insert(stmt, &mut insert);
-            assert_eq!(code, 0);
-            assert_eq!(insert, 1);
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
 
-            let mut nums = 0;
-            let code = taos_stmt_num_params(stmt, &mut nums);
-            assert_eq!(code, 0);
-            assert_eq!(nums, 2);
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
 
-            let mut ty = 0;
-            let mut bytes = 0;
-            let code = taos_stmt_get_param(stmt, 1, &mut ty, &mut bytes);
-            assert_eq!(code, 0);
-            assert_eq!(ty, Ty::Int as i32);
-            assert_eq!(bytes, 4);
+    let stmt2 = &mut taos_stmt.stmt2;
 
-            let mut cols = vec![
-                TAOS_MULTI_BIND::from_timestamps(&[1738910658659i64], &[false], &[8]),
-                TAOS_MULTI_BIND::from_primitives(&[20], &[false], &[4]),
-            ];
-            let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
-            assert_eq!(code, 0);
-
-            let mut cols = vec![
-                TAOS_MULTI_BIND::from_timestamps(&[1738910658659i64], &[false], &[8]),
-                TAOS_MULTI_BIND::from_primitives(&[2025], &[false], &[4]),
-            ];
-            let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
-            assert_eq!(code, 0);
-
-            let code = taos_stmt_add_batch(stmt);
-            assert_eq!(code, 0);
-
-            let code = taos_stmt_execute(stmt);
-            assert_eq!(code, 0);
-
-            let errstr = taos_stmt_errstr(stmt);
-            assert_eq!(CStr::from_ptr(errstr), c"");
-
-            let affected_rows = taos_stmt_affected_rows(stmt);
-            assert_eq!(affected_rows, 1);
-
-            let affected_rows_once = taos_stmt_affected_rows_once(stmt);
-            assert_eq!(affected_rows_once, 1);
-
-            let code = taos_stmt_close(stmt);
-            assert_eq!(code, 0);
-
-            test_exec(taos, "drop database test_1740472346");
-            taos_close(taos);
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_set_tags can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
         }
     }
 
-    #[test]
-    fn test_taos_stmt_init_with_options() {
-        unsafe {
-            let taos = test_connect();
-            let mut option = TAOS_STMT_OPTIONS {
-                reqId: 1001,
-                singleStbInsert: true,
-                singleTableBindOnce: false,
-            };
+    let tag_cnt = taos_stmt
+        .tag_fields
+        .as_ref()
+        .map_or(0, |fields| fields.len());
 
-            let stmt = taos_stmt_init_with_options(taos, &mut option);
-            assert!(!stmt.is_null());
+    let binds = slice::from_raw_parts(tags, tag_cnt);
 
-            let code = taos_stmt_close(stmt);
-            assert_eq!(code, 0);
+    let mut tags = Vec::with_capacity(tag_cnt);
+    for bind in binds {
+        tags.push(bind.to_value());
+    }
 
-            taos_close(taos);
+    taos_stmt.set_tags(tags);
+
+    debug!("taos_stmt_set_tags succ, taos_stmt: {taos_stmt:?}");
+
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
+
+pub unsafe fn taos_stmt_set_sub_tbname(stmt: *mut TAOS_STMT, name: *const c_char) -> c_int {
+    taos_stmt_set_tbname(stmt, name)
+}
+
+#[allow(non_snake_case)]
+pub unsafe fn taos_stmt_get_tag_fields(
+    stmt: *mut TAOS_STMT,
+    fieldNum: *mut c_int,
+    fields: *mut *mut TAOS_FIELD_E,
+) -> c_int {
+    debug!("taos_stmt_get_tag_fields start, stmt: {stmt:?}, field_num: {fieldNum:?}, fields: {fields:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
         }
+    };
 
-        unsafe {
-            let taos = test_connect();
-            let stmt = taos_stmt_init_with_options(taos, ptr::null_mut());
-            assert!(!stmt.is_null());
+    if fieldNum.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fieldNum is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
-            let code = taos_stmt_close(stmt);
-            assert_eq!(code, 0);
+    if fields.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fields is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
-            taos_close(taos);
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_get_tag_fields can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
         }
     }
 
-    #[test]
-    fn test_taos_stmt_use_result() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1740560525",
-                    "create database test_1740560525",
-                    "use test_1740560525",
-                    "create table t0 (ts timestamp, c1 int)",
-                    "insert into t0 values(1739762261437, 1)",
-                    "insert into t0 values(1739762261438, 99)",
-                ],
-            );
+    let tag_fields: Vec<TAOS_FIELD_E> = taos_stmt
+        .tag_fields
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|field| field.into())
+        .collect();
 
-            let stmt = taos_stmt_init(taos);
-            assert!(!stmt.is_null());
+    debug!("taos_stmt_get_tag_fields, fields: {tag_fields:?}");
 
-            let sql = c"select * from t0 where c1 > ?";
-            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
-            assert_eq!(code, 0);
+    let len = tag_fields.len();
 
-            let mut buffer = vec![0];
-            let mut length = vec![4];
-            let mut is_null = vec![0];
-            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+    *fieldNum = len as _;
+    *fields = ptr::null_mut();
 
-            let mut bind = vec![c1];
-            let code = taos_stmt_bind_param(stmt, bind.as_mut_ptr());
-            assert_eq!(code, 0);
+    if !tag_fields.is_empty() {
+        let ptr = StmtFields::alloc(len);
+        if ptr.is_null() {
+            error!("taos_stmt_get_tag_fields failed, alloc null");
+            maybe_err.with_err(Some(TaosError::new(Code::FAILED, "alloc failed")));
+            return format_errno(Code::FAILED.into());
+        }
 
-            let code = taos_stmt_execute(stmt);
-            assert_eq!(code, 0);
+        (*ptr).len = len;
+        let fields_ptr = (*ptr).fields.as_mut_ptr();
+        ptr::copy_nonoverlapping(tag_fields.as_ptr(), fields_ptr, len);
 
-            let res = taos_stmt_use_result(stmt);
-            assert!(!res.is_null());
+        *fields = fields_ptr;
+    }
 
-            let affected_rows = taos_affected_rows(res);
-            assert_eq!(affected_rows, 0);
+    trace!("taos_stmt_get_tag_fields succ, taos_stmt: {taos_stmt:?}");
 
-            let precision = taos_result_precision(res);
-            assert_eq!(precision, 0);
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
 
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
+#[allow(non_snake_case)]
+pub unsafe fn taos_stmt_get_col_fields(
+    stmt: *mut TAOS_STMT,
+    fieldNum: *mut c_int,
+    fields: *mut *mut TAOS_FIELD_E,
+) -> c_int {
+    debug!("taos_stmt_get_col_fields start, stmt: {stmt:?}, field_num: {fieldNum:?}, fields: {fields:?}");
 
-            let fields = taos_fetch_fields(res);
-            assert!(!fields.is_null());
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
 
-            let num_fields = taos_num_fields(res);
-            assert_eq!(num_fields, 2);
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
 
-            let mut str = vec![0 as c_char; 1024];
-            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            assert!(len > 0);
-            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+    if fieldNum.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fieldNum is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
+    if fields.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fields is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
-            let mut str = vec![0 as c_char; 1024];
-            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            assert!(len > 0);
-            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+    let stmt2 = &mut taos_stmt.stmt2;
 
-            taos_stop_query(res);
-
-            taos_free_result(res);
-
-            let code = taos_stmt_close(stmt);
-            assert_eq!(code, 0);
-
-            test_exec(taos, "drop database test_1740560525");
-            taos_close(taos);
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_get_col_fields can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
         }
     }
 
-    #[test]
-    fn test_taos_stmt_bind_param_batch() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1740563439",
-                    "create database test_1740563439",
-                    "use test_1740563439",
-                    "create table s0 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, \
-                    c5 bigint, c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, \
-                    c9 bigint unsigned, c10 float, c11 double, c12 varchar(10), c13 nchar(10), \
-                    c14 varbinary(10), c15 geometry(50)) \
-                    tags (t1 timestamp, t2 bool, t3 tinyint, t4 smallint, t5 int, t6 bigint, \
-                    t7 tinyint unsigned, t8 smallint unsigned, t9 int unsigned, \
-                    t10 bigint unsigned, t11 float, t12 double, t13 varchar(10), t14 nchar(10), \
-                    t15 varbinary(10), t16 geometry(50), t17 int)",
-                ],
-            );
-
-            let stmt = taos_stmt_init(taos);
-            assert!(!stmt.is_null());
-
-            let sql =
-                c"insert into ? using s0 tags(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
-                values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
-            assert_eq!(code, 0);
-
-            let tbname1 = c"d0";
-            let tbname2 = c"d1";
-
-            let mut buffer = vec![1739521477831i64];
-            let mut length = vec![8];
-            let mut is_null = vec![0];
-            let t1 = new_bind!(Ty::Timestamp, buffer, length, is_null);
-
-            let mut buffer = vec![1i8];
-            let mut length = vec![1];
-            let mut is_null = vec![0];
-            let t2 = new_bind!(Ty::Bool, buffer, length, is_null);
-
-            let mut buffer = vec![10i8];
-            let mut length = vec![1];
-            let mut is_null = vec![0];
-            let t3 = new_bind!(Ty::TinyInt, buffer, length, is_null);
-
-            let mut buffer = vec![23i16];
-            let mut length = vec![2];
-            let mut is_null = vec![0];
-            let t4 = new_bind!(Ty::SmallInt, buffer, length, is_null);
-
-            let mut buffer = vec![479i32];
-            let mut length = vec![4];
-            let mut is_null = vec![0];
-            let t5 = new_bind!(Ty::Int, buffer, length, is_null);
-
-            let mut buffer = vec![1999i64];
-            let mut length = vec![8];
-            let mut is_null = vec![0];
-            let t6 = new_bind!(Ty::BigInt, buffer, length, is_null);
-
-            let mut buffer = vec![27u8];
-            let mut length = vec![1];
-            let mut is_null = vec![0];
-            let t7 = new_bind!(Ty::UTinyInt, buffer, length, is_null);
-
-            let mut buffer = vec![89u16];
-            let mut length = vec![2];
-            let mut is_null = vec![0];
-            let t8 = new_bind!(Ty::USmallInt, buffer, length, is_null);
-
-            let mut buffer = vec![234578u32];
-            let mut length = vec![4];
-            let mut is_null = vec![0];
-            let t9 = new_bind!(Ty::UInt, buffer, length, is_null);
-
-            let mut buffer = vec![234578u64];
-            let mut length = vec![8];
-            let mut is_null = vec![0];
-            let t10 = new_bind!(Ty::UBigInt, buffer, length, is_null);
-
-            let mut buffer = vec![1.23f32];
-            let mut length = vec![4];
-            let mut is_null = vec![0];
-            let t11 = new_bind!(Ty::Float, buffer, length, is_null);
-
-            let mut buffer = vec![2345345.99f64];
-            let mut length = vec![8];
-            let mut is_null = vec![0];
-            let t12 = new_bind!(Ty::Double, buffer, length, is_null);
-
-            let mut buffer = vec![104u8, 101, 108, 108, 111];
-            let mut length = vec![buffer.len() as _];
-            let mut is_null = vec![0];
-            let t13 = new_bind!(Ty::VarChar, buffer, length, is_null);
-
-            let mut buffer = vec![104u8, 101, 108, 108, 111];
-            let mut length = vec![buffer.len() as _];
-            let mut is_null = vec![0];
-            let t14 = new_bind!(Ty::NChar, buffer, length, is_null);
-
-            let mut buffer = vec![118u8, 97, 114, 98, 105, 110, 97, 114, 121];
-            let mut length = vec![buffer.len() as _];
-            let mut is_null = vec![0];
-            let t15 = new_bind!(Ty::VarBinary, buffer, length, is_null);
-
-            let mut buffer = vec![
-                1u8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63,
-            ];
-            let mut length = vec![buffer.len() as _];
-            let mut is_null = vec![0];
-            let t16 = new_bind!(Ty::Geometry, buffer, length, is_null);
-
-            let mut is_null = vec![1];
-            let t17 = TAOS_MULTI_BIND {
-                buffer_type: Ty::Int as _,
-                buffer: ptr::null_mut(),
-                buffer_length: 0,
-                length: ptr::null_mut(),
-                is_null: is_null.as_mut_ptr(),
-                num: is_null.len() as _,
-            };
-
-            let mut tags = vec![
-                t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15, t16, t17,
-            ];
-
-            let mut buffer = vec![
-                1739521477831i64,
-                1739521477832,
-                1739521477833,
-                1739521477834,
-            ];
-            let mut length = vec![8, 8, 8, 8];
-            let mut is_null = vec![0, 0, 0, 0];
-            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
-
-            let mut buffer = vec![1i8, 1, 0, 0];
-            let mut length = vec![1, 1, 1, 1];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c1 = new_bind!(Ty::Bool, buffer, length, is_null);
-
-            let mut buffer = vec![23i8, 0, -23, 0];
-            let mut length = vec![1, 1, 1, 1];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c2 = new_bind!(Ty::TinyInt, buffer, length, is_null);
-
-            let mut buffer = vec![34i16, 0, -34, 0];
-            let mut length = vec![2, 2, 2, 2];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c3 = new_bind!(Ty::SmallInt, buffer, length, is_null);
-
-            let mut buffer = vec![45i32, 46, -45, 0];
-            let mut length = vec![4, 4, 4, 4];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c4 = new_bind!(Ty::Int, buffer, length, is_null);
-
-            let mut buffer = vec![56i64, 57, -56, 0];
-            let mut length = vec![8, 8, 8, 8];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c5 = new_bind!(Ty::BigInt, buffer, length, is_null);
-
-            let mut buffer = vec![67u8, 68, 67, 0];
-            let mut length = vec![1, 1, 1, 1];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c6 = new_bind!(Ty::UTinyInt, buffer, length, is_null);
-
-            let mut buffer = vec![78u16, 79, 78, 0];
-            let mut length = vec![2, 2, 2, 2];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c7 = new_bind!(Ty::USmallInt, buffer, length, is_null);
-
-            let mut buffer = vec![89u32, 90, 89, 0];
-            let mut length = vec![4, 4, 4, 4];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c8 = new_bind!(Ty::UInt, buffer, length, is_null);
-
-            let mut buffer = vec![100u64, 101, 100, 0];
-            let mut length = vec![8, 8, 8, 8];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c9 = new_bind!(Ty::UBigInt, buffer, length, is_null);
-
-            let mut buffer = vec![1.23f32, 1.24, -1.23, 0.0];
-            let mut length = vec![4, 4, 4, 4];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c10 = new_bind!(Ty::Float, buffer, length, is_null);
-
-            let mut buffer = vec![2345.67f64, 2345.68, -2345.67, 0.0];
-            let mut length = vec![8, 8, 8, 8];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c11 = new_bind!(Ty::Double, buffer, length, is_null);
-
-            let mut buffer = vec![
-                104u8, 101, 108, 108, 111, 0, 0, 0, 0, 0, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0,
-                104, 101, 108, 108, 111, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ];
-            let mut length = vec![5, 5, 10, 0];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c12 = new_bind!(Ty::VarChar, buffer, length, is_null);
-
-            let mut buffer = vec![
-                104u8, 101, 108, 108, 111, 0, 0, 0, 0, 0, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0,
-                104, 101, 108, 108, 111, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ];
-            let mut length = vec![5, 5, 10, 0];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c13 = new_bind!(Ty::NChar, buffer, length, is_null);
-
-            let mut buffer = vec![
-                104u8, 101, 108, 108, 111, 0, 0, 0, 0, 0, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0,
-                104, 101, 108, 108, 111, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ];
-            let mut length = vec![5, 5, 10, 0];
-            let mut is_null = vec![0, 0, 0, 1];
-            let c14 = new_bind!(Ty::VarBinary, buffer, length, is_null);
-
-            let mut buffer = vec![
-                1u8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0,
-            ];
-            let mut length = vec![21, 0, 21, 0];
-            let mut is_null = vec![0, 1, 0, 1];
-            let c15 = new_bind!(Ty::Geometry, buffer, length, is_null);
-
-            let mut cols = vec![
-                ts, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15,
-            ];
-
-            let code = taos_stmt_set_tbname(stmt, tbname1.as_ptr());
-            assert_eq!(code, 0);
-
-            let code = taos_stmt_set_tags(stmt, tags.as_mut_ptr());
-            assert_eq!(code, 0);
-
-            let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
-            assert_eq!(code, 0);
-
-            let code = taos_stmt_add_batch(stmt);
-            assert_eq!(code, 0);
-
-            let mut buffer = vec![
-                1739521477831i64,
-                1739521477832,
-                1739521477833,
-                1739521477834,
-            ];
-            let mut length = vec![8, 8, 8, 8];
-            let ts = new_bind_without_is_null!(Ty::Timestamp, buffer, length);
-
-            let mut buffer = vec![1i8, 1, 0, 0];
-            let mut length = vec![1, 1, 1, 1];
-            let c1 = new_bind_without_is_null!(Ty::Bool, buffer, length);
-
-            let mut buffer = vec![23i8, 0, -23, 0];
-            let mut length = vec![1, 1, 1, 1];
-            let c2 = new_bind_without_is_null!(Ty::TinyInt, buffer, length);
-
-            let mut buffer = vec![34i16, 0, -34, 0];
-            let mut length = vec![2, 2, 2, 2];
-            let c3 = new_bind_without_is_null!(Ty::SmallInt, buffer, length);
-
-            let mut buffer = vec![45i32, 46, -45, 0];
-            let mut length = vec![4, 4, 4, 4];
-            let c4 = new_bind_without_is_null!(Ty::Int, buffer, length);
-
-            let mut buffer = vec![56i64, 57, -56, 0];
-            let mut length = vec![8, 8, 8, 8];
-            let c5 = new_bind_without_is_null!(Ty::BigInt, buffer, length);
-
-            let mut buffer = vec![67u8, 68, 67, 0];
-            let mut length = vec![1, 1, 1, 1];
-            let c6 = new_bind_without_is_null!(Ty::UTinyInt, buffer, length);
-
-            let mut buffer = vec![78u16, 79, 78, 0];
-            let mut length = vec![2, 2, 2, 2];
-            let c7 = new_bind_without_is_null!(Ty::USmallInt, buffer, length);
-
-            let mut buffer = vec![89u32, 90, 89, 0];
-            let mut length = vec![4, 4, 4, 4];
-            let c8 = new_bind_without_is_null!(Ty::UInt, buffer, length);
-
-            let mut buffer = vec![100u64, 101, 100, 0];
-            let mut length = vec![8, 8, 8, 8];
-            let c9 = new_bind_without_is_null!(Ty::UBigInt, buffer, length);
-
-            let mut buffer = vec![1.23f32, 1.24, -1.23, 0.0];
-            let mut length = vec![4, 4, 4, 4];
-            let c10 = new_bind_without_is_null!(Ty::Float, buffer, length);
-
-            let mut buffer = vec![2345.67f64, 2345.68, -2345.67, 0.0];
-            let mut length = vec![8, 8, 8, 8];
-            let c11 = new_bind_without_is_null!(Ty::Double, buffer, length);
-
-            let mut buffer = vec![
-                104u8, 101, 108, 108, 111, 0, 0, 0, 0, 0, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0,
-                104, 101, 108, 108, 111, 119, 111, 114, 108, 100, 104, 101, 108, 108, 111, 119,
-                111, 114, 108, 100,
-            ];
-            let mut length = vec![5, 5, 10, 10];
-            let c12 = new_bind_without_is_null!(Ty::VarChar, buffer, length);
-
-            let mut buffer = vec![
-                104u8, 101, 108, 108, 111, 0, 0, 0, 0, 0, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0,
-                104, 101, 108, 108, 111, 119, 111, 114, 108, 100, 104, 101, 108, 108, 111, 119,
-                111, 114, 108, 100,
-            ];
-            let mut length = vec![5, 5, 10, 10];
-            let c13 = new_bind_without_is_null!(Ty::NChar, buffer, length);
-
-            let mut buffer = vec![
-                104u8, 101, 108, 108, 111, 0, 0, 0, 0, 0, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0,
-                104, 101, 108, 108, 111, 119, 111, 114, 108, 100, 104, 101, 108, 108, 111, 119,
-                111, 114, 108, 100,
-            ];
-            let mut length = vec![5, 5, 10, 10];
-            let c14 = new_bind_without_is_null!(Ty::VarBinary, buffer, length);
-
-            let mut buffer = vec![
-                1u8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 1, 1, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 240, 63,
-                0, 0, 0, 0, 0, 0, 240, 63,
-            ];
-            let mut length = vec![21, 21, 21, 21];
-            let c15 = new_bind_without_is_null!(Ty::Geometry, buffer, length);
-
-            let mut cols = vec![
-                ts, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15,
-            ];
-
-            let code = taos_stmt_set_tbname_tags(stmt, tbname2.as_ptr(), tags.as_mut_ptr());
-            assert_eq!(code, 0);
-
-            let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
-            assert_eq!(code, 0);
-
-            let code = taos_stmt_execute(stmt);
-            assert_eq!(code, 0);
-
-            let affected_rows = taos_stmt_affected_rows(stmt);
-            assert_eq!(affected_rows, 8);
-
-            let sql = c"select * from s0 where c4 > ?";
-            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
-            assert_eq!(code, 0);
-
-            let mut buffer = vec![0];
-            let mut length = vec![4];
-            let mut is_null = vec![0];
-            let c4 = new_bind!(Ty::Int, buffer, length, is_null);
-
-            let mut bind = vec![c4];
-
-            let code = taos_stmt_bind_param(stmt, bind.as_mut_ptr());
-            assert_eq!(code, 0);
-
-            let code = taos_stmt_execute(stmt);
-            assert_eq!(code, 0);
-
-            let affected_rows_once = taos_stmt_affected_rows_once(stmt);
-            assert_eq!(affected_rows_once, 0);
-
-            let res = taos_stmt_use_result(stmt);
-            assert!(!res.is_null());
-
-            let row = taos_fetch_row(res);
-            assert!(!row.is_null());
-
-            let fields = taos_fetch_fields(res);
-            assert!(!fields.is_null());
-
-            let num_fields = taos_num_fields(res);
-            assert_eq!(num_fields, 33);
-
-            let mut str = vec![0 as c_char; 1024];
-            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            assert!(len > 0);
-            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
-
-            taos_free_result(res);
-
-            let code = taos_stmt_close(stmt);
-            assert_eq!(code, 0);
-
-            test_exec(taos, "drop database test_1740563439");
-            taos_close(taos);
+    let col_fields: Vec<TAOS_FIELD_E> = taos_stmt
+        .col_fields
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|field| field.into())
+        .collect();
+
+    debug!("taos_stmt_get_col_fields, fields: {col_fields:?}");
+
+    let len = col_fields.len();
+
+    *fieldNum = len as _;
+    *fields = ptr::null_mut();
+
+    if !col_fields.is_empty() {
+        let ptr = StmtFields::alloc(len);
+        if ptr.is_null() {
+            error!("taos_stmt_get_col_fields failed, alloc null");
+            maybe_err.with_err(Some(TaosError::new(Code::FAILED, "alloc failed")));
+            return format_errno(Code::FAILED.into());
         }
 
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1740573608",
-                    "create database test_1740573608",
-                    "use test_1740573608",
-                    "create table s0 (ts timestamp, c1 int) tags (t1 json)",
-                ],
-            );
+        (*ptr).len = len;
+        let fields_ptr = (*ptr).fields.as_mut_ptr();
+        ptr::copy_nonoverlapping(col_fields.as_ptr(), fields_ptr, len);
 
-            let stmt = taos_stmt_init(taos);
-            assert!(!stmt.is_null());
+        *fields = fields_ptr;
+    }
 
-            let sql = c"insert into ? using s0 tags(?) values(?, ?)";
-            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
-            assert_eq!(code, 0);
+    trace!("taos_stmt_get_col_fields succ, taos_stmt: {taos_stmt:?}");
 
-            let tbname = c"d0";
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
 
-            let mut buffer = vec![
-                123u8, 34, 107, 101, 121, 34, 58, 34, 118, 97, 108, 117, 101, 34, 125,
-            ];
-            let mut length = vec![buffer.len() as _];
-            let mut is_null = vec![0];
-            let t1 = new_bind!(Ty::Json, buffer, length, is_null);
+pub unsafe fn taos_stmt_reclaim_fields(stmt: *mut TAOS_STMT, fields: *mut TAOS_FIELD_E) {
+    debug!("taos_stmt_reclaim_fields start, stmt: {stmt:?}, fields: {fields:?}");
 
-            let mut tags = vec![t1];
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => {
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
+            return;
+        }
+    };
 
-            let mut buffer = vec![1739521477831i64];
-            let mut length = vec![8];
-            let mut is_null = vec![0];
-            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+    if fields.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "fields is null")));
+        return;
+    }
 
-            let mut buffer = vec![99];
-            let mut length = vec![4];
-            let mut is_null = vec![0];
-            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+    let ptr = (fields as *mut u8).sub(size_of::<StmtFields>()) as *mut StmtFields;
+    let len = (*ptr).len;
+    let total_size = size_of::<StmtFields>() + len * size_of::<TAOS_FIELD_E>();
+    let layout = Layout::from_size_align_unchecked(total_size, align_of::<StmtFields>());
+    dealloc(ptr as *mut u8, layout);
 
-            let mut cols = vec![ts, c1];
+    debug!("taos_stmt_reclaim_fields succ");
+    maybe_err.clear_err();
+    clear_err_and_ret_succ();
+}
 
-            let code = taos_stmt_set_tbname_tags(stmt, tbname.as_ptr(), tags.as_mut_ptr());
-            assert_eq!(code, 0);
+pub unsafe fn taos_stmt_is_insert(stmt: *mut TAOS_STMT, insert: *mut c_int) -> c_int {
+    debug!("taos_stmt_is_insert start, stmt: {stmt:?}, insert: {insert:?}");
 
-            let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
-            assert_eq!(code, 0);
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
 
-            let code = taos_stmt_execute(stmt);
-            assert_eq!(code, 0);
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
 
-            let affected_rows = taos_stmt_affected_rows(stmt);
-            assert_eq!(affected_rows, 1);
+    if insert.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "insert is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
-            let code = taos_stmt_close(stmt);
-            assert_eq!(code, 0);
+    let stmt2 = &mut taos_stmt.stmt2;
 
-            test_exec(taos, "drop database test_1740573608");
-            taos_close(taos);
+    if stmt2.is_insert().is_none() {
+        maybe_err.with_err(Some(TaosError::new(
+            Code::FAILED,
+            "taos_stmt_prepare is not called",
+        )));
+        return format_errno(Code::FAILED.into());
+    }
+
+    let is_insert = stmt2.is_insert().unwrap();
+    *insert = is_insert as _;
+
+    debug!("taos_stmt_is_insert succ, is_insert: {is_insert}");
+
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
+
+pub unsafe fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c_int) -> c_int {
+    debug!("taos_stmt_num_params start, stmt: {stmt:?}, nums: {nums:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    if nums.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "nums is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    match stmt2.is_insert() {
+        Some(true) => {
+            *nums = taos_stmt
+                .col_fields
+                .as_ref()
+                .map_or(0, |fields| fields.len() as _);
+        }
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_num_params can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
         }
     }
 
-    #[test]
-    fn test_stmt_stb_insert() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1741246945",
-                    "create database test_1741246945",
-                    "use test_1741246945",
-                    "create table s0 (ts timestamp, c1 int) tags (t1 int)",
-                ],
-            );
+    debug!("taos_stmt_num_params succ");
 
-            let mut option = TAOS_STMT_OPTIONS {
-                reqId: 1001,
-                singleStbInsert: true,
-                singleTableBindOnce: true,
-            };
-            let stmt = taos_stmt_init_with_options(taos, &mut option);
-            assert!(!stmt.is_null());
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
 
-            let sql = c"insert into s0 (tbname, ts, c1) values(?, ?, ?)";
-            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
-            assert_eq!(code, 0);
+pub unsafe fn taos_stmt_get_param(
+    stmt: *mut TAOS_STMT,
+    idx: c_int,
+    r#type: *mut c_int,
+    bytes: *mut c_int,
+) -> c_int {
+    debug!(
+        "taos_stmt_get_param start, stmt: {stmt:?}, idx: {idx}, type: {type:?}, bytes: {bytes:?}"
+    );
 
-            let num_of_sub_table = 10;
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
 
-            let mut buffer = vec![1739521477831i64];
-            let mut length = vec![8];
-            let mut is_null = vec![0];
-            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
-
-            let mut buffer = vec![99];
-            let mut length = vec![4];
-            let mut is_null = vec![0];
-            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
-
-            let ts_start = 1739521477831i64;
-
-            for i in 0..num_of_sub_table {
-                test_exec(taos, format!("create table d{i} using s0 tags({i})"));
-
-                let name = CString::new(format!("d{i}")).unwrap();
-                let code = taos_stmt_set_tbname(stmt, name.as_ptr());
-                assert_eq!(code, 0);
-
-                let mut cols = vec![ts.clone(), c1.clone()];
-                let code = taos_stmt_bind_param(stmt, cols.as_mut_ptr());
-                assert_eq!(code, 0);
-            }
-
-            let code = taos_stmt_add_batch(stmt);
-            assert_eq!(code, 0);
-
-            let code = taos_stmt_execute(stmt);
-            assert_eq!(code, 0);
-
-            let affected_rows = taos_stmt_affected_rows(stmt);
-            assert_eq!(affected_rows as i64, num_of_sub_table);
-
-            let code = taos_stmt_close(stmt);
-            assert_eq!(code, 0);
-
-            test_exec(taos, "drop database test_1741246945");
-            taos_close(taos);
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
         }
+    };
 
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1741251640",
-                    "create database test_1741251640",
-                    "use test_1741251640",
-                    "create table s0 (ts timestamp, c1 int) tags (t1 int)",
-                ],
-            );
+    if r#type.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "type is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
-            let mut option = TAOS_STMT_OPTIONS {
-                reqId: 1001,
-                singleStbInsert: true,
-                singleTableBindOnce: true,
-            };
-            let stmt = taos_stmt_init_with_options(taos, &mut option);
-            assert!(!stmt.is_null());
+    if bytes.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "bytes is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
-            let sql = c"insert into s0 (tbname, ts, c1) values(?, ?, ?)";
-            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
-            assert_eq!(code, 0);
+    let stmt2 = &mut taos_stmt.stmt2;
 
-            let num_of_sub_table = 10;
-
-            let mut buffer = vec![1739521477831i64];
-            let mut length = vec![8];
-            let mut is_null = vec![0];
-            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
-
-            let mut buffer = vec![99];
-            let mut length = vec![4];
-            let mut is_null = vec![0];
-            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
-
-            let ts_start = 1739521477831i64;
-
-            for i in 0..num_of_sub_table {
-                test_exec(taos, format!("create table d{i} using s0 tags({i})"));
-
-                let name = CString::new(format!("d{i}")).unwrap();
-                let code = taos_stmt_set_tbname(stmt, name.as_ptr());
-                assert_eq!(code, 0);
-
-                let mut cols = vec![ts.clone(), c1.clone()];
-                let code = taos_stmt_bind_param_batch(stmt, cols.as_mut_ptr());
-                assert_eq!(code, 0);
-            }
-
-            let code = taos_stmt_add_batch(stmt);
-            assert_eq!(code, 0);
-
-            let code = taos_stmt_execute(stmt);
-            assert_eq!(code, 0);
-
-            let affected_rows = taos_stmt_affected_rows(stmt);
-            assert_eq!(affected_rows as i64, num_of_sub_table);
-
-            let code = taos_stmt_close(stmt);
-            assert_eq!(code, 0);
-
-            test_exec(taos, "drop database test_1741251640");
-            taos_close(taos);
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_get_param can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
         }
     }
 
-    #[test]
-    fn test_taos_stmt_bind_single_param_batch() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1741438739",
-                    "create database test_1741438739",
-                    "use test_1741438739",
-                    "create table s0 (ts timestamp, c1 int) tags (t1 int)",
-                    "create table d0 using s0 tags(0)",
-                    "create table d1 using s0 tags(1)",
-                ],
-            );
+    let col_cnt = taos_stmt
+        .col_fields
+        .as_ref()
+        .map_or(0, |fields| fields.len());
 
-            let stmt = taos_stmt_init(taos);
-            assert!(!stmt.is_null());
+    if idx < 0 || (idx as usize) >= col_cnt {
+        maybe_err.with_err(Some(TaosError::new(
+            Code::INVALID_PARA,
+            "idx is out of range",
+        )));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
-            let sql = c"insert into s0 (tbname, ts, c1) values(?, ?, ?)";
-            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
-            assert_eq!(code, 0);
+    let field = taos_stmt
+        .col_fields
+        .as_ref()
+        .unwrap()
+        .get(idx as usize)
+        .unwrap();
 
-            let tbname = c"d0";
-            let code = taos_stmt_set_tbname(stmt, tbname.as_ptr());
-            assert_eq!(code, 0);
+    *r#type = field.field_type as _;
+    *bytes = field.bytes as _;
 
-            let mut buffer = vec![1739521477831i64];
-            let mut length = vec![8];
-            let mut is_null = vec![0];
-            let mut ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+    debug!("taos_stmt_get_param succ, field: {field:?}");
 
-            let mut buffer = vec![99];
-            let mut length = vec![4];
-            let mut is_null = vec![0];
-            let mut c1 = new_bind!(Ty::Int, buffer, length, is_null);
+    maybe_err.clear_err();
+    clear_err_and_ret_succ()
+}
 
-            let code = taos_stmt_bind_single_param_batch(stmt, &mut ts, 0);
-            assert_eq!(code, 0);
+pub unsafe fn taos_stmt_bind_param(stmt: *mut TAOS_STMT, bind: *mut TAOS_MULTI_BIND) -> c_int {
+    debug!("taos_stmt_bind_param start, stmt: {stmt:?}, bind: {bind:?}");
 
-            let code = taos_stmt_bind_single_param_batch(stmt, &mut c1, 1);
-            assert_eq!(code, 0);
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
 
-            let code = taos_stmt_add_batch(stmt);
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
 
-            let tbname = c"d1";
-            let code = taos_stmt_set_tbname(stmt, tbname.as_ptr());
-            assert_eq!(code, 0);
+    let stmt2 = &mut taos_stmt.stmt2;
 
-            let mut buffer = vec![1739521477831i64];
-            let mut length = vec![8];
-            let mut is_null = vec![0];
-            let mut ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+    let col_cnt = match stmt2.is_insert() {
+        Some(true) => taos_stmt
+            .col_fields
+            .as_ref()
+            .map_or(0, |fields| fields.len()),
+        Some(false) => stmt2.fields_count().unwrap_or(0),
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+    };
 
-            let mut buffer = vec![99];
-            let mut length = vec![4];
-            let mut is_null = vec![0];
-            let mut c1 = new_bind!(Ty::Int, buffer, length, is_null);
+    let mut cols = Vec::with_capacity(col_cnt);
+    let binds = slice::from_raw_parts(bind, col_cnt);
+    for bind in binds {
+        if bind.num > 1 {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::INVALID_PARA,
+                "bind number out of range or not match",
+            )));
+            return format_errno(Code::INVALID_PARA.into());
+        }
 
-            let code = taos_stmt_bind_single_param_batch(stmt, &mut ts, 0);
-            assert_eq!(code, 0);
+        cols.push(bind.to_column_view());
+    }
 
-            let code = taos_stmt_bind_single_param_batch(stmt, &mut c1, 1);
-            assert_eq!(code, 0);
+    taos_stmt.set_cols(cols);
 
-            let code = taos_stmt_execute(stmt);
-            assert_eq!(code, 0);
-
-            let affected_rows = taos_stmt_affected_rows(stmt);
-            assert_eq!(affected_rows, 2);
-
-            let code = taos_stmt_close(stmt);
-            assert_eq!(code, 0);
-
-            test_exec(taos, "drop database test_1741438739");
-            taos_close(taos);
+    if taos_stmt.stb_insert {
+        if let Err(err) = taos_stmt.move_to_bind_params() {
+            error!("taos_stmt_bind_param failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            return format_errno(err.code().into());
         }
     }
+
+    debug!("taos_stmt_bind_param succ, taos_stmt: {taos_stmt:?}");
+
+    maybe_err.with_err(None);
+    clear_err_and_ret_succ()
+}
+
+pub unsafe fn taos_stmt_bind_param_batch(
+    stmt: *mut TAOS_STMT,
+    bind: *mut TAOS_MULTI_BIND,
+) -> c_int {
+    debug!("taos_stmt_bind_param_batch start, stmt: {stmt:?}, bind: {bind:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_bind_param_batch can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+    }
+
+    let col_cnt = taos_stmt
+        .col_fields
+        .as_ref()
+        .map_or(0, |fields| fields.len());
+
+    let binds = slice::from_raw_parts(bind, col_cnt);
+
+    let mut cols = Vec::with_capacity(col_cnt);
+    for bind in binds {
+        cols.push(bind.to_column_view());
+    }
+
+    taos_stmt.set_cols(cols);
+
+    if taos_stmt.stb_insert {
+        if let Err(err) = taos_stmt.move_to_bind_params() {
+            error!("taos_stmt_bind_param_batch failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            return format_errno(err.code().into());
+        }
+    }
+
+    debug!("taos_stmt_bind_param_batch succ, taos_stmt: {taos_stmt:?}");
+
+    maybe_err.with_err(None);
+    clear_err_and_ret_succ()
+}
+
+#[allow(non_snake_case)]
+pub unsafe fn taos_stmt_bind_single_param_batch(
+    stmt: *mut TAOS_STMT,
+    bind: *mut TAOS_MULTI_BIND,
+    colIdx: c_int,
+) -> c_int {
+    debug!(
+        "taos_stmt_bind_single_param_batch start, stmt: {stmt:?}, bind: {bind:?}, col_idx: {colIdx}"
+    );
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "stmt is invalid")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_bind_single_param_batch can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_bind_single_param_batch is not called",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+    }
+
+    let view = match bind.as_ref() {
+        Some(bind) => bind.to_column_view(),
+        None => {
+            maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "bind is null")));
+            return format_errno(Code::INVALID_PARA.into());
+        }
+    };
+
+    debug!("taos_stmt_bind_single_param_batch, idx: {colIdx}, view: {view:?}");
+
+    taos_stmt.set_single_col(colIdx as _, view);
+
+    debug!("taos_stmt_bind_single_param_batch succ, taos_stmt: {taos_stmt:?}");
+    maybe_err.with_err(None);
+    0
+}
+
+pub unsafe fn taos_stmt_add_batch(stmt: *mut TAOS_STMT) -> c_int {
+    debug!("taos_stmt_add_batch start, stmt: {stmt:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    match stmt2.is_insert() {
+        Some(true) => {}
+        Some(false) => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_add_batch can only be called for insertion",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+        None => {
+            maybe_err.with_err(Some(TaosError::new(
+                Code::FAILED,
+                "taos_stmt_prepare is not called",
+            )));
+            return format_errno(Code::FAILED.into());
+        }
+    }
+
+    if let Err(err) = taos_stmt.move_to_bind_params() {
+        error!("taos_stmt_add_batch failed, err: {err:?}");
+        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+        return format_errno(err.code().into());
+    }
+
+    debug!("taos_stmt_add_batch succ, taos_stmt: {taos_stmt:?}");
+
+    maybe_err.with_err(None);
+    clear_err_and_ret_succ()
+}
+
+pub unsafe fn taos_stmt_execute(stmt: *mut TAOS_STMT) -> c_int {
+    debug!("taos_stmt_execute start, stmt: {stmt:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    if let Err(err) = taos_stmt.move_to_bind_params() {
+        error!("taos_stmt_execute failed, err: {err:?}");
+        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+        return format_errno(err.code().into());
+    }
+
+    debug!("taos_stmt_execute, taos_stmt: {taos_stmt:?}");
+
+    let stmt2 = &mut taos_stmt.stmt2;
+
+    let params = std::mem::take(&mut taos_stmt.bind_params);
+    debug!("taos_stmt_execute, params: {params:?}");
+
+    if let Err(err) = stmt2.bind(&params) {
+        error!("taos_stmt_execute failed, err: {err:?}");
+        maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+        return format_errno(err.code().into());
+    }
+
+    match stmt2.exec() {
+        Ok(_) => {
+            debug!("taos_stmt_execute succ");
+            maybe_err.clear_err();
+            clear_err_and_ret_succ()
+        }
+        Err(err) => {
+            error!("taos_stmt_execute failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            format_errno(err.code().into())
+        }
+    }
+}
+
+pub unsafe fn taos_stmt_use_result(stmt: *mut TAOS_STMT) -> *mut TAOS_RES {
+    debug!("taos_stmt_use_result start, stmt: {stmt:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => {
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
+            return ptr::null_mut();
+        }
+    };
+
+    let taos_stmt = match maybe_err.deref_mut() {
+        Some(taos_stmt) => taos_stmt,
+        None => {
+            set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid"));
+            return ptr::null_mut();
+        }
+    };
+
+    let stmt2 = &mut taos_stmt.stmt2;
+    match stmt2.result_set() {
+        Ok(rs) => {
+            let rs: TaosMaybeError<ResultSet> = ResultSet::Query(QueryResultSet::new(rs)).into();
+            debug!("taos_stmt_use_result succ, result_set: {rs:?}");
+            maybe_err.clear_err();
+            clear_err_and_ret_succ();
+            let res = Box::into_raw(Box::new(rs)) as _;
+            taos_stmt.res = Some(res);
+            res
+        }
+        Err(err) => {
+            error!("taos_stmt_use_result failed, err: {err:?}");
+            maybe_err.with_err(Some(TaosError::new(err.code(), &err.to_string())));
+            ptr::null_mut()
+        }
+    }
+}
+
+pub unsafe fn taos_stmt_close(stmt: *mut TAOS_STMT) -> c_int {
+    debug!("taos_stmt_close, stmt: {stmt:?}");
+    if stmt.is_null() {
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null"));
+    }
+    let _ = Box::from_raw(stmt as *mut TaosMaybeError<TaosStmt>);
+    clear_err_and_ret_succ()
+}
+
+pub unsafe fn taos_stmt_errstr(stmt: *mut TAOS_STMT) -> *mut c_char {
+    taos_errstr(stmt as _) as _
+}
+
+pub unsafe fn taos_stmt_affected_rows(stmt: *mut TAOS_STMT) -> c_int {
+    debug!("taos_stmt_affected_rows start, stmt: {stmt:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt) => &mut taos_stmt.stmt2,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    debug!(
+        "taos_stmt_affected_rows succ, affected_rows: {}",
+        stmt2.affected_rows()
+    );
+
+    stmt2.affected_rows() as _
+}
+
+pub unsafe fn taos_stmt_affected_rows_once(stmt: *mut TAOS_STMT) -> c_int {
+    debug!("taos_stmt_affected_rows_once start, stmt: {stmt:?}");
+
+    let maybe_err = match (stmt as *mut TaosMaybeError<TaosStmt>).as_mut() {
+        Some(maybe_err) => maybe_err,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is null")),
+    };
+
+    let stmt2 = match maybe_err.deref_mut() {
+        Some(taos_stmt) => &mut taos_stmt.stmt2,
+        None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
+    };
+
+    debug!(
+        "taos_stmt_affected_rows_once succ, affected_rows_once: {}",
+        stmt2.affected_rows_once(),
+    );
+
+    stmt2.affected_rows_once() as _
 }

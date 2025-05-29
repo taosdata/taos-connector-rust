@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [lib]
+# FIXME: rename taos
 name = "taosws"
 crate-type = ["cdylib", "staticlib"]
 

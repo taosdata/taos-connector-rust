@@ -606,6 +606,7 @@ unsafe fn tmq_consumer_poll(tmq: *mut ws_tmq_t, timeout: i64) -> WsResult<Option
                 let r = consumer.recv_timeout(timeout)?;
                 match r {
                     Some((offset, message_set)) => {
+                        // TODO: support meta
                         if message_set.has_meta() {
                             return Err(WsError::new(
                                 Code::FAILED,
