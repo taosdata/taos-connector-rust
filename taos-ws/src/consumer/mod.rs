@@ -1538,7 +1538,7 @@ impl From<WsTmqError> for RawError {
 mod tests {
     use std::time::Duration;
 
-    use tokio::sync::mpsc;
+    use tokio::sync::{mpsc, oneshot, watch};
 
     use super::{TaosBuilder, TmqBuilder};
     use crate::consumer::{Data, Meta};
@@ -2797,33 +2797,22 @@ mod tests {
 
         let num = 5000;
 
-        let (msg_tx, mut msg_rx) = mpsc::channel::<MessageSet<Meta, Data>>(100);
+        let (msg_tx, mut msg_rx) =
+            mpsc::channel::<(MessageSet<Meta, Data>, oneshot::Sender<()>)>(100);
 
-        let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
-        let mut cnt_cancel_rx = cancel_rx.clone();
+        let (cancel_tx, mut cancel_rx) = watch::channel(false);
 
         let cnt_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             let mut cnt = 0;
-
-            loop {
-                tokio::select! {
-                    _ = cnt_cancel_rx.changed() => {
-                        break;
-                    }
-                    res = msg_rx.recv() => {
-                        if let Some(mut msg) = res {
-                            if let Some(data) = msg.data() {
-                                while let Some(block) = data.fetch_block().await? {
-                                    cnt += block.nrows();
-                                }
-                            }
-                        }
+            while let Some((mut msg, done_tx)) = msg_rx.recv().await {
+                if let Some(data) = msg.data() {
+                    while let Some(block) = data.fetch_block().await? {
+                        cnt += block.nrows();
                     }
                 }
+                let _ = done_tx.send(());
             }
-
             assert_eq!(cnt, num);
-
             Ok(())
         });
 
@@ -2842,7 +2831,9 @@ mod tests {
                     }
                     res = consumer.recv_timeout(timeout) => {
                         if let Some((offset, message)) = res? {
-                            msg_tx.send(message).await?;
+                            let (done_tx, done_rx) = oneshot::channel();
+                            msg_tx.send((message, done_tx)).await?;
+                            let _ = done_rx.await;
                             consumer.commit(offset).await?;
                         }
                     }
@@ -2876,7 +2867,7 @@ mod tests {
             }
         }
 
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_secs(20)).await;
 
         let _ = cancel_tx.send(true);
 
@@ -2914,33 +2905,22 @@ mod tests {
 
         let num = 3000;
 
-        let (msg_tx, mut msg_rx) = mpsc::channel::<MessageSet<Meta, Data>>(100);
+        let (msg_tx, mut msg_rx) =
+            mpsc::channel::<(MessageSet<Meta, Data>, oneshot::Sender<()>)>(100);
 
-        let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
-        let mut cnt_cancel_rx = cancel_rx.clone();
+        let (cancel_tx, mut cancel_rx) = watch::channel(false);
 
         let cnt_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             let mut cnt = 0;
-
-            loop {
-                tokio::select! {
-                    _ = cnt_cancel_rx.changed() => {
-                        break;
-                    }
-                    res = msg_rx.recv() => {
-                        if let Some(mut msg) = res {
-                            if let Some(data) = msg.data() {
-                                while let Some(block) = data.fetch_block().await? {
-                                    cnt += block.nrows();
-                                }
-                            }
-                        }
+            while let Some((mut msg, done_tx)) = msg_rx.recv().await {
+                if let Some(data) = msg.data() {
+                    while let Some(block) = data.fetch_block().await? {
+                        cnt += block.nrows();
                     }
                 }
+                let _ = done_tx.send(());
             }
-
             assert_eq!(cnt, num);
-
             Ok(())
         });
 
@@ -2959,7 +2939,9 @@ mod tests {
                     }
                     res = consumer.recv_timeout(timeout) => {
                         if let Some((offset, message)) = res? {
-                            msg_tx.send(message).await?;
+                            let (done_tx, done_rx) = oneshot::channel();
+                            msg_tx.send((message, done_tx)).await?;
+                            let _ = done_rx.await;
                             consumer.commit(offset).await?;
                         }
                     }
