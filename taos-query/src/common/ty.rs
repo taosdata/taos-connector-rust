@@ -106,6 +106,7 @@ impl<'de> serde::Deserialize<'de> for Ty {
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("invalid TDengine type")
             }
+
             fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
@@ -180,6 +181,7 @@ impl FromStr for Ty {
             }
             return Ok(Self::Decimal);
         }
+
         match s.as_str() {
             "timestamp" => Ok(Ty::Timestamp),
             "bool" => Ok(Ty::Bool),
@@ -211,17 +213,11 @@ impl Ty {
         matches!(self, Ty::Null)
     }
 
-    /// Var type is one of [Ty::VarChar], [Ty::VarBinary], [Ty::NChar], [Ty::Geometry].
+    /// Var type is one of [Ty::VarChar], [Ty::VarBinary], [Ty::NChar], [Ty::Geometry], [Ty::Blob].
     pub const fn is_var_type(&self) -> bool {
         use Ty::*;
-        matches!(self, VarChar | VarBinary | NChar | Geometry)
+        matches!(self, VarChar | VarBinary | NChar | Geometry | Blob)
     }
-
-    // /// Check if the data type need quotes, means one of [Ty::VarChar], [Ty::NChar], [Ty::Json].
-    // pub const fn is_quote(&self) -> bool {
-    //     use Ty::*;
-    //     matches!(self, Json)
-    // }
 
     pub const fn is_json(&self) -> bool {
         matches!(self, Ty::Json)
@@ -421,6 +417,7 @@ impl Ty {
         }
     }
 }
+
 impl From<u8> for Ty {
     #[inline]
     fn from(v: u8) -> Self {
@@ -433,16 +430,17 @@ impl Display for Ty {
         write!(f, "{}", self.name())
     }
 }
+
 macro_rules! _impl_from_primitive {
     ($($ty:ty) *) => {
-      $(
-         impl From<$ty> for Ty {
-            #[inline]
-           fn from(v: $ty) -> Self {
-             Self::from_u8(v as _)
-           }
-         }
-      )*
+        $(
+            impl From<$ty> for Ty {
+                #[inline]
+                fn from(v: $ty) -> Self {
+                    Self::from_u8(v as _)
+                }
+            }
+        )*
     }
 }
 

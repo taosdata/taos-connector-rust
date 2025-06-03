@@ -1,5 +1,5 @@
+use std::borrow::Cow;
 use std::ffi::c_void;
-use std::fmt::Debug;
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -7,39 +7,53 @@ use itertools::Itertools;
 use super::{IsColumnView, Offsets};
 use crate::common::{BorrowedValue, Ty};
 use crate::prelude::InlinableWrite;
-use crate::util::InlineJson;
+use crate::util::InlineBytes;
 
 #[derive(Debug, Clone)]
-pub struct JsonView {
-    pub offsets: Offsets,
-    pub data: Bytes,
+pub struct BlobView {
+    pub(crate) offsets: Offsets,
+    pub(crate) data: Bytes,
 }
 
-type View = JsonView;
-
-impl IsColumnView for View {
+impl IsColumnView for BlobView {
     fn ty(&self) -> Ty {
-        Ty::Json
+        Ty::Blob
     }
 
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
-        Self::from_iter::<String, _, _, _>(
-            iter.map(|v| v.to_str().map(|v| v.into_owned()))
-                .collect_vec(),
-        )
+        Self::from_iter::<Bytes, _, _, _>(iter.map(|v| v.to_bytes()).collect_vec())
     }
 }
 
-impl JsonView {
+impl BlobView {
+    /// Get the length of the `offsets`.
+    #[inline]
     pub fn len(&self) -> usize {
         self.offsets.len()
     }
 
+    /// Get the raw pointer to the underlying data.
+    #[inline]
     pub fn as_raw_ptr(&self) -> *const u8 {
         self.data.as_ptr() as _
     }
 
+    /// A iterator only decide if the value at some row index is NULL or not.
+    #[inline]
+    pub fn is_null_iter(&self) -> BlobNullsIter {
+        BlobNullsIter { view: self, row: 0 }
+    }
+
+    /// Build a nulls vector.
+    #[inline]
+    pub fn to_nulls_vec(&self) -> Vec<bool> {
+        self.is_null_iter().collect()
+    }
+
     /// Check if the value at `row` index is NULL or not.
+    ///
+    /// Returns null when `row` index out of bound.
+    #[inline]
     pub fn is_null(&self, row: usize) -> bool {
         if row < self.len() {
             unsafe { self.is_null_unchecked(row) }
@@ -48,15 +62,18 @@ impl JsonView {
         }
     }
 
-    /// Unsafe version for [methods.is_null]
-    pub unsafe fn is_null_unchecked(&self, row: usize) -> bool {
+    /// Unsafe version for [is_null](#method.is_null)
+    #[inline]
+    pub(crate) unsafe fn is_null_unchecked(&self, row: usize) -> bool {
         self.offsets.get_unchecked(row) < 0
     }
 
-    pub unsafe fn get_unchecked(&self, row: usize) -> Option<&InlineJson> {
+    /// Get the `InlineBytes<u32>` at `row` index.
+    #[inline]
+    pub(crate) unsafe fn get_unchecked(&self, row: usize) -> Option<&InlineBytes<u32>> {
         let offset = self.offsets.get_unchecked(row);
         if offset >= 0 {
-            Some(InlineJson::<u16>::from_ptr(
+            Some(InlineBytes::<u32>::from_ptr(
                 self.data.as_ptr().offset(offset as isize),
             ))
         } else {
@@ -64,31 +81,36 @@ impl JsonView {
         }
     }
 
-    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
-        // todo: use simd_json::BorrowedValue as Json.
+    /// Get the value at `row` index.
+    #[inline]
+    pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
-            .map_or(BorrowedValue::Null(Ty::Json), |s| {
-                BorrowedValue::Json(s.as_bytes().into())
+            .map_or(BorrowedValue::Null(Ty::Blob), |b| {
+                BorrowedValue::Blob(Cow::Borrowed(b.as_bytes()))
             })
     }
 
-    pub unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
+    /// Get the raw value at `row` index.
+    #[inline]
+    pub(crate) unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
         match self.get_unchecked(row) {
-            Some(json) => (Ty::Json, json.len() as _, json.as_ptr() as _),
-            None => (Ty::Json, 0, std::ptr::null()),
+            Some(b) => (Ty::Blob, b.len() as _, b.as_ptr() as _),
+            None => (Ty::Blob, 0, std::ptr::null()),
         }
     }
 
+    /// Get the length of the value at `row` index.
     #[inline]
     pub unsafe fn get_length_unchecked(&self, row: usize) -> Option<usize> {
         let offset = self.offsets.get_unchecked(row);
         if offset >= 0 {
-            Some(InlineJson::<u16>::from_ptr(self.data.as_ptr().offset(offset as isize)).len())
+            Some(InlineBytes::<u32>::from_ptr(self.data.as_ptr().offset(offset as isize)).len())
         } else {
             None
         }
     }
 
+    /// Get the lengths of all values.
     #[inline]
     pub fn lengths(&self) -> Vec<Option<usize>> {
         (0..self.len())
@@ -96,6 +118,7 @@ impl JsonView {
             .collect()
     }
 
+    /// Get the maximum length of all values.
     #[inline]
     pub fn max_length(&self) -> usize {
         (0..self.len())
@@ -104,51 +127,34 @@ impl JsonView {
             .unwrap_or(0)
     }
 
-    pub fn slice(&self, mut range: std::ops::Range<usize>) -> Option<Self> {
-        if range.start >= self.len() {
-            return None;
-        }
-        if range.end > self.len() {
-            range.end = self.len();
-        }
-        if range.is_empty() {
-            return None;
-        }
-        let (offsets, range) = unsafe { self.offsets.slice_unchecked(range) };
-        if let Some(range) = range {
-            let range = range.0 as usize..range.1.map_or(self.data.len(), |v| v as usize);
-            let data = self.data.slice(range);
-            Some(Self { offsets, data })
-        } else {
-            let data = self.data.slice(0..0);
-            Some(Self { offsets, data })
-        }
+    /// Get an iterator for the `BlobView`.
+    #[inline]
+    pub fn iter(&self) -> BlobIter {
+        BlobIter { view: self, row: 0 }
     }
 
-    pub fn iter(&self) -> VarCharIter {
-        VarCharIter { view: self, row: 0 }
-    }
-
-    pub fn to_vec(&self) -> Vec<Option<String>> {
+    /// Convert the `BlobView` to a vector of optional byte vectors.
+    #[inline]
+    pub fn to_vec(&self) -> Vec<Option<Vec<u8>>> {
         (0..self.len())
-            .map(|row| unsafe { self.get_unchecked(row) }.map(|s| s.to_string()))
+            .map(|row| unsafe { self.get_unchecked(row) }.map(|b| b.as_bytes().to_vec()))
             .collect()
     }
 
     /// Write column data as raw bytes.
     pub(crate) fn write_raw_into<W: std::io::Write>(&self, mut wtr: W) -> std::io::Result<usize> {
-        let mut offsets = Vec::new();
+        let mut offsets = Vec::with_capacity(self.len());
         let mut bytes: Vec<u8> = Vec::new();
         for v in self.iter() {
             if let Some(v) = v {
                 offsets.push(bytes.len() as i32);
-                bytes.write_inlined_str::<2>(v.as_str()).unwrap();
+                bytes.write_inlined_bytes::<4>(v.as_bytes()).unwrap();
             } else {
                 offsets.push(-1);
             }
         }
+
         unsafe {
-            // dbg!(&offsets);
             let offsets_bytes = std::slice::from_raw_parts(
                 offsets.as_ptr() as *const u8,
                 offsets.len() * std::mem::size_of::<i32>(),
@@ -157,14 +163,11 @@ impl JsonView {
             wtr.write_all(&bytes)?;
             Ok(offsets_bytes.len() + bytes.len())
         }
-        // let offsets = self.offsets.as_bytes();
-        // wtr.write_all(offsets)?;
-        // wtr.write_all(&self.data)?;
-        // Ok(offsets.len() + self.data.len())
     }
 
+    /// Create a new `BlobView` from an iterator of optional byte slices.
     pub fn from_iter<
-        S: AsRef<str>,
+        S: AsRef<[u8]>,
         T: Into<Option<S>>,
         I: ExactSizeIterator<Item = T>,
         V: IntoIterator<Item = T, IntoIter = I>,
@@ -177,14 +180,14 @@ impl JsonView {
 
         for i in iter.map(|v| v.into()) {
             if let Some(s) = i {
-                let s: &str = s.as_ref();
+                let s: &[u8] = s.as_ref();
                 offsets.push(data.len() as i32);
-                data.write_inlined_str::<2>(s).unwrap();
+                data.write_inlined_bytes::<4>(s).unwrap();
             } else {
                 offsets.push(-1);
             }
         }
-        // dbg!(&offsets);
+
         let offsets_bytes = unsafe {
             Vec::from_raw_parts(
                 offsets.as_mut_ptr() as *mut u8,
@@ -192,25 +195,23 @@ impl JsonView {
                 offsets.capacity() * 4,
             )
         };
+
         std::mem::forget(offsets);
+
         Self {
             offsets: Offsets(offsets_bytes.into()),
             data: data.into(),
         }
     }
-
-    pub fn concat(&self, rhs: &Self) -> Self {
-        Self::from_iter::<&InlineJson, _, _, _>(self.iter().chain(rhs.iter()).collect_vec())
-    }
 }
 
-pub struct VarCharIter<'a> {
-    view: &'a JsonView,
+pub struct BlobIter<'a> {
+    view: &'a BlobView,
     row: usize,
 }
 
-impl<'a> Iterator for VarCharIter<'a> {
-    type Item = Option<&'a InlineJson>;
+impl<'a> Iterator for BlobIter<'a> {
+    type Item = Option<&'a InlineBytes<u32>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.row < self.view.len() {
@@ -222,42 +223,35 @@ impl<'a> Iterator for VarCharIter<'a> {
         }
     }
 
-    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.view.len() - self.row;
+        (len, Some(len))
+    }
+}
+
+impl ExactSizeIterator for BlobIter<'_> {}
+
+pub struct BlobNullsIter<'a> {
+    view: &'a BlobView,
+    row: usize,
+}
+
+impl Iterator for BlobNullsIter<'_> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<Self::Item> {
         if self.row < self.view.len() {
-            let len = self.view.len() - self.row;
-            (len, Some(len))
+            let row = self.row;
+            self.row += 1;
+            Some(unsafe { self.view.is_null_unchecked(row) })
         } else {
-            (0, Some(0))
+            None
         }
     }
 }
 
-impl ExactSizeIterator for VarCharIter<'_> {
+impl ExactSizeIterator for BlobNullsIter<'_> {
     fn len(&self) -> usize {
         self.view.len() - self.row
-    }
-}
-
-#[test]
-fn test_slice() {
-    let data = [None, Some(""), Some("abc"), Some("中文"), None, None, Some("a loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooog string")];
-    let view = JsonView::from_iter::<&str, _, _, _>(data);
-    let slice = view.slice(0..0);
-    assert!(slice.is_none());
-    let slice = view.slice(100..1000);
-    assert!(slice.is_none());
-
-    for start in 0..data.len() {
-        let end = start + 1;
-        for end in end..data.len() {
-            let slice = view.slice(start..end).unwrap();
-            assert_eq!(
-                slice.to_vec().as_slice(),
-                &itertools::Itertools::collect_vec(
-                    data[start..end].iter().map(|s| s.map(ToString::to_string))
-                )
-            );
-        }
     }
 }

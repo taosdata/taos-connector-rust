@@ -400,11 +400,7 @@ impl RawBlock {
 
                     data_lengths[i] = *length * rows as u32;
                 }
-                Ty::Decimal | Ty::Decimal64 => unimplemented!("decimal type not supported"),
-                Ty::VarBinary => todo!(),
-                Ty::Blob => todo!(),
-                Ty::MediumBlob => todo!(),
-                Ty::Geometry => todo!(),
+                _ => todo!(),
             }
         }
 
@@ -554,6 +550,15 @@ impl RawBlock {
                     let offsets = Offsets::from(bytes.slice(o1..o2));
                     let data = bytes.slice(o2..data_offset);
                     ColumnView::Geometry(GeometryView { offsets, data })
+                }
+                // FIXME
+                Ty::Blob => {
+                    let o1 = data_offset;
+                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
+                    data_offset = o2 + length;
+                    let offsets = Offsets::from(bytes.slice(o1..o2));
+                    let data: Bytes = bytes.slice(o2..data_offset);
+                    ColumnView::Blob(BlobView { offsets, data })
                 }
                 ty => {
                     unreachable!("unsupported type: {ty}")
@@ -823,6 +828,15 @@ impl RawBlock {
                 offsets
             }
             ColumnView::Geometry(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            ColumnView::Blob(view) => {
                 let len = view.offsets.len();
                 let mut offsets = Vec::with_capacity(len);
                 for i in 0..len {

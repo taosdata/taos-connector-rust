@@ -62,6 +62,9 @@ pub use geometry_view::GeometryView;
 mod decimal_view;
 pub(crate) use decimal_view::DecimalView;
 
+mod blob_view;
+pub use blob_view::BlobView;
+
 mod schema;
 pub(crate) use schema::*;
 
@@ -115,6 +118,7 @@ pub enum ColumnView {
     Json(JsonView),              // 15
     VarBinary(VarBinaryView),    // 16
     Decimal(DecimalView<i128>),  // 17
+    Blob(BlobView),              // 18
     Geometry(GeometryView),      // 20
     Decimal64(DecimalView<i64>), // 21
 }
@@ -144,6 +148,7 @@ impl Debug for ColumnView {
             Self::Decimal(view) => f.debug_tuple("Decimal").field(&view.to_vec()).finish(),
             Self::Decimal64(view) => f.debug_tuple("Decimal64").field(&view.to_vec()).finish(),
             Self::Geometry(view) => f.debug_tuple("Geometry").field(&view.to_vec()).finish(),
+            Self::Blob(view) => f.debug_tuple("Blob").field(&view.to_vec()).finish(),
         }
     }
 }
@@ -356,6 +361,17 @@ impl ColumnView {
         ColumnView::Geometry(GeometryView::from_iter(iter))
     }
 
+    pub fn from_blob_bytes<
+        S: AsRef<[u8]>,
+        T: Into<Option<S>>,
+        I: ExactSizeIterator<Item = T>,
+        V: IntoIterator<Item = T, IntoIter = I>,
+    >(
+        iter: V,
+    ) -> Self {
+        ColumnView::Blob(BlobView::from_iter(iter))
+    }
+
     #[inline]
     pub fn concat_iter<'b, 'a: 'b, T: Iterator<Item = BorrowedValue<'b>>>(
         &'a self,
@@ -415,7 +431,9 @@ impl ColumnView {
             Ty::Decimal | Ty::Decimal64 => {
                 unimplemented!("Unable to determine the values for precision and scale")
             }
-            Ty::Blob => todo!(),
+            Ty::Blob => ColumnView::Blob(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
             Ty::MediumBlob => todo!(),
             Ty::Geometry => ColumnView::Geometry(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
@@ -456,8 +474,8 @@ impl ColumnView {
             (ColumnView::VarChar(a), ColumnView::VarChar(b)) => ColumnView::VarChar(a.concat(b)),
             (ColumnView::NChar(a), ColumnView::NChar(b)) => ColumnView::NChar(a.concat(b)),
             (ColumnView::Json(a), ColumnView::Json(b)) => ColumnView::Json(a.concat(b)),
-            (ColumnView::VarBinary(_a), ColumnView::VarBinary(_b)) => todo!(), //ColumnView::VarBinary(a.concat(b)),
-            (ColumnView::Geometry(_a), ColumnView::Geometry(_b)) => todo!(), //ColumnView::Geometry(a.concat(b)),
+            (ColumnView::VarBinary(_a), ColumnView::VarBinary(_b)) => todo!(),
+            (ColumnView::Geometry(_a), ColumnView::Geometry(_b)) => todo!(),
             _ => panic!("strict concat needs same schema: {self:?}, {rhs:?}"),
         }
     }
@@ -489,11 +507,7 @@ impl ColumnView {
             Ty::Decimal | Ty::Decimal64 => {
                 unimplemented!("Unable to determine the values for precision and scale")
             }
-            Ty::Json => todo!(),
-            Ty::VarBinary => todo!(),
-            Ty::Blob => todo!(),
-            Ty::MediumBlob => todo!(),
-            Ty::Geometry => todo!(),
+            _ => todo!(),
         }
     }
 
@@ -519,6 +533,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.len(),
             ColumnView::Decimal(view) => view.len(),
             ColumnView::Decimal64(view) => view.len(),
+            ColumnView::Blob(view) => view.len(),
         }
     }
 
@@ -538,6 +553,7 @@ impl ColumnView {
             ColumnView::Json(view) => view.max_length(),
             ColumnView::VarBinary(view) => view.max_length(),
             ColumnView::Geometry(view) => view.max_length(),
+            ColumnView::Blob(view) => view.max_length(),
         }
     }
 
@@ -564,6 +580,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.is_null_unchecked(row),
             ColumnView::Decimal(view) => view.is_null_unchecked(row),
             ColumnView::Decimal64(view) => view.is_null_unchecked(row),
+            ColumnView::Blob(view) => view.is_null_unchecked(row),
         }
     }
 
@@ -598,6 +615,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.get_value_unchecked(row),
             ColumnView::Decimal(view) => view.get_value_unchecked(row),
             ColumnView::Decimal64(view) => view.get_value_unchecked(row),
+            ColumnView::Blob(view) => view.get_value_unchecked(row),
         }
     }
 
@@ -625,6 +643,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.get_raw_value_unchecked(row),
             ColumnView::Decimal(view) => view.get_raw_value_unchecked(row),
             ColumnView::Decimal64(view) => view.get_raw_value_unchecked(row),
+            ColumnView::Blob(view) => view.get_raw_value_unchecked(row),
         }
     }
 
@@ -651,8 +670,7 @@ impl ColumnView {
             ColumnView::Json(view) => view.slice(range).map(ColumnView::Json),
             ColumnView::Decimal(view) => view.slice(range).map(ColumnView::Decimal),
             ColumnView::Decimal64(view) => view.slice(range).map(ColumnView::Decimal64),
-            ColumnView::VarBinary(_view) => todo!(), //view.slice(range).map(ColumnView::VarBinary),
-            ColumnView::Geometry(_view) => todo!(),  //view.slice(range).map(ColumnView::Geometry),
+            _ => todo!(),
         }
     }
 
@@ -677,6 +695,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.write_raw_into(wtr),
             ColumnView::Decimal(view) => view.write_raw_into(wtr),
             ColumnView::Decimal64(view) => view.write_raw_into(wtr),
+            ColumnView::Blob(view) => view.write_raw_into(wtr),
         }
     }
 
@@ -701,6 +720,7 @@ impl ColumnView {
             ColumnView::Geometry(_) => Ty::Geometry,
             ColumnView::Decimal(_) => Ty::Decimal,
             ColumnView::Decimal64(_) => Ty::Decimal64,
+            ColumnView::Blob(_) => Ty::Blob,
         }
     }
 
@@ -725,6 +745,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.as_raw_ptr() as _,
             ColumnView::Decimal(view) => view.as_raw_ptr() as _,
             ColumnView::Decimal64(view) => view.as_raw_ptr() as _,
+            ColumnView::Blob(view) => view.as_raw_ptr() as _,
         }
     }
 

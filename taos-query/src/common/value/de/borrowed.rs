@@ -165,8 +165,7 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                     .map_err(<Self::Error as de::Error>::custom),
             },
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
-            Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
-            VarBinary(v) | Geometry(v) => match v {
+            VarBinary(v) | Geometry(v) | Blob(v) | MediumBlob(v) => match v {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
@@ -294,8 +293,7 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                     .map_err(<Self::Error as de::Error>::custom),
             },
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
-            Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
-            VarBinary(v) | Geometry(v) => match v {
+            VarBinary(v) | Geometry(v) | Blob(v) | MediumBlob(v) => match v {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
@@ -320,7 +318,6 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 .into_deserializer()
                 .deserialize_seq(visitor),
             Json(v) => v.to_vec().into_deserializer().deserialize_seq(visitor),
-            Timestamp(_) => todo!(),
             VarChar(v) => v
                 .as_bytes()
                 .to_vec()
@@ -331,7 +328,6 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 .to_vec()
                 .into_deserializer()
                 .deserialize_seq(visitor),
-            Blob(v) | MediumBlob(v) => v.to_vec().into_deserializer().deserialize_seq(visitor),
             _ => todo!(),
         }
     }
@@ -473,6 +469,7 @@ mod tests {
     #[test]
     fn de_value_as_inner() {
         use BorrowedValue::*;
+
         macro_rules! _de_value {
             ($($v:expr, $ty:ty, $tv:expr) *) => {
                 $(
@@ -499,8 +496,8 @@ mod tests {
             VarChar(""), String, "".to_string()
             NChar("".into()), String, "".to_string()
             Timestamp(crate::Timestamp::Milliseconds(1)), crate::Timestamp, crate::Timestamp::Milliseconds(1)
-            Blob(&[0, 1,2]), Vec<u8>, vec![0, 1, 2]
-            MediumBlob(&[0, 1,2]), Vec<u8>, vec![0, 1, 2]
+            Blob(Cow::from(vec![0, 1, 2])), Cow<[u8]>, Cow::<[u8]>::Owned(vec![0, 1, 2])
+            MediumBlob(Cow::from(vec![0, 1, 2])), Cow<[u8]>, Cow::<[u8]>::Owned(vec![0, 1, 2])
         );
     }
 
