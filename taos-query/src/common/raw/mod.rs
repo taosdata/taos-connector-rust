@@ -551,7 +551,6 @@ impl RawBlock {
                     let data = bytes.slice(o2..data_offset);
                     ColumnView::Geometry(GeometryView { offsets, data })
                 }
-                // FIXME
                 Ty::Blob => {
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
@@ -560,9 +559,7 @@ impl RawBlock {
                     let data: Bytes = bytes.slice(o2..data_offset);
                     ColumnView::Blob(BlobView { offsets, data })
                 }
-                ty => {
-                    unreachable!("unsupported type: {ty}")
-                }
+                ty => unreachable!("unsupported type: {ty}"),
             };
             columns.push(column);
             debug_assert!(data_offset <= len);

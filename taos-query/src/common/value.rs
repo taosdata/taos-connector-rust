@@ -555,6 +555,7 @@ impl Value {
     pub const fn is_null(&self) -> bool {
         matches!(self, Value::Null(_))
     }
+
     /// Only VarChar, NChar, Json could be treated as [&str].
     pub fn strict_as_str(&self) -> &str {
         use Value::*;
