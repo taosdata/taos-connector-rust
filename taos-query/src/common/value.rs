@@ -458,9 +458,9 @@ unsafe impl Send for BorrowedValue<'_> {}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub enum Value {
-    Null(Ty),    // 0
-    Bool(bool),  // 1
-    TinyInt(i8), // 2
+    Null(Ty),
+    Bool(bool),
+    TinyInt(i8),
     SmallInt(i16),
     Int(i32),
     BigInt(i64),
@@ -472,14 +472,14 @@ pub enum Value {
     UTinyInt(u8),
     USmallInt(u16),
     UInt(u32),
-    UBigInt(u64), // 14
+    UBigInt(u64),
     Json(serde_json::Value),
     VarBinary(Bytes),
-    Decimal(BigDecimal), // 17
+    Decimal(BigDecimal),
     Blob(Vec<u8>),
     MediumBlob(Vec<u8>),
     Geometry(Bytes),
-    Decimal64(BigDecimal), // 21
+    Decimal64(BigDecimal),
 }
 
 impl Display for Value {

@@ -6,30 +6,34 @@ use serde::de::Visitor;
 
 /// TDengine data type enumeration.
 ///
-/// | enum       | int | sql name         | rust type |
-/// | ----       |:---:| --------         |:---------:|
-/// | Null       | 0   | NULL             | None      |
-/// | Bool       | 1   | BOOL             | bool      |
-/// | TinyInt    | 2   | TINYINT          | i8        |
-/// | SmallInt   | 3   | SMALLINT         | i16       |
-/// | Int        | 4   | INT              | i32       |
-/// | BitInt     | 5   | BIGINT           | i64       |
-/// | Float      | 6   | FLOAT            | f32       |
-/// | Double     | 7   | DOUBLE           | f64       |
-/// | VarChar    | 8   | BINARY/VARCHAR   | str/String        |
-/// | Timestamp  | 9   | TIMESTAMP        | i64               |
-/// | NChar      | 10  | NCHAR            | str/String        |
-/// | UTinyInt   | 11  | TINYINT UNSIGNED | u8                |
-/// | USmallInt  | 12  | SMALLINT UNSIGNED| u16               |
-/// | UInt       | 13  | INT UNSIGNED     | u32               |
-/// | UBigInt    | 14  | BIGINT UNSIGNED  | u64               |
-/// | Json       | 15  | JSON             | serde_json::Value |
-/// | VarBinary  | 16  | VARBINARY        | Vec<u8>           |
-/// | Geometry   | 20  | GEOMETRY         | Vec<u8>           |
+/// | enum      | int | sql name          | rust type              |
+/// | ----      |:---:| --- ----          |:---------:             |
+/// | Null      | 0   | NULL              | None                   |
+/// | Bool      | 1   | BOOL              | bool                   |
+/// | TinyInt   | 2   | TINYINT           | i8                     |
+/// | SmallInt  | 3   | SMALLINT          | i16                    |
+/// | Int       | 4   | INT               | i32                    |
+/// | BitInt    | 5   | BIGINT            | i64                    |
+/// | Float     | 6   | FLOAT             | f32                    |
+/// | Double    | 7   | DOUBLE            | f64                    |
+/// | VarChar   | 8   | BINARY/VARCHAR    | str/String             |
+/// | Timestamp | 9   | TIMESTAMP         | i64                    |
+/// | NChar     | 10  | NCHAR             | str/String             |
+/// | UTinyInt  | 11  | TINYINT UNSIGNED  | u8                     |
+/// | USmallInt | 12  | SMALLINT UNSIGNED | u16                    |
+/// | UInt      | 13  | INT UNSIGNED      | u32                    |
+/// | UBigInt   | 14  | BIGINT UNSIGNED   | u64                    |
+/// | Json      | 15  | JSON              | serde_json::Value      |
+/// | VarBinary | 16  | VARBINARY         | Vec<u8>                |
+/// | Decimal   | 17  | DECIMAL           | bigdecimal::BigDecimal |
+/// | Blob      | 18  | BLOB              | Vec<u8>                |
+/// | Geometry  | 20  | GEOMETRY          | Vec<u8>                |
+/// | Decimal64 | 21  | DECIMAL           | bigdecimal::BigDecimal |
 ///
-/// Note:
-/// - VarChar sql name is BINARY in v2, and VARCHAR in v3.
-/// - Decimal/Blob/MediumBlob is not supported in 2.0/3.0 .
+/// Notes:
+/// - VarChar sql name is BINARY in TDengine 2.0, and VARCHAR in 3.0.
+/// - Decimal and Blob types are not supported in TDengine 2.0.
+/// - MediumBlob type is not supported in TDengine 2.0 and 3.0.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde_repr::Serialize_repr)]
 #[repr(u8)]
 #[non_exhaustive]
@@ -43,52 +47,49 @@ pub enum Ty {
     Null = 0,
     /// The `BOOL` type in sql, will be represented as [bool] in Rust.
     Bool = 1,
-    /// `TINYINT` type in sql, will be represented in Rust as [i8].
+    /// The `TINYINT` type in sql, will be represented as [i8] in Rust.
     TinyInt = 2,
-    /// `SMALLINT` type in sql, will be represented in Rust as [i16].
+    /// The `SMALLINT` type in sql, will be represented as [i16] in Rust.
     SmallInt = 3,
-    /// `INT` type in sql, will be represented in Rust as [i32].
+    /// The `INT` type in sql, will be represented as [i32] in Rust.
     Int = 4,
-    /// `BIGINT` type in sql, will be represented in Rust as [i64].
-    BigInt = 5, // 5
-    /// UTinyInt, `tinyint unsigned` in sql, [u8] in Rust.
-    UTinyInt = 11, // 11
-    /// 12: USmallInt, `smallint unsigned` in sql, [u16] in Rust.
-    USmallInt = 12, // 12
-    /// 13: UInt, `int unsigned` in sql, [u32] in Rust.
-    UInt = 13, // 13
-    /// 14: UBigInt, `bigint unsigned` in sql, [u64] in Rust.
-    UBigInt = 14, // 14
-    /// 6: Float, `float` type in sql, will be represented in Rust as [f32].
-    Float = 6, // 6
-    /// 7: Double, `tinyint` type in sql, will be represented in Rust as [f64].
-    Double = 7, // 7
-    /// 9: Timestamp, `timestamp` type in sql, will be represented as [i64] in Rust.
-    /// But can be deserialized to [chrono::naive::NaiveDateTime] or [String].
-    Timestamp = 9, // 9
-    /// 8: VarChar, `binary` type in sql for TDengine 2.x, `varchar` for TDengine 3.x,
-    ///  will be represented in Rust as [&str] or [String]. This type of data be deserialized to [`Vec<u8>`].
+    /// The `BIGINT` type in sql, will be represented as [i64] in Rust.
+    BigInt = 5,
+    /// The `FLOAT` type in sql, will be represented as [f32] in Rust.
+    Float = 6,
+    /// The `DOUBLE` type in sql, will be represented as [f64] in Rust.
+    Double = 7,
+    /// The `BINARY` type in sql for TDengine 2.x, `VARCHAR` for TDengine 3.x,
+    /// will be represented as [&str] or [String] in Rust. This type of data be deserialized to [`Vec<u8>`].
     VarChar = 8,
-    /// 10: NChar, `nchar` type in sql, the recommended way in TDengine to store utf-8 [String].
-    NChar = 10, // 10
-    /// 15: Json, `json` tag in sql, will be represented as [serde_json::value::Value] in Rust.
-    Json = 15, // 15
-
-    /// 16, VarBinary, `varbinary` in sql, [`Vec<u8>`] in Rust.
-    VarBinary = 16, // 16
-    /// 17, Not supported now.
+    /// The `TIMESTAMP` type in sql, will be represented as [i64] in Rust.
+    /// But can be deserialized to [chrono::naive::NaiveDateTime] or [String].
+    Timestamp = 9,
+    /// The `NCHAR` type in sql, will be represented as [&str] or [String] in Rust.
+    /// The recommended way in TDengine to store utf-8 [String].
+    NChar = 10,
+    /// The `TINYINT UNSIGNED` type in sql, will be represented as [u8] in Rust.
+    UTinyInt = 11,
+    /// The `SMALLINT UNSIGNED` type in sql, will be represented as [u16] in Rust.
+    USmallInt = 12,
+    /// The `INT UNSIGNED` type in sql, will be represented as [u32] in Rust.
+    UInt = 13,
+    /// The `BIGINT UNSIGNED` type in sql, will be represented as [u64] in Rust.
+    UBigInt = 14,
+    /// The `JSON` type in sql, will be represented as [serde_json::value::Value] in Rust.
+    Json = 15,
+    /// The `VARBINARY` type in sql, will be represented as [`Vec<u8>`] in Rust.
+    VarBinary = 16,
+    /// The `DECIMAL` type in sql, will be represented as [bigdecimal::BigDecimal] in Rust.
+    Decimal = 17,
+    /// The `BLOB` type in sql, will be represented as [`Vec<u8>`] in Rust.
+    Blob = 18,
+    /// Not supported now.
     #[doc(hidden)]
-    Decimal = 17, // 17
-    /// 18, Not supported now.
-    #[doc(hidden)]
-    Blob, // 18
-    /// 19, Not supported now.
-    #[doc(hidden)]
-    MediumBlob, // 19
-
-    /// 20, Geometry, `geometry` in sql, [`Vec<u8>`] in Rust.
-    Geometry, // 20
-
+    MediumBlob = 19,
+    /// The `GEOMETRY` type in sql, will be represented as [`Vec<u8>`] in Rust.
+    Geometry = 20,
+    /// The `DECIMAL` type in sql, will be represented as [bigdecimal::BigDecimal] in Rust.
     Decimal64 = 21,
 }
 
