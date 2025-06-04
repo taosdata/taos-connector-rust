@@ -1918,4 +1918,70 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_parse_blob_raw_block() -> anyhow::Result<()> {
+        let mut bytes = BytesMut::new();
+
+        // header
+        bytes.extend_from_slice(
+            Header {
+                version: 3,
+                length: 82,
+                nrows: 1,
+                ncols: 3,
+                flag: 0,
+                group_id: 0,
+            }
+            .as_bytes(),
+        );
+
+        // schema
+        bytes.extend_from_slice(ColSchema::new(Ty::Blob, 0).as_bytes());
+        bytes.extend_from_slice(ColSchema::new(Ty::Blob, 0).as_bytes());
+        bytes.extend_from_slice(ColSchema::new(Ty::Blob, 0).as_bytes());
+
+        // length
+        bytes.put_u32_ne(8);
+        bytes.put_u32_ne(0);
+        bytes.put_u32_ne(7);
+
+        // blobs
+        bytes.put_i32_ne(0);
+        bytes.put_u32_ne(4);
+        bytes.put_slice(&[1, 2, 3, 4]);
+
+        bytes.put_i32_le(-1);
+
+        bytes.put_i32_ne(0);
+        bytes.put_u32_ne(3);
+        bytes.put_slice(&[2, 3, 3]);
+
+        let block = RawBlock::parse_from_raw_block(bytes, Precision::Millisecond);
+        let views = block.column_views();
+        assert_eq!(views.len(), 3);
+
+        if let Some(ColumnView::Blob(view)) = views.get(0) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [Some(vec![1, 2, 3, 4])]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        if let Some(ColumnView::Blob(view)) = views.get(1) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [None]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        if let Some(ColumnView::Blob(view)) = views.get(2) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [Some(vec![2, 3, 3])]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        Ok(())
+    }
 }

@@ -1306,12 +1306,6 @@ impl ColumnView {
             _ => unreachable!(),
         }
     }
-
-    pub(crate) fn _to_nulls_vec(&self) -> Vec<bool> {
-        (0..self.len())
-            .map(|i| unsafe { self.is_null_unchecked(i) })
-            .collect()
-    }
 }
 
 pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
@@ -1455,6 +1449,8 @@ _impl_from_iter!(
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
     use crate::common::decimal::Decimal;
 
@@ -1491,41 +1487,64 @@ mod tests {
 
     #[test]
     fn test_concat_iter() {
-        let column_view_int = ColumnView::from(vec![1, 2, 3]);
-
-        let iterator_values = [
+        let values = [
             BorrowedValue::Int(7),
             BorrowedValue::UInt(8),
             BorrowedValue::Int(9),
         ];
 
-        let result_column_int =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::Int);
-        assert_eq!(result_column_int.len(), 6);
+        let column_view_int = ColumnView::from(vec![1, 2, 3]);
 
-        let result_column_uint =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::UInt);
-        assert_eq!(result_column_uint.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Bool);
+        assert_eq!(res.len(), 6);
 
-        let result_column_bigint =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::BigInt);
-        assert_eq!(result_column_bigint.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::TinyInt);
+        assert_eq!(res.len(), 6);
 
-        let result_column_ubigint =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::UBigInt);
-        assert_eq!(result_column_ubigint.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::SmallInt);
+        assert_eq!(res.len(), 6);
 
-        let result_column_float =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::Float);
-        assert_eq!(result_column_float.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Int);
+        assert_eq!(res.len(), 6);
 
-        let result_column_double =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::Double);
-        assert_eq!(result_column_double.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::BigInt);
+        assert_eq!(res.len(), 6);
 
-        let result_column_varchar =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::VarChar);
-        assert_eq!(result_column_varchar.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::UTinyInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::USmallInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::UInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::UBigInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Float);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Double);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::VarChar);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::NChar);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Json);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::VarBinary);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Blob);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Geometry);
+        assert_eq!(res.len(), 6);
     }
 
     #[test]
@@ -1577,6 +1596,72 @@ mod tests {
             slice.get(1),
             Some(BorrowedValue::Decimal64(Decimal::new(333, 10, 0)))
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_blob_column_view() -> anyhow::Result<()> {
+        let view = ColumnView::from_blob_bytes::<Vec<u8>, _, _, _>([
+            Some(vec![1, 2, 3, 4]),
+            None,
+            Some(vec![2, 3, 3]),
+        ]);
+
+        assert_eq!(view.as_ty(), Ty::Blob);
+        assert_eq!(view.len(), 3);
+        assert_eq!(view.max_variable_length(), 4);
+        assert_eq!(
+            format!("{view:?}"),
+            "Blob([Some([1, 2, 3, 4]), None, Some([2, 3, 3])])"
+        );
+
+        assert!(!view.as_raw_ptr().is_null());
+
+        unsafe {
+            assert!(!view.is_null_unchecked(0));
+            assert!(view.is_null_unchecked(1));
+            assert!(!view.is_null_unchecked(2));
+        }
+
+        assert_eq!(
+            view.get(0),
+            Some(BorrowedValue::Blob(Cow::from(vec![1, 2, 3, 4])))
+        );
+        assert_eq!(view.get(1), Some(BorrowedValue::Null(Ty::Blob)));
+        assert_eq!(
+            view.get(2),
+            Some(BorrowedValue::Blob(Cow::from(vec![2, 3, 3])))
+        );
+
+        unsafe {
+            assert_eq!(
+                view.get_ref_unchecked(0),
+                BorrowedValue::Blob(Cow::from(vec![1, 2, 3, 4]))
+            );
+            assert_eq!(view.get_ref_unchecked(1), BorrowedValue::Null(Ty::Blob));
+            assert_eq!(
+                view.get_ref_unchecked(2),
+                BorrowedValue::Blob(Cow::from(vec![2, 3, 3]))
+            );
+        }
+
+        unsafe {
+            let (ty, size, ptr) = view.get_raw_value_unchecked(0);
+            assert_eq!(ty, Ty::Blob);
+            assert_eq!(size, 4);
+            assert!(!ptr.is_null());
+
+            let (ty, size, ptr) = view.get_raw_value_unchecked(1);
+            assert_eq!(ty, Ty::Blob);
+            assert_eq!(size, 0);
+            assert!(ptr.is_null());
+
+            let (ty, size, ptr) = view.get_raw_value_unchecked(2);
+            assert_eq!(ty, Ty::Blob);
+            assert_eq!(size, 3);
+            assert!(!ptr.is_null());
+        }
 
         Ok(())
     }

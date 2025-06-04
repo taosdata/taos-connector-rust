@@ -487,4 +487,225 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_from_str() {
+        assert_eq!("timestamp".parse::<Ty>().unwrap(), Ty::Timestamp);
+        assert_eq!("bool".parse::<Ty>().unwrap(), Ty::Bool);
+        assert_eq!("tinyint".parse::<Ty>().unwrap(), Ty::TinyInt);
+        assert_eq!("smallint".parse::<Ty>().unwrap(), Ty::SmallInt);
+        assert_eq!("int".parse::<Ty>().unwrap(), Ty::Int);
+        assert_eq!("bigint".parse::<Ty>().unwrap(), Ty::BigInt);
+        assert_eq!("tinyint unsigned".parse::<Ty>().unwrap(), Ty::UTinyInt);
+        assert_eq!("smallint unsigned".parse::<Ty>().unwrap(), Ty::USmallInt);
+        assert_eq!("int unsigned".parse::<Ty>().unwrap(), Ty::UInt);
+        assert_eq!("bigint unsigned".parse::<Ty>().unwrap(), Ty::UBigInt);
+        assert_eq!("float".parse::<Ty>().unwrap(), Ty::Float);
+        assert_eq!("double".parse::<Ty>().unwrap(), Ty::Double);
+        assert_eq!("binary".parse::<Ty>().unwrap(), Ty::VarChar);
+        assert_eq!("varchar".parse::<Ty>().unwrap(), Ty::VarChar);
+        assert_eq!("nchar".parse::<Ty>().unwrap(), Ty::NChar);
+        assert_eq!("json".parse::<Ty>().unwrap(), Ty::Json);
+        assert_eq!("varbinary".parse::<Ty>().unwrap(), Ty::VarBinary);
+        assert_eq!("blob".parse::<Ty>().unwrap(), Ty::Blob);
+        assert_eq!("mediumblob".parse::<Ty>().unwrap(), Ty::MediumBlob);
+        assert_eq!("geometry".parse::<Ty>().unwrap(), Ty::Geometry);
+        assert_eq!("decimal(5,2)".parse::<Ty>().unwrap(), Ty::Decimal64);
+        assert_eq!("decimal(20,2)".parse::<Ty>().unwrap(), Ty::Decimal);
+        assert_eq!(
+            "invalid type".parse::<Ty>().unwrap_err(),
+            "not a valid data type string: invalid type".to_string()
+        );
+    }
+
+    #[test]
+    fn test_is_null() {
+        assert!(Ty::Null.is_null());
+        assert!(!Ty::Bool.is_null());
+        assert!(!Ty::Int.is_null());
+        assert!(!Ty::VarChar.is_null());
+    }
+
+    #[test]
+    fn test_name() {
+        assert_eq!(Ty::Null.name(), "NULL");
+        assert_eq!(Ty::Bool.name(), "BOOL");
+        assert_eq!(Ty::TinyInt.name(), "TINYINT");
+        assert_eq!(Ty::SmallInt.name(), "SMALLINT");
+        assert_eq!(Ty::Int.name(), "INT");
+        assert_eq!(Ty::BigInt.name(), "BIGINT");
+        assert_eq!(Ty::Float.name(), "FLOAT");
+        assert_eq!(Ty::Double.name(), "DOUBLE");
+        assert_eq!(Ty::VarChar.name(), "BINARY");
+        assert_eq!(Ty::Timestamp.name(), "TIMESTAMP");
+        assert_eq!(Ty::NChar.name(), "NCHAR");
+        assert_eq!(Ty::UTinyInt.name(), "TINYINT UNSIGNED");
+        assert_eq!(Ty::USmallInt.name(), "SMALLINT UNSIGNED");
+        assert_eq!(Ty::UInt.name(), "INT UNSIGNED");
+        assert_eq!(Ty::UBigInt.name(), "BIGINT UNSIGNED");
+        assert_eq!(Ty::Json.name(), "JSON");
+        assert_eq!(Ty::VarBinary.name(), "VARBINARY");
+        assert_eq!(Ty::Decimal.name(), "DECIMAL");
+        assert_eq!(Ty::Decimal64.name(), "DECIMAL");
+        assert_eq!(Ty::Blob.name(), "BLOB");
+        assert_eq!(Ty::MediumBlob.name(), "MEDIUMBLOB");
+        assert_eq!(Ty::Geometry.name(), "GEOMETRY");
+    }
+
+    #[test]
+    fn test_lowercase_name() {
+        assert_eq!(Ty::Null.lowercase_name(), "null");
+        assert_eq!(Ty::Bool.lowercase_name(), "bool");
+        assert_eq!(Ty::TinyInt.lowercase_name(), "tinyint");
+        assert_eq!(Ty::SmallInt.lowercase_name(), "smallint");
+        assert_eq!(Ty::Int.lowercase_name(), "int");
+        assert_eq!(Ty::BigInt.lowercase_name(), "bigint");
+        assert_eq!(Ty::Float.lowercase_name(), "float");
+        assert_eq!(Ty::Double.lowercase_name(), "double");
+        assert_eq!(Ty::VarChar.lowercase_name(), "binary");
+        assert_eq!(Ty::Timestamp.lowercase_name(), "timestamp");
+        assert_eq!(Ty::NChar.lowercase_name(), "nchar");
+        assert_eq!(Ty::UTinyInt.lowercase_name(), "tinyint unsigned");
+        assert_eq!(Ty::USmallInt.lowercase_name(), "smallint unsigned");
+        assert_eq!(Ty::UInt.lowercase_name(), "int unsigned");
+        assert_eq!(Ty::UBigInt.lowercase_name(), "bigint unsigned");
+        assert_eq!(Ty::Json.lowercase_name(), "json");
+        assert_eq!(Ty::VarBinary.lowercase_name(), "varbinary");
+        assert_eq!(Ty::Decimal.lowercase_name(), "decimal");
+        assert_eq!(Ty::Decimal64.lowercase_name(), "decimal");
+        assert_eq!(Ty::Blob.lowercase_name(), "blob");
+        assert_eq!(Ty::MediumBlob.lowercase_name(), "mediumblob");
+        assert_eq!(Ty::Geometry.lowercase_name(), "geometry");
+    }
+
+    #[test]
+    fn test_tsdb_name() {
+        use std::ffi::CStr;
+
+        unsafe {
+            assert_eq!(CStr::from_ptr(Ty::Null.tsdb_name()), c"TSDB_DATA_TYPE_NULL");
+            assert_eq!(CStr::from_ptr(Ty::Bool.tsdb_name()), c"TSDB_DATA_TYPE_BOOL");
+            assert_eq!(
+                CStr::from_ptr(Ty::TinyInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_TINYINT"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::SmallInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_SMALLINT"
+            );
+            assert_eq!(CStr::from_ptr(Ty::Int.tsdb_name()), c"TSDB_DATA_TYPE_INT");
+            assert_eq!(
+                CStr::from_ptr(Ty::BigInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_BIGINT"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Float.tsdb_name()),
+                c"TSDB_DATA_TYPE_FLOAT"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Double.tsdb_name()),
+                c"TSDB_DATA_TYPE_DOUBLE"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::VarChar.tsdb_name()),
+                c"TSDB_DATA_TYPE_VARCHAR"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Timestamp.tsdb_name()),
+                c"TSDB_DATA_TYPE_TIMESTAMP"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::NChar.tsdb_name()),
+                c"TSDB_DATA_TYPE_NCHAR"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::UTinyInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_UTINYINT"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::USmallInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_USMALLINT"
+            );
+            assert_eq!(CStr::from_ptr(Ty::UInt.tsdb_name()), c"TSDB_DATA_TYPE_UINT");
+            assert_eq!(
+                CStr::from_ptr(Ty::UBigInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_UBIGINT"
+            );
+            assert_eq!(CStr::from_ptr(Ty::Json.tsdb_name()), c"TSDB_DATA_TYPE_JSON");
+            assert_eq!(
+                CStr::from_ptr(Ty::VarBinary.tsdb_name()),
+                c"TSDB_DATA_TYPE_VARBINARY"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Decimal.tsdb_name()),
+                c"TSDB_DATA_TYPE_DECIMAL"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Decimal64.tsdb_name()),
+                c"TSDB_DATA_TYPE_DECIMAL64"
+            );
+            assert_eq!(CStr::from_ptr(Ty::Blob.tsdb_name()), c"TSDB_DATA_TYPE_BLOB");
+            assert_eq!(
+                CStr::from_ptr(Ty::MediumBlob.tsdb_name()),
+                c"TSDB_DATA_TYPE_MEDIUMBLOB"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Geometry.tsdb_name()),
+                c"TSDB_DATA_TYPE_GEOMETRY"
+            );
+        }
+    }
+
+    #[test]
+    fn test_from_u8_option() {
+        assert_eq!(Ty::from_u8_option(0), Some(Ty::Null));
+        assert_eq!(Ty::from_u8_option(1), Some(Ty::Bool));
+        assert_eq!(Ty::from_u8_option(2), Some(Ty::TinyInt));
+        assert_eq!(Ty::from_u8_option(3), Some(Ty::SmallInt));
+        assert_eq!(Ty::from_u8_option(4), Some(Ty::Int));
+        assert_eq!(Ty::from_u8_option(5), Some(Ty::BigInt));
+        assert_eq!(Ty::from_u8_option(6), Some(Ty::Float));
+        assert_eq!(Ty::from_u8_option(7), Some(Ty::Double));
+        assert_eq!(Ty::from_u8_option(8), Some(Ty::VarChar));
+        assert_eq!(Ty::from_u8_option(9), Some(Ty::Timestamp));
+        assert_eq!(Ty::from_u8_option(10), Some(Ty::NChar));
+        assert_eq!(Ty::from_u8_option(11), Some(Ty::UTinyInt));
+        assert_eq!(Ty::from_u8_option(12), Some(Ty::USmallInt));
+        assert_eq!(Ty::from_u8_option(13), Some(Ty::UInt));
+        assert_eq!(Ty::from_u8_option(14), Some(Ty::UBigInt));
+        assert_eq!(Ty::from_u8_option(15), Some(Ty::Json));
+        assert_eq!(Ty::from_u8_option(16), Some(Ty::VarBinary));
+        assert_eq!(Ty::from_u8_option(17), Some(Ty::Decimal));
+        assert_eq!(Ty::from_u8_option(18), Some(Ty::Blob));
+        assert_eq!(Ty::from_u8_option(19), Some(Ty::MediumBlob));
+        assert_eq!(Ty::from_u8_option(20), Some(Ty::Geometry));
+        assert_eq!(Ty::from_u8_option(21), Some(Ty::Decimal64));
+        assert_eq!(Ty::from_u8_option(22), None);
+    }
+
+    #[test]
+    fn test_from_u8() {
+        assert_eq!(Ty::from(0), Ty::Null);
+        assert_eq!(Ty::from(1), Ty::Bool);
+        assert_eq!(Ty::from(2), Ty::TinyInt);
+        assert_eq!(Ty::from(3), Ty::SmallInt);
+        assert_eq!(Ty::from(4), Ty::Int);
+        assert_eq!(Ty::from(5), Ty::BigInt);
+        assert_eq!(Ty::from(6), Ty::Float);
+        assert_eq!(Ty::from(7), Ty::Double);
+        assert_eq!(Ty::from(8), Ty::VarChar);
+        assert_eq!(Ty::from(9), Ty::Timestamp);
+        assert_eq!(Ty::from(10), Ty::NChar);
+        assert_eq!(Ty::from(11), Ty::UTinyInt);
+        assert_eq!(Ty::from(12), Ty::USmallInt);
+        assert_eq!(Ty::from(13), Ty::UInt);
+        assert_eq!(Ty::from(14), Ty::UBigInt);
+        assert_eq!(Ty::from(15), Ty::Json);
+        assert_eq!(Ty::from(16), Ty::VarBinary);
+        assert_eq!(Ty::from(17), Ty::Decimal);
+        assert_eq!(Ty::from(18), Ty::Blob);
+        assert_eq!(Ty::from(19), Ty::MediumBlob);
+        assert_eq!(Ty::from(20), Ty::Geometry);
+        assert_eq!(Ty::from(21), Ty::Decimal64);
+    }
 }

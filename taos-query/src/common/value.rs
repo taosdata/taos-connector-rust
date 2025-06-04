@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use super::decimal::Decimal;
 use super::{Timestamp, Ty};
 
+mod de;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BorrowedValue<'b> {
     Null(Ty),
@@ -262,7 +264,9 @@ impl BorrowedValue<'_> {
             NChar(str) => serde_json::Value::String(str.to_string()),
             Decimal(v) => serde_json::Value::String(format!("{v}")),
             Decimal64(v) => serde_json::Value::String(format!("{v}")),
-            _ => todo!(),
+            Blob(v) | MediumBlob(v) | VarBinary(v) | Geometry(v) => {
+                serde_json::Value::String(format!("{:?}", v.to_vec()))
+            }
         }
     }
 
@@ -762,7 +766,6 @@ _impl_primitive_from!(u64, UBigInt);
 _impl_primitive_from!(f32, Float);
 _impl_primitive_from!(f64, Double);
 _impl_primitive_from!(Timestamp, Timestamp);
-mod de;
 
 #[cfg(test)]
 mod tests {
@@ -1325,6 +1328,12 @@ mod tests {
 
         let medium_blob_value = BorrowedValue::MediumBlob(Cow::from(vec![1, 2, 3]));
         assert_eq!(medium_blob_value.ty(), Ty::MediumBlob);
+
+        let varbinary_value = BorrowedValue::VarBinary(Cow::from(vec![1, 2, 3]));
+        assert_eq!(varbinary_value.ty(), Ty::VarBinary);
+
+        let geometry_value = BorrowedValue::Geometry(Cow::from(vec![1, 2, 3]));
+        assert_eq!(geometry_value.ty(), Ty::Geometry);
     }
 
     #[test]
@@ -1395,8 +1404,16 @@ mod tests {
             .contains("1970-01-01T"));
 
         let nchar_value = Value::NChar("hello".to_string());
-        let b_nchar_value = nchar_value.to_borrowed_value();
-        assert_eq!(b_nchar_value.to_sql_value(), "\"hello\"".to_string());
+        assert_eq!(
+            nchar_value.to_sql_value_with_rfc3339(),
+            "\"hello\"".to_string()
+        );
+
+        let json_value = Value::Json(serde_json::json!({"hello": "world"}));
+        assert_eq!(
+            json_value.to_sql_value_with_rfc3339(),
+            "\"{\"hello\":\"world\"}\"".to_string()
+        );
     }
 
     #[test]
@@ -1864,6 +1881,60 @@ mod tests {
             serde_json::Value::String("12345".to_string())
         );
         assert!(value.eq(&BorrowedValue::Decimal64(Decimal::new(12345, 5, 0))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_borrowed_value_strict_as_str() {
+        let varchar_value_borrowed = BorrowedValue::VarChar("hello");
+        let str = varchar_value_borrowed.strict_as_str();
+        assert_eq!(str, "hello");
+
+        let nchar_value_borrowed = BorrowedValue::NChar(Cow::from("hello"));
+        let str = nchar_value_borrowed.strict_as_str();
+        assert_eq!(str, "hello");
+    }
+
+    #[test]
+    fn test_value_strict_as_str() {
+        let varchar_value = Value::VarChar("hello".to_string());
+        let str = varchar_value.strict_as_str();
+        assert_eq!(str, "hello");
+
+        let nchar_value = Value::NChar("hello".to_string());
+        let str = nchar_value.strict_as_str();
+        assert_eq!(str, "hello");
+    }
+
+    #[test]
+    fn test_blob_value() -> anyhow::Result<()> {
+        let blob_value = Value::Blob(Bytes::from(vec![1, 2, 3]));
+        assert_eq!(blob_value.ty(), Ty::Blob);
+        assert_eq!(
+            blob_value.to_json_value(),
+            serde_json::Value::String("[1, 2, 3]".to_string())
+        );
+        assert_eq!(format!("{}", blob_value), "[1, 2, 3]");
+
+        let blob_value_borrowed = blob_value.to_borrowed_value();
+        assert_eq!(blob_value_borrowed.ty(), Ty::Blob);
+        assert_eq!(
+            blob_value_borrowed.to_json_value(),
+            serde_json::Value::String("[1, 2, 3]".to_string())
+        );
+        assert_eq!(format!("{}", blob_value_borrowed), "[1, 2, 3]");
+
+        assert_eq!(blob_value_borrowed.to_value(), blob_value);
+        assert_eq!(blob_value_borrowed.clone().into_value(), blob_value);
+        assert_eq!(
+            blob_value_borrowed.to_bytes(),
+            Some(Bytes::from(vec![1, 2, 3]))
+        );
+
+        assert_eq!(blob_value_borrowed, blob_value);
+        assert_eq!(blob_value, blob_value_borrowed);
+        assert_eq!(blob_value_borrowed, &blob_value);
+
         Ok(())
     }
 }

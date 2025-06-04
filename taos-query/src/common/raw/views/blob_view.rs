@@ -255,3 +255,107 @@ impl ExactSizeIterator for BlobNullsIter<'_> {
         self.view.len() - self.row
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn test_blob_view() {
+        let view = BlobView::from_iter::<Vec<u8>, _, _, _>([
+            Some(vec![1, 2, 3, 4]),
+            None,
+            Some(vec![2, 3, 3]),
+        ]);
+
+        assert_eq!(view.ty(), Ty::Blob);
+        assert_eq!(view.len(), 3);
+        assert!(!view.as_raw_ptr().is_null());
+        assert_eq!(view.to_nulls_vec(), vec![false, true, false]);
+
+        assert!(!view.is_null(0));
+        assert!(view.is_null(1));
+        assert!(!view.is_null(2));
+
+        unsafe {
+            let bytes = view.get_unchecked(0).unwrap();
+            assert_eq!(bytes.len(), 4);
+            assert_eq!(bytes.as_bytes(), &[1, 2, 3, 4]);
+
+            let res = view.get_unchecked(1);
+            assert!(res.is_none());
+
+            let bytes = view.get_unchecked(2).unwrap();
+            assert_eq!(bytes.len(), 3);
+            assert_eq!(bytes.as_bytes(), &[2, 3, 3]);
+        }
+
+        assert_eq!(view.lengths(), vec![Some(4), None, Some(3)]);
+
+        let mut iter = view.iter();
+        assert_eq!(iter.next().unwrap().unwrap().as_bytes(), &[1, 2, 3, 4]);
+        assert!(iter.next().unwrap().is_none());
+        assert_eq!(iter.next().unwrap().unwrap().as_bytes(), &[2, 3, 3]);
+        assert!(iter.next().is_none());
+
+        assert_eq!(
+            view.to_vec(),
+            vec![Some(vec![1, 2, 3, 4]), None, Some(vec![2, 3, 3])]
+        );
+    }
+
+    #[test]
+    fn test_write_raw_into() {
+        let view = BlobView::from_iter::<Vec<u8>, _, _, _>([
+            Some(vec![10, 20, 30]),
+            None,
+            Some(vec![40, 50]),
+            Some(vec![]),
+            None,
+        ]);
+
+        let mut buf = Cursor::new(Vec::new());
+        let len = view.write_raw_into(&mut buf).unwrap();
+        let output = buf.into_inner();
+
+        assert_eq!(len, output.len());
+        assert_eq!(output.len(), 20 + 17);
+
+        let (offset_bytes, data_bytes) = output.split_at(20);
+        let offsets: Vec<i32> = offset_bytes
+            .chunks(4)
+            .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        assert_eq!(offsets, vec![0, -1, 7, 13, -1]);
+
+        assert_eq!(&data_bytes[0..7], &[3, 0, 0, 0, 10, 20, 30]);
+        assert_eq!(&data_bytes[7..13], &[2, 0, 0, 0, 40, 50]);
+        assert_eq!(&data_bytes[13..17], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn test_write_raw_into_empty() {
+        let view = BlobView::from_iter::<Vec<u8>, Option<_>, _, _>([]);
+        let mut buf = Cursor::new(Vec::new());
+        let len = view.write_raw_into(&mut buf).unwrap();
+        let output = buf.into_inner();
+        assert_eq!(len, 0);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_write_raw_into_all_null() {
+        let view = BlobView::from_iter::<Vec<u8>, _, _, _>([None, None]);
+        let mut buf = Cursor::new(Vec::new());
+        let len = view.write_raw_into(&mut buf).unwrap();
+        let output = buf.into_inner();
+        assert_eq!(len, 8);
+        let offsets: Vec<i32> = output
+            .chunks(4)
+            .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        assert_eq!(offsets, vec![-1, -1]);
+    }
+}
