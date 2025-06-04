@@ -1982,6 +1982,15 @@ mod tests {
             panic!("expected blob column");
         }
 
+        let offsets = block.get_col_data_offset_unchecked(0);
+        assert_eq!(offsets, &[0]);
+
+        let offsets = block.get_col_data_offset_unchecked(1);
+        assert_eq!(offsets, &[-1]);
+
+        let offsets = block.get_col_data_offset_unchecked(2);
+        assert_eq!(offsets, &[0]);
+
         Ok(())
     }
 }
