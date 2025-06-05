@@ -479,14 +479,22 @@ impl Consumer {
     async fn poll(&self, timeout: Duration) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
         self.auto_commit().await;
 
-        let blocking_time = match timeout.as_secs() {
-            s if s > 2 => timeout.as_millis() / 2,
-            _ => timeout.as_millis(),
-        };
+        let permit = self
+            .cache_sender
+            .reserve()
+            .await
+            .expect("poll cache channel closed");
+
+        let data_opt = { self.cache_reader.lock().await.recv().await };
+        if let Some(Some(data)) = data_opt {
+            tracing::trace!("poll data from cache: {data:?}");
+            permit.send(None);
+            return Ok(self.parse_data(data));
+        }
 
         let req = TmqSend::Poll {
             req_id: self.sender.req_id(),
-            blocking_time: blocking_time as _,
+            blocking_time: (timeout.as_millis() / 2) as _,
             message_id: self.message_id.load(Ordering::Relaxed),
         };
 
@@ -497,27 +505,36 @@ impl Consumer {
             data,
             elapsed.elapsed().as_millis()
         );
-        Ok(self.parse_data(data).await)
+        Ok(self.parse_data(data))
     }
 
     async fn auto_commit(&self) {
-        if self.auto_commit {
-            let mut guard = self.auto_commit_offset.lock().await;
-            if let Some(offset) = guard.0.take() {
-                let now = Instant::now();
-                let interval = Duration::from_millis(self.auto_commit_interval_ms.unwrap());
-                if now - guard.1 > interval {
-                    guard.1 = now;
-                    tracing::trace!("poll auto commit, commit offset: {offset:?}");
-                    if let Err(err) = AsAsyncConsumer::commit(self, offset).await {
-                        tracing::error!("poll auto commit failed, err: {err:?}");
+        if !self.auto_commit {
+            return;
+        }
+
+        if let Some(offset) = &self.auto_commit_offset.0 {
+            let now = Instant::now();
+            let last_commit = self.auto_commit_offset.1;
+            let interval = Duration::from_millis(self.auto_commit_interval_ms.unwrap());
+            if now - last_commit > interval {
+                tracing::trace!("poll auto commit, commit offset: {offset:?}");
+                if let Err(err) = AsAsyncConsumer::commit(self, offset.clone()).await {
+                    tracing::error!("poll auto commit failed, err: {err:?}");
+                } else {
+                    // Safety: This code guarantees that there is no concurrent access to the `auto_commit_offset` field.
+                    unsafe {
+                        let ptr = self as *const Self as *mut Self;
+                        let auto_commit_offset = &mut (*ptr).auto_commit_offset;
+                        auto_commit_offset.0 = None;
+                        auto_commit_offset.1 = now;
                     }
                 }
             }
         }
     }
 
-    async fn parse_data(&self, data: TmqRecvData) -> Option<(Offset, MessageSet<Meta, Data>)> {
+    fn parse_data(&self, data: TmqRecvData) -> Option<(Offset, MessageSet<Meta, Data>)> {
         if let TmqRecvData::Poll(TmqPoll {
             message_id,
             database,
@@ -544,8 +561,13 @@ impl Consumer {
 
             if self.auto_commit {
                 tracing::trace!("poll auto commit, set offset: {offset:?}");
-                let mut guard = self.auto_commit_offset.lock().await;
-                guard.0.replace(offset.clone());
+
+                // Safety: This code guarantees that there is no concurrent access to the `auto_commit_offset` field.
+                unsafe {
+                    let ptr = self as *const Self as *mut Self;
+                    let auto_commit_offset = &mut (*ptr).auto_commit_offset;
+                    auto_commit_offset.0 = Some(offset.clone());
+                }
             }
 
             self.message_id.store(message_id, Ordering::Relaxed);
@@ -680,6 +702,13 @@ impl AsAsyncConsumer for Consumer {
     }
 
     async fn commit_all(&self) -> RawResult<()> {
+        let has_data = { !self.cache_reader.lock().await.is_empty() };
+        if has_data {
+            return Err(RawError::from_string(
+                "polling data is in queue, can't commit all",
+            ));
+        }
+
         let action = TmqSend::Commit(MessageArgs {
             req_id: self.sender.req_id(),
             message_id: 0,
@@ -1172,6 +1201,10 @@ impl TmqBuilder {
             }
         });
 
+        let (cache_tx, cache_rx) = mpsc::channel(2);
+        let _ = cache_tx.send(None).await;
+        let cache_sender = cache_tx.clone();
+
         tokio::spawn(async move {
             let instant = Instant::now();
             'ws: loop {
@@ -1203,7 +1236,7 @@ impl TmqBuilder {
                                             }
                                         }
                                         TmqRecvData::Poll(_) => {
-                                            match queries_sender.remove(&req_id) {
+                                            let data = match queries_sender.remove(&req_id) {
                                                 Some((_, sender)) => {
                                                     #[cfg(test)]
                                                     #[allow(static_mut_refs)]
@@ -1218,11 +1251,35 @@ impl TmqBuilder {
                                                         }
                                                     }
 
-                                                    if let Err(err) = sender.send(ok.map(|_| recv)).await {
-                                                        tracing::warn!(req_id, "poll message received but no receiver alive, err: {err:?}");
+                                                    match sender.send(ok.map(|_| recv)).await {
+                                                        Ok(_) => None,
+                                                        Err(err) => match err.0 {
+                                                            Ok(data) => Some(data),
+                                                            Err(err) => {
+                                                                tracing::warn!("poll message received, err: {err:?}");
+                                                                None
+                                                            }
+                                                        },
                                                     }
                                                 },
-                                                None => tracing::warn!(req_id, "poll message received but no sender alive"),
+                                                None => Some(recv),
+                                            };
+
+                                            tracing::trace!("poll end: {data:?}");
+                                            if let Err(err) = cache_sender.send(data).await {
+                                                tracing::error!("poll end notification failed, break the connection, err: {err:?}");
+                                                let keys = queries_sender.iter().map(|r| *r.key()).collect_vec();
+                                                for key in keys {
+                                                    if let Some((_, sender)) = queries_sender.remove(&key) {
+                                                        let _ = sender
+                                                            .send(Err(RawError::new(
+                                                                WS_ERROR_NO::CONN_CLOSED.as_code(),
+                                                                "Consumer messages lost",
+                                                            )))
+                                                            .await;
+                                                    }
+                                                }
+                                                break 'ws;
                                             }
                                         }
                                         TmqRecvData::FetchJsonMeta { data } => {
@@ -1416,8 +1473,10 @@ impl TmqBuilder {
                 .auto_commit_interval_ms
                 .as_deref()
                 .and_then(|s| s.parse::<u64>().ok()),
-            auto_commit_offset: Arc::new(Mutex::new((None, Instant::now()))),
+            auto_commit_offset: (None, Instant::now()),
             message_id: AtomicU64::new(0),
+            cache_sender: cache_tx,
+            cache_reader: Mutex::new(cache_rx),
         })
     }
 }
@@ -1433,8 +1492,10 @@ pub struct Consumer {
     support_fetch_raw: bool,
     auto_commit: bool,
     auto_commit_interval_ms: Option<u64>,
-    auto_commit_offset: Arc<Mutex<(Option<Offset>, Instant)>>,
+    auto_commit_offset: (Option<Offset>, Instant),
     message_id: AtomicU64,
+    cache_sender: mpsc::Sender<Option<TmqRecvData>>,
+    cache_reader: Mutex<mpsc::Receiver<Option<TmqRecvData>>>,
 }
 
 impl Drop for Consumer {
@@ -3012,23 +3073,48 @@ mod tests {
         ])
         .await?;
 
-        let poll_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async {
+        let (msg_tx, mut msg_rx) =
+            mpsc::channel::<(MessageSet<Meta, Data>, oneshot::Sender<()>)>(100);
+
+        let (cancel_tx, mut cancel_rx) = watch::channel(false);
+
+        let cnt_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let mut cnt = 0;
+            while let Some((mut msg, done_tx)) = msg_rx.recv().await {
+                if let Some(data) = msg.data() {
+                    while let Some(block) = data.fetch_block().await? {
+                        cnt += block.nrows();
+                    }
+                }
+                let _ = done_tx.send(());
+            }
+            assert_eq!(cnt, 3);
+            Ok(())
+        });
+
+        let poll_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             let tmq =
                 TmqBuilder::from_dsn("ws://localhost:6041?group.id=10&auto.offset.reset=earliest")?;
             let mut consumer = tmq.build().await?;
             consumer.subscribe(["topic_1748512722"]).await?;
 
-            let mut cnt = 0;
             let timeout = Timeout::Duration(Duration::from_secs(1));
 
-            for _ in 0..30 {
-                if let Some((offset, _message)) = consumer.recv_timeout(timeout).await? {
-                    cnt += 1;
-                    consumer.commit(offset).await?;
+            loop {
+                tokio::select! {
+                    _ = cancel_rx.changed() => {
+                        break;
+                    }
+                    res = consumer.recv_timeout(timeout) => {
+                        if let Some((offset, message)) = res? {
+                            let (done_tx, done_rx) = oneshot::channel();
+                            msg_tx.send((message, done_tx)).await?;
+                            let _ = done_rx.await;
+                            consumer.commit(offset).await?;
+                        }
+                    }
                 }
             }
-
-            assert_eq!(cnt, 2);
 
             consumer.unsubscribe().await;
 
@@ -3043,7 +3129,16 @@ mod tests {
 
         taos.exec("insert into t0 values(now, 1, 2.2, 3.3)").await?;
 
+        tokio::time::sleep(Duration::from_secs(20)).await;
+
+        taos.exec("insert into t0 values(now, 1, 2.2, 3.3)").await?;
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
+
+        let _ = cancel_tx.send(true);
+
         poll_handle.await??;
+        cnt_handle.await??;
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
