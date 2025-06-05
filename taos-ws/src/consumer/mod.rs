@@ -477,6 +477,14 @@ impl Consumer {
     }
 
     async fn poll(&self, timeout: Duration) -> RawResult<Option<(Offset, MessageSet<Meta, Data>)>> {
+        #[inline(always)]
+        fn now() -> u64 {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64
+        }
+
         self.auto_commit().await;
 
         let permit = self
@@ -485,12 +493,30 @@ impl Consumer {
             .await
             .expect("poll cache channel closed");
 
-        let data_opt = { self.cache_reader.lock().await.recv().await };
-        if let Some(Some(data)) = data_opt {
-            tracing::trace!("poll data from cache: {data:?}");
-            permit.send(None);
-            return Ok(self.parse_data(data));
+        let mut guard = self.cache_reader.lock().await;
+        if !guard.is_empty() {
+            if let Some(Some(data)) = guard.recv().await {
+                tracing::trace!("poll data from cache, data: {data:?}");
+                permit.send(None);
+                return Ok(self.parse_data(data));
+            }
+        } else {
+            let last_poll = self.last_poll_time.load(Ordering::Relaxed);
+            if now() - last_poll < 60 * 1000 {
+                tracing::trace!("poll data wait cache, last poll: {last_poll}");
+                if let Some(Some(data)) = guard.recv().await {
+                    tracing::trace!("poll data wait cache, data: {data:?}");
+                    permit.send(None);
+                    return Ok(self.parse_data(data));
+                }
+            }
+
+            tracing::warn!("poll data lost: no data received from cache for over 60 seconds, possible data loss");
         }
+
+        drop(guard);
+
+        self.last_poll_time.store(now(), Ordering::Relaxed);
 
         let req = TmqSend::Poll {
             req_id: self.sender.req_id(),
@@ -498,12 +524,11 @@ impl Consumer {
             message_id: self.message_id.load(Ordering::Relaxed),
         };
 
-        let elapsed = tokio::time::Instant::now();
+        let now = tokio::time::Instant::now();
         let data = self.sender.send_recv(req).await?;
         tracing::trace!(
-            "poll received data: {:?}, elapsed: {}ms",
-            data,
-            elapsed.elapsed().as_millis()
+            "poll received data: {data:?}, elapsed: {}ms",
+            now.elapsed().as_millis()
         );
         Ok(self.parse_data(data))
     }
@@ -1477,6 +1502,7 @@ impl TmqBuilder {
             message_id: AtomicU64::new(0),
             cache_sender: cache_tx,
             cache_reader: Mutex::new(cache_rx),
+            last_poll_time: AtomicU64::new(0),
         })
     }
 }
@@ -1496,6 +1522,7 @@ pub struct Consumer {
     message_id: AtomicU64,
     cache_sender: mpsc::Sender<Option<TmqRecvData>>,
     cache_reader: Mutex<mpsc::Receiver<Option<TmqRecvData>>>,
+    last_poll_time: AtomicU64,
 }
 
 impl Drop for Consumer {
