@@ -3,11 +3,15 @@ use std::fmt::{Debug, Display};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use futures_util::stream::FusedStream;
+use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use once_cell::sync::OnceCell;
+use rand::Rng;
 use taos_query::prelude::Code;
 use taos_query::util::Edition;
 use taos_query::{DsnError, IntoDsn, RawResult};
 use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
+use tokio_tungstenite::tungstenite::Message;
 use tracing::warn;
 
 pub mod stmt;
@@ -502,9 +506,99 @@ impl TaosBuilder {
 
     pub(crate) async fn reconnect(
         &self,
-        taos: &mut Taos,
+        mut url: String,
+        use_global_endpoint: bool,
+        conn_msg: Option<Message>,
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-        todo!()
+        let mut config = WebSocketConfig::default();
+        config.max_frame_size = None;
+        config.max_message_size = None;
+        if self.compression {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "deflate")] {
+                    tracing::debug!(url, "Enable compression");
+                    config.compression = Some(DeflateConfig::default());
+                } else {
+                    tracing::warn!("WebSocket compression is not supported unless with `deflate` feature");
+                }
+            }
+        }
+
+        let mut retries = 0;
+        let mut wait_millis = self.retry_backoff.retry_backoff_ms;
+
+        let mut ws_url = self.to_ws_url();
+        loop {
+            match connect_async_with_config(
+                if use_global_endpoint {
+                    ws_url.as_str()
+                } else {
+                    url.as_str()
+                },
+                Some(config),
+                false,
+            )
+            .await
+            {
+                Ok((mut ws, _)) => {
+                    if let Some(msg) = conn_msg {
+                        // FIXME
+                        ws.send(msg).await.unwrap();
+                    }
+                    return Ok(ws);
+                }
+                Err(err) => {
+                    let err_string = err.to_string();
+                    if err_string.contains("307") {
+                        tracing::debug!(error = err_string, "Redirecting to HTTPS link");
+                        self.set_https(true);
+                        url = url.replace("ws://", "wss://");
+                        ws_url = self.to_ws_url();
+                    } else if err_string.contains("401 Unauthorized") {
+                        return Err(QueryError::Unauthorized(self.to_ws_url()).into());
+                    } else if err.to_string().contains("404 Not Found")
+                        || err.to_string().contains("400")
+                    {
+                        if !use_global_endpoint {
+                            return Err(QueryError::from(err).into());
+                        }
+                        match connect_async_with_config(&url, Some(config), false).await {
+                            Ok((mut ws, _)) => {
+                                if let Some(msg) = conn_msg {
+                                    // FIXME
+                                    ws.send(msg).await.unwrap();
+                                }
+                                return Ok(ws);
+                            }
+                            Err(err) => {
+                                let err_string = err.to_string();
+                                if err_string.contains("401 Unauthorized") {
+                                    return Err(QueryError::Unauthorized(url).into());
+                                }
+                            }
+                        }
+                    }
+
+                    if retries >= self.conn_retries.0 {
+                        return Err(QueryError::from(err).into());
+                    }
+                    retries += 1;
+                    tracing::warn!(
+                        "Failed to connect to {}, retrying...({})",
+                        self.to_ws_url(),
+                        retries
+                    );
+
+                    let mut rng = rand::rng();
+                    let time = (wait_millis as f64 * rng.random_range(0.0..0.2)) as u64;
+                    tokio::time::sleep(std::time::Duration::from_millis(time)).await;
+
+                    // backoff strategy
+                    wait_millis =
+                        std::cmp::min(wait_millis * 2, self.retry_backoff.retry_backoff_max_ms);
+                }
+            }
+        }
     }
 
     pub(crate) async fn build_stream(
