@@ -3277,4 +3277,97 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_poll_data_timeout_return() -> anyhow::Result<()> {
+        use futures::{SinkExt, StreamExt};
+        use serde_json::json;
+        use taos_query::AsyncTBuilder;
+        use tokio::sync::mpsc;
+        use tokio::task::JoinHandle;
+        use tracing::debug;
+        use warp::Filter;
+
+        let poll_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let tmq = TmqBuilder::from_dsn("ws://127.0.0.1:7749?group.id=10")?;
+            let consumer = tmq.build().await?;
+            let timeout = Duration::from_secs(5);
+
+            loop {
+                match consumer.poll_timeout(timeout).await? {
+                    Some(res) => {
+                        debug!("Received message: {res:?}");
+                        break;
+                    }
+                    None => debug!("No message received within timeout"),
+                }
+            }
+
+            Ok(())
+        });
+
+        let (close_tx, mut close_rx) = mpsc::channel(1);
+
+        let routes = warp::path!("rest" / "tmq").and(warp::ws()).map({
+            move |ws: warp::ws::Ws| {
+                let close = close_tx.clone();
+                ws.on_upgrade(move |ws| async {
+                    let close = close;
+                    let (mut tx, mut rx) = ws.split();
+
+                    while let Some(msg) = rx.next().await {
+                        let msg = msg.unwrap();
+                        debug!("ws recv msg: {msg:?}");
+                        if msg.is_text() {
+                            let text = msg.to_str().unwrap();
+                            if text.contains("version") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "version message",
+                                    "action": "version",
+                                    "req_id": 1001,
+                                    "version": "3.0"
+                                });
+                                let msg = warp::ws::Message::text(data.to_string());
+                                let _ = tx.send(msg).await;
+                            } else if text.contains("poll") {
+                                debug!("poll waiting for 6 seconds");
+                                tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "",
+                                    "action": "poll",
+                                    "req_id": 1,
+                                    "timing": 1277505,
+                                    "have_message": true,
+                                    "topic": "topic_1748505708",
+                                    "database": "test_1748505708",
+                                    "vgroup_id": 56,
+                                    "message_type": 1,
+                                    "message_id": 1561,
+                                    "offset": 5621
+                                });
+                                let msg = warp::ws::Message::text(data.to_string());
+                                let _ = tx.send(msg).await;
+                                let _ = close.send(()).await;
+                                break;
+                            }
+                        }
+                    }
+                })
+            }
+        });
+
+        let (_, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 7749), async move {
+                let _ = close_rx.recv().await;
+                debug!("Shutting down...");
+            });
+
+        server.await;
+
+        poll_handle.await??;
+
+        Ok(())
+    }
 }
