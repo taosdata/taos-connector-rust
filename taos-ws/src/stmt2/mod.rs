@@ -10,7 +10,7 @@ use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable, RawResult}
 use tracing::Instrument;
 
 use crate::query::asyn::QueryMetrics;
-use crate::query::infra::{Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
+use crate::query::messages::{Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
 use crate::query::WsTaos;
 use crate::{ResultSet, Taos};
 

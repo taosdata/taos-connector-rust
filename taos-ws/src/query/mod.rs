@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 pub(crate) use asyn::WsTaos;
 pub use asyn::{Error, ResultSet};
-pub(crate) use infra::WsConnReq;
-pub use infra::{BindType, Stmt2Field};
+pub(crate) use messages::WsConnReq;
+pub use messages::{BindType, Stmt2Field};
 use taos_query::common::{RawMeta, SmlData};
 use taos_query::prelude::RawResult;
 use taos_query::AsyncQueryable;
@@ -12,7 +12,7 @@ use crate::TaosBuilder;
 
 pub mod asyn;
 pub use asyn::check_server_status;
-pub(crate) mod infra;
+pub(crate) mod messages;
 
 #[derive(Debug)]
 pub struct Taos {
@@ -35,7 +35,7 @@ impl Taos {
                     if retries >= dsn.conn_retries.0 {
                         return Err(err);
                     }
-                    tracing::warn!(remote = dsn.addr, retries, "retrying connection: {}", err);
+                    tracing::warn!(remote = ?dsn.addrs, retries, "retrying connection: {}", err);
                     retries += 1;
                 }
             }
@@ -148,7 +148,6 @@ mod tests {
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
         let client = TaosBuilder::from_dsn("taosws://localhost:6041/")?.build()?;
         let db = "ws_sync_json";
@@ -384,10 +383,8 @@ mod tests {
         Ok(())
     }
 
-    // #[tokio::test]
     async fn _ws_select_from_meters() -> anyhow::Result<()> {
         unsafe { std::env::set_var("RUST_LOG", "info") };
-        // pretty_env_logger::init_timed();
         use taos_query::prelude::*;
         let dsn = "taos+ws:///test";
         let client = TaosBuilder::from_dsn(dsn)?.build().await?;
@@ -409,7 +406,6 @@ mod tests {
     #[tokio::test]
     async fn test_client() -> anyhow::Result<()> {
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // pretty_env_logger::init();
         use futures::TryStreamExt;
         use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};
 
@@ -434,7 +430,6 @@ mod tests {
             1
         );
 
-        // let mut rs = client.s_query("select * from ws_test_client.tb1").unwrap().unwrap();
         let mut rs = client.query("select * from ws_test_client.tb1").await?;
 
         #[derive(Debug, serde::Deserialize)]
