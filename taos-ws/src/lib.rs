@@ -1,6 +1,6 @@
 #![recursion_limit = "256"]
 use std::fmt::{Debug, Display};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use futures_util::stream::FusedStream;
@@ -8,7 +8,7 @@ use futures_util::{SinkExt, StreamExt, TryStreamExt};
 use once_cell::sync::OnceCell;
 use rand::Rng;
 use taos_query::prelude::Code;
-use taos_query::util::Edition;
+use taos_query::util::{generate_req_id, Edition};
 use taos_query::{DsnError, IntoDsn, RawResult};
 use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
 use tokio_tungstenite::tungstenite::Message;
@@ -31,6 +31,8 @@ pub(crate) use taos_query::block_in_place_or_global;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
+
+use crate::query::messages::{ToMessage, WsSend};
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
@@ -55,7 +57,8 @@ struct RetryBackoff {
 #[derive(Debug, Clone)]
 pub struct TaosBuilder {
     https: Arc<AtomicBool>,
-    addr: String,
+    addrs: Vec<String>,
+    current_addr_index: Arc<AtomicUsize>,
     auth: WsAuth,
     database: Option<String>,
     server_version: OnceCell<String>,
@@ -145,11 +148,12 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn is_enterprise_edition(&self) -> RawResult<bool> {
-        if self.addr.matches(".cloud.tdengine.com").next().is_some()
-            || self.addr.matches(".cloud.taosdata.com").next().is_some()
-        {
-            return Ok(true);
-        }
+        // FIXME
+        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
+        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
+        // {
+        //     return Ok(true);
+        // }
 
         let taos = self.build()?;
 
@@ -179,12 +183,13 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn get_edition(&self) -> RawResult<Edition> {
-        if self.addr.matches(".cloud.tdengine.com").next().is_some()
-            || self.addr.matches(".cloud.taosdata.com").next().is_some()
-        {
-            let edition = Edition::new("cloud", false);
-            return Ok(edition);
-        }
+        // FIXME
+        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
+        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
+        // {
+        //     let edition = Edition::new("cloud", false);
+        //     return Ok(edition);
+        // }
 
         let taos = self.build()?;
 
@@ -260,11 +265,12 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         // Ensue server is ready.
         taos.exec("select server_version()").await?;
 
-        if self.addr.matches(".cloud.tdengine.com").next().is_some()
-            || self.addr.matches(".cloud.taosdata.com").next().is_some()
-        {
-            return Ok(true);
-        }
+        // FIXME
+        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
+        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
+        // {
+        //     return Ok(true);
+        // }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
             &taos,
@@ -299,12 +305,13 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         // Ensure server is ready.
         taos.exec("select server_version()").await?;
 
-        if self.addr.matches(".cloud.tdengine.com").next().is_some()
-            || self.addr.matches(".cloud.taosdata.com").next().is_some()
-        {
-            let edition = Edition::new("cloud", false);
-            return Ok(edition);
-        }
+        // FIXME
+        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
+        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
+        // {
+        //     let edition = Edition::new("cloud", false);
+        //     return Ok(edition);
+        // }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
             &taos,
@@ -367,16 +374,19 @@ impl TaosBuilder {
 
         let token = dsn.params.remove("token");
 
-        let addr = match dsn.addresses.first() {
-            Some(addr) => {
-                if addr.port.is_none() && addr.host.as_deref() == Some("localhost") {
-                    "localhost:6041".to_string()
-                } else {
-                    addr.to_string()
-                }
-            }
-            None => "localhost:6041".to_string(),
-        };
+        let mut addrs = Vec::with_capacity(dsn.addresses.len());
+        for addr in &dsn.addresses {
+            let addr = if addr.host.as_deref() == Some("localhost") && addr.port.is_none() {
+                "localhost:6041".to_string()
+            } else {
+                addr.to_string()
+            };
+            addrs.push(addr);
+        }
+
+        if addrs.is_empty() {
+            addrs.push("localhost:6041".to_string());
+        }
 
         let compression = dsn
             .params
@@ -412,10 +422,11 @@ impl TaosBuilder {
             retry_backoff_max_ms,
         };
 
+        // TODO: refactor
         if let Some(token) = token {
             Ok(TaosBuilder {
                 https,
-                addr,
+                addrs,
                 auth: WsAuth::Token(token),
                 database: dsn.subject,
                 server_version: OnceCell::new(),
@@ -423,13 +434,14 @@ impl TaosBuilder {
                 compression,
                 conn_retries,
                 retry_backoff,
+                current_addr_index: Arc::new(AtomicUsize::new(0)),
             })
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
             let password = dsn.password.unwrap_or_else(|| "taosdata".to_string());
             Ok(TaosBuilder {
                 https,
-                addr,
+                addrs,
                 auth: WsAuth::Plain(username, password),
                 database: dsn.subject,
                 server_version: OnceCell::new(),
@@ -437,48 +449,78 @@ impl TaosBuilder {
                 compression,
                 conn_retries,
                 retry_backoff,
+                current_addr_index: Arc::new(AtomicUsize::new(0)),
             })
         }
     }
 
     pub(crate) fn to_query_url(&self) -> String {
+        let idx = self.current_addr_index.load(Ordering::Relaxed);
+        let addr = &self.addrs[idx];
+        // let mut cur_idx = self.current_addr_index;
+        // let start_idx = cur_idx;
+        // let addrs_len = self.addrs.len();
+
+        // FIXME
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/rest/ws?token={}", self.scheme(), self.addr, token)
+                format!("{}://{}/rest/ws?token={}", self.scheme(), addr, token)
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme(), self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme(), addr),
+        }
+    }
+
+    pub(crate) fn to_query_url_new(&self, addr: &str) -> String {
+        match &self.auth {
+            WsAuth::Token(token) => {
+                format!("{}://{}/rest/ws?token={}", self.scheme(), addr, token)
+            }
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme(), addr),
         }
     }
 
     pub(crate) fn to_stmt_url(&self) -> String {
+        // FIXME
         match &self.auth {
             WsAuth::Token(token) => {
                 format!(
                     "{}://{}/rest/stmt?token={}",
                     self.scheme(),
-                    self.addr,
+                    "localhost:6041",
                     token
                 )
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/stmt", self.scheme(), self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/stmt", self.scheme(), "localhost:6041"),
         }
     }
 
     pub(crate) fn to_tmq_url(&self) -> String {
+        // FIXME
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/rest/tmq?token={}", self.scheme(), self.addr, token)
+                format!(
+                    "{}://{}/rest/tmq?token={}",
+                    self.scheme(),
+                    "localhost:6041",
+                    token
+                )
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/tmq", self.scheme(), self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/tmq", self.scheme(), "localhost:6041"),
         }
     }
 
     pub(crate) fn to_ws_url(&self) -> String {
+        // FIXME
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/ws?token={}", self.scheme(), self.addr, token)
+                format!(
+                    "{}://{}/ws?token={}",
+                    self.scheme(),
+                    "localhost:6041",
+                    token
+                )
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme(), self.addr),
+            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme(), "localhost:6041"),
         }
     }
 
@@ -507,9 +549,13 @@ impl TaosBuilder {
     pub(crate) async fn reconnect(
         &self,
         mut url: String,
-        use_global_endpoint: bool,
-        conn_msg: Option<Message>,
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+        let conn = WsSend::Conn {
+            req_id: generate_req_id(),
+            req: self.to_conn_request(),
+        };
+        let conn_msg = Some(conn.to_msg());
+
         let mut config = WebSocketConfig::default();
         config.max_frame_size = None;
         config.max_message_size = None;
@@ -527,78 +573,100 @@ impl TaosBuilder {
         let mut retries = 0;
         let mut wait_millis = self.retry_backoff.retry_backoff_ms;
 
-        let mut ws_url = self.to_ws_url();
-        loop {
-            match connect_async_with_config(
-                if use_global_endpoint {
-                    ws_url.as_str()
-                } else {
-                    url.as_str()
-                },
-                Some(config),
-                false,
-            )
-            .await
-            {
-                Ok((mut ws, _)) => {
-                    if let Some(msg) = conn_msg {
-                        // FIXME
-                        ws.send(msg).await.unwrap();
-                    }
-                    return Ok(ws);
-                }
-                Err(err) => {
-                    let err_string = err.to_string();
-                    if err_string.contains("307") {
-                        tracing::debug!(error = err_string, "Redirecting to HTTPS link");
-                        self.set_https(true);
-                        url = url.replace("ws://", "wss://");
-                        ws_url = self.to_ws_url();
-                    } else if err_string.contains("401 Unauthorized") {
-                        return Err(QueryError::Unauthorized(self.to_ws_url()).into());
-                    } else if err.to_string().contains("404 Not Found")
-                        || err.to_string().contains("400")
-                    {
-                        if !use_global_endpoint {
-                            return Err(QueryError::from(err).into());
+        // let mut cur_idx = self.current_addr_index;
+        let start_idx = self.current_addr_index.load(Ordering::Relaxed);
+        let addrs_len = self.addrs.len();
+
+        'outer: loop {
+            // let addr = &self.addrs[cur_idx];
+            // let mut ws_url = self.to_ws_url();
+            // let mut ws_url = self.to_query_url_new(addr);
+            url = self.to_query_url();
+
+            loop {
+                match connect_async_with_config(url.as_str(), Some(config), false).await {
+                    Ok((mut ws, _)) => {
+                        if let Some(msg) = conn_msg {
+                            // FIXME
+                            ws.send(msg).await.unwrap();
                         }
-                        match connect_async_with_config(&url, Some(config), false).await {
-                            Ok((mut ws, _)) => {
-                                if let Some(msg) = conn_msg {
-                                    // FIXME
-                                    ws.send(msg).await.unwrap();
-                                }
-                                return Ok(ws);
-                            }
-                            Err(err) => {
-                                let err_string = err.to_string();
-                                if err_string.contains("401 Unauthorized") {
-                                    return Err(QueryError::Unauthorized(url).into());
-                                }
-                            }
+                        return Ok(ws);
+                    }
+                    Err(err) => {
+                        let err_string = err.to_string();
+                        if err_string.contains("307") {
+                            tracing::debug!(error = err_string, "Redirecting to HTTPS link");
+                            self.set_https(true);
+                            url = url.replace("ws://", "wss://");
+                            // ws_url = self.to_ws_url();
+                        } else if err_string.contains("401 Unauthorized") {
+                            // continue 'outer;
+                            break;
+                            // return Err(QueryError::Unauthorized(self.to_ws_url()).into());
                         }
+                        // else if err.to_string().contains("404 Not Found")
+                        //     || err.to_string().contains("400")
+                        // {
+                        // if !use_global_endpoint {
+                        //     // continue 'outer;
+                        //     break;
+                        //     // return Err(QueryError::from(err).into());
+                        // }
+                        // match connect_async_with_config(&url, Some(config), false).await {
+                        //     Ok((mut ws, _)) => {
+                        //         if let Some(msg) = conn_msg {
+                        //             // FIXME
+                        //             ws.send(msg).await.unwrap();
+                        //         }
+                        //         return Ok(ws);
+                        //     }
+                        //     Err(err) => {
+                        //         let err_string = err.to_string();
+                        //         if err_string.contains("401 Unauthorized") {
+                        //             // continue 'outer;
+                        //             break;
+                        //             // return Err(QueryError::Unauthorized(url).into());
+                        //         }
+                        //     }
+                        // }
+                        // }
+
+                        if retries >= self.conn_retries.0 {
+                            // continue 'outer;
+                            break;
+                            // return Err(QueryError::from(err).into());
+                        }
+                        retries += 1;
+                        tracing::warn!(
+                            "Failed to connect to {}, retrying...({})",
+                            self.to_ws_url(),
+                            retries
+                        );
+
+                        let mut rng = rand::rng();
+                        let time = (wait_millis as f64 * rng.random_range(0.0..0.2)) as u64;
+                        tokio::time::sleep(std::time::Duration::from_millis(time)).await;
+
+                        // backoff strategy
+                        wait_millis =
+                            std::cmp::min(wait_millis * 2, self.retry_backoff.retry_backoff_max_ms);
                     }
-
-                    if retries >= self.conn_retries.0 {
-                        return Err(QueryError::from(err).into());
-                    }
-                    retries += 1;
-                    tracing::warn!(
-                        "Failed to connect to {}, retrying...({})",
-                        self.to_ws_url(),
-                        retries
-                    );
-
-                    let mut rng = rand::rng();
-                    let time = (wait_millis as f64 * rng.random_range(0.0..0.2)) as u64;
-                    tokio::time::sleep(std::time::Duration::from_millis(time)).await;
-
-                    // backoff strategy
-                    wait_millis =
-                        std::cmp::min(wait_millis * 2, self.retry_backoff.retry_backoff_max_ms);
                 }
             }
+
+            let cur_addr_idx = (self.current_addr_index.load(Ordering::Relaxed) + 1) % addrs_len;
+
+            // self.current_addr_index = (self.current_addr_index + 1) % addrs_len;
+            if cur_addr_idx == start_idx {
+                // If we have tried all addresses, break the loop
+                break;
+            }
+
+            self.current_addr_index
+                .store(cur_addr_idx, Ordering::Relaxed);
         }
+
+        Err("All addresses failed".into())
     }
 
     pub(crate) async fn build_stream(

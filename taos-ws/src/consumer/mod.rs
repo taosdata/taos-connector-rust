@@ -123,22 +123,23 @@ impl TBuilder for TmqBuilder {
     }
 
     fn get_edition(&self) -> RawResult<taos_query::util::Edition> {
-        if self
-            .info
-            .addr
-            .matches(".cloud.tdengine.com")
-            .next()
-            .is_some()
-            || self
-                .info
-                .addr
-                .matches(".cloud.taosdata.com")
-                .next()
-                .is_some()
-        {
-            let edition = Edition::new("cloud", false);
-            return Ok(edition);
-        }
+        // FIXME
+        // if self
+        //     .info
+        //     .addrs
+        //     .matches(".cloud.tdengine.com")
+        //     .next()
+        //     .is_some()
+        //     || self
+        //         .info
+        //         .addrs
+        //         .matches(".cloud.taosdata.com")
+        //         .next()
+        //         .is_some()
+        // {
+        //     let edition = Edition::new("cloud", false);
+        //     return Ok(edition);
+        // }
 
         let taos = TBuilder::build(&self.info)?;
 
@@ -225,22 +226,23 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
         // Ensure server is ready.
         taos.exec("select server_version()").await?;
 
-        if self
-            .info
-            .addr
-            .matches(".cloud.tdengine.com")
-            .next()
-            .is_some()
-            || self
-                .info
-                .addr
-                .matches(".cloud.taosdata.com")
-                .next()
-                .is_some()
-        {
-            let edition = Edition::new("cloud", false);
-            return Ok(edition);
-        }
+        // FIXME
+        // if self
+        //     .info
+        //     .addrs
+        //     .matches(".cloud.tdengine.com")
+        //     .next()
+        //     .is_some()
+        //     || self
+        //         .info
+        //         .addrs
+        //         .matches(".cloud.taosdata.com")
+        //         .next()
+        //         .is_some()
+        // {
+        //     let edition = Edition::new("cloud", false);
+        //     return Ok(edition);
+        // }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
             &taos,

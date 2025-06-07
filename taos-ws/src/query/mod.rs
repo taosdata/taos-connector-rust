@@ -35,7 +35,7 @@ impl Taos {
                     if retries >= dsn.conn_retries.0 {
                         return Err(err);
                     }
-                    tracing::warn!(remote = dsn.addr, retries, "retrying connection: {}", err);
+                    tracing::warn!(remote = ?dsn.addrs, retries, "retrying connection: {}", err);
                     retries += 1;
                 }
             }
