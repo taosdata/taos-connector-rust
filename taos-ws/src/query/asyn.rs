@@ -1917,4 +1917,11 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_env_cloud() {
+        let dsn = std::env::var("TDENGINE_CLOUD_DSN");
+        println!("dsn: {dsn:?}");
+        tracing::trace!("dsn: {dsn:?}");
+    }
 }
