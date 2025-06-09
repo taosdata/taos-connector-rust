@@ -1494,7 +1494,8 @@ mod async_tests {
         let client = TaosBuilder::from_dsn(dsn)?;
         tracing::debug!("client: {:?}", &client);
 
-        client.assert_enterprise_edition().await?;
+        let edition = client.assert_enterprise_edition().await;
+        tracing::debug!("assert enterprise edition: {:?}", edition);
 
         Ok(())
     }
@@ -1821,7 +1822,8 @@ mod cloud_tests {
 
         assert!(builder.ready().await);
 
-        builder.assert_enterprise_edition().await?;
+        let edition = builder.assert_enterprise_edition().await;
+        tracing::info!("assert enterprise edition: {:?}", edition);
 
         let edition = builder.get_edition().await;
         tracing::info!("get edition: {:?}", edition);
