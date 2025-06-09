@@ -2544,4 +2544,55 @@ mod tests {
             ws_close(taos);
         }
     }
+
+    #[test]
+    #[ignore]
+    fn test_ipv6() {
+        unsafe {
+            // [::1]
+            let taos =
+                ws_connect(b"ws://[2002:9ba:b4e:6:be24:11ff:fee5:66b5]:6041\0" as *const u8 as _);
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"drop database if exists test_1748918714\0");
+            execute!(b"create database test_1748918714\0");
+            execute!(b"use test_1748918714\0");
+            execute!(b"create table t0 (ts timestamp, c1 int)\0");
+            execute!(b"insert into t0 values (1741660079228, 1)\0");
+
+            let res = ws_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let row = ws_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = ws_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = ws_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = ws_print_row(str.as_mut_ptr(), str.len() as _, row, fields, num_fields);
+            assert_eq!(len, 15);
+            assert_eq!(
+                "1741660079228 1",
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
+            );
+
+            ws_free_result(res);
+            execute!(b"drop database test_1748918714\0");
+            ws_close(taos);
+        }
+    }
 }
