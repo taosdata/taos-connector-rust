@@ -1925,5 +1925,7 @@ mod tests {
         tracing::info!("xxxurl: {url:?}");
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         tracing::info!("xxxtoken: {token:?}");
+        let token = std::env::var("TDENGINE_CLOUD_DSN_TEST");
+        tracing::info!("xxxdsn: {token:?}");
     }
 }
