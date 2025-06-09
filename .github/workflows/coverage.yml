@@ -16,6 +16,7 @@ env:
 jobs:
   build-tdengine:
     runs-on: ubuntu-latest
+    environment: cloud
     outputs:
       commit_id: ${{ steps.get_commit_id.outputs.commit_id }}
     steps:
@@ -188,15 +189,16 @@ jobs:
           sleep 1
 
       - name: Generate code coverage
-        # env:
-        #   TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
-        #   TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
+        env:
+          TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
+          TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
+          TDENGINE_CLOUD_DSN_TEST: ${{ secrets.TDENGINE_CLOUD_DSN }}
         run: |
-          export TDENGINE_CLOUD_URL=${{ secrets.TDENGINE_CLOUD_URL }}
-          export TDENGINE_CLOUD_TOKEN=${{ secrets.TDENGINE_CLOUD_TOKEN }}
-          export TDENGINE_CLOUD_DSN_TEST=${{ secrets.TDENGINE_CLOUD_DSN }}
           RUST_BACKTRACE=1 cargo llvm-cov -j 2 --workspace --lcov --output-path lcov.info
         # run: RUST_BACKTRACE=1 cargo llvm-cov -j 2 --workspace --features ws-rustls-aws-lc-crypto-provider --lcov --output-path lcov.info
+        # export TDENGINE_CLOUD_URL=${{ secrets.TDENGINE_CLOUD_URL }}
+        # export TDENGINE_CLOUD_TOKEN=${{ secrets.TDENGINE_CLOUD_TOKEN }}
+        # export TDENGINE_CLOUD_DSN_TEST=${{ secrets.TDENGINE_CLOUD_DSN }}
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
