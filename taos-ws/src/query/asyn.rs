@@ -1511,10 +1511,7 @@ mod tests {
     async fn test_client() -> anyhow::Result<()> {
         use futures::TryStreamExt;
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        let dsn =
-            std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        // pretty_env_logger::init();
-
+        let dsn = "http://localhost:6041";
         let client = WsTaos::from_dsn(dsn).await?;
 
         let _version = client.version();
@@ -1551,38 +1548,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_cloud() -> anyhow::Result<()> {
-        unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // pretty_env_logger::init();
-        let dsn = std::env::var("TDENGINE_ClOUD_DSN");
-        if dsn.is_err() {
-            println!("Skip test when not in cloud");
-            return Ok(());
-        }
-        let dsn = dsn.unwrap();
-        let client = WsTaos::from_dsn(dsn).await?;
-        let mut rs = client.query("select * from test.meters limit 10").await?;
-
-        let values = rs.to_records().await?;
-        for row in values {
-            use itertools::Itertools;
-            println!(
-                "{}",
-                row.into_iter()
-                    .map(|value| format!("{value:?}"))
-                    .join(" | ")
-            );
-        }
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn ws_show_databases() -> anyhow::Result<()> {
         unsafe { std::env::set_var("RUST_LOG", "debug") };
         use futures::TryStreamExt;
-        // let _ = pretty_env_logger::try_init_timed();
-        let dsn =
-            std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+        let dsn = "http://localhost:6041";
         let client = WsTaos::from_dsn(dsn).await?;
         let mut rs = client.query("show databases").await?;
 
@@ -1611,9 +1580,7 @@ mod tests {
 
         use futures::TryStreamExt;
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        let dsn =
-            std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        // pretty_env_logger::init();
+        let dsn = "http://localhost:6041";
 
         let client = WsTaos::from_dsn(dsn).await?;
 
@@ -1664,9 +1631,7 @@ mod tests {
 
         use futures::TryStreamExt;
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        let dsn = std::env::var("TDENGINE_TEST_DSN").unwrap_or("http://localhost:6041".to_string());
-        // pretty_env_logger::init();
-
+        let dsn = "http://localhost:6041";
         let client = WsTaos::from_dsn(dsn).await?;
 
         let _version = client.version();
@@ -1914,6 +1879,142 @@ mod tests {
         let (status, details) = check_server_status(dsn, None, 0).await?;
         assert_eq!(status, 2);
         println!("status: {status}, details: {details}");
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use futures::TryStreamExt;
+    use taos_query::common::{Field, Precision, Timestamp, Ty, Value};
+    use taos_query::{AsyncFetchable, AsyncQueryable, RawBlock};
+
+    use crate::query::WsTaos;
+
+    #[tokio::test]
+    async fn test_sql() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+        let taos = WsTaos::from_dsn(dsn).await?;
+
+        taos.exec_many([
+            "create table t_sql(ts timestamp, c1 int)",
+            "insert into t_sql values(1655793421375, 1)",
+        ])
+        .await?;
+
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct Record {
+            ts: i64,
+            c1: i32,
+        }
+
+        let mut rs = taos.query("select * from t_sql").await?;
+        let records: Vec<Record> = rs.deserialize().try_collect().await?;
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].ts, 1655793421375);
+        assert_eq!(records[0].c1, 1);
+
+        let mut rs = taos.query("select * from t_sql").await?;
+        let values = rs.to_records().await?;
+
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].len(), 2);
+        assert_eq!(
+            values[0][0],
+            Value::Timestamp(Timestamp::new(1655793421375, Precision::Millisecond))
+        );
+        assert_eq!(values[0][1], Value::Int(1));
+
+        taos.exec("drop table t_sql").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_write_raw_block() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+        let taos = WsTaos::from_dsn(dsn).await?;
+
+        taos.exec_many([
+            "drop table if exists t_raw_block",
+            "create table t_raw_block(ts timestamp, c1 bool)",
+        ])
+        .await?;
+
+        let mut raw = RawBlock::parse_from_raw_block_v2(
+            &[0, 0, 0, 0, 0, 2, 0, 0, 2][..],
+            &[
+                Field::new("ts", Ty::Timestamp, 8),
+                Field::new("c1", Ty::Bool, 1),
+            ],
+            &[8, 1],
+            1,
+            Precision::Millisecond,
+        );
+
+        raw.with_table_name("t_raw_block");
+
+        dbg!(&raw);
+
+        taos.write_raw_block(&raw).await?;
+
+        let mut rs = taos.query("select * from t_raw_block").await?;
+
+        #[derive(Debug, serde::Deserialize)]
+        struct Record {
+            ts: i64,
+            c1: Option<bool>,
+        }
+
+        let records: Vec<Record> = rs.deserialize().try_collect().await?;
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].ts, 2199023255552);
+        assert_eq!(records[0].c1, None);
+
+        taos.exec("drop table t_raw_block").await?;
 
         Ok(())
     }
