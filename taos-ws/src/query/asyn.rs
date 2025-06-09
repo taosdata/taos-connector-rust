@@ -365,7 +365,9 @@ async fn run(
             _ = recv_handle => break,
         }
 
-        (ws_stream_sender, ws_stream_reader) = reconnect(&info).await?;
+        let ws_stream = info.reconnect(info.to_query_url()).await?;
+        (ws_stream_sender, ws_stream_reader) = ws_stream.split();
+        // (ws_stream_sender, ws_stream_reader) = reconnect(&info).await?;
 
         query_sender.queries.clear();
         query_sender.results.clear();
@@ -374,7 +376,7 @@ async fn run(
         cache.scan(|key, _| keys.push(*key));
         for key in keys {
             if let Some((_, msg)) = cache.remove_async(&key).await {
-                // 缓存中的数据放在后面了
+                // FIXME: 缓存中的数据放在后面了
                 let _res = query_sender
                     .sender
                     .send_async(ToMsgEnum::Message(msg))

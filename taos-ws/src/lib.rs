@@ -600,6 +600,7 @@ impl TaosBuilder {
                             url = url.replace("ws://", "wss://");
                             // ws_url = self.to_ws_url();
                         } else if err_string.contains("401 Unauthorized") {
+                            // 401 是直接结束还是尝试下一个地址？
                             // continue 'outer;
                             break;
                             // return Err(QueryError::Unauthorized(self.to_ws_url()).into());
@@ -643,8 +644,12 @@ impl TaosBuilder {
                             retries
                         );
 
-                        let mut rng = rand::rng();
-                        let time = (wait_millis as f64 * rng.random_range(0.0..0.2)) as u64;
+                        let time = {
+                            let mut rng = rand::rng();
+                            (wait_millis as f64 * rng.random_range(0.0..0.2)) as u64
+                        };
+                        // let mut rng = rand::rng();
+                        // let time = (wait_millis as f64 * rng.random_range(0.0..0.2)) as u64;
                         tokio::time::sleep(std::time::Duration::from_millis(time)).await;
 
                         // backoff strategy
