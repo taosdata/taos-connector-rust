@@ -581,6 +581,7 @@ impl<'b> From<&'b ColumnView> for DropMultiBind {
             VarBinary(view) => DropMultiBind::new(TaosMultiBind::from_bytes(&view.to_vec())),
             Geometry(view) => DropMultiBind::new(TaosMultiBind::from_geobytes(&view.to_vec())),
             Decimal(_) | Decimal64(_) => unimplemented!("decimal type is not supported in stmt"),
+            Blob(_) => unimplemented!("blob type is not supported in stmt"),
         }
     }
 }
