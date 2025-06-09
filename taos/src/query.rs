@@ -1271,8 +1271,8 @@ mod async_tests {
     }
 
     async fn put_line() -> RawResult<()> {
-        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("ws://localhost:6041".to_owned());
-        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        let dsn = "ws://localhost:6041";
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
 
         let db = "test_1741154385";
         taos.exec_many([
@@ -1332,8 +1332,8 @@ mod async_tests {
     }
 
     async fn put_telnet() -> RawResult<()> {
-        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("ws://localhost:6041".to_owned());
-        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        let dsn = "ws://localhost:6041";
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
         let db = "test_1741154916";
 
         taos.exec_many([
@@ -1392,8 +1392,8 @@ mod async_tests {
     }
 
     async fn put_json() -> RawResult<()> {
-        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("ws://localhost:6041".to_owned());
-        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        let dsn = "ws://localhost:6041";
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
 
         let db = "test_1741156350";
         taos.exec_many([
@@ -1440,6 +1440,201 @@ mod async_tests {
         assert_eq!(taos.put(&sml_data).await?, ());
 
         taos.exec(format!("drop database {db}")).await?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "ws-rustls-aws-lc-crypto-provider")]
+    #[tokio::test]
+    async fn test_put_cloud() -> RawResult<()> {
+        let _ = tracing_subscriber::fmt::try_init();
+        put_line_cloud().await?;
+        put_telnet_cloud().await?;
+        put_json_cloud().await?;
+        Ok(())
+    }
+
+    #[cfg(feature = "ws-rustls-aws-lc-crypto-provider")]
+    async fn put_line_cloud() -> RawResult<()> {
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let data = [
+            "t_1749459655,host=host1 field1=2i,field2=2.0 1741153642000".to_owned(),
+            "t_1749459655,host=host1 field1=2i,field2=2.0 1741153643000".to_owned(),
+            "t_1749459655,host=host1 field1=2i,field2=2.0 1741153644000".to_owned(),
+            "t_1749459655,host=host1 field1=2i,field2=2.0 1741153645000".to_owned(),
+        ];
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(100u64)
+            .table_name_key("host")
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .req_id(101u64)
+            .table_name_key("host")
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .table_name_key("host")
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Line)
+            .data(data)
+            .req_id(103u64)
+            .table_name_key("host")
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "ws-rustls-aws-lc-crypto-provider")]
+    async fn put_telnet_cloud() -> RawResult<()> {
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let data = [
+            "t_1749459618.current 1648432611249 10.3 location=California.SanFrancisco group=2"
+                .to_owned(),
+            "t_1749459618.current 1648432611250 12.6 location=California.SanFrancisco group=2"
+                .to_owned(),
+            "t_1749459618.current 1648432611249 10.8 location=California.LosAngeles group=3"
+                .to_owned(),
+            "t_1749459618.current 1648432611250 11.3 location=California.LosAngeles group=3"
+                .to_owned(),
+            "t_1749459618.voltage 1648432611249 219 location=California.SanFrancisco group=2"
+                .to_owned(),
+            "t_1749459618.voltage 1648432611250 218 location=California.SanFrancisco group=2"
+                .to_owned(),
+            "t_1749459618.voltage 1648432611249 221 location=California.LosAngeles group=3"
+                .to_owned(),
+            "t_1749459618.voltage 1648432611250 217 location=California.LosAngeles group=3"
+                .to_owned(),
+        ];
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Telnet)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(200u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Telnet)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(201u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Telnet)
+            .data(data.clone())
+            .req_id(202u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Telnet)
+            .data(data.clone())
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "ws-rustls-aws-lc-crypto-provider")]
+    async fn put_json_cloud() -> RawResult<()> {
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let data = [
+            r#"[{"metric":"t_1749459517.current","timestamp":1681345954000,"value":10.3,"tags":{"location":"California.SanFrancisco","groupid":2}},{"metric":"t_1749459517.voltage","timestamp":1648432611249,"value":219,"tags":{"location":"California.LosAngeles","groupid":1}},{"metric":"t_1749459517.current","timestamp":1648432611250,"value":12.6,"tags":{"location":"California.SanFrancisco","groupid":2}},{"metric":"t_1749459517.voltage","timestamp":1648432611250,"value":221,"tags":{"location":"California.LosAngeles","groupid":1}}]"#.to_owned(),
+        ];
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Json)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(300u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Json)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(301u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Json)
+            .data(data.clone())
+            .req_id(302u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Json)
+            .data(data.clone())
+            .build()?;
+        taos.put(&sml_data).await?;
 
         Ok(())
     }
