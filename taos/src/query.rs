@@ -613,24 +613,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn test_assert_enterprise_edition_cloud() -> RawResult<()> {
-        use taos_query::prelude::sync::*;
-        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        let dsn = Dsn::from_str(&dsn)?;
-        let builder = TaosBuilder::from_dsn(dsn).unwrap();
-        assert!(builder.ready());
-
-        let mut conn = builder.build().unwrap();
-        assert!(builder.ping(&mut conn).is_ok());
-
-        let res = builder.assert_enterprise_edition();
-        println!("assert enterprise edition: {:?}", res);
-
-        Ok(())
-    }
-
-    #[test]
     fn test_server_version_ws() -> RawResult<()> {
         use taos_query::prelude::sync::*;
         let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());

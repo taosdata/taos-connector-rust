@@ -559,53 +559,101 @@ impl TaosBuilder {
     }
 }
 
-#[cfg(feature = "rustls")]
 #[cfg(test)]
-mod lib_tests {
-
-    use std::time::Duration;
-
+mod tests {
     use futures::{SinkExt, StreamExt};
     use tracing::*;
-    use tracing_subscriber::util::SubscriberInitExt;
 
-    use crate::query::infra::{ToMessage, WsRecv, WsSend};
+    use crate::query::infra::{ToMessage, WsRecv, WsRecvData, WsSend};
     use crate::*;
 
-    #[cfg(feature = "_with_crypto_provider")]
     #[tokio::test]
     async fn test_build_stream() -> Result<(), anyhow::Error> {
-        let _subscriber = tracing_subscriber::fmt::fmt()
-            .with_max_level(Level::TRACE)
+        let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .finish();
-        let _ = _subscriber.try_init();
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
 
-        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        let builder = TaosBuilder::from_dsn(dsn).unwrap();
+        let dsn = "ws://localhost:6041";
+        let builder = TaosBuilder::from_dsn(dsn)?;
         let url = builder.to_query_url();
-        info!("url: {}", url);
-        let ws = builder.build_stream(url).await.unwrap();
-        trace!("ws: {:?}", ws);
 
+        let ws = builder.build_stream(url).await?;
         let (mut sender, mut reader) = ws.split();
 
         let version = WsSend::Version;
         sender.send(version.to_msg()).await?;
 
-        let _handle = tokio::spawn(async move {
-            loop {
-                if let Some(Ok(msg)) = reader.next().await {
-                    let text = msg.to_text().unwrap();
-                    let recv: WsRecv = serde_json::from_str(text).unwrap();
-                    info!("recv: {:?}", recv);
-                    assert_eq!(recv.code, 0);
+        loop {
+            if let Some(Ok(msg)) = reader.next().await {
+                let text = msg.to_text().unwrap();
+                let recv: WsRecv = serde_json::from_str(text).unwrap();
+                assert_eq!(recv.code, 0);
+                if let WsRecvData::Version { version, .. } = recv.data {
+                    info!("server version: {}", version);
+                    break;
                 }
             }
-        });
+        }
 
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use futures::{SinkExt, StreamExt};
+    use tracing::*;
+
+    use crate::query::infra::{ToMessage, WsRecv, WsRecvData, WsSend};
+    use crate::*;
+
+    #[tokio::test]
+    async fn test_build_stream() -> Result<(), anyhow::Error> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+
+        let builder = TaosBuilder::from_dsn(dsn)?;
+        let url = builder.to_query_url();
+
+        let ws = builder.build_stream(url).await?;
+        let (mut sender, mut reader) = ws.split();
+
+        let version = WsSend::Version;
+        sender.send(version.to_msg()).await?;
+
+        loop {
+            if let Some(Ok(msg)) = reader.next().await {
+                let text = msg.to_text().unwrap();
+                let recv: WsRecv = serde_json::from_str(text).unwrap();
+                assert_eq!(recv.code, 0);
+                if let WsRecvData::Version { version, .. } = recv.data {
+                    info!("server version: {}", version);
+                    break;
+                }
+            }
+        }
 
         Ok(())
     }
