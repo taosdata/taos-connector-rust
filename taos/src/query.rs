@@ -1654,16 +1654,44 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_is_enterprise_edition_ws() -> RawResult<()> {
-        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
 
-        let dsn =
-            std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        tracing::debug!("dsn: {:?}", &dsn);
+        let dsn = "ws://localhost:6041";
+        let taos = TaosBuilder::from_dsn(dsn)?;
+        tracing::info!("is_enterprise: {:?}", taos.is_enterprise_edition().await?);
+        Ok(())
+    }
 
-        let client = TaosBuilder::from_dsn(dsn)?;
-        tracing::debug!("client: {:?}", &client);
-        tracing::debug!("is_enterprise: {:?}", client.is_enterprise_edition().await?);
+    #[cfg(feature = "ws-rustls-aws-lc-crypto-provider")]
+    #[tokio::test]
+    async fn test_is_enterprise_edition_cloud() -> RawResult<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+        let taos = TaosBuilder::from_dsn(dsn)?;
+        tracing::info!("is_enterprise: {:?}", taos.is_enterprise_edition().await?);
         Ok(())
     }
 
