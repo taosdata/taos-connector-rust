@@ -190,7 +190,6 @@ jobs:
       - name: Generate code coverage
         env:
           TDENGINE_CLOUD_DSN: ${{ secrets.TDENGINE_CLOUD_DSN }}
-          TDENGINE_ClOUD_DSN: ${{ secrets.TDENGINE_CLOUD_DSN }}
         run: RUST_BACKTRACE=1 cargo llvm-cov -j 2 --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
