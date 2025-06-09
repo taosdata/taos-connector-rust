@@ -1917,15 +1917,4 @@ mod tests {
 
         Ok(())
     }
-
-    #[tokio::test]
-    async fn test_env_cloud() {
-        let _ = tracing_subscriber::fmt::try_init();
-        let url = std::env::var("TDENGINE_CLOUD_URL");
-        tracing::info!("xxxurl: {url:?}");
-        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
-        tracing::info!("xxxtoken: {token:?}");
-        let token = std::env::var("TDENGINE_CLOUD_DSN_TEST");
-        tracing::info!("xxxdsn: {token:?}");
-    }
 }
