@@ -3703,6 +3703,7 @@ dependencies = [
  "taos-ws",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
