@@ -842,10 +842,11 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     } else {
         CStr::from_ptr(dsn)
     };
+
     let dsn = dsn.to_str()?;
     let builder = TaosBuilder::from_dsn(dsn)?;
 
-    if dsn.contains("kepware") {
+    if cfg!(all(windows, target_pointer_width = "32")) {
         let stack_size = 4 * 1024 * 1024;
 
         let handle = thread::Builder::new()
@@ -869,7 +870,6 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
         }
     } else {
         let mut taos = builder.build()?;
-
         builder.ping(&mut taos)?;
         Ok(taos)
     }
