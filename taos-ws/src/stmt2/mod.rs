@@ -9,7 +9,7 @@ use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable, RawResult};
 use tracing::Instrument;
 
-use crate::query::asyn::QueryMetrics;
+use crate::query::asyn::{fetch_binary, QueryMetrics};
 use crate::query::infra::{Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
 use crate::query::WsTaos;
 use crate::{ResultSet, Taos};
@@ -173,17 +173,17 @@ impl Stmt2 {
                 .collect();
 
             let (raw_block_tx, raw_block_rx) = flume::bounded(64);
+            let (fetch_done_tx, fetch_done_rx) = flume::bounded(1);
 
-            tokio::spawn(
-                crate::query::asyn::fetch(
-                    self.client.sender(),
-                    id,
-                    raw_block_tx,
-                    precision,
-                    fields_names,
-                )
-                .in_current_span(),
-            );
+            fetch_binary(
+                self.client.sender(),
+                id,
+                raw_block_tx,
+                precision,
+                fields_names,
+                fetch_done_tx,
+            )
+            .await;
 
             let timing = match precision {
                 Precision::Millisecond => Duration::from_millis(timing),
@@ -202,11 +202,11 @@ impl Stmt2 {
                 timing,
                 block_future: None,
                 closer: Some(close_tx),
-                completed: false,
                 metrics: QueryMetrics::default(),
                 blocks_buffer: Some(raw_block_rx),
                 fields_precisions,
                 fields_scales,
+                fetch_done_reader: Some(fetch_done_rx),
             });
         }
 

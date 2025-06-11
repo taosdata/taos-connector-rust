@@ -29,7 +29,7 @@ use tokio::sync::watch;
 use tokio::time::{self, timeout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use tracing::{instrument, trace, Instrument};
+use tracing::{error, instrument, trace, warn, Instrument};
 
 use super::infra::*;
 use super::TaosBuilder;
@@ -66,6 +66,7 @@ impl WsQuerySender {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 
+    #[allow(dead_code)]
     fn req_id_ref(&self) -> &Arc<AtomicU64> {
         &self.req_id
     }
@@ -166,11 +167,11 @@ pub struct ResultSet {
     pub(crate) timing: Duration,
     pub(crate) block_future: Option<BlockFuture>,
     pub(crate) closer: Option<oneshot::Sender<()>>,
-    pub(crate) completed: bool,
     pub(crate) metrics: QueryMetrics,
     pub(crate) blocks_buffer: Option<flume::Receiver<RawResult<(RawBlock, Duration)>>>,
     pub(crate) fields_precisions: Option<Vec<i64>>,
     pub(crate) fields_scales: Option<Vec<i64>>,
+    pub(crate) fetch_done_reader: Option<flume::Receiver<()>>,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -190,26 +191,32 @@ impl Debug for ResultSet {
 
 impl Drop for ResultSet {
     fn drop(&mut self) {
-        trace!("dropping, metrics: {:?}", self.metrics);
-        let (sender, closer, args, completed) = (
-            self.sender.clone(),
-            self.closer.take(),
-            self.args,
-            self.completed,
-        );
+        trace!("dropping result set, metrics: {:?}", self.metrics);
+
+        let args = self.args;
+        let query_sender = self.sender.clone();
+        let closer = self.closer.take();
+        let blocks_rx = self.blocks_buffer.take();
+        let fetch_done_rx = self.fetch_done_reader.take();
+
         let clean = move || {
-            if let Some((_, req_id)) = sender.results.remove(&args.id) {
-                sender.queries.remove(&req_id);
+            if let Some((_, req_id)) = query_sender.results.remove(&args.id) {
+                query_sender.queries.remove(&req_id);
             }
-
-            if !completed {
-                let _ = sender.send_blocking(WsSend::FreeResult(args));
+            if let Some(blocks_rx) = blocks_rx {
+                drop(blocks_rx);
             }
-
             if let Some(closer) = closer {
                 let _ = closer.send(());
             }
+            if let Some(fetch_done_rx) = fetch_done_rx {
+                trace!("waiting for fetch done, args: {args:?}");
+                let _ = fetch_done_rx.recv_timeout(Duration::from_secs(10));
+                trace!("sending free result message after fetch done or timeout, args: {args:?}");
+                let _ = query_sender.send_blocking(WsSend::FreeResult(args));
+            }
         };
+
         if tokio::runtime::Handle::try_current().is_ok() {
             tokio::task::spawn_blocking(clean);
         } else {
@@ -955,18 +962,15 @@ impl WsTaos {
 
     #[instrument(skip(self))]
     pub async fn s_query_with_req_id(&self, sql: &str, req_id: u64) -> RawResult<ResultSet> {
-        let req = if self.is_support_binary_sql() {
-            let mut req_vec = Vec::with_capacity(sql.len() + 30);
-            req_vec.write_u64_le(req_id).map_err(Error::from)?;
-            req_vec.write_u64_le(0).map_err(Error::from)?; //ResultID, uesless here
-            req_vec.write_u64_le(6).map_err(Error::from)?; //ActionID, 6 for query
-            req_vec.write_u16_le(1).map_err(Error::from)?; //Version
-            req_vec
-                .write_u32_le(sql.len().try_into().unwrap())
-                .map_err(Error::from)?; //SQL length
-            req_vec.write_all(sql.as_bytes()).map_err(Error::from)?;
-
-            self.sender.send_recv(WsSend::Binary(req_vec)).await?
+        let data = if self.is_support_binary_sql() {
+            let mut bytes = Vec::with_capacity(sql.len() + 30);
+            bytes.write_u64_le(req_id).map_err(Error::from)?;
+            bytes.write_u64_le(0).map_err(Error::from)?; // result ID, uesless here
+            bytes.write_u64_le(6).map_err(Error::from)?; // action, 6 for query
+            bytes.write_u16_le(1).map_err(Error::from)?; // version
+            bytes.write_u32_le(sql.len() as _).map_err(Error::from)?;
+            bytes.write_all(sql.as_bytes()).map_err(Error::from)?;
+            self.sender.send_recv(WsSend::Binary(bytes)).await?
         } else {
             let action = WsSend::Query {
                 req_id,
@@ -975,19 +979,21 @@ impl WsTaos {
             self.sender.send_recv(action).await?
         };
 
-        let resp = match req {
+        let resp = match data {
             WsRecvData::Query(resp) => resp,
             _ => unreachable!(),
         };
 
-        let result_id = resp.id;
-        //  for drop task.
-        let (closer, rx) = oneshot::channel();
+        let res_id = resp.id;
+        let args = WsResArgs { id: res_id, req_id };
+
+        let (close_tx, close_rx) = oneshot::channel();
+
         tokio::task::spawn(
             async move {
-                let t = Instant::now();
-                let _ = rx.await;
-                tracing::trace!("result {result_id} lives {:?}", t.elapsed());
+                let now = Instant::now();
+                let _ = close_rx.await;
+                trace!("result {} lived for {:?}", res_id, now.elapsed());
             }
             .in_current_span(),
         );
@@ -1003,126 +1009,69 @@ impl WsTaos {
                 .map(|((name, ty), len)| Field::new(name, ty, len))
                 .collect();
 
-            // Start query.
-            let req_id_ref = self.sender.req_id_ref().clone();
-            let sender = self.sender.clone();
-            let res_id = resp.id;
             let precision = resp.precision;
-            let (tx, rx) = flume::bounded(64);
+            let sender = self.sender.clone();
+
+            let (raw_block_tx, raw_block_rx) = flume::bounded(64);
+            let (fetch_done_tx, fetch_done_rx) = flume::bounded(1);
+
             if sender.version.is_support_binary_sql {
-                tokio::spawn(fetch(sender, res_id, tx, precision, names).in_current_span());
+                fetch_binary(
+                    sender,
+                    res_id,
+                    raw_block_tx,
+                    precision,
+                    names,
+                    fetch_done_tx,
+                )
+                .await;
             } else {
-                // Start query.
-                let fields = fields.clone();
-                tokio::spawn(
-                    async move {
-                        let mut metrics = QueryMetrics::default();
-                        loop {
-                            let now = Instant::now();
-                            let args = WsResArgs {
-                                req_id: req_id_ref
-                                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                                id: res_id,
-                            };
-                            let fetch = WsSend::Fetch(args);
-                            let fetch_resp = match sender.send_recv(fetch).await {
-                                Ok(WsRecvData::Fetch(fetch)) => fetch,
-                                Err(err) => {
-                                    let _ = tx.send_async(Err(err)).await;
-                                    break;
-                                }
-                                _ => unreachable!("fetch action result error"),
-                            };
-                            if fetch_resp.completed {
-                                drop(tx);
-                                break;
-                            }
-                            let args = WsResArgs {
-                                req_id: req_id_ref
-                                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-                                id: res_id,
-                            };
-
-                            let fetch_block = WsSend::FetchBlock(args);
-                            match sender.send_recv(fetch_block).await {
-                                Ok(WsRecvData::Block { timing, raw }) => {
-                                    metrics.time_cost_in_fetch += now.elapsed();
-                                    let mut raw = RawBlock::parse_from_raw_block(raw, precision);
-                                    raw.with_field_names(&names);
-                                    if tx.send_async(Ok((raw, timing))).await.is_err() {
-                                        break;
-                                    }
-                                }
-                                Ok(WsRecvData::BlockV2 { timing, raw }) => {
-                                    metrics.time_cost_in_fetch += now.elapsed();
-                                    let mut raw = RawBlock::parse_from_raw_block_v2(
-                                        raw,
-                                        &fields,
-                                        fetch_resp.lengths.as_ref().unwrap(),
-                                        fetch_resp.rows,
-                                        precision,
-                                    );
-
-                                    raw.with_field_names(&names);
-                                    if tx.send_async(Ok((raw, timing))).await.is_err() {
-                                        break;
-                                    }
-                                }
-                                Ok(_) => {}
-                                Err(err) => {
-                                    metrics.time_cost_in_fetch += now.elapsed();
-                                    if tx.send_async(Err(err)).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        trace!("Spawn metrics: {:?}", metrics);
-                    }
-                    .in_current_span(),
-                );
+                fetch(
+                    sender,
+                    res_id,
+                    raw_block_tx,
+                    precision,
+                    fields.clone(),
+                    names,
+                    fetch_done_tx,
+                )
+                .await;
             }
-            let blocks_buffer = Some(rx);
+
             Ok(ResultSet {
+                sender: self.sender.clone(),
+                args,
                 fields: Some(fields),
                 fields_count: resp.fields_count,
-                precision: resp.precision,
                 affected_rows: resp.affected_rows,
-                args: WsResArgs {
-                    req_id,
-                    id: resp.id,
-                },
+                precision,
                 summary: (0, 0),
-                sender: self.sender.clone(),
                 timing: resp.timing,
                 block_future: None,
-                closer: Some(closer),
-                completed: false,
+                closer: Some(close_tx),
                 metrics: QueryMetrics::default(),
-                blocks_buffer,
+                blocks_buffer: Some(raw_block_rx),
                 fields_precisions: resp.fields_precisions,
                 fields_scales: resp.fields_scales,
+                fetch_done_reader: Some(fetch_done_rx),
             })
         } else {
             Ok(ResultSet {
+                sender: self.sender.clone(),
+                args,
                 affected_rows: resp.affected_rows,
-                args: WsResArgs {
-                    req_id,
-                    id: resp.id,
-                },
-                fields: None,
-                fields_count: 0,
                 precision: resp.precision,
                 summary: (0, 0),
-                sender: self.sender.clone(),
                 timing: resp.timing,
-                block_future: None,
-                closer: Some(closer),
-                completed: true,
+                closer: Some(close_tx),
                 metrics: QueryMetrics::default(),
+                fields: None,
+                fields_count: 0,
+                block_future: None,
                 blocks_buffer: None,
                 fields_precisions: None,
                 fields_scales: None,
+                fetch_done_reader: None,
             })
         }
     }
@@ -1201,75 +1150,190 @@ impl WsTaos {
     }
 }
 
-pub(crate) async fn fetch(
-    sender: WsQuerySender,
+pub(crate) async fn fetch_binary(
+    query_sender: WsQuerySender,
     res_id: ResId,
-    raw_block_tx: Sender<Result<(RawBlock, Duration), RawError>>,
+    raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
     precision: Precision,
     field_names: Vec<String>,
-) -> RawResult<()> {
-    const ACTION: u64 = 7;
-    const VERSION: u16 = 1;
+    fetch_done_sender: flume::Sender<()>,
+) {
+    tokio::spawn(
+        async move {
+            trace!("fetch binary, result id: {res_id}");
 
-    let mut bytes = vec![0u8; 26];
-    LittleEndian::write_u64(&mut bytes[8..], res_id);
-    LittleEndian::write_u64(&mut bytes[16..], ACTION);
-    LittleEndian::write_u16(&mut bytes[24..], VERSION);
+            let mut metrics = QueryMetrics::default();
 
-    let mut metrics = QueryMetrics::default();
+            let mut bytes = vec![0u8; 26];
+            LittleEndian::write_u64(&mut bytes[8..], res_id);
+            LittleEndian::write_u64(&mut bytes[16..], 7); // action, 7 for fetch
+            LittleEndian::write_u16(&mut bytes[24..], 1); // version
 
-    loop {
-        LittleEndian::write_u64(&mut bytes, generate_req_id());
+            loop {
+                LittleEndian::write_u64(&mut bytes, generate_req_id());
 
-        let fetch_start = Instant::now();
-        match sender.send_recv(WsSend::Binary(bytes.clone())).await {
-            Ok(WsRecvData::BlockNew {
-                block_code,
-                block_message,
-                timing,
-                finished,
-                raw,
-                ..
-            }) => {
-                metrics.num_of_fetches += 1;
-                metrics.time_cost_in_fetch += fetch_start.elapsed();
+                let fetch_start = Instant::now();
+                match query_sender.send_recv(WsSend::Binary(bytes.clone())).await {
+                    Ok(WsRecvData::BlockNew {
+                        block_code,
+                        block_message,
+                        timing,
+                        finished,
+                        raw,
+                        ..
+                    }) => {
+                        trace!("fetch binary, result id: {res_id}, finished: {finished}");
 
-                if block_code != 0 {
-                    return Err(RawError::new(block_code, block_message));
-                }
+                        metrics.num_of_fetches += 1;
+                        metrics.time_cost_in_fetch += fetch_start.elapsed();
 
-                if finished {
-                    tracing::trace!("Finished processing result:{res_id}");
-                    drop(raw_block_tx);
-                    break;
-                }
+                        if block_code != 0 {
+                            let err = RawError::new(block_code, block_message);
+                            error!("fetch binary failed, result id: {res_id}, err: {err:?}");
+                            let _ = raw_block_sender.send_async(Err(err)).await;
+                            break;
+                        }
 
-                let parse_start = Instant::now();
-                let mut raw_block = RawBlock::parse_from_raw_block(raw, precision);
-                metrics.time_cost_in_block_parse += parse_start.elapsed();
+                        if finished {
+                            drop(raw_block_sender);
+                            break;
+                        }
 
-                raw_block.with_field_names(&field_names);
-                if raw_block_tx
-                    .send_async(Ok((raw_block, timing)))
-                    .await
-                    .is_err()
-                {
-                    tracing::debug!("Failed to send raw block; receiver may be closed");
-                    break;
+                        let parse_start = Instant::now();
+                        let mut raw_block = RawBlock::parse_from_raw_block(raw, precision);
+                        raw_block.with_field_names(&field_names);
+                        metrics.time_cost_in_block_parse += parse_start.elapsed();
+
+                        if raw_block_sender
+                            .send_async(Ok((raw_block, timing)))
+                            .await
+                            .is_err()
+                        {
+                            warn!("fetch binary, failed to send raw block to receiver, result id: {res_id}");
+                            break;
+                        }
+                    }
+                    Ok(_) => unreachable!("unexpected response for result: {res_id}"),
+                    Err(err) => {
+                        if raw_block_sender.send_async(Err(err)).await.is_err() {
+                            warn!("fetch binary, failed to send error to receiver, result id: {res_id}");
+                            break;
+                        }
+                    }
                 }
             }
-            Ok(_) => tracing::warn!("Unexpected response for result:{res_id}"),
-            Err(err) => {
-                if raw_block_tx.send_async(Err(err)).await.is_err() {
-                    tracing::debug!("Failed to send err; receiver may be closed");
-                    break;
-                }
-            }
+
+            let _ = fetch_done_sender.send_async(()).await;
+
+            trace!("fetch binary completed, result id: {res_id}, metrics: {metrics:?}");
         }
-    }
+        .in_current_span(),
+    );
+}
 
-    tracing::trace!("Metrics for result:{res_id}: {metrics:?}");
-    Ok(())
+async fn fetch(
+    query_sender: WsQuerySender,
+    res_id: ResId,
+    raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
+    precision: Precision,
+    fields: Vec<Field>,
+    field_names: Vec<String>,
+    fetch_done_sender: flume::Sender<()>,
+) {
+    tokio::spawn(
+        async move {
+            trace!("fetch, result id: {res_id}");
+
+            let mut metrics = QueryMetrics::default();
+
+            loop {
+                let args = WsResArgs {
+                    id: res_id,
+                    req_id: generate_req_id(),
+                };
+                let fetch = WsSend::Fetch(args);
+
+                let fetch_start = Instant::now();
+                let fetch_resp = match query_sender.send_recv(fetch).await {
+                    Ok(WsRecvData::Fetch(fetch)) => fetch,
+                    Ok(_) => unreachable!("unexpected response for result: {res_id}"),
+                    Err(err) => {
+                        let _ = raw_block_sender.send_async(Err(err)).await;
+                        break;
+                    }
+                };
+
+                trace!("fetch, result id: {res_id}, resp: {fetch_resp:?}");
+
+                if fetch_resp.completed {
+                    drop(raw_block_sender);
+                    break;
+                }
+
+                let fetch_block = WsSend::FetchBlock(args);
+                match query_sender.send_recv(fetch_block).await {
+                    Ok(WsRecvData::Block { timing, raw }) => {
+                        metrics.num_of_fetches += 1;
+                        metrics.time_cost_in_fetch += fetch_start.elapsed();
+
+                        let parse_start = Instant::now();
+                        let mut raw = RawBlock::parse_from_raw_block(raw, precision);
+                        raw.with_field_names(&field_names);
+                        metrics.time_cost_in_block_parse += parse_start.elapsed();
+
+                        if raw_block_sender
+                            .send_async(Ok((raw, timing)))
+                            .await
+                            .is_err()
+                        {
+                            warn!(
+                                "fetch block, failed to send raw block to receiver, result id: {res_id}"
+                            );
+                            break;
+                        }
+                    }
+                    Ok(WsRecvData::BlockV2 { timing, raw }) => {
+                        metrics.num_of_fetches += 1;
+                        metrics.time_cost_in_fetch += fetch_start.elapsed();
+
+                        let parse_start = Instant::now();
+
+                        let lengths = fetch_resp.lengths.as_ref().unwrap();
+                        let rows = fetch_resp.rows;
+                        let mut raw = RawBlock::parse_from_raw_block_v2(
+                            raw, &fields, &lengths, rows, precision,
+                        );
+                        raw.with_field_names(&field_names);
+
+                        metrics.time_cost_in_block_parse += parse_start.elapsed();
+
+                        if raw_block_sender
+                            .send_async(Ok((raw, timing)))
+                            .await
+                            .is_err()
+                        {
+                            warn!(
+                                "fetch block v2, failed to send raw block to receiver, result id: {res_id}"
+                            );
+                            break;
+                        }
+                    }
+                    Ok(_) => unreachable!("unexpected response for result: {res_id}"),
+                    Err(err) => {
+                        if raw_block_sender.send_async(Err(err)).await.is_err() {
+                            warn!("fetch, failed to send error to receiver, result id: {res_id}");
+                            break;
+                        }
+                    }
+                }
+            }
+
+            let _ = fetch_done_sender.send_async(()).await;
+
+            trace!("fetch completed, result id: {res_id}, metrics: {metrics:?}");
+        }
+        .in_current_span(),
+    );
 }
 
 impl ResultSet {
@@ -1342,7 +1406,6 @@ impl AsyncFetchable for ResultSet {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<RawResult<Option<RawBlock>>> {
         if let Some(mut f) = self.block_future.take() {
-            // let mut f = self.block_future.take().unwrap();
             let res = f.poll_unpin(cx);
             match res {
                 std::task::Poll::Ready(v) => Poll::Ready(v),
