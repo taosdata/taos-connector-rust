@@ -579,23 +579,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn test_get_edition_cloud() -> RawResult<()> {
-        use taos_query::prelude::sync::*;
-        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        let dsn = Dsn::from_str(&dsn)?;
-        let builder = TaosBuilder::from_dsn(dsn).unwrap();
-        assert!(builder.ready());
-
-        let mut conn = builder.build().unwrap();
-        assert!(builder.ping(&mut conn).is_ok());
-
-        println!("get enterprise edition: {:?}", builder.get_edition());
-
-        Ok(())
-    }
-
-    #[test]
     fn test_assert_enterprise_edition() -> RawResult<()> {
         use taos_query::prelude::sync::*;
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
@@ -616,24 +599,6 @@ mod tests {
     fn test_assert_enterprise_edition_ws() -> RawResult<()> {
         use taos_query::prelude::sync::*;
         let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
-        let dsn = Dsn::from_str(&dsn)?;
-        let builder = TaosBuilder::from_dsn(dsn).unwrap();
-        assert!(builder.ready());
-
-        let mut conn = builder.build().unwrap();
-        assert!(builder.ping(&mut conn).is_ok());
-
-        let res = builder.assert_enterprise_edition();
-        println!("assert enterprise edition: {:?}", res);
-
-        Ok(())
-    }
-
-    #[test]
-    #[ignore]
-    fn test_assert_enterprise_edition_cloud() -> RawResult<()> {
-        use taos_query::prelude::sync::*;
-        let dsn = std::env::var("TEST_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let builder = TaosBuilder::from_dsn(dsn).unwrap();
         assert!(builder.ready());
@@ -801,7 +766,6 @@ mod tests {
         use taos_query::prelude::sync::*;
 
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // pretty_env_logger::init();
         let client = TaosBuilder::from_dsn(dsn)?.build()?;
         assert_eq!(client.exec(format!("drop database if exists {db}"))?, 0);
         assert_eq!(client.exec(format!("create database {db} keep 36500"))?, 0);
@@ -839,7 +803,6 @@ mod tests {
             2
         );
 
-        // let mut rs = client.s_query("select * from wsabc.tb1").unwrap().unwrap();
         let mut rs = client.query(format!("select * from {db}.tb1 order by ts limit 1"))?;
 
         #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
@@ -912,9 +875,7 @@ mod tests {
 
     #[test]
     fn test_put_line() -> RawResult<()> {
-        // std::env::set_var("RUST_LOG", "taos=trace");
         unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
@@ -982,9 +943,7 @@ mod tests {
 
     #[test]
     fn test_put_telnet() -> RawResult<()> {
-        // std::env::set_var("RUST_LOG", "taos=trace");
         unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
@@ -1056,9 +1015,7 @@ mod tests {
 
     #[test]
     fn test_put_json() -> RawResult<()> {
-        // std::env::set_var("RUST_LOG", "taos=trace");
         unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
@@ -1075,7 +1032,6 @@ mod tests {
         // should specify database before insert
         client.exec(format!("use {db}"))?;
 
-        // SchemalessProtocol::Json
         let data = [
             r#"[{"metric": "meters.current", "timestamp": 1681345954000, "value": 10.3, "tags": {"location": "California.SanFrancisco", "groupid": 2}}, {"metric": "meters.voltage", "timestamp": 1648432611249, "value": 219, "tags": {"location": "California.LosAngeles", "groupid": 1}}, {"metric": "meters.current", "timestamp": 1648432611250, "value": 12.6, "tags": {"location": "California.SanFrancisco", "groupid": 2}}, {"metric": "meters.voltage", "timestamp": 1648432611250, "value": 221, "tags": {"location": "California.LosAngeles", "groupid": 1}}]"#
         ]
@@ -1124,7 +1080,6 @@ mod tests {
         use crate::TmqBuilder;
 
         unsafe { std::env::set_var("RUST_LOG", "taos=trace") };
-        // pretty_env_logger::init();
 
         let taos = TaosBuilder::from_dsn("http://localhost:6041")?.build()?;
         let db = "test_ws_write_raw_block_req_id";
@@ -1132,12 +1087,8 @@ mod tests {
         taos.query(format!("drop database if exists {db}"))?;
         taos.query(format!("create database {db} keep 36500 vgroups 1"))?;
         taos.query(format!("use {db}"))?;
+        taos.query("create stable stb1(ts timestamp, v int) tags(jt int, t1 float)")?;
         taos.query(
-            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
-            "create stable stb1(ts timestamp, v int) tags(jt int, t1 float)",
-        )?;
-        taos.query(
-            // "create stable if not exists st1(ts timestamp, v int) tags(jt json)"
             "insert into tb2 using stb1 tags(2, 2.2) values(now, 0) (now + 1s, 0) tb3 using stb1 tags (3, 3.3) values (now, 3) (now +1s, 3)",
         )?;
 
@@ -1233,7 +1184,6 @@ mod async_tests {
     #[ignore]
     async fn test_recycle() -> RawResult<()> {
         unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
         let builder = TaosBuilder::from_dsn("taos+ws://localhost:6041/")?;
         let pool = builder.pool()?;
 
@@ -1271,8 +1221,8 @@ mod async_tests {
     }
 
     async fn put_line() -> RawResult<()> {
-        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("ws://localhost:6041".to_owned());
-        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        let dsn = "ws://localhost:6041";
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
 
         let db = "test_1741154385";
         taos.exec_many([
@@ -1332,8 +1282,8 @@ mod async_tests {
     }
 
     async fn put_telnet() -> RawResult<()> {
-        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("ws://localhost:6041".to_owned());
-        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        let dsn = "ws://localhost:6041";
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
         let db = "test_1741154916";
 
         taos.exec_many([
@@ -1392,8 +1342,8 @@ mod async_tests {
     }
 
     async fn put_json() -> RawResult<()> {
-        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("ws://localhost:6041".to_owned());
-        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        let dsn = "ws://localhost:6041";
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
 
         let db = "test_1741156350";
         taos.exec_many([
@@ -1459,23 +1409,22 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_is_enterprise_edition_ws() -> RawResult<()> {
-        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
 
-        let dsn =
-            std::env::var("TDENGINE_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        tracing::debug!("dsn: {:?}", &dsn);
-
-        let client = TaosBuilder::from_dsn(dsn)?;
-        tracing::debug!("client: {:?}", &client);
-        tracing::debug!("is_enterprise: {:?}", client.is_enterprise_edition().await?);
+        let dsn = "ws://localhost:6041";
+        let taos = TaosBuilder::from_dsn(dsn)?;
+        tracing::info!("is_enterprise: {:?}", taos.is_enterprise_edition().await?);
         Ok(())
     }
 
     #[tokio::test]
     async fn test_get_edition() -> RawResult<()> {
         unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         tracing::debug!("dsn: {:?}", &dsn);
@@ -1490,7 +1439,6 @@ mod async_tests {
     #[tokio::test]
     async fn test_get_edition_ws() -> RawResult<()> {
         unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
         tracing::debug!("dsn: {:?}", &dsn);
@@ -1503,25 +1451,8 @@ mod async_tests {
     }
 
     #[tokio::test]
-    #[ignore]
-    async fn test_get_edition_cloud() -> RawResult<()> {
-        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
-
-        let dsn = std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        tracing::debug!("dsn: {:?}", &dsn);
-
-        let client = TaosBuilder::from_dsn(dsn)?;
-        tracing::debug!("client: {:?}", &client);
-        tracing::debug!("get enterprise edition: {:?}", client.get_edition().await);
-
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_assert_enterprise_edition() -> RawResult<()> {
         unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         tracing::debug!("dsn: {:?}", &dsn);
@@ -1538,7 +1469,6 @@ mod async_tests {
     #[tokio::test]
     async fn test_assert_enterprise_edition_ws() -> RawResult<()> {
         unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
         tracing::debug!("dsn: {:?}", &dsn);
@@ -1546,39 +1476,16 @@ mod async_tests {
         let client = TaosBuilder::from_dsn(dsn)?;
         tracing::debug!("client: {:?}", &client);
 
-        let res = client.assert_enterprise_edition().await;
-        tracing::debug!("assert enterprise edition: {:?}", res);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_assert_enterprise_edition_cloud() -> RawResult<()> {
-        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
-
-        let dsn = std::env::var("TEST_ClOUD_DSN").unwrap_or("http://localhost:6041".to_string());
-        tracing::debug!("dsn: {:?}", &dsn);
-
-        let client = TaosBuilder::from_dsn(dsn)?;
-        tracing::debug!("client: {:?}", &client);
-
-        let res = client.assert_enterprise_edition().await;
-        tracing::debug!("assert enterprise edition: {:?}", res);
+        let edition = client.assert_enterprise_edition().await;
+        tracing::debug!("assert enterprise edition: {:?}", edition);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_varchar() -> anyhow::Result<()> {
-        // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(tracing::LevelFilter::Trace)
-        //     .init();
         let dsn = "taos://";
-
         let pool = TaosBuilder::from_dsn(dsn)?.pool()?;
-
         let taos = pool.get().await?;
 
         let db = "test_varchar";
@@ -1624,6 +1531,287 @@ mod async_tests {
                 assert_eq!(len, 6);
             }
         }
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "ws-rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use taos_query::common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder};
+    use taos_query::{AsyncQueryable, AsyncTBuilder, RawResult};
+
+    use crate::TaosBuilder;
+
+    #[tokio::test]
+    async fn test_sml_line() -> RawResult<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let data = [
+            "measurement,host=host1 field1=2i,field2=2.0 1741153642000".to_owned(),
+            "measurement,host=host1 field1=2i,field2=2.0 1741153643000".to_owned(),
+            "measurement,host=host1 field1=2i,field2=2.0 1741153644000".to_owned(),
+            "measurement,host=host1 field1=2i,field2=2.0 1741153645000".to_owned(),
+        ];
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(100u64)
+            .table_name_key("host")
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .req_id(101u64)
+            .table_name_key("host")
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Line)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .table_name_key("host")
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Line)
+            .data(data)
+            .req_id(103u64)
+            .table_name_key("host")
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_sml_telnet() -> RawResult<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let data = [
+            "meters_telnet.current 1648432611249 10.3 location=California.SanFrancisco group=2"
+                .to_owned(),
+            "meters_telnet.current 1648432611250 12.6 location=California.SanFrancisco group=2"
+                .to_owned(),
+            "meters_telnet.current 1648432611249 10.8 location=California.LosAngeles group=3"
+                .to_owned(),
+            "meters_telnet.current 1648432611250 11.3 location=California.LosAngeles group=3"
+                .to_owned(),
+            "meters_telnet.voltage 1648432611249 219 location=California.SanFrancisco group=2"
+                .to_owned(),
+            "meters_telnet.voltage 1648432611250 218 location=California.SanFrancisco group=2"
+                .to_owned(),
+            "meters_telnet.voltage 1648432611249 221 location=California.LosAngeles group=3"
+                .to_owned(),
+            "meters_telnet.voltage 1648432611250 217 location=California.LosAngeles group=3"
+                .to_owned(),
+        ];
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Telnet)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(200u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Telnet)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(201u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Telnet)
+            .data(data.clone())
+            .req_id(202u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Telnet)
+            .data(data.clone())
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_sml_json() -> RawResult<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let data = [
+            r#"[{"metric":"meters_json.current","timestamp":1681345954000,"value":10.3,"tags":{"location":"California.SanFrancisco","groupid":2}},{"metric":"meters_json.voltage","timestamp":1648432611249,"value":219,"tags":{"location":"California.LosAngeles","groupid":1}},{"metric":"meters_json.current","timestamp":1648432611250,"value":12.6,"tags":{"location":"California.SanFrancisco","groupid":2}},{"metric":"meters_json.voltage","timestamp":1648432611250,"value":221,"tags":{"location":"California.LosAngeles","groupid":1}}]"#.to_owned(),
+        ];
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Json)
+            .precision(SchemalessPrecision::Millisecond)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(300u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Json)
+            .data(data.clone())
+            .ttl(1000)
+            .req_id(301u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Json)
+            .data(data.clone())
+            .req_id(302u64)
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        let sml_data = SmlDataBuilder::default()
+            .protocol(SchemalessProtocol::Json)
+            .data(data.clone())
+            .build()?;
+        taos.put(&sml_data).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_is_enterprise_edition() -> RawResult<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+        let taos = TaosBuilder::from_dsn(dsn)?;
+        tracing::info!("is_enterprise: {:?}", taos.is_enterprise_edition().await?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_edition() -> RawResult<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+
+        let builder = TaosBuilder::from_dsn(dsn)?;
+
+        assert!(builder.ready().await);
+
+        let edition = builder.assert_enterprise_edition().await;
+        tracing::info!("assert enterprise edition: {:?}", edition);
+
+        let edition = builder.get_edition().await;
+        tracing::info!("get edition: {:?}", edition);
+
+        let mut taos = builder.build().await?;
+        builder.ping(&mut taos).await?;
 
         Ok(())
     }

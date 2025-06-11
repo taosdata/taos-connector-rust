@@ -2259,7 +2259,6 @@ mod tests {
             match message {
                 MessageSet::Meta(meta) => {
                     let _raw = meta.as_raw_meta()?;
-                    // taos.write_meta(raw)?;
 
                     // meta data can be write to an database seamlessly by raw or json (to sql).
                     let json = meta.as_json_meta()?;
@@ -2287,8 +2286,6 @@ mod tests {
                     // data message may have more than one data block for various tables.
                     for block in data {
                         let _block = block?;
-                        // dbg!(block.table_name());
-                        // dbg!(block);
                     }
                 }
                 _ => unreachable!(),
@@ -2304,179 +2301,6 @@ mod tests {
             "drop topic ws_tmq_meta_sync3",
             "drop database ws_tmq_meta_sync3",
         ])?;
-        Ok(())
-    }
-
-    #[cfg(feature = "rustls")]
-    #[tokio::test]
-    async fn test_consumer_cloud() -> anyhow::Result<()> {
-        use taos_query::prelude::*;
-        unsafe { std::env::set_var("RUST_LOG", "debug") };
-
-        let dsn = std::env::var("TDENGINE_ClOUD_DSN");
-        if dsn.is_err() {
-            println!("Skip test when not in cloud");
-            return Ok(());
-        }
-        let dsn = dsn.unwrap();
-
-        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
-        taos.exec_many([
-            "drop topic if exists ws_tmq_meta",
-            "drop database if exists ws_tmq_meta",
-            "create database ws_tmq_meta wal_retention_period 3600",
-            "create topic ws_tmq_meta with meta as database ws_tmq_meta",
-            "use ws_tmq_meta",
-            // kind 1: create super table using all types
-            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
-            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
-            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
-            tags(t1 json)",
-            // kind 2: create child table with json tag
-            "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
-            "create table tb1 using stb1 tags(NULL)",
-            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL)
-            tb1 values(now, true, -2, -3, -4, -5, \
-            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
-            254, 65534, 1, 1)",
-            // kind 3: create super table with all types except json (especially for tags)
-            "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
-            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
-            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
-            tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
-            t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
-            t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
-            // kind 4: create child table with all types except json
-            "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
-            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
-            254, 65534, 1, 1)",
-            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL)",
-            // kind 5: create common table
-            "create table `table` (ts timestamp, v int)",
-            // kind 6: column in super table
-            "alter table stb1 add column new1 bool",
-            "alter table stb1 add column new2 tinyint",
-            "alter table stb1 add column new10 nchar(16)",
-            "alter table stb1 modify column new10 nchar(32)",
-            "alter table stb1 drop column new10",
-            "alter table stb1 drop column new2",
-            "alter table stb1 drop column new1",
-            // kind 7: add tag in super table
-            "alter table `stb2` add tag new1 bool",
-            "alter table `stb2` rename tag new1 new1_new",
-            "alter table `stb2` modify tag t10 nchar(32)",
-            "alter table `stb2` drop tag new1_new",
-            // kind 8: column in common table
-            "alter table `table` add column new1 bool",
-            "alter table `table` add column new2 tinyint",
-            "alter table `table` add column new10 nchar(16)",
-            "alter table `table` modify column new10 nchar(32)",
-            "alter table `table` rename column new10 new10_new",
-            "alter table `table` drop column new10_new",
-            "alter table `table` drop column new2",
-            "alter table `table` drop column new1",
-        ])
-        .await?;
-
-        taos.exec_many([
-            "drop database if exists ws_tmq_meta2",
-            "create database if not exists ws_tmq_meta2 wal_retention_period 3600",
-            "use ws_tmq_meta2",
-        ])
-        .await?;
-
-        let builder = TmqBuilder::new(&dsn)?;
-        let mut consumer = builder.build_consumer().await?;
-        consumer.subscribe(["ws_tmq_meta"]).await?;
-
-        {
-            let mut stream = consumer.stream();
-
-            while let Some((offset, message)) = stream.try_next().await? {
-                // Offset contains information for topic name, database name and vgroup id,
-                //  similar to kafka topic/partition/offset.
-                let _ = offset.topic();
-                let _ = offset.database();
-                let _ = offset.vgroup_id();
-
-                match message {
-                    MessageSet::Meta(meta) => {
-                        let _raw = meta.as_raw_meta().await?;
-
-                        // meta data can be write to an database seamlessly by raw or json (to sql).
-                        let json = meta.as_json_meta().await?;
-                        for meta in &json {
-                            let sql = meta.to_string();
-                            tracing::debug!("sql: {}", sql);
-                            if let Err(err) = taos.exec(sql).await {
-                                match err.code() {
-                                    Code::TAG_ALREADY_EXIST => {
-                                        tracing::trace!("tag already exists")
-                                    }
-                                    Code::TAG_NOT_EXIST => tracing::trace!("tag not exist"),
-                                    Code::COLUMN_EXISTS => tracing::trace!("column already exists"),
-                                    Code::COLUMN_NOT_EXIST => tracing::trace!("column not exists"),
-                                    Code::INVALID_COLUMN_NAME => {
-                                        tracing::trace!("invalid column name")
-                                    }
-                                    Code::MODIFIED_ALREADY => {
-                                        tracing::trace!("modified already done")
-                                    }
-                                    Code::TABLE_NOT_EXIST => {
-                                        tracing::trace!("table does not exists")
-                                    }
-                                    Code::STABLE_NOT_EXIST => {
-                                        tracing::trace!("stable does not exists")
-                                    }
-                                    _ => tracing::error!("{}", err),
-                                }
-                            }
-                        }
-                    }
-                    MessageSet::Data(data) => {
-                        // data message may have more than one data block for various tables.
-                        while let Some(_data) = data.fetch_block().await? {}
-                    }
-                    _ => unreachable!(),
-                }
-                consumer.commit(offset).await?;
-            }
-        }
-        consumer.unsubscribe().await;
-
-        tokio::time::sleep(Duration::from_secs(2)).await;
-
-        taos.exec_many([
-            "drop database ws_tmq_meta2",
-            "drop topic ws_tmq_meta",
-            "drop database ws_tmq_meta",
-        ])
-        .await?;
-        Ok(())
-    }
-
-    #[cfg(feature = "rustls")]
-    #[cfg(feature = "rustls-aws-lc-crypto-provider")]
-    #[tokio::test]
-    async fn test_consumer_cloud_conn() -> anyhow::Result<()> {
-        use std::env;
-
-        use taos_query::prelude::*;
-
-        unsafe { std::env::set_var("RUST_LOG", "trace") };
-
-        let dsn = env::var("TDENGINE_CLOUD_DSN")
-            .expect("TDENGINE_CLOUD_DSN environment variable not set");
-
-        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
-        let r = taos.server_version().await?;
-
-        tracing::info!("server version: {}", r);
-
         Ok(())
     }
 
@@ -3367,6 +3191,124 @@ mod tests {
         server.await;
 
         poll_handle.await??;
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use std::time::Duration;
+
+    use taos_query::prelude::*;
+    use tokio::sync::{mpsc, oneshot, watch};
+
+    use crate::consumer::{Data, Meta};
+    use crate::{TaosBuilder, TmqBuilder};
+
+    #[tokio::test]
+    async fn test_poll() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let url = url.unwrap();
+        let token = token.unwrap();
+
+        let dsn = format!("{}/rust_test?token={}", url, token);
+        let tmq_dsn = format!("{}&group.id=10&auto.offset.reset=earliest", dsn);
+
+        let num = 100;
+
+        let (msg_tx, mut msg_rx) =
+            mpsc::channel::<(MessageSet<Meta, Data>, oneshot::Sender<()>)>(100);
+
+        let (cancel_tx, mut cancel_rx) = watch::channel(false);
+
+        let cnt_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let mut cnt = 0;
+            while let Some((mut msg, done_tx)) = msg_rx.recv().await {
+                if let Some(data) = msg.data() {
+                    while let Some(block) = data.fetch_block().await? {
+                        cnt += block.nrows();
+                    }
+                }
+                let _ = done_tx.send(());
+            }
+            assert_eq!(cnt, num);
+            Ok(())
+        });
+
+        let poll_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let tmq = TmqBuilder::from_dsn(tmq_dsn)?;
+            let mut consumer = tmq.build().await?;
+            consumer.subscribe(["rust_tmq_test_topic"]).await?;
+
+            let timeout = Timeout::Duration(Duration::from_secs(2));
+
+            loop {
+                tokio::select! {
+                    _ = cancel_rx.changed() => {
+                        break;
+                    }
+                    res = consumer.recv_timeout(timeout) => {
+                        if let Some((offset, message)) = res? {
+                            let (done_tx, done_rx) = oneshot::channel();
+                            msg_tx.send((message, done_tx)).await?;
+                            let _ = done_rx.await;
+                            consumer.commit(offset).await?;
+                        }
+                    }
+                }
+            }
+
+            consumer.unsubscribe().await;
+
+            Ok(())
+        });
+
+        let mut sqls = Vec::with_capacity(num);
+
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        for i in 0..num {
+            sqls.push(format!(
+                "insert into rust_test.t_tmq values ({}, {})",
+                ts + i as i64,
+                i,
+            ));
+        }
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        taos.exec_many(&sqls).await?;
+
+        tokio::time::sleep(Duration::from_secs(20)).await;
+
+        let _ = cancel_tx.send(true);
+
+        poll_handle.await??;
+        cnt_handle.await??;
+
+        taos.exec("delete from rust_test.t_tmq").await?;
 
         Ok(())
     }

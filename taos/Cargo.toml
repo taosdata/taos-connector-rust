@@ -42,6 +42,9 @@ rand = "0.8.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
+tracing-subscriber = { version = "0.3.18", default-features = false, features = [
+    "fmt",
+] }
 
 [[bench]]
 harness = false
