@@ -1301,7 +1301,7 @@ async fn fetch(
                         let lengths = fetch_resp.lengths.as_ref().unwrap();
                         let rows = fetch_resp.rows;
                         let mut raw = RawBlock::parse_from_raw_block_v2(
-                            raw, &fields, &lengths, rows, precision,
+                            raw, &fields, lengths, rows, precision,
                         );
                         raw.with_field_names(&field_names);
 
