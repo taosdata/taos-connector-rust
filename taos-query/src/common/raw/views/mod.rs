@@ -1471,41 +1471,61 @@ mod tests {
 
     #[test]
     fn test_concat_iter() {
-        let column_view_int = ColumnView::from(vec![1, 2, 3]);
-
-        let iterator_values = [
+        let values = [
             BorrowedValue::Int(7),
             BorrowedValue::UInt(8),
             BorrowedValue::Int(9),
         ];
 
-        let result_column_int =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::Int);
-        assert_eq!(result_column_int.len(), 6);
+        let column_view_int = ColumnView::from(vec![1, 2, 3]);
 
-        let result_column_uint =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::UInt);
-        assert_eq!(result_column_uint.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Bool);
+        assert_eq!(res.len(), 6);
 
-        let result_column_bigint =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::BigInt);
-        assert_eq!(result_column_bigint.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::TinyInt);
+        assert_eq!(res.len(), 6);
 
-        let result_column_ubigint =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::UBigInt);
-        assert_eq!(result_column_ubigint.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::SmallInt);
+        assert_eq!(res.len(), 6);
 
-        let result_column_float =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::Float);
-        assert_eq!(result_column_float.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Int);
+        assert_eq!(res.len(), 6);
 
-        let result_column_double =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::Double);
-        assert_eq!(result_column_double.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::BigInt);
+        assert_eq!(res.len(), 6);
 
-        let result_column_varchar =
-            column_view_int.concat_iter(iterator_values.iter().cloned(), Ty::VarChar);
-        assert_eq!(result_column_varchar.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::UTinyInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::USmallInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::UInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::UBigInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Float);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Double);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::VarChar);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::NChar);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Json);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::VarBinary);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Geometry);
+        assert_eq!(res.len(), 6);
     }
 
     #[test]

@@ -842,10 +842,15 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     } else {
         CStr::from_ptr(dsn)
     };
+
     let dsn = dsn.to_str()?;
     let builder = TaosBuilder::from_dsn(dsn)?;
 
-    if dsn.contains("kepware") {
+    if cfg!(all(windows, target_pointer_width = "32")) {
+        tracing::debug!(
+            "Connecting with dsn: {dsn}, using thread to avoid stack overflow on 32-bit Windows"
+        );
+
         let stack_size = 4 * 1024 * 1024;
 
         let handle = thread::Builder::new()
@@ -869,7 +874,6 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
         }
     } else {
         let mut taos = builder.build()?;
-
         builder.ping(&mut taos)?;
         Ok(taos)
     }
@@ -2005,9 +2009,10 @@ mod tests {
             }
         }
     }
+
     #[test]
     fn kepware_connect() {
-        let stack_size = 256 * 1024;
+        let stack_size = 512 * 1024;
 
         let handle = thread::Builder::new()
             .stack_size(stack_size)
@@ -2040,10 +2045,8 @@ mod tests {
     }
 
     #[test]
-    fn connect_cloud() {
-        use std::env;
-
-        let dsn = env::var("TDENGINE_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+    fn test_connect() {
+        let dsn = "http://localhost:6041";
 
         init_env();
         unsafe {
@@ -2543,5 +2546,41 @@ mod tests {
             ws_free_result(rs);
             ws_close(taos);
         }
+    }
+}
+
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use super::*;
+
+    #[test]
+    fn test_connect() -> anyhow::Result<()> {
+        init_env();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+
+        unsafe {
+            let cdsn = CString::new(dsn).unwrap();
+            let taos = ws_connect(cdsn.as_ptr() as *const u8 as _);
+            assert!(!taos.is_null());
+
+            let version = ws_get_server_info(taos);
+            tracing::info!("Server version: {:?}", CStr::from_ptr(version as _));
+        }
+
+        Ok(())
     }
 }
