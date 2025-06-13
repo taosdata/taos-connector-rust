@@ -144,7 +144,7 @@ pub struct WsTaos {
 
 impl Drop for WsTaos {
     fn drop(&mut self) {
-        trace!("dropping connection");
+        trace!("dropping ws connection");
         // Send close signal to reader/writer spawned tasks.
         let _ = self.close_signal.send(true);
     }
@@ -350,6 +350,7 @@ async fn run(
         tokio::select! {
             err = err_rx.recv() => {
                 if let Some(err) = err {
+                    tracing::warn!("WebSocket error: {}", err);
                     if !is_disconnect_error(&err) {
                         handle_error(query_sender.queries.clone(), &err, cache).await;
                         break;
@@ -365,10 +366,13 @@ async fn run(
             _ = recv_handle => break,
         }
 
+        tracing::trace!("reconnecting...");
         let ws_stream = info.reconnect(info.to_query_url()).await?;
+        tracing::trace!("reconnected");
         (ws_stream_sender, ws_stream_reader) = ws_stream.split();
         // (ws_stream_sender, ws_stream_reader) = reconnect(&info).await?;
 
+        // FIXME: do not clear the query sender's queries and results
         query_sender.queries.clear();
         query_sender.results.clear();
 
@@ -717,19 +721,19 @@ async fn read_messages(
             }
         }
     }
-    if queries_sender.is_empty() {
-        return;
-    }
+    // if queries_sender.is_empty() {
+    //     return;
+    // }
 
-    let mut keys = Vec::with_capacity(queries_sender.len());
-    queries_sender.scan(|k, _| {
-        keys.push(*k);
-    });
-    for k in keys {
-        if let Some((_, sender)) = queries_sender.remove(&k) {
-            let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
-        }
-    }
+    // let mut keys = Vec::with_capacity(queries_sender.len());
+    // queries_sender.scan(|k, _| {
+    //     keys.push(*k);
+    // });
+    // for k in keys {
+    //     if let Some((_, sender)) = queries_sender.remove(&k) {
+    //         let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
+    //     }
+    // }
 }
 
 fn is_disconnect_error(err: &WsError) -> bool {
@@ -1084,25 +1088,25 @@ impl WsTaos {
 
     #[instrument(skip(self))]
     pub async fn s_query_with_req_id(&self, sql: &str, req_id: u64) -> RawResult<ResultSet> {
-        // let data = if self.is_support_binary_sql() {
-        //     let mut req_vec = Vec::with_capacity(sql.len() + 30);
-        //     req_vec.write_u64_le(req_id).map_err(Error::from)?;
-        //     req_vec.write_u64_le(0).map_err(Error::from)?; //ResultID, uesless here
-        //     req_vec.write_u64_le(6).map_err(Error::from)?; //ActionID, 6 for query
-        //     req_vec.write_u16_le(1).map_err(Error::from)?; //Version
-        //     req_vec
-        //         .write_u32_le(sql.len().try_into().unwrap())
-        //         .map_err(Error::from)?; //SQL length
-        //     req_vec.write_all(sql.as_bytes()).map_err(Error::from)?;
+        let data = if self.is_support_binary_sql() {
+            let mut req_vec = Vec::with_capacity(sql.len() + 30);
+            req_vec.write_u64_le(req_id).map_err(Error::from)?;
+            req_vec.write_u64_le(0).map_err(Error::from)?; //ResultID, uesless here
+            req_vec.write_u64_le(6).map_err(Error::from)?; //ActionID, 6 for query
+            req_vec.write_u16_le(1).map_err(Error::from)?; //Version
+            req_vec
+                .write_u32_le(sql.len().try_into().unwrap())
+                .map_err(Error::from)?; //SQL length
+            req_vec.write_all(sql.as_bytes()).map_err(Error::from)?;
 
-        //     self.sender.send_recv(WsSend::Binary(req_vec)).await?
-        // } else {
-        let action = WsSend::Query {
-            req_id,
-            sql: sql.to_string(),
+            self.sender.send_recv(WsSend::Binary(req_vec)).await?
+        } else {
+            let action = WsSend::Query {
+                req_id,
+                sql: sql.to_string(),
+            };
+            self.sender.send_recv(action).await?
         };
-        let data = self.sender.send_recv(action).await?;
-        // };
 
         let resp = match data {
             WsRecvData::Query(resp) => resp,
@@ -1138,77 +1142,77 @@ impl WsTaos {
             let res_id = resp.id;
             let precision = resp.precision;
             let (tx, rx) = flume::bounded(64);
-            // if sender.version.is_support_binary_sql {
-            //     tokio::spawn(fetch(sender, res_id, tx, precision, names).in_current_span());
-            // } else {
-            // Start query.
-            let fields1 = fields.clone();
-            tokio::spawn(
-                async move {
-                    let mut metrics = QueryMetrics::default();
-                    loop {
-                        let now = Instant::now();
-                        let args = WsResArgs {
-                            id: res_id,
-                            req_id: req_id_ref.fetch_add(1, Ordering::SeqCst),
-                        };
-                        let fetch = WsSend::Fetch(args);
-                        let fetch_resp = match sender.send_recv(fetch).await {
-                            Ok(WsRecvData::Fetch(fetch)) => fetch,
-                            Err(err) => {
-                                let _ = tx.send_async(Err(err)).await;
+            if sender.version.is_support_binary_sql {
+                tokio::spawn(fetch(sender, res_id, tx, precision, names).in_current_span());
+            } else {
+                // Start query.
+                let fields1 = fields.clone();
+                tokio::spawn(
+                    async move {
+                        let mut metrics = QueryMetrics::default();
+                        loop {
+                            let now = Instant::now();
+                            let args = WsResArgs {
+                                id: res_id,
+                                req_id: req_id_ref.fetch_add(1, Ordering::SeqCst),
+                            };
+                            let fetch = WsSend::Fetch(args);
+                            let fetch_resp = match sender.send_recv(fetch).await {
+                                Ok(WsRecvData::Fetch(fetch)) => fetch,
+                                Err(err) => {
+                                    let _ = tx.send_async(Err(err)).await;
+                                    break;
+                                }
+                                _ => unreachable!("fetch action result error"),
+                            };
+                            if fetch_resp.completed {
+                                drop(tx);
                                 break;
                             }
-                            _ => unreachable!("fetch action result error"),
-                        };
-                        if fetch_resp.completed {
-                            drop(tx);
-                            break;
-                        }
-                        let args = WsResArgs {
-                            id: res_id,
-                            req_id: req_id_ref.fetch_add(1, Ordering::SeqCst),
-                        };
+                            let args = WsResArgs {
+                                id: res_id,
+                                req_id: req_id_ref.fetch_add(1, Ordering::SeqCst),
+                            };
 
-                        let fetch_block = WsSend::FetchBlock(args);
-                        match sender.send_recv(fetch_block).await {
-                            Ok(WsRecvData::Block { timing, raw }) => {
-                                metrics.time_cost_in_fetch += now.elapsed();
-                                let mut raw = RawBlock::parse_from_raw_block(raw, precision);
-                                raw.with_field_names(&names);
-                                if tx.send_async(Ok((raw, timing))).await.is_err() {
-                                    break;
+                            let fetch_block = WsSend::FetchBlock(args);
+                            match sender.send_recv(fetch_block).await {
+                                Ok(WsRecvData::Block { timing, raw }) => {
+                                    metrics.time_cost_in_fetch += now.elapsed();
+                                    let mut raw = RawBlock::parse_from_raw_block(raw, precision);
+                                    raw.with_field_names(&names);
+                                    if tx.send_async(Ok((raw, timing))).await.is_err() {
+                                        break;
+                                    }
                                 }
-                            }
-                            Ok(WsRecvData::BlockV2 { timing, raw }) => {
-                                metrics.time_cost_in_fetch += now.elapsed();
-                                let mut raw = RawBlock::parse_from_raw_block_v2(
-                                    raw,
-                                    &fields1,
-                                    fetch_resp.lengths.as_ref().unwrap(),
-                                    fetch_resp.rows,
-                                    precision,
-                                );
+                                Ok(WsRecvData::BlockV2 { timing, raw }) => {
+                                    metrics.time_cost_in_fetch += now.elapsed();
+                                    let mut raw = RawBlock::parse_from_raw_block_v2(
+                                        raw,
+                                        &fields1,
+                                        fetch_resp.lengths.as_ref().unwrap(),
+                                        fetch_resp.rows,
+                                        precision,
+                                    );
 
-                                raw.with_field_names(&names);
-                                if tx.send_async(Ok((raw, timing))).await.is_err() {
-                                    break;
+                                    raw.with_field_names(&names);
+                                    if tx.send_async(Ok((raw, timing))).await.is_err() {
+                                        break;
+                                    }
                                 }
-                            }
-                            Ok(_) => {}
-                            Err(err) => {
-                                metrics.time_cost_in_fetch += now.elapsed();
-                                if tx.send_async(Err(err)).await.is_err() {
-                                    break;
+                                Ok(_) => {}
+                                Err(err) => {
+                                    metrics.time_cost_in_fetch += now.elapsed();
+                                    if tx.send_async(Err(err)).await.is_err() {
+                                        break;
+                                    }
                                 }
                             }
                         }
+                        trace!("Spawn metrics: {:?}", metrics);
                     }
-                    trace!("Spawn metrics: {:?}", metrics);
-                }
-                .in_current_span(),
-            );
-            // }
+                    .in_current_span(),
+                );
+            }
             let blocks_buffer = Some(rx);
             Ok(ResultSet {
                 fields: Some(fields),
@@ -2025,6 +2029,34 @@ mod tests {
         assert_eq!(affected_rows, 1);
 
         taos.exec("drop database test_1748241233").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_ws_disconnect() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .compact()
+            .try_init();
+
+        let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+
+        tracing::info!("Waiting for 5 seconds before executing SQL...");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        taos.exec_many([
+            "drop database if exists test_1749775774",
+            "create database test_1749775774",
+            "use test_1749775774",
+            "create table t0(ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let affected_rows = taos.s_exec("insert into t0 values(now, 1)").await?;
+        assert_eq!(affected_rows, 1);
 
         Ok(())
     }
