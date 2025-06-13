@@ -3,15 +3,13 @@ use std::fmt::{Debug, Display};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use futures_util::stream::FusedStream;
-use futures_util::{SinkExt, StreamExt, TryStreamExt};
+use futures_util::SinkExt;
 use once_cell::sync::OnceCell;
 use rand::Rng;
 use taos_query::prelude::Code;
 use taos_query::util::{generate_req_id, Edition};
 use taos_query::{DsnError, IntoDsn, RawResult};
 use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
-use tokio_tungstenite::tungstenite::Message;
 use tracing::warn;
 
 pub mod stmt;
@@ -470,6 +468,7 @@ impl TaosBuilder {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn to_query_url_new(&self, addr: &str) -> String {
         match &self.auth {
             WsAuth::Token(token) => {
@@ -577,7 +576,7 @@ impl TaosBuilder {
         let start_idx = self.current_addr_index.load(Ordering::Relaxed);
         let addrs_len = self.addrs.len();
 
-        'outer: loop {
+        loop {
             // let addr = &self.addrs[cur_idx];
             // let mut ws_url = self.to_ws_url();
             // let mut ws_url = self.to_query_url_new(addr);

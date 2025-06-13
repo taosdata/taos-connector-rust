@@ -732,11 +732,6 @@ async fn read_messages(
     }
 }
 
-async fn reconnect(info: &TaosBuilder) -> RawResult<(WsStreamSender, WsStreamReader)> {
-    let ws_stream = info.build_stream(info.to_query_url()).await?;
-    Ok(ws_stream.split())
-}
-
 fn is_disconnect_error(err: &WsError) -> bool {
     matches!(
         err,
