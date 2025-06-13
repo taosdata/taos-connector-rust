@@ -766,7 +766,7 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use tracing::*;
 
-    use crate::query::infra::{ToMessage, WsRecv, WsRecvData, WsSend};
+    use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
     use crate::*;
 
     #[tokio::test]
