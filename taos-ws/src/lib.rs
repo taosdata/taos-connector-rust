@@ -39,8 +39,10 @@ pub enum WsAuth {
 }
 
 const RETRIES_DEFAULT: u32 = 5;
-const RETRY_BACKOFF_MS_DEFAULT: u64 = 100;
-const RETRY_BACKOFF_MAX_MS_DEFAULT: u64 = 1000;
+// const RETRY_BACKOFF_MS_DEFAULT: u64 = 100;
+// const RETRY_BACKOFF_MAX_MS_DEFAULT: u64 = 1000;
+const RETRY_BACKOFF_MS_DEFAULT: u64 = 1000;
+const RETRY_BACKOFF_MAX_MS_DEFAULT: u64 = 5000;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Retries(u32);
@@ -645,7 +647,7 @@ impl TaosBuilder {
 
                         let time = {
                             let mut rng = rand::rng();
-                            (wait_millis as f64 * rng.random_range(0.0..0.2)) as u64
+                            wait_millis + (wait_millis as f64 * rng.random_range(0.0..0.2)) as u64
                         };
                         // let mut rng = rand::rng();
                         // let time = (wait_millis as f64 * rng.random_range(0.0..0.2)) as u64;
@@ -660,6 +662,11 @@ impl TaosBuilder {
 
             let cur_addr_idx = (self.current_addr_index.load(Ordering::Relaxed) + 1) % addrs_len;
 
+            tracing::debug!(
+                "Trying next address: start_idx: {} (cur_addr_idx: {})",
+                start_idx,
+                cur_addr_idx
+            );
             // self.current_addr_index = (self.current_addr_index + 1) % addrs_len;
             if cur_addr_idx == start_idx {
                 // If we have tried all addresses, break the loop
@@ -670,6 +677,7 @@ impl TaosBuilder {
                 .store(cur_addr_idx, Ordering::Relaxed);
         }
 
+        tracing::error!("Failed to connect to all addresses: {:?}", self.addrs);
         Err("All addresses failed".into())
     }
 

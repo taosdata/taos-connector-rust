@@ -64,6 +64,15 @@ pub(crate) struct WsQuerySender {
     queries: QueryAgent,
 }
 
+impl Drop for WsQuerySender {
+    fn drop(&mut self) {
+        trace!("dropping ws query sender");
+        // Clear all queries and results when dropping the sender.
+        // self.queries.clear();
+        // self.results.clear();
+    }
+}
+
 const SEND_TIMEOUT: Duration = Duration::from_millis(1000);
 
 impl WsQuerySender {
@@ -98,12 +107,16 @@ impl WsQuerySender {
                     .map_err(Error::from)?
                     .map_err(Error::from)?;
             }
-            // WsSend::Binary(bytes) => {
-            //     timeout(SEND_TIMEOUT, self.sender.send_async(msg))
-            //         .await
-            //         .map_err(Error::from)?
-            //         .map_err(Error::from)?;
-            // }
+            WsSend::Binary(bytes) => {
+                timeout(
+                    SEND_TIMEOUT,
+                    self.sender
+                        .send_async(ToMsgEnum::Message(Message::Binary(bytes))),
+                )
+                .await
+                .map_err(Error::from)?
+                .map_err(Error::from)?;
+            }
             _ => {
                 tracing::trace!("[req id: {req_id}] prepare message: {msg:?}");
                 timeout(SEND_TIMEOUT, self.sender.send_async(ToMsgEnum::WsSend(msg)))
@@ -112,13 +125,15 @@ impl WsQuerySender {
                     .map_err(Error::from)?;
             }
         }
+        // TODO: add timeout
         // handle the error
         tracing::trace!("[req id: {req_id}] message sent, wait for receiving");
         let res = rx
             .await
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
-            .map_err(Error::from)?;
+            .map_err(Error::from);
         tracing::trace!("[req id: {req_id}] message received: {res:?}");
+        let res = res?;
         Ok(res)
     }
 
@@ -322,6 +337,9 @@ async fn run(
     mut close_reader: watch::Receiver<bool>,
     info: TaosBuilder,
 ) -> RawResult<()> {
+    let _msg_reader_clone = msg_reader.clone();
+    let _query_sender_clone = query_sender.clone();
+
     loop {
         let (err_tx, mut err_rx) = mpsc::channel(2);
         let (close_tx, close_rx) = watch::channel(false);
@@ -352,9 +370,12 @@ async fn run(
                 if let Some(err) = err {
                     tracing::warn!("WebSocket error: {}", err);
                     if !is_disconnect_error(&err) {
+                        tracing::error!("WebSocket is not disconnect error: {}", err);
                         handle_error(query_sender.queries.clone(), &err, cache).await;
                         break;
                     }
+                    // 接收错误后，需要 stop send 和 recv message task
+                    let _ = close_tx.send(true);
                 }
             }
             _ = close_reader.changed() => {
@@ -362,20 +383,42 @@ async fn run(
                 let _ = close_tx.send(true);
                 break;
             }
-            _ = send_handle => break,
-            _ = recv_handle => break,
+            // _ = send_handle => break,
+            // _ = recv_handle => break,
         }
 
         tracing::trace!("reconnecting...");
-        let ws_stream = info.reconnect(info.to_query_url()).await?;
+        let ws_stream = info.reconnect(info.to_query_url()).await;
+        let ws_stream = match ws_stream {
+            Ok(ws) => ws,
+            Err(err) => {
+                tracing::error!("Reconnect error: {:?}", err);
+                let mut keys = Vec::with_capacity(query_sender.queries.len());
+                query_sender.queries.scan(|k, _| {
+                    keys.push(*k);
+                });
+                // cache 中的 key 也要处理
+                for k in keys {
+                    if let Some((_, sender)) = query_sender.queries.remove(&k) {
+                        let _ = sender
+                            .send(Err(RawError::from_string("websocket connection is closed")));
+                    }
+                }
+                tracing::error!("WebSocket connection is closed, error: {}", err);
+                return Ok(());
+            }
+        };
+
+        // 错误处理，返回给应用
         tracing::trace!("reconnected");
         (ws_stream_sender, ws_stream_reader) = ws_stream.split();
         // (ws_stream_sender, ws_stream_reader) = reconnect(&info).await?;
 
         // FIXME: do not clear the query sender's queries and results
-        query_sender.queries.clear();
+        // query_sender.queries.clear();
         query_sender.results.clear();
 
+        tracing::trace!("clearing cache, cache: {:?}", cache);
         let mut keys = Vec::new();
         cache.scan(|key, _| keys.push(*key));
         for key in keys {
@@ -385,6 +428,7 @@ async fn run(
                     .sender
                     .send_async(ToMsgEnum::Message(msg))
                     .await;
+                tracing::error!("Failed to send cached message, error: {:?}", _res);
             }
         }
     }
@@ -399,6 +443,8 @@ async fn send_messages(
     mut close_reader: watch::Receiver<bool>,
     cache: Arc<scc::HashMap<ReqId, Message>>,
 ) {
+    tracing::trace!("send start");
+
     let mut interval = time::interval(Duration::from_secs(53));
 
     loop {
@@ -411,7 +457,8 @@ async fn send_messages(
                 }
                 let _ = ws_stream_sender.flush().await;
             }
-            _ = close_reader.changed() => {
+            v = close_reader.changed() => {
+                tracing::trace!("close signal received: {:?}", v);
                 let _= ws_stream_sender.send(Message::Close(None)).await;
                 let _ = ws_stream_sender.close().await;
                 tracing::trace!("close sender task");
@@ -432,11 +479,16 @@ async fn send_messages(
                             break;
                         }
                     }
-                    Err(_) => break, // TODO: handle error
+                    Err(e) => {
+                        tracing::error!("Failed to receive message from channel: {}", e);
+                        break; // TODO: handle error
+                    }
                 }
             }
         }
     }
+
+    tracing::trace!("send end");
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -450,6 +502,8 @@ async fn read_messages(
     err_sender: mpsc::Sender<WsError>,
     cache: Arc<scc::HashMap<ReqId, Message>>,
 ) {
+    tracing::trace!("reader start");
+
     let parse_frame = |frame: Message| {
         let cache = cache.clone();
         match frame {
@@ -708,19 +762,21 @@ async fn read_messages(
             _ = close_listener.changed() => {
                 // TODO: handle close signal
                 tracing::trace!("close reader task");
-                let mut keys = Vec::with_capacity(queries_sender.len());
-                queries_sender.scan(|k, _| {
-                    keys.push(*k);
-                });
-                for k in keys {
-                    if let Some((_, sender)) = queries_sender.remove(&k) {
-                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "close signal received")));
-                    }
-                }
+                // let mut keys = Vec::with_capacity(queries_sender.len());
+                // queries_sender.scan(|k, _| {
+                //     keys.push(*k);
+                // });
+                // for k in keys {
+                //     if let Some((_, sender)) = queries_sender.remove(&k) {
+                //         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "close signal received")));
+                //     }
+                // }
                 break;
             }
         }
     }
+
+    tracing::trace!("reader end");
     // if queries_sender.is_empty() {
     //     return;
     // }
@@ -1099,7 +1155,9 @@ impl WsTaos {
                 .map_err(Error::from)?; //SQL length
             req_vec.write_all(sql.as_bytes()).map_err(Error::from)?;
 
-            self.sender.send_recv(WsSend::Binary(req_vec)).await?
+            let res = self.sender.send_recv(WsSend::Binary(req_vec)).await;
+            tracing::error!("failed to send query: {sql}, error: {:?}", res);
+            res?
         } else {
             let action = WsSend::Query {
                 req_id,
@@ -1146,7 +1204,7 @@ impl WsTaos {
                 tokio::spawn(fetch(sender, res_id, tx, precision, names).in_current_span());
             } else {
                 // Start query.
-                let fields1 = fields.clone();
+                let fields = fields.clone();
                 tokio::spawn(
                     async move {
                         let mut metrics = QueryMetrics::default();
@@ -1188,7 +1246,7 @@ impl WsTaos {
                                     metrics.time_cost_in_fetch += now.elapsed();
                                     let mut raw = RawBlock::parse_from_raw_block_v2(
                                         raw,
-                                        &fields1,
+                                        &fields,
                                         fetch_resp.lengths.as_ref().unwrap(),
                                         fetch_resp.rows,
                                         precision,
