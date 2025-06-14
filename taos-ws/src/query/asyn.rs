@@ -4,7 +4,7 @@ use std::io::Write;
 use std::mem::transmute;
 use std::ops::ControlFlow;
 use std::pin::Pin;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
@@ -12,12 +12,11 @@ use std::time::{Duration, Instant};
 use anyhow::bail;
 use byteorder::{ByteOrder, LittleEndian};
 use faststr::FastStr;
-use flume::Sender;
+use flume::{Receiver, Sender};
 use futures::channel::oneshot;
-use futures::stream::SplitStream;
+use futures::stream::{SplitSink, SplitStream};
 use futures::{FutureExt, SinkExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
-use oneshot::channel as query_channel;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::{generate_req_id, InlinableWrite};
@@ -25,28 +24,35 @@ use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::select;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::time::{self, timeout};
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{error, instrument, trace, warn, Instrument};
 
-use super::infra::*;
+use super::messages::*;
 use super::TaosBuilder;
 
-type WsSender = flume::Sender<Message>;
+type WsSender = flume::Sender<ToMsgEnum>;
 
 type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
 type QueryInner = scc::HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = scc::HashMap<ResId, ReqId>;
 
-type WebSocketStreamReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+type WsStreamReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+type WsStreamSender = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 
 #[derive(Debug, Clone)]
 struct Version {
     version: String,
     is_support_binary_sql: bool,
+}
+
+impl Version {
+    fn is_v3(&self) -> bool {
+        self.version.starts_with('3')
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -58,12 +64,20 @@ pub(crate) struct WsQuerySender {
     queries: QueryAgent,
 }
 
+impl Drop for WsQuerySender {
+    fn drop(&mut self) {
+        trace!("dropping ws query sender");
+        // Clear all queries and results when dropping the sender.
+        // self.queries.clear();
+        // self.results.clear();
+    }
+}
+
 const SEND_TIMEOUT: Duration = Duration::from_millis(1000);
 
 impl WsQuerySender {
     fn req_id(&self) -> ReqId {
-        self.req_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        self.req_id.fetch_add(1, Ordering::SeqCst)
     }
 
     #[allow(dead_code)]
@@ -74,7 +88,7 @@ impl WsQuerySender {
     #[instrument(skip_all)]
     async fn send_recv(&self, msg: WsSend) -> RawResult<WsRecvData> {
         let req_id = msg.req_id();
-        let (tx, rx) = query_channel();
+        let (tx, rx) = oneshot::channel();
 
         let _ = self.queries.insert_async(req_id, tx).await;
 
@@ -89,37 +103,43 @@ impl WsQuerySender {
                 }
                 let _ = self.results.insert_async(args.id, args.req_id).await;
 
-                timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
+                timeout(SEND_TIMEOUT, self.sender.send_async(ToMsgEnum::WsSend(msg)))
                     .await
                     .map_err(Error::from)?
                     .map_err(Error::from)?;
             }
             WsSend::Binary(bytes) => {
-                timeout(SEND_TIMEOUT, self.sender.send_async(Message::Binary(bytes)))
-                    .await
-                    .map_err(Error::from)?
-                    .map_err(Error::from)?;
+                timeout(
+                    SEND_TIMEOUT,
+                    self.sender
+                        .send_async(ToMsgEnum::Message(Message::Binary(bytes))),
+                )
+                .await
+                .map_err(Error::from)?
+                .map_err(Error::from)?;
             }
             _ => {
                 tracing::trace!("[req id: {req_id}] prepare message: {msg:?}");
-                timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
+                timeout(SEND_TIMEOUT, self.sender.send_async(ToMsgEnum::WsSend(msg)))
                     .await
                     .map_err(Error::from)?
                     .map_err(Error::from)?;
             }
         }
+        // TODO: add timeout
         // handle the error
         tracing::trace!("[req id: {req_id}] message sent, wait for receiving");
         let res = rx
             .await
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
-            .map_err(Error::from)?;
+            .map_err(Error::from);
         tracing::trace!("[req id: {req_id}] message received: {res:?}");
+        let res = res?;
         Ok(res)
     }
 
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
-        timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
+        timeout(SEND_TIMEOUT, self.sender.send_async(ToMsgEnum::WsSend(msg)))
             .await
             .map_err(Error::from)?
             .map_err(Error::from)?;
@@ -127,20 +147,20 @@ impl WsQuerySender {
     }
 
     fn send_blocking(&self, msg: WsSend) -> RawResult<()> {
-        let _ = self.sender.send(msg.to_msg());
+        let _ = self.sender.send(ToMsgEnum::WsSend(msg));
         Ok(())
     }
 }
 
 #[derive(Debug)]
 pub struct WsTaos {
+    sender: Arc<WsQuerySender>,
     close_signal: watch::Sender<bool>,
-    sender: WsQuerySender,
 }
 
 impl Drop for WsTaos {
     fn drop(&mut self) {
-        trace!("dropping connection");
+        trace!("dropping ws connection");
         // Send close signal to reader/writer spawned tasks.
         let _ = self.close_signal.send(true);
     }
@@ -157,7 +177,7 @@ pub(crate) struct QueryMetrics {
 type BlockFuture = Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>;
 
 pub struct ResultSet {
-    pub(crate) sender: WsQuerySender,
+    pub(crate) sender: Arc<WsQuerySender>,
     pub(crate) args: WsResArgs,
     pub(crate) fields: Option<Vec<Field>>,
     pub(crate) fields_count: usize,
@@ -234,7 +254,7 @@ pub enum Error {
     #[error("{0}")]
     FetchError(#[from] tokio::sync::oneshot::error::RecvError),
     #[error(transparent)]
-    FlumeSendError(#[from] flume::SendError<Message>),
+    FlumeSendError(#[from] flume::SendError<ToMsgEnum>),
     #[error("Send data via websocket timeout")]
     SendTimeoutError(#[from] tokio::time::error::Elapsed),
     #[error("Query timed out with sql: {0}")]
@@ -244,15 +264,11 @@ pub enum Error {
     #[error("{0}")]
     DeError(#[from] DeError),
     #[error("WebSocket internal error: {0}")]
-    TungsteniteError(#[from] tokio_tungstenite::tungstenite::Error),
+    TungsteniteError(#[from] WsError),
     #[error(transparent)]
-    TungsteniteSendTimeoutError(
-        #[from] tokio::sync::mpsc::error::SendTimeoutError<tokio_tungstenite::tungstenite::Message>,
-    ),
+    TungsteniteSendTimeoutError(#[from] mpsc::error::SendTimeoutError<Message>),
     #[error(transparent)]
-    TungsteniteSendError(
-        #[from] tokio::sync::mpsc::error::SendError<tokio_tungstenite::tungstenite::Message>,
-    ),
+    TungsteniteSendError(#[from] mpsc::error::SendError<Message>),
     #[error(transparent)]
     IoError(#[from] std::io::Error),
     #[error("Websocket has been closed: {0}")]
@@ -320,16 +336,183 @@ impl From<Error> for RawError {
     }
 }
 
-#[instrument(skip_all)]
-async fn read_queries(
-    mut reader: WebSocketStreamReader,
+async fn run(
+    mut ws_stream_sender: WsStreamSender,
+    mut ws_stream_reader: WsStreamReader,
+    query_sender: Arc<WsQuerySender>,
+    msg_reader: Receiver<ToMsgEnum>,
+    mut close_reader: watch::Receiver<bool>,
+    info: TaosBuilder,
+) -> RawResult<()> {
+    let _msg_reader_clone = msg_reader.clone();
+    let _query_sender_clone = query_sender.clone();
+
+    loop {
+        let (err_tx, mut err_rx) = mpsc::channel(2);
+        let (close_tx, close_rx) = watch::channel(false);
+
+        let cache = Arc::new(scc::HashMap::new());
+
+        let send_handle = tokio::spawn(send_messages(
+            ws_stream_sender,
+            msg_reader.clone(),
+            err_tx.clone(),
+            close_rx.clone(),
+            cache.clone(),
+        ));
+
+        let recv_handle = tokio::spawn(read_messages(
+            ws_stream_reader,
+            query_sender.queries.clone(),
+            query_sender.results.clone(),
+            query_sender.sender.clone(),
+            query_sender.version.is_v3(),
+            close_rx,
+            err_tx,
+            cache.clone(),
+        ));
+
+        tokio::select! {
+            err = err_rx.recv() => {
+                if let Some(err) = err {
+                    tracing::warn!("WebSocket error: {}", err);
+                    if !is_disconnect_error(&err) {
+                        tracing::error!("WebSocket is not disconnect error: {}", err);
+                        handle_error(query_sender.queries.clone(), &err, cache).await;
+                        break;
+                    }
+                    // 接收错误后，需要 stop send 和 recv message task
+                    let _ = close_tx.send(true);
+                }
+            }
+            _ = close_reader.changed() => {
+                tracing::trace!("close reader task");
+                let _ = close_tx.send(true);
+                break;
+            }
+            // _ = send_handle => break,
+            // _ = recv_handle => break,
+        }
+
+        tracing::trace!("reconnecting...");
+        let ws_stream = info.reconnect(info.to_query_url()).await;
+        let ws_stream = match ws_stream {
+            Ok(ws) => ws,
+            Err(err) => {
+                tracing::error!("Reconnect error: {:?}", err);
+                let mut keys = Vec::with_capacity(query_sender.queries.len());
+                query_sender.queries.scan(|k, _| {
+                    keys.push(*k);
+                });
+                // cache 中的 key 也要处理
+                for k in keys {
+                    if let Some((_, sender)) = query_sender.queries.remove(&k) {
+                        let _ = sender
+                            .send(Err(RawError::from_string("websocket connection is closed")));
+                    }
+                }
+                tracing::error!("WebSocket connection is closed, error: {}", err);
+                return Ok(());
+            }
+        };
+
+        // 错误处理，返回给应用
+        tracing::trace!("reconnected");
+        (ws_stream_sender, ws_stream_reader) = ws_stream.split();
+        // (ws_stream_sender, ws_stream_reader) = reconnect(&info).await?;
+
+        // FIXME: do not clear the query sender's queries and results
+        // query_sender.queries.clear();
+        query_sender.results.clear();
+
+        tracing::trace!("clearing cache, cache: {:?}", cache);
+        let mut keys = Vec::new();
+        cache.scan(|key, _| keys.push(*key));
+        for key in keys {
+            if let Some((_, msg)) = cache.remove_async(&key).await {
+                // FIXME: 缓存中的数据放在后面了
+                let _res = query_sender
+                    .sender
+                    .send_async(ToMsgEnum::Message(msg))
+                    .await;
+                tracing::error!("Failed to send cached message, error: {:?}", _res);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn send_messages(
+    mut ws_stream_sender: WsStreamSender,
+    msg_reader: Receiver<ToMsgEnum>,
+    err_sender: mpsc::Sender<WsError>,
+    mut close_reader: watch::Receiver<bool>,
+    cache: Arc<scc::HashMap<ReqId, Message>>,
+) {
+    tracing::trace!("send start");
+
+    let mut interval = time::interval(Duration::from_secs(53));
+
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                if let Err(err) = ws_stream_sender.send(Message::Ping(b"TAOS".to_vec())).await {
+                    tracing::error!("Write websocket ping error: {}", err);
+                    err_sender.send(err).await.unwrap();
+                    break;
+                }
+                let _ = ws_stream_sender.flush().await;
+            }
+            v = close_reader.changed() => {
+                tracing::trace!("close signal received: {:?}", v);
+                let _= ws_stream_sender.send(Message::Close(None)).await;
+                let _ = ws_stream_sender.close().await;
+                tracing::trace!("close sender task");
+                break;
+            }
+            msg = msg_reader.recv_async() => {
+                match msg {
+                    Ok(msg) => {
+                        let trya = msg.trya();
+                        let req_id = msg.req_id();
+                        let message = msg.too_message();
+                        if trya {
+                            let _res = cache.insert(req_id, message.clone());
+                        }
+                        if let Err(err) = ws_stream_sender.send(message).await {
+                            tracing::error!("Write websocket error: {}", err);
+                            err_sender.send(err).await.unwrap();
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to receive message from channel: {}", e);
+                        break; // TODO: handle error
+                    }
+                }
+            }
+        }
+    }
+
+    tracing::trace!("send end");
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn read_messages(
+    mut reader: WsStreamReader,
     queries_sender: QueryAgent,
     fetches_sender: Arc<QueryResMapper>,
     ws2: WsSender,
     is_v3: bool,
     mut close_listener: watch::Receiver<bool>,
+    err_sender: mpsc::Sender<WsError>,
+    cache: Arc<scc::HashMap<ReqId, Message>>,
 ) {
+    tracing::trace!("reader start");
+
     let parse_frame = |frame: Message| {
+        let cache = cache.clone();
         match frame {
             Message::Text(text) => {
                 tracing::trace!("received json response: {text}",);
@@ -366,10 +549,10 @@ async fn read_queries(
                         let id = fetch.id;
                         if fetch.completed {
                             tokio::spawn(async move {
-                                let _ = ws2
-                                    .send_async(
-                                        WsSend::FreeResult(WsResArgs { req_id, id }).to_msg(),
-                                    )
+                                let _ =
+                                    ws2.send_async(ToMsgEnum::WsSend(WsSend::FreeResult(
+                                        WsResArgs { req_id, id },
+                                    )))
                                     .await;
                             });
                         }
@@ -430,6 +613,8 @@ async fn read_queries(
                     }
                     _ => unreachable!(),
                 }
+
+                let _ = cache.remove(&req_id);
             }
             Message::Binary(payload) => {
                 let queries_sender = queries_sender.clone();
@@ -468,6 +653,9 @@ async fn read_queries(
                         } else {
                             slice.read_inlined_bytes::<4>().unwrap()
                         };
+
+                        cache.remove(&block_req_id);
+
                         if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
                             sender
                                 .send(Ok(WsRecvData::BlockNew {
@@ -488,8 +676,8 @@ async fn read_queries(
                     } else {
                         let res_id = slice.read_u64().unwrap();
                         if let Some((_, req_id)) = fetches_sender.remove(&res_id) {
+                            cache.remove(&req_id);
                             if is_v3 {
-                                // v3
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                     tracing::trace!("send data to fetches with id {}", res_id);
                                     sender
@@ -503,21 +691,18 @@ async fn read_queries(
                                         "req_id {res_id} not detected, message might be lost"
                                     );
                                 }
+                            } else if let Some((_, sender)) = queries_sender.remove(&req_id) {
+                                tracing::trace!("send data to fetches with id {}", res_id);
+                                sender
+                                    .send(Ok(WsRecvData::BlockV2 {
+                                        timing,
+                                        raw: block[offset..].to_vec(),
+                                    }))
+                                    .unwrap();
                             } else {
-                                // v2
-                                if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                    tracing::trace!("send data to fetches with id {}", res_id);
-                                    sender
-                                        .send(Ok(WsRecvData::BlockV2 {
-                                            timing,
-                                            raw: block[offset..].to_vec(),
-                                        }))
-                                        .unwrap();
-                                } else {
-                                    tracing::warn!(
-                                        "req_id {res_id} not detected, message might be lost"
-                                    );
-                                }
+                                tracing::warn!(
+                                    "req_id {res_id} not detected, message might be lost"
+                                );
                             }
                         } else {
                             tracing::warn!("result id {res_id} not found");
@@ -548,7 +733,9 @@ async fn read_queries(
             Message::Ping(data) => {
                 let ws2 = ws2.clone();
                 tokio::spawn(async move {
-                    let _ = ws2.send_async(Message::Pong(data)).await;
+                    let _ = ws2
+                        .send_async(ToMsgEnum::Message(Message::Pong(data)))
+                        .await;
                 });
             }
             Message::Pong(_) => tracing::trace!("received pong message, do nothing"),
@@ -560,6 +747,7 @@ async fn read_queries(
 
         ControlFlow::Continue(())
     };
+
     loop {
         tokio::select! {
             res = reader.try_next() => {
@@ -573,36 +761,70 @@ async fn read_queries(
                     }
                     Err(e) => {
                         tracing::error!("reader err: {e:?}");
+                        err_sender.send(e).await.unwrap();
                         break;
                     }
                 }
             }
             _ = close_listener.changed() => {
+                // TODO: handle close signal
                 tracing::trace!("close reader task");
-                let mut keys = Vec::with_capacity(queries_sender.len());
-                queries_sender.scan(|k, _| {
-                    keys.push(*k);
-                });
-                for k in keys {
-                    if let Some((_, sender)) = queries_sender.remove(&k) {
-                        let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "close signal received")));
-                    }
-                }
+                // let mut keys = Vec::with_capacity(queries_sender.len());
+                // queries_sender.scan(|k, _| {
+                //     keys.push(*k);
+                // });
+                // for k in keys {
+                //     if let Some((_, sender)) = queries_sender.remove(&k) {
+                //         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "close signal received")));
+                //     }
+                // }
                 break;
             }
         }
     }
-    if queries_sender.is_empty() {
-        return;
-    }
 
-    let mut keys = Vec::with_capacity(queries_sender.len());
-    queries_sender.scan(|k, _| {
-        keys.push(*k);
-    });
+    tracing::trace!("reader end");
+    // if queries_sender.is_empty() {
+    //     return;
+    // }
+
+    // let mut keys = Vec::with_capacity(queries_sender.len());
+    // queries_sender.scan(|k, _| {
+    //     keys.push(*k);
+    // });
+    // for k in keys {
+    //     if let Some((_, sender)) = queries_sender.remove(&k) {
+    //         let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
+    //     }
+    // }
+}
+
+fn is_disconnect_error(err: &WsError) -> bool {
+    matches!(
+        err,
+        WsError::ConnectionClosed
+            | WsError::AlreadyClosed
+            | WsError::Io(_)
+            | WsError::Tls(_)
+            | WsError::Protocol(_)
+    )
+}
+
+async fn handle_error(
+    queries3: QueryAgent,
+    err: &WsError,
+    cache: Arc<scc::HashMap<ReqId, Message>>,
+) {
+    let mut keys = Vec::new();
+    queries3.scan(|k, _| keys.push(*k));
     for k in keys {
-        if let Some((_, sender)) = queries_sender.remove(&k) {
-            let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
+        if !cache.contains_async(&k).await {
+            if let Some((_, sender)) = queries3.remove_async(&k).await {
+                let _ = sender.send(Err(RawError::new(
+                    WS_ERROR_NO::CONN_CLOSED.as_code(),
+                    err.to_string(),
+                )));
+            }
         }
     }
 }
@@ -630,6 +852,119 @@ pub fn is_support_binary_sql(v1: &str) -> bool {
     is_greater_than_or_equal_to(v1, "3.3.2.0")
 }
 
+async fn send_version(
+    ws_sender: &mut WsStreamSender,
+    ws_reader: &mut WsStreamReader,
+) -> RawResult<Version> {
+    let version = WsSend::Version;
+    ws_sender.send(version.to_msg()).await.map_err(|err| {
+        RawError::any(err)
+            .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+            .context("Send version request message error")
+    })?;
+    let duration = Duration::from_secs(8);
+    let version_future = async {
+        let max_non_version = 5;
+        let mut count = 0;
+        loop {
+            count += 1;
+            if let Some(message) = ws_reader.next().await {
+                match message {
+                    Ok(Message::Text(text)) => {
+                        let v: WsRecv = serde_json::from_str(&text).map_err(|err| {
+                            RawError::any(err)
+                                .with_code(WS_ERROR_NO::DE_ERROR.as_code())
+                                .context("Parser text as json error")
+                        })?;
+                        let (_req_id, data, ok) = v.ok();
+                        match data {
+                            WsRecvData::Version { version } => {
+                                ok?;
+                                return Ok(version);
+                            }
+                            _ => return Ok("2.x".to_string()),
+                        }
+                    }
+                    Ok(Message::Ping(bytes)) => {
+                        ws_sender.send(Message::Pong(bytes)).await.map_err(|err| {
+                            RawError::any(err)
+                                .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                .context("Send pong message error")
+                        })?;
+                        if count >= max_non_version {
+                            return Ok("2.x".to_string());
+                        }
+                        count += 1;
+                    }
+                    _ => return Ok("2.x".to_string()),
+                }
+            } else {
+                bail!("Expect version message, but got nothing");
+            }
+        }
+    }
+    .in_current_span();
+    let version = match tokio::time::timeout(duration, version_future).await {
+        Ok(Ok(version)) => version,
+        Ok(Err(err)) => {
+            return Err(RawError::any(err).context("Version fetching error"));
+        }
+        Err(_) => "2.x".to_string(),
+    };
+    let is_v3 = !version.starts_with('2');
+    let is_support_binary_sql = is_v3 && is_support_binary_sql(&version);
+
+    Ok(Version {
+        version,
+        is_support_binary_sql,
+    })
+}
+
+async fn send_conn(
+    ws_sender: &mut WsStreamSender,
+    ws_reader: &mut WsStreamReader,
+    info: &TaosBuilder,
+) -> RawResult<()> {
+    let login = WsSend::Conn {
+        req_id: generate_req_id(),
+        req: info.to_conn_request(),
+    };
+    ws_sender.send(login.to_msg()).await.map_err(Error::from)?;
+    while let Some(Ok(message)) = ws_reader.next().await {
+        match message {
+            Message::Text(text) => {
+                let v: WsRecv = serde_json::from_str(&text).unwrap();
+                let (_req_id, data, ok) = v.ok();
+                match data {
+                    WsRecvData::Conn => {
+                        ok?;
+                        break;
+                    }
+                    WsRecvData::Version { .. } => {}
+                    data => {
+                        return Err(RawError::from_string(format!(
+                            "Unexpected login result: {data:?}"
+                        )))
+                    }
+                }
+            }
+            Message::Ping(bytes) => {
+                ws_sender
+                    .send(Message::Pong(bytes))
+                    .await
+                    .map_err(RawError::from_any)?;
+            }
+            _ => {
+                return Err(RawError::from_string(format!(
+                    "unexpected message on login: {message:?}"
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 impl WsTaos {
     /// Build TDengine WebSocket client from dsn.
     ///
@@ -643,197 +978,53 @@ impl WsTaos {
     }
 
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        let ws = info.build_stream(info.to_query_url()).await?;
+        let ws_stream = info.build_stream(info.to_query_url()).await?;
+        let (mut ws_stream_tx, mut ws_stream_rx) = ws_stream.split();
 
-        let req_id = 0;
-        let (mut sender, mut reader) = ws.split();
+        let version = send_version(&mut ws_stream_tx, &mut ws_stream_rx).await?;
+        send_conn(&mut ws_stream_tx, &mut ws_stream_rx, info).await?;
 
-        let version = WsSend::Version;
-        sender.send(version.to_msg()).await.map_err(|err| {
-            RawError::any(err)
-                .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
-                .context("Send version request message error")
-        })?;
-        let duration = Duration::from_secs(8);
-        let version_future = async {
-            let max_non_version = 5;
-            let mut count = 0;
-            loop {
-                count += 1;
-                if let Some(message) = reader.next().await {
-                    match message {
-                        Ok(Message::Text(text)) => {
-                            let v: WsRecv = serde_json::from_str(&text).map_err(|err| {
-                                RawError::any(err)
-                                    .with_code(WS_ERROR_NO::DE_ERROR.as_code())
-                                    .context("Parser text as json error")
-                            })?;
-                            let (_req_id, data, ok) = v.ok();
-                            match data {
-                                WsRecvData::Version { version } => {
-                                    ok?;
-                                    return Ok(version);
-                                }
-                                _ => return Ok("2.x".to_string()),
-                            }
-                        }
-                        Ok(Message::Ping(bytes)) => {
-                            sender.send(Message::Pong(bytes)).await.map_err(|err| {
-                                RawError::any(err)
-                                    .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
-                                    .context("Send pong message error")
-                            })?;
-                            if count >= max_non_version {
-                                return Ok("2.x".to_string());
-                            }
-                            count += 1;
-                        }
-                        _ => return Ok("2.x".to_string()),
-                    }
-                } else {
-                    bail!("Expect version message, but got nothing");
-                }
-            }
-        }
-        .in_current_span();
-        let version = match tokio::time::timeout(duration, version_future).await {
-            Ok(Ok(version)) => version,
-            Ok(Err(err)) => {
-                return Err(RawError::any(err).context("Version fetching error"));
-            }
-            Err(_) => "2.x".to_string(),
+        let (close_tx, close_rx) = watch::channel(false);
+        let (msg_tx, msg_rx) = flume::bounded(64);
+
+        let queries = Arc::new(QueryInner::new());
+        let results = Arc::new(QueryResMapper::new());
+
+        let sender = Arc::new(WsQuerySender {
+            version,
+            req_id: Arc::default(),
+            sender: msg_tx,
+            queries,
+            results,
+        });
+
+        let ws_taos = WsTaos {
+            close_signal: close_tx,
+            sender: sender.clone(),
         };
-        let is_v3 = !version.starts_with('2');
-        let is_support_binary_sql = is_v3 && is_support_binary_sql(&version);
 
-        let login = WsSend::Conn {
-            req_id,
-            req: info.to_conn_request(),
-        };
-        sender.send(login.to_msg()).await.map_err(Error::from)?;
-        while let Some(Ok(message)) = reader.next().await {
-            match message {
-                Message::Text(text) => {
-                    let v: WsRecv = serde_json::from_str(&text).unwrap();
-                    let (_req_id, data, ok) = v.ok();
-                    match data {
-                        WsRecvData::Conn => {
-                            ok?;
-                            break;
-                        }
-                        WsRecvData::Version { .. } => {}
-                        data => {
-                            return Err(RawError::from_string(format!(
-                                "Unexpected login result: {data:?}"
-                            )))
-                        }
-                    }
-                }
-                Message::Ping(bytes) => {
-                    sender
-                        .send(Message::Pong(bytes))
-                        .await
-                        .map_err(RawError::from_any)?;
-                }
-                _ => {
-                    return Err(RawError::from_string(format!(
-                        "unexpected message on login: {message:?}"
-                    )));
-                }
-            }
-        }
-
-        let queries2 = Arc::new(QueryInner::new());
-
-        let fetches_sender = Arc::new(QueryResMapper::new());
-        let results = fetches_sender.clone();
-
-        let queries2_cloned = queries2.clone();
-        let queries3 = queries2.clone();
-
-        let (ws, msg_recv) = flume::bounded(64);
-        let ws2 = ws.clone();
-
-        // Connection watcher
-        let (tx, mut rx) = watch::channel(false);
-        let close_listener = rx.clone();
-
-        tokio::spawn(async move {
-            let mut interval = time::interval(Duration::from_secs(53));
-
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        if let Err(err) = sender.send(Message::Ping(b"TAOS".to_vec())).await {
-                            tracing::error!("Write websocket ping error: {}", err);
-                            break;
-                        }
-                        let _ = sender.flush().await;
-                    }
-                    _ = rx.changed() => {
-                        let _= sender.send(Message::Close(None)).await;
-                        let _ = sender.close().await;
-                        tracing::trace!("close sender task");
-                        break;
-                    }
-                    msg = msg_recv.recv_async() => {
-                        match msg {
-                            Ok(msg) => {
-                                if let Err(err) = sender.send(msg).await {
-                                    tracing::error!("Write websocket error: {}", err);
-                                    let mut keys = Vec::new();
-                                    queries3.scan(|k, _| keys.push(*k));
-                                    for k in keys {
-                                        if let Some((_, sender)) = queries3.remove_async(&k).await {
-                                            let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.to_string())));
-                                        }
-                                    }
-                                    break;
-                                }
-                            }
-                            Err(_) => {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }.in_current_span());
-
-        tokio::spawn(read_queries(
-            reader,
-            queries2,
-            fetches_sender,
-            ws2,
-            is_v3,
-            close_listener,
+        tokio::spawn(run(
+            ws_stream_tx,
+            ws_stream_rx,
+            sender,
+            msg_rx,
+            close_rx,
+            info.clone(),
         ));
 
-        Ok(Self {
-            close_signal: tx,
-            sender: WsQuerySender {
-                version: Version {
-                    version,
-                    is_support_binary_sql,
-                },
-                req_id: Arc::default(),
-                sender: ws,
-                queries: queries2_cloned,
-                results,
-            },
-        })
+        Ok(ws_taos)
     }
 
     pub async fn write_meta(&self, raw: &RawMeta) -> RawResult<()> {
+        const ACTION: u64 = 3;
+
         let req_id = self.sender.req_id();
         let message_id = req_id;
-        let raw_meta_message = 3; // magic number from taosAdapter.
 
         let mut meta = Vec::new();
         meta.write_u64_le(req_id).map_err(Error::from)?;
         meta.write_u64_le(message_id).map_err(Error::from)?;
-        meta.write_u64_le(raw_meta_message as u64)
-            .map_err(Error::from)?;
+        meta.write_u64_le(ACTION).map_err(Error::from)?;
 
         meta.write_u32_le(raw.raw_len()).map_err(Error::from)?;
         meta.write_u16_le(raw.raw_type()).map_err(Error::from)?;
@@ -889,13 +1080,12 @@ impl WsTaos {
         let message_id = req_id;
 
         if self.version().starts_with("3.0.1.") {
-            let raw_block_message = 4; // action number from `taosAdapter/controller/rest/const.go:L56`.
+            const ACTION: u64 = 4;
 
             let mut meta = Vec::new();
             meta.write_u64_le(req_id).map_err(Error::from)?;
             meta.write_u64_le(message_id).map_err(Error::from)?;
-            meta.write_u64_le(raw_block_message as u64)
-                .map_err(Error::from)?;
+            meta.write_u64_le(ACTION).map_err(Error::from)?;
             meta.write_u32_le(raw.nrows() as u32).map_err(Error::from)?;
             meta.write_inlined_str::<2>(raw.table_name().unwrap())
                 .map_err(Error::from)?;
@@ -909,13 +1099,12 @@ impl WsTaos {
                 _ => Err(RawError::from_string("write raw block error"))?,
             }
         } else {
-            let raw_block_message = 5; // action number from `taosAdapter/controller/rest/const.go:L56`.
+            const ACTION: u64 = 5;
 
             let mut meta = Vec::new();
             meta.write_u64_le(req_id).map_err(Error::from)?;
             meta.write_u64_le(message_id).map_err(Error::from)?;
-            meta.write_u64_le(raw_block_message as u64)
-                .map_err(Error::from)?;
+            meta.write_u64_le(ACTION).map_err(Error::from)?;
             meta.write_u32_le(raw.nrows() as u32).map_err(Error::from)?;
             meta.write_inlined_str::<2>(raw.table_name().unwrap())
                 .map_err(Error::from)?;
@@ -1077,13 +1266,12 @@ impl WsTaos {
     }
 
     pub async fn s_exec(&self, sql: &str) -> RawResult<usize> {
-        let req_id = self.sender.req_id();
-        let action = WsSend::Query {
-            req_id,
+        let req = WsSend::Query {
+            req_id: self.sender.req_id(),
             sql: sql.to_string(),
         };
-        match self.sender.send_recv(action).await? {
-            WsRecvData::Query(query) => Ok(query.affected_rows),
+        match self.sender.send_recv(req).await? {
+            WsRecvData::Query(resp) => Ok(resp.affected_rows),
             _ => unreachable!(),
         }
     }
@@ -1145,13 +1333,13 @@ impl WsTaos {
         self.sender.send_recv(req).await
     }
 
-    pub(crate) fn sender(&self) -> WsQuerySender {
+    pub(crate) fn sender(&self) -> Arc<WsQuerySender> {
         self.sender.clone()
     }
 }
 
 pub(crate) async fn fetch_binary(
-    query_sender: WsQuerySender,
+    query_sender: Arc<WsQuerySender>,
     res_id: ResId,
     raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
     precision: Precision,
@@ -1232,7 +1420,7 @@ pub(crate) async fn fetch_binary(
 }
 
 async fn fetch(
-    query_sender: WsQuerySender,
+    query_sender: Arc<WsQuerySender>,
     res_id: ResId,
     raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
     precision: Precision,
@@ -1358,6 +1546,7 @@ impl ResultSet {
     }
 
     pub async fn stop(&self) {
+        println!("Stop result set: {}", self.args.id);
         if let Some((_, req_id)) = self.sender.results.remove_async(&self.args.id).await {
             self.sender.queries.remove_async(&req_id).await;
         }
@@ -1539,17 +1728,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use flume::unbounded;
     use futures::TryStreamExt;
 
     use super::*;
 
     #[test]
     fn test_errno() {
-        let (tx, rx) = unbounded();
+        let (tx, rx) = flume::unbounded();
         drop(rx);
 
-        let send_err = tx.send(Message::Text("oh, no!".to_string())).unwrap_err();
+        let send_err = tx.send(ToMsgEnum::WsSend(WsSend::Version)).unwrap_err();
+
         let err = Error::FlumeSendError(send_err);
         let errno: i32 = err.errno().into();
         assert_eq!(WS_ERROR_NO::CONN_CLOSED as i32, errno);
@@ -1942,6 +2131,53 @@ mod tests {
         let (status, details) = check_server_status(dsn, None, 0).await?;
         assert_eq!(status, 2);
         println!("status: {status}, details: {details}");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_s_exec() -> anyhow::Result<()> {
+        let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+        taos.exec_many([
+            "drop database if exists test_1748241233",
+            "create database test_1748241233",
+            "use test_1748241233",
+            "create table t0(ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let affected_rows = taos.s_exec("insert into t0 values(now, 1)").await?;
+        assert_eq!(affected_rows, 1);
+
+        taos.exec("drop database test_1748241233").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_ws_disconnect() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .compact()
+            .try_init();
+
+        let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+
+        tracing::info!("Waiting for 5 seconds before executing SQL...");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        taos.exec_many([
+            "drop database if exists test_1749775774",
+            "create database test_1749775774",
+            "use test_1749775774",
+            "create table t0(ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let affected_rows = taos.s_exec("insert into t0 values(now, 1)").await?;
+        assert_eq!(affected_rows, 1);
 
         Ok(())
     }
