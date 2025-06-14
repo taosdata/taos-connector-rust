@@ -1339,7 +1339,7 @@ impl WsTaos {
 }
 
 pub(crate) async fn fetch_binary(
-    query_sender: WsQuerySender,
+    query_sender: Arc<WsQuerySender>,
     res_id: ResId,
     raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
     precision: Precision,
@@ -1420,7 +1420,7 @@ pub(crate) async fn fetch_binary(
 }
 
 async fn fetch(
-    query_sender: WsQuerySender,
+    query_sender: Arc<WsQuerySender>,
     res_id: ResId,
     raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
     precision: Precision,
