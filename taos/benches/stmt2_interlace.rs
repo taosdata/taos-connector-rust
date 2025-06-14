@@ -112,7 +112,8 @@ async fn produce_data(
 
     for i in 0..thread_cnt {
         let sender = senders[i].clone();
-        tokio::spawn(async move {
+        // tokio::spawn(async move {
+        std::thread::spawn(move || {
             println!("Producer thread[{i}] starts producing data");
 
             let mut rng = StdRng::from_entropy();
@@ -144,7 +145,8 @@ async fn produce_data(
 
                     params.push(Stmt2BindParam::new(Some(tbname), None, Some(cols)));
                     if params.len() % batch_cnt == 0 {
-                        sender.send_async(params.drain(..).collect()).await.unwrap();
+                        // sender.send_async(params.drain(..).collect()).await.unwrap();
+                        sender.send(params.drain(..).collect()).unwrap();
                         params.clear();
                     }
                 }
