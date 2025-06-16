@@ -198,7 +198,7 @@ async fn consume_data(
                 start.elapsed()
             );
 
-            start.elapsed().as_millis()
+            start.elapsed().as_secs()
         });
 
         tasks.push(task);
@@ -211,7 +211,7 @@ async fn consume_data(
 
     println!(
         "Consuming data end, sleep(single thread) = {:?}\n",
-        total_record_cnt / total_time as usize / thread_cnt
+        total_record_cnt / total_time as usize
     );
 }
 
