@@ -492,7 +492,6 @@ impl TaosBuilder {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = None;
         config.max_message_size = None;
-        config.write_buffer_size = 1024 * 1024; // 1MB
         if self.compression {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "deflate")] {

@@ -204,7 +204,7 @@ async fn consume_data(
             }
 
             println!(
-                "Consumer thread[{i}] ends consuming data, elapsed = {:?}, bind time = {:?}, exec time = {:?}",
+                "Consumer thread[{i}] ends consuming data, elapsed = {:?}, bind time = {:?}ms, exec time = {:?}ms",
                 start.elapsed(), bind_time, exec_time
             );
 

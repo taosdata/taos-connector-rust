@@ -560,6 +560,7 @@ async fn read_queries(
 
         ControlFlow::Continue(())
     };
+    let start = Instant::now();
     loop {
         tokio::select! {
             res = reader.try_next() => {
@@ -592,6 +593,9 @@ async fn read_queries(
             }
         }
     }
+    let elapsed = start.elapsed();
+    println!("recv ws resp elapsed: {:?}", elapsed);
+
     if queries_sender.is_empty() {
         return;
     }
@@ -760,6 +764,7 @@ impl WsTaos {
 
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_secs(53));
+            let start = Instant::now();
 
             loop {
                 tokio::select! {
@@ -798,6 +803,9 @@ impl WsTaos {
                     }
                 }
             }
+
+            let elapsed = start.elapsed();
+            println!("send ws req elapsed: {:?}", elapsed);
         }.in_current_span());
 
         tokio::spawn(read_queries(
