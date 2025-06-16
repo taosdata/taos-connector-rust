@@ -24,9 +24,15 @@ pub mod query;
 use query::{Error as QueryError, WsConnReq};
 pub use query::{ResultSet, Taos};
 pub(crate) use taos_query::block_in_place_or_global;
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
