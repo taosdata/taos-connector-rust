@@ -163,13 +163,15 @@ async fn consume_data(
     mut receivers: Vec<Receiver<Vec<Stmt2BindParam>>>,
     total_record_cnt: usize,
 ) {
+    let thread_cnt = receivers.len();
+
     let now = Local::now();
     let time = now.format("%Y-%m-%d %H:%M:%S").to_string();
     println!("Consuming data start, time = {time}");
 
     let mut tasks = vec![];
 
-    for i in 0..receivers.len() {
+    for i in 0..thread_cnt {
         let db = db.to_owned();
         let receiver = receivers.pop().unwrap();
 
@@ -209,7 +211,7 @@ async fn consume_data(
 
     println!(
         "Consuming data end, sleep(single thread) = {:?}\n",
-        total_record_cnt / total_time as usize / receivers.len()
+        total_record_cnt / total_time as usize / thread_cnt
     );
 }
 
