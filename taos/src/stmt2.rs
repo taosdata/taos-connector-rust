@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use taos_query::stmt2::Stmt2BindParam;
 use taos_query::RawResult;
 use taos_ws::Stmt2 as WsStmt2;
@@ -31,7 +29,7 @@ impl taos_query::stmt2::Stmt2Bindable<super::Taos> for Stmt2 {
         Ok(self)
     }
 
-    fn bind(&mut self, params: Arc<Vec<Stmt2BindParam>>) -> RawResult<&mut Self> {
+    fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
         match &mut self.0 {
             Stmt2Inner::Ws(stmt2) => {
                 stmt2.bind(params)?;
@@ -77,7 +75,7 @@ impl taos_query::stmt2::Stmt2AsyncBindable<super::Taos> for Stmt2 {
         Ok(self)
     }
 
-    async fn bind(&mut self, params: Arc<Vec<Stmt2BindParam>>) -> RawResult<&mut Self> {
+    async fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
         match &mut self.0 {
             Stmt2Inner::Ws(stmt2) => {
                 stmt2.bind(params).await?;
