@@ -3845,6 +3845,7 @@ dependencies = [
  "itertools 0.13.0",
  "once_cell",
  "pretty_env_logger",
+ "rayon",
  "scc",
  "serde",
  "serde_json",

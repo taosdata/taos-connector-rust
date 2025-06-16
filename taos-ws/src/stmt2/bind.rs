@@ -1,4 +1,5 @@
 use byteorder::{ByteOrder, LittleEndian};
+use rayon::prelude::*;
 use taos_query::common::{BorrowedValue, ColumnView, Value};
 use taos_query::stmt2::Stmt2BindParam;
 use taos_query::RawResult;
@@ -140,62 +141,108 @@ pub(super) fn bind_params_to_bytes(
 }
 
 fn get_tbname_lens(params: &[Stmt2BindParam]) -> RawResult<Vec<u16>> {
-    let mut tbname_lens = vec![0u16; params.len()];
-    for (i, param) in params.iter().enumerate() {
-        if param.table_name().map_or(true, |s| s.is_empty()) {
-            return Err("table name is empty".into());
-        }
-        let tbname = param.table_name().unwrap();
-        // Add 1 because the table name ends with '\0'
-        tbname_lens[i] = (tbname.len() + 1) as _;
-    }
-    Ok(tbname_lens)
+    params
+        .par_iter()
+        .map(|param| {
+            let tbname = param.table_name().ok_or("table name is empty")?;
+            if tbname.is_empty() {
+                return Err("table name is empty".into());
+            }
+            // Add 1 because the table name ends with '\0'
+            Ok((tbname.len() + 1) as u16)
+        })
+        .collect()
+
+    // let mut tbname_lens = vec![0u16; params.len()];
+    // for (i, param) in params.iter().enumerate() {
+    //     if param.table_name().map_or(true, |s| s.is_empty()) {
+    //         return Err("table name is empty".into());
+    //     }
+    //     let tbname = param.table_name().unwrap();
+    //     // Add 1 because the table name ends with '\0'
+    //     tbname_lens[i] = (tbname.len() + 1) as _;
+    // }
+    // Ok(tbname_lens)
 }
 
 fn get_tag_lens(params: &[Stmt2BindParam], tag_cnt: usize) -> RawResult<Vec<u32>> {
-    let mut tag_lens = vec![0u32; params.len()];
-    for (i, param) in params.iter().enumerate() {
-        if param.tags().is_none() {
-            return Err("tags is empty".into());
-        }
+    params
+        .par_iter()
+        .map(|param| {
+            let tags = param.tags().ok_or("tags is empty")?;
+            if tags.len() != tag_cnt {
+                return Err("tags len mismatch".into());
+            }
+            let mut len = 0;
+            for tag in tags {
+                let have_len = tag.ty().fixed_length() == 0;
+                len += get_tc_header_len(1, have_len);
+                len += get_tag_data_len(tag);
+            }
+            Ok(len as u32)
+        })
+        .collect()
 
-        let tags = param.tags().unwrap();
-        if tags.len() != tag_cnt {
-            return Err("tags len mismatch".into());
-        }
+    // let mut tag_lens = vec![0u32; params.len()];
+    // for (i, param) in params.iter().enumerate() {
+    //     if param.tags().is_none() {
+    //         return Err("tags is empty".into());
+    //     }
 
-        let mut len = 0;
-        for tag in tags {
-            let have_len = tag.ty().fixed_length() == 0;
-            len += get_tc_header_len(1, have_len);
-            len += get_tag_data_len(tag);
-        }
-        tag_lens[i] = len as _;
-    }
-    Ok(tag_lens)
+    //     let tags = param.tags().unwrap();
+    //     if tags.len() != tag_cnt {
+    //         return Err("tags len mismatch".into());
+    //     }
+
+    //     let mut len = 0;
+    //     for tag in tags {
+    //         let have_len = tag.ty().fixed_length() == 0;
+    //         len += get_tc_header_len(1, have_len);
+    //         len += get_tag_data_len(tag);
+    //     }
+    //     tag_lens[i] = len as _;
+    // }
+    // Ok(tag_lens)
 }
 
 fn get_col_lens(params: &[Stmt2BindParam], col_cnt: usize) -> RawResult<Vec<u32>> {
-    let mut col_lens = vec![0u32; params.len()];
-    for (i, param) in params.iter().enumerate() {
-        if param.columns().is_none() {
-            return Err("columns is empty".into());
-        }
+    params
+        .par_iter()
+        .map(|param| {
+            let cols = param.columns().ok_or("columns is empty")?;
+            if cols.len() != col_cnt {
+                return Err("columns len mismatch".into());
+            }
+            let mut len = 0;
+            for col in cols {
+                let have_len = col.as_ty().fixed_length() == 0;
+                len += get_tc_header_len(col.len(), have_len);
+                len += get_col_data_len(col);
+            }
+            Ok(len as u32)
+        })
+        .collect()
 
-        let cols = param.columns().unwrap();
-        if cols.len() != col_cnt {
-            return Err("columns len mismatch".into());
-        }
+    // let mut col_lens = vec![0u32; params.len()];
+    // for (i, param) in params.iter().enumerate() {
+    //     if param.columns().is_none() {
+    //         return Err("columns is empty".into());
+    //     }
 
-        let mut len = 0;
-        for col in cols {
-            let have_len = col.as_ty().fixed_length() == 0;
-            len += get_tc_header_len(col.len(), have_len);
-            len += get_col_data_len(col);
-        }
-        col_lens[i] = len as _;
-    }
-    Ok(col_lens)
+    //     let cols = param.columns().unwrap();
+    //     if cols.len() != col_cnt {
+    //         return Err("columns len mismatch".into());
+    //     }
+
+    //     let mut len = 0;
+    //     for col in cols {
+    //         let have_len = col.as_ty().fixed_length() == 0;
+    //         len += get_tc_header_len(col.len(), have_len);
+    //         len += get_col_data_len(col);
+    //     }
+    //     col_lens[i] = len as _;
+    // }
+    // Ok(col_lens)
 }
 
 fn get_tc_header_len(num: usize, have_len: bool) -> usize {
