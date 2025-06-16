@@ -56,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    consume_data(db, receivers).await;
+    consume_data(db, receivers, subtable_cnt * record_cnt).await;
 
     check_count(&taos, subtable_cnt * record_cnt).await?;
 
@@ -158,12 +158,15 @@ async fn produce_data(
     }
 }
 
-async fn consume_data(db: &str, mut receivers: Vec<Receiver<Vec<Stmt2BindParam>>>) {
+async fn consume_data(
+    db: &str,
+    mut receivers: Vec<Receiver<Vec<Stmt2BindParam>>>,
+    total_record_cnt: usize,
+) {
     let now = Local::now();
     let time = now.format("%Y-%m-%d %H:%M:%S").to_string();
     println!("Consuming data start, time = {time}");
 
-    let start = Instant::now();
     let mut tasks = vec![];
 
     for i in 0..receivers.len() {
@@ -192,16 +195,22 @@ async fn consume_data(db: &str, mut receivers: Vec<Receiver<Vec<Stmt2BindParam>>
                 "Consumer thread[{i}] ends consuming data, elapsed = {:?}",
                 start.elapsed()
             );
+
+            start.elapsed().as_millis()
         });
 
         tasks.push(task);
     }
 
+    let mut total_time = 0;
     for task in tasks {
-        task.await.unwrap();
+        total_time += task.await.unwrap();
     }
 
-    println!("Consuming data end, elapsed = {:?}\n", start.elapsed());
+    println!(
+        "Consuming data end, sleep(single thread) = {:?}\n",
+        total_record_cnt / total_time as usize / receivers.len()
+    );
 }
 
 async fn check_count(taos: &Taos, cnt: usize) -> anyhow::Result<()> {
