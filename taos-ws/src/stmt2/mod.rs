@@ -90,39 +90,40 @@ impl Stmt2 {
         unreachable!()
     }
 
-    // async fn bind(&self, params: Arc<Vec<Stmt2BindParam>>) -> RawResult<()> {
-    async fn bind(&self, params: &[Stmt2BindParam]) -> RawResult<()> {
-        // let stmt_id = self.stmt_id.unwrap();
-        // let is_insert = self.is_insert.unwrap();
-        // let fields = self.fields.clone();
-        // let fields_count = self.fields_count.unwrap();
-        // let params = params.to_vec();
-        // let params = Arc::from(params);
-
-        // let bytes = tokio::task::spawn_blocking(move || {
-        //     let fields = fields;
-        //     let params = params;
-        //     bind::bind_params_to_bytes(
-        //         &params,
-        //         generate_req_id(),
-        //         stmt_id,
-        //         is_insert,
-        //         fields.as_ref(),
-        //         fields_count,
-        //     )
-        // })
-        // .await
-        // .unwrap()?;
-
+    // async fn bind(&self, params: &[Stmt2BindParam]) -> RawResult<()> {
+    async fn bind(&self, params: Arc<Vec<Stmt2BindParam>>) -> RawResult<()> {
         let start = Instant::now();
-        let bytes = bind::bind_params_to_bytes(
-            params,
-            generate_req_id(),
-            self.stmt_id.unwrap(),
-            self.is_insert.unwrap(),
-            self.fields.as_ref(),
-            self.fields_count.unwrap(),
-        )?;
+
+        let stmt_id = self.stmt_id.unwrap();
+        let is_insert = self.is_insert.unwrap();
+        let fields = self.fields.clone();
+        let fields_count = self.fields_count.unwrap();
+        let params = params.to_vec();
+        let params = Arc::from(params);
+
+        let bytes = tokio::task::spawn_blocking(move || {
+            let fields = fields;
+            let params = params;
+            bind::bind_params_to_bytes(
+                &params,
+                generate_req_id(),
+                stmt_id,
+                is_insert,
+                fields.as_ref(),
+                fields_count,
+            )
+        })
+        .await
+        .unwrap()?;
+
+        // let bytes = bind::bind_params_to_bytes(
+        //     params,
+        //     generate_req_id(),
+        //     self.stmt_id.unwrap(),
+        //     self.is_insert.unwrap(),
+        //     self.fields.as_ref(),
+        //     self.fields_count.unwrap(),
+        // )?;
         let elapsed = start.elapsed();
         BIND_TIME.fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
 
@@ -267,8 +268,8 @@ impl Stmt2 {
 
 impl Drop for Stmt2 {
     fn drop(&mut self) {
-        println!("bind_time: {}", BIND_TIME.load(Ordering::Relaxed));
-        println!("ws_time: {}", WS_TIME.load(Ordering::Relaxed));
+        println!("bind_time: {}ms", BIND_TIME.load(Ordering::Relaxed));
+        println!("ws_time: {}ms", WS_TIME.load(Ordering::Relaxed));
         self.close();
     }
 }
@@ -285,7 +286,7 @@ impl Stmt2Bindable<super::Taos> for Stmt2 {
         Ok(self)
     }
 
-    fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
+    fn bind(&mut self, params: Arc<Vec<Stmt2BindParam>>) -> RawResult<&mut Self> {
         block_in_place_or_global(Stmt2::bind(self, params))?;
         Ok(self)
     }
@@ -316,7 +317,7 @@ impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
         Ok(self)
     }
 
-    async fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self> {
+    async fn bind(&mut self, params: Arc<Vec<Stmt2BindParam>>) -> RawResult<&mut Self> {
         Stmt2::bind(self, params).await?;
         Ok(self)
     }
