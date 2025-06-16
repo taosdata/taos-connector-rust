@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{AsyncQueryable, ColumnView, Queryable, RawResult, Value};
 
 pub trait Stmt2Bindable<Q>
@@ -9,7 +11,7 @@ where
 
     fn prepare(&mut self, sql: &str) -> RawResult<&mut Self>;
 
-    fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self>;
+    fn bind(&mut self, params: Arc<Vec<Stmt2BindParam>>) -> RawResult<&mut Self>;
 
     fn exec(&mut self) -> RawResult<usize>;
 
@@ -28,7 +30,7 @@ where
 
     async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self>;
 
-    async fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self>;
+    async fn bind(&mut self, params: Arc<Vec<Stmt2BindParam>>) -> RawResult<&mut Self>;
 
     async fn exec(&mut self) -> RawResult<usize>;
 
