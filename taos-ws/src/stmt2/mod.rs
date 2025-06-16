@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -26,6 +27,9 @@ pub struct Stmt2 {
     affected_rows: usize,
     affected_rows_once: usize,
 }
+
+static BIND_TIME: AtomicU64 = AtomicU64::new(0);
+static WS_TIME: AtomicU64 = AtomicU64::new(0);
 
 impl Stmt2 {
     pub fn new(client: Arc<WsTaos>) -> Self {
@@ -110,6 +114,7 @@ impl Stmt2 {
         // .await
         // .unwrap()?;
 
+        let start = Instant::now();
         let bytes = bind::bind_params_to_bytes(
             params,
             generate_req_id(),
@@ -118,9 +123,15 @@ impl Stmt2 {
             self.fields.as_ref(),
             self.fields_count.unwrap(),
         )?;
+        let elapsed = start.elapsed();
+        BIND_TIME.fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
 
         let req = WsSend::Binary(bytes);
+        let start = Instant::now();
         let resp = self.client.send_request(req).await?;
+        let elapsed = start.elapsed();
+        WS_TIME.fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
+
         if let WsRecvData::Stmt2Bind { .. } = resp {
             return Ok(());
         }
@@ -256,6 +267,8 @@ impl Stmt2 {
 
 impl Drop for Stmt2 {
     fn drop(&mut self) {
+        println!("bind_time: {}", BIND_TIME.load(Ordering::Relaxed));
+        println!("ws_time: {}", WS_TIME.load(Ordering::Relaxed));
         self.close();
     }
 }
