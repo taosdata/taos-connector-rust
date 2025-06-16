@@ -210,7 +210,7 @@ async fn consume_data(
     }
 
     println!(
-        "Consuming data end, sleep(single thread) = {:?}\n",
+        "Consuming data end, speed(single thread) = {:?}\n",
         total_record_cnt / total_time as usize
     );
 }
