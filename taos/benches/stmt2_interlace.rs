@@ -186,16 +186,26 @@ async fn consume_data(
 
             println!("Consumer thread[{i}] starts consuming data");
 
+            let mut bind_time = 0;
+            let mut exec_time = 0;
+
             let start = Instant::now();
             while let Ok(params) = receiver.recv_async().await {
                 // stmt2.bind(&params).await.unwrap();
+                let bind_start = Instant::now();
                 stmt2.bind(Arc::new(params)).await.unwrap();
+                let bind_elapsed = bind_start.elapsed();
+                bind_time += bind_elapsed.as_millis();
+
+                let exec_start = Instant::now();
                 stmt2.exec().await.unwrap();
+                let exec_elapsed = exec_start.elapsed();
+                exec_time += exec_elapsed.as_millis();
             }
 
             println!(
-                "Consumer thread[{i}] ends consuming data, elapsed = {:?}",
-                start.elapsed()
+                "Consumer thread[{i}] ends consuming data, elapsed = {:?}, bind time = {:?}, exec time = {:?}",
+                start.elapsed(), bind_time, exec_time
             );
 
             start.elapsed().as_secs()

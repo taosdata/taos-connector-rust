@@ -26,10 +26,13 @@ pub struct Stmt2 {
     fields_count: Option<usize>,
     affected_rows: usize,
     affected_rows_once: usize,
+    bind_time: AtomicU64,
+    ws_time: AtomicU64,
 }
 
 static BIND_TIME: AtomicU64 = AtomicU64::new(0);
 static WS_TIME: AtomicU64 = AtomicU64::new(0);
+static EXEC_TIME: AtomicU64 = AtomicU64::new(0);
 
 impl Stmt2 {
     pub fn new(client: Arc<WsTaos>) -> Self {
@@ -41,6 +44,8 @@ impl Stmt2 {
             fields_count: None,
             affected_rows: 0,
             affected_rows_once: 0,
+            bind_time: AtomicU64::new(0),
+            ws_time: AtomicU64::new(0),
         }
     }
 
@@ -123,12 +128,16 @@ impl Stmt2 {
             self.fields_count.unwrap(),
         )?;
         let elapsed = start.elapsed();
+        self.bind_time
+            .fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
         BIND_TIME.fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
 
         let req = WsSend::Binary(bytes);
         let start = Instant::now();
         let resp = self.client.send_request(req).await?;
         let elapsed = start.elapsed();
+        self.ws_time
+            .fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
         WS_TIME.fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
 
         if let WsRecvData::Stmt2Bind { .. } = resp {
@@ -142,7 +151,12 @@ impl Stmt2 {
             req_id: generate_req_id(),
             stmt_id: self.stmt_id.unwrap(),
         };
+
+        let start = Instant::now();
         let resp = self.client.send_request(req).await?;
+        let elapsed = start.elapsed();
+        EXEC_TIME.fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
+
         if let WsRecvData::Stmt2Exec { affected, .. } = resp {
             self.affected_rows += affected;
             self.affected_rows_once = affected;
@@ -266,8 +280,11 @@ impl Stmt2 {
 
 impl Drop for Stmt2 {
     fn drop(&mut self) {
-        println!("bind_time: {}ms", BIND_TIME.load(Ordering::Relaxed));
-        println!("ws_time: {}ms", WS_TIME.load(Ordering::Relaxed));
+        println!("total bind_time: {}ms", BIND_TIME.load(Ordering::Relaxed));
+        println!("total ws_time: {}ms", WS_TIME.load(Ordering::Relaxed));
+        println!("total exec_time: {}ms", EXEC_TIME.load(Ordering::Relaxed));
+        println!("bind_time: {}ms", self.bind_time.load(Ordering::Relaxed));
+        println!("ws_time: {}ms", self.ws_time.load(Ordering::Relaxed));
         self.close();
     }
 }
