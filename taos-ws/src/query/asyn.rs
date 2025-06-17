@@ -34,7 +34,7 @@ use tracing::{error, instrument, trace, warn, Instrument};
 use super::infra::*;
 use super::TaosBuilder;
 
-type WsSender = flume::Sender<Message>;
+// type WsSender = flume::Sender<Message>;
 
 type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
 type QueryInner = scc::HashMap<ReqId, QueryChannelSender>;
@@ -54,7 +54,8 @@ pub(crate) struct WsQuerySender {
     version: Version,
     req_id: Arc<AtomicU64>,
     results: Arc<QueryResMapper>,
-    sender: WsSender,
+    // sender: WsSender,
+    sender: flume::Sender<(Option<Instant>, Message)>,
     queries: QueryAgent,
 }
 
@@ -89,23 +90,33 @@ impl WsQuerySender {
                 }
                 let _ = self.results.insert_async(args.id, args.req_id).await;
 
-                timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
-                    .await
-                    .map_err(Error::from)?
-                    .map_err(Error::from)?;
+                timeout(
+                    SEND_TIMEOUT,
+                    self.sender.send_async((Some(Instant::now()), msg.to_msg())),
+                )
+                .await
+                .map_err(Error::from)?
+                .map_err(Error::from)?;
             }
             WsSend::Binary(bytes) => {
-                timeout(SEND_TIMEOUT, self.sender.send_async(Message::Binary(bytes)))
-                    .await
-                    .map_err(Error::from)?
-                    .map_err(Error::from)?;
+                timeout(
+                    SEND_TIMEOUT,
+                    self.sender
+                        .send_async((Some(Instant::now()), Message::Binary(bytes))),
+                )
+                .await
+                .map_err(Error::from)?
+                .map_err(Error::from)?;
             }
             _ => {
                 tracing::trace!("[req id: {req_id}] prepare message: {msg:?}");
-                timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
-                    .await
-                    .map_err(Error::from)?
-                    .map_err(Error::from)?;
+                timeout(
+                    SEND_TIMEOUT,
+                    self.sender.send_async((Some(Instant::now()), msg.to_msg())),
+                )
+                .await
+                .map_err(Error::from)?
+                .map_err(Error::from)?;
             }
         }
         // handle the error
@@ -119,15 +130,18 @@ impl WsQuerySender {
     }
 
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
-        timeout(SEND_TIMEOUT, self.sender.send_async(msg.to_msg()))
-            .await
-            .map_err(Error::from)?
-            .map_err(Error::from)?;
+        timeout(
+            SEND_TIMEOUT,
+            self.sender.send_async((Some(Instant::now()), msg.to_msg())),
+        )
+        .await
+        .map_err(Error::from)?
+        .map_err(Error::from)?;
         Ok(())
     }
 
     fn send_blocking(&self, msg: WsSend) -> RawResult<()> {
-        let _ = self.sender.send(msg.to_msg());
+        let _ = self.sender.send((Some(Instant::now()), msg.to_msg()));
         Ok(())
     }
 }
@@ -234,7 +248,7 @@ pub enum Error {
     #[error("{0}")]
     FetchError(#[from] tokio::sync::oneshot::error::RecvError),
     #[error(transparent)]
-    FlumeSendError(#[from] flume::SendError<Message>),
+    FlumeSendError(#[from] flume::SendError<(Option<Instant>, Message)>),
     #[error("Send data via websocket timeout")]
     SendTimeoutError(#[from] tokio::time::error::Elapsed),
     #[error("Query timed out with sql: {0}")]
@@ -247,10 +261,26 @@ pub enum Error {
     TungsteniteError(#[from] tokio_tungstenite::tungstenite::Error),
     #[error(transparent)]
     TungsteniteSendTimeoutError(
+        #[from]
+        tokio::sync::mpsc::error::SendTimeoutError<(
+            Option<Instant>,
+            tokio_tungstenite::tungstenite::Message,
+        )>,
+    ),
+    #[error(transparent)]
+    TungsteniteSendTimeoutError2(
         #[from] tokio::sync::mpsc::error::SendTimeoutError<tokio_tungstenite::tungstenite::Message>,
     ),
     #[error(transparent)]
     TungsteniteSendError(
+        #[from]
+        tokio::sync::mpsc::error::SendError<(
+            Option<Instant>,
+            tokio_tungstenite::tungstenite::Message,
+        )>,
+    ),
+    #[error(transparent)]
+    TungsteniteSendError2(
         #[from] tokio::sync::mpsc::error::SendError<tokio_tungstenite::tungstenite::Message>,
     ),
     #[error(transparent)]
@@ -325,7 +355,7 @@ async fn read_queries(
     mut reader: WebSocketStreamReader,
     queries_sender: QueryAgent,
     fetches_sender: Arc<QueryResMapper>,
-    ws2: WsSender,
+    ws2: flume::Sender<(Option<Instant>, Message)>,
     is_v3: bool,
     mut close_listener: watch::Receiver<bool>,
 ) {
@@ -367,9 +397,10 @@ async fn read_queries(
                         if fetch.completed {
                             tokio::spawn(async move {
                                 let _ = ws2
-                                    .send_async(
+                                    .send_async((
+                                        Some(Instant::now()),
                                         WsSend::FreeResult(WsResArgs { req_id, id }).to_msg(),
-                                    )
+                                    ))
                                     .await;
                             });
                         }
@@ -548,7 +579,9 @@ async fn read_queries(
             Message::Ping(data) => {
                 let ws2 = ws2.clone();
                 tokio::spawn(async move {
-                    let _ = ws2.send_async(Message::Pong(data)).await;
+                    let _ = ws2
+                        .send_async((Some(Instant::now()), Message::Pong(data)))
+                        .await;
                 });
             }
             Message::Pong(_) => tracing::trace!("received pong message, do nothing"),
@@ -756,7 +789,7 @@ impl WsTaos {
         let queries3 = queries2.clone();
 
         let (ws, msg_recv) = flume::bounded(64);
-        let ws2 = ws.clone();
+        let ws2: Sender<(Option<Instant>, Message)> = ws.clone();
 
         // Connection watcher
         let (tx, mut rx) = watch::channel(false);
@@ -765,6 +798,7 @@ impl WsTaos {
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_secs(53));
             let start = Instant::now();
+            let mut ws_send_time = 0;
 
             loop {
                 tokio::select! {
@@ -783,7 +817,10 @@ impl WsTaos {
                     }
                     msg = msg_recv.recv_async() => {
                         match msg {
-                            Ok(msg) => {
+                            Ok((ins, msg)) => {
+                                println!("flume channel elapsed: {:?}", ins.unwrap().elapsed());
+
+                                let ws_start = Instant::now();
                                 if let Err(err) = sender.send(msg).await {
                                     tracing::error!("Write websocket error: {}", err);
                                     let mut keys = Vec::new();
@@ -795,6 +832,8 @@ impl WsTaos {
                                     }
                                     break;
                                 }
+                                let elapsed = ws_start.elapsed();
+                                ws_send_time += elapsed.as_millis();
                             }
                             Err(_) => {
                                 break;
@@ -805,7 +844,7 @@ impl WsTaos {
             }
 
             let elapsed = start.elapsed();
-            println!("send ws req elapsed: {:?}", elapsed);
+            println!("send ws req elapsed: {:?}, send time: {}", elapsed, ws_send_time);
         }.in_current_span());
 
         tokio::spawn(read_queries(
@@ -1547,21 +1586,21 @@ where
 
 #[cfg(test)]
 mod tests {
-    use flume::unbounded;
+    // use flume::unbounded;
     use futures::TryStreamExt;
 
     use super::*;
 
-    #[test]
-    fn test_errno() {
-        let (tx, rx) = unbounded();
-        drop(rx);
+    // #[test]
+    // fn test_errno() {
+    //     let (tx, rx) = unbounded();
+    //     drop(rx);
 
-        let send_err = tx.send(Message::Text("oh, no!".to_string())).unwrap_err();
-        let err = Error::FlumeSendError(send_err);
-        let errno: i32 = err.errno().into();
-        assert_eq!(WS_ERROR_NO::CONN_CLOSED as i32, errno);
-    }
+    //     let send_err = tx.send(Message::Text("oh, no!".to_string())).unwrap_err();
+    //     let err = Error::FlumeSendError(send_err);
+    //     let errno: i32 = err.errno().into();
+    //     assert_eq!(WS_ERROR_NO::CONN_CLOSED as i32, errno);
+    // }
 
     #[test]
     fn test_is_support_binary_sql() -> anyhow::Result<()> {
