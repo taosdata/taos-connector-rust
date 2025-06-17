@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::Local;
@@ -191,9 +190,8 @@ async fn consume_data(
 
             let start = Instant::now();
             while let Ok(params) = receiver.recv_async().await {
-                // stmt2.bind(&params).await.unwrap();
                 let bind_start = Instant::now();
-                stmt2.bind(Arc::new(params)).await.unwrap();
+                stmt2.bind(&params).await.unwrap();
                 let bind_elapsed = bind_start.elapsed();
                 bind_time += bind_elapsed.as_millis();
 
