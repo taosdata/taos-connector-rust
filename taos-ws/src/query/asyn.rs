@@ -36,7 +36,7 @@ use super::TaosBuilder;
 
 // type WsSender = flume::Sender<Message>;
 
-type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
+type QueryChannelSender = oneshot::Sender<RawResult<(Instant, WsRecvData)>>;
 type QueryInner = scc::HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = scc::HashMap<ResId, ReqId>;
@@ -60,15 +60,17 @@ pub(crate) struct WsQuerySender {
     rx_await_time: Arc<AtomicU64>,
     prepare_time: Arc<AtomicU64>,
     flume_ch_time: Arc<AtomicU64>,
+    ws_resp_send_time: Arc<AtomicU64>,
 }
 
 impl Drop for WsQuerySender {
     fn drop(&mut self) {
         println!(
-            "prepare time: {}ms, flume channel time: {}ms, rx await time: {}ms",
+            "prepare time: {}ms, flume channel time: {}ms, rx await time: {}ms, ws resp send time: {}ms",
             self.prepare_time.load(std::sync::atomic::Ordering::SeqCst),
             self.flume_ch_time.load(std::sync::atomic::Ordering::SeqCst),
             self.rx_await_time.load(std::sync::atomic::Ordering::SeqCst),
+            self.ws_resp_send_time.load(std::sync::atomic::Ordering::SeqCst)
         );
     }
 }
@@ -144,16 +146,25 @@ impl WsQuerySender {
         // handle the error
         tracing::trace!("[req id: {req_id}] message sent, wait for receiving");
         let start = Instant::now();
-        let res = rx
+        let (ins, res) = rx
             .await
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
             .map_err(Error::from)?;
+
         let elapsed = start.elapsed().as_millis();
         self.rx_await_time
             .fetch_add(elapsed as u64, std::sync::atomic::Ordering::SeqCst);
         if elapsed >= 500 {
             println!("send recv2 elapsed: {:?}ms", elapsed);
         }
+
+        let elapsed = ins.elapsed().as_millis();
+        self.ws_resp_send_time
+            .fetch_add(elapsed as u64, std::sync::atomic::Ordering::SeqCst);
+        if elapsed >= 500 {
+            println!("ws send resp time: {:?}ms", elapsed);
+        }
+
         tracing::trace!("[req id: {req_id}] message received: {res:?}");
         Ok(res)
     }
@@ -405,7 +416,7 @@ async fn read_queries(
                 match &data {
                     WsRecvData::Insert(_) => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            sender.send(ok.map(|_| data)).unwrap();
+                            sender.send(ok.map(|_| (Instant::now(), data))).unwrap();
                         } else {
                             debug_assert!(!queries_sender.contains(&req_id));
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
@@ -413,7 +424,7 @@ async fn read_queries(
                     }
                     WsRecvData::Query(_) => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            if let Err(err) = sender.send(ok.map(|_| data)) {
+                            if let Err(err) = sender.send(ok.map(|_| (Instant::now(), data))) {
                                 tracing::error!("send data with error: {err:?}");
                             }
                         } else {
@@ -434,7 +445,7 @@ async fn read_queries(
                             });
                         }
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
+                            let _ = sender.send(ok.map(|_| (Instant::now(), data)));
                         } else {
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
@@ -442,28 +453,28 @@ async fn read_queries(
                     WsRecvData::FetchBlock => {
                         assert!(ok.is_err());
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
+                            let _ = sender.send(ok.map(|_| (Instant::now(), data)));
                         } else {
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     }
                     WsRecvData::WriteMeta => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
+                            let _ = sender.send(ok.map(|_| (Instant::now(), data)));
                         } else {
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     }
                     WsRecvData::WriteRaw => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
+                            let _ = sender.send(ok.map(|_| (Instant::now(), data)));
                         } else {
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
                     }
                     WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
+                            let _ = sender.send(ok.map(|_| (Instant::now(), data)));
                         } else {
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
@@ -475,7 +486,7 @@ async fn read_queries(
                     | WsRecvData::Stmt2Result { .. }
                     | WsRecvData::Stmt2Close { .. } => match queries_sender.remove(&req_id) {
                         Some((_, sender)) => {
-                            let _ = sender.send(ok.map(|_| data));
+                            let _ = sender.send(ok.map(|_| (Instant::now(), data)));
                         }
                         None => {
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
@@ -483,7 +494,7 @@ async fn read_queries(
                     },
                     WsRecvData::ValidateSql { .. } | WsRecvData::CheckServerStatus { .. } => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
+                            let _ = sender.send(ok.map(|_| (Instant::now(), data)));
                         } else {
                             tracing::warn!("req_id {req_id} not detected, message might be lost");
                         }
@@ -530,15 +541,18 @@ async fn read_queries(
                         };
                         if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
                             sender
-                                .send(Ok(WsRecvData::BlockNew {
-                                    block_version,
-                                    timing,
-                                    block_req_id,
-                                    block_code,
-                                    block_message,
-                                    finished,
-                                    raw: result_block,
-                                }))
+                                .send(Ok((
+                                    Instant::now(),
+                                    WsRecvData::BlockNew {
+                                        block_version,
+                                        timing,
+                                        block_req_id,
+                                        block_code,
+                                        block_message,
+                                        finished,
+                                        raw: result_block,
+                                    },
+                                )))
                                 .unwrap();
                         } else {
                             tracing::warn!(
@@ -553,10 +567,13 @@ async fn read_queries(
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                     tracing::trace!("send data to fetches with id {}", res_id);
                                     sender
-                                        .send(Ok(WsRecvData::Block {
-                                            timing,
-                                            raw: block[offset..].to_vec(),
-                                        }))
+                                        .send(Ok((
+                                            Instant::now(),
+                                            WsRecvData::Block {
+                                                timing,
+                                                raw: block[offset..].to_vec(),
+                                            },
+                                        )))
                                         .unwrap();
                                 } else {
                                     tracing::warn!(
@@ -568,10 +585,13 @@ async fn read_queries(
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                     tracing::trace!("send data to fetches with id {}", res_id);
                                     sender
-                                        .send(Ok(WsRecvData::BlockV2 {
-                                            timing,
-                                            raw: block[offset..].to_vec(),
-                                        }))
+                                        .send(Ok((
+                                            Instant::now(),
+                                            WsRecvData::BlockV2 {
+                                                timing,
+                                                raw: block[offset..].to_vec(),
+                                            },
+                                        )))
                                         .unwrap();
                                 } else {
                                     tracing::warn!(
@@ -876,7 +896,7 @@ impl WsTaos {
             }
 
             let elapsed = start.elapsed();
-            println!("send ws req elapsed: {:?}, send time: {}", elapsed, ws_send_time);
+            println!("send ws req elapsed: {:?}, send time: {}ms", elapsed, ws_send_time);
         }.in_current_span());
 
         tokio::spawn(read_queries(
@@ -902,6 +922,7 @@ impl WsTaos {
                 rx_await_time: Arc::new(AtomicU64::new(0)),
                 flume_ch_time: Arc::new(AtomicU64::new(0)),
                 prepare_time: Arc::new(AtomicU64::new(0)),
+                ws_resp_send_time: Arc::new(AtomicU64::new(0)),
             },
         })
     }
