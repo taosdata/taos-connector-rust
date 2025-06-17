@@ -57,6 +57,7 @@ pub(crate) struct WsQuerySender {
     // sender: WsSender,
     sender: flume::Sender<(Option<Instant>, Message)>,
     queries: QueryAgent,
+    rx_await_time: Arc<AtomicU64>,
 }
 
 const SEND_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -131,7 +132,9 @@ impl WsQuerySender {
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
             .map_err(Error::from)?;
         let elapsed = start.elapsed().as_millis();
-        if elapsed >= 1 {
+        self.rx_await_time
+            .fetch_add(elapsed as u64, std::sync::atomic::Ordering::SeqCst);
+        if elapsed >= 500 {
             println!("send recv2 elapsed: {:?}ms", elapsed);
         }
         tracing::trace!("[req id: {req_id}] message received: {res:?}");
@@ -879,6 +882,7 @@ impl WsTaos {
                 sender: ws,
                 queries: queries2_cloned,
                 results,
+                rx_await_time: Arc::new(AtomicU64::new(0)),
             },
         })
     }
