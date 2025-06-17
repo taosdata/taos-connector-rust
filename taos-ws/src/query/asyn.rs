@@ -74,10 +74,14 @@ impl WsQuerySender {
 
     #[instrument(skip_all)]
     async fn send_recv(&self, msg: WsSend) -> RawResult<WsRecvData> {
+        let start = Instant::now();
         let req_id = msg.req_id();
         let (tx, rx) = query_channel();
-
         let _ = self.queries.insert_async(req_id, tx).await;
+        let elapsed = start.elapsed().as_millis();
+        if elapsed >= 1 {
+            println!("send recv1 elapsed: {:?}ms", elapsed);
+        }
 
         match msg {
             WsSend::FetchBlock(args) => {
@@ -121,10 +125,15 @@ impl WsQuerySender {
         }
         // handle the error
         tracing::trace!("[req id: {req_id}] message sent, wait for receiving");
+        let start = Instant::now();
         let res = rx
             .await
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
             .map_err(Error::from)?;
+        let elapsed = start.elapsed().as_millis();
+        if elapsed >= 1 {
+            println!("send recv2 elapsed: {:?}ms", elapsed);
+        }
         tracing::trace!("[req id: {req_id}] message received: {res:?}");
         Ok(res)
     }
@@ -818,7 +827,10 @@ impl WsTaos {
                     msg = msg_recv.recv_async() => {
                         match msg {
                             Ok((ins, msg)) => {
-                                println!("flume channel elapsed: {:?}", ins.unwrap().elapsed());
+                                let t = ins.unwrap().elapsed().as_millis();
+                                if t >= 1 {
+                                    println!("flume channel elapsed: {:?}ms", t);
+                                }
 
                                 let ws_start = Instant::now();
                                 if let Err(err) = sender.send(msg).await {
