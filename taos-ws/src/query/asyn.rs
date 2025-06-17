@@ -60,6 +60,15 @@ pub(crate) struct WsQuerySender {
     rx_await_time: Arc<AtomicU64>,
 }
 
+impl Drop for WsQuerySender {
+    fn drop(&mut self) {
+        println!(
+            "rx await time: {}ms",
+            self.rx_await_time.load(std::sync::atomic::Ordering::SeqCst)
+        );
+    }
+}
+
 const SEND_TIMEOUT: Duration = Duration::from_millis(1000);
 
 impl WsQuerySender {
