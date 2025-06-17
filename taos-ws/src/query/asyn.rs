@@ -58,13 +58,17 @@ pub(crate) struct WsQuerySender {
     sender: flume::Sender<(Option<Instant>, Message)>,
     queries: QueryAgent,
     rx_await_time: Arc<AtomicU64>,
+    prepare_time: Arc<AtomicU64>,
+    flume_ch_time: Arc<AtomicU64>,
 }
 
 impl Drop for WsQuerySender {
     fn drop(&mut self) {
         println!(
-            "rx await time: {}ms",
-            self.rx_await_time.load(std::sync::atomic::Ordering::SeqCst)
+            "prepare time: {}ms, flume channel time: {}ms, rx await time: {}ms",
+            self.prepare_time.load(std::sync::atomic::Ordering::SeqCst),
+            self.flume_ch_time.load(std::sync::atomic::Ordering::SeqCst),
+            self.rx_await_time.load(std::sync::atomic::Ordering::SeqCst),
         );
     }
 }
@@ -89,10 +93,10 @@ impl WsQuerySender {
         let (tx, rx) = query_channel();
         let _ = self.queries.insert_async(req_id, tx).await;
         let elapsed = start.elapsed().as_millis();
-        if elapsed >= 1 {
-            println!("send recv1 elapsed: {:?}ms", elapsed);
-        }
+        self.prepare_time
+            .fetch_add(elapsed as u64, std::sync::atomic::Ordering::SeqCst);
 
+        let start = Instant::now();
         match msg {
             WsSend::FetchBlock(args) => {
                 tracing::trace!("[req id: {req_id}] prepare message {msg:?}");
@@ -133,6 +137,10 @@ impl WsQuerySender {
                 .map_err(Error::from)?;
             }
         }
+        let elapsed = start.elapsed().as_millis();
+        self.flume_ch_time
+            .fetch_add(elapsed as u64, std::sync::atomic::Ordering::SeqCst);
+
         // handle the error
         tracing::trace!("[req id: {req_id}] message sent, wait for receiving");
         let start = Instant::now();
@@ -892,6 +900,8 @@ impl WsTaos {
                 queries: queries2_cloned,
                 results,
                 rx_await_time: Arc::new(AtomicU64::new(0)),
+                flume_ch_time: Arc::new(AtomicU64::new(0)),
+                prepare_time: Arc::new(AtomicU64::new(0)),
             },
         })
     }
