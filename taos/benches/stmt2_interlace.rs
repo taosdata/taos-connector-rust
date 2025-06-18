@@ -114,14 +114,14 @@ async fn produce_data(
             let mut rng = StdRng::from_entropy();
             let mut params = Vec::with_capacity(batch_cnt);
 
+            let start = i * thread_subt_cnt;
+            let end = start + thread_subt_cnt;
+
             for _ in 0..record_cnt {
                 let ts = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_millis() as i64;
-
-                let start = i * thread_subt_cnt;
-                let end = start + thread_subt_cnt;
 
                 for k in start..end {
                     let c1 = rng.gen::<i32>();
@@ -165,7 +165,6 @@ async fn consume_data(
     let time = now.format("%Y-%m-%d %H:%M:%S").to_string();
     println!("Consuming data start, time = {time}");
 
-    let start = Instant::now();
     let mut tasks = vec![];
 
     for i in 0..thread_cnt {
@@ -206,8 +205,7 @@ async fn consume_data(
     }
 
     println!(
-        "Consuming data end, elapsed = {:?}, speed(single thread) = {:?}\n",
-        start.elapsed(),
+        "Consuming data end, speed(single thread) = {:?}\n",
         total_record_cnt / total_time as usize
     );
 }
