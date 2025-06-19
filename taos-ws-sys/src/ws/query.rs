@@ -2811,4 +2811,54 @@ mod tests {
             taos_close(taos);
         }
     }
+
+    #[test]
+    #[ignore]
+    fn test_ipv6() {
+        unsafe {
+            let taos = taos_connect(
+                c"[::1]".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                ptr::null(),
+                6041,
+            );
+            assert!(!taos.is_null());
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1748918064",
+                    "create database test_1748918064",
+                    "use test_1748918064",
+                    "create table t0 (ts timestamp, c1 int)",
+                    "insert into t0 values (1741660079228, 1)",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(len, 15);
+            assert_eq!(
+                "1741660079228 1",
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
+            );
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1748918064");
+            taos_close(taos);
+        }
+    }
 }

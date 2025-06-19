@@ -1162,6 +1162,9 @@ impl TmqBuilder {
             Err(_) => "2.x".to_string(),
         };
 
+        let is_v3 = !version.starts_with('2');
+        let is_support_binary_sql = is_v3 && is_support_binary_sql(&version);
+
         let queries = Arc::new(HashMap::<ReqId, mpsc::Sender<_>>::new());
 
         let queries_sender = queries.clone();
@@ -1494,7 +1497,7 @@ impl TmqBuilder {
             close_signal: tx,
             timeout: self.timeout,
             topics: vec![],
-            support_fetch_raw: is_support_binary_sql(&version),
+            support_fetch_raw: is_support_binary_sql,
             auto_commit: self.conf.auto_commit == "true",
             auto_commit_interval_ms: self
                 .conf
