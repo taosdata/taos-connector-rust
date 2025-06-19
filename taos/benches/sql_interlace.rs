@@ -1,4 +1,3 @@
-use std::ops::Add;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::Local;
@@ -14,15 +13,13 @@ async fn main() -> anyhow::Result<()> {
         a total of one hundred million records."
     );
 
-    // One million subtables
     let subtable_cnt = 1000000;
-    // One hundred records per subtable
-    let record_cnt = 100;
+    let record_cnt = 100; // number of records per subtable
 
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_nanos();
+        .as_millis();
 
     let db = &format!("db_{}", ts);
 
@@ -54,17 +51,17 @@ async fn create_subtables(db: &str, subtable_cnt: usize) {
     let start = Instant::now();
     let batch_cnt = 10000;
     let thread_cnt = 10;
-    let thread_subtable_cnt = subtable_cnt / thread_cnt;
+    let thread_subt_cnt = subtable_cnt / thread_cnt;
     let mut tasks = vec![];
 
-    for i in (0..subtable_cnt).step_by(thread_subtable_cnt) {
+    for i in (0..subtable_cnt).step_by(thread_subt_cnt) {
         let db = db.to_owned();
 
         let task = tokio::spawn(async move {
             let taos = TaosBuilder::from_dsn(DSN).unwrap().build().await.unwrap();
             taos.exec(format!("use {db}")).await.unwrap();
 
-            for j in (0..thread_subtable_cnt).step_by(batch_cnt) {
+            for j in (0..thread_subt_cnt).step_by(batch_cnt) {
                 // creata table d0 using s0 tags(0) d1 using s0 tags(0) ...
                 let mut sql = String::with_capacity(25 * batch_cnt);
                 sql.push_str("create table ");
@@ -91,7 +88,7 @@ async fn produce_sqls(subtable_cnt: usize, record_cnt: usize) -> Vec<String> {
     let start = Instant::now();
     let batch_cnt = 10000;
     let thread_cnt = 10;
-    let thread_record_cnt = record_cnt / thread_cnt;
+    let thread_subt_cnt = subtable_cnt / thread_cnt;
     let mut tasks = Vec::with_capacity(thread_cnt);
 
     for i in 0..thread_cnt {
@@ -99,16 +96,18 @@ async fn produce_sqls(subtable_cnt: usize, record_cnt: usize) -> Vec<String> {
             println!("Producer thread[{i}] starts producing data");
 
             let mut rng = rand::thread_rng();
-            let mut sqls = Vec::with_capacity(subtable_cnt * thread_record_cnt);
+            let mut sqls = Vec::with_capacity(thread_subt_cnt * record_cnt);
 
-            for _ in 0..thread_record_cnt {
+            let start = i * thread_subt_cnt;
+            let end = start + thread_subt_cnt;
+
+            for _ in 0..record_cnt {
                 let ts = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
-                    .as_millis()
-                    .add((i * 200) as u128) as i64;
+                    .as_millis() as i64;
 
-                for j in (0..subtable_cnt).step_by(batch_cnt) {
+                for j in (start..end).step_by(batch_cnt) {
                     // insert into d0 values() d1 values() ...
                     let mut sql = String::with_capacity(100 * batch_cnt);
                     sql.push_str("insert into ");
@@ -149,10 +148,9 @@ async fn consume_sqls(db: &str, sqls: Vec<String>) {
     let time = now.format("%Y-%m-%d %H:%M:%S").to_string();
     println!("Consuming data start, time = {time}");
 
-    let start = Instant::now();
     let thread_cnt = 4;
     let thread_sql_cnt = sqls.len() / thread_cnt;
-    let mut tasks = vec![];
+    let mut tasks = Vec::with_capacity(thread_cnt);
 
     for (i, sqls) in sqls.chunks(thread_sql_cnt).enumerate() {
         let db = db.to_owned();
@@ -173,16 +171,22 @@ async fn consume_sqls(db: &str, sqls: Vec<String>) {
                 "Consumer thread[{i}] ends consuming data, elapsed = {:?}",
                 start.elapsed()
             );
+
+            start.elapsed().as_secs()
         });
 
         tasks.push(task);
     }
 
+    let mut total_time = 0;
     for task in tasks {
-        task.await.unwrap();
+        total_time += task.await.unwrap();
     }
 
-    println!("Consuming data end, elapsed = {:?}\n", start.elapsed());
+    println!(
+        "Consuming data end, speed(single thread) = {:?}\n",
+        sqls.len() * 10000 / total_time as usize
+    );
 }
 
 async fn check_count(taos: &Taos, cnt: usize) -> anyhow::Result<()> {
