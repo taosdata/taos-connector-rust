@@ -141,6 +141,7 @@ impl taos_query::Queryable for Taos {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use serde::Deserialize;
     use taos_query::util::hex::*;
 
     use crate::TaosBuilder;
@@ -520,5 +521,44 @@ mod tests {
 
         server.await;
         let _ = query_rx.await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_ws_ipv6() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let taos = TaosBuilder::from_dsn("ws://[::1]:6041")?.build().await?;
+
+        taos.exec_many([
+            "drop database if exists test_1748584226",
+            "create database test_1748584226",
+            "use test_1748584226",
+            "create table t0(ts timestamp, c1 int)",
+            "insert into t0 values(1726803358466, 101)",
+            "insert into t0 values(1726803359466, 102)",
+        ])
+        .await?;
+
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: i32,
+        }
+
+        let mut rs = taos.query("select * from t0").await?;
+        let rows: Vec<Row> = rs.deserialize().try_collect().await?;
+
+        assert_eq!(rows.len(), 2);
+
+        assert_eq!(rows[0].ts, 1726803358466);
+        assert_eq!(rows[1].ts, 1726803359466);
+
+        assert_eq!(rows[0].c1, 101);
+        assert_eq!(rows[1].c1, 102);
+
+        taos.exec("drop database test_1748584226").await?;
+
+        Ok(())
     }
 }
