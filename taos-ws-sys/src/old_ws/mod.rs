@@ -2549,9 +2549,7 @@ mod tests {
     #[ignore]
     fn test_ipv6() {
         unsafe {
-            // [::1]
-            let taos =
-                ws_connect(b"ws://[2002:9ba:b4e:6:be24:11ff:fee5:66b5]:6041\0" as *const u8 as _);
+            let taos = ws_connect(b"ws://[::1]:6041\0" as *const u8 as _);
             assert!(!taos.is_null());
 
             macro_rules! execute {

@@ -528,10 +528,7 @@ mod tests {
     async fn test_ws_ipv6() -> anyhow::Result<()> {
         use taos_query::prelude::*;
 
-        // [::1]
-        let taos = TaosBuilder::from_dsn("ws://[2002:9ba:b4e:6:be24:11ff:fee5:66b5]:6041")?
-            .build()
-            .await?;
+        let taos = TaosBuilder::from_dsn("ws://[::1]:6041")?.build().await?;
 
         taos.exec_many([
             "drop database if exists test_1748584226",

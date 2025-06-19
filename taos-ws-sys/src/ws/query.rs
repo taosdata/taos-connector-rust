@@ -2817,8 +2817,7 @@ mod tests {
     fn test_ipv6() {
         unsafe {
             let taos = taos_connect(
-                // [::1]
-                c"[2002:9ba:b4e:6:be24:11ff:fee5:66b5]".as_ptr(),
+                c"[::1]".as_ptr(),
                 c"root".as_ptr(),
                 c"taosdata".as_ptr(),
                 ptr::null(),
