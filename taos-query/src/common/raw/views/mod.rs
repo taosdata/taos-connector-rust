@@ -812,7 +812,7 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "tinyint can be casted to primitive types only",
                         })
                     }
                 };
@@ -849,7 +849,7 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "smallint can be casted to primitive types only",
                         })
                     }
                 };
@@ -886,7 +886,7 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "int can be casted to primitive types only",
                         })
                     }
                 };
@@ -923,7 +923,7 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "bigint can be casted to primitive types only",
                         })
                     }
                 };
@@ -961,7 +961,7 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "unsigned tinyint can be casted to primitive types only",
                         })
                     }
                 };
@@ -999,7 +999,7 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "unsigned smallint can be casted to primitive types only",
                         })
                     }
                 };
@@ -1037,7 +1037,7 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "unsigned int can be casted to primitive types only",
                         })
                     }
                 };
@@ -1074,7 +1074,7 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "unsigned big int can be casted to primitive types only",
                         })
                     }
                 };
@@ -1141,11 +1141,14 @@ impl ColumnView {
                     NChar => Self::from_nchar::<String, _, _, _>(
                         view.iter().map(|v| v.map(|b| b.to_string())),
                     ),
+                    Decimal => {
+                        Self::from_decimal64(view.iter().map(|v| v.map(|b| b as i64)), 22, 10)
+                    }
                     _ => {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "double can be casted to primitive types only",
                         })
                     }
                 };
