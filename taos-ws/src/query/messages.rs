@@ -388,7 +388,9 @@ pub trait ToMessage: Serialize {
 
 impl ToMessage for WsSend {}
 
+#[derive(Debug)]
 pub enum ToMsgEnum {
+    // 兼容 Message::Pong，接收 ping 后返回 pong
     Message(Message),
     WsSend(WsSend),
 }
@@ -406,29 +408,35 @@ impl ToMsgEnum {
 
     pub(crate) fn req_id(&self) -> ReqId {
         match self {
-            ToMsgEnum::Message(_) => 0,
+            // binary 发送 Message::Bytes，从 bytes 解析
+            // Message::ping 不要放到缓存中
+            ToMsgEnum::Message(_) => generate_req_id(),
             ToMsgEnum::WsSend(ws_send) => ws_send.req_id(),
         }
     }
 
+    // 是否需要缓存
     pub(crate) fn trya(&self) -> bool {
-        match self {
-            ToMsgEnum::Message(_) => false,
-            ToMsgEnum::WsSend(ws_send) => match ws_send {
-                WsSend::Insert { .. } | WsSend::Query { .. } | WsSend::CheckServerStatus { .. } => {
-                    true
-                }
-                WsSend::Binary(bytes) => {
-                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
-                    match action {
-                        // TODO
-                        1 => true,
-                        _ => false,
-                    }
-                }
-                _ => false,
-            },
-        }
+        true
+        // match self {
+        //     ToMsgEnum::Message(_) => false,
+        //     ToMsgEnum::WsSend(ws_send) => match ws_send {
+        //         WsSend::Insert { .. } | WsSend::Query { .. } | WsSend::CheckServerStatus { .. } => {
+        //             true
+        //         }
+        //         WsSend::Binary(_bytes) => {
+        //             // query 在使用 ResultSet 后无法支持自动重连, fetch 无法做自动重连
+        //             // let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+        //             // match action {
+        //             //     // TODO
+        //             //     1 => true,
+        //             //     _ => false,
+        //             // }
+        //             true
+        //         }
+        //         _ => false,
+        //     },
+        // }
     }
 }
 

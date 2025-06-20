@@ -3,6 +3,7 @@ use std::fmt::{Debug, Display};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use futures::TryStreamExt;
 use futures_util::SinkExt;
 use once_cell::sync::OnceCell;
 use rand::Rng;
@@ -18,7 +19,6 @@ pub use stmt::Stmt;
 pub mod stmt2;
 pub use stmt2::Stmt2;
 
-// pub mod tmq;
 pub mod consumer;
 pub use consumer::{Consumer, Offset, TmqBuilder};
 
@@ -67,6 +67,12 @@ pub struct TaosBuilder {
     conn_retries: Retries,
     #[allow(dead_code)]
     retry_backoff: RetryBackoff,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum UrlKind {
+    Ws,
+    Tmq,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -175,7 +181,9 @@ impl taos_query::TBuilder for TaosBuilder {
                     expired.trim() == "false" || expired.trim() == "unlimited",
                 )
             } else {
-                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                warn!(
+                    "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
+                );
                 Edition::new("unknown", true)
             }
         };
@@ -211,7 +219,9 @@ impl taos_query::TBuilder for TaosBuilder {
                     expired.trim() == "false" || expired.trim() == "unlimited",
                 )
             } else {
-                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                warn!(
+                    "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
+                );
                 Edition::new("unknown", true)
             }
         };
@@ -291,7 +301,9 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
                     !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
-                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                warn!(
+                    "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
+                );
                 Edition::new("unknown", true)
             }
         };
@@ -332,7 +344,9 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
                     !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
-                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                warn!(
+                    "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
+                );
                 Edition::new("unknown", true)
             }
         };
@@ -454,77 +468,6 @@ impl TaosBuilder {
         }
     }
 
-    pub(crate) fn to_query_url(&self) -> String {
-        let idx = self.current_addr_index.load(Ordering::Relaxed);
-        let addr = &self.addrs[idx];
-        // let mut cur_idx = self.current_addr_index;
-        // let start_idx = cur_idx;
-        // let addrs_len = self.addrs.len();
-
-        // FIXME
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!("{}://{}/rest/ws?token={}", self.scheme(), addr, token)
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme(), addr),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn to_query_url_new(&self, addr: &str) -> String {
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!("{}://{}/rest/ws?token={}", self.scheme(), addr, token)
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme(), addr),
-        }
-    }
-
-    pub(crate) fn to_stmt_url(&self) -> String {
-        // FIXME
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!(
-                    "{}://{}/rest/stmt?token={}",
-                    self.scheme(),
-                    "localhost:6041",
-                    token
-                )
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/stmt", self.scheme(), "localhost:6041"),
-        }
-    }
-
-    pub(crate) fn to_tmq_url(&self) -> String {
-        // FIXME
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!(
-                    "{}://{}/rest/tmq?token={}",
-                    self.scheme(),
-                    "localhost:6041",
-                    token
-                )
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/tmq", self.scheme(), "localhost:6041"),
-        }
-    }
-
-    pub(crate) fn to_ws_url(&self) -> String {
-        // FIXME
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!(
-                    "{}://{}/ws?token={}",
-                    self.scheme(),
-                    "localhost:6041",
-                    token
-                )
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme(), "localhost:6041"),
-        }
-    }
-
     pub(crate) fn to_conn_request(&self) -> WsConnReq {
         let mode = match self.conn_mode {
             Some(1) => Some(0), //for adapter, 0 is bi mode
@@ -547,9 +490,41 @@ impl TaosBuilder {
         }
     }
 
-    pub(crate) async fn reconnect(
+    #[inline]
+    pub(crate) fn to_url(&self, kind: UrlKind) -> String {
+        match kind {
+            UrlKind::Ws => self.to_ws_url(),
+            UrlKind::Tmq => self.to_tmq_url(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn to_ws_url(&self) -> String {
+        let cur_addr_idx = self.current_addr_index.load(Ordering::Relaxed);
+        let addr = &self.addrs[cur_addr_idx];
+        match &self.auth {
+            WsAuth::Token(token) => {
+                format!("{}://{}/ws?token={}", self.scheme(), addr, token)
+            }
+            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme(), addr),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn to_tmq_url(&self) -> String {
+        let cur_addr_idx = self.current_addr_index.load(Ordering::Relaxed);
+        let addr = &self.addrs[cur_addr_idx];
+        match &self.auth {
+            WsAuth::Token(token) => {
+                format!("{}://{}/rest/tmq?token={}", self.scheme(), addr, token)
+            }
+            WsAuth::Plain(_, _) => format!("{}://{}/rest/tmq", self.scheme(), addr),
+        }
+    }
+
+    pub(crate) async fn connect(
         &self,
-        mut url: String,
+        kind: UrlKind,
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         let conn = WsSend::Conn {
             req_id: generate_req_id(),
@@ -563,7 +538,7 @@ impl TaosBuilder {
         if self.compression {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "deflate")] {
-                    tracing::debug!(url, "Enable compression");
+                    tracing::trace!("enable WebSocket compression");
                     config.compression = Some(DeflateConfig::default());
                 } else {
                     tracing::warn!("WebSocket compression is not supported unless with `deflate` feature");
@@ -574,22 +549,17 @@ impl TaosBuilder {
         let mut retries = 0;
         let mut wait_millis = self.retry_backoff.retry_backoff_ms;
 
-        // let mut cur_idx = self.current_addr_index;
-        let start_idx = self.current_addr_index.load(Ordering::Relaxed);
-        let addrs_len = self.addrs.len();
-
-        loop {
-            // let addr = &self.addrs[cur_idx];
-            // let mut ws_url = self.to_ws_url();
-            // let mut ws_url = self.to_query_url_new(addr);
-            url = self.to_query_url();
+        for _ in 0..self.addrs.len() {
+            let mut url = self.to_url(kind);
 
             loop {
-                match connect_async_with_config(url.as_str(), Some(config), false).await {
+                match connect_async_with_config(&url, Some(config), false).await {
                     Ok((mut ws, _)) => {
                         if let Some(msg) = conn_msg {
                             // FIXME
                             ws.send(msg).await.unwrap();
+                            let a = ws.try_next().await;
+                            tracing::info!("reconnect ws recv conn resp: {a:?}");
                         }
                         return Ok(ws);
                     }
@@ -660,21 +630,9 @@ impl TaosBuilder {
                 }
             }
 
-            let cur_addr_idx = (self.current_addr_index.load(Ordering::Relaxed) + 1) % addrs_len;
-
-            tracing::debug!(
-                "Trying next address: start_idx: {} (cur_addr_idx: {})",
-                start_idx,
-                cur_addr_idx
-            );
-            // self.current_addr_index = (self.current_addr_index + 1) % addrs_len;
-            if cur_addr_idx == start_idx {
-                // If we have tried all addresses, break the loop
-                break;
-            }
-
-            self.current_addr_index
-                .store(cur_addr_idx, Ordering::Relaxed);
+            let cur_idx = self.current_addr_index.load(Ordering::Relaxed);
+            let next_idx = (cur_idx + 1) % self.addrs.len();
+            self.current_addr_index.store(next_idx, Ordering::Relaxed);
         }
 
         tracing::error!("Failed to connect to all addresses: {:?}", self.addrs);
@@ -788,7 +746,7 @@ mod tests {
 
         let dsn = "ws://localhost:6041";
         let builder = TaosBuilder::from_dsn(dsn)?;
-        let url = builder.to_query_url();
+        let url = builder.to_ws_url();
 
         let ws = builder.build_stream(url).await?;
         let (mut sender, mut reader) = ws.split();

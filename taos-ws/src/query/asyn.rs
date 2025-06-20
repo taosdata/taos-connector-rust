@@ -30,6 +30,8 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{error, instrument, trace, warn, Instrument};
 
+use crate::UrlKind;
+
 use super::messages::*;
 use super::TaosBuilder;
 
@@ -108,11 +110,11 @@ impl WsQuerySender {
                     .map_err(Error::from)?
                     .map_err(Error::from)?;
             }
-            WsSend::Binary(bytes) => {
+            WsSend::Binary(ref _bytes) => {
                 timeout(
                     SEND_TIMEOUT,
-                    self.sender
-                        .send_async(ToMsgEnum::Message(Message::Binary(bytes))),
+                    self.sender.send_async(ToMsgEnum::WsSend(msg)),
+                    // .send_async(ToMsgEnum::Message(Message::Binary(bytes))),
                 )
                 .await
                 .map_err(Error::from)?
@@ -347,11 +349,20 @@ async fn run(
     let _msg_reader_clone = msg_reader.clone();
     let _query_sender_clone = query_sender.clone();
 
+    // cache 只能有一个
+    // msg_id -> msg
+    let cache = Arc::new(scc::HashMap::new());
+    // req_id -> msg_id
+    let req_id_msg_id = Arc::new(scc::HashMap::new());
+    let msg_id = Arc::new(AtomicU64::new(0));
+    let last_ack_msg_id = Arc::new(AtomicU64::new(0));
+
     loop {
+        let len = query_sender.sender.len();
+        tracing::info!("query sender queue length: {len}");
+
         let (err_tx, mut err_rx) = mpsc::channel(2);
         let (close_tx, close_rx) = watch::channel(false);
-
-        let cache = Arc::new(scc::HashMap::new());
 
         let send_handle = tokio::spawn(send_messages(
             ws_stream_sender,
@@ -359,6 +370,9 @@ async fn run(
             err_tx.clone(),
             close_rx.clone(),
             cache.clone(),
+            req_id_msg_id.clone(),
+            msg_id.clone(),
+            last_ack_msg_id.clone(),
         ));
 
         let recv_handle = tokio::spawn(read_messages(
@@ -370,6 +384,8 @@ async fn run(
             close_rx,
             err_tx,
             cache.clone(),
+            req_id_msg_id.clone(),
+            last_ack_msg_id.clone(),
         ));
 
         tokio::select! {
@@ -394,8 +410,12 @@ async fn run(
             // _ = recv_handle => break,
         }
 
+        // 重连前确保 send 和 recv 任务都结束
+        let a = send_handle.await;
+        let a = recv_handle.await;
+
         tracing::trace!("reconnecting...");
-        let ws_stream = info.reconnect(info.to_query_url()).await;
+        let ws_stream = info.connect(UrlKind::Ws).await;
         let ws_stream = match ws_stream {
             Ok(ws) => ws,
             Err(err) => {
@@ -425,19 +445,19 @@ async fn run(
         // query_sender.queries.clear();
         query_sender.results.clear();
 
-        tracing::trace!("clearing cache, cache: {:?}", cache);
-        let mut keys = Vec::new();
-        cache.scan(|key, _| keys.push(*key));
-        for key in keys {
-            if let Some((_, msg)) = cache.remove_async(&key).await {
-                // FIXME: 缓存中的数据放在后面了
-                let _res = query_sender
-                    .sender
-                    .send_async(ToMsgEnum::Message(msg))
-                    .await;
-                tracing::error!("Failed to send cached message, error: {:?}", _res);
-            }
-        }
+        // tracing::trace!("cache: {:?}", cache);
+        // let mut keys = Vec::new();
+        // cache.scan(|key, _| keys.push(*key));
+        // for key in keys {
+        //     if let Some((_, msg)) = cache.remove_async(&key).await {
+        //         // FIXME: 缓存中的数据放在后面了
+        //         let _res = query_sender
+        //             .sender
+        //             .send_async(ToMsgEnum::Message(msg))
+        //             .await;
+        //         tracing::error!("Failed to send cached message, error: {:?}", _res);
+        //     }
+        // }
     }
 
     Ok(())
@@ -448,13 +468,27 @@ async fn send_messages(
     msg_reader: Receiver<ToMsgEnum>,
     err_sender: mpsc::Sender<WsError>,
     mut close_reader: watch::Receiver<bool>,
-    cache: Arc<scc::HashMap<ReqId, Message>>,
+    cache: Arc<scc::HashMap<u64, Message>>,
+    req_id_msg_id: Arc<scc::HashMap<ReqId, u64>>,
+    msg_id: Arc<AtomicU64>,
+    last_ack_msg_id: Arc<AtomicU64>,
 ) {
-    tracing::trace!("send start");
+    tracing::trace!("send start, ws_stream_sender: {:?}", ws_stream_sender);
 
     let mut interval = time::interval(Duration::from_secs(53));
 
-    loop {
+    let mut msg_ids = Vec::new();
+    cache.scan(|key, _| msg_ids.push(*key));
+    msg_ids.sort_unstable();
+
+    // let start = last_ack_msg_id.load(Ordering::SeqCst) + 1;
+    // let end = start + req_id_msg_id.len() as u64;
+
+    // tracing::info!("send_messages start: {}, end: {}", start, end);
+
+    tracing::info!("msg_ids: {msg_ids:?}");
+
+    for msg_id in msg_ids {
         tokio::select! {
             _ = interval.tick() => {
                 if let Err(err) = ws_stream_sender.send(Message::Ping(b"TAOS".to_vec())).await {
@@ -471,14 +505,59 @@ async fn send_messages(
                 tracing::trace!("close sender task");
                 break;
             }
+            entry = cache.get_async(&msg_id) => {
+                let entry = entry.unwrap();
+                let msg = entry.get().clone();
+                tracing::info!("cache send msg: {:?}", msg);
+                // 缓存中的数据无需再缓存
+                // let trya = msg.trya();
+                // let req_id = msg.req_id();
+                // let message = msg.too_message();
+                // if trya {
+                //     tracing::info!("send_messages cache message: {:?}", message);
+                //     let _res = cache.insert(req_id, message.clone());
+                // }
+                if let Err(err) = ws_stream_sender.send(msg).await {
+                    tracing::error!("Write websocket error: {}", err);
+                    err_sender.send(err).await.unwrap();
+                    break;
+                }
+            }
+        }
+    }
+
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                if let Err(err) = ws_stream_sender.send(Message::Ping(b"TAOS".to_vec())).await {
+                    tracing::error!("Write websocket ping error: {}", err);
+                    // 自动重连？
+                    err_sender.send(err).await.unwrap();
+                    break;
+                }
+                let _ = ws_stream_sender.flush().await;
+            }
+            v = close_reader.changed() => {
+                tracing::trace!("close signal received: {:?}", v);
+                let _= ws_stream_sender.send(Message::Close(None)).await;
+                let _ = ws_stream_sender.close().await;
+                tracing::trace!("close sender task");
+                break;
+            }
             msg = msg_reader.recv_async() => {
                 match msg {
                     Ok(msg) => {
+                        tracing::info!("send_messages received message: {:?}", msg);
                         let trya = msg.trya();
                         let req_id = msg.req_id();
                         let message = msg.too_message();
                         if trya {
-                            let _res = cache.insert(req_id, message.clone());
+                            // log print msg_id, log_id
+                            let msg_id = msg_id.fetch_add(1, Ordering::SeqCst);
+                            tracing::info!("send_messages cache, req_id: {req_id}, msg_id: {msg_id}, message: {message:?}");
+                            let _r = req_id_msg_id.insert_async(req_id, msg_id).await;
+                            let _res = cache.insert(msg_id, message.clone());
+
                         }
                         if let Err(err) = ws_stream_sender.send(message).await {
                             tracing::error!("Write websocket error: {}", err);
@@ -508,6 +587,8 @@ async fn read_messages(
     mut close_listener: watch::Receiver<bool>,
     err_sender: mpsc::Sender<WsError>,
     cache: Arc<scc::HashMap<ReqId, Message>>,
+    req_id_msg_id: Arc<scc::HashMap<ReqId, u64>>,
+    last_ack_msg_id: Arc<AtomicU64>,
 ) {
     tracing::trace!("reader start");
 
@@ -515,7 +596,7 @@ async fn read_messages(
         let cache = cache.clone();
         match frame {
             Message::Text(text) => {
-                tracing::trace!("received json response: {text}",);
+                tracing::trace!("received json response: {text}");
                 // 如果text 序列化失败，打印日志，继续处理下一个消息
                 let v = serde_json::from_str::<WsRecv>(&text);
                 if let Err(err) = v {
@@ -526,6 +607,14 @@ async fn read_messages(
                 let queries_sender = queries_sender.clone();
                 let ws2 = ws2.clone();
                 let (req_id, data, ok) = v.ok();
+                // 接收到响应后，将数据从 cache 中 remove
+                // TODO: async + log
+                tracing::trace!("try to remove cache for req_id: {req_id}");
+                let (_, msg_id) = req_id_msg_id.remove(&req_id).unwrap();
+                let _ = cache.remove(&msg_id);
+                tracing::trace!("remove cache for req_id: {req_id}, msg_id: {msg_id}");
+                // last_ack_msg_id.store(msg_id, Ordering::SeqCst);
+
                 match &data {
                     WsRecvData::Insert(_) => {
                         if let Some((_, sender)) = queries_sender.remove(&req_id) {
@@ -969,20 +1058,22 @@ impl WsTaos {
     /// Build TDengine WebSocket client from dsn.
     ///
     /// ```text
-    /// ws://localhost:6041/
+    /// ws://localhost:6041
     /// ```
     pub async fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
-        let info = TaosBuilder::from_dsn(dsn)?;
-        Self::from_wsinfo(&info).await
+        let builder = TaosBuilder::from_dsn(dsn)?;
+        Self::from_builder(&builder).await
     }
 
-    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        let ws_stream = info.build_stream(info.to_query_url()).await?;
+    pub(crate) async fn from_builder(builder: &TaosBuilder) -> RawResult<Self> {
+        let ws_stream = builder.build_stream(builder.to_ws_url()).await?;
         let (mut ws_stream_tx, mut ws_stream_rx) = ws_stream.split();
 
+        // 优化 send_version 和 send_conn，只传 ws_stream，不要 split
         let version = send_version(&mut ws_stream_tx, &mut ws_stream_rx).await?;
-        send_conn(&mut ws_stream_tx, &mut ws_stream_rx, info).await?;
+        // TODO: 重连后复用 send_conn
+        send_conn(&mut ws_stream_tx, &mut ws_stream_rx, builder).await?;
 
         let (close_tx, close_rx) = watch::channel(false);
         let (msg_tx, msg_rx) = flume::bounded(64);
@@ -1009,7 +1100,7 @@ impl WsTaos {
             sender,
             msg_rx,
             close_rx,
-            info.clone(),
+            builder.clone(),
         ));
 
         Ok(ws_taos)
@@ -1690,7 +1781,7 @@ where
     T: Into<Option<FastStr>>,
 {
     let builder = TaosBuilder::from_dsn(dsn)?;
-    let ws = builder.build_stream(builder.to_query_url()).await?;
+    let ws = builder.build_stream(builder.to_ws_url()).await?;
     let (mut sender, mut reader) = ws.split();
 
     let req = WsSend::CheckServerStatus {
@@ -2176,7 +2267,7 @@ mod tests {
         ])
         .await?;
 
-        let affected_rows = taos.s_exec("insert into t0 values(now, 1)").await?;
+        let affected_rows = taos.exec("insert into t0 values(now, 1)").await?;
         assert_eq!(affected_rows, 1);
 
         Ok(())

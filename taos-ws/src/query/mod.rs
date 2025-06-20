@@ -24,7 +24,7 @@ impl Taos {
     pub(super) async fn from_builder(dsn: TaosBuilder) -> RawResult<Self> {
         let mut retries = 0;
         loop {
-            match WsTaos::from_wsinfo(&dsn).await {
+            match WsTaos::from_builder(&dsn).await {
                 Ok(client) => {
                     return Ok(Self {
                         dsn,
