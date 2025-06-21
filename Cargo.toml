@@ -26,7 +26,7 @@ keywords = ["timeseries", "database", "tdengine", "taosdata", "connection"]
 license = "MIT OR Apache-2.0"
 readme = "./README.md"
 repository = "https://github.com/taosdata/taos-connector-rust.git"
-rust-version = "1.70"
+rust-version = "1.87.0"
 
 [profile.release]
 lto = true

@@ -1,13 +1,20 @@
 #![recursion_limit = "256"]
-use std::fmt::{Debug, Display};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
+use futures::StreamExt;
+use futures_util::SinkExt;
 use once_cell::sync::OnceCell;
+use rand::Rng;
+use std::cmp;
+use std::fmt::{Debug, Display};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use taos_query::prelude::Code;
-use taos_query::util::Edition;
-use taos_query::{DsnError, IntoDsn, RawResult};
+use taos_query::util::{generate_req_id, Edition};
+use taos_query::{DsnError, IntoDsn, RawError, RawResult};
 use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
+use tokio_tungstenite::tungstenite::Error as WsError;
+use tokio_tungstenite::tungstenite::Message;
 use tracing::warn;
 
 pub mod stmt;
@@ -16,7 +23,6 @@ pub use stmt::Stmt;
 pub mod stmt2;
 pub use stmt2::Stmt2;
 
-// pub mod tmq;
 pub mod consumer;
 pub use consumer::{Consumer, Offset, TmqBuilder};
 
@@ -28,31 +34,53 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
 
+use crate::query::asyn::is_disconnect_error;
+use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
+
 #[derive(Debug, Clone)]
 pub enum WsAuth {
     Token(String),
     Plain(String, String),
 }
 
+const RETRIES_DEFAULT: u32 = 5;
+// const RETRY_BACKOFF_MS_DEFAULT: u64 = 100;
+// const RETRY_BACKOFF_MAX_MS_DEFAULT: u64 = 1000;
+const RETRY_BACKOFF_MS_DEFAULT: u64 = 1000;
+const RETRY_BACKOFF_MAX_MS_DEFAULT: u64 = 5000;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Retries(u32);
 
-impl Default for Retries {
-    fn default() -> Self {
-        Self(5)
-    }
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct RetryBackoff {
+    retry_backoff_ms: u64,
+    retry_backoff_max_ms: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct TaosBuilder {
     https: Arc<AtomicBool>,
-    addr: String,
+    addrs: Vec<String>,
+    current_addr_index: Arc<AtomicUsize>,
     auth: WsAuth,
     database: Option<String>,
     server_version: OnceCell<String>,
     conn_mode: Option<u32>,
     compression: bool,
     conn_retries: Retries,
+    #[allow(dead_code)]
+    retry_backoff: RetryBackoff,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum UrlKind {
+    Ws,
+    #[allow(dead_code)]
+    Stmt,
+    #[allow(dead_code)]
+    Tmq,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -134,11 +162,12 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn is_enterprise_edition(&self) -> RawResult<bool> {
-        if self.addr.matches(".cloud.tdengine.com").next().is_some()
-            || self.addr.matches(".cloud.taosdata.com").next().is_some()
-        {
-            return Ok(true);
-        }
+        // FIXME
+        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
+        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
+        // {
+        //     return Ok(true);
+        // }
 
         let taos = self.build()?;
 
@@ -160,7 +189,9 @@ impl taos_query::TBuilder for TaosBuilder {
                     expired.trim() == "false" || expired.trim() == "unlimited",
                 )
             } else {
-                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                warn!(
+                    "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
+                );
                 Edition::new("unknown", true)
             }
         };
@@ -168,12 +199,13 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn get_edition(&self) -> RawResult<Edition> {
-        if self.addr.matches(".cloud.tdengine.com").next().is_some()
-            || self.addr.matches(".cloud.taosdata.com").next().is_some()
-        {
-            let edition = Edition::new("cloud", false);
-            return Ok(edition);
-        }
+        // FIXME
+        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
+        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
+        // {
+        //     let edition = Edition::new("cloud", false);
+        //     return Ok(edition);
+        // }
 
         let taos = self.build()?;
 
@@ -195,7 +227,9 @@ impl taos_query::TBuilder for TaosBuilder {
                     expired.trim() == "false" || expired.trim() == "unlimited",
                 )
             } else {
-                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                warn!(
+                    "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
+                );
                 Edition::new("unknown", true)
             }
         };
@@ -249,11 +283,12 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         // Ensue server is ready.
         taos.exec("select server_version()").await?;
 
-        if self.addr.matches(".cloud.tdengine.com").next().is_some()
-            || self.addr.matches(".cloud.taosdata.com").next().is_some()
-        {
-            return Ok(true);
-        }
+        // FIXME
+        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
+        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
+        // {
+        //     return Ok(true);
+        // }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
             &taos,
@@ -274,7 +309,9 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
                     !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
-                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                warn!(
+                    "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
+                );
                 Edition::new("unknown", true)
             }
         };
@@ -288,12 +325,13 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         // Ensure server is ready.
         taos.exec("select server_version()").await?;
 
-        if self.addr.matches(".cloud.tdengine.com").next().is_some()
-            || self.addr.matches(".cloud.taosdata.com").next().is_some()
-        {
-            let edition = Edition::new("cloud", false);
-            return Ok(edition);
-        }
+        // FIXME
+        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
+        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
+        // {
+        //     let edition = Edition::new("cloud", false);
+        //     return Ok(edition);
+        // }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
             &taos,
@@ -314,7 +352,9 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
                     !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
-                warn!("Can't check enterprise edition with either \"show cluster\" or \"show grants\"");
+                warn!(
+                    "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
+                );
                 Edition::new("unknown", true)
             }
         };
@@ -337,11 +377,13 @@ impl TaosBuilder {
 
     pub fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
         let mut dsn = dsn.into_dsn()?;
+
         let https = match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "http", _) | ("taos" | "taosws" | "tmq", Some("ws" | "http") | None) => false,
             ("wss" | "https", _) | ("taos" | "taosws" | "tmq", Some("wss" | "https")) => true,
             _ => Err(DsnError::InvalidDriver(dsn.to_string()))?,
         };
+
         let https = Arc::new(AtomicBool::new(https));
 
         let conn_mode = match dsn.params.get("conn_mode") {
@@ -354,16 +396,19 @@ impl TaosBuilder {
 
         let token = dsn.params.remove("token");
 
-        let addr = match dsn.addresses.first() {
-            Some(addr) => {
-                if addr.port.is_none() && addr.host.as_deref() == Some("localhost") {
-                    "localhost:6041".to_string()
-                } else {
-                    addr.to_string()
-                }
-            }
-            None => "localhost:6041".to_string(),
-        };
+        let mut addrs = Vec::with_capacity(dsn.addresses.len());
+        for addr in &dsn.addresses {
+            let addr = if addr.host.as_deref() == Some("localhost") && addr.port.is_none() {
+                "localhost:6041".to_string()
+            } else {
+                addr.to_string()
+            };
+            addrs.push(addr);
+        }
+
+        if addrs.is_empty() {
+            addrs.push("localhost:6041".to_string());
+        }
 
         let compression = dsn
             .params
@@ -379,84 +424,121 @@ impl TaosBuilder {
 
         let conn_retries = dsn
             .remove("conn_retries")
-            .map_or_else(Retries::default, |s| Retries(s.parse::<u32>().unwrap_or(5)));
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(RETRIES_DEFAULT);
 
+        let conn_retries = Retries(conn_retries);
+
+        let retry_backoff_ms = dsn
+            .remove("retry_backoff_ms")
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(RETRY_BACKOFF_MS_DEFAULT);
+
+        let retry_backoff_max_ms = dsn
+            .remove("retry_backoff_max_ms")
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(RETRY_BACKOFF_MAX_MS_DEFAULT);
+
+        let retry_backoff = RetryBackoff {
+            retry_backoff_ms,
+            retry_backoff_max_ms,
+        };
+
+        // TODO: refactor
         if let Some(token) = token {
             Ok(TaosBuilder {
                 https,
-                addr,
+                addrs,
                 auth: WsAuth::Token(token),
                 database: dsn.subject,
                 server_version: OnceCell::new(),
                 conn_mode,
                 compression,
                 conn_retries,
+                retry_backoff,
+                current_addr_index: Arc::new(AtomicUsize::new(0)),
             })
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
             let password = dsn.password.unwrap_or_else(|| "taosdata".to_string());
             Ok(TaosBuilder {
                 https,
-                addr,
+                addrs,
                 auth: WsAuth::Plain(username, password),
                 database: dsn.subject,
                 server_version: OnceCell::new(),
                 conn_mode,
                 compression,
                 conn_retries,
+                retry_backoff,
+                current_addr_index: Arc::new(AtomicUsize::new(0)),
             })
         }
     }
 
-    pub(crate) fn to_query_url(&self) -> String {
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!("{}://{}/rest/ws?token={}", self.scheme(), self.addr, token)
+    async fn send_conn_request(
+        &self,
+        ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    ) -> RawResult<()> {
+        #[inline]
+        fn handle_disconnect_error(err: WsError) -> RawError {
+            if is_disconnect_error(&err) {
+                return RawError::from_code(Code::WS_DISCONNECTED);
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/ws", self.scheme(), self.addr),
+            RawError::from_any(err)
         }
+
+        let conn_req = WsSend::Conn {
+            req_id: generate_req_id(),
+            req: self.build_conn_request(),
+        };
+
+        ws_stream
+            .send(conn_req.to_msg())
+            .await
+            .map_err(handle_disconnect_error)?;
+
+        while let Some(res) = ws_stream.next().await {
+            let msg = res.map_err(handle_disconnect_error)?;
+            match msg {
+                Message::Text(text) => {
+                    let conn_resp: WsRecv = serde_json::from_str(&text).map_err(|e| {
+                        RawError::from_string(format!("invalid conn response: {e}"))
+                    })?;
+                    let (_, data, ok) = conn_resp.ok();
+                    ok?;
+                    if let WsRecvData::Conn = data {
+                        return Ok(());
+                    }
+                    return Err(RawError::from_string(format!(
+                        "unexpected conn response: {data:?}"
+                    )));
+                }
+                Message::Ping(bytes) => {
+                    ws_stream
+                        .send(Message::Pong(bytes))
+                        .await
+                        .map_err(RawError::from_any)?;
+                }
+                _ => {
+                    return Err(RawError::from_string(format!(
+                        "unexpected message during conn: {msg:?}"
+                    )))
+                }
+            }
+        }
+
+        Err(RawError::from_code(Code::WS_DISCONNECTED))
     }
 
-    pub(crate) fn to_stmt_url(&self) -> String {
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!(
-                    "{}://{}/rest/stmt?token={}",
-                    self.scheme(),
-                    self.addr,
-                    token
-                )
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/stmt", self.scheme(), self.addr),
-        }
-    }
-
-    pub(crate) fn to_tmq_url(&self) -> String {
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!("{}://{}/rest/tmq?token={}", self.scheme(), self.addr, token)
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/tmq", self.scheme(), self.addr),
-        }
-    }
-
-    pub(crate) fn to_ws_url(&self) -> String {
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!("{}://{}/ws?token={}", self.scheme(), self.addr, token)
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme(), self.addr),
-        }
-    }
-
-    pub(crate) fn to_conn_request(&self) -> WsConnReq {
+    pub(crate) fn build_conn_request(&self) -> WsConnReq {
         let mode = match self.conn_mode {
-            Some(1) => Some(0), //for adapter, 0 is bi mode
+            Some(1) => Some(0), // for adapter, 0 is bi mode
             _ => None,
         };
 
         match &self.auth {
-            WsAuth::Token(_token) => WsConnReq {
+            WsAuth::Token(_) => WsConnReq {
                 user: Some("root".to_string()),
                 password: Some("taosdata".to_string()),
                 db: self.database.clone(),
@@ -469,6 +551,122 @@ impl TaosBuilder {
                 mode,
             },
         }
+    }
+
+    #[inline]
+    pub(crate) fn to_url(&self, kind: UrlKind) -> String {
+        match kind {
+            UrlKind::Tmq => self.to_tmq_url(),
+            _ => self.to_ws_url(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn to_ws_url(&self) -> String {
+        self.format_url("ws")
+    }
+
+    #[inline]
+    pub(crate) fn to_query_url(&self) -> String {
+        self.format_url("rest/ws")
+    }
+
+    #[inline]
+    pub(crate) fn to_stmt_url(&self) -> String {
+        self.format_url("rest/stmt")
+    }
+
+    #[inline]
+    pub(crate) fn to_tmq_url(&self) -> String {
+        self.format_url("rest/tmq")
+    }
+
+    fn format_url(&self, path: &str) -> String {
+        let cur_addr_idx = self.current_addr_index.load(Ordering::Relaxed);
+        let addr = &self.addrs[cur_addr_idx];
+        match &self.auth {
+            WsAuth::Token(token) => {
+                format!("{}://{}/{}?token={}", self.scheme(), addr, path, token)
+            }
+            WsAuth::Plain(_, _) => {
+                format!("{}://{}/{}", self.scheme(), addr, path)
+            }
+        }
+    }
+
+    pub(crate) async fn connect(
+        &self,
+        kind: UrlKind,
+    ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+        let mut config = WebSocketConfig::default();
+        config.max_frame_size = None;
+        config.max_message_size = None;
+        if self.compression {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "deflate")] {
+                    tracing::trace!("WebSocket compression enabled");
+                    config.compression = Some(DeflateConfig::default());
+                } else {
+                    tracing::warn!("WebSocket compression is not supported, missing `deflate` feature");
+                }
+            }
+        }
+
+        for _ in 0..self.addrs.len() {
+            let mut url = self.to_url(kind);
+
+            for i in 0..self.conn_retries.0 {
+                match connect_async_with_config(&url, Some(config), false).await {
+                    Ok((mut ws_stream, _)) => match self.send_conn_request(&mut ws_stream).await {
+                        Ok(_) => return Ok(ws_stream),
+                        Err(e) => {
+                            tracing::warn!("failed to send conn request: {e}");
+                            if e.code() != Code::WS_DISCONNECTED {
+                                break;
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        let errstr = e.to_string();
+                        tracing::warn!("failed to connect to {url}: {errstr}");
+                        if errstr.contains("307") {
+                            self.set_https(true);
+                            url = url.replace("ws://", "wss://");
+                            continue;
+                        } else if errstr.contains("400") || errstr.contains("404 Not Found") {
+                            url = match kind {
+                                UrlKind::Ws => self.to_query_url(),
+                                UrlKind::Stmt => self.to_stmt_url(),
+                                UrlKind::Tmq => self.to_tmq_url(),
+                            };
+                            continue;
+                        } else if errstr.contains("401 Unauthorized") {
+                            break;
+                        }
+                    }
+                }
+
+                tracing::warn!("failed to connect to {url}, retrying...({i})",);
+
+                let base_delay = cmp::min(
+                    self.retry_backoff.retry_backoff_max_ms,
+                    self.retry_backoff.retry_backoff_ms * 2u64.saturating_pow(i),
+                );
+
+                let jitter = 1.0 + rand::rng().random_range(-0.2..=0.2);
+                let delay = (base_delay as f64 * jitter) as u64;
+
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+            }
+
+            let cur_idx = self.current_addr_index.load(Ordering::Relaxed);
+            let next_idx = (cur_idx + 1) % self.addrs.len();
+            self.current_addr_index.store(next_idx, Ordering::Relaxed);
+        }
+
+        tracing::error!("failed to connect to all addresses: {:?}", self.addrs);
+
+        Err(RawError::from_string("all addresses failed"))
     }
 
     pub(crate) async fn build_stream(
@@ -564,7 +762,7 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use tracing::*;
 
-    use crate::query::infra::{ToMessage, WsRecv, WsRecvData, WsSend};
+    use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
     use crate::*;
 
     #[tokio::test]
@@ -578,7 +776,7 @@ mod tests {
 
         let dsn = "ws://localhost:6041";
         let builder = TaosBuilder::from_dsn(dsn)?;
-        let url = builder.to_query_url();
+        let url = builder.to_ws_url();
 
         let ws = builder.build_stream(url).await?;
         let (mut sender, mut reader) = ws.split();
@@ -608,7 +806,7 @@ mod cloud_tests {
     use futures::{SinkExt, StreamExt};
     use tracing::*;
 
-    use crate::query::infra::{ToMessage, WsRecv, WsRecvData, WsSend};
+    use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
     use crate::*;
 
     #[tokio::test]

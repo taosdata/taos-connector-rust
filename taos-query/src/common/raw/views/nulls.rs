@@ -5,7 +5,7 @@ use std::ops::Range;
 use bytes::Bytes;
 
 const fn null_bits_len(len: usize) -> usize {
-    (len + 7) / 8
+    len.div_ceil(8)
 }
 
 /// A bitmap for nulls.

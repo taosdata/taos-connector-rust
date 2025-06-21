@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::common::{Precision, Ty};
 use taos_query::prelude::RawError;
+use taos_query::util::generate_req_id;
+use tokio_tungstenite::tungstenite::Message;
 
 pub type ReqId = u64;
 pub type StmtId = u64;
@@ -37,8 +39,8 @@ impl WsConnReq {
 
 #[derive(Debug, Serialize, Clone, Copy)]
 pub struct WsResArgs {
-    pub req_id: ReqId,
     pub id: ResId,
+    pub req_id: ReqId,
 }
 
 #[derive(Debug, Serialize)]
@@ -51,6 +53,7 @@ pub enum WsSend {
         #[serde(flatten)]
         req: WsConnReq,
     },
+    // sml ok
     Insert {
         protocol: u8,
         precision: String,
@@ -59,13 +62,18 @@ pub enum WsSend {
         req_id: Option<ReqId>,
         table_name_key: Option<String>,
     },
+    // ok
     Query {
         req_id: ReqId,
         sql: String,
     },
+    // not ok
     Fetch(WsResArgs),
+    // not ok
     FetchBlock(WsResArgs),
+    // check
     Binary(Vec<u8>),
+    // not ok
     FreeResult(WsResArgs),
     Stmt2Init {
         req_id: ReqId,
@@ -90,6 +98,7 @@ pub enum WsSend {
         req_id: ReqId,
         stmt_id: StmtId,
     },
+    // ok
     CheckServerStatus {
         req_id: ReqId,
         fqdn: Option<FastStr>,
@@ -108,7 +117,7 @@ impl WsSend {
             | WsSend::Stmt2Result { req_id, .. }
             | WsSend::Stmt2Close { req_id, .. }
             | WsSend::CheckServerStatus { req_id, .. } => *req_id,
-            WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
+            WsSend::Insert { req_id, .. } => req_id.unwrap_or(generate_req_id()),
             WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
             WsSend::Fetch(args) | WsSend::FetchBlock(args) | WsSend::FreeResult(args) => {
                 args.req_id
@@ -372,17 +381,69 @@ impl<'de> Deserialize<'de> for BindType {
 }
 
 pub trait ToMessage: Serialize {
-    fn to_msg(&self) -> tokio_tungstenite::tungstenite::Message {
-        tokio_tungstenite::tungstenite::Message::Text(serde_json::to_string(self).unwrap())
+    fn to_msg(&self) -> Message {
+        Message::Text(serde_json::to_string(self).unwrap())
     }
 }
 
 impl ToMessage for WsSend {}
 
+#[derive(Debug)]
+pub enum ToMsgEnum {
+    // 兼容 Message::Pong，接收 ping 后返回 pong
+    Message(Message),
+    WsSend(WsSend),
+}
+
+impl ToMsgEnum {
+    pub(crate) fn too_message(self) -> Message {
+        match self {
+            ToMsgEnum::Message(msg) => msg,
+            ToMsgEnum::WsSend(ws_send) => match ws_send {
+                WsSend::Binary(bytes) => Message::Binary(bytes),
+                _ => ws_send.to_msg(),
+            },
+        }
+    }
+
+    pub(crate) fn req_id(&self) -> ReqId {
+        match self {
+            // binary 发送 Message::Bytes，从 bytes 解析
+            // Message::ping 不要放到缓存中
+            ToMsgEnum::Message(_) => generate_req_id(),
+            ToMsgEnum::WsSend(ws_send) => ws_send.req_id(),
+        }
+    }
+
+    // 是否需要缓存
+    pub(crate) fn trya(&self) -> bool {
+        true
+        // match self {
+        //     ToMsgEnum::Message(_) => false,
+        //     ToMsgEnum::WsSend(ws_send) => match ws_send {
+        //         WsSend::Insert { .. } | WsSend::Query { .. } | WsSend::CheckServerStatus { .. } => {
+        //             true
+        //         }
+        //         WsSend::Binary(_bytes) => {
+        //             // query 在使用 ResultSet 后无法支持自动重连, fetch 无法做自动重连
+        //             // let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+        //             // match action {
+        //             //     // TODO
+        //             //     1 => true,
+        //             //     _ => false,
+        //             // }
+        //             true
+        //         }
+        //         _ => false,
+        //     },
+        // }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::BindType;
-    use crate::query::infra::{WsRecv, WsSend};
+    use crate::query::messages::{WsRecv, WsSend};
     use crate::query::WsConnReq;
     use crate::TaosBuilder;
 

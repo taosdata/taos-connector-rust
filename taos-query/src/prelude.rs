@@ -321,9 +321,8 @@ mod r#async {
         fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             self.query.fetch_raw_block(cx).map(|raw| {
                 raw.map(|raw| {
-                    raw.map(|raw| {
+                    raw.inspect(|raw| {
                         self.query.update_summary(raw.nrows());
-                        raw
                     })
                 })
                 .transpose()
