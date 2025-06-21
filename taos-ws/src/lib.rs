@@ -483,7 +483,7 @@ impl TaosBuilder {
             if is_disconnect_error(&err) {
                 return RawError::from_code(Code::WS_DISCONNECTED);
             }
-            return RawError::from_any(err);
+            RawError::from_any(err)
         }
 
         let conn_req = WsSend::Conn {
