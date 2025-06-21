@@ -62,7 +62,7 @@ struct RetryBackoff {
 #[derive(Debug, Clone)]
 pub struct TaosBuilder {
     https: Arc<AtomicBool>,
-    addrs: Vec<String>, // url
+    addrs: Vec<String>,
     current_addr_index: Arc<AtomicUsize>,
     auth: WsAuth,
     database: Option<String>,
@@ -77,6 +77,8 @@ pub struct TaosBuilder {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum UrlKind {
     Ws,
+    #[allow(dead_code)]
+    Stmt,
     #[allow(dead_code)]
     Tmq,
 }
@@ -554,32 +556,41 @@ impl TaosBuilder {
     #[inline]
     pub(crate) fn to_url(&self, kind: UrlKind) -> String {
         match kind {
-            UrlKind::Ws => self.to_ws_url(),
             UrlKind::Tmq => self.to_tmq_url(),
+            _ => self.to_ws_url(),
         }
     }
 
     #[inline]
     pub(crate) fn to_ws_url(&self) -> String {
-        let cur_addr_idx = self.current_addr_index.load(Ordering::Relaxed);
-        let addr = &self.addrs[cur_addr_idx];
-        match &self.auth {
-            WsAuth::Token(token) => {
-                format!("{}://{}/ws?token={}", self.scheme(), addr, token)
-            }
-            WsAuth::Plain(_, _) => format!("{}://{}/ws", self.scheme(), addr),
-        }
+        self.format_url("ws")
+    }
+
+    #[inline]
+    pub(crate) fn to_query_url(&self) -> String {
+        self.format_url("rest/ws")
+    }
+
+    #[inline]
+    pub(crate) fn to_stmt_url(&self) -> String {
+        self.format_url("rest/stmt")
     }
 
     #[inline]
     pub(crate) fn to_tmq_url(&self) -> String {
+        self.format_url("rest/tmq")
+    }
+
+    fn format_url(&self, path: &str) -> String {
         let cur_addr_idx = self.current_addr_index.load(Ordering::Relaxed);
         let addr = &self.addrs[cur_addr_idx];
         match &self.auth {
             WsAuth::Token(token) => {
-                format!("{}://{}/rest/tmq?token={}", self.scheme(), addr, token)
+                format!("{}://{}/{}?token={}", self.scheme(), addr, path, token)
             }
-            WsAuth::Plain(_, _) => format!("{}://{}/rest/tmq", self.scheme(), addr),
+            WsAuth::Plain(_, _) => {
+                format!("{}://{}/{}", self.scheme(), addr, path)
+            }
         }
     }
 
@@ -603,6 +614,7 @@ impl TaosBuilder {
 
         for _ in 0..self.addrs.len() {
             let mut url = self.to_url(kind);
+
             for i in 0..self.conn_retries.0 {
                 match connect_async_with_config(&url, Some(config), false).await {
                     Ok((mut ws_stream, _)) => match self.send_conn_request(&mut ws_stream).await {
@@ -620,6 +632,13 @@ impl TaosBuilder {
                         if errstr.contains("307") {
                             self.set_https(true);
                             url = url.replace("ws://", "wss://");
+                            continue;
+                        } else if errstr.contains("400") || errstr.contains("404 Not Found") {
+                            url = match kind {
+                                UrlKind::Ws => self.to_query_url(),
+                                UrlKind::Stmt => self.to_stmt_url(),
+                                UrlKind::Tmq => self.to_tmq_url(),
+                            };
                             continue;
                         } else if errstr.contains("401 Unauthorized") {
                             break;
@@ -647,7 +666,7 @@ impl TaosBuilder {
 
         tracing::error!("failed to connect to all addresses: {:?}", self.addrs);
 
-        Err("all addresses failed".into())
+        Err(RawError::from_string("all addresses failed"))
     }
 
     pub(crate) async fn build_stream(
