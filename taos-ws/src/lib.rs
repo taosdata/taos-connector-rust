@@ -1,16 +1,20 @@
 #![recursion_limit = "256"]
-use std::fmt::{Debug, Display};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
 
-use futures::TryStreamExt;
+use futures::StreamExt;
 use futures_util::SinkExt;
 use once_cell::sync::OnceCell;
 use rand::Rng;
+use std::cmp;
+use std::fmt::{Debug, Display};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use taos_query::prelude::Code;
 use taos_query::util::{generate_req_id, Edition};
-use taos_query::{DsnError, IntoDsn, RawResult};
+use taos_query::{DsnError, IntoDsn, RawError, RawResult};
 use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
+use tokio_tungstenite::tungstenite::Error as WsError;
+use tokio_tungstenite::tungstenite::Message;
 use tracing::warn;
 
 pub mod stmt;
@@ -30,7 +34,8 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
 
-use crate::query::messages::{ToMessage, WsSend};
+use crate::query::asyn::is_disconnect_error;
+use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
@@ -57,7 +62,7 @@ struct RetryBackoff {
 #[derive(Debug, Clone)]
 pub struct TaosBuilder {
     https: Arc<AtomicBool>,
-    addrs: Vec<String>,
+    addrs: Vec<String>, // url
     current_addr_index: Arc<AtomicUsize>,
     auth: WsAuth,
     database: Option<String>,
@@ -72,6 +77,7 @@ pub struct TaosBuilder {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum UrlKind {
     Ws,
+    #[allow(dead_code)]
     Tmq,
 }
 
@@ -468,14 +474,69 @@ impl TaosBuilder {
         }
     }
 
-    pub(crate) fn to_conn_request(&self) -> WsConnReq {
+    async fn send_conn_request(
+        &self,
+        ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    ) -> RawResult<()> {
+        #[inline]
+        fn handle_disconnect_error(err: WsError) -> RawError {
+            if is_disconnect_error(&err) {
+                return RawError::from_code(Code::WS_DISCONNECTED);
+            }
+            return RawError::from_any(err);
+        }
+
+        let conn_req = WsSend::Conn {
+            req_id: generate_req_id(),
+            req: self.build_conn_request(),
+        };
+
+        ws_stream
+            .send(conn_req.to_msg())
+            .await
+            .map_err(handle_disconnect_error)?;
+
+        while let Some(res) = ws_stream.next().await {
+            let msg = res.map_err(handle_disconnect_error)?;
+            match msg {
+                Message::Text(text) => {
+                    let conn_resp: WsRecv = serde_json::from_str(&text).map_err(|e| {
+                        RawError::from_string(format!("invalid conn response: {e}"))
+                    })?;
+                    let (_, data, ok) = conn_resp.ok();
+                    ok?;
+                    if let WsRecvData::Conn = data {
+                        return Ok(());
+                    }
+                    return Err(RawError::from_string(format!(
+                        "unexpected conn response: {data:?}"
+                    )));
+                }
+                Message::Ping(bytes) => {
+                    ws_stream
+                        .send(Message::Pong(bytes))
+                        .await
+                        .map_err(RawError::from_any)?;
+                }
+                _ => {
+                    return Err(RawError::from_string(format!(
+                        "unexpected message during conn: {msg:?}"
+                    )))
+                }
+            }
+        }
+
+        Err(RawError::from_code(Code::WS_DISCONNECTED))
+    }
+
+    pub(crate) fn build_conn_request(&self) -> WsConnReq {
         let mode = match self.conn_mode {
-            Some(1) => Some(0), //for adapter, 0 is bi mode
+            Some(1) => Some(0), // for adapter, 0 is bi mode
             _ => None,
         };
 
         match &self.auth {
-            WsAuth::Token(_token) => WsConnReq {
+            WsAuth::Token(_) => WsConnReq {
                 user: Some("root".to_string()),
                 password: Some("taosdata".to_string()),
                 db: self.database.clone(),
@@ -526,108 +587,57 @@ impl TaosBuilder {
         &self,
         kind: UrlKind,
     ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-        let conn = WsSend::Conn {
-            req_id: generate_req_id(),
-            req: self.to_conn_request(),
-        };
-        let conn_msg = Some(conn.to_msg());
-
         let mut config = WebSocketConfig::default();
         config.max_frame_size = None;
         config.max_message_size = None;
         if self.compression {
             cfg_if::cfg_if! {
                 if #[cfg(feature = "deflate")] {
-                    tracing::trace!("enable WebSocket compression");
+                    tracing::trace!("WebSocket compression enabled");
                     config.compression = Some(DeflateConfig::default());
                 } else {
-                    tracing::warn!("WebSocket compression is not supported unless with `deflate` feature");
+                    tracing::warn!("WebSocket compression is not supported, missing `deflate` feature");
                 }
             }
         }
 
-        let mut retries = 0;
-        let mut wait_millis = self.retry_backoff.retry_backoff_ms;
-
         for _ in 0..self.addrs.len() {
             let mut url = self.to_url(kind);
-
-            loop {
+            for i in 0..self.conn_retries.0 {
                 match connect_async_with_config(&url, Some(config), false).await {
-                    Ok((mut ws, _)) => {
-                        if let Some(msg) = conn_msg {
-                            // FIXME
-                            ws.send(msg).await.unwrap();
-                            let a = ws.try_next().await;
-                            tracing::info!("reconnect ws recv conn resp: {a:?}");
+                    Ok((mut ws_stream, _)) => match self.send_conn_request(&mut ws_stream).await {
+                        Ok(_) => return Ok(ws_stream),
+                        Err(e) => {
+                            tracing::warn!("failed to send conn request: {e}");
+                            if e.code() != Code::WS_DISCONNECTED {
+                                break;
+                            }
                         }
-                        return Ok(ws);
-                    }
-                    Err(err) => {
-                        let err_string = err.to_string();
-                        if err_string.contains("307") {
-                            tracing::debug!(error = err_string, "Redirecting to HTTPS link");
+                    },
+                    Err(e) => {
+                        let errstr = e.to_string();
+                        tracing::warn!("failed to connect to {url}: {errstr}");
+                        if errstr.contains("307") {
                             self.set_https(true);
                             url = url.replace("ws://", "wss://");
-                            // ws_url = self.to_ws_url();
-                        } else if err_string.contains("401 Unauthorized") {
-                            // 401 是直接结束还是尝试下一个地址？
-                            // continue 'outer;
+                            continue;
+                        } else if errstr.contains("401 Unauthorized") {
                             break;
-                            // return Err(QueryError::Unauthorized(self.to_ws_url()).into());
                         }
-                        // else if err.to_string().contains("404 Not Found")
-                        //     || err.to_string().contains("400")
-                        // {
-                        // if !use_global_endpoint {
-                        //     // continue 'outer;
-                        //     break;
-                        //     // return Err(QueryError::from(err).into());
-                        // }
-                        // match connect_async_with_config(&url, Some(config), false).await {
-                        //     Ok((mut ws, _)) => {
-                        //         if let Some(msg) = conn_msg {
-                        //             // FIXME
-                        //             ws.send(msg).await.unwrap();
-                        //         }
-                        //         return Ok(ws);
-                        //     }
-                        //     Err(err) => {
-                        //         let err_string = err.to_string();
-                        //         if err_string.contains("401 Unauthorized") {
-                        //             // continue 'outer;
-                        //             break;
-                        //             // return Err(QueryError::Unauthorized(url).into());
-                        //         }
-                        //     }
-                        // }
-                        // }
-
-                        if retries >= self.conn_retries.0 {
-                            // continue 'outer;
-                            break;
-                            // return Err(QueryError::from(err).into());
-                        }
-                        retries += 1;
-                        tracing::warn!(
-                            "Failed to connect to {}, retrying...({})",
-                            self.to_ws_url(),
-                            retries
-                        );
-
-                        let time = {
-                            let mut rng = rand::rng();
-                            wait_millis + (wait_millis as f64 * rng.random_range(0.0..0.2)) as u64
-                        };
-                        // let mut rng = rand::rng();
-                        // let time = (wait_millis as f64 * rng.random_range(0.0..0.2)) as u64;
-                        tokio::time::sleep(std::time::Duration::from_millis(time)).await;
-
-                        // backoff strategy
-                        wait_millis =
-                            std::cmp::min(wait_millis * 2, self.retry_backoff.retry_backoff_max_ms);
                     }
                 }
+
+                tracing::warn!("failed to connect to {url}, retrying...({i})",);
+
+                let base_delay = cmp::min(
+                    self.retry_backoff.retry_backoff_max_ms,
+                    self.retry_backoff.retry_backoff_ms * 2u64.saturating_pow(i),
+                );
+
+                let jitter = 1.0 + rand::rng().random_range(-0.2..=0.2);
+                let delay = (base_delay as f64 * jitter) as u64;
+
+                tokio::time::sleep(Duration::from_millis(delay)).await;
             }
 
             let cur_idx = self.current_addr_index.load(Ordering::Relaxed);
@@ -635,8 +645,9 @@ impl TaosBuilder {
             self.current_addr_index.store(next_idx, Ordering::Relaxed);
         }
 
-        tracing::error!("Failed to connect to all addresses: {:?}", self.addrs);
-        Err("All addresses failed".into())
+        tracing::error!("failed to connect to all addresses: {:?}", self.addrs);
+
+        Err("all addresses failed".into())
     }
 
     pub(crate) async fn build_stream(

@@ -1486,7 +1486,7 @@ impl TmqBuilder {
         });
 
         Ok(Consumer {
-            conn: self.info.to_conn_request(),
+            conn: self.info.build_conn_request(),
             tmq_conf: self.conf.clone(),
             sender: WsTmqSender {
                 req_id: Arc::new(AtomicU64::new(1)),

@@ -275,7 +275,7 @@ impl Stmt {
 
         let login = StmtSend::Conn {
             req_id,
-            req: info.to_conn_request(),
+            req: info.build_conn_request(),
         };
         sender.send(login.to_msg()).await.map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {

@@ -355,7 +355,6 @@ async fn run(
     // req_id -> msg_id
     let req_id_msg_id = Arc::new(scc::HashMap::new());
     let msg_id = Arc::new(AtomicU64::new(0));
-    let last_ack_msg_id = Arc::new(AtomicU64::new(0));
 
     loop {
         let len = query_sender.sender.len();
@@ -372,7 +371,6 @@ async fn run(
             cache.clone(),
             req_id_msg_id.clone(),
             msg_id.clone(),
-            last_ack_msg_id.clone(),
         ));
 
         let recv_handle = tokio::spawn(read_messages(
@@ -385,7 +383,6 @@ async fn run(
             err_tx,
             cache.clone(),
             req_id_msg_id.clone(),
-            last_ack_msg_id.clone(),
         ));
 
         tokio::select! {
@@ -411,8 +408,8 @@ async fn run(
         }
 
         // 重连前确保 send 和 recv 任务都结束
-        let a = send_handle.await;
-        let a = recv_handle.await;
+        let _ = send_handle.await;
+        let _ = recv_handle.await;
 
         tracing::trace!("reconnecting...");
         let ws_stream = info.connect(UrlKind::Ws).await;
@@ -471,7 +468,6 @@ async fn send_messages(
     cache: Arc<scc::HashMap<u64, Message>>,
     req_id_msg_id: Arc<scc::HashMap<ReqId, u64>>,
     msg_id: Arc<AtomicU64>,
-    last_ack_msg_id: Arc<AtomicU64>,
 ) {
     tracing::trace!("send start, ws_stream_sender: {:?}", ws_stream_sender);
 
@@ -491,6 +487,7 @@ async fn send_messages(
     for msg_id in msg_ids {
         tokio::select! {
             _ = interval.tick() => {
+                //
                 if let Err(err) = ws_stream_sender.send(Message::Ping(b"TAOS".to_vec())).await {
                     tracing::error!("Write websocket ping error: {}", err);
                     err_sender.send(err).await.unwrap();
@@ -588,7 +585,6 @@ async fn read_messages(
     err_sender: mpsc::Sender<WsError>,
     cache: Arc<scc::HashMap<ReqId, Message>>,
     req_id_msg_id: Arc<scc::HashMap<ReqId, u64>>,
-    last_ack_msg_id: Arc<AtomicU64>,
 ) {
     tracing::trace!("reader start");
 
@@ -888,7 +884,7 @@ async fn read_messages(
     // }
 }
 
-fn is_disconnect_error(err: &WsError) -> bool {
+pub fn is_disconnect_error(err: &WsError) -> bool {
     matches!(
         err,
         WsError::ConnectionClosed
@@ -1016,7 +1012,7 @@ async fn send_conn(
 ) -> RawResult<()> {
     let login = WsSend::Conn {
         req_id: generate_req_id(),
-        req: info.to_conn_request(),
+        req: info.build_conn_request(),
     };
     ws_sender.send(login.to_msg()).await.map_err(Error::from)?;
     while let Some(Ok(message)) = ws_reader.next().await {
@@ -1094,6 +1090,8 @@ impl WsTaos {
             sender: sender.clone(),
         };
 
+        // log span
+        // 一个连接建立一个单独的 span，连接加 id
         tokio::spawn(run(
             ws_stream_tx,
             ws_stream_rx,
