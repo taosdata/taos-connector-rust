@@ -10,13 +10,23 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unali
 use crate::common::Ty;
 
 #[allow(clippy::partial_pub_fields)]
-#[derive(Debug, Clone, Copy, Eq, KnownLayout, IntoBytes, FromBytes, Unaligned, Immutable)]
+#[derive(Clone, Copy, Eq, KnownLayout, IntoBytes, FromBytes, Unaligned, Immutable)]
 #[repr(C)]
 pub struct PrecScale {
     pub scale: u8,
     pub prec: u8,
     _empty: u8,
     pub len: u8,
+}
+
+impl Debug for PrecScale {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PrecScale")
+            .field("len", &self.len)
+            .field("prec", &self.prec)
+            .field("scale", &self.scale)
+            .finish()
+    }
 }
 
 impl PrecScale {
@@ -38,11 +48,47 @@ impl PartialEq for PrecScale {
     }
 }
 
-#[derive(Clone, Copy, KnownLayout, FromBytes, Immutable)]
-#[repr(C)]
+#[derive(Clone, Copy, Eq, KnownLayout, FromBytes, Immutable)]
+#[repr(packed(1))]
 union LenOrDec {
+    /// Length of the column schema for non-decimal types.
+    ///
+    /// - For fixed-length types, this is the length of the type in bytes.
+    /// - For variable-length types, this is the length of the value in bytes.
     len: u32,
+    /// Decimal precision and scale.
+    ///
+    /// The length is always 8 for `Decimal64` and 16 for `Decimal`.
+    ///
+    /// - The `len` field is used to store the length of the decimal value.
+    /// - The `prec` field is used to store the precision of the decimal value.
+    /// - The `scale` field is used to store the scale of the decimal value.
     dec: PrecScale,
+}
+
+impl Deref for LenOrDec {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { std::mem::transmute::<_, &[u8; 4]>(self) }.as_slice()
+    }
+}
+
+unsafe impl zerocopy::ByteSlice for LenOrDec {}
+
+impl Debug for LenOrDec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("LenOrDec")
+            .field(&unsafe { self.len })
+            .field(&unsafe { self.dec })
+            .finish()
+    }
+}
+
+impl PartialEq for LenOrDec {
+    fn eq(&self, other: &Self) -> bool {
+        unsafe { self.len == other.len }
+    }
 }
 
 impl LenOrDec {
@@ -191,57 +237,74 @@ impl FromStr for DataType {
                             MIN_DECIMAL_SCALE,
                         ));
                     }
-                    let mut parts = params.split(',').map(|x| x.trim());
-                    match (parts.next(), parts.next()) {
-                        (Some(p), Some(s)) => {
-                            let precision: u8 = p
-                                .parse()
-                                .map_err(ParseDataTypeError::ParseDecimalPrecisionError)?;
-                            let scale: u8 = s
-                                .parse()
-                                .map_err(ParseDataTypeError::ParseDecimalScaleError)?;
-                            if scale > precision {
-                                return Err(ParseDataTypeError::InvalidDecimalScale(scale));
-                            }
-                            match precision {
-                                1..=MAX_DECIMAL64_PRECISION => {
-                                    return Ok(Self::new_decimal(Ty::Decimal64, precision, scale));
-                                }
-                                19..=MAX_DECIMAL_PRECISION => {
-                                    return Ok(Self::new_decimal(Ty::Decimal, precision, scale));
-                                }
-                                _ => {
-                                    return Err(ParseDataTypeError::InvalidDecimalPrecision(
-                                        precision,
-                                    ));
-                                }
-                            }
-                        }
-                        (Some(p), None) => {
-                            let precision: u8 = p
-                                .parse()
-                                .map_err(ParseDataTypeError::ParseDecimalPrecisionError)?;
-                            match precision {
-                                1..=MAX_DECIMAL64_PRECISION => {
-                                    return Ok(Self::new_decimal(Ty::Decimal64, precision, 0));
-                                }
-                                19..=MAX_DECIMAL_PRECISION => {
-                                    return Ok(Self::new_decimal(Ty::Decimal, precision, 0));
-                                }
-                                _ => {
-                                    return Err(ParseDataTypeError::InvalidDecimalPrecision(
-                                        precision,
-                                    ));
-                                }
-                            }
-                        }
-                        _ => {
+
+                    if let Some((p, s)) = params.split_once(',') {
+                        let p = p.trim();
+                        let s = s.trim();
+                        if p.is_empty() && s.is_empty() {
                             // If no params, fallback to default
                             return Ok(Self::new_decimal(
                                 Ty::Decimal64,
                                 MAX_DECIMAL64_PRECISION,
                                 MIN_DECIMAL_SCALE,
                             ));
+                        }
+
+                        if p.is_empty() {
+                            return Err(ParseDataTypeError::FormatError(
+                                "DECIMAL(precision[,scale])",
+                                s.to_string(),
+                            ));
+                        }
+
+                        let precision: u8 = p
+                            .parse()
+                            .map_err(ParseDataTypeError::ParseDecimalPrecisionError)?;
+                        let scale: u8 = if s.is_empty() {
+                            0
+                        } else {
+                            s.parse()
+                                .map_err(ParseDataTypeError::ParseDecimalScaleError)?
+                        };
+                        if scale > precision {
+                            return Err(ParseDataTypeError::InvalidDecimalScale(scale));
+                        }
+                        match precision {
+                            1..=MAX_DECIMAL64_PRECISION => {
+                                return Ok(Self::new_decimal(Ty::Decimal64, precision, scale));
+                            }
+                            19..=MAX_DECIMAL_PRECISION => {
+                                return Ok(Self::new_decimal(Ty::Decimal, precision, scale));
+                            }
+                            _ => {
+                                return Err(ParseDataTypeError::InvalidDecimalPrecision(precision));
+                            }
+                        }
+                    } else {
+                        // If only precision is provided, scale defaults to 0
+                        let p = params.trim();
+                        if p.is_empty() {
+                            // If no params, fallback to default
+                            return Ok(Self::new_decimal(
+                                Ty::Decimal64,
+                                MAX_DECIMAL64_PRECISION,
+                                MIN_DECIMAL_SCALE,
+                            ));
+                        }
+
+                        let precision: u8 = p
+                            .parse()
+                            .map_err(ParseDataTypeError::ParseDecimalPrecisionError)?;
+                        match precision {
+                            1..=MAX_DECIMAL64_PRECISION => {
+                                return Ok(Self::new_decimal(Ty::Decimal64, precision, 0));
+                            }
+                            19..=MAX_DECIMAL_PRECISION => {
+                                return Ok(Self::new_decimal(Ty::Decimal, precision, 0));
+                            }
+                            _ => {
+                                return Err(ParseDataTypeError::InvalidDecimalPrecision(precision));
+                            }
                         }
                     }
                 }
@@ -568,6 +631,79 @@ mod tests {
     }
 
     #[test]
+    fn test_prec_scale() {
+        let ps = PrecScale::new(8, 10, 2);
+        assert_eq!(ps.scale, 2);
+        assert_eq!(ps.prec, 10);
+        assert_eq!(ps._empty, 0);
+        assert_eq!(ps.len, 8);
+        let expected: [u8; 4] = [2, 10, 0, 8];
+
+        let bytes: [u8; 4] = unsafe { std::mem::transmute_copy(&ps) };
+        assert_eq!(bytes, expected);
+
+        assert_eq!(
+            format!("{ps:?}"),
+            "PrecScale { len: 8, prec: 10, scale: 2 }"
+        );
+        assert_eq!(ps.as_bytes(), expected);
+
+        let ps: PrecScale = unsafe { std::mem::transmute_copy(&bytes) };
+        assert_eq!(ps.len, 8);
+        assert_eq!(ps.prec, 10);
+        assert_eq!(ps.scale, 2);
+        assert_eq!(ps._empty, 0);
+
+        let ps2 = PrecScale::read_from_bytes(&bytes).unwrap();
+        assert_eq!(ps.len, 8);
+        assert_eq!(ps.prec, 10);
+        assert_eq!(ps.scale, 2);
+        assert_eq!(ps._empty, 0);
+
+        assert_eq!(ps, ps2);
+
+        let ps3 = PrecScale::ref_from_bytes(&bytes).unwrap();
+        assert_eq!(ps, *ps3);
+    }
+
+    #[test]
+    fn test_union_len_or_dec() {
+        let len = LenOrDec::new_len(8);
+        assert_eq!(unsafe { len.len }, 8);
+        let dec = PrecScale::new(8, 10, 2);
+        let dec = LenOrDec { dec };
+        assert_eq!(unsafe { dec.dec.len }, 8);
+        assert_eq!(unsafe { dec.dec.prec }, 10);
+        assert_eq!(unsafe { dec.dec.scale }, 2);
+
+        let bytes: [u8; 4] = unsafe { std::mem::transmute_copy(&len) };
+        assert_eq!(bytes, [8, 0, 0, 0]);
+
+        let bytes: [u8; 4] = unsafe { std::mem::transmute_copy(&dec) };
+        assert_eq!(bytes, [2, 10, 0, 8]);
+
+        let len2: LenOrDec = unsafe { std::mem::transmute_copy(&bytes) };
+
+        let len3 = LenOrDec::read_from_bytes(&bytes).unwrap();
+        assert_eq!(len2, len3);
+
+        let len3 = LenOrDec::ref_from_bytes(&bytes).unwrap();
+        assert_eq!(unsafe { len3.dec.len }, 8);
+        assert_eq!(unsafe { len3.dec.prec }, 10);
+        assert_eq!(unsafe { len3.dec.scale }, 2);
+        assert_eq!(len2, *len3);
+
+        assert_eq!(
+            format!("{len:?}"),
+            "LenOrDec(8, PrecScale { len: 0, prec: 0, scale: 8 })"
+        );
+        assert_eq!(
+            format!("{len2:?}"),
+            "LenOrDec(134220290, PrecScale { len: 8, prec: 10, scale: 2 })"
+        );
+    }
+
+    #[test]
     fn test_dec() {
         let schema = DataType::new(Ty::BigInt, 8);
         assert_eq!(schema.len(), 8);
@@ -579,6 +715,25 @@ mod tests {
 
         let bytes = dec_schema.as_bytes();
         assert_eq!(bytes, [21, 2, 10, 0, 8]);
+    }
+
+    #[test]
+    fn test_col_schema_from_ty() {
+        let schema = DataType::from(Ty::BigInt);
+        assert_eq!(schema.ty, Ty::BigInt);
+        assert_eq!(schema.len(), 8);
+        assert_eq!(schema.to_string(), "BIGINT");
+    }
+
+    #[test]
+    fn test_col_schema_from_number() {
+        let schema: DataType = "1".parse().unwrap();
+        assert_eq!(schema.ty, Ty::Bool);
+        for n in 1..=21 {
+            assert!(DataType::from_str(&format!("{n}")).is_ok());
+        }
+        let schema = DataType::from_str("125");
+        assert!(schema.is_err());
     }
 
     #[test]
@@ -663,6 +818,7 @@ mod tests {
         assert_eq!(schema.ty, Ty::Timestamp);
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.to_string(), "TIMESTAMP");
+        assert_eq!(format!("{schema:?}"), "ColSchema { ty: Timestamp, len: 8 }");
         let schema = "UNKNOWN".parse::<DataType>();
         assert!(schema.is_err());
         let schema = "DECIMAL(40,2)".parse::<DataType>();
@@ -677,6 +833,10 @@ mod tests {
         assert_eq!(schema.precision(), 10);
         assert_eq!(schema.scale(), 2);
         assert_eq!(schema.to_string(), "DECIMAL(10,2)");
+        assert_eq!(
+            format!("{schema:?}"),
+            "ColSchema { ty: Decimal64, len: 8, prec: 10, scale: 2 }"
+        );
 
         let schema: DataType = "DECIMAL(20,5)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal);
@@ -717,5 +877,21 @@ mod tests {
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.precision(), 18);
         assert_eq!(schema.scale(), 0);
+    }
+
+    #[test]
+    fn test_schema_decimal_invalid() {
+        let schema = "DECIMAL(39,2)".parse::<DataType>();
+        assert!(schema.is_err());
+        let schema = "DECIMAL(0)".parse::<DataType>();
+        assert!(schema.is_err());
+        let schema = "DECIMAL(18,19)".parse::<DataType>();
+        assert!(schema.is_err());
+        let schema = "DECIMAL(18,20)".parse::<DataType>();
+        assert!(schema.is_err());
+        let schema = "DECIMAL(80)".parse::<DataType>();
+        assert!(schema.is_err());
+        let schema = "DECIMAL(18,2,3)".parse::<DataType>();
+        assert!(schema.is_err());
     }
 }

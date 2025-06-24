@@ -24,6 +24,7 @@ pub struct DecimalView<T: DecimalAllowedTy> {
 
 impl<T: DecimalAllowedTy> DecimalView<T> {
     const ITEM_SIZE: usize = std::mem::size_of::<T>();
+    const MAX_SCALE: u8 = T::MAX_SCALE;
 
     /// Create a new decimal view.
     pub(crate) fn new(nulls: NullBits, data: Bytes, prec_scale: PrecScale) -> Self {
@@ -194,6 +195,51 @@ impl<T: DecimalAllowedTy> Drop for DecimalView<T> {
 
 macro_rules! impl_from_iter {
     ($ty: ty) => {
+        /// Convert decimals to TDengine values.
+        ///
+        /// Returns the list if error.
+        pub fn from_str_iter<I, T>(values: I) -> Result<Self, Vec<Option<BigDecimal>>>
+        where
+            T: AsRef<str>,
+            I: IntoIterator<Item = T>,
+        {
+            Self::from_decimals(values.into_iter().map(|v| v.as_ref().parse().ok()))
+        }
+        /// Convert decimals to TDengine values.
+        ///
+        /// Returns the list if error.
+        pub fn from_decimals<I, T>(values: I) -> Result<Self, Vec<Option<BigDecimal>>>
+        where
+            T: TryInto<Option<BigDecimal>>,
+            I: IntoIterator<Item = T>,
+        {
+            let values: Vec<Option<BigDecimal>> = values
+                .into_iter()
+                .map(|v| v.try_into().ok().and_then(|v| v))
+                .collect();
+            let scale = values
+                .iter()
+                .flatten()
+                .map(|v| v.as_bigint_and_exponent().1)
+                .max()
+                .unwrap_or(0) as u8;
+            if scale > Self::MAX_SCALE {
+                return Err(values);
+            }
+            let precision = scale; // Default precision for i64
+
+            let values = values.into_iter().map(|v| {
+                v.and_then(|v| {
+                    <$ty>::try_from(
+                        v.with_scale_round(scale as _, bigdecimal::RoundingMode::HalfUp)
+                            .into_bigint_and_scale()
+                            .0,
+                    )
+                    .ok()
+                })
+            });
+            Ok(Self::from_values(values, precision, scale))
+        }
         pub(super) fn from_bigdecimal_with<I, T>(values: I, prec_scale: PrecScale) -> Self
         where
             T: TryInto<Option<bigdecimal::BigDecimal>>,
@@ -264,7 +310,6 @@ impl DecimalView<i128> {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::Decimal), BorrowedValue::Decimal)
     }
-
     impl_from_iter!(i128);
 }
 
@@ -272,34 +317,6 @@ impl DecimalView<i64> {
     pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::Decimal64), BorrowedValue::Decimal64)
-    }
-    pub fn from_decimals<I, T>(values: I) -> Self
-    where
-        T: TryInto<Option<BigDecimal>>,
-        I: IntoIterator<Item = T>,
-    {
-        let values: Vec<Option<BigDecimal>> = values
-            .into_iter()
-            .map(|v| v.try_into().ok().and_then(|v| v))
-            .collect();
-        let scale = values
-            .iter()
-            .flatten()
-            .map(|v| v.as_bigint_and_exponent().1)
-            .max()
-            .unwrap_or(0) as u8;
-        let precision = scale; // Default precision for i64
-        let values = values.into_iter().map(|v| {
-            v.and_then(|v| {
-                <i64>::try_from(
-                    v.with_scale_round(scale as _, bigdecimal::RoundingMode::HalfUp)
-                        .into_bigint_and_scale()
-                        .0,
-                )
-                .ok()
-            })
-        });
-        Self::from_values(values, precision, scale)
     }
     impl_from_iter!(i64);
 }
@@ -518,5 +535,71 @@ mod tests {
         assert_eq!(decimal.scale, 4);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_from_decimals() {
+        use bigdecimal::BigDecimal;
+        let decimals = ["1.2", "1.23", "10.234"];
+        let values = decimals
+            .into_iter()
+            .map(|v| BigDecimal::from_str(v).unwrap());
+        let d1 = DecimalView::<i128>::from_decimals(values).unwrap();
+        assert_eq!(d1.precision_and_scale(), (3, 3));
+
+        assert_eq!(
+            unsafe { d1.get_value_unchecked(0).to_string().unwrap() },
+            "1.200"
+        );
+        assert_eq!(
+            unsafe { d1.get_value_unchecked(1).to_string().unwrap() },
+            "1.230"
+        );
+        assert_eq!(
+            unsafe { d1.get_value_unchecked(2).to_string().unwrap() },
+            "10.234"
+        );
+
+        let decimals = ["0.1234567890123456789"];
+
+        let values = decimals
+            .into_iter()
+            .map(|v| BigDecimal::from_str(v).unwrap());
+        let d1 = DecimalView::<i64>::from_decimals(values);
+        assert!(d1.is_err());
+
+        let decimals = ["0.1234567890123456789012345678901234567890"];
+
+        let values = decimals
+            .into_iter()
+            .map(|v| BigDecimal::from_str(v).unwrap());
+        let d1 = DecimalView::<i128>::from_decimals(values);
+        assert!(d1.is_err());
+    }
+
+    #[test]
+    fn test_get_raw_value() {
+        let decimals = ["1.2", "1.23", "10.234"];
+        let d1 = DecimalView::<i128>::from_str_iter(decimals).unwrap();
+
+        let ptr = d1.as_raw_ptr();
+        assert!(!ptr.is_null());
+
+        let (t, l, p) = unsafe { d1.get_raw_value_unchecked(0) };
+        assert_eq!(t, Ty::Decimal);
+        assert_eq!(l, 16);
+        let p = unsafe { std::ffi::CStr::from_ptr(p as _).to_str().unwrap() };
+        assert_eq!(p, "1.200");
+
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        d1.write_raw_into(&mut cursor).unwrap();
+        let bytes = cursor.into_inner();
+        assert_eq!(
+            bytes.as_slice(),
+            [
+                0, 176, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 206, 4, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 250, 39, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
     }
 }
