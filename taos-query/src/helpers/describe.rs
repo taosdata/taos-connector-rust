@@ -493,11 +493,19 @@ impl ColumnMeta {
             ColumnMeta::Column(desc) | ColumnMeta::Tag(desc) => desc.field.as_str(),
         }
     }
+
     pub fn ty(&self) -> Ty {
         match self {
             ColumnMeta::Column(desc) | ColumnMeta::Tag(desc) => desc.ty,
         }
     }
+
+    pub fn origin_ty(&self) -> Option<&str> {
+        match self {
+            ColumnMeta::Column(desc) | ColumnMeta::Tag(desc) => desc.origin_ty.as_deref(),
+        }
+    }
+
     pub fn length(&self) -> usize {
         match self {
             ColumnMeta::Column(desc) | ColumnMeta::Tag(desc) => desc.length,
