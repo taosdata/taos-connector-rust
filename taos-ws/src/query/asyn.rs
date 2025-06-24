@@ -4,12 +4,11 @@ use std::io::Write;
 use std::mem::transmute;
 use std::ops::ControlFlow;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
-use anyhow::bail;
 use byteorder::{ByteOrder, LittleEndian};
 use faststr::FastStr;
 use flume::{Receiver, Sender};
@@ -20,11 +19,13 @@ use itertools::Itertools;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::{generate_req_id, InlinableWrite};
-use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
+use taos_query::{
+    block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
+};
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::select;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, RwLock};
 use tokio::time::{self, timeout};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -42,24 +43,70 @@ type QueryInner = scc::HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = scc::HashMap<ResId, ReqId>;
 
-type WsStreamReader = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
-type WsStreamSender = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type WsStreamReader = SplitStream<WsStream>;
+type WsStreamSender = SplitSink<WsStream, Message>;
 
-#[derive(Debug, Clone)]
-struct Version {
-    version: String,
-    is_support_binary_sql: bool,
+pub(crate) type Version = String;
+
+#[derive(Clone)]
+pub(crate) struct VersionInfo {
+    version: Arc<RwLock<Version>>,
+    is_v3: Arc<AtomicBool>,
+    supports_binary_sql: Arc<AtomicBool>,
 }
 
-impl Version {
-    fn is_v3(&self) -> bool {
-        self.version.starts_with('3')
+impl VersionInfo {
+    pub(crate) fn new(version: Version) -> Self {
+        let is_v3 = !version.starts_with('2');
+        let supports_binary_sql = is_v3 && is_support_binary_sql(&version);
+        Self {
+            version: Arc::new(RwLock::new(version)),
+            is_v3: Arc::new(AtomicBool::new(is_v3)),
+            supports_binary_sql: Arc::new(AtomicBool::new(supports_binary_sql)),
+        }
+    }
+
+    pub(crate) async fn update(&self, version: Version) {
+        if version == self.version() {
+            return;
+        }
+
+        let is_v3 = !version.starts_with('2');
+        let supports_binary_sql = is_v3 && is_support_binary_sql(&version);
+
+        *self.version.write().await = version;
+        self.is_v3.store(is_v3, Ordering::Relaxed);
+        self.supports_binary_sql
+            .store(supports_binary_sql, Ordering::Relaxed);
+    }
+
+    pub(crate) fn version(&self) -> Version {
+        block_in_place_or_global(self.version.read()).clone()
+    }
+
+    pub(crate) fn is_v3(&self) -> bool {
+        self.is_v3.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn supports_binary_sql(&self) -> bool {
+        self.supports_binary_sql.load(Ordering::Relaxed)
+    }
+}
+
+impl std::fmt::Debug for VersionInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Version")
+            .field("version", &self.version())
+            .field("is_v3", &self.is_v3())
+            .field("supports_binary_sql", &self.supports_binary_sql())
+            .finish()
     }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct WsQuerySender {
-    version: Version,
+    version_info: VersionInfo,
     req_id: Arc<AtomicU64>,
     results: Arc<QueryResMapper>,
     sender: WsSender,
@@ -156,7 +203,7 @@ impl WsQuerySender {
 
 #[derive(Debug)]
 pub struct WsTaos {
-    sender: Arc<WsQuerySender>,
+    sender: WsQuerySender,
     close_signal: watch::Sender<bool>,
 }
 
@@ -179,7 +226,7 @@ pub(crate) struct QueryMetrics {
 type BlockFuture = Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>;
 
 pub struct ResultSet {
-    pub(crate) sender: Arc<WsQuerySender>,
+    pub(crate) sender: WsQuerySender,
     pub(crate) args: WsResArgs,
     pub(crate) fields: Option<Vec<Field>>,
     pub(crate) fields_count: usize,
@@ -291,6 +338,7 @@ pub enum WS_ERROR_NO {
     IO_ERROR = 0xE005,
     UNAUTHORIZED = 0xE006,
     DE_ERROR = 0xE007,
+    WEBSOCKET_DISCONNECTED = 0xE008,
 }
 
 impl WS_ERROR_NO {
@@ -338,160 +386,165 @@ impl From<Error> for RawError {
     }
 }
 
+#[derive(Default, Clone)]
+struct MessageCache {
+    next_msg_id: Arc<AtomicU64>,
+    req_to_msg: Arc<scc::HashMap<ReqId, MsgId>>,
+    messages: Arc<scc::HashMap<MsgId, Message>>,
+}
+
+impl MessageCache {
+    fn new() -> Self {
+        MessageCache::default()
+    }
+
+    async fn insert(&self, req_id: ReqId, message: Message) {
+        let msg_id = self.next_msg_id.fetch_add(1, Ordering::Relaxed);
+        let _ = self.req_to_msg.insert_async(req_id, msg_id).await;
+        let _ = self.messages.insert_async(msg_id, message).await;
+    }
+
+    // async fn remove(&self, req_id: ReqId) {
+    //     if let Some((_, msg_id)) = self.req_to_msg.remove_async(&req_id).await {
+    //         self.messages.remove_async(&msg_id).await;
+    //     }
+    // }
+
+    fn remove(&self, req_id: ReqId) {
+        if let Some((_, msg_id)) = self.req_to_msg.remove(&req_id) {
+            self.messages.remove(&msg_id);
+        }
+    }
+
+    async fn messages(&self) -> Vec<Message> {
+        let mut msg_ids = Vec::with_capacity(self.messages.len());
+
+        self.messages
+            .scan_async(|k, _| {
+                msg_ids.push(*k);
+            })
+            .await;
+
+        msg_ids.sort_unstable();
+
+        let mut msgs = Vec::with_capacity(self.messages.len());
+
+        for msg_id in msg_ids {
+            if let Some(msg) = self.messages.get_async(&msg_id).await {
+                msgs.push(msg.clone());
+            }
+        }
+
+        msgs
+    }
+}
+
 async fn run(
-    mut ws_stream_sender: WsStreamSender,
-    mut ws_stream_reader: WsStreamReader,
-    query_sender: Arc<WsQuerySender>,
+    builder: TaosBuilder,
+    mut ws_stream: WsStream,
+    query_sender: WsQuerySender,
     msg_reader: Receiver<ToMsgEnum>,
     mut close_reader: watch::Receiver<bool>,
-    info: TaosBuilder,
-) -> RawResult<()> {
-    let _msg_reader_clone = msg_reader.clone();
-    let _query_sender_clone = query_sender.clone();
-
-    // cache 只能有一个
-    // msg_id -> msg
-    let cache = Arc::new(scc::HashMap::new());
-    // req_id -> msg_id
-    let req_id_msg_id = Arc::new(scc::HashMap::new());
-    let msg_id = Arc::new(AtomicU64::new(0));
+) {
+    let cache = MessageCache::new();
 
     loop {
-        let len = query_sender.sender.len();
-        tracing::info!("query sender queue length: {len}");
-
+        let (ws_stream_tx, ws_stream_rx) = ws_stream.split();
         let (err_tx, mut err_rx) = mpsc::channel(2);
         let (close_tx, close_rx) = watch::channel(false);
 
         let send_handle = tokio::spawn(send_messages(
-            ws_stream_sender,
+            ws_stream_tx,
             msg_reader.clone(),
-            err_tx.clone(),
             close_rx.clone(),
+            err_tx.clone(),
             cache.clone(),
-            req_id_msg_id.clone(),
-            msg_id.clone(),
         ));
 
         let recv_handle = tokio::spawn(read_messages(
-            ws_stream_reader,
-            query_sender.queries.clone(),
-            query_sender.results.clone(),
-            query_sender.sender.clone(),
-            query_sender.version.is_v3(),
+            ws_stream_rx,
+            query_sender.clone(),
             close_rx,
             err_tx,
             cache.clone(),
-            req_id_msg_id.clone(),
         ));
 
         tokio::select! {
             err = err_rx.recv() => {
                 if let Some(err) = err {
-                    tracing::warn!("WebSocket error: {}", err);
-                    if !is_disconnect_error(&err) {
-                        tracing::error!("WebSocket is not disconnect error: {}", err);
-                        handle_error(query_sender.queries.clone(), &err, cache).await;
-                        break;
-                    }
-                    // 接收错误后，需要 stop send 和 recv message task
+                    warn!("WebSocket error: {err}");
                     let _ = close_tx.send(true);
+                    if !is_disconnect_error(&err) {
+                        handle_error(query_sender.queries.clone()).await;
+                        return;
+                    }
                 }
             }
             _ = close_reader.changed() => {
-                tracing::trace!("close reader task");
+                trace!("close WebSocket connection");
                 let _ = close_tx.send(true);
-                break;
+                return;
             }
-            // _ = send_handle => break,
-            // _ = recv_handle => break,
         }
 
-        // 重连前确保 send 和 recv 任务都结束
         let _ = send_handle.await;
         let _ = recv_handle.await;
 
-        tracing::trace!("reconnecting...");
-        let ws_stream = info.connect(UrlKind::Ws).await;
-        let ws_stream = match ws_stream {
-            Ok(ws) => ws,
+        trace!("reconnecting...");
+
+        match builder.connect(UrlKind::Ws).await {
+            Ok((ws, ver)) => {
+                ws_stream = ws;
+                query_sender.version_info.update(ver).await;
+            }
             Err(err) => {
-                tracing::error!("Reconnect error: {:?}", err);
-                let mut keys = Vec::with_capacity(query_sender.queries.len());
-                query_sender.queries.scan(|k, _| {
-                    keys.push(*k);
-                });
-                // cache 中的 key 也要处理
-                for k in keys {
-                    if let Some((_, sender)) = query_sender.queries.remove(&k) {
-                        let _ = sender
-                            .send(Err(RawError::from_string("websocket connection is closed")));
-                    }
-                }
-                tracing::error!("WebSocket connection is closed, error: {}", err);
-                return Ok(());
+                error!("failed to reconnect WebSocket: {err}");
+                handle_error(query_sender.queries.clone()).await;
+                return;
             }
         };
 
-        // 错误处理，返回给应用
         tracing::trace!("reconnected");
-        (ws_stream_sender, ws_stream_reader) = ws_stream.split();
-        // (ws_stream_sender, ws_stream_reader) = reconnect(&info).await?;
 
-        // FIXME: do not clear the query sender's queries and results
-        // query_sender.queries.clear();
-        query_sender.results.clear();
-
-        // tracing::trace!("cache: {:?}", cache);
-        // let mut keys = Vec::new();
-        // cache.scan(|key, _| keys.push(*key));
-        // for key in keys {
-        //     if let Some((_, msg)) = cache.remove_async(&key).await {
-        //         // FIXME: 缓存中的数据放在后面了
-        //         let _res = query_sender
-        //             .sender
-        //             .send_async(ToMsgEnum::Message(msg))
-        //             .await;
-        //         tracing::error!("Failed to send cached message, error: {:?}", _res);
-        //     }
-        // }
+        clean(query_sender.clone()).await;
     }
+}
 
-    Ok(())
+async fn clean(query_sender: WsQuerySender) {
+    let mut req_ids = Vec::with_capacity(query_sender.results.len());
+
+    query_sender
+        .results
+        .scan_async(|_, v| {
+            req_ids.push(*v);
+        })
+        .await;
+
+    query_sender.results.clear();
+
+    for req_id in req_ids {
+        let _ = query_sender.queries.remove_async(&req_id).await;
+    }
 }
 
 async fn send_messages(
     mut ws_stream_sender: WsStreamSender,
     msg_reader: Receiver<ToMsgEnum>,
-    err_sender: mpsc::Sender<WsError>,
     mut close_reader: watch::Receiver<bool>,
-    cache: Arc<scc::HashMap<u64, Message>>,
-    req_id_msg_id: Arc<scc::HashMap<ReqId, u64>>,
-    msg_id: Arc<AtomicU64>,
+    err_sender: mpsc::Sender<WsError>,
+    cache: MessageCache,
 ) {
-    tracing::trace!("send start, ws_stream_sender: {:?}", ws_stream_sender);
-
     let mut interval = time::interval(Duration::from_secs(53));
 
-    let mut msg_ids = Vec::new();
-    cache.scan(|key, _| msg_ids.push(*key));
-    msg_ids.sort_unstable();
+    let msgs = cache.messages().await;
 
-    // let start = last_ack_msg_id.load(Ordering::SeqCst) + 1;
-    // let end = start + req_id_msg_id.len() as u64;
-
-    // tracing::info!("send_messages start: {}, end: {}", start, end);
-
-    tracing::info!("msg_ids: {msg_ids:?}");
-
-    for msg_id in msg_ids {
+    for msg in msgs {
         tokio::select! {
             _ = interval.tick() => {
-                //
                 if let Err(err) = ws_stream_sender.send(Message::Ping(b"TAOS".to_vec())).await {
                     tracing::error!("Write websocket ping error: {}", err);
                     err_sender.send(err).await.unwrap();
-                    break;
+                    return;
                 }
                 let _ = ws_stream_sender.flush().await;
             }
@@ -500,24 +553,13 @@ async fn send_messages(
                 let _= ws_stream_sender.send(Message::Close(None)).await;
                 let _ = ws_stream_sender.close().await;
                 tracing::trace!("close sender task");
-                break;
+                return;
             }
-            entry = cache.get_async(&msg_id) => {
-                let entry = entry.unwrap();
-                let msg = entry.get().clone();
-                tracing::info!("cache send msg: {:?}", msg);
-                // 缓存中的数据无需再缓存
-                // let trya = msg.trya();
-                // let req_id = msg.req_id();
-                // let message = msg.too_message();
-                // if trya {
-                //     tracing::info!("send_messages cache message: {:?}", message);
-                //     let _res = cache.insert(req_id, message.clone());
-                // }
-                if let Err(err) = ws_stream_sender.send(msg).await {
+            res = ws_stream_sender.send(msg) => {
+                if let Err(err) = res {
                     tracing::error!("Write websocket error: {}", err);
                     err_sender.send(err).await.unwrap();
-                    break;
+                    return;
                 }
             }
         }
@@ -528,9 +570,8 @@ async fn send_messages(
             _ = interval.tick() => {
                 if let Err(err) = ws_stream_sender.send(Message::Ping(b"TAOS".to_vec())).await {
                     tracing::error!("Write websocket ping error: {}", err);
-                    // 自动重连？
                     err_sender.send(err).await.unwrap();
-                    break;
+                    return;
                 }
                 let _ = ws_stream_sender.flush().await;
             }
@@ -539,7 +580,7 @@ async fn send_messages(
                 let _= ws_stream_sender.send(Message::Close(None)).await;
                 let _ = ws_stream_sender.close().await;
                 tracing::trace!("close sender task");
-                break;
+                return;
             }
             msg = msg_reader.recv_async() => {
                 match msg {
@@ -549,17 +590,12 @@ async fn send_messages(
                         let req_id = msg.req_id();
                         let message = msg.too_message();
                         if trya {
-                            // log print msg_id, log_id
-                            let msg_id = msg_id.fetch_add(1, Ordering::SeqCst);
-                            tracing::info!("send_messages cache, req_id: {req_id}, msg_id: {msg_id}, message: {message:?}");
-                            let _r = req_id_msg_id.insert_async(req_id, msg_id).await;
-                            let _res = cache.insert(msg_id, message.clone());
-
+                            cache.insert(req_id, message.clone()).await;
                         }
                         if let Err(err) = ws_stream_sender.send(message).await {
                             tracing::error!("Write websocket error: {}", err);
                             err_sender.send(err).await.unwrap();
-                            break;
+                            return;
                         }
                     }
                     Err(e) => {
@@ -574,19 +610,19 @@ async fn send_messages(
     tracing::trace!("send end");
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn read_messages(
-    mut reader: WsStreamReader,
-    queries_sender: QueryAgent,
-    fetches_sender: Arc<QueryResMapper>,
-    ws2: WsSender,
-    is_v3: bool,
-    mut close_listener: watch::Receiver<bool>,
+    mut ws_stream_reader: WsStreamReader,
+    query_sender: WsQuerySender,
+    mut close_reader: watch::Receiver<bool>,
     err_sender: mpsc::Sender<WsError>,
-    cache: Arc<scc::HashMap<ReqId, Message>>,
-    req_id_msg_id: Arc<scc::HashMap<ReqId, u64>>,
+    cache: MessageCache,
 ) {
     tracing::trace!("reader start");
+
+    let queries = query_sender.queries.clone();
+    let results = query_sender.results.clone();
+    let msg_tx = query_sender.sender.clone();
+    let is_v3 = query_sender.version_info.is_v3();
 
     let parse_frame = |frame: Message| {
         let cache = cache.clone();
@@ -594,22 +630,21 @@ async fn read_messages(
             Message::Text(text) => {
                 tracing::trace!("received json response: {text}");
                 // 如果text 序列化失败，打印日志，继续处理下一个消息
+                // map_err
                 let v = serde_json::from_str::<WsRecv>(&text);
                 if let Err(err) = v {
                     tracing::error!("failed to deserialize json text: {text}, error: {err:?}");
                     return ControlFlow::Continue(());
                 }
                 let v = v.unwrap();
-                let queries_sender = queries_sender.clone();
-                let ws2 = ws2.clone();
+                let queries_sender = queries.clone();
+                let ws2 = msg_tx.clone();
                 let (req_id, data, ok) = v.ok();
                 // 接收到响应后，将数据从 cache 中 remove
                 // TODO: async + log
                 tracing::trace!("try to remove cache for req_id: {req_id}");
-                let (_, msg_id) = req_id_msg_id.remove(&req_id).unwrap();
-                let _ = cache.remove(&msg_id);
-                tracing::trace!("remove cache for req_id: {req_id}, msg_id: {msg_id}");
-                // last_ack_msg_id.store(msg_id, Ordering::SeqCst);
+                cache.remove(req_id);
+                // tracing::trace!("remove cache for req_id: {req_id}, msg_id: {msg_id}");
 
                 match &data {
                     WsRecvData::Insert(_) => {
@@ -699,11 +734,11 @@ async fn read_messages(
                     _ => unreachable!(),
                 }
 
-                let _ = cache.remove(&req_id);
+                let _ = cache.remove(req_id);
             }
             Message::Binary(payload) => {
-                let queries_sender = queries_sender.clone();
-                let fetches_sender = fetches_sender.clone();
+                let queries_sender = queries.clone();
+                let fetches_sender = results.clone();
                 let block = payload;
                 tokio::spawn(async move {
                     use taos_query::util::InlinableRead;
@@ -739,7 +774,7 @@ async fn read_messages(
                             slice.read_inlined_bytes::<4>().unwrap()
                         };
 
-                        cache.remove(&block_req_id);
+                        cache.remove(block_req_id);
 
                         if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
                             sender
@@ -761,7 +796,7 @@ async fn read_messages(
                     } else {
                         let res_id = slice.read_u64().unwrap();
                         if let Some((_, req_id)) = fetches_sender.remove(&res_id) {
-                            cache.remove(&req_id);
+                            cache.remove(req_id);
                             if is_v3 {
                                 if let Some((_, sender)) = queries_sender.remove(&req_id) {
                                     tracing::trace!("send data to fetches with id {}", res_id);
@@ -801,11 +836,11 @@ async fn read_messages(
 
                 tracing::warn!("websocket connection is closed normally");
                 let mut keys = Vec::new();
-                queries_sender.scan(|k, _| {
+                queries.scan(|k, _| {
                     keys.push(*k);
                 });
                 for k in keys {
-                    if let Some((_, sender)) = queries_sender.remove(&k) {
+                    if let Some((_, sender)) = queries.remove(&k) {
                         let _ = sender.send(Err(RawError::new(
                             WS_ERROR_NO::CONN_CLOSED.as_code(),
                             "received close message",
@@ -816,7 +851,7 @@ async fn read_messages(
                 return ControlFlow::Break(());
             }
             Message::Ping(data) => {
-                let ws2 = ws2.clone();
+                let ws2 = msg_tx.clone();
                 tokio::spawn(async move {
                     let _ = ws2
                         .send_async(ToMsgEnum::Message(Message::Pong(data)))
@@ -835,7 +870,7 @@ async fn read_messages(
 
     loop {
         tokio::select! {
-            res = reader.try_next() => {
+            res = ws_stream_reader.try_next() => {
                 match res {
                     Ok(frame) => {
                         if let Some(frame) = frame {
@@ -851,7 +886,7 @@ async fn read_messages(
                     }
                 }
             }
-            _ = close_listener.changed() => {
+            _ = close_reader.changed() => {
                 // TODO: handle close signal
                 tracing::trace!("close reader task");
                 // let mut keys = Vec::with_capacity(queries_sender.len());
@@ -895,21 +930,18 @@ pub fn is_disconnect_error(err: &WsError) -> bool {
     )
 }
 
-async fn handle_error(
-    queries3: QueryAgent,
-    err: &WsError,
-    cache: Arc<scc::HashMap<ReqId, Message>>,
-) {
-    let mut keys = Vec::new();
-    queries3.scan(|k, _| keys.push(*k));
-    for k in keys {
-        if !cache.contains_async(&k).await {
-            if let Some((_, sender)) = queries3.remove_async(&k).await {
-                let _ = sender.send(Err(RawError::new(
-                    WS_ERROR_NO::CONN_CLOSED.as_code(),
-                    err.to_string(),
-                )));
-            }
+async fn handle_error(queries: QueryAgent) {
+    let mut req_ids = Vec::with_capacity(queries.len());
+    queries
+        .scan_async(|k, _| {
+            req_ids.push(*k);
+        })
+        .await;
+
+    for req_id in req_ids {
+        if let Some((_, sender)) = queries.remove_async(&req_id).await {
+            let _ = sender.send(Err(RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
+                .context("WebSocket connection is closed")));
         }
     }
 }
@@ -929,125 +961,12 @@ pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
     nums1.cmp(&nums2)
 }
 
-pub fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
-    !matches!(compare_versions(v1, v2), std::cmp::Ordering::Less)
-}
-
 pub fn is_support_binary_sql(v1: &str) -> bool {
     is_greater_than_or_equal_to(v1, "3.3.2.0")
 }
 
-async fn send_version(
-    ws_sender: &mut WsStreamSender,
-    ws_reader: &mut WsStreamReader,
-) -> RawResult<Version> {
-    let version = WsSend::Version;
-    ws_sender.send(version.to_msg()).await.map_err(|err| {
-        RawError::any(err)
-            .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
-            .context("Send version request message error")
-    })?;
-    let duration = Duration::from_secs(8);
-    let version_future = async {
-        let max_non_version = 5;
-        let mut count = 0;
-        loop {
-            count += 1;
-            if let Some(message) = ws_reader.next().await {
-                match message {
-                    Ok(Message::Text(text)) => {
-                        let v: WsRecv = serde_json::from_str(&text).map_err(|err| {
-                            RawError::any(err)
-                                .with_code(WS_ERROR_NO::DE_ERROR.as_code())
-                                .context("Parser text as json error")
-                        })?;
-                        let (_req_id, data, ok) = v.ok();
-                        match data {
-                            WsRecvData::Version { version } => {
-                                ok?;
-                                return Ok(version);
-                            }
-                            _ => return Ok("2.x".to_string()),
-                        }
-                    }
-                    Ok(Message::Ping(bytes)) => {
-                        ws_sender.send(Message::Pong(bytes)).await.map_err(|err| {
-                            RawError::any(err)
-                                .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
-                                .context("Send pong message error")
-                        })?;
-                        if count >= max_non_version {
-                            return Ok("2.x".to_string());
-                        }
-                        count += 1;
-                    }
-                    _ => return Ok("2.x".to_string()),
-                }
-            } else {
-                bail!("Expect version message, but got nothing");
-            }
-        }
-    }
-    .in_current_span();
-    let version = match tokio::time::timeout(duration, version_future).await {
-        Ok(Ok(version)) => version,
-        Ok(Err(err)) => {
-            return Err(RawError::any(err).context("Version fetching error"));
-        }
-        Err(_) => "2.x".to_string(),
-    };
-    let is_v3 = !version.starts_with('2');
-    let is_support_binary_sql = is_v3 && is_support_binary_sql(&version);
-
-    Ok(Version {
-        version,
-        is_support_binary_sql,
-    })
-}
-
-async fn send_conn(
-    ws_sender: &mut WsStreamSender,
-    ws_reader: &mut WsStreamReader,
-    info: &TaosBuilder,
-) -> RawResult<()> {
-    let login = WsSend::Conn {
-        req_id: generate_req_id(),
-        req: info.build_conn_request(),
-    };
-    ws_sender.send(login.to_msg()).await.map_err(Error::from)?;
-    while let Some(Ok(message)) = ws_reader.next().await {
-        match message {
-            Message::Text(text) => {
-                let v: WsRecv = serde_json::from_str(&text).unwrap();
-                let (_req_id, data, ok) = v.ok();
-                match data {
-                    WsRecvData::Conn => {
-                        ok?;
-                        break;
-                    }
-                    WsRecvData::Version { .. } => {}
-                    data => {
-                        return Err(RawError::from_string(format!(
-                            "Unexpected login result: {data:?}"
-                        )))
-                    }
-                }
-            }
-            Message::Ping(bytes) => {
-                ws_sender
-                    .send(Message::Pong(bytes))
-                    .await
-                    .map_err(RawError::from_any)?;
-            }
-            _ => {
-                return Err(RawError::from_string(format!(
-                    "unexpected message on login: {message:?}"
-                )));
-            }
-        }
-    }
-
-    Ok(())
+pub fn is_greater_than_or_equal_to(v1: &str, v2: &str) -> bool {
+    !matches!(compare_versions(v1, v2), std::cmp::Ordering::Less)
 }
 
 impl WsTaos {
@@ -1063,45 +982,31 @@ impl WsTaos {
     }
 
     pub(crate) async fn from_builder(builder: &TaosBuilder) -> RawResult<Self> {
-        let ws_stream = builder.build_stream(builder.to_ws_url()).await?;
-        let (mut ws_stream_tx, mut ws_stream_rx) = ws_stream.split();
+        let (ws_stream, version) = builder.connect(UrlKind::Ws).await?;
 
-        // 优化 send_version 和 send_conn，只传 ws_stream，不要 split
-        let version = send_version(&mut ws_stream_tx, &mut ws_stream_rx).await?;
-        // TODO: 重连后复用 send_conn
-        send_conn(&mut ws_stream_tx, &mut ws_stream_rx, builder).await?;
-
-        let (close_tx, close_rx) = watch::channel(false);
         let (msg_tx, msg_rx) = flume::bounded(64);
+        let (close_tx, close_rx) = watch::channel(false);
 
-        let queries = Arc::new(QueryInner::new());
-        let results = Arc::new(QueryResMapper::new());
-
-        let sender = Arc::new(WsQuerySender {
-            version,
+        let query_sender = WsQuerySender {
+            version_info: VersionInfo::new(version),
             req_id: Arc::default(),
             sender: msg_tx,
-            queries,
-            results,
-        });
-
-        let ws_taos = WsTaos {
-            close_signal: close_tx,
-            sender: sender.clone(),
+            queries: Arc::new(QueryInner::new()),
+            results: Arc::new(QueryResMapper::new()),
         };
 
-        // log span
-        // 一个连接建立一个单独的 span，连接加 id
         tokio::spawn(run(
-            ws_stream_tx,
-            ws_stream_rx,
-            sender,
+            builder.clone(),
+            ws_stream,
+            query_sender.clone(),
             msg_rx,
             close_rx,
-            builder.clone(),
         ));
 
-        Ok(ws_taos)
+        Ok(WsTaos {
+            close_signal: close_tx,
+            sender: query_sender,
+        })
     }
 
     pub async fn write_meta(&self, raw: &RawMeta) -> RawResult<()> {
@@ -1293,7 +1198,7 @@ impl WsTaos {
             let (raw_block_tx, raw_block_rx) = flume::bounded(64);
             let (fetch_done_tx, fetch_done_rx) = flume::bounded(1);
 
-            if sender.version.is_support_binary_sql {
+            if sender.version_info.supports_binary_sql() {
                 fetch_binary(
                     sender,
                     res_id,
@@ -1406,12 +1311,14 @@ impl WsTaos {
         }
     }
 
+    // TODO: use static
     pub fn version(&self) -> &str {
-        &self.sender.version.version
+        // self.sender.version_info.version()
+        ""
     }
 
     pub fn is_support_binary_sql(&self) -> bool {
-        self.sender.version.is_support_binary_sql
+        self.sender.version_info.supports_binary_sql()
     }
 
     pub fn get_req_id(&self) -> ReqId {
@@ -1422,13 +1329,13 @@ impl WsTaos {
         self.sender.send_recv(req).await
     }
 
-    pub(crate) fn sender(&self) -> Arc<WsQuerySender> {
+    pub(crate) fn sender(&self) -> WsQuerySender {
         self.sender.clone()
     }
 }
 
 pub(crate) async fn fetch_binary(
-    query_sender: Arc<WsQuerySender>,
+    query_sender: WsQuerySender,
     res_id: ResId,
     raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
     precision: Precision,
@@ -1509,7 +1416,7 @@ pub(crate) async fn fetch_binary(
 }
 
 async fn fetch(
-    query_sender: Arc<WsQuerySender>,
+    query_sender: WsQuerySender,
     res_id: ResId,
     raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
     precision: Precision,
@@ -2267,6 +2174,9 @@ mod tests {
 
         let affected_rows = taos.exec("insert into t0 values(now, 1)").await?;
         assert_eq!(affected_rows, 1);
+
+        tracing::info!("Waiting for 500 seconds before disconnecting...");
+        tokio::time::sleep(Duration::from_secs(500)).await;
 
         Ok(())
     }

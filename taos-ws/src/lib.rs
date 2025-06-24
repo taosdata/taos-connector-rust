@@ -34,7 +34,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
 
-use crate::query::asyn::is_disconnect_error;
+use crate::query::asyn::{is_disconnect_error, Version, WS_ERROR_NO};
 use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
 
 #[derive(Debug, Clone)]
@@ -70,7 +70,6 @@ pub struct TaosBuilder {
     conn_mode: Option<u32>,
     compression: bool,
     conn_retries: Retries,
-    #[allow(dead_code)]
     retry_backoff: RetryBackoff,
 }
 
@@ -476,25 +475,79 @@ impl TaosBuilder {
         }
     }
 
+    async fn send_version_request(
+        &self,
+        ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    ) -> RawResult<Version> {
+        ws_stream
+            .send(WsSend::Version.to_msg())
+            .await
+            .map_err(handle_disconnect_error)?;
+
+        let version_fut = async {
+            let max_non_version_cnt = 5;
+            let mut non_version_cnt = 0;
+            loop {
+                if let Some(res) = ws_stream.next().await {
+                    let msg = res.map_err(handle_disconnect_error)?;
+                    match msg {
+                        Message::Text(text) => {
+                            let resp: WsRecv = serde_json::from_str(&text).map_err(|e| {
+                                RawError::any(e)
+                                    .with_code(WS_ERROR_NO::DE_ERROR.as_code())
+                                    .context("invalid json response")
+                            })?;
+                            let (_, data, ok) = resp.ok();
+                            ok?;
+                            match data {
+                                WsRecvData::Version { version } => {
+                                    return Ok(version);
+                                }
+                                _ => return Ok("2.x".to_string()),
+                            }
+                        }
+                        Message::Ping(bytes) => {
+                            ws_stream
+                                .send(Message::Pong(bytes))
+                                .await
+                                .map_err(handle_disconnect_error)?;
+
+                            non_version_cnt += 1;
+                            if non_version_cnt >= max_non_version_cnt {
+                                return Ok("2.x".to_string());
+                            }
+                        }
+                        _ => return Ok("2.x".to_string()),
+                    }
+                } else {
+                    return Err(RawError::from_code(
+                        WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code(),
+                    ));
+                }
+            }
+        };
+
+        let duration = Duration::from_secs(8);
+        let version = match tokio::time::timeout(duration, version_fut).await {
+            Ok(Ok(ver)) => ver,
+            Ok(Err(err)) => return Err(err),
+            Err(_) => "2.x".to_string(),
+        };
+
+        Ok(version)
+    }
+
     async fn send_conn_request(
         &self,
         ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> RawResult<()> {
-        #[inline]
-        fn handle_disconnect_error(err: WsError) -> RawError {
-            if is_disconnect_error(&err) {
-                return RawError::from_code(Code::WS_DISCONNECTED);
-            }
-            RawError::from_any(err)
-        }
-
-        let conn_req = WsSend::Conn {
+        let req = WsSend::Conn {
             req_id: generate_req_id(),
             req: self.build_conn_request(),
         };
 
         ws_stream
-            .send(conn_req.to_msg())
+            .send(req.to_msg())
             .await
             .map_err(handle_disconnect_error)?;
 
@@ -502,23 +555,28 @@ impl TaosBuilder {
             let msg = res.map_err(handle_disconnect_error)?;
             match msg {
                 Message::Text(text) => {
-                    let conn_resp: WsRecv = serde_json::from_str(&text).map_err(|e| {
-                        RawError::from_string(format!("invalid conn response: {e}"))
+                    let resp: WsRecv = serde_json::from_str(&text).map_err(|e| {
+                        RawError::any(e)
+                            .with_code(WS_ERROR_NO::DE_ERROR.as_code())
+                            .context("invalid json response")
                     })?;
-                    let (_, data, ok) = conn_resp.ok();
+                    let (_, data, ok) = resp.ok();
                     ok?;
-                    if let WsRecvData::Conn = data {
-                        return Ok(());
+                    match data {
+                        WsRecvData::Conn => return Ok(()),
+                        WsRecvData::Version { .. } => {}
+                        _ => {
+                            return Err(RawError::from_string(format!(
+                                "unexpected conn response: {data:?}"
+                            )))
+                        }
                     }
-                    return Err(RawError::from_string(format!(
-                        "unexpected conn response: {data:?}"
-                    )));
                 }
                 Message::Ping(bytes) => {
                     ws_stream
                         .send(Message::Pong(bytes))
                         .await
-                        .map_err(RawError::from_any)?;
+                        .map_err(handle_disconnect_error)?;
                 }
                 _ => {
                     return Err(RawError::from_string(format!(
@@ -597,7 +655,7 @@ impl TaosBuilder {
     pub(crate) async fn connect(
         &self,
         kind: UrlKind,
-    ) -> RawResult<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+    ) -> RawResult<(WebSocketStream<MaybeTlsStream<TcpStream>>, Version)> {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = None;
         config.max_message_size = None;
@@ -617,15 +675,24 @@ impl TaosBuilder {
 
             for i in 0..self.conn_retries.0 {
                 match connect_async_with_config(&url, Some(config), false).await {
-                    Ok((mut ws_stream, _)) => match self.send_conn_request(&mut ws_stream).await {
-                        Ok(_) => return Ok(ws_stream),
-                        Err(e) => {
-                            tracing::warn!("failed to send conn request: {e}");
-                            if e.code() != Code::WS_DISCONNECTED {
+                    Ok((mut ws_stream, _)) => {
+                        let version_res = self.send_version_request(&mut ws_stream).await;
+                        if let Err(err) = &version_res {
+                            tracing::warn!("failed to send version request: {err}");
+                            if err.code() != WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code() {
                                 break;
                             }
                         }
-                    },
+
+                        if let Err(err) = self.send_conn_request(&mut ws_stream).await {
+                            tracing::warn!("failed to send conn request: {err}");
+                            if err.code() != WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code() {
+                                break;
+                            }
+                        }
+
+                        return Ok((ws_stream, version_res.unwrap()));
+                    }
                     Err(e) => {
                         let errstr = e.to_string();
                         tracing::warn!("failed to connect to {url}: {errstr}");
@@ -754,6 +821,16 @@ impl TaosBuilder {
                 }
             }
         }
+    }
+}
+
+#[inline]
+fn handle_disconnect_error(err: WsError) -> RawError {
+    if is_disconnect_error(&err) {
+        RawError::from_code(WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code())
+            .context("WebSocket connection disconnected")
+    } else {
+        RawError::any(err).context("WebSocket error")
     }
 }
 

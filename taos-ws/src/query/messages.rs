@@ -9,6 +9,7 @@ use taos_query::util::generate_req_id;
 use tokio_tungstenite::tungstenite::Message;
 
 pub type ReqId = u64;
+pub type MsgId = u64;
 pub type StmtId = u64;
 
 /// Type for result ID.
@@ -417,6 +418,9 @@ impl ToMsgEnum {
 
     // 是否需要缓存
     pub(crate) fn trya(&self) -> bool {
+        // 不要缓存 pong
+        // if pong return false
+
         true
         // match self {
         //     ToMsgEnum::Message(_) => false,
