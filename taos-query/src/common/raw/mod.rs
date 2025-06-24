@@ -474,11 +474,11 @@ impl RawBlock {
                     data_offset = o2 + rows * std::mem::size_of::<$prim>();
                     let nulls = bytes.slice(o1..o2);
                     let data = bytes.slice(o2..data_offset);
-                    // precision + scale
-                    let decimal_schema = schema.len;
-                    let precision = ((decimal_schema >> 8) & 0xFF) as _;
-                    let scale = (decimal_schema & 0xFF) as _;
-                    $ty(DecimalView::new(NullBits(nulls), data, precision, scale))
+                    $ty(DecimalView::new(
+                        NullBits(nulls),
+                        data,
+                        schema.as_prec_scale_unchecked(),
+                    ))
                 }};
             }
 
@@ -886,7 +886,7 @@ impl RawBlock {
         self.schemas()
             .iter()
             .zip(self.field_names())
-            .map(|(schema, name)| Field::new(name, schema.ty, schema.len))
+            .map(|(schema, name)| Field::new(name, schema.ty, schema.len()))
             .collect_vec()
     }
 
@@ -984,20 +984,38 @@ impl Display for PrettyBlock<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use prettytable::{Row, Table};
         let mut table = Table::new();
-        writeln!(
-            f,
-            "Table view with {} rows, {} columns, table name \"{}\"",
-            self.nrows(),
-            self.ncols(),
-            self.table_name().unwrap_or_default(),
-        )?;
+        if let Some(table) = self.table_name() {
+            writeln!(
+                f,
+                "Table view with {} rows, {} columns, table name \"{}\"",
+                self.nrows(),
+                self.ncols(),
+                table
+            )?;
+        } else {
+            writeln!(
+                f,
+                "Table view with {} rows, {} columns",
+                self.nrows(),
+                self.ncols(),
+            )?;
+        }
         table.set_titles(Row::from_iter(self.field_names()));
+        let mut types: Row = self
+            .column_views()
+            .iter()
+            .map(|view| view.schema().to_string())
+            .collect();
+        table.add_row(types);
         let nrows = self.nrows();
         const MAX_DISPLAY_ROWS: usize = 10;
         let mut rows_iter = self.raw.rows();
         if f.alternate() {
             for row in rows_iter {
-                table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
+                table.add_row(
+                    row.map(|s| dbg!(s.1).to_string().unwrap_or_default())
+                        .collect(),
+                );
             }
         } else if nrows > 2 * MAX_DISPLAY_ROWS {
             for row in (&mut rows_iter).take(MAX_DISPLAY_ROWS) {

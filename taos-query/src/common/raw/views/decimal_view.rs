@@ -3,9 +3,11 @@ use std::marker::PhantomData;
 use std::ptr;
 use std::sync::OnceLock;
 
+use bigdecimal::BigDecimal;
 use bytes::Bytes;
 
 use super::{NullBits, NullsIter};
+use crate::common::views::PrecScale;
 use crate::common::{BorrowedValue, Ty};
 use crate::decimal::{Decimal, DecimalAllowedTy};
 
@@ -15,8 +17,7 @@ type View<T> = DecimalView<T>;
 pub struct DecimalView<T: DecimalAllowedTy> {
     pub(crate) nulls: NullBits,
     pub(crate) data: Bytes,
-    pub(crate) precision: u8,
-    pub(crate) scale: u8,
+    pub(crate) prec_scale: PrecScale,
     pub(crate) _p: PhantomData<T>,
     buf: OnceLock<Vec<*mut c_char>>,
 }
@@ -25,19 +26,26 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
     const ITEM_SIZE: usize = std::mem::size_of::<T>();
 
     /// Create a new decimal view.
-    pub fn new(nulls: NullBits, data: Bytes, precision: u8, scale: u8) -> Self {
+    pub fn new(nulls: NullBits, data: Bytes, prec_scale: PrecScale) -> Self {
         Self {
             nulls,
             data,
-            precision,
-            scale,
+            prec_scale,
             _p: PhantomData,
             buf: OnceLock::new(),
         }
     }
 
     pub fn precision_and_scale(&self) -> (u8, u8) {
-        (self.precision, self.scale)
+        (self.prec_scale.prec, self.prec_scale.scale)
+    }
+
+    pub fn precision(&self) -> u8 {
+        self.prec_scale.prec
+    }
+
+    pub fn scale(&self) -> u8 {
+        self.prec_scale.scale
     }
 
     /// Rows
@@ -84,8 +92,8 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
         } else {
             Some(Decimal {
                 data: self.get_raw_data_at(row).read_unaligned(),
-                precision: self.precision,
-                scale: self.scale,
+                precision: self.precision(),
+                scale: self.scale(),
             })
         }
     }
@@ -107,7 +115,7 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
         let data = self
             .data
             .slice(range.start * item_size..range.end * item_size);
-        Some(Self::new(nulls, data, self.precision, self.scale))
+        Some(Self::new(nulls, data, self.prec_scale))
     }
 
     /// A iterator to nullable values of current row.
@@ -130,8 +138,8 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
     }
 
     pub fn concat(&self, rhs: &View<T>) -> View<T> {
-        assert!(
-            !(self.precision != rhs.precision || self.scale != rhs.scale),
+        assert_eq!(
+            self.prec_scale, rhs.prec_scale,
             "decimal strict concat needs same schema"
         );
 
@@ -149,7 +157,7 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
             .copied()
             .collect();
 
-        Self::new(nulls, data, self.precision, self.scale)
+        Self::new(nulls, data, self.prec_scale)
     }
 
     /// Get raw value at `row` index.
@@ -159,7 +167,7 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
             for i in 0..self.len() {
                 if !self.nulls.is_null_unchecked(i) {
                     let data = self.get_raw_data_at(i).read_unaligned();
-                    let dec = Decimal::new(data, self.precision, self.scale);
+                    let dec = Decimal::new(data, self.precision(), self.scale());
                     let str = dec.as_bigdecimal().to_string();
                     let cstr = CString::new(str).unwrap();
                     buf[i] = cstr.into_raw();
@@ -186,6 +194,23 @@ impl<T: DecimalAllowedTy> Drop for DecimalView<T> {
 
 macro_rules! impl_from_iter {
     ($ty: ty) => {
+        pub fn from_bigdecimal_with<I, T>(values: I, prec_scale: PrecScale) -> Self
+        where
+            T: TryInto<Option<bigdecimal::BigDecimal>>,
+            I: IntoIterator<Item = T>,
+        {
+            let values = values.into_iter().map(|v| {
+                v.try_into().ok().and_then(|v| v).and_then(|v| {
+                    <$ty>::try_from(
+                        v.with_scale(prec_scale.scale as _)
+                            .into_bigint_and_scale()
+                            .0,
+                    )
+                    .ok()
+                })
+            });
+            Self::from_values(values, prec_scale.prec, prec_scale.scale)
+        }
         pub fn from_values<I, T>(values: I, precision: u8, scale: u8) -> Self
         where
             T: Into<Option<$ty>>,
@@ -227,7 +252,9 @@ macro_rules! impl_from_iter {
                 }
             });
 
-            Self::new(nulls, data, precision, scale)
+            let prec_scale = PrecScale::new(std::mem::size_of::<$ty>() as _, precision, scale);
+
+            Self::new(nulls, data, prec_scale)
         }
     };
 }
@@ -246,7 +273,27 @@ impl DecimalView<i64> {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::Decimal64), BorrowedValue::Decimal64)
     }
-
+    pub fn from_decimals<I, T>(values: I) -> Self
+    where
+        T: TryInto<Option<BigDecimal>>,
+        I: IntoIterator<Item = T>,
+    {
+        let values: Vec<Option<BigDecimal>> = values
+            .into_iter()
+            .map(|v| v.try_into().ok().and_then(|v| v))
+            .collect();
+        let scale = values
+            .iter()
+            .flatten()
+            .map(|v| v.as_bigint_and_exponent().1)
+            .max()
+            .unwrap_or(0) as u8;
+        let precision = scale; // Default precision for i64
+        let values = values.into_iter().map(|v| {
+            v.and_then(|v| <i64>::try_from(v.with_scale(scale as _).into_bigint_and_scale().0).ok())
+        });
+        Self::from_values(values, precision, scale)
+    }
     impl_from_iter!(i64);
 }
 
@@ -281,6 +328,8 @@ impl<T: DecimalAllowedTy> Iterator for DecimalViewIter<'_, T> {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::common::decimal::Decimal;
 
@@ -395,6 +444,72 @@ mod tests {
         assert_eq!(iter.next(), Some(None));
         assert_eq!(iter.next(), Some(Some(Decimal::new(22, precision, scale))));
         assert_eq!(iter.next(), None);
+        Ok(())
+    }
+
+    #[test]
+    fn concat_test() {
+        let view1 = DecimalView::<i64>::from_values([Some(12345), None, Some(22)], 10, 2);
+        let view2 = DecimalView::<i64>::from_values([Some(5), None, Some(100)], 10, 2);
+        let view = view1.concat(&view2);
+        assert_eq!(view.len(), 6);
+        assert_eq!(
+            unsafe { view.get_value_unchecked(0) },
+            BorrowedValue::Decimal64(Decimal::new(12345, 10, 2))
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(1) },
+            BorrowedValue::Null(Ty::Decimal64)
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(2) },
+            BorrowedValue::Decimal64(Decimal::new(22, 10, 2))
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(3) },
+            BorrowedValue::Decimal64(Decimal::new(5, 10, 2))
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(4) },
+            BorrowedValue::Null(Ty::Decimal64)
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(5) },
+            BorrowedValue::Decimal64(Decimal::new(100, 10, 2))
+        );
+        assert_eq!(
+            unsafe { view.get_value_unchecked(0) }.to_string().unwrap(),
+            "123.45"
+        );
+        assert!(!view.is_null(0));
+        assert!(view.is_null(1));
+        assert!(!view.is_null(2));
+        assert!(!view.is_null(3));
+        assert!(view.is_null(4));
+        assert!(!view.is_null(5));
+    }
+
+    #[test]
+    fn test_from_bigdecimal_with() -> anyhow::Result<()> {
+        let d1 = bigdecimal::BigDecimal::from_str("12345678901234567.89")?;
+        assert_eq!(d1.as_bigint_and_exponent().1, 2);
+        let d2 = d1.with_scale(3);
+        assert_eq!(d2.as_bigint_and_exponent().1, 3);
+        let ps = PrecScale::new(16, 21, 4);
+        let view = DecimalView::<i128>::from_bigdecimal_with([Some(d1), Some(d2)], ps);
+
+        assert_eq!(view.len(), 2);
+        assert_eq!(view.precision_and_scale(), (21, 4));
+
+        let decimal = unsafe { view.get_unchecked(0) }.unwrap();
+        assert_eq!(decimal.data, 123456789012345678900);
+        assert_eq!(decimal.precision, 21);
+        assert_eq!(decimal.scale, 4);
+        let decimal = unsafe { view.get_unchecked(0) }.unwrap();
+        assert_eq!(decimal.data, 123456789012345678900);
+        assert_eq!(decimal.precision, 21);
+        assert_eq!(decimal.scale, 4);
+
         Ok(())
     }
 }
