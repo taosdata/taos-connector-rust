@@ -734,7 +734,7 @@ async fn read_messages(
                     _ => unreachable!(),
                 }
 
-                let _ = cache.remove(req_id);
+                cache.remove(req_id);
             }
             Message::Binary(payload) => {
                 let queries_sender = queries.clone();
