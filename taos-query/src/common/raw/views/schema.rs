@@ -578,7 +578,7 @@ mod tests {
         assert_eq!(unsafe { dec_schema.attr.dec.scale }, 2);
 
         let bytes = dec_schema.as_bytes();
-        assert_eq!(bytes, [21, 8, 0, 10, 2]);
+        assert_eq!(bytes, [21, 2, 10, 0, 8]);
     }
 
     #[test]
@@ -676,42 +676,42 @@ mod tests {
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.precision(), 10);
         assert_eq!(schema.scale(), 2);
-        assert_eq!(schema.to_string(), "DECIMAL(10, 2)");
+        assert_eq!(schema.to_string(), "DECIMAL(10,2)");
 
         let schema: DataType = "DECIMAL(20,5)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal);
         assert_eq!(schema.len(), 16);
         assert_eq!(schema.precision(), 20);
         assert_eq!(schema.scale(), 5);
-        assert_eq!(schema.to_string(), "DECIMAL(20, 5)");
+        assert_eq!(schema.to_string(), "DECIMAL(20,5)");
 
         let schema: DataType = "DECIMAL(38,0)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal);
         assert_eq!(schema.len(), 16);
         assert_eq!(schema.precision(), 38);
         assert_eq!(schema.scale(), 0);
-        assert_eq!(schema.to_string(), "DECIMAL(38, 0)");
+        assert_eq!(schema.to_string(), "DECIMAL(38,0)");
 
         let schema: DataType = "DECIMAL(38)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal);
         assert_eq!(schema.len(), 16);
         assert_eq!(schema.precision(), 38);
         assert_eq!(schema.scale(), 0);
-        assert_eq!(schema.to_string(), "DECIMAL(38, 0)");
+        assert_eq!(schema.to_string(), "DECIMAL(38,0)");
 
         let schema: DataType = "DECIMAL(18,4)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal64);
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.precision(), 18);
         assert_eq!(schema.scale(), 4);
-        assert_eq!(schema.to_string(), "DECIMAL(18, 4)");
+        assert_eq!(schema.to_string(), "DECIMAL(18,4)");
 
         let schema: DataType = "DECIMAL(18)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal64);
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.precision(), 18);
         assert_eq!(schema.scale(), 0);
-        assert_eq!(schema.to_string(), "DECIMAL(18, 0)");
+        assert_eq!(schema.to_string(), "DECIMAL(18,0)");
         let schema: DataType = "DECIMAL".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal64);
         assert_eq!(schema.len(), 8);

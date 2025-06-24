@@ -93,7 +93,7 @@ impl fmt::Display for CompressOptions {
 }
 
 #[allow(clippy::partial_pub_fields)]
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Serialize, Deserialize, Eq, Clone)]
 pub struct Described {
     pub field: String,
     #[serde(rename = "type")]
@@ -105,6 +105,17 @@ pub struct Described {
     pub note: Option<String>,
     #[serde(flatten, default)]
     pub compression: Option<CompressOptions>,
+}
+
+impl PartialEq for Described {
+    /// Skip origin_ty field when [PartialEq], but keep it for internal use.
+    fn eq(&self, other: &Self) -> bool {
+        self.field == other.field
+            && self.data_type == other.data_type
+            && self.length == other.length
+            && self.note == other.note
+            && self.compression == other.compression
+    }
 }
 
 impl Described {

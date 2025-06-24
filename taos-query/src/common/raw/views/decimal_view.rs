@@ -202,7 +202,7 @@ macro_rules! impl_from_iter {
             let values = values.into_iter().map(|v| {
                 v.try_into().ok().and_then(|v| v).and_then(|v| {
                     <$ty>::try_from(
-                        v.with_scale(prec_scale.scale as _)
+                        v.with_scale_round(prec_scale.scale as _, bigdecimal::RoundingMode::HalfUp)
                             .into_bigint_and_scale()
                             .0,
                     )
