@@ -2,7 +2,6 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::io::Write;
 use std::mem::transmute;
-use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -404,14 +403,15 @@ impl MessageCache {
         let _ = self.messages.insert_async(msg_id, message).await;
     }
 
-    // async fn remove(&self, req_id: ReqId) {
-    //     if let Some((_, msg_id)) = self.req_to_msg.remove_async(&req_id).await {
+    // async fn remove_async(&self, req_id: &ReqId) {
+    //     if let Some((_, msg_id)) = self.req_to_msg.remove_async(req_id).await {
     //         self.messages.remove_async(&msg_id).await;
     //     }
     // }
 
-    fn remove(&self, req_id: ReqId) {
-        if let Some((_, msg_id)) = self.req_to_msg.remove(&req_id) {
+    fn remove(&self, req_id: &ReqId) {
+        // log
+        if let Some((_, msg_id)) = self.req_to_msg.remove(req_id) {
             self.messages.remove(&msg_id);
         }
     }
@@ -617,306 +617,205 @@ async fn read_messages(
     err_sender: mpsc::Sender<WsError>,
     cache: MessageCache,
 ) {
-    tracing::trace!("reader start");
+    tracing::trace!("start reading messages from WebSocket stream");
 
-    let queries = query_sender.queries.clone();
-    let results = query_sender.results.clone();
-    let msg_tx = query_sender.sender.clone();
-    let is_v3 = query_sender.version_info.is_v3();
+    let (message_tx, message_rx) = mpsc::channel(64);
+    let message_handle = tokio::spawn(handle_messages(message_rx, query_sender.clone(), cache));
 
-    let parse_frame = |frame: Message| {
-        let cache = cache.clone();
-        match frame {
-            Message::Text(text) => {
-                tracing::trace!("received json response: {text}");
-                // 如果text 序列化失败，打印日志，继续处理下一个消息
-                // map_err
-                let v = serde_json::from_str::<WsRecv>(&text);
-                if let Err(err) = v {
-                    tracing::error!("failed to deserialize json text: {text}, error: {err:?}");
-                    return ControlFlow::Continue(());
-                }
-                let v = v.unwrap();
-                let queries_sender = queries.clone();
-                let ws2 = msg_tx.clone();
-                let (req_id, data, ok) = v.ok();
-                // 接收到响应后，将数据从 cache 中 remove
-                // TODO: async + log
-                tracing::trace!("try to remove cache for req_id: {req_id}");
-                cache.remove(req_id);
-                // tracing::trace!("remove cache for req_id: {req_id}, msg_id: {msg_id}");
-
-                match &data {
-                    WsRecvData::Insert(_) => {
-                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            sender.send(ok.map(|_| data)).unwrap();
-                        } else {
-                            debug_assert!(!queries_sender.contains(&req_id));
-                            tracing::warn!("req_id {req_id} not detected, message might be lost");
-                        }
-                    }
-                    WsRecvData::Query(_) => {
-                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            if let Err(err) = sender.send(ok.map(|_| data)) {
-                                tracing::error!("send data with error: {err:?}");
-                            }
-                        } else {
-                            debug_assert!(!queries_sender.contains(&req_id));
-                            tracing::warn!("req_id {req_id} not detected, message might be lost");
-                        }
-                    }
-                    WsRecvData::Fetch(fetch) => {
-                        let id = fetch.id;
-                        if fetch.completed {
-                            tokio::spawn(async move {
-                                let _ =
-                                    ws2.send_async(ToMsgEnum::WsSend(WsSend::FreeResult(
-                                        WsResArgs { req_id, id },
-                                    )))
-                                    .await;
-                            });
-                        }
-                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
-                        } else {
-                            tracing::warn!("req_id {req_id} not detected, message might be lost");
-                        }
-                    }
-                    WsRecvData::FetchBlock => {
-                        assert!(ok.is_err());
-                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
-                        } else {
-                            tracing::warn!("req_id {req_id} not detected, message might be lost");
-                        }
-                    }
-                    WsRecvData::WriteMeta => {
-                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
-                        } else {
-                            tracing::warn!("req_id {req_id} not detected, message might be lost");
-                        }
-                    }
-                    WsRecvData::WriteRaw => {
-                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
-                        } else {
-                            tracing::warn!("req_id {req_id} not detected, message might be lost");
-                        }
-                    }
-                    WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => {
-                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
-                        } else {
-                            tracing::warn!("req_id {req_id} not detected, message might be lost");
-                        }
-                    }
-                    WsRecvData::Stmt2Init { .. }
-                    | WsRecvData::Stmt2Prepare { .. }
-                    | WsRecvData::Stmt2Bind { .. }
-                    | WsRecvData::Stmt2Exec { .. }
-                    | WsRecvData::Stmt2Result { .. }
-                    | WsRecvData::Stmt2Close { .. } => match queries_sender.remove(&req_id) {
-                        Some((_, sender)) => {
-                            let _ = sender.send(ok.map(|_| data));
-                        }
-                        None => {
-                            tracing::warn!("req_id {req_id} not detected, message might be lost");
-                        }
-                    },
-                    WsRecvData::ValidateSql { .. } | WsRecvData::CheckServerStatus { .. } => {
-                        if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                            let _ = sender.send(ok.map(|_| data));
-                        } else {
-                            tracing::warn!("req_id {req_id} not detected, message might be lost");
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-
-                cache.remove(req_id);
-            }
-            Message::Binary(payload) => {
-                let queries_sender = queries.clone();
-                let fetches_sender = results.clone();
-                let block = payload;
-                tokio::spawn(async move {
-                    use taos_query::util::InlinableRead;
-                    let offset = if is_v3 { 16 } else { 8 };
-
-                    let mut slice = block.as_slice();
-                    let mut is_block_new = false;
-
-                    let timing = if is_v3 {
-                        let timing = slice.read_u64().unwrap();
-                        if timing == u64::MAX {
-                            is_block_new = true;
-                            Duration::ZERO
-                        } else {
-                            Duration::from_nanos(timing as _)
-                        }
-                    } else {
-                        Duration::ZERO
-                    };
-
-                    if is_block_new {
-                        let _action = slice.read_u64().unwrap();
-                        let block_version = slice.read_u16().unwrap();
-                        let timing = Duration::from_nanos(slice.read_u64().unwrap());
-                        let block_req_id = slice.read_u64().unwrap();
-                        let block_code = slice.read_u32().unwrap();
-                        let block_message = slice.read_inlined_str::<4>().unwrap();
-                        let _result_id = slice.read_u64().unwrap();
-                        let finished = slice.read_u8().unwrap() == 1;
-                        let result_block = if finished {
-                            Vec::new()
-                        } else {
-                            slice.read_inlined_bytes::<4>().unwrap()
-                        };
-
-                        cache.remove(block_req_id);
-
-                        if let Some((_, sender)) = queries_sender.remove(&block_req_id) {
-                            sender
-                                .send(Ok(WsRecvData::BlockNew {
-                                    block_version,
-                                    timing,
-                                    block_req_id,
-                                    block_code,
-                                    block_message,
-                                    finished,
-                                    raw: result_block,
-                                }))
-                                .unwrap();
-                        } else {
-                            tracing::warn!(
-                                "req_id {block_req_id} not detected, message might be lost"
-                            );
-                        }
-                    } else {
-                        let res_id = slice.read_u64().unwrap();
-                        if let Some((_, req_id)) = fetches_sender.remove(&res_id) {
-                            cache.remove(req_id);
-                            if is_v3 {
-                                if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                    tracing::trace!("send data to fetches with id {}", res_id);
-                                    sender
-                                        .send(Ok(WsRecvData::Block {
-                                            timing,
-                                            raw: block[offset..].to_vec(),
-                                        }))
-                                        .unwrap();
-                                } else {
-                                    tracing::warn!(
-                                        "req_id {res_id} not detected, message might be lost"
-                                    );
-                                }
-                            } else if let Some((_, sender)) = queries_sender.remove(&req_id) {
-                                tracing::trace!("send data to fetches with id {}", res_id);
-                                sender
-                                    .send(Ok(WsRecvData::BlockV2 {
-                                        timing,
-                                        raw: block[offset..].to_vec(),
-                                    }))
-                                    .unwrap();
-                            } else {
-                                tracing::warn!(
-                                    "req_id {res_id} not detected, message might be lost"
-                                );
-                            }
-                        } else {
-                            tracing::warn!("result id {res_id} not found");
-                        }
-                    }
-                });
-            }
-            Message::Close(_) => {
-                // taosAdapter should never send close frame to client.
-                // So all close frames should be treated as error.
-
-                tracing::warn!("websocket connection is closed normally");
-                let mut keys = Vec::new();
-                queries.scan(|k, _| {
-                    keys.push(*k);
-                });
-                for k in keys {
-                    if let Some((_, sender)) = queries.remove(&k) {
-                        let _ = sender.send(Err(RawError::new(
-                            WS_ERROR_NO::CONN_CLOSED.as_code(),
-                            "received close message",
-                        )));
-                    }
-                }
-
-                return ControlFlow::Break(());
-            }
-            Message::Ping(data) => {
-                let ws2 = msg_tx.clone();
-                tokio::spawn(async move {
-                    let _ = ws2
-                        .send_async(ToMsgEnum::Message(Message::Pong(data)))
-                        .await;
-                });
-            }
-            Message::Pong(_) => tracing::trace!("received pong message, do nothing"),
-            Message::Frame(_) => {
-                tracing::warn!("received (unexpected) frame message, do nothing");
-                tracing::trace!("* frame data: {frame:?}");
-            }
-        }
-
-        ControlFlow::Continue(())
-    };
+    let mut closed_normally = false;
 
     loop {
         tokio::select! {
             res = ws_stream_reader.try_next() => {
                 match res {
-                    Ok(frame) => {
-                        if let Some(frame) = frame {
-                            if let ControlFlow::Break(()) = parse_frame(frame) {
-                                break;
-                            }
+                    Ok(Some(message)) => {
+                        if let Err(err) = message_tx.send(message).await {
+                            tracing::warn!("failed to send message to handler, err: {err:?}");
+                            let _ = err_sender.send(WsError::ConnectionClosed).await;
+                            break;
                         }
                     }
-                    Err(e) => {
-                        tracing::error!("reader err: {e:?}");
-                        err_sender.send(e).await.unwrap();
+                    Ok(None) => {
+                        tracing::info!("WebSocket stream closed by peer");
+                        closed_normally = true;
+                        break;
+                    }
+                    Err(err) => {
+                        tracing::warn!("WebSocket reader error: {err:?}");
+                        let _ = err_sender.send(err).await;
                         break;
                     }
                 }
             }
             _ = close_reader.changed() => {
-                // TODO: handle close signal
-                tracing::trace!("close reader task");
-                // let mut keys = Vec::with_capacity(queries_sender.len());
-                // queries_sender.scan(|k, _| {
-                //     keys.push(*k);
-                // });
-                // for k in keys {
-                //     if let Some((_, sender)) = queries_sender.remove(&k) {
-                //         let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), "close signal received")));
-                //     }
-                // }
+                tracing::info!("WebSocket reader received close signal");
+                closed_normally = true;
                 break;
             }
         }
     }
 
-    tracing::trace!("reader end");
-    // if queries_sender.is_empty() {
-    //     return;
-    // }
+    let _ = message_handle.await;
 
-    // let mut keys = Vec::with_capacity(queries_sender.len());
-    // queries_sender.scan(|k, _| {
-    //     keys.push(*k);
-    // });
-    // for k in keys {
-    //     if let Some((_, sender)) = queries_sender.remove(&k) {
-    //         let _ = sender.send(Err(RawError::from_string("websocket connection is closed")));
-    //     }
-    // }
+    if closed_normally {
+        handle_error(query_sender.queries.clone()).await;
+    }
+
+    tracing::trace!("stop reading messages from WebSocket stream");
+}
+
+async fn handle_messages(
+    mut message_reader: mpsc::Receiver<Message>,
+    query_sender: WsQuerySender,
+    cache: MessageCache,
+) {
+    while let Some(message) = message_reader.recv().await {
+        parse_message(message, query_sender.clone(), cache.clone());
+    }
+}
+
+fn parse_message(message: Message, query_sender: WsQuerySender, cache: MessageCache) {
+    match message {
+        Message::Text(text) => parse_text_message(text, query_sender, cache),
+        Message::Binary(payload) => parse_binary_message(payload, query_sender, cache),
+        Message::Ping(data) => {
+            tokio::spawn(async move {
+                let _ = query_sender
+                    .sender
+                    .send_async(ToMsgEnum::Message(Message::Pong(data)))
+                    .await;
+            });
+        }
+        Message::Close(_) => {
+            // taosAdapter should never send a close frame to the client.
+            // Therefore all close frames should be treated as errors.
+            tracing::warn!("received unexpected close message, this should not happen");
+        }
+        Message::Pong(_) => tracing::trace!("received pong message, do nothing"),
+        Message::Frame(_) => {
+            tracing::warn!("received unexpected frame message, do nothing");
+            tracing::trace!("frame message: {message:?}");
+        }
+    }
+}
+
+fn parse_text_message(text: String, query_sender: WsQuerySender, cache: MessageCache) {
+    tracing::trace!("received text message, text: {text}");
+
+    let resp = match serde_json::from_str::<WsRecv>(&text) {
+        Ok(resp) => resp,
+        Err(err) => {
+            tracing::warn!("failed to deserialize json text: {text}, err: {err:?}");
+            return;
+        }
+    };
+
+    let (req_id, data, ok) = resp.ok();
+
+    cache.remove(&req_id);
+
+    match &data {
+        WsRecvData::Conn
+        | WsRecvData::Version { .. }
+        | WsRecvData::Block { .. }
+        | WsRecvData::BlockNew { .. }
+        | WsRecvData::BlockV2 { .. } => unreachable!("unexpected data type: {:?}", data),
+        _ => {
+            if let Some((_, sender)) = query_sender.queries.remove(&req_id) {
+                if let Err(err) = sender.send(ok.map(|_| data)) {
+                    tracing::warn!("failed to send data, req_id: {req_id}, err: {err:?}");
+                }
+            } else {
+                tracing::warn!("no sender found for req_id: {req_id}, the message may be lost");
+            }
+        }
+    }
+}
+
+fn parse_binary_message(payload: Vec<u8>, query_sender: WsQuerySender, cache: MessageCache) {
+    tracing::trace!("received binary message, len: {}", payload.len());
+
+    let is_v3 = query_sender.version_info.is_v3();
+
+    tokio::spawn(async move {
+        use taos_query::util::InlinableRead;
+
+        let mut slice = payload.as_slice();
+        let mut is_block_new = false;
+
+        let timing = if is_v3 {
+            let timing = slice.read_u64().unwrap();
+            if timing == u64::MAX {
+                is_block_new = true;
+                Duration::ZERO
+            } else {
+                Duration::from_nanos(timing)
+            }
+        } else {
+            Duration::ZERO
+        };
+
+        let (req_id, data) = if is_block_new {
+            let _action = slice.read_u64().unwrap();
+            let block_version = slice.read_u16().unwrap();
+            let timing = Duration::from_nanos(slice.read_u64().unwrap());
+            let block_req_id = slice.read_u64().unwrap();
+            let block_code = slice.read_u32().unwrap();
+            let block_message = slice.read_inlined_str::<4>().unwrap();
+            let _res_id = slice.read_u64().unwrap();
+            let finished = slice.read_u8().unwrap() == 1;
+            let block = if finished {
+                Vec::new()
+            } else {
+                slice.read_inlined_bytes::<4>().unwrap()
+            };
+
+            cache.remove(&block_req_id);
+
+            (
+                block_req_id,
+                WsRecvData::BlockNew {
+                    block_version,
+                    timing,
+                    block_req_id,
+                    block_code,
+                    block_message,
+                    finished,
+                    raw: block,
+                },
+            )
+        } else {
+            let res_id = slice.read_u64().unwrap();
+            if let Some((_, req_id)) = query_sender.results.remove(&res_id) {
+                cache.remove(&req_id);
+
+                let data = if is_v3 {
+                    WsRecvData::Block {
+                        timing,
+                        raw: payload[16..].to_vec(),
+                    }
+                } else {
+                    WsRecvData::BlockV2 {
+                        timing,
+                        raw: payload[8..].to_vec(),
+                    }
+                };
+
+                (req_id, data)
+            } else {
+                tracing::warn!("no request id found for result id: {res_id}");
+                return;
+            }
+        };
+
+        if let Some((_, sender)) = query_sender.queries.remove(&req_id) {
+            if let Err(err) = sender.send(Ok(data)) {
+                tracing::warn!("failed to send data, req_id: {req_id}, err: {err:?}");
+            }
+        } else {
+            tracing::warn!("no sender found for req_id: {req_id}, the message may be lost");
+        }
+    });
 }
 
 pub fn is_disconnect_error(err: &WsError) -> bool {
