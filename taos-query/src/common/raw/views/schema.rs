@@ -9,6 +9,7 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unali
 
 use crate::common::Ty;
 
+#[allow(clippy::partial_pub_fields)]
 #[derive(Debug, Clone, Copy, Eq, KnownLayout, IntoBytes, FromBytes, Unaligned, Immutable)]
 #[repr(C)]
 pub struct PrecScale {
@@ -39,9 +40,9 @@ impl PartialEq for PrecScale {
 
 #[derive(Clone, Copy, KnownLayout, FromBytes, Immutable)]
 #[repr(C)]
-pub union LenOrDec {
-    pub len: u32,
-    pub dec: PrecScale,
+union LenOrDec {
+    len: u32,
+    dec: PrecScale,
 }
 
 impl LenOrDec {
@@ -49,39 +50,19 @@ impl LenOrDec {
     pub const fn new_len(len: u32) -> Self {
         Self { len }
     }
-
-    #[inline]
-    pub const fn new_dec(len: u32, precision: u8, scale: u8) -> Self {
-        Self {
-            dec: PrecScale {
-                len: len as u8,
-                _empty: 0,
-                prec: precision,
-                scale,
-            },
-        }
-    }
 }
 
 /// Represent column basics information: type, length.
-#[derive(
-    Clone,
-    Copy,
-    KnownLayout,
-    TryFromBytes,
-    Immutable,
-    DeserializeFromStr,
-    SerializeDisplay,
-    Unaligned,
-)]
+#[allow(clippy::unsafe_derive_deserialize)]
+#[derive(Clone, Copy, TryFromBytes, Immutable, DeserializeFromStr, SerializeDisplay, Unaligned)]
 #[repr(C)]
 #[repr(packed(1))]
-pub struct ColSchema {
-    pub ty: Ty,
-    pub attr: LenOrDec,
+pub struct DataType {
+    ty: Ty,
+    attr: LenOrDec,
 }
 
-impl PartialEq for ColSchema {
+impl PartialEq for DataType {
     fn eq(&self, other: &Self) -> bool {
         self.ty == other.ty
             && self.len() == other.len()
@@ -89,9 +70,9 @@ impl PartialEq for ColSchema {
             && self.scale() == other.scale()
     }
 }
-impl Eq for ColSchema {}
+impl Eq for DataType {}
 
-impl Debug for ColSchema {
+impl Debug for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_struct("ColSchema");
         debug.field("ty", &self.ty);
@@ -109,13 +90,7 @@ impl Debug for ColSchema {
     }
 }
 
-impl ColSchema {
-    pub fn as_ty(&self) -> Ty {
-        self.ty
-    }
-}
-
-impl Display for ColSchema {
+impl Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.ty.is_decimal() {
             let dec = unsafe { self.attr.dec };
@@ -158,7 +133,7 @@ pub enum ParseDataTypeError {
     UnknownDataType(String),
 }
 
-impl FromStr for ColSchema {
+impl FromStr for DataType {
     type Err = ParseDataTypeError;
 
     /// Zero-copy compatible parsing of a data type string.
@@ -176,10 +151,10 @@ impl FromStr for ColSchema {
     ///
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim();
-        if let Ok(i) = u8::from_str(&s) {
+        if let Ok(i) = u8::from_str(s) {
             // Handle fixed-length types: TINYINT, SMALLINT, INT, BIGINT, etc.
             return Ok(Self::from_ty(
-                Ty::from_u8_option(i).ok_or_else(|| ParseDataTypeError::TypeNumberError(i))?,
+                Ty::from_u8_option(i).ok_or(ParseDataTypeError::TypeNumberError(i))?,
             ));
         }
 
@@ -232,7 +207,7 @@ impl FromStr for ColSchema {
                                 1..=MAX_DECIMAL64_PRECISION => {
                                     return Ok(Self::new_decimal(Ty::Decimal64, precision, scale));
                                 }
-                                1..=MAX_DECIMAL_PRECISION => {
+                                19..=MAX_DECIMAL_PRECISION => {
                                     return Ok(Self::new_decimal(Ty::Decimal, precision, scale));
                                 }
                                 _ => {
@@ -250,7 +225,7 @@ impl FromStr for ColSchema {
                                 1..=MAX_DECIMAL64_PRECISION => {
                                     return Ok(Self::new_decimal(Ty::Decimal64, precision, 0));
                                 }
-                                1..=MAX_DECIMAL_PRECISION => {
+                                19..=MAX_DECIMAL_PRECISION => {
                                     return Ok(Self::new_decimal(Ty::Decimal, precision, 0));
                                 }
                                 _ => {
@@ -360,18 +335,18 @@ impl FromStr for ColSchema {
                 if u == s {
                     return Err(ParseDataTypeError::UnknownDataType(s.to_string()));
                 }
-                return Self::from_str(&u);
+                Self::from_str(&u)
             }
         }
     }
 }
 
-impl From<Ty> for ColSchema {
+impl From<Ty> for DataType {
     fn from(value: Ty) -> Self {
         Self::from_ty(value)
     }
 }
-impl ColSchema {
+impl DataType {
     #[inline]
     pub(crate) const fn new(ty: Ty, len: u32) -> Self {
         Self {
@@ -421,6 +396,11 @@ impl ColSchema {
         unsafe { std::mem::transmute::<Self, [u8; 5]>(self) }
     }
 
+    /// Data type as a [Ty].
+    pub fn ty(&self) -> Ty {
+        self.ty
+    }
+
     /// The raw length of the column schema.
     #[inline]
     pub fn len(&self) -> u32 {
@@ -439,9 +419,9 @@ impl ColSchema {
         if self.ty.is_var_type() {
             let len = unsafe { self.attr.len };
             if len == 0 {
-                return 64; // Default variable length for other types
+                64 // Default variable length for other types
             } else {
-                return len;
+                len
             }
         } else {
             self.ty.fixed_length() as u32
@@ -452,9 +432,9 @@ impl ColSchema {
     unsafe fn positive_var_len(&self) -> u32 {
         let len = self.attr.len;
         if len == 0 {
-            return 64; // Default variable length for other types
+            64 // Default variable length for other types
         } else {
-            return len;
+            len
         }
     }
 
@@ -525,18 +505,18 @@ impl Debug for Schemas {
 
 impl Schemas {
     /// As a [ColSchema] slice.
-    pub fn as_slice(&self) -> &[ColSchema] {
+    pub fn as_slice(&self) -> &[DataType] {
         unsafe {
             std::slice::from_raw_parts(
-                self.0.as_ptr() as *const ColSchema,
-                self.0.len() / std::mem::size_of::<ColSchema>(),
+                self.0.as_ptr() as *const DataType,
+                self.0.len() / std::mem::size_of::<DataType>(),
             )
         }
     }
 }
 
 impl Deref for Schemas {
-    type Target = [ColSchema];
+    type Target = [DataType];
 
     fn deref(&self) -> &Self::Target {
         self.as_slice()
@@ -549,7 +529,7 @@ mod tests {
 
     #[test]
     fn col_schema() {
-        let col = ColSchema {
+        let col = DataType {
             ty: Ty::BigInt,
             attr: LenOrDec::new_len(4),
         };
@@ -557,7 +537,7 @@ mod tests {
         dbg!(&bytes);
 
         let bytes: [u8; 5] = [4, 1, 0, 0, 0];
-        let col2: ColSchema = unsafe { std::mem::transmute_copy(&bytes) };
+        let col2: DataType = unsafe { std::mem::transmute_copy(&bytes) };
         dbg!(col2);
 
         assert_eq!(std::mem::size_of_val(&col), 5);
@@ -589,9 +569,9 @@ mod tests {
 
     #[test]
     fn test_dec() {
-        let schema = ColSchema::new(Ty::BigInt, 8);
+        let schema = DataType::new(Ty::BigInt, 8);
         assert_eq!(schema.len(), 8);
-        let dec_schema = ColSchema::new_decimal(Ty::Decimal64, 10, 2);
+        let dec_schema = DataType::new_decimal(Ty::Decimal64, 10, 2);
         assert_eq!(dec_schema.len(), 8);
         assert_eq!(dec_schema.ty, Ty::Decimal64);
         assert_eq!(unsafe { dec_schema.attr.dec.prec }, 10);
@@ -603,136 +583,136 @@ mod tests {
 
     #[test]
     fn test_col_schema_from_str() {
-        let schema: ColSchema = "VARCHAR(100)".parse().unwrap();
+        let schema: DataType = "VARCHAR(100)".parse().unwrap();
         assert_eq!(schema.ty, Ty::VarChar);
         assert_eq!(schema.len(), 100);
         assert_eq!(schema.to_string(), "BINARY(100)");
-        let schema: ColSchema = "BINARY(100)".parse().unwrap();
+        let schema: DataType = "BINARY(100)".parse().unwrap();
         assert_eq!(schema.ty, Ty::VarChar);
         assert_eq!(schema.len(), 100);
         assert_eq!(schema.to_string(), "BINARY(100)");
-        let schema: ColSchema = "NCHAR(50)".parse().unwrap();
+        let schema: DataType = "NCHAR(50)".parse().unwrap();
         assert_eq!(schema.ty, Ty::NChar);
         assert_eq!(schema.len(), 50);
         assert_eq!(schema.to_string(), "NCHAR(50)");
-        let schema: ColSchema = "VARBINARY(32)".parse().unwrap();
+        let schema: DataType = "VARBINARY(32)".parse().unwrap();
         assert_eq!(schema.ty, Ty::VarBinary);
         assert_eq!(schema.len(), 32);
         assert_eq!(schema.to_string(), "VARBINARY(32)");
-        let schema: ColSchema = "GEOMETRY(128)".parse().unwrap();
+        let schema: DataType = "GEOMETRY(128)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Geometry);
         assert_eq!(schema.len(), 128);
         assert_eq!(schema.to_string(), "GEOMETRY(128)");
-        let schema: ColSchema = "JSON".parse().unwrap();
+        let schema: DataType = "JSON".parse().unwrap();
         assert_eq!(schema.ty, Ty::Json);
         assert_eq!(schema.len(), 0);
         assert_eq!(schema.to_string(), "JSON");
-        let schema: ColSchema = "BLOB".parse().unwrap();
+        let schema: DataType = "BLOB".parse().unwrap();
         assert_eq!(schema.ty, Ty::Blob);
         assert_eq!(schema.len(), 0);
         assert_eq!(schema.to_string(), "BLOB");
-        let schema: ColSchema = "MEDIUMBLOB".parse().unwrap();
+        let schema: DataType = "MEDIUMBLOB".parse().unwrap();
         assert_eq!(schema.ty, Ty::MediumBlob);
         assert_eq!(schema.len(), 0);
         assert_eq!(schema.to_string(), "MEDIUMBLOB");
-        let schema: ColSchema = "BOOL".parse().unwrap();
+        let schema: DataType = "BOOL".parse().unwrap();
         assert_eq!(schema.ty, Ty::Bool);
         assert_eq!(schema.len(), 1);
         assert_eq!(schema.to_string(), "BOOL");
-        let schema: ColSchema = "TINYINT".parse().unwrap();
+        let schema: DataType = "TINYINT".parse().unwrap();
         assert_eq!(schema.ty, Ty::TinyInt);
         assert_eq!(schema.len(), 1);
         assert_eq!(schema.to_string(), "TINYINT");
-        let schema: ColSchema = "SMALLINT".parse().unwrap();
+        let schema: DataType = "SMALLINT".parse().unwrap();
         assert_eq!(schema.ty, Ty::SmallInt);
         assert_eq!(schema.len(), 2);
         assert_eq!(schema.to_string(), "SMALLINT");
-        let schema: ColSchema = "INT".parse().unwrap();
+        let schema: DataType = "INT".parse().unwrap();
         assert_eq!(schema.ty, Ty::Int);
         assert_eq!(schema.len(), 4);
         assert_eq!(schema.to_string(), "INT");
-        let schema: ColSchema = "BIGINT".parse().unwrap();
+        let schema: DataType = "BIGINT".parse().unwrap();
         assert_eq!(schema.ty, Ty::BigInt);
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.to_string(), "BIGINT");
-        let schema: ColSchema = "TINYINT UNSIGNED".parse().unwrap();
+        let schema: DataType = "TINYINT UNSIGNED".parse().unwrap();
         assert_eq!(schema.ty, Ty::UTinyInt);
         assert_eq!(schema.len(), 1);
         assert_eq!(schema.to_string(), "TINYINT UNSIGNED");
-        let schema: ColSchema = "SMALLINT UNSIGNED".parse().unwrap();
+        let schema: DataType = "SMALLINT UNSIGNED".parse().unwrap();
         assert_eq!(schema.ty, Ty::USmallInt);
         assert_eq!(schema.len(), 2);
         assert_eq!(schema.to_string(), "SMALLINT UNSIGNED");
-        let schema: ColSchema = "INT UNSIGNED".parse().unwrap();
+        let schema: DataType = "INT UNSIGNED".parse().unwrap();
         assert_eq!(schema.ty, Ty::UInt);
         assert_eq!(schema.len(), 4);
         assert_eq!(schema.to_string(), "INT UNSIGNED");
-        let schema: ColSchema = "BIGINT UNSIGNED".parse().unwrap();
+        let schema: DataType = "BIGINT UNSIGNED".parse().unwrap();
         assert_eq!(schema.ty, Ty::UBigInt);
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.to_string(), "BIGINT UNSIGNED");
-        let schema: ColSchema = "FLOAT".parse().unwrap();
+        let schema: DataType = "FLOAT".parse().unwrap();
         assert_eq!(schema.ty, Ty::Float);
         assert_eq!(schema.len(), 4);
         assert_eq!(schema.to_string(), "FLOAT");
-        let schema: ColSchema = "DOUBLE".parse().unwrap();
+        let schema: DataType = "DOUBLE".parse().unwrap();
         assert_eq!(schema.ty, Ty::Double);
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.to_string(), "DOUBLE");
-        let schema: ColSchema = "TIMESTAMP".parse().unwrap();
+        let schema: DataType = "TIMESTAMP".parse().unwrap();
         assert_eq!(schema.ty, Ty::Timestamp);
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.to_string(), "TIMESTAMP");
-        let schema = "UNKNOWN".parse::<ColSchema>();
+        let schema = "UNKNOWN".parse::<DataType>();
         assert!(schema.is_err());
-        let schema = "DECIMAL(40,2)".parse::<ColSchema>();
+        let schema = "DECIMAL(40,2)".parse::<DataType>();
         assert!(schema.is_err());
     }
 
     #[test]
     fn test_schema_decimal() {
-        let schema: ColSchema = "DECIMAL(10,2)".parse().unwrap();
+        let schema: DataType = "DECIMAL(10,2)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal64);
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.precision(), 10);
         assert_eq!(schema.scale(), 2);
         assert_eq!(schema.to_string(), "DECIMAL(10, 2)");
 
-        let schema: ColSchema = "DECIMAL(20,5)".parse().unwrap();
+        let schema: DataType = "DECIMAL(20,5)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal);
         assert_eq!(schema.len(), 16);
         assert_eq!(schema.precision(), 20);
         assert_eq!(schema.scale(), 5);
         assert_eq!(schema.to_string(), "DECIMAL(20, 5)");
 
-        let schema: ColSchema = "DECIMAL(38,0)".parse().unwrap();
+        let schema: DataType = "DECIMAL(38,0)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal);
         assert_eq!(schema.len(), 16);
         assert_eq!(schema.precision(), 38);
         assert_eq!(schema.scale(), 0);
         assert_eq!(schema.to_string(), "DECIMAL(38, 0)");
 
-        let schema: ColSchema = "DECIMAL(38)".parse().unwrap();
+        let schema: DataType = "DECIMAL(38)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal);
         assert_eq!(schema.len(), 16);
         assert_eq!(schema.precision(), 38);
         assert_eq!(schema.scale(), 0);
         assert_eq!(schema.to_string(), "DECIMAL(38, 0)");
 
-        let schema: ColSchema = "DECIMAL(18,4)".parse().unwrap();
+        let schema: DataType = "DECIMAL(18,4)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal64);
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.precision(), 18);
         assert_eq!(schema.scale(), 4);
         assert_eq!(schema.to_string(), "DECIMAL(18, 4)");
 
-        let schema: ColSchema = "DECIMAL(18)".parse().unwrap();
+        let schema: DataType = "DECIMAL(18)".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal64);
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.precision(), 18);
         assert_eq!(schema.scale(), 0);
         assert_eq!(schema.to_string(), "DECIMAL(18, 0)");
-        let schema: ColSchema = "DECIMAL".parse().unwrap();
+        let schema: DataType = "DECIMAL".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal64);
         assert_eq!(schema.len(), 8);
         assert_eq!(schema.precision(), 18);

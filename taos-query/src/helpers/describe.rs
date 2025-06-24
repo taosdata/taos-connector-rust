@@ -1,9 +1,9 @@
-use std::fmt::{self, Display};
-use std::ops::{ControlFlow, Deref, DerefMut};
+use std::fmt;
+use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
-use crate::common::views::ColSchema;
-use crate::common::{Precision, Ty};
+use crate::common::views::DataType;
+use crate::common::Ty;
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -97,7 +97,7 @@ impl fmt::Display for CompressOptions {
 pub struct Described {
     pub field: String,
     #[serde(rename = "type")]
-    pub data_type: ColSchema,
+    pub data_type: DataType,
     #[serde(skip)]
     origin_ty: Option<String>,
     pub length: usize,
@@ -109,10 +109,10 @@ pub struct Described {
 
 impl Described {
     pub fn ty(&self) -> Ty {
-        self.data_type.as_ty()
+        self.data_type.ty()
     }
 
-    pub fn data_type(&self) -> &ColSchema {
+    pub fn data_type(&self) -> &DataType {
         &self.data_type
     }
     /// Represent the data type in sql.
@@ -178,7 +178,10 @@ impl Described {
     }
 
     /// Create a new column description without primary-key/compression feature.
+    ///
+    /// Decimal should not set as is.
     pub fn new<T: Into<String>, U: Into<Option<usize>>>(field: T, ty: Ty, length: U) -> Self {
+        debug_assert!(!ty.is_decimal());
         let field = field.into();
         let length = length.into();
         let length = length.unwrap_or_else(|| {
@@ -190,7 +193,7 @@ impl Described {
         });
         Self {
             field,
-            data_type: todo!(),
+            data_type: DataType::new(ty, length as _),
             origin_ty: None,
             length,
             note: None,
@@ -325,10 +328,11 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let field = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let origin: serde_json::Value = seq
+
+                let data_type: DataType = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(1, &self))?;
-                let mut origin_ty = None;
+                let origin_ty = Some(data_type.to_string());
 
                 let length = seq
                     .next_element()?
@@ -362,7 +366,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 };
                 let desc = Described {
                     field,
-                    data_type: todo!(),
+                    data_type,
                     origin_ty,
                     length,
                     note,
@@ -382,7 +386,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let mut field = None;
                 let mut ty = None;
                 let mut origin_ty = None;
-                let mut data_type: Option<ColSchema> = None;
+                let mut data_type: Option<DataType> = None;
                 let mut length = None;
                 let mut note = None;
                 let mut encode = None;
@@ -453,7 +457,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let mut data_type = data_type.ok_or_else(|| de::Error::missing_field("type"))?;
                 let field = field.ok_or_else(|| de::Error::missing_field("field"))?;
                 let length = length.ok_or_else(|| de::Error::missing_field("length"))?;
-                if data_type.as_ty().is_decimal() {
+                if data_type.ty().is_decimal() {
                     data_type.set_len(length as u32);
                 }
                 let compression = if let (Some(encode), Some(compress), Some(level)) =
@@ -530,7 +534,7 @@ mod tests {
     fn test_sql_expr() {
         let desc = Described {
             field: "ts".to_string(),
-            data_type: ColSchema::from_ty(Ty::Timestamp),
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: None,
@@ -540,7 +544,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            data_type: ColSchema::from_ty(Ty::Timestamp),
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -550,7 +554,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            data_type: ColSchema::from_ty(Ty::Timestamp),
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -559,7 +563,7 @@ mod tests {
         assert_eq!(desc.sql_repr(), "`ts` TIMESTAMP PRIMARY KEY");
         let desc = Described {
             field: "ts".to_string(),
-            data_type: ColSchema::from_ty(Ty::Timestamp),
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: None,
@@ -568,7 +572,7 @@ mod tests {
         assert_eq!(desc.sql_repr(), "`ts` TIMESTAMP");
         let desc = Described {
             field: "ts".to_string(),
-            data_type: ColSchema::new(Ty::VarChar, 100),
+            data_type: DataType::new(Ty::VarChar, 100),
             origin_ty: None,
             length: 100,
             note: Some("PRIMARY KEY".to_string()),
@@ -577,7 +581,7 @@ mod tests {
         assert_eq!(desc.sql_repr(), "`ts` BINARY(100) PRIMARY KEY");
         let desc = Described {
             field: "ts".to_string(),
-            data_type: ColSchema::new(Ty::VarChar, 100),
+            data_type: DataType::new(Ty::VarChar, 100),
             origin_ty: None,
             length: 100,
             note: None,
@@ -587,7 +591,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            data_type: ColSchema::from_ty(Ty::Timestamp),
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -599,7 +603,7 @@ mod tests {
         );
         let desc = Described {
             field: "ts".to_string(),
-            data_type: ColSchema::from_ty(Ty::Timestamp),
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -611,7 +615,7 @@ mod tests {
         );
         let desc = Described {
             field: "ts".to_string(),
-            data_type: ColSchema::from_ty(Ty::Timestamp),
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -620,7 +624,7 @@ mod tests {
         assert_eq!(desc.sql_repr(), "`ts` TIMESTAMP LEVEL 'medium' PRIMARY KEY");
         let desc = Described {
             field: "ts".to_string(),
-            data_type: ColSchema::from_ty(Ty::Timestamp),
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -632,7 +636,7 @@ mod tests {
         );
         let desc = Described {
             field: "ts".to_string(),
-            data_type: ColSchema::new(Ty::VarBinary, 100),
+            data_type: DataType::new(Ty::VarBinary, 100),
             origin_ty: None,
             length: 100,
             note: Some("PRIMARY KEY".to_string()),
@@ -749,7 +753,7 @@ mod tests {
     fn decimal_describe_test() -> anyhow::Result<()> {
         let desc = Described {
             field: "v".to_string(),
-            data_type: ColSchema::new_decimal(Ty::Decimal64, 5, 2),
+            data_type: DataType::new_decimal(Ty::Decimal64, 5, 2),
             origin_ty: Some("DECIMAL(5, 2)".to_string()),
             length: 16,
             note: None,

@@ -1,6 +1,7 @@
 use bigdecimal::{BigDecimal, FromPrimitive, ToPrimitive};
 use bitvec::macros::internal::funty::Fundamental;
 use itertools::Itertools;
+use nom::Slice;
 use std::ffi::c_void;
 use std::fmt::{Debug, Display};
 use std::io::Write;
@@ -738,7 +739,7 @@ impl ColumnView {
     /// If it is not a decimal type, it will return the type and maximum variable length.
     ///
     ///
-    pub fn schema(&self) -> ColSchema {
+    pub fn schema(&self) -> DataType {
         let ty = self.as_ty();
         if ty.is_decimal() {
             let (precision, scale) = match self {
@@ -746,9 +747,9 @@ impl ColumnView {
                 ColumnView::Decimal64(view) => view.precision_and_scale(),
                 _ => unreachable!(),
             };
-            ColSchema::new_decimal(ty, precision, scale)
+            DataType::new_decimal(ty, precision, scale)
         } else {
-            ColSchema::new(ty, self.max_variable_length() as _)
+            DataType::new(ty, self.max_variable_length() as _)
         }
     }
 
@@ -1159,10 +1160,8 @@ impl ColumnView {
                     ),
                     Decimal64 => {
                         // 遍历 view，找到最大的有效位数和小数点后位数
-                        let (max_precision, max_scale) = view
-                            .iter()
-                            .filter_map(|v| v.map(|b| b as f64))
-                            .fold((0, 0), |(max_p, max_s), b| {
+                        let (max_precision, max_scale) =
+                            view.iter().flatten().fold((0, 0), |(max_p, max_s), b| {
                                 let s = b.to_string();
                                 let parts: Vec<&str> = s.split('.').collect();
                                 let p = parts[0].len() + parts.get(1).map_or(0, |s| s.len());
@@ -1180,7 +1179,6 @@ impl ColumnView {
                         Self::from_decimal64(
                             view.iter().map(|v| {
                                 v.map(|b| {
-                                    let b = b as f64;
                                     let s = b.to_string();
                                     let parts: Vec<&str> = s.split('.').collect();
                                     let scale = parts.get(1).map_or(0, |s| s.len());
@@ -1188,10 +1186,10 @@ impl ColumnView {
                                     // 如果 s.len() < max_precision 将 s 后面补零
                                     if scale < max_scale {
                                         for _ in scale..max_scale {
-                                            s.push_str("0");
+                                            s.push('0');
                                         }
                                     }
-                                    tracing::info!(
+                                    tracing::trace!(
                                         "decimal64, precision: {}, scale: {}, b: {:?}, s: {:?}",
                                         max_precision,
                                         max_scale,
@@ -1388,7 +1386,7 @@ impl ColumnView {
                     to: Ty::Decimal64,
                     message: "invalid decimal64 type",
                 })?;
-                let params = &origin_ty[start + 1..end];
+                let params = origin_ty.slice(start + 1..end);
                 let mut parts = params.split(',').map(|x| x.trim());
                 let precision = parts
                     .next()
@@ -1402,7 +1400,6 @@ impl ColumnView {
                 Ok(Self::from_decimal64(
                     d_view.iter().map(|v| {
                         v.map(|b| {
-                            let b = b as f64;
                             let s = b.to_string();
                             let parts: Vec<&str> = s.split('.').collect();
                             let scale_cur = parts.get(1).map_or(0, |s| s.len().as_u8());
@@ -1410,7 +1407,7 @@ impl ColumnView {
                             // 如果 scale_cur < scale 将 s 后面补零
                             if scale_cur < scale {
                                 for _ in scale_cur..scale {
-                                    s.push_str("0");
+                                    s.push('0');
                                 }
                             }
                             let b: i64 = s.parse().unwrap();
@@ -1433,7 +1430,7 @@ impl ColumnView {
                     to: Ty::Decimal,
                     message: "invalid decimal type",
                 })?;
-                let params = &origin_ty[start + 1..end];
+                let params = origin_ty.slice(start + 1..end);
                 let mut parts = params.split(',').map(|x| x.trim());
                 let precision = parts
                     .next()
@@ -1447,7 +1444,6 @@ impl ColumnView {
                 Ok(Self::from_decimal(
                     d_view.iter().map(|v| {
                         v.map(|b| {
-                            let b = b as f64;
                             let s = b.to_string();
                             let parts: Vec<&str> = s.split('.').collect();
                             let scale_cur = parts.get(1).map_or(0, |s| s.len().as_u8());
@@ -1455,7 +1451,7 @@ impl ColumnView {
                             // 如果 scale_cur < scale 将 s 后面补零
                             if scale_cur < scale {
                                 for _ in scale_cur..scale {
-                                    s.push_str("0");
+                                    s.push('0');
                                 }
                             }
                             let b: i128 = s.parse().unwrap();
@@ -1471,8 +1467,8 @@ impl ColumnView {
         }
     }
 
-    pub fn cast_with_schema(&self, schema: &ColSchema) -> Result<ColumnView, CastError> {
-        let ty = schema.ty;
+    pub fn cast_with_schema(&self, schema: &DataType) -> Result<ColumnView, CastError> {
+        let ty = schema.ty();
         if !ty.is_decimal() {
             self.cast(ty)
         } else {
@@ -1495,25 +1491,25 @@ impl ColumnView {
                 ColumnView::Bool(view) => {
                     to_decimal!(view
                         .iter()
-                        .map(|v| v.and_then(|v| BigDecimal::from_i32(v as i32))))
+                        .map(|v| v.and_then(|v| BigDecimal::from_i8(v as i8))))
                 }
                 ColumnView::TinyInt(view) => {
-                    to_decimal!(view.iter().map(|v| v.and_then(|v| BigDecimal::from_i8(v))))
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_i8)))
                 }
                 ColumnView::SmallInt(view) => {
-                    to_decimal!(view.iter().map(|v| v.and_then(|v| BigDecimal::from_i16(v))))
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_i16)))
                 }
                 ColumnView::Int(view) => {
-                    to_decimal!(view.iter().map(|v| v.and_then(|v| BigDecimal::from_i32(v))))
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_i32)))
                 }
                 ColumnView::BigInt(view) => {
-                    to_decimal!(view.iter().map(|v| v.and_then(|v| BigDecimal::from_i64(v))))
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_i64)))
                 }
                 ColumnView::Float(view) => {
-                    to_decimal!(view.iter().map(|v| v.and_then(|v| BigDecimal::from_f32(v))))
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_f32)))
                 }
                 ColumnView::Double(view) => {
-                    to_decimal!(view.iter().map(|v| v.and_then(|v| BigDecimal::from_f64(v))))
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_f64)))
                 }
                 ColumnView::Timestamp(view) => {
                     to_decimal!(view.iter().map(|v| {
@@ -1524,16 +1520,16 @@ impl ColumnView {
                     }))
                 }
                 ColumnView::UTinyInt(view) => {
-                    to_decimal!(view.iter().map(|v| v.and_then(|v| BigDecimal::from_u8(v))))
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_u8)))
                 }
                 ColumnView::USmallInt(view) => {
-                    to_decimal!(view.iter().map(|v| v.and_then(|v| BigDecimal::from_u16(v))))
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_u16)))
                 }
                 ColumnView::UInt(view) => {
-                    to_decimal!(view.iter().map(|v| v.and_then(|v| BigDecimal::from_u32(v))))
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_u32)))
                 }
                 ColumnView::UBigInt(view) => {
-                    to_decimal!(view.iter().map(|v| v.and_then(|v| BigDecimal::from_u64(v))))
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_u64)))
                 }
                 ColumnView::VarChar(view) => {
                     to_decimal!(view
@@ -1606,7 +1602,7 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
     let schema_bytes = unsafe {
         std::slice::from_raw_parts(
             schemas.as_ptr() as *const u8,
-            ncols * std::mem::size_of::<ColSchema>(),
+            ncols * std::mem::size_of::<DataType>(),
         )
     };
     bytes.write_all(schema_bytes).unwrap();
@@ -1866,5 +1862,92 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn any_to_decimal_view() {
+        let schema = DataType::from_str("DECIMAL(10,2)").unwrap();
+        assert_eq!(schema.to_string(), "DECIMAL(10,2)");
+        let view = ColumnView::from_bools(vec![true, false, true]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_tiny_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_small_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_big_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_unsigned_tiny_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_unsigned_small_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_unsigned_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_unsigned_big_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_floats(vec![1.23f32, 2.0, 3.0]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.23");
+
+        let view = ColumnView::from_doubles(vec![1.23f64, 2.0, 3.0]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(
+            dbg!(decimal_view.get(0)).unwrap().to_string().unwrap(),
+            "1.23"
+        );
+
+        let view = ColumnView::from_varchar(vec!["1.23", "2.0", "3.0"]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.23");
+
+        let view = ColumnView::from_nchar(vec!["1.23", "2.0", "3.0"]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.23");
+
+        let view = ColumnView::from_millis_timestamp(vec![1234567890]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(
+            decimal_view.get(0).unwrap().to_string().unwrap(),
+            "1234567890.00"
+        );
+
+        let view = ColumnView::from_decimal(vec![12345], 10, 1);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1234.50");
+
+        let view = ColumnView::from_decimal64(vec![12345], 10, 1);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1234.50");
+
+        let view = ColumnView::from_json(vec![serde_json::json!({"key": "value"}).to_string()]);
+        let decimal_view = view.cast_with_schema(&schema);
+        assert!(decimal_view.is_err());
+
+        let view = ColumnView::from_bytes(vec![bytes::Bytes::from("test")]);
+        let decimal_view = view.cast_with_schema(&schema);
+        assert!(decimal_view.is_err());
+
+        let view = ColumnView::from_geobytes(vec!["", ""]);
+        let decimal_view = view.cast_with_schema(&schema);
+        assert!(decimal_view.is_err());
     }
 }

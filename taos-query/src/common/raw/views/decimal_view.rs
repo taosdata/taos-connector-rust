@@ -26,7 +26,7 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
     const ITEM_SIZE: usize = std::mem::size_of::<T>();
 
     /// Create a new decimal view.
-    pub fn new(nulls: NullBits, data: Bytes, prec_scale: PrecScale) -> Self {
+    pub(crate) fn new(nulls: NullBits, data: Bytes, prec_scale: PrecScale) -> Self {
         Self {
             nulls,
             data,
@@ -194,7 +194,7 @@ impl<T: DecimalAllowedTy> Drop for DecimalView<T> {
 
 macro_rules! impl_from_iter {
     ($ty: ty) => {
-        pub fn from_bigdecimal_with<I, T>(values: I, prec_scale: PrecScale) -> Self
+        pub(super) fn from_bigdecimal_with<I, T>(values: I, prec_scale: PrecScale) -> Self
         where
             T: TryInto<Option<bigdecimal::BigDecimal>>,
             I: IntoIterator<Item = T>,
@@ -290,7 +290,14 @@ impl DecimalView<i64> {
             .unwrap_or(0) as u8;
         let precision = scale; // Default precision for i64
         let values = values.into_iter().map(|v| {
-            v.and_then(|v| <i64>::try_from(v.with_scale(scale as _).into_bigint_and_scale().0).ok())
+            v.and_then(|v| {
+                <i64>::try_from(
+                    v.with_scale_round(scale as _, bigdecimal::RoundingMode::HalfUp)
+                        .into_bigint_and_scale()
+                        .0,
+                )
+                .ok()
+            })
         });
         Self::from_values(values, precision, scale)
     }

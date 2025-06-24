@@ -3,11 +3,7 @@ use std::os::raw::c_char;
 use std::str::FromStr;
 
 use serde::de::Visitor;
-use serde_with::{serde_as, DeserializeFromStr, SerializeDisplay};
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
-
-use crate::common::views::ColSchema;
-use crate::common::Precision;
+use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
 /// TDengine data type enumeration.
 ///
