@@ -19,6 +19,7 @@ pub struct PrecScale {
     pub len: u8,
 }
 
+#[allow(clippy::missing_fields_in_debug)]
 impl Debug for PrecScale {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PrecScale")
@@ -49,6 +50,7 @@ impl PartialEq for PrecScale {
 }
 
 #[derive(Clone, Copy, Eq, KnownLayout, FromBytes, Immutable)]
+#[repr(C)]
 #[repr(packed(1))]
 union LenOrDec {
     /// Length of the column schema for non-decimal types.
@@ -280,31 +282,30 @@ impl FromStr for DataType {
                                 return Err(ParseDataTypeError::InvalidDecimalPrecision(precision));
                             }
                         }
-                    } else {
-                        // If only precision is provided, scale defaults to 0
-                        let p = params.trim();
-                        if p.is_empty() {
-                            // If no params, fallback to default
-                            return Ok(Self::new_decimal(
-                                Ty::Decimal64,
-                                MAX_DECIMAL64_PRECISION,
-                                MIN_DECIMAL_SCALE,
-                            ));
-                        }
+                    }
+                    // If only precision is provided, scale defaults to 0
+                    let p = params.trim();
+                    if p.is_empty() {
+                        // If no params, fallback to default
+                        return Ok(Self::new_decimal(
+                            Ty::Decimal64,
+                            MAX_DECIMAL64_PRECISION,
+                            MIN_DECIMAL_SCALE,
+                        ));
+                    }
 
-                        let precision: u8 = p
-                            .parse()
-                            .map_err(ParseDataTypeError::ParseDecimalPrecisionError)?;
-                        match precision {
-                            1..=MAX_DECIMAL64_PRECISION => {
-                                return Ok(Self::new_decimal(Ty::Decimal64, precision, 0));
-                            }
-                            19..=MAX_DECIMAL_PRECISION => {
-                                return Ok(Self::new_decimal(Ty::Decimal, precision, 0));
-                            }
-                            _ => {
-                                return Err(ParseDataTypeError::InvalidDecimalPrecision(precision));
-                            }
+                    let precision: u8 = p
+                        .parse()
+                        .map_err(ParseDataTypeError::ParseDecimalPrecisionError)?;
+                    match precision {
+                        1..=MAX_DECIMAL64_PRECISION => {
+                            return Ok(Self::new_decimal(Ty::Decimal64, precision, 0));
+                        }
+                        19..=MAX_DECIMAL_PRECISION => {
+                            return Ok(Self::new_decimal(Ty::Decimal, precision, 0));
+                        }
+                        _ => {
+                            return Err(ParseDataTypeError::InvalidDecimalPrecision(precision));
                         }
                     }
                 }
