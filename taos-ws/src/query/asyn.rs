@@ -210,13 +210,14 @@ impl WsQuerySender {
 
 #[derive(Debug)]
 pub struct WsTaos {
+    conn_id: u64,
     sender: WsQuerySender,
     close_signal: watch::Sender<bool>,
 }
 
 impl Drop for WsTaos {
     fn drop(&mut self) {
-        trace!("dropping ws connection");
+        tracing::trace!("dropping ws connection, conn_id: {}", self.conn_id);
         // Send close signal to reader/writer spawned tasks.
         let _ = self.close_signal.send(true);
     }
@@ -893,7 +894,13 @@ impl WsTaos {
     }
 
     pub(crate) async fn from_builder(builder: &TaosBuilder) -> RawResult<Self> {
-        let (ws_stream, version) = builder.connect(UrlKind::Ws).await?;
+        let conn_id = generate_req_id();
+        let span = tracing::span!(tracing::Level::WARN, "ws_connection", conn_id = conn_id);
+
+        let (ws_stream, version) = builder
+            .connect(UrlKind::Ws)
+            .instrument(span.clone())
+            .await?;
 
         let (message_tx, message_rx) = flume::bounded(64);
         let (close_tx, close_rx) = watch::channel(false);
@@ -906,15 +913,19 @@ impl WsTaos {
             results: Arc::default(),
         };
 
-        tokio::spawn(run(
-            builder.clone(),
-            ws_stream,
-            query_sender.clone(),
-            message_rx,
-            close_rx,
-        ));
+        tokio::spawn(
+            run(
+                builder.clone(),
+                ws_stream,
+                query_sender.clone(),
+                message_rx,
+                close_rx,
+            )
+            .instrument(span),
+        );
 
         Ok(WsTaos {
+            conn_id,
             close_signal: close_tx,
             sender: query_sender,
         })
