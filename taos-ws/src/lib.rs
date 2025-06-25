@@ -34,7 +34,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
 
-use crate::query::asyn::{is_disconnect_error, Version, WS_ERROR_NO};
+use crate::query::asyn::{Version, WS_ERROR_NO};
 use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
 
 #[derive(Debug, Clone)]
@@ -826,11 +826,16 @@ impl TaosBuilder {
 
 #[inline]
 fn handle_disconnect_error(err: WsError) -> RawError {
-    if is_disconnect_error(&err) {
-        RawError::from_code(WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code())
-            .context("WebSocket connection disconnected")
-    } else {
-        RawError::any(err).context("WebSocket error")
+    match err {
+        WsError::ConnectionClosed
+        | WsError::AlreadyClosed
+        | WsError::Io(_)
+        | WsError::Tls(_)
+        | WsError::Protocol(_) => {
+            RawError::from_code(WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code())
+                .context("WebSocket connection disconnected")
+        }
+        _ => RawError::any(err).context("WebSocket error"),
     }
 }
 
