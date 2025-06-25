@@ -1,9 +1,12 @@
+use bigdecimal::{BigDecimal, FromPrimitive, ToPrimitive};
+use bitvec::macros::internal::funty::Fundamental;
+use itertools::Itertools;
+use nom::Slice;
 use std::ffi::c_void;
 use std::fmt::{Debug, Display};
 use std::io::Write;
 use std::iter::FusedIterator;
-
-use itertools::Itertools;
+use std::str::FromStr;
 
 use crate::common::{BorrowedValue, Ty, Value};
 use crate::Precision;
@@ -531,8 +534,8 @@ impl ColumnView {
             | ColumnView::Double(_)
             | ColumnView::UBigInt(_)
             | ColumnView::Timestamp(_)
-            | ColumnView::Decimal(_) => 16,
-            ColumnView::Decimal64(_) => 8,
+            | ColumnView::Decimal64(_) => 8,
+            ColumnView::Decimal(_) => 16,
             ColumnView::VarChar(view) => view.max_length(),
             ColumnView::NChar(view) => view.max_length(),
             ColumnView::Json(view) => view.max_length(),
@@ -728,6 +731,28 @@ impl ColumnView {
         }
     }
 
+    /// Get the schema of the column view.
+    ///
+    /// The schema is used to describe the column's type and properties.
+    /// It includes the type, maximum variable length, precision, and scale for decimal types.
+    /// If the column view is a decimal type, it will return the precision and scale.
+    /// If it is not a decimal type, it will return the type and maximum variable length.
+    ///
+    ///
+    pub fn schema(&self) -> DataType {
+        let ty = self.as_ty();
+        if ty.is_decimal() {
+            let (precision, scale) = match self {
+                ColumnView::Decimal(view) => view.precision_and_scale(),
+                ColumnView::Decimal64(view) => view.precision_and_scale(),
+                _ => unreachable!(),
+            };
+            DataType::new_decimal(ty, precision, scale)
+        } else {
+            DataType::new(ty, self.max_variable_length() as _)
+        }
+    }
+
     /// Cast behaviors:
     ///
     /// - BOOL to VARCHAR/NCHAR: true => "true", false => "false"
@@ -781,17 +806,15 @@ impl ColumnView {
                 };
                 Ok(view)
             }
-            ColumnView::TinyInt(booleans) => {
+            ColumnView::TinyInt(view) => {
                 macro_rules! _cast_to {
                     ($ty:ty) => {
-                        booleans.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                        view.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
                     };
                 }
 
                 let view = match ty {
-                    Bool => {
-                        Self::from_bools(booleans.iter().map(|v| v.map(|b| b > 0)).collect_vec())
-                    }
+                    Bool => Self::from_bools(view.iter().map(|v| v.map(|b| b > 0)).collect_vec()),
                     TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
                     SmallInt => Self::from_small_ints(_cast_to!(i16)),
                     Int => Self::from_ints(_cast_to!(i32)),
@@ -803,16 +826,16 @@ impl ColumnView {
                     Float => Self::from_floats(_cast_to!(f32)),
                     Double => Self::from_doubles(_cast_to!(f64)),
                     VarChar => Self::from_varchar::<String, _, _, _>(
-                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                        view.iter().map(|v| v.map(|b| b.to_string())),
                     ),
                     NChar => Self::from_nchar::<String, _, _, _>(
-                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                        view.iter().map(|v| v.map(|b| b.to_string())),
                     ),
                     _ => {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "tinyint can be casted to primitive types only",
                         })
                     }
                 };
@@ -849,23 +872,21 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "smallint can be casted to primitive types only",
                         })
                     }
                 };
                 Ok(view)
             }
-            ColumnView::Int(booleans) => {
+            ColumnView::Int(view) => {
                 macro_rules! _cast_to {
                     ($ty:ty) => {
-                        booleans.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
+                        view.iter().map(|v| v.map(|b| b as $ty)).collect_vec()
                     };
                 }
 
                 let view = match ty {
-                    Bool => {
-                        Self::from_bools(booleans.iter().map(|v| v.map(|b| b > 0)).collect_vec())
-                    }
+                    Bool => Self::from_bools(view.iter().map(|v| v.map(|b| b > 0)).collect_vec()),
                     TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
                     SmallInt => Self::from_small_ints(_cast_to!(i16)),
                     Int => Self::from_ints(_cast_to!(i32)),
@@ -877,16 +898,16 @@ impl ColumnView {
                     Float => Self::from_floats(_cast_to!(f32)),
                     Double => Self::from_doubles(_cast_to!(f64)),
                     VarChar => Self::from_varchar::<String, _, _, _>(
-                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                        view.iter().map(|v| v.map(|b| b.to_string())),
                     ),
                     NChar => Self::from_nchar::<String, _, _, _>(
-                        booleans.iter().map(|v| v.map(|b| b.to_string())),
+                        view.iter().map(|v| v.map(|b| b.to_string())),
                     ),
                     _ => {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "int can be casted to primitive types only",
                         })
                     }
                 };
@@ -923,13 +944,12 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "bigint can be casted to primitive types only",
                         })
                     }
                 };
                 Ok(view)
             }
-
             ColumnView::UTinyInt(booleans) => {
                 macro_rules! _cast_to {
                     ($ty:ty) => {
@@ -961,13 +981,12 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "unsigned tinyint can be casted to primitive types only",
                         })
                     }
                 };
                 Ok(view)
             }
-
             ColumnView::USmallInt(booleans) => {
                 macro_rules! _cast_to {
                     ($ty:ty) => {
@@ -999,13 +1018,12 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "unsigned smallint can be casted to primitive types only",
                         })
                     }
                 };
                 Ok(view)
             }
-
             ColumnView::UInt(booleans) => {
                 macro_rules! _cast_to {
                     ($ty:ty) => {
@@ -1037,7 +1055,7 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "unsigned int can be casted to primitive types only",
                         })
                     }
                 };
@@ -1074,13 +1092,12 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "unsigned big int can be casted to primitive types only",
                         })
                     }
                 };
                 Ok(view)
             }
-
             ColumnView::Float(view) => {
                 macro_rules! _cast_to {
                     ($ty:ty) => {
@@ -1141,11 +1158,57 @@ impl ColumnView {
                     NChar => Self::from_nchar::<String, _, _, _>(
                         view.iter().map(|v| v.map(|b| b.to_string())),
                     ),
+                    Decimal64 => {
+                        // 遍历 view，找到最大的有效位数和小数点后位数
+                        let (max_precision, max_scale) =
+                            view.iter().flatten().fold((0, 0), |(max_p, max_s), b| {
+                                let s = b.to_string();
+                                let parts: Vec<&str> = s.split('.').collect();
+                                let p = parts[0].len() + parts.get(1).map_or(0, |s| s.len());
+                                let s = parts.get(1).map_or(0, |s| s.len());
+                                (max_p.max(p), max_s.max(s))
+                            });
+                        if max_precision > 18 {
+                            return Err(CastError {
+                                from: l_ty,
+                                to: ty,
+                                message: "decimal64 overflow",
+                            });
+                        }
+                        // 将 f64 转换为 i64
+                        Self::from_decimal64(
+                            view.iter().map(|v| {
+                                v.map(|b| {
+                                    let s = b.to_string();
+                                    let parts: Vec<&str> = s.split('.').collect();
+                                    let scale = parts.get(1).map_or(0, |s| s.len());
+                                    let mut s = s.replace(".", "");
+                                    // 如果 s.len() < max_precision 将 s 后面补零
+                                    if scale < max_scale {
+                                        for _ in scale..max_scale {
+                                            s.push('0');
+                                        }
+                                    }
+                                    tracing::trace!(
+                                        "decimal64, precision: {}, scale: {}, b: {:?}, s: {:?}",
+                                        max_precision,
+                                        max_scale,
+                                        b,
+                                        s
+                                    );
+                                    let b: i64 = s.parse().unwrap();
+                                    b
+                                })
+                            }),
+                            max_precision as u8,
+                            max_scale as u8,
+                        )
+                    }
                     _ => {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-                            message: "booleans can be casted to primitive types only",
+                            message: "double cast error",
                         })
                     }
                 };
@@ -1159,7 +1222,6 @@ impl ColumnView {
                             .collect_vec()
                     };
                 }
-
                 let view = match ty {
                     Bool => Self::from_bools(_cast_to!(bool)),
                     TinyInt => Self::from_tiny_ints(_cast_to!(i8)),
@@ -1262,9 +1324,42 @@ impl ColumnView {
                         return Err(CastError {
                             from: l_ty,
                             to: ty,
-
-                            message: "",
+                            message: "Timestamp cast error",
                         })
+                    }
+                };
+                Ok(view)
+            }
+            ColumnView::Decimal64(view) => {
+                let view = match ty {
+                    Double => Self::from_doubles(
+                        view.iter()
+                            .map(|v| v.and_then(|b| b.as_bigdecimal().to_f64()))
+                            .collect_vec(),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "decimal64 can be casted to double only",
+                        });
+                    }
+                };
+                Ok(view)
+            }
+            ColumnView::Decimal(view) => {
+                let view = match ty {
+                    Double => Self::from_doubles(
+                        view.iter()
+                            .map(|v| v.and_then(|b| b.as_bigdecimal().to_f64()))
+                            .collect_vec(),
+                    ),
+                    _ => {
+                        return Err(CastError {
+                            from: l_ty,
+                            to: ty,
+                            message: "decimal can be casted to double only",
+                        });
                     }
                 };
                 Ok(view)
@@ -1273,6 +1368,203 @@ impl ColumnView {
         }
     }
 
+    pub fn cast_origin_type(&self, ty: Ty, origin_ty: &str) -> Result<ColumnView, CastError> {
+        let l_ty = self.as_ty();
+        if l_ty == ty {
+            return Ok(self.clone());
+        }
+        match (self, ty) {
+            (ColumnView::Double(d_view), Ty::Decimal64) => {
+                // origin_ty 的格式 DECIMAL(precision, scale)， 从中解析出 precision 和 scale
+                let start = origin_ty.find('(').ok_or(CastError {
+                    from: Ty::Double,
+                    to: Ty::Decimal64,
+                    message: "invalid decimal64 type",
+                })?;
+                let end = origin_ty.find(')').ok_or(CastError {
+                    from: Ty::Double,
+                    to: Ty::Decimal64,
+                    message: "invalid decimal64 type",
+                })?;
+                let params = origin_ty.slice(start + 1..end);
+                let mut parts = params.split(',').map(|x| x.trim());
+                let precision = parts
+                    .next()
+                    .and_then(|p| p.parse::<u8>().ok())
+                    .expect("precision must be specified in origin_ty");
+                let scale = parts
+                    .next()
+                    .and_then(|s| s.parse::<u8>().ok())
+                    .expect("scale must be specified in origin_ty");
+
+                Ok(Self::from_decimal64(
+                    d_view.iter().map(|v| {
+                        v.map(|b| {
+                            let s = b.to_string();
+                            let parts: Vec<&str> = s.split('.').collect();
+                            let scale_cur = parts.get(1).map_or(0, |s| s.len().as_u8());
+                            let mut s = s.replace(".", "");
+                            // 如果 scale_cur < scale 将 s 后面补零
+                            if scale_cur < scale {
+                                for _ in scale_cur..scale {
+                                    s.push('0');
+                                }
+                            }
+                            let b: i64 = s.parse().unwrap();
+                            b
+                        })
+                    }),
+                    precision,
+                    scale,
+                ))
+            }
+            (ColumnView::Double(d_view), Ty::Decimal) => {
+                // origin_ty 的格式 DECIMAL(precision, scale)， 从中解析出 precision 和 scale
+                let start = origin_ty.find('(').ok_or(CastError {
+                    from: Ty::Double,
+                    to: Ty::Decimal,
+                    message: "invalid decimal type",
+                })?;
+                let end = origin_ty.find(')').ok_or(CastError {
+                    from: Ty::Double,
+                    to: Ty::Decimal,
+                    message: "invalid decimal type",
+                })?;
+                let params = origin_ty.slice(start + 1..end);
+                let mut parts = params.split(',').map(|x| x.trim());
+                let precision = parts
+                    .next()
+                    .and_then(|p| p.parse::<u8>().ok())
+                    .expect("precision must be specified in origin_ty");
+                let scale = parts
+                    .next()
+                    .and_then(|s| s.parse::<u8>().ok())
+                    .expect("scale must be specified in origin_ty");
+
+                Ok(Self::from_decimal(
+                    d_view.iter().map(|v| {
+                        v.map(|b| {
+                            let s = b.to_string();
+                            let parts: Vec<&str> = s.split('.').collect();
+                            let scale_cur = parts.get(1).map_or(0, |s| s.len().as_u8());
+                            let mut s = s.replace(".", "");
+                            // 如果 scale_cur < scale 将 s 后面补零
+                            if scale_cur < scale {
+                                for _ in scale_cur..scale {
+                                    s.push('0');
+                                }
+                            }
+                            let b: i128 = s.parse().unwrap();
+                            tracing::info!("b: {b}, precision: {precision}, scale: {scale}");
+                            b
+                        })
+                    }),
+                    precision,
+                    scale,
+                ))
+            }
+            _ => todo!(),
+        }
+    }
+
+    pub fn cast_with_schema(&self, schema: &DataType) -> Result<ColumnView, CastError> {
+        let ty = schema.ty();
+        if !ty.is_decimal() {
+            self.cast(ty)
+        } else {
+            let prec_scale = schema.as_prec_scale_unchecked();
+            macro_rules! to_decimal {
+                ($iter:expr) => {{
+                    let iter = { $iter };
+                    match ty {
+                        Ty::Decimal => Ok(ColumnView::Decimal(
+                            DecimalView::<i128>::from_bigdecimal_with(iter, prec_scale),
+                        )),
+                        Ty::Decimal64 => Ok(ColumnView::Decimal64(
+                            DecimalView::<i64>::from_bigdecimal_with(iter, prec_scale),
+                        )),
+                        _ => unreachable!(),
+                    }
+                }};
+            }
+            match self {
+                ColumnView::Bool(view) => {
+                    to_decimal!(view
+                        .iter()
+                        .map(|v| v.and_then(|v| BigDecimal::from_i8(v as i8))))
+                }
+                ColumnView::TinyInt(view) => {
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_i8)))
+                }
+                ColumnView::SmallInt(view) => {
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_i16)))
+                }
+                ColumnView::Int(view) => {
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_i32)))
+                }
+                ColumnView::BigInt(view) => {
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_i64)))
+                }
+                ColumnView::Float(view) => {
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_f32)))
+                }
+                ColumnView::Double(view) => {
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_f64)))
+                }
+                ColumnView::Timestamp(view) => {
+                    to_decimal!(view.iter().map(|v| {
+                        v.and_then(|v| {
+                            let ts = v.as_raw_i64();
+                            BigDecimal::from_i64(ts)
+                        })
+                    }))
+                }
+                ColumnView::UTinyInt(view) => {
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_u8)))
+                }
+                ColumnView::USmallInt(view) => {
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_u16)))
+                }
+                ColumnView::UInt(view) => {
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_u32)))
+                }
+                ColumnView::UBigInt(view) => {
+                    to_decimal!(view.iter().map(|v| v.and_then(BigDecimal::from_u64)))
+                }
+                ColumnView::VarChar(view) => {
+                    to_decimal!(view
+                        .iter()
+                        .map(|v| { v.and_then(|s| { BigDecimal::from_str(s.as_str()).ok() }) }))
+                }
+                ColumnView::NChar(view) => {
+                    to_decimal!(view
+                        .iter()
+                        .map(|v| { v.and_then(|s| { BigDecimal::from_str(s).ok() }) }))
+                }
+                ColumnView::Decimal(view) => {
+                    to_decimal!(view.iter().map(|v| v.map(|d| { d.as_bigdecimal() })))
+                }
+                ColumnView::Decimal64(view) => {
+                    to_decimal!(view.iter().map(|v| v.map(|d| { d.as_bigdecimal() })))
+                }
+                ColumnView::Json(_) => Err(CastError {
+                    from: self.as_ty(),
+                    to: ty,
+                    message: "json can not be casted to decimal type",
+                }),
+                ColumnView::VarBinary(_) => Err(CastError {
+                    from: self.as_ty(),
+                    to: ty,
+                    message: "varbinary can not be casted to decimal type",
+                }),
+                ColumnView::Geometry(_) => Err(CastError {
+                    from: self.as_ty(),
+                    to: ty,
+                    message: "geometry can not be casted to decimal type",
+                }),
+            }
+        }
+    }
     pub fn cast_precision(&self, precision: Precision) -> ColumnView {
         match self {
             ColumnView::Timestamp(view) => ColumnView::Timestamp(view.cast_precision(precision)),
@@ -1306,20 +1598,11 @@ pub fn views_to_raw_block(views: &[ColumnView]) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend(header.as_bytes());
 
-    let schemas = views
-        .iter()
-        .map(|view| {
-            let ty = view.as_ty();
-            ColSchema {
-                ty,
-                len: ty.fixed_length() as _,
-            }
-        })
-        .collect_vec();
+    let schemas = views.iter().map(|view| view.schema()).collect_vec();
     let schema_bytes = unsafe {
         std::slice::from_raw_parts(
             schemas.as_ptr() as *const u8,
-            ncols * std::mem::size_of::<ColSchema>(),
+            ncols * std::mem::size_of::<DataType>(),
         )
     };
     bytes.write_all(schema_bytes).unwrap();
@@ -1579,5 +1862,92 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn any_to_decimal_view() {
+        let schema = DataType::from_str("DECIMAL(10,2)").unwrap();
+        assert_eq!(schema.to_string(), "DECIMAL(10,2)");
+        let view = ColumnView::from_bools(vec![true, false, true]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_tiny_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_small_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_big_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_unsigned_tiny_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_unsigned_small_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_unsigned_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_unsigned_big_ints(vec![1, 2, 3]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.00");
+
+        let view = ColumnView::from_floats(vec![1.23f32, 2.0, 3.0]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.23");
+
+        let view = ColumnView::from_doubles(vec![1.23f64, 2.0, 3.0]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(
+            dbg!(decimal_view.get(0)).unwrap().to_string().unwrap(),
+            "1.23"
+        );
+
+        let view = ColumnView::from_varchar(vec!["1.23", "2.0", "3.0"]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.23");
+
+        let view = ColumnView::from_nchar(vec!["1.23", "2.0", "3.0"]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1.23");
+
+        let view = ColumnView::from_millis_timestamp(vec![1234567890]);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(
+            decimal_view.get(0).unwrap().to_string().unwrap(),
+            "1234567890.00"
+        );
+
+        let view = ColumnView::from_decimal(vec![12345], 10, 1);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1234.50");
+
+        let view = ColumnView::from_decimal64(vec![12345], 10, 1);
+        let decimal_view = view.cast_with_schema(&schema).unwrap();
+        assert_eq!(decimal_view.get(0).unwrap().to_string().unwrap(), "1234.50");
+
+        let view = ColumnView::from_json(vec![serde_json::json!({"key": "value"}).to_string()]);
+        let decimal_view = view.cast_with_schema(&schema);
+        assert!(decimal_view.is_err());
+
+        let view = ColumnView::from_bytes(vec![bytes::Bytes::from("test")]);
+        let decimal_view = view.cast_with_schema(&schema);
+        assert!(decimal_view.is_err());
+
+        let view = ColumnView::from_geobytes(vec!["", ""]);
+        let decimal_view = view.cast_with_schema(&schema);
+        assert!(decimal_view.is_err());
     }
 }

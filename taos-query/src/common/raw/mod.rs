@@ -246,7 +246,7 @@ impl RawBlock {
         let cols = fields.len();
 
         let mut schemas_bytes =
-            bytes::BytesMut::with_capacity(cols * std::mem::size_of::<ColSchema>());
+            bytes::BytesMut::with_capacity(cols * std::mem::size_of::<DataType>());
         fields
             .iter()
             .for_each(|f| schemas_bytes.put(f.to_column_schema().as_bytes()));
@@ -441,7 +441,7 @@ impl RawBlock {
         debug_assert_eq!(bytes.len(), len);
         let group_id = header.group_id;
 
-        let schema_end = schema_start + cols * std::mem::size_of::<ColSchema>();
+        let schema_end = schema_start + cols * std::mem::size_of::<DataType>();
         let schemas = Schemas::from(bytes.slice(schema_start..schema_end));
 
         let lengths_end = schema_end + std::mem::size_of::<u32>() * cols;
@@ -474,15 +474,15 @@ impl RawBlock {
                     data_offset = o2 + rows * std::mem::size_of::<$prim>();
                     let nulls = bytes.slice(o1..o2);
                     let data = bytes.slice(o2..data_offset);
-                    // precision + scale
-                    let decimal_schema = schema.len;
-                    let precision = ((decimal_schema >> 8) & 0xFF) as _;
-                    let scale = (decimal_schema & 0xFF) as _;
-                    $ty(DecimalView::new(NullBits(nulls), data, precision, scale))
+                    $ty(DecimalView::new(
+                        NullBits(nulls),
+                        data,
+                        schema.as_prec_scale_unchecked(),
+                    ))
                 }};
             }
 
-            let column = match schema.ty {
+            let column = match schema.ty() {
                 Ty::Null => unreachable!("raw block does not contains type NULL"),
                 Ty::Bool => _primitive_value!(Bool, i8),
                 Ty::TinyInt => _primitive_value!(TinyInt, i8),
@@ -702,7 +702,7 @@ impl RawBlock {
     }
 
     #[inline]
-    pub fn schemas(&self) -> &[ColSchema] {
+    pub fn schemas(&self) -> &[DataType] {
         &self.schemas
     }
 
@@ -886,7 +886,7 @@ impl RawBlock {
         self.schemas()
             .iter()
             .zip(self.field_names())
-            .map(|(schema, name)| Field::new(name, schema.ty, schema.len))
+            .map(|(schema, name)| Field::new(name, schema.ty(), schema.len()))
             .collect_vec()
     }
 
@@ -984,14 +984,29 @@ impl Display for PrettyBlock<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use prettytable::{Row, Table};
         let mut table = Table::new();
-        writeln!(
-            f,
-            "Table view with {} rows, {} columns, table name \"{}\"",
-            self.nrows(),
-            self.ncols(),
-            self.table_name().unwrap_or_default(),
-        )?;
+        if let Some(table) = self.table_name() {
+            writeln!(
+                f,
+                "Table view with {} rows, {} columns, table name \"{}\"",
+                self.nrows(),
+                self.ncols(),
+                table
+            )?;
+        } else {
+            writeln!(
+                f,
+                "Table view with {} rows, {} columns",
+                self.nrows(),
+                self.ncols(),
+            )?;
+        }
         table.set_titles(Row::from_iter(self.field_names()));
+        let types: Row = self
+            .column_views()
+            .iter()
+            .map(|view| view.schema().to_string())
+            .collect();
+        table.add_row(types);
         let nrows = self.nrows();
         const MAX_DISPLAY_ROWS: usize = 10;
         let mut rows_iter = self.raw.rows();
@@ -1761,13 +1776,13 @@ mod tests {
 
         // schema (1+4) * 3
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 2).as_bytes(), // 123.45
+            DataType::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 2).as_bytes(), // 123.45
         );
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 0).as_bytes(), // 12345
+            DataType::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 0).as_bytes(), // 12345
         );
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 5).as_bytes(), // 0.12345
+            DataType::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 5).as_bytes(), // 0.12345
         );
         // 43
 
@@ -1831,13 +1846,13 @@ mod tests {
 
         // schema (1+4) * 3
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 2).as_bytes(), // 123.45
+            DataType::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 2).as_bytes(), // 123.45
         );
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 0).as_bytes(), // 12345
+            DataType::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 0).as_bytes(), // 12345
         );
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 5).as_bytes(), // 0.12345
+            DataType::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 5).as_bytes(), // 0.12345
         );
         // 43
 

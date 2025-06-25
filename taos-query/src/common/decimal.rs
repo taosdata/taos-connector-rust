@@ -10,10 +10,12 @@ mod private {
 }
 
 pub trait DecimalAllowedTy: private::DecimalAllowedTy + Copy + Into<BigInt> {
+    const MAX_SCALE: u8;
     fn ty() -> Ty;
 }
 
 impl DecimalAllowedTy for i64 {
+    const MAX_SCALE: u8 = 18;
     #[inline]
     fn ty() -> Ty {
         Ty::Decimal64
@@ -21,6 +23,7 @@ impl DecimalAllowedTy for i64 {
 }
 
 impl DecimalAllowedTy for i128 {
+    const MAX_SCALE: u8 = 38;
     #[inline]
     fn ty() -> Ty {
         Ty::Decimal
