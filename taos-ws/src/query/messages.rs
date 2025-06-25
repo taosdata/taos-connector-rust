@@ -54,7 +54,6 @@ pub enum WsSend {
         #[serde(flatten)]
         req: WsConnReq,
     },
-    // sml ok
     Insert {
         protocol: u8,
         precision: String,
@@ -63,18 +62,13 @@ pub enum WsSend {
         req_id: Option<ReqId>,
         table_name_key: Option<String>,
     },
-    // ok
     Query {
         req_id: ReqId,
         sql: String,
     },
-    // not ok
     Fetch(WsResArgs),
-    // not ok
     FetchBlock(WsResArgs),
-    // check
     Binary(Vec<u8>),
-    // not ok
     FreeResult(WsResArgs),
     Stmt2Init {
         req_id: ReqId,
@@ -99,7 +93,6 @@ pub enum WsSend {
         req_id: ReqId,
         stmt_id: StmtId,
     },
-    // ok
     CheckServerStatus {
         req_id: ReqId,
         fqdn: Option<FastStr>,
@@ -390,57 +383,43 @@ pub trait ToMessage: Serialize {
 impl ToMessage for WsSend {}
 
 #[derive(Debug)]
-pub enum ToMsgEnum {
-    // 兼容 Message::Pong，接收 ping 后返回 pong
-    Message(Message),
-    WsSend(WsSend),
+pub enum WsMessage {
+    Command(WsSend),
+    Raw(Message),
 }
 
-impl ToMsgEnum {
-    pub(crate) fn too_message(self) -> Message {
+impl WsMessage {
+    pub(crate) fn req_id(&self) -> ReqId {
         match self {
-            ToMsgEnum::Message(msg) => msg,
-            ToMsgEnum::WsSend(ws_send) => match ws_send {
+            WsMessage::Raw(_) => generate_req_id(),
+            WsMessage::Command(ws_send) => ws_send.req_id(),
+        }
+    }
+
+    pub(crate) fn to_message(self) -> Message {
+        match self {
+            WsMessage::Raw(message) => message,
+            WsMessage::Command(ws_send) => match ws_send {
                 WsSend::Binary(bytes) => Message::Binary(bytes),
                 _ => ws_send.to_msg(),
             },
         }
     }
 
-    pub(crate) fn req_id(&self) -> ReqId {
+    pub(crate) fn should_cache(&self) -> bool {
         match self {
-            // binary 发送 Message::Bytes，从 bytes 解析
-            // Message::ping 不要放到缓存中
-            ToMsgEnum::Message(_) => generate_req_id(),
-            ToMsgEnum::WsSend(ws_send) => ws_send.req_id(),
+            WsMessage::Raw(_) => false,
+            WsMessage::Command(ws_send) => match ws_send {
+                WsSend::Insert { .. } | WsSend::Query { .. } | WsSend::CheckServerStatus { .. } => {
+                    true
+                }
+                WsSend::Binary(bytes) => {
+                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+                    matches!(action, 4 | 5 | 6 | 10)
+                }
+                _ => false,
+            },
         }
-    }
-
-    // 是否需要缓存
-    pub(crate) fn trya(&self) -> bool {
-        // 不要缓存 pong
-        // if pong return false
-
-        true
-        // match self {
-        //     ToMsgEnum::Message(_) => false,
-        //     ToMsgEnum::WsSend(ws_send) => match ws_send {
-        //         WsSend::Insert { .. } | WsSend::Query { .. } | WsSend::CheckServerStatus { .. } => {
-        //             true
-        //         }
-        //         WsSend::Binary(_bytes) => {
-        //             // query 在使用 ResultSet 后无法支持自动重连, fetch 无法做自动重连
-        //             // let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
-        //             // match action {
-        //             //     // TODO
-        //             //     1 => true,
-        //             //     _ => false,
-        //             // }
-        //             true
-        //         }
-        //         _ => false,
-        //     },
-        // }
     }
 }
 

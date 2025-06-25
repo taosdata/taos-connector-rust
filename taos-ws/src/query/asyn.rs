@@ -35,7 +35,7 @@ use crate::UrlKind;
 use super::messages::*;
 use super::TaosBuilder;
 
-type WsSender = flume::Sender<ToMsgEnum>;
+type WsSender = flume::Sender<WsMessage>;
 
 type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
 type QueryInner = scc::HashMap<ReqId, QueryChannelSender>;
@@ -151,16 +151,18 @@ impl WsQuerySender {
                 }
                 let _ = self.results.insert_async(args.id, args.req_id).await;
 
-                timeout(SEND_TIMEOUT, self.sender.send_async(ToMsgEnum::WsSend(msg)))
-                    .await
-                    .map_err(Error::from)?
-                    .map_err(Error::from)?;
+                timeout(
+                    SEND_TIMEOUT,
+                    self.sender.send_async(WsMessage::Command(msg)),
+                )
+                .await
+                .map_err(Error::from)?
+                .map_err(Error::from)?;
             }
             WsSend::Binary(ref _bytes) => {
                 timeout(
                     SEND_TIMEOUT,
-                    self.sender.send_async(ToMsgEnum::WsSend(msg)),
-                    // .send_async(ToMsgEnum::Message(Message::Binary(bytes))),
+                    self.sender.send_async(WsMessage::Command(msg)),
                 )
                 .await
                 .map_err(Error::from)?
@@ -168,10 +170,13 @@ impl WsQuerySender {
             }
             _ => {
                 tracing::trace!("[req id: {req_id}] prepare message: {msg:?}");
-                timeout(SEND_TIMEOUT, self.sender.send_async(ToMsgEnum::WsSend(msg)))
-                    .await
-                    .map_err(Error::from)?
-                    .map_err(Error::from)?;
+                timeout(
+                    SEND_TIMEOUT,
+                    self.sender.send_async(WsMessage::Command(msg)),
+                )
+                .await
+                .map_err(Error::from)?
+                .map_err(Error::from)?;
             }
         }
         // TODO: add timeout
@@ -187,15 +192,18 @@ impl WsQuerySender {
     }
 
     async fn send_only(&self, msg: WsSend) -> RawResult<()> {
-        timeout(SEND_TIMEOUT, self.sender.send_async(ToMsgEnum::WsSend(msg)))
-            .await
-            .map_err(Error::from)?
-            .map_err(Error::from)?;
+        timeout(
+            SEND_TIMEOUT,
+            self.sender.send_async(WsMessage::Command(msg)),
+        )
+        .await
+        .map_err(Error::from)?
+        .map_err(Error::from)?;
         Ok(())
     }
 
     fn send_blocking(&self, msg: WsSend) -> RawResult<()> {
-        let _ = self.sender.send(ToMsgEnum::WsSend(msg));
+        let _ = self.sender.send(WsMessage::Command(msg));
         Ok(())
     }
 }
@@ -302,7 +310,7 @@ pub enum Error {
     #[error("{0}")]
     FetchError(#[from] tokio::sync::oneshot::error::RecvError),
     #[error(transparent)]
-    FlumeSendError(#[from] flume::SendError<ToMsgEnum>),
+    FlumeSendError(#[from] flume::SendError<WsMessage>),
     #[error("Send data via websocket timeout")]
     SendTimeoutError(#[from] tokio::time::error::Elapsed),
     #[error("Query timed out with sql: {0}")]
@@ -426,7 +434,7 @@ async fn run(
     builder: TaosBuilder,
     mut ws_stream: WsStream,
     query_sender: WsQuerySender,
-    message_reader: Receiver<ToMsgEnum>,
+    message_reader: Receiver<WsMessage>,
     mut close_reader: watch::Receiver<bool>,
 ) {
     let cache = MessageCache::new();
@@ -502,7 +510,7 @@ async fn run(
 
 async fn send_messages(
     mut ws_stream_sender: WsStreamSender,
-    message_reader: Receiver<ToMsgEnum>,
+    message_reader: Receiver<WsMessage>,
     mut close_reader: watch::Receiver<bool>,
     err_sender: mpsc::Sender<Error>,
     cache: MessageCache,
@@ -552,10 +560,10 @@ async fn send_messages(
             message = message_reader.recv_async() => {
                 match message {
                     Ok(message) => {
-                        let trya = message.trya();
                         let req_id = message.req_id();
-                        let message = message.too_message();
-                        if trya {
+                        let should_cache = message.should_cache();
+                        let message = message.to_message();
+                        if should_cache {
                             cache.insert(req_id, message.clone());
                         }
                         if let Err(err) = ws_stream_sender.send(message).await {
@@ -669,7 +677,7 @@ fn parse_message(message: Message, query_sender: WsQuerySender, cache: MessageCa
             tokio::spawn(async move {
                 let _ = query_sender
                     .sender
-                    .send_async(ToMsgEnum::Message(Message::Pong(data)))
+                    .send_async(WsMessage::Raw(Message::Pong(data)))
                     .await;
             });
         }
@@ -1636,7 +1644,7 @@ mod tests {
         let (tx, rx) = flume::unbounded();
         drop(rx);
 
-        let send_err = tx.send(ToMsgEnum::WsSend(WsSend::Version)).unwrap_err();
+        let send_err = tx.send(WsMessage::Command(WsSend::Version)).unwrap_err();
 
         let err = Error::FlumeSendError(send_err);
         let errno: i32 = err.errno().into();
