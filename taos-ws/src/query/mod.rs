@@ -12,6 +12,7 @@ use crate::TaosBuilder;
 
 pub mod asyn;
 pub use asyn::check_server_status;
+mod conn;
 pub(crate) mod messages;
 
 #[derive(Debug)]

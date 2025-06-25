@@ -73,12 +73,11 @@ pub struct TaosBuilder {
     retry_backoff: RetryBackoff,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum UrlKind {
     Ws,
-    #[allow(dead_code)]
     Stmt,
-    #[allow(dead_code)]
     Tmq,
 }
 
