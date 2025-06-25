@@ -514,17 +514,15 @@ async fn send_messages(
     for message in cache.messages() {
         tokio::select! {
             _ = interval.tick() => {
-                if let Err(err) = ws_stream_sender.send(Message::Ping(b"TAOS".to_vec())).await {
+                if let Err(err) = send_ping_message(&mut ws_stream_sender).await {
                     tracing::error!("failed to send WebSocket ping message: {err}");
                     let _ = err_sender.send(err.into()).await;
                     return;
                 }
-                let _ = ws_stream_sender.flush().await;
             }
             _ = close_reader.changed() => {
                 tracing::info!("WebSocket sender received close signal");
-                let _ = ws_stream_sender.send(Message::Close(None)).await;
-                let _ = ws_stream_sender.close().await;
+                send_close_message(&mut ws_stream_sender).await;
                 return;
             }
             res = ws_stream_sender.send(message) => {
@@ -540,17 +538,15 @@ async fn send_messages(
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                if let Err(err) = ws_stream_sender.send(Message::Ping(b"TAOS".to_vec())).await {
+                if let Err(err) = send_ping_message(&mut ws_stream_sender).await {
                     tracing::error!("failed to send WebSocket ping message: {err}");
                     let _ = err_sender.send(err.into()).await;
                     break;
                 }
-                let _ = ws_stream_sender.flush().await;
             }
             _ = close_reader.changed() => {
                 tracing::info!("WebSocket sender received close signal");
-                let _ = ws_stream_sender.send(Message::Close(None)).await;
-                let _ = ws_stream_sender.close().await;
+                send_close_message(&mut ws_stream_sender).await;
                 break;
             }
             message = message_reader.recv_async() => {
@@ -579,6 +575,24 @@ async fn send_messages(
     }
 
     tracing::trace!("stop sending messages to WebSocket stream");
+}
+
+async fn send_ping_message(ws_stream_sender: &mut WsStreamSender) -> Result<(), Error> {
+    ws_stream_sender
+        .send(Message::Ping(b"TAOS".to_vec()))
+        .await
+        .map_err(Into::<Error>::into)?;
+
+    ws_stream_sender.flush().await.map_err(Into::<Error>::into)
+}
+
+async fn send_close_message(ws_stream_sender: &mut WsStreamSender) {
+    if let Err(err) = ws_stream_sender.send(Message::Close(None)).await {
+        tracing::error!("failed to send close message: {err:?}");
+    }
+    if let Err(err) = ws_stream_sender.close().await {
+        tracing::error!("failed to close WebSocket stream: {err:?}");
+    }
 }
 
 async fn read_messages(
