@@ -1232,7 +1232,7 @@ impl TmqBuilder {
             }
         });
 
-        let (cache_tx, cache_rx) = mpsc::channel(2);
+        let (cache_tx, cache_rx) = mpsc::channel(8);
         let _ = cache_tx.send(None).await;
         let cache_sender = cache_tx.clone();
 
