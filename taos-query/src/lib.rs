@@ -551,7 +551,7 @@ mod tests {
         let mut rs = conn.query("abc").unwrap();
 
         for record in rs.deserialize::<(i32, String, u8)>() {
-            let _ = dbg!(record);
+            println!("{:?}", record);
         }
     }
     #[test]
@@ -565,7 +565,7 @@ mod tests {
         for block in &mut set {
             let block = block.unwrap();
             for record in block.deserialize::<(i32,)>() {
-                dbg!(record.unwrap());
+                assert_eq!(record.unwrap(), (1i32,));
             }
         }
     }
@@ -581,7 +581,7 @@ mod tests {
         for block in &mut set {
             let block = block.unwrap();
             for record in block.deserialize::<String>() {
-                dbg!(record.unwrap());
+                assert_eq!(record.unwrap(), "1");
             }
         }
     }
@@ -597,7 +597,7 @@ mod tests {
 
         for row in set.deserialize::<u8>() {
             let row = row.unwrap();
-            dbg!(row);
+            assert_eq!(row, 1);
         }
     }
     #[test]
