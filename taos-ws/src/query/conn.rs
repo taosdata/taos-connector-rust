@@ -105,9 +105,8 @@ pub(super) async fn run(
                         tracing::error!("non-disconnect error detected, cleaning up all pending queries");
                         cleanup_after_disconnect(query_sender.clone());
                         return;
-                    } else {
-                        tracing::warn!("disconnect error detected, attempting to reconnect");
                     }
+                    tracing::warn!("disconnect error detected, attempting to reconnect");
                 }
             }
             _ = close_reader.changed() => {
@@ -160,7 +159,7 @@ async fn send_messages(
             _ = interval.tick() => {
                 if let Err(err) = send_ping_message(&mut ws_stream_sender).await {
                     tracing::error!("failed to send WebSocket ping message: {err}");
-                    let _ = err_sender.send(err.into()).await;
+                    let _ = err_sender.send(err).await;
                     return;
                 }
             }
@@ -184,7 +183,7 @@ async fn send_messages(
             _ = interval.tick() => {
                 if let Err(err) = send_ping_message(&mut ws_stream_sender).await {
                     tracing::error!("failed to send WebSocket ping message: {err}");
-                    let _ = err_sender.send(err.into()).await;
+                    let _ = err_sender.send(err).await;
                     break;
                 }
             }
@@ -198,7 +197,7 @@ async fn send_messages(
                     Ok(message) => {
                         let req_id = message.req_id();
                         let should_cache = message.should_cache();
-                        let message = message.to_message();
+                        let message = message.into_message();
                         if should_cache {
                             cache.insert(req_id, message.clone());
                         }

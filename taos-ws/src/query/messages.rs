@@ -396,7 +396,7 @@ impl WsMessage {
         }
     }
 
-    pub(crate) fn to_message(self) -> Message {
+    pub(crate) fn into_message(self) -> Message {
         match self {
             WsMessage::Raw(message) => message,
             WsMessage::Command(ws_send) => match ws_send {
