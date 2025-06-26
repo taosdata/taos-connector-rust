@@ -12,6 +12,7 @@ use std::time::Duration;
 use taos_query::prelude::Code;
 use taos_query::util::{generate_req_id, Edition};
 use taos_query::{DsnError, IntoDsn, RawError, RawResult};
+use tokio::time;
 use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message;
@@ -470,9 +471,14 @@ impl TaosBuilder {
         &self,
         ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> RawResult<Version> {
-        ws_stream
-            .send(WsSend::Version.to_msg())
+        let timeout = Duration::from_secs(8);
+
+        time::timeout(timeout, ws_stream.send(WsSend::Version.to_msg()))
             .await
+            .map_err(|_| {
+                RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
+                    .context("timeout sending version request")
+            })?
             .map_err(handle_disconnect_error)?;
 
         let version_fut = async {
@@ -518,8 +524,7 @@ impl TaosBuilder {
             }
         };
 
-        let duration = Duration::from_secs(8);
-        let version = match tokio::time::timeout(duration, version_fut).await {
+        let version = match time::timeout(timeout, version_fut).await {
             Ok(Ok(ver)) => ver,
             Ok(Err(err)) => return Err(err),
             Err(_) => "2.x".to_string(),
@@ -537,14 +542,31 @@ impl TaosBuilder {
             req: self.build_conn_request(),
         };
 
-        ws_stream
-            .send(req.to_msg())
+        let timeout = Duration::from_secs(8);
+
+        time::timeout(timeout, ws_stream.send(req.to_msg()))
             .await
+            .map_err(|_| {
+                RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
+                    .context("timeout sending conn request")
+            })?
             .map_err(handle_disconnect_error)?;
 
-        while let Some(res) = ws_stream.next().await {
-            let msg = res.map_err(handle_disconnect_error)?;
-            match msg {
+        loop {
+            let res = time::timeout(timeout, ws_stream.next())
+                .await
+                .map_err(|_| {
+                    RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
+                        .context("timeout waiting for conn response")
+                })?;
+
+            let Some(res) = res else {
+                return Err(RawError::from_code(Code::WS_DISCONNECTED));
+            };
+
+            let message = res.map_err(handle_disconnect_error)?;
+
+            match message {
                 Message::Text(text) => {
                     let resp: WsRecv = serde_json::from_str(&text).map_err(|e| {
                         RawError::any(e)
@@ -571,13 +593,11 @@ impl TaosBuilder {
                 }
                 _ => {
                     return Err(RawError::from_string(format!(
-                        "unexpected message during conn: {msg:?}"
+                        "unexpected message during conn: {message:?}"
                     )))
                 }
             }
         }
-
-        Err(RawError::from_code(Code::WS_DISCONNECTED))
     }
 
     pub(crate) fn build_conn_request(&self) -> WsConnReq {
