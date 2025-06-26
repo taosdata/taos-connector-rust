@@ -735,67 +735,62 @@ impl WsQuerySender {
     }
 
     #[instrument(skip_all)]
-    async fn send_recv(&self, msg: WsSend) -> RawResult<WsRecvData> {
-        let req_id = msg.req_id();
-        let (tx, rx) = oneshot::channel();
+    async fn send_recv(&self, message: WsSend) -> RawResult<WsRecvData> {
+        let req_id = message.req_id();
+        let (data_tx, data_rx) = oneshot::channel();
+        let _ = self.queries.insert_async(req_id, data_tx).await;
 
-        let _ = self.queries.insert_async(req_id, tx).await;
-
-        match msg {
-            WsSend::FetchBlock(args) => {
-                tracing::trace!("[req id: {req_id}] prepare message {msg:?}");
-                if self.results.contains_async(&args.id).await {
-                    Err(RawError::from_string(format!(
-                        "there's a result with id {}",
-                        args.id
-                    )))?;
-                }
-                let _ = self.results.insert_async(args.id, args.req_id).await;
-
-                timeout(
-                    SEND_TIMEOUT,
-                    self.sender.send_async(WsMessage::Command(msg)),
-                )
-                .await
-                .map_err(Error::from)?
-                .map_err(Error::from)?;
+        let res_id = if let WsSend::FetchBlock(args) = message {
+            let id = args.id;
+            if self.results.contains_async(&id).await {
+                Err(RawError::from_string(format!(
+                    "FetchBlock: result id: {id} already exists"
+                )))?;
             }
-            WsSend::Binary(ref _bytes) => {
-                timeout(
-                    SEND_TIMEOUT,
-                    self.sender.send_async(WsMessage::Command(msg)),
-                )
-                .await
-                .map_err(Error::from)?
-                .map_err(Error::from)?;
-            }
-            _ => {
-                tracing::trace!("[req id: {req_id}] prepare message: {msg:?}");
-                timeout(
-                    SEND_TIMEOUT,
-                    self.sender.send_async(WsMessage::Command(msg)),
-                )
-                .await
-                .map_err(Error::from)?
-                .map_err(Error::from)?;
-            }
-        }
-        // TODO: add timeout
-        // handle the error
-        tracing::trace!("[req id: {req_id}] message sent, wait for receiving");
-        let res = rx
-            .await
-            .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
-            .map_err(Error::from);
-        tracing::trace!("[req id: {req_id}] message received: {res:?}");
-        let res = res?;
-        Ok(res)
-    }
+            let _ = self.results.insert_async(id, args.req_id).await;
+            Some(id)
+        } else {
+            None
+        };
 
-    async fn send_only(&self, msg: WsSend) -> RawResult<()> {
+        tracing::trace!("req_id: {req_id}, sending message: {message:?}");
+
         timeout(
             SEND_TIMEOUT,
-            self.sender.send_async(WsMessage::Command(msg)),
+            self.sender.send_async(WsMessage::Command(message)),
+        )
+        .await
+        .map_err(Error::from)?
+        .map_err(Error::from)?;
+
+        tracing::trace!("req_id: {req_id}, message sent, waiting for response");
+
+        let cleanup = || {
+            tracing::warn!("req_id: {req_id}, res_id: {res_id:?}, cleaning up queries and results");
+            let _ = self.queries.remove(&req_id);
+            if let Some(res_id) = res_id {
+                let _ = self.results.remove(&res_id);
+            }
+        };
+
+        let data = timeout(Duration::from_secs(60), data_rx)
+            .await
+            .map_err(|err| {
+                cleanup();
+                Error::from(err)
+            })?
+            .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
+            .map_err(Error::from)?;
+
+        tracing::trace!("req_id: {req_id}, received data: {data:?}");
+
+        Ok(data)
+    }
+
+    async fn send_only(&self, message: WsSend) -> RawResult<()> {
+        timeout(
+            SEND_TIMEOUT,
+            self.sender.send_async(WsMessage::Command(message)),
         )
         .await
         .map_err(Error::from)?
@@ -803,8 +798,10 @@ impl WsQuerySender {
         Ok(())
     }
 
-    fn send_blocking(&self, msg: WsSend) -> RawResult<()> {
-        let _ = self.sender.send(WsMessage::Command(msg));
+    fn send_blocking(&self, message: WsSend) -> RawResult<()> {
+        self.sender
+            .send(WsMessage::Command(message))
+            .map_err(Error::from)?;
         Ok(())
     }
 }
