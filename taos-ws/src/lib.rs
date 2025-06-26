@@ -16,7 +16,6 @@ use tokio::time;
 use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::warn;
 
 pub mod stmt;
 pub use stmt::Stmt;
@@ -157,12 +156,12 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn is_enterprise_edition(&self) -> RawResult<bool> {
-        // FIXME
-        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
-        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
-        // {
-        //     return Ok(true);
-        // }
+        let addr = self.active_addr();
+        if addr.matches(".cloud.tdengine.com").next().is_some()
+            || addr.matches(".cloud.taosdata.com").next().is_some()
+        {
+            return Ok(true);
+        }
 
         let taos = self.build()?;
 
@@ -184,7 +183,7 @@ impl taos_query::TBuilder for TaosBuilder {
                     expired.trim() == "false" || expired.trim() == "unlimited",
                 )
             } else {
-                warn!(
+                tracing::warn!(
                     "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
                 );
                 Edition::new("unknown", true)
@@ -194,13 +193,13 @@ impl taos_query::TBuilder for TaosBuilder {
     }
 
     fn get_edition(&self) -> RawResult<Edition> {
-        // FIXME
-        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
-        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
-        // {
-        //     let edition = Edition::new("cloud", false);
-        //     return Ok(edition);
-        // }
+        let addr = self.active_addr();
+        if addr.matches(".cloud.tdengine.com").next().is_some()
+            || addr.matches(".cloud.taosdata.com").next().is_some()
+        {
+            let edition = Edition::new("cloud", false);
+            return Ok(edition);
+        }
 
         let taos = self.build()?;
 
@@ -222,7 +221,7 @@ impl taos_query::TBuilder for TaosBuilder {
                     expired.trim() == "false" || expired.trim() == "unlimited",
                 )
             } else {
-                warn!(
+                tracing::warn!(
                     "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
                 );
                 Edition::new("unknown", true)
@@ -271,19 +270,20 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             })
         }
     }
+
     async fn is_enterprise_edition(&self) -> RawResult<bool> {
         use taos_query::prelude::AsyncQueryable;
 
         let taos = self.build().await?;
-        // Ensue server is ready.
+        // Ensure server is ready
         taos.exec("select server_version()").await?;
 
-        // FIXME
-        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
-        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
-        // {
-        //     return Ok(true);
-        // }
+        let addr = self.active_addr();
+        if addr.matches(".cloud.tdengine.com").next().is_some()
+            || addr.matches(".cloud.taosdata.com").next().is_some()
+        {
+            return Ok(true);
+        }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
             &taos,
@@ -304,12 +304,13 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
                     !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
-                warn!(
+                tracing::warn!(
                     "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
                 );
                 Edition::new("unknown", true)
             }
         };
+
         Ok(edition.is_enterprise_edition())
     }
 
@@ -317,16 +318,16 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
         use taos_query::prelude::AsyncQueryable;
 
         let taos = self.build().await?;
-        // Ensure server is ready.
+        // Ensure server is ready
         taos.exec("select server_version()").await?;
 
-        // FIXME
-        // if self.addrs.matches(".cloud.tdengine.com").next().is_some()
-        //     || self.addrs.matches(".cloud.taosdata.com").next().is_some()
-        // {
-        //     let edition = Edition::new("cloud", false);
-        //     return Ok(edition);
-        // }
+        let addr = self.active_addr();
+        if addr.matches(".cloud.tdengine.com").next().is_some()
+            || addr.matches(".cloud.taosdata.com").next().is_some()
+        {
+            let edition = Edition::new("cloud", false);
+            return Ok(edition);
+        }
 
         let grant: RawResult<Option<(String, bool)>> = AsyncQueryable::query_one(
             &taos,
@@ -347,7 +348,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
                     !(expired.trim() == "false" || expired.trim() == "unlimited"),
                 )
             } else {
-                warn!(
+                tracing::warn!(
                     "Can't check enterprise edition with either \"show cluster\" or \"show grants\""
                 );
                 Edition::new("unknown", true)
@@ -651,8 +652,7 @@ impl TaosBuilder {
     }
 
     fn format_url(&self, path: &str) -> String {
-        let cur_addr_idx = self.current_addr_index.load(Ordering::Relaxed);
-        let addr = &self.addrs[cur_addr_idx];
+        let addr = self.active_addr();
         match &self.auth {
             WsAuth::Token(token) => {
                 format!("{}://{}/{}?token={}", self.scheme(), addr, path, token)
@@ -661,6 +661,11 @@ impl TaosBuilder {
                 format!("{}://{}/{}", self.scheme(), addr, path)
             }
         }
+    }
+
+    fn active_addr(&self) -> &String {
+        let cur_addr_idx = self.current_addr_index.load(Ordering::Relaxed);
+        &self.addrs[cur_addr_idx]
     }
 
     pub(crate) async fn connect(
