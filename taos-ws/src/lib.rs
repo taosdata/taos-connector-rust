@@ -45,20 +45,15 @@ pub enum WsAuth {
     Plain(String, String),
 }
 
-const RETRIES_DEFAULT: u32 = 5;
-// const RETRY_BACKOFF_MS_DEFAULT: u64 = 100;
-// const RETRY_BACKOFF_MAX_MS_DEFAULT: u64 = 1000;
-const RETRY_BACKOFF_MS_DEFAULT: u64 = 1000;
-const RETRY_BACKOFF_MAX_MS_DEFAULT: u64 = 5000;
+const DEFAULT_RETRY_RETRIES: u32 = 5;
+const DEFAULT_RETRY_BACKOFF_MS: u64 = 100;
+const DEFAULT_RETRY_BACKOFF_MAX_MS: u64 = 1000;
 
-#[derive(Debug, Clone, Copy)]
-pub struct Retries(u32);
-
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
-struct RetryBackoff {
-    retry_backoff_ms: u64,
-    retry_backoff_max_ms: u64,
+struct RetryPolicy {
+    retries: u32,
+    backoff_ms: u64,
+    backoff_max_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -71,8 +66,7 @@ pub struct TaosBuilder {
     server_version: OnceCell<String>,
     conn_mode: Option<u32>,
     compression: bool,
-    conn_retries: Retries,
-    retry_backoff: RetryBackoff,
+    retry_policy: RetryPolicy,
 }
 
 #[allow(dead_code)]
@@ -422,29 +416,27 @@ impl TaosBuilder {
             })
             .unwrap_or(false);
 
-        let conn_retries = dsn
+        let retries = dsn
             .remove("conn_retries")
             .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(RETRIES_DEFAULT);
+            .unwrap_or(DEFAULT_RETRY_RETRIES);
 
-        let conn_retries = Retries(conn_retries);
-
-        let retry_backoff_ms = dsn
+        let backoff_ms = dsn
             .remove("retry_backoff_ms")
             .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(RETRY_BACKOFF_MS_DEFAULT);
+            .unwrap_or(DEFAULT_RETRY_BACKOFF_MS);
 
-        let retry_backoff_max_ms = dsn
+        let backoff_max_ms = dsn
             .remove("retry_backoff_max_ms")
             .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(RETRY_BACKOFF_MAX_MS_DEFAULT);
+            .unwrap_or(DEFAULT_RETRY_BACKOFF_MAX_MS);
 
-        let retry_backoff = RetryBackoff {
-            retry_backoff_ms,
-            retry_backoff_max_ms,
+        let retry_policy = RetryPolicy {
+            retries,
+            backoff_ms,
+            backoff_max_ms,
         };
 
-        // TODO: refactor
         if let Some(token) = token {
             Ok(TaosBuilder {
                 https,
@@ -454,8 +446,7 @@ impl TaosBuilder {
                 server_version: OnceCell::new(),
                 conn_mode,
                 compression,
-                conn_retries,
-                retry_backoff,
+                retry_policy,
                 current_addr_index: Arc::new(AtomicUsize::new(0)),
             })
         } else {
@@ -469,8 +460,7 @@ impl TaosBuilder {
                 server_version: OnceCell::new(),
                 conn_mode,
                 compression,
-                conn_retries,
-                retry_backoff,
+                retry_policy,
                 current_addr_index: Arc::new(AtomicUsize::new(0)),
             })
         }
@@ -674,7 +664,7 @@ impl TaosBuilder {
         for _ in 0..self.addrs.len() {
             let mut url = self.to_url(kind);
 
-            for i in 0..self.conn_retries.0 {
+            for i in 0..self.retry_policy.retries {
                 match connect_async_with_config(&url, Some(config), false).await {
                     Ok((mut ws_stream, _)) => {
                         let version_res = self.send_version_request(&mut ws_stream).await;
@@ -717,8 +707,8 @@ impl TaosBuilder {
                 tracing::warn!("failed to connect to {url}, retrying...({i})",);
 
                 let base_delay = cmp::min(
-                    self.retry_backoff.retry_backoff_max_ms,
-                    self.retry_backoff.retry_backoff_ms * 2u64.saturating_pow(i),
+                    self.retry_policy.backoff_max_ms,
+                    self.retry_policy.backoff_ms * 2u64.saturating_pow(i),
                 );
 
                 let jitter = 1.0 + rand::rng().random_range(-0.2..=0.2);
@@ -806,7 +796,7 @@ impl TaosBuilder {
                         }
                     }
 
-                    if retries >= self.conn_retries.0 {
+                    if retries >= self.retry_policy.retries {
                         return Err(QueryError::from(err).into());
                     }
                     retries += 1;
