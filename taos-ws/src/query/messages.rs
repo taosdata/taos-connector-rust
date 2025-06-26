@@ -111,7 +111,7 @@ impl WsSend {
             | WsSend::Stmt2Result { req_id, .. }
             | WsSend::Stmt2Close { req_id, .. }
             | WsSend::CheckServerStatus { req_id, .. } => *req_id,
-            WsSend::Insert { req_id, .. } => req_id.unwrap_or(generate_req_id()),
+            WsSend::Insert { req_id, .. } => req_id.unwrap_or(0),
             WsSend::Binary(bytes) => unsafe { *(bytes.as_ptr() as *const u64) as _ },
             WsSend::Fetch(args) | WsSend::FetchBlock(args) | WsSend::FreeResult(args) => {
                 args.req_id
