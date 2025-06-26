@@ -1,8 +1,11 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
 use std::time::Duration;
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use flume::Receiver;
 use futures::stream::{SplitSink, SplitStream};
@@ -139,7 +142,7 @@ pub(super) async fn run(
 
         tracing::info!("WebSocket reconnected successfully");
 
-        cleanup_after_reconnect(query_sender.clone());
+        cleanup_after_reconnect(query_sender.clone(), cache.clone());
     }
 }
 
@@ -476,10 +479,17 @@ fn cleanup_after_disconnect(query_sender: WsQuerySender) {
     }
 }
 
-fn cleanup_after_reconnect(query_sender: WsQuerySender) {
-    let mut req_ids = Vec::with_capacity(query_sender.results.len());
+fn cleanup_after_reconnect(query_sender: WsQuerySender, cache: MessageCache) {
+    let mut req_ids = HashSet::new();
+
+    query_sender.queries.scan(|req_id, _| {
+        if !cache.req_to_msg.contains(req_id) {
+            req_ids.insert(*req_id);
+        }
+    });
+
     query_sender.results.scan(|_, req_id| {
-        req_ids.push(*req_id);
+        req_ids.insert(*req_id);
     });
 
     query_sender.results.clear();
