@@ -688,6 +688,7 @@ impl TaosBuilder {
 
         for _ in 0..self.addrs.len() {
             let mut url = self.to_url(kind);
+            tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
 
             for i in 0..self.retry_policy.retries {
                 match connect_async_with_config(&url, Some(config), false).await {

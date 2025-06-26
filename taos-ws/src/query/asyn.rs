@@ -753,7 +753,7 @@ impl WsQuerySender {
             None
         };
 
-        tracing::trace!("req_id: {req_id}, sending message: {message:?}");
+        tracing::trace!("send_recv, req_id: {req_id}, sending message: {message:?}");
 
         timeout(
             SEND_TIMEOUT,
@@ -763,10 +763,12 @@ impl WsQuerySender {
         .map_err(Error::from)?
         .map_err(Error::from)?;
 
-        tracing::trace!("req_id: {req_id}, message sent, waiting for response");
+        tracing::trace!("send_recv, req_id: {req_id}, message sent, waiting for response");
 
         let cleanup = || {
-            tracing::warn!("req_id: {req_id}, res_id: {res_id:?}, cleaning up queries and results");
+            tracing::warn!(
+                "send_recv, req_id: {req_id}, res_id: {res_id:?}, cleaning up queries and results"
+            );
             let _ = self.queries.remove(&req_id);
             if let Some(res_id) = res_id {
                 let _ = self.results.remove(&res_id);
@@ -782,7 +784,7 @@ impl WsQuerySender {
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
             .map_err(Error::from)?;
 
-        tracing::trace!("req_id: {req_id}, received data: {data:?}");
+        tracing::trace!("send_recv, req_id: {req_id}, received data: {data:?}");
 
         Ok(data)
     }
