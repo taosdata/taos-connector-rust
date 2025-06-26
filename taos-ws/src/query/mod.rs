@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 pub(crate) use asyn::WsTaos;
 pub use asyn::{Error, ResultSet};
+use faststr::FastStr;
 pub(crate) use messages::WsConnReq;
 pub use messages::{BindType, Stmt2Field};
 use taos_query::common::{RawMeta, SmlData};
@@ -43,7 +44,7 @@ impl Taos {
         }
     }
 
-    pub fn version(&self) -> &str {
+    pub fn version(&self) -> FastStr {
         self.async_client.version()
     }
 

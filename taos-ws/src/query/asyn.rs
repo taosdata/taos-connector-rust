@@ -17,9 +17,7 @@ use itertools::Itertools;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::{generate_req_id, InlinableWrite};
-use taos_query::{
-    block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
-};
+use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
 use thiserror::Error;
 use tokio::select;
 use tokio::sync::{mpsc, watch, RwLock};
@@ -36,8 +34,6 @@ type QueryChannelSender = oneshot::Sender<RawResult<WsRecvData>>;
 type QueryInner = scc::HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = scc::HashMap<ResId, ReqId>;
-
-pub(crate) type Version = String;
 
 #[derive(Debug)]
 pub struct WsTaos {
@@ -323,10 +319,8 @@ impl WsTaos {
         }
     }
 
-    // TODO: use static
-    pub fn version(&self) -> &str {
-        // self.sender.version_info.version()
-        ""
+    pub fn version(&self) -> FastStr {
+        self.sender.version_info.version()
     }
 
     pub fn is_support_binary_sql(&self) -> bool {
@@ -653,15 +647,16 @@ async fn fetch(
     );
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(super) struct VersionInfo {
-    version: Arc<RwLock<Version>>,
+    version: Arc<RwLock<FastStr>>,
     is_v3: Arc<AtomicBool>,
     supports_binary_sql: Arc<AtomicBool>,
 }
 
 impl VersionInfo {
-    fn new(version: Version) -> Self {
+    fn new<T: Into<FastStr>>(version: T) -> Self {
+        let version = version.into();
         let is_v3 = !version.starts_with('2');
         let supports_binary_sql = is_v3 && is_support_binary_sql(&version);
         Self {
@@ -671,7 +666,8 @@ impl VersionInfo {
         }
     }
 
-    pub(super) async fn update(&self, version: Version) {
+    pub(super) async fn update<T: Into<FastStr>>(&self, version: T) {
+        let version = version.into();
         if version == self.version() {
             return;
         }
@@ -685,8 +681,8 @@ impl VersionInfo {
             .store(supports_binary_sql, Ordering::Relaxed);
     }
 
-    fn version(&self) -> Version {
-        block_in_place_or_global(self.version.read()).clone()
+    fn version(&self) -> FastStr {
+        self.version.blocking_read().clone()
     }
 
     pub(super) fn is_v3(&self) -> bool {
@@ -695,16 +691,6 @@ impl VersionInfo {
 
     fn supports_binary_sql(&self) -> bool {
         self.supports_binary_sql.load(Ordering::Relaxed)
-    }
-}
-
-impl std::fmt::Debug for VersionInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Version")
-            .field("version", &self.version())
-            .field("is_v3", &self.is_v3())
-            .field("supports_binary_sql", &self.supports_binary_sql())
-            .finish()
     }
 }
 

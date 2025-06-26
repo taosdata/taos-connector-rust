@@ -875,7 +875,7 @@ pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char 
 
     let server_info = SERVER_INFO.get_or_init(|| {
         if let Some(taos) = (taos as *mut Taos).as_mut() {
-            CString::new(taos.version()).unwrap()
+            CString::new(taos.version().as_bytes()).unwrap()
         } else {
             CString::new("").unwrap()
         }

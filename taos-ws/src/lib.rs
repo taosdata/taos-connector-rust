@@ -34,8 +34,10 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
 
-use crate::query::asyn::{Version, WS_ERROR_NO};
+use crate::query::asyn::WS_ERROR_NO;
 use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
+
+type Version = String;
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
