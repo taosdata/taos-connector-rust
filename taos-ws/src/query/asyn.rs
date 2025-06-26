@@ -17,7 +17,9 @@ use itertools::Itertools;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
 use taos_query::util::{generate_req_id, InlinableWrite};
-use taos_query::{AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn};
+use taos_query::{
+    block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
+};
 use thiserror::Error;
 use tokio::select;
 use tokio::sync::{mpsc, watch, RwLock};
@@ -320,7 +322,7 @@ impl WsTaos {
     }
 
     pub fn version(&self) -> FastStr {
-        self.sender.version_info.version()
+        block_in_place_or_global(self.sender.version_info.version())
     }
 
     pub fn is_support_binary_sql(&self) -> bool {
@@ -668,7 +670,7 @@ impl VersionInfo {
 
     pub(super) async fn update<T: Into<FastStr>>(&self, version: T) {
         let version = version.into();
-        if version == self.version() {
+        if version == self.version().await {
             return;
         }
 
@@ -681,8 +683,8 @@ impl VersionInfo {
             .store(supports_binary_sql, Ordering::Relaxed);
     }
 
-    fn version(&self) -> FastStr {
-        self.version.blocking_read().clone()
+    async fn version(&self) -> FastStr {
+        self.version.read().await.clone()
     }
 
     pub(super) fn is_v3(&self) -> bool {
