@@ -1574,30 +1574,92 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_auto_reconnect() -> anyhow::Result<()> {
+        use futures::{SinkExt, StreamExt};
+        use serde_json::json;
+        use taos_query::{AsyncQueryable, AsyncTBuilder};
+        use tokio::task::JoinHandle;
+        use tracing::Instrument;
+        use warp::Filter;
+
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::TRACE)
-            .compact()
+            .with_max_level(tracing::Level::DEBUG)
             .try_init();
 
-        let taos = WsTaos::from_dsn("ws://localhost:6041").await?;
+        let _handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(
+            async move {
+                let taos = TaosBuilder::from_dsn("ws://127.0.0.1:9980")?
+                    .build()
+                    .await?;
+                let _ = taos.query("select * from meters").await?;
+                Ok(())
+            }
+            .in_current_span(),
+        );
 
-        tracing::info!("Waiting for 5 seconds before executing SQL...");
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        let (close_tx, close_rx) = flume::bounded(1);
 
-        taos.exec_many([
-            "drop database if exists test_1749775774",
-            "create database test_1749775774",
-            "use test_1749775774",
-            "create table t0(ts timestamp, c1 int)",
-        ])
-        .await?;
+        let routes = warp::path("ws").and(warp::ws()).map({
+            move |ws: warp::ws::Ws| {
+                let close = close_tx.clone();
+                ws.on_upgrade(move |ws| async {
+                    let close = close;
+                    let (mut ws_tx, mut ws_rx) = ws.split();
+                    while let Some(res) = ws_rx.next().await {
+                        let message = res.unwrap();
+                        tracing::debug!("ws recv message: {message:?}");
+                        if message.is_text() {
+                            let text = message.to_str().unwrap();
+                            if text.contains("version") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "message",
+                                    "action": "version",
+                                    "req_id": 100,
+                                    "version": "3.0"
+                                });
+                                let message = warp::ws::Message::text(data.to_string());
+                                let _ = ws_tx.send(message).await;
+                            } else if text.contains("conn") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "message",
+                                    "action": "conn",
+                                    "req_id": 100
+                                });
+                                let message = warp::ws::Message::text(data.to_string());
+                                let _ = ws_tx.send(message).await;
+                            } else if text.contains("query") {
+                                let _ = close.send_async(()).await;
+                                break;
+                            }
+                        }
+                    }
+                })
+            }
+        });
 
-        let affected_rows = taos.exec("insert into t0 values(now, 1)").await?;
-        assert_eq!(affected_rows, 1);
+        let close = close_rx.clone();
+        let (_, server) = warp::serve(routes.clone()).bind_with_graceful_shutdown(
+            ([127, 0, 0, 1], 9980),
+            async move {
+                let _ = close.recv_async().await;
+                tracing::debug!("shutting down...");
+            },
+        );
 
-        tracing::info!("Waiting for 500 seconds before disconnecting...");
+        server.await;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let (_, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9980), async move {
+                let _ = close_rx.recv_async().await;
+                tracing::debug!("restarted server shutting down...");
+            });
+
+        server.await;
 
         Ok(())
     }
