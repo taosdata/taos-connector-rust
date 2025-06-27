@@ -1177,7 +1177,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_client() -> anyhow::Result<()> {
         use futures::TryStreamExt;
         unsafe { std::env::set_var("RUST_LOG", "debug") };
@@ -1233,7 +1233,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn ws_write_raw_block() -> anyhow::Result<()> {
         let mut raw = RawBlock::parse_from_raw_block_v2(
             &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
@@ -1284,7 +1284,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn ws_write_raw_block_with_req_id() -> anyhow::Result<()> {
         let mut raw = RawBlock::parse_from_raw_block_v2(
             &[0, 0, 0, 0, 0, 0, 0, 0, 2][..],
@@ -1673,7 +1673,7 @@ mod cloud_tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_write_raw_block() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
