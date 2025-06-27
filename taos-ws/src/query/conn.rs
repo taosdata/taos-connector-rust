@@ -518,3 +518,102 @@ fn cleanup_after_reconnect(query_sender: WsQuerySender, cache: MessageCache) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use futures::{SinkExt, StreamExt};
+    use serde_json::json;
+    use taos_query::{AsyncQueryable, AsyncTBuilder};
+    use tokio::task::JoinHandle;
+    use tracing::Instrument;
+    use warp::Filter;
+
+    use crate::TaosBuilder;
+
+    #[tokio::test]
+    async fn test_ws_auto_reconnect() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::DEBUG)
+            .try_init();
+
+        let _handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(
+            async move {
+                let taos = TaosBuilder::from_dsn("ws://127.0.0.1:9980")?
+                    .build()
+                    .await?;
+                let _ = taos.query("select * from meters").await?;
+                Ok(())
+            }
+            .in_current_span(),
+        );
+
+        let (close_tx, close_rx) = flume::bounded(1);
+
+        let routes = warp::path("ws").and(warp::ws()).map({
+            move |ws: warp::ws::Ws| {
+                let close = close_tx.clone();
+                ws.on_upgrade(move |ws| async {
+                    let close = close;
+                    let (mut ws_tx, mut ws_rx) = ws.split();
+                    while let Some(res) = ws_rx.next().await {
+                        let message = res.unwrap();
+                        tracing::debug!("ws recv message: {message:?}");
+                        if message.is_text() {
+                            let text = message.to_str().unwrap();
+                            if text.contains("version") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "message",
+                                    "action": "version",
+                                    "req_id": 100,
+                                    "version": "3.0"
+                                });
+                                let message = warp::ws::Message::text(data.to_string());
+                                let _ = ws_tx.send(message).await;
+                            } else if text.contains("conn") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "message",
+                                    "action": "conn",
+                                    "req_id": 100
+                                });
+                                let message = warp::ws::Message::text(data.to_string());
+                                let _ = ws_tx.send(message).await;
+                            } else if text.contains("query") {
+                                let _ = close.send_async(()).await;
+                                break;
+                            }
+                        }
+                    }
+                })
+            }
+        });
+
+        let close = close_rx.clone();
+        let (_, server) = warp::serve(routes.clone()).bind_with_graceful_shutdown(
+            ([127, 0, 0, 1], 9980),
+            async move {
+                let _ = close.recv_async().await;
+                tracing::debug!("shutting down...");
+            },
+        );
+
+        server.await;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let (_, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9980), async move {
+                let _ = close_rx.recv_async().await;
+                tracing::debug!("restarted server shutting down...");
+            });
+
+        server.await;
+
+        Ok(())
+    }
+}
