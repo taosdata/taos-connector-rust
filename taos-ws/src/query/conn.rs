@@ -60,6 +60,10 @@ impl MessageCache {
     }
 
     fn messages(&self) -> Vec<Message> {
+        if self.messages.is_empty() {
+            return Vec::new();
+        }
+
         let mut msg_ids = Vec::with_capacity(self.messages.len());
         self.messages.scan(|msg_id, _| {
             msg_ids.push(*msg_id);
