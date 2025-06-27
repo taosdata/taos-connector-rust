@@ -20,6 +20,7 @@ use tokio_tungstenite::{
     tungstenite::{Error as WsError, Message},
     MaybeTlsStream, WebSocketStream,
 };
+use tracing::Instrument;
 
 use crate::query::{
     asyn::{WsQuerySender, WS_ERROR_NO},
@@ -83,21 +84,27 @@ pub(super) async fn run(
         let (err_tx, mut err_rx) = mpsc::channel(2);
         let (close_tx, close_rx) = watch::channel(false);
 
-        let send_handle = tokio::spawn(send_messages(
-            ws_stream_tx,
-            message_reader.clone(),
-            close_rx.clone(),
-            err_tx.clone(),
-            cache.clone(),
-        ));
+        let send_handle = tokio::spawn(
+            send_messages(
+                ws_stream_tx,
+                message_reader.clone(),
+                close_rx.clone(),
+                err_tx.clone(),
+                cache.clone(),
+            )
+            .in_current_span(),
+        );
 
-        let recv_handle = tokio::spawn(read_messages(
-            ws_stream_rx,
-            query_sender.clone(),
-            close_rx,
-            err_tx,
-            cache.clone(),
-        ));
+        let recv_handle = tokio::spawn(
+            read_messages(
+                ws_stream_rx,
+                query_sender.clone(),
+                close_rx,
+                err_tx,
+                cache.clone(),
+            )
+            .in_current_span(),
+        );
 
         tokio::select! {
             err = err_rx.recv() => {
@@ -251,7 +258,9 @@ async fn read_messages(
     tracing::trace!("start reading messages from WebSocket stream");
 
     let (message_tx, message_rx) = mpsc::channel(64);
-    let message_handle = tokio::spawn(handle_messages(message_rx, query_sender.clone(), cache));
+
+    let message_handle =
+        tokio::spawn(handle_messages(message_rx, query_sender.clone(), cache).in_current_span());
 
     let mut closed_normally = false;
 

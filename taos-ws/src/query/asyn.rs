@@ -58,7 +58,7 @@ impl WsTaos {
 
     pub(super) async fn from_builder(builder: &TaosBuilder) -> RawResult<Self> {
         let conn_id = generate_req_id();
-        let span = tracing::span!(tracing::Level::WARN, "ws_connection", conn_id = conn_id);
+        let span = tracing::info_span!("ws_conn", conn_id = conn_id);
 
         let (ws_stream, version) = builder
             .connect(UrlKind::Ws)
@@ -1573,7 +1573,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_ws_disconnect() -> anyhow::Result<()> {
+    async fn test_ws_auto_reconnect() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
@@ -1598,7 +1598,6 @@ mod tests {
         assert_eq!(affected_rows, 1);
 
         tracing::info!("Waiting for 500 seconds before disconnecting...");
-        tokio::time::sleep(Duration::from_secs(500)).await;
 
         Ok(())
     }

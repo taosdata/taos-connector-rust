@@ -23,25 +23,12 @@ pub struct Taos {
 }
 
 impl Taos {
-    pub(super) async fn from_builder(dsn: TaosBuilder) -> RawResult<Self> {
-        let mut retries = 0;
-        loop {
-            match WsTaos::from_builder(&dsn).await {
-                Ok(client) => {
-                    return Ok(Self {
-                        dsn,
-                        async_client: Arc::new(client),
-                    })
-                }
-                Err(err) => {
-                    if retries >= dsn.retry_policy.retries {
-                        return Err(err);
-                    }
-                    tracing::warn!(remote = ?dsn.addrs, retries, "retrying connection: {}", err);
-                    retries += 1;
-                }
-            }
-        }
+    pub(super) async fn from_builder(builder: TaosBuilder) -> RawResult<Self> {
+        let ws_taos = WsTaos::from_builder(&builder).await?;
+        Ok(Self {
+            dsn: builder,
+            async_client: Arc::new(ws_taos),
+        })
     }
 
     pub fn version(&self) -> FastStr {

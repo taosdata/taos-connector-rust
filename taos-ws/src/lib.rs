@@ -712,7 +712,7 @@ impl TaosBuilder {
                     }
                     Err(e) => {
                         let errstr = e.to_string();
-                        tracing::warn!("failed to connect to {url}: {errstr}");
+                        tracing::warn!("failed to connect to {url}, err: {errstr}");
                         if errstr.contains("307") {
                             self.set_https(true);
                             url = url.replace("ws://", "wss://");
@@ -730,7 +730,7 @@ impl TaosBuilder {
                     }
                 }
 
-                tracing::warn!("failed to connect to {url}, retrying...({i})",);
+                tracing::warn!("failed to connect to {}, retrying...({})", url, i + 1);
 
                 let base_delay = cmp::min(
                     self.retry_policy.backoff_max_ms,
@@ -750,7 +750,8 @@ impl TaosBuilder {
 
         tracing::error!("failed to connect to all addresses: {:?}", self.addrs);
 
-        Err(RawError::from_string("all addresses failed"))
+        Err(RawError::from_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+            .context("failed to connect to all addresses"))
     }
 
     pub(crate) async fn build_stream(
