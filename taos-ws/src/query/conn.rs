@@ -47,11 +47,13 @@ impl MessageCache {
 
     fn insert(&self, req_id: ReqId, message: Message) {
         let msg_id = self.next_msg_id.fetch_add(1, Ordering::Relaxed);
+        tracing::trace!("insert message into cache, req_id: {req_id}, msg_id: {msg_id}");
         let _ = self.req_to_msg.insert(req_id, msg_id);
         let _ = self.messages.insert(msg_id, message);
     }
 
     fn remove(&self, req_id: &ReqId) {
+        tracing::trace!("remove message from cache, req_id: {req_id}");
         if let Some((_, msg_id)) = self.req_to_msg.remove(req_id) {
             self.messages.remove(&msg_id);
         }
