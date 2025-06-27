@@ -295,6 +295,8 @@ async fn read_messages(
         }
     }
 
+    drop(message_tx);
+
     if let Err(err) = message_handle.await {
         tracing::error!("handle messages task failed: {err:?}");
     }

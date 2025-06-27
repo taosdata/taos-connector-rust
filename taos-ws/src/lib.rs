@@ -46,8 +46,8 @@ pub enum WsAuth {
 }
 
 const DEFAULT_RETRY_RETRIES: u32 = 5;
-const DEFAULT_RETRY_BACKOFF_MS: u64 = 100;
-const DEFAULT_RETRY_BACKOFF_MAX_MS: u64 = 1000;
+const DEFAULT_RETRY_BACKOFF_MS: u64 = 200;
+const DEFAULT_RETRY_BACKOFF_MAX_MS: u64 = 2000;
 
 #[derive(Debug, Clone)]
 struct RetryPolicy {
@@ -532,7 +532,7 @@ impl TaosBuilder {
             Err(_) => "2.x".to_string(),
         };
 
-        tracing::trace!("WebSocket server version: {version}");
+        tracing::trace!("send_version_request, server version: {version}");
 
         Ok(version)
     }
