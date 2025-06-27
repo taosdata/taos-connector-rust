@@ -2081,6 +2081,8 @@ mod tests {
             let param = c"hello, world";
             taos_query_a(taos, sql.as_ptr(), cb, param.as_ptr() as _);
 
+            sleep(Duration::from_secs(1));
+
             test_exec(taos, "drop database test_1740664844");
             taos_close(taos);
         }
