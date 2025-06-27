@@ -487,8 +487,9 @@ impl TaosBuilder {
             let mut non_version_cnt = 0;
             loop {
                 if let Some(res) = ws_stream.next().await {
-                    let msg = res.map_err(handle_disconnect_error)?;
-                    match msg {
+                    let message = res.map_err(handle_disconnect_error)?;
+                    tracing::trace!("send_version_request, received message: {message}");
+                    match message {
                         Message::Text(text) => {
                             let resp: WsRecv = serde_json::from_str(&text).map_err(|e| {
                                 RawError::any(e)
@@ -531,6 +532,8 @@ impl TaosBuilder {
             Err(_) => "2.x".to_string(),
         };
 
+        tracing::trace!("WebSocket server version: {version}");
+
         Ok(version)
     }
 
@@ -566,6 +569,7 @@ impl TaosBuilder {
             };
 
             let message = res.map_err(handle_disconnect_error)?;
+            tracing::trace!("send_conn_request, received message: {message}");
 
             match message {
                 Message::Text(text) => {
