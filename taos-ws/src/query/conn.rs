@@ -528,6 +528,7 @@ mod tests {
     use taos_query::{AsyncQueryable, AsyncTBuilder};
     use tokio::task::JoinHandle;
     use tracing::Instrument;
+    use warp::ws::Message;
     use warp::Filter;
 
     use crate::TaosBuilder;
@@ -572,7 +573,7 @@ mod tests {
                                     "req_id": 100,
                                     "version": "3.0"
                                 });
-                                let message = warp::ws::Message::text(data.to_string());
+                                let message = Message::text(data.to_string());
                                 let _ = ws_tx.send(message).await;
                             } else if text.contains("conn") {
                                 let data = json!({
@@ -581,7 +582,7 @@ mod tests {
                                     "action": "conn",
                                     "req_id": 100
                                 });
-                                let message = warp::ws::Message::text(data.to_string());
+                                let message = Message::text(data.to_string());
                                 let _ = ws_tx.send(message).await;
                             } else if text.contains("query") {
                                 let _ = close.send_async(()).await;

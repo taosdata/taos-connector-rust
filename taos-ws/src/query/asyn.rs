@@ -769,7 +769,7 @@ impl WsQuerySender {
 
         let cleanup = || {
             tracing::warn!(
-                "send_recv, req_id: {req_id}, res_id: {res_id:?}, cleaning up queries and results"
+                "send_recv, req_id: {req_id}, res_id: {res_id:?}, timeout to clean up queries and results"
             );
             let _ = self.queries.remove(&req_id);
             if let Some(res_id) = res_id {
