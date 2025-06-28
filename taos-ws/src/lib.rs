@@ -71,7 +71,7 @@ pub struct TaosBuilder {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum UrlKind {
+pub(crate) enum EndpointType {
     Ws,
     Stmt,
     Tmq,
@@ -628,9 +628,9 @@ impl TaosBuilder {
     }
 
     #[inline]
-    pub(crate) fn to_url(&self, kind: UrlKind) -> String {
-        match kind {
-            UrlKind::Tmq => self.to_tmq_url(),
+    pub(crate) fn to_url(&self, ty: EndpointType) -> String {
+        match ty {
+            EndpointType::Tmq => self.to_tmq_url(),
             _ => self.to_ws_url(),
         }
     }
@@ -674,7 +674,7 @@ impl TaosBuilder {
 
     pub(crate) async fn connect(
         &self,
-        kind: UrlKind,
+        ty: EndpointType,
     ) -> RawResult<(WebSocketStream<MaybeTlsStream<TcpStream>>, Version)> {
         let mut config = WebSocketConfig::default();
         config.max_frame_size = None;
@@ -691,7 +691,7 @@ impl TaosBuilder {
         }
 
         for _ in 0..self.addrs.len() {
-            let mut url = self.to_url(kind);
+            let mut url = self.to_url(ty);
             tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
 
             for i in 0..self.retry_policy.retries {
@@ -722,10 +722,10 @@ impl TaosBuilder {
                             url = url.replace("ws://", "wss://");
                             continue;
                         } else if errstr.contains("400") || errstr.contains("404 Not Found") {
-                            url = match kind {
-                                UrlKind::Ws => self.to_query_url(),
-                                UrlKind::Stmt => self.to_stmt_url(),
-                                UrlKind::Tmq => self.to_tmq_url(),
+                            url = match ty {
+                                EndpointType::Ws => self.to_query_url(),
+                                EndpointType::Stmt => self.to_stmt_url(),
+                                EndpointType::Tmq => self.to_tmq_url(),
                             };
                             continue;
                         } else if errstr.contains("401 Unauthorized") {

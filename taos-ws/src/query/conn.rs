@@ -27,7 +27,7 @@ use crate::query::{
     messages::{MsgId, ReqId, WsMessage, WsRecv, WsRecvData},
     Error,
 };
-use crate::{TaosBuilder, UrlKind};
+use crate::{EndpointType, TaosBuilder};
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsStreamReader = SplitStream<WsStream>;
@@ -141,7 +141,7 @@ pub(super) async fn run(
 
         tracing::warn!("WebSocket disconnected, starting to reconnect");
 
-        match builder.connect(UrlKind::Ws).await {
+        match builder.connect(EndpointType::Ws).await {
             Ok((ws, ver)) => {
                 ws_stream = ws;
                 query_sender.version_info.update(ver).await;
