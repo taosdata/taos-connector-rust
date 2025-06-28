@@ -16,7 +16,7 @@ use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 use tokio::sync::{oneshot, watch};
 use tokio_tungstenite::tungstenite::protocol::Message;
 
-use crate::query::infra::ToMessage;
+use crate::query::messages::ToMessage;
 use crate::{Taos, TaosBuilder};
 
 mod messages;
@@ -268,14 +268,14 @@ impl Drop for Stmt {
 impl Stmt {
     #[allow(dead_code)]
     pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        let ws = info.build_stream(info.to_stmt_url()).await?;
+        let ws = info.build_stream(info.to_ws_url()).await?;
 
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 
         let login = StmtSend::Conn {
             req_id,
-            req: info.to_conn_request(),
+            req: info.build_conn_request(),
         };
         sender.send(login.to_msg()).await.map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {

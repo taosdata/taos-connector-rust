@@ -131,7 +131,7 @@ impl Display for MetaCreate {
                         "`{}` USING `{}` TAGS({})",
                         table_name,
                         using,
-                        std::iter::repeat("NULL").take(tag_num.unwrap()).join(",")
+                        std::iter::repeat_n("NULL", tag_num.unwrap()).join(",")
                     ))?;
                 }
             }

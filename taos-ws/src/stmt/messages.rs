@@ -4,7 +4,7 @@ use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::prelude::RawError as Error;
 
 use super::StmtPrepareResult;
-use crate::query::infra::{ToMessage, WsConnReq};
+use crate::query::messages::{ToMessage, WsConnReq};
 use crate::stmt::{StmtField, StmtParam, StmtUseResult};
 
 pub type ReqId = u64;

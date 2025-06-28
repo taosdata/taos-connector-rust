@@ -605,7 +605,6 @@ impl ColumnView {
     }
 
     /// Get pointer to value.
-    /// FIXME: for Decimal/Decimal64 type, we can not get complete data from data ptr, we also need precision/scale in schema
     #[inline]
     pub(super) unsafe fn get_raw_value_unchecked(&self, row: usize) -> (Ty, u32, *const c_void) {
         match self {
