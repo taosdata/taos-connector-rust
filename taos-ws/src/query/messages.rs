@@ -9,11 +9,9 @@ use taos_query::util::generate_req_id;
 use tokio_tungstenite::tungstenite::Message;
 
 pub type ReqId = u64;
-pub type MsgId = u64;
-pub type StmtId = u64;
-
-/// Type for result ID.
 pub type ResId = u64;
+pub type StmtId = u64;
+pub type MessageId = u64;
 
 #[serde_as]
 #[derive(Debug, Serialize, Default, Clone)]

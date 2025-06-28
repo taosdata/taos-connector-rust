@@ -208,7 +208,7 @@ impl WsTaos {
             let (raw_block_tx, raw_block_rx) = flume::bounded(64);
             let (fetch_done_tx, fetch_done_rx) = flume::bounded(1);
 
-            if sender.version_info.supports_binary_sql() {
+            if sender.version_info.support_binary_sql() {
                 fetch_binary(
                     sender,
                     res_id,
@@ -326,7 +326,7 @@ impl WsTaos {
     }
 
     pub fn is_support_binary_sql(&self) -> bool {
-        self.sender.version_info.supports_binary_sql()
+        self.sender.version_info.support_binary_sql()
     }
 
     pub fn get_req_id(&self) -> ReqId {
@@ -653,18 +653,18 @@ async fn fetch(
 pub(super) struct VersionInfo {
     version: Arc<RwLock<FastStr>>,
     is_v3: Arc<AtomicBool>,
-    supports_binary_sql: Arc<AtomicBool>,
+    support_binary_sql: Arc<AtomicBool>,
 }
 
 impl VersionInfo {
     fn new<T: Into<FastStr>>(version: T) -> Self {
         let version = version.into();
         let is_v3 = !version.starts_with('2');
-        let supports_binary_sql = is_v3 && is_support_binary_sql(&version);
+        let support_binary_sql = is_v3 && is_support_binary_sql(&version);
         Self {
             version: Arc::new(RwLock::new(version)),
             is_v3: Arc::new(AtomicBool::new(is_v3)),
-            supports_binary_sql: Arc::new(AtomicBool::new(supports_binary_sql)),
+            support_binary_sql: Arc::new(AtomicBool::new(support_binary_sql)),
         }
     }
 
@@ -675,12 +675,12 @@ impl VersionInfo {
         }
 
         let is_v3 = !version.starts_with('2');
-        let supports_binary_sql = is_v3 && is_support_binary_sql(&version);
+        let support_binary_sql = is_v3 && is_support_binary_sql(&version);
 
         *self.version.write().await = version;
         self.is_v3.store(is_v3, Ordering::Relaxed);
-        self.supports_binary_sql
-            .store(supports_binary_sql, Ordering::Relaxed);
+        self.support_binary_sql
+            .store(support_binary_sql, Ordering::Relaxed);
     }
 
     async fn version(&self) -> FastStr {
@@ -691,8 +691,8 @@ impl VersionInfo {
         self.is_v3.load(Ordering::Relaxed)
     }
 
-    fn supports_binary_sql(&self) -> bool {
-        self.supports_binary_sql.load(Ordering::Relaxed)
+    fn support_binary_sql(&self) -> bool {
+        self.support_binary_sql.load(Ordering::Relaxed)
     }
 }
 

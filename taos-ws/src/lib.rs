@@ -70,7 +70,7 @@ pub struct TaosBuilder {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EndpointType {
     Ws,
     Stmt,
@@ -491,8 +491,8 @@ impl TaosBuilder {
                     tracing::trace!("send_version_request, received message: {message}");
                     match message {
                         Message::Text(text) => {
-                            let resp: WsRecv = serde_json::from_str(&text).map_err(|e| {
-                                RawError::any(e)
+                            let resp: WsRecv = serde_json::from_str(&text).map_err(|err| {
+                                RawError::any(err)
                                     .with_code(WS_ERROR_NO::DE_ERROR.as_code())
                                     .context("invalid json response")
                             })?;
@@ -705,10 +705,12 @@ impl TaosBuilder {
                             }
                         }
 
-                        if let Err(err) = self.send_conn_request(&mut ws_stream).await {
-                            tracing::warn!("failed to send conn request: {err}");
-                            if err.code() != WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code() {
-                                break;
+                        if ty != EndpointType::Tmq {
+                            if let Err(err) = self.send_conn_request(&mut ws_stream).await {
+                                tracing::warn!("failed to send conn request: {err}");
+                                if err.code() != WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code() {
+                                    break;
+                                }
                             }
                         }
 
@@ -857,7 +859,9 @@ fn handle_disconnect_error(err: WsError) -> RawError {
             RawError::from_code(WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code())
                 .context("WebSocket connection disconnected")
         }
-        _ => RawError::any(err).context("WebSocket error"),
+        _ => RawError::any(err)
+            .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+            .context("WebSocket error"),
     }
 }
 

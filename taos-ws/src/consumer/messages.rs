@@ -9,16 +9,13 @@ use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::common::{Field, Precision, Ty};
 use taos_query::prelude::RawError;
 use taos_query::tmq::{Assignment, VGroupId};
+use tokio_tungstenite::tungstenite::Message;
 
 use crate::query::messages::{ToMessage, WsConnReq};
 
 pub type ReqId = u64;
-
-/// Type for result ID.
 pub type ResId = u64;
-
 pub type ConsumerId = u64;
-
 pub type MessageId = u64;
 
 #[derive(Debug, Serialize, Default, Clone)]
@@ -291,6 +288,21 @@ impl TmqRecv {
                 Err(RawError::new(self.code, self.message.unwrap_or_default()))
             },
         )
+    }
+}
+
+#[derive(Debug)]
+pub enum WsMessage {
+    Command(TmqSend),
+    Raw(Message),
+}
+
+impl WsMessage {
+    pub(crate) fn into_message(self) -> Message {
+        match self {
+            WsMessage::Raw(message) => message,
+            WsMessage::Command(tmq_send) => tmq_send.to_msg(),
+        }
     }
 }
 

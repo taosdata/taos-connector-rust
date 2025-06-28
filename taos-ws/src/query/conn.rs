@@ -24,7 +24,7 @@ use tracing::Instrument;
 
 use crate::query::{
     asyn::{WsQuerySender, WS_ERROR_NO},
-    messages::{MsgId, ReqId, WsMessage, WsRecv, WsRecvData},
+    messages::{MessageId, ReqId, WsMessage, WsRecv, WsRecvData},
     Error,
 };
 use crate::{EndpointType, TaosBuilder};
@@ -36,8 +36,8 @@ type WsStreamSender = SplitSink<WsStream, Message>;
 #[derive(Default, Clone)]
 struct MessageCache {
     next_msg_id: Arc<AtomicU64>,
-    req_to_msg: Arc<scc::HashMap<ReqId, MsgId>>,
-    messages: Arc<scc::HashMap<MsgId, Message>>,
+    req_to_msg: Arc<scc::HashMap<ReqId, MessageId>>,
+    messages: Arc<scc::HashMap<MessageId, Message>>,
 }
 
 impl MessageCache {
