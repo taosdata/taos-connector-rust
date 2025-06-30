@@ -304,6 +304,13 @@ impl WsMessage {
             WsMessage::Command(tmq_send) => tmq_send.to_msg(),
         }
     }
+
+    pub(crate) fn should_cache(&self) -> bool {
+        match self {
+            WsMessage::Raw(_) => false,
+            WsMessage::Command(tmq_send) => matches!(tmq_send, TmqSend::Poll { .. }),
+        }
+    }
 }
 
 #[test]

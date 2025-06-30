@@ -818,8 +818,6 @@ pub(crate) struct QueryMetrics {
     pub(crate) time_cost_in_flume: Duration,
 }
 
-type BlockFuture = Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>;
-
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("{0}")]
@@ -868,7 +866,7 @@ pub enum WS_ERROR_NO {
 }
 
 impl WS_ERROR_NO {
-    pub fn as_code(&self) -> Code {
+    pub const fn as_code(&self) -> Code {
         Code::new(*self as _)
     }
 }
@@ -911,6 +909,8 @@ impl From<Error> for RawError {
         }
     }
 }
+
+type BlockFuture = Pin<Box<dyn Future<Output = RawResult<Option<RawBlock>>> + Send>>;
 
 pub struct ResultSet {
     pub(crate) sender: WsQuerySender,

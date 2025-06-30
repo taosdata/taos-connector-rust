@@ -8,18 +8,11 @@ use std::{
 };
 
 use flume::Receiver;
-use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use taos_query::prelude::RawError;
+use tokio::sync::{mpsc, watch};
 use tokio::time;
-use tokio::{
-    net::TcpStream,
-    sync::{mpsc, watch},
-};
-use tokio_tungstenite::{
-    tungstenite::{Error as WsError, Message},
-    MaybeTlsStream, WebSocketStream,
-};
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tracing::Instrument;
 
 use crate::query::{
@@ -27,11 +20,7 @@ use crate::query::{
     messages::{MessageId, ReqId, WsMessage, WsRecv, WsRecvData},
     Error,
 };
-use crate::{EndpointType, TaosBuilder};
-
-type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
-type WsStreamReader = SplitStream<WsStream>;
-type WsStreamSender = SplitSink<WsStream, Message>;
+use crate::{EndpointType, TaosBuilder, WsStream, WsStreamReader, WsStreamSender};
 
 #[derive(Default, Clone)]
 struct MessageCache {
@@ -470,8 +459,8 @@ fn parse_binary_message(payload: Vec<u8>, query_sender: WsQuerySender, cache: Me
 
 fn is_disconnect_error(err: &Error) -> bool {
     match err {
-        Error::TungsteniteError(ws_err) => matches!(
-            ws_err,
+        Error::TungsteniteError(err) => matches!(
+            err,
             WsError::ConnectionClosed
                 | WsError::AlreadyClosed
                 | WsError::Io(_)

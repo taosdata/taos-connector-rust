@@ -1,7 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::fmt::Debug;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,12 +18,12 @@ use taos_query::tmq::{
 use taos_query::util::{generate_req_id, AsyncInlinable, Edition, InlinableRead};
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, RawResult, TBuilder};
 use thiserror::Error;
-use tokio::sync::{mpsc, oneshot, watch, Mutex};
+use tokio::sync::{mpsc, oneshot, watch, Mutex, RwLock};
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tracing::Instrument;
 
-use crate::query::asyn::is_support_binary_sql;
+use crate::query::asyn::WS_ERROR_NO;
 use crate::query::messages::WsConnReq;
 use crate::{EndpointType, TaosBuilder};
 
@@ -52,7 +52,7 @@ impl WsTmqSender {
         let (data_tx, mut data_rx) = mpsc::channel(1);
         self.queries.insert(message.req_id(), data_tx);
 
-        let timeout = Duration::from_millis(5000);
+        let timeout = Duration::from_secs(5);
 
         tokio::time::timeout(timeout, self.sender.send_async(WsMessage::Command(message)))
             .await
@@ -578,7 +578,7 @@ impl Consumer {
             self.message_id.store(message_id, Ordering::Relaxed);
 
             let message =
-                WsMessageBase::new(self.support_fetch_raw, self.sender.clone(), message_id);
+                WsMessageBase::new(self.support_fetch_raw(), self.sender.clone(), message_id);
 
             return match message_type {
                 MessageType::Meta => Some((offset, MessageSet::Meta(Meta(message)))),
@@ -588,7 +588,7 @@ impl Consumer {
                     MessageSet::MetaData(
                         Meta(message),
                         Data(WsMessageBase::new(
-                            self.support_fetch_raw,
+                            self.support_fetch_raw(),
                             self.sender.clone(),
                             message_id,
                         )),
@@ -599,6 +599,18 @@ impl Consumer {
         }
 
         unreachable!()
+    }
+
+    fn support_fetch_raw(&self) -> bool {
+        self.support_fetch_raw.load(Ordering::Relaxed)
+    }
+
+    async fn topics(&self) -> Vec<String> {
+        self.topics.read().await.clone()
+    }
+
+    async fn with_topics(&self, topics: Vec<String>) {
+        *self.topics.write().await = topics;
     }
 }
 
@@ -612,11 +624,13 @@ impl AsAsyncConsumer for Consumer {
         &mut self,
         topics: I,
     ) -> RawResult<()> {
-        self.topics = topics.into_iter().map(Into::into).collect_vec();
+        let topics = topics.into_iter().map(Into::into).collect_vec();
+        self.with_topics(topics.clone()).await;
+
         let action = TmqSend::Subscribe {
             req_id: self.sender.req_id(),
             req: self.tmq_conf.clone().disable_auto_commit(),
-            topics: self.topics.clone(),
+            topics: topics.clone(),
             conn: self.conn.clone(),
         };
         if let Err(err) = self.sender.send_recv(action).await {
@@ -635,7 +649,7 @@ impl AsAsyncConsumer for Consumer {
                         .clone()
                         .disable_batch_meta()
                         .disable_auto_commit(),
-                    topics: self.topics.clone(),
+                    topics: topics.clone(),
                     conn: self.conn.clone(),
                 };
                 self.sender.send_recv(action).await?;
@@ -654,7 +668,7 @@ impl AsAsyncConsumer for Consumer {
                 })
                 .collect_vec();
 
-            let topic_name = &self.topics[0];
+            let topic_name = &topics[0];
 
             for offset in offsets {
                 let vgroup_id = offset[0] as i32;
@@ -748,13 +762,14 @@ impl AsAsyncConsumer for Consumer {
     }
 
     async fn list_topics(&self) -> RawResult<Vec<String>> {
-        Ok(self.topics.clone())
+        Ok(self.topics().await)
     }
 
     async fn assignments(&self) -> Option<Vec<(String, Vec<Assignment>)>> {
-        tracing::trace!("topics: {:?}", self.topics);
+        let topics = self.topics().await;
+        tracing::trace!("topics: {topics:?}");
         let mut res = Vec::new();
-        for topic in self.topics.clone() {
+        for topic in topics {
             let assignments = self.topic_assignment(&topic).await;
             res.push((topic, assignments));
         }
@@ -1093,6 +1108,11 @@ impl TmqBuilder {
             timeout: Timeout::Duration(Duration::MAX),
         };
 
+        let topics: Arc<RwLock<Vec<String>>> = Arc::default();
+
+        let support_fetch_raw = conn::is_fetch_raw_supported(&version);
+        let support_fetch_raw = Arc::new(AtomicBool::new(support_fetch_raw));
+
         tokio::spawn(
             conn::run(
                 self.info.clone(),
@@ -1101,12 +1121,12 @@ impl TmqBuilder {
                 poll_cache_tx.clone(),
                 message_rx,
                 close_rx,
+                self.conf.clone(),
+                topics.clone(),
+                support_fetch_raw.clone(),
             )
             .instrument(span),
         );
-
-        let is_v3 = !version.starts_with('2');
-        let is_support_binary_sql = is_v3 && is_support_binary_sql(&version);
 
         let auto_commit_interval_ms = self
             .conf
@@ -1121,8 +1141,8 @@ impl TmqBuilder {
             sender: tmq_sender,
             close_signal: close_tx,
             timeout: self.timeout,
-            topics: Vec::new(),
-            support_fetch_raw: is_support_binary_sql,
+            topics,
+            support_fetch_raw,
             auto_commit: self.conf.auto_commit == "true",
             auto_commit_interval_ms,
             auto_commit_offset: (None, Instant::now()),
@@ -1142,8 +1162,8 @@ pub struct Consumer {
     sender: WsTmqSender,
     close_signal: watch::Sender<bool>,
     timeout: Timeout,
-    topics: Vec<String>,
-    support_fetch_raw: bool,
+    topics: Arc<RwLock<Vec<String>>>,
+    support_fetch_raw: Arc<AtomicBool>,
     auto_commit: bool,
     auto_commit_interval_ms: Option<u64>,
     auto_commit_offset: (Option<Offset>, Instant),
@@ -1221,16 +1241,17 @@ pub enum WsTmqError {
 }
 
 unsafe impl Send for WsTmqError {}
-
 unsafe impl Sync for WsTmqError {}
 
 impl WsTmqError {
     pub const fn errno(&self) -> Code {
         match self {
-            WsTmqError::TaosError(error) => error.code(),
+            WsTmqError::TaosError(err) => err.code(),
+            WsTmqError::WsError(_) => WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code(),
             _ => Code::FAILED,
         }
     }
+
     pub fn errstr(&self) -> String {
         match self {
             WsTmqError::TaosError(error) => error.message(),

@@ -1,3 +1,7 @@
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::stream::{SplitSink, SplitStream};
@@ -5,103 +9,162 @@ use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
 use taos_query::prelude::RawError;
 
+use taos_query::RawResult;
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, Mutex, RwLock};
 use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::Instrument;
 
-use crate::consumer::messages::{TmqRecv, TmqRecvData, WsMessage};
+use crate::consumer::messages::{TmqInit, TmqRecv, TmqRecvData, TmqSend, WsMessage};
 use crate::consumer::{WsTmqError, WsTmqSender};
-use crate::query::asyn::WS_ERROR_NO;
-use crate::TaosBuilder;
+use crate::query::asyn::{is_support_binary_sql, WS_ERROR_NO};
+use crate::query::messages::ToMessage;
+use crate::{EndpointType, TaosBuilder};
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsStreamReader = SplitStream<WsStream>;
 type WsStreamSender = SplitSink<WsStream, Message>;
 
+#[derive(Debug, Clone)]
+struct MessageCache {
+    message: Arc<Mutex<Option<Message>>>,
+}
+
+impl MessageCache {
+    fn new() -> Self {
+        Self {
+            message: Arc::default(),
+        }
+    }
+
+    async fn insert(&self, message: Message) {
+        *self.message.lock().await = Some(message);
+    }
+
+    async fn remove(&self) {
+        *self.message.lock().await = None;
+    }
+
+    async fn message(&self) -> Option<Message> {
+        self.message.lock().await.clone()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn run(
-    _builder: TaosBuilder,
-    ws_stream: WsStream,
+    builder: TaosBuilder,
+    mut ws_stream: WsStream,
     tmq_sender: WsTmqSender,
     poll_cache_sender: mpsc::Sender<Option<TmqRecvData>>,
     message_reader: flume::Receiver<WsMessage>,
     mut close_reader: watch::Receiver<bool>,
+    tmq_conf: TmqInit,
+    topics: Arc<RwLock<Vec<String>>>,
+    support_fetch_raw: Arc<AtomicBool>,
 ) {
-    // TODO: cache poll request
+    let cache = MessageCache::new();
 
-    // loop {
-    let (ws_stream_tx, ws_stream_rx) = ws_stream.split();
-    let (err_tx, mut err_rx) = mpsc::channel(2);
-    let (close_tx, close_rx) = watch::channel(false);
+    loop {
+        let (ws_stream_tx, ws_stream_rx) = ws_stream.split();
+        let (err_tx, mut err_rx) = mpsc::channel(2);
+        let (close_tx, close_rx) = watch::channel(false);
 
-    let send_handle = tokio::spawn(
-        send_messages(
-            ws_stream_tx,
-            message_reader.clone(),
-            close_rx.clone(),
-            err_tx.clone(),
-        )
-        .in_current_span(),
-    );
+        let send_handle = tokio::spawn(
+            send_messages(
+                ws_stream_tx,
+                message_reader.clone(),
+                close_rx.clone(),
+                err_tx.clone(),
+                cache.clone(),
+            )
+            .in_current_span(),
+        );
 
-    let recv_handle = tokio::spawn(
-        read_messages(
-            ws_stream_rx,
-            tmq_sender.clone(),
-            poll_cache_sender.clone(),
-            close_rx,
-            err_tx,
-        )
-        .in_current_span(),
-    );
+        let recv_handle = tokio::spawn(
+            read_messages(
+                ws_stream_rx,
+                tmq_sender.clone(),
+                poll_cache_sender.clone(),
+                close_rx,
+                err_tx,
+                cache.clone(),
+            )
+            .in_current_span(),
+        );
 
-    tokio::select! {
-        err = err_rx.recv() => {
-            if let Some(err) = err {
-                tracing::error!("WebSocket error: {err}");
+        tokio::select! {
+            err = err_rx.recv() => {
+                if let Some(err) = err {
+                    tracing::error!("WebSocket error: {err}");
+                    let _ = close_tx.send(true);
+                    if !is_disconnect_error(&err) {
+                        tracing::error!("non-disconnect error detected, cleaning up all pending queries");
+                        // cleanup_after_disconnect(agent.clone());
+                        return;
+                    }
+                    tracing::warn!("disconnect error detected, attempting to reconnect");
+                }
+            }
+            _ = close_reader.changed() => {
+                tracing::info!("WebSocket received close signal");
                 let _ = close_tx.send(true);
-                // if !is_disconnect_error(&err) {
-                //     tracing::error!("non-disconnect error detected, cleaning up all pending queries");
-                //     cleanup_after_disconnect(agent.clone());
-                //     return;
-                // }
-                // tracing::warn!("disconnect error detected, attempting to reconnect");
+                return;
             }
         }
-        _ = close_reader.changed() => {
-            tracing::info!("WebSocket received close signal");
-            let _ = close_tx.send(true);
-            return;
+
+        if let Err(err) = send_handle.await {
+            tracing::error!("send messages task failed: {err:?}");
         }
+        if let Err(err) = recv_handle.await {
+            tracing::error!("read messages task failed: {err:?}");
+        }
+
+        tracing::warn!("WebSocket disconnected, starting to reconnect");
+
+        if cache.message().await.is_some() {
+            match builder
+                .connect_with_cb(
+                    EndpointType::Tmq,
+                    subscribe(
+                        builder.clone(),
+                        tmq_sender.clone(),
+                        tmq_conf.clone(),
+                        topics.clone(),
+                    ),
+                )
+                .await
+            {
+                Ok((ws, ver)) => {
+                    ws_stream = ws;
+                    support_fetch_raw.store(is_fetch_raw_supported(&ver), Ordering::Relaxed);
+                }
+                Err(err) => {
+                    tracing::error!("WebSocket reconnection failed: {err}");
+                    // cleanup_after_disconnect(agent.clone());
+                    return;
+                }
+            };
+        } else {
+            match builder.connect(EndpointType::Tmq).await {
+                Ok((ws, ver)) => {
+                    ws_stream = ws;
+                    support_fetch_raw.store(is_fetch_raw_supported(&ver), Ordering::Relaxed);
+                }
+                Err(err) => {
+                    tracing::error!("WebSocket reconnection failed: {err}");
+                    // cleanup_after_disconnect(agent.clone());
+                    return;
+                }
+            };
+        };
+
+        tracing::info!("WebSocket reconnected successfully");
+
+        // cleanup_after_reconnect(agent.clone(), cache.clone());
     }
-
-    if let Err(err) = send_handle.await {
-        tracing::error!("send messages task failed: {err:?}");
-    }
-    if let Err(err) = recv_handle.await {
-        tracing::error!("read messages task failed: {err:?}");
-    }
-
-    tracing::warn!("WebSocket disconnected, starting to reconnect");
-
-    // match builder.connect(EndpointType::Ws).await {
-    //     Ok((ws, ver)) => {
-    //         ws_stream = ws;
-    //         agent.version_info.update(ver).await;
-    //     }
-    //     Err(err) => {
-    //         tracing::error!("WebSocket reconnection failed: {err}");
-    //         cleanup_after_disconnect(agent.clone());
-    //         return;
-    //     }
-    // };
-
-    // tracing::info!("WebSocket reconnected successfully");
-
-    // cleanup_after_reconnect(agent.clone(), cache.clone());
-    // }
 }
 
 async fn send_messages(
@@ -109,8 +172,18 @@ async fn send_messages(
     message_reader: flume::Receiver<WsMessage>,
     mut close_reader: watch::Receiver<bool>,
     err_sender: mpsc::Sender<WsTmqError>,
+    cache: MessageCache,
 ) {
+    tracing::trace!("start sending messages to WebSocket stream");
+
     let mut interval = time::interval(Duration::from_secs(29));
+
+    if let Some(message) = cache.message().await {
+        if let Err(err) = ws_stream_sender.send(message).await {
+            tracing::error!("failed to send poll message: {err}");
+            let _ = err_sender.send(err.into()).await;
+        }
+    }
 
     loop {
         tokio::select! {
@@ -138,12 +211,11 @@ async fn send_messages(
             message = message_reader.recv_async() => {
                 match message {
                     Ok(message) => {
-                        // let req_id = message.req_id();
-                        // let should_cache = message.should_cache();
+                        let should_cache = message.should_cache();
                         let message = message.into_message();
-                        // if should_cache {
-                        //     cache.insert(req_id, message.clone());
-                        // }
+                        if should_cache {
+                            cache.insert(message.clone()).await;
+                        }
                         if let Err(err) = ws_stream_sender.send(message).await {
                             tracing::error!("WebSocket sender error: {err:?}");
                             let _ = err_sender.send(err.into()).await;
@@ -199,9 +271,10 @@ async fn send_ping_message(ws_stream_sender: &mut WsStreamSender) -> Result<(), 
 async fn read_messages(
     mut ws_stream_reader: WsStreamReader,
     tmq_sender: WsTmqSender,
-    cache_sender: mpsc::Sender<Option<TmqRecvData>>,
+    poll_cache_sender: mpsc::Sender<Option<TmqRecvData>>,
     mut close_reader: watch::Receiver<bool>,
     _err_sender: mpsc::Sender<WsTmqError>,
+    cache: MessageCache,
 ) {
     let instant = Instant::now();
     let agent = tmq_sender.queries.clone();
@@ -235,6 +308,7 @@ async fn read_messages(
                                     }
                                 }
                                 TmqRecvData::Poll(_) => {
+                                    cache.remove().await;
                                     let data = match agent.remove(&req_id) {
                                         Some((_, sender)) => {
                                             #[cfg(test)]
@@ -265,7 +339,7 @@ async fn read_messages(
                                     };
 
                                     tracing::trace!("poll end: {data:?}");
-                                    if let Err(err) = cache_sender.send(data).await {
+                                    if let Err(err) = poll_cache_sender.send(data).await {
                                         tracing::error!("poll end notification failed, break the connection, err: {err:?}");
                                         let keys = agent.iter().map(|r| *r.key()).collect_vec();
                                         for key in keys {
@@ -451,4 +525,80 @@ async fn read_messages(
         }
     }
     tracing::trace!("Consuming done in {:?}", instant.elapsed());
+}
+
+fn subscribe(
+    builder: TaosBuilder,
+    tmq_sender: WsTmqSender,
+    tmq_conf: TmqInit,
+    topics: Arc<RwLock<Vec<String>>>,
+) -> impl for<'a> Fn(&'a mut WsStream) -> Pin<Box<dyn Future<Output = RawResult<()>> + Send + 'a>> + Clone
+{
+    move |ws_stream| {
+        let builder = builder.clone();
+        let tmq_sender = tmq_sender.clone();
+        let tmq_conf = tmq_conf.clone();
+        let topics = topics.clone();
+
+        Box::pin(async move {
+            let topics = topics.read().await.clone();
+            let req = TmqSend::Subscribe {
+                req_id: tmq_sender.req_id(),
+                req: tmq_conf.clone().disable_auto_commit(),
+                topics: topics.clone(),
+                conn: builder.build_conn_request(),
+            };
+
+            let timeout = Duration::from_secs(8);
+
+            // TODO: handle error
+            let _ = time::timeout(timeout, ws_stream.send(req.to_msg()))
+                .await
+                .map_err(|_| {
+                    RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
+                        .context("timeout sending conn request")
+                })?;
+
+            if let Err(err) = tmq_sender.send_recv(req).await {
+                tracing::error!("subscribe error: {err:?}");
+                if tmq_conf.enable_batch_meta.is_none() {
+                    return Err(err);
+                }
+
+                let code: i32 = err.code().into();
+                if code & 0xFFFF == 0xFFFE {
+                    let action = TmqSend::Subscribe {
+                        req_id: tmq_sender.req_id(),
+                        req: tmq_conf.clone().disable_batch_meta().disable_auto_commit(),
+                        topics,
+                        conn: builder.build_conn_request(),
+                    };
+                    tmq_sender.send_recv(action).await?;
+                } else {
+                    return Err(err);
+                }
+            }
+
+            Ok(())
+        })
+    }
+}
+
+#[inline]
+pub(super) fn is_fetch_raw_supported(version: &str) -> bool {
+    !version.starts_with('2') && is_support_binary_sql(version)
+}
+
+fn is_disconnect_error(err: &WsTmqError) -> bool {
+    match err {
+        WsTmqError::WsError(err) => matches!(
+            err,
+            WsError::ConnectionClosed
+                | WsError::AlreadyClosed
+                | WsError::Io(_)
+                | WsError::Tls(_)
+                | WsError::Protocol(_)
+        ),
+        _ => false,
+    }
 }
