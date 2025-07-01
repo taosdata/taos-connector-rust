@@ -4,35 +4,30 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use taos_query::prelude::{Code, RawError};
 
 use taos_query::util::generate_req_id;
 use taos_query::RawResult;
-use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch, Mutex, RwLock};
 use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::tungstenite::Error as WsError;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::Instrument;
 
-use crate::consumer::messages::{TmqInit, TmqRecv, TmqRecvData, TmqSend, WsMessage};
+use crate::consumer::messages::{ReqId, TmqInit, TmqRecv, TmqRecvData, TmqSend, WsMessage};
 use crate::consumer::{WsTmqAgent, WsTmqError, WsTmqSender};
 use crate::query::asyn::{is_support_binary_sql, WS_ERROR_NO};
 use crate::query::messages::ToMessage;
 use crate::query::WsConnReq;
-use crate::{handle_disconnect_error, EndpointType, TaosBuilder};
-
-type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
-type WsStreamReader = SplitStream<WsStream>;
-type WsStreamSender = SplitSink<WsStream, Message>;
+use crate::{
+    handle_disconnect_error, EndpointType, TaosBuilder, WsStream, WsStreamReader, WsStreamSender,
+};
 
 #[derive(Debug, Clone)]
 struct MessageCache {
-    message: Arc<Mutex<Option<Message>>>,
+    message: Arc<Mutex<Option<(ReqId, Message)>>>,
 }
 
 impl MessageCache {
@@ -42,16 +37,22 @@ impl MessageCache {
         }
     }
 
-    async fn insert(&self, message: Message) {
-        *self.message.lock().await = Some(message);
+    async fn insert(&self, req_id: ReqId, message: Message) {
+        *self.message.lock().await = Some((req_id, message));
     }
 
     async fn remove(&self) {
         *self.message.lock().await = None;
     }
 
+    async fn req_id(&self) -> Option<ReqId> {
+        let guard = self.message.lock().await;
+        guard.as_ref().map(|(req_id, _)| *req_id)
+    }
+
     async fn message(&self) -> Option<Message> {
-        self.message.lock().await.clone()
+        let guard = self.message.lock().await;
+        guard.as_ref().map(|(_, msg)| msg.clone())
     }
 }
 
@@ -104,7 +105,7 @@ pub(super) async fn run(
                     let _ = close_tx.send(true);
                     if !is_disconnect_error(&err) {
                         tracing::error!("non-disconnect error detected, cleaning up all pending queries");
-                        // cleanup_after_disconnect(agent.clone());
+                        cleanup_after_disconnect(tmq_sender.queries.clone()).await;
                         return;
                     }
                     tracing::warn!("disconnect error detected, attempting to reconnect");
@@ -144,14 +145,14 @@ pub(super) async fn run(
             }
             Err(err) => {
                 tracing::error!("WebSocket reconnection failed: {err}");
-                // cleanup_after_disconnect(agent.clone());
+                cleanup_after_disconnect(tmq_sender.queries.clone()).await;
                 return;
             }
         }
 
         tracing::info!("WebSocket reconnected successfully");
 
-        // cleanup_after_reconnect(agent.clone(), cache.clone());
+        cleanup_after_reconnect(tmq_sender.queries.clone(), cache.clone()).await;
     }
 }
 
@@ -164,14 +165,14 @@ async fn send_messages(
 ) {
     tracing::trace!("start sending messages to WebSocket stream");
 
-    let mut interval = time::interval(Duration::from_secs(29));
-
     if let Some(message) = cache.message().await {
         if let Err(err) = ws_stream_sender.send(message).await {
             tracing::error!("failed to send poll message: {err}");
             let _ = err_sender.send(err.into()).await;
         }
     }
+
+    let mut interval = time::interval(Duration::from_secs(29));
 
     loop {
         tokio::select! {
@@ -181,28 +182,20 @@ async fn send_messages(
                     let _ = err_sender.send(err).await;
                     break;
                 }
-
-                // tracing::trace!("Check websocket message sender alive");
-                // if let Err(err) = ws_stream_sender.send(Message::Ping(PING.to_vec())).await {
-                //     tracing::trace!("sending ping message to {sending_url} error: {err:?}");
-                //     let keys = agent.iter().map(|r| *r.key()).collect_vec();
-                //     for k in keys {
-                //         if let Some((_, sender)) = agent.remove(&k) {
-                //             let _ = sender.send(Err(RawError::new(
-                //                 WS_ERROR_NO::CONN_CLOSED.as_code(),
-                //                 format!("WebSocket internal error: {err}"),
-                //             ))).await;
-                //         }
-                //     }
-                // }
+            }
+            _ = close_reader.changed() => {
+                tracing::info!("WebSocket sender received close signal");
+                send_close_message(&mut ws_stream_sender).await;
+                break;
             }
             message = message_reader.recv_async() => {
                 match message {
                     Ok(message) => {
+                        let req_id = message.req_id();
                         let should_cache = message.should_cache();
                         let message = message.into_message();
                         if should_cache {
-                            cache.insert(message.clone()).await;
+                            cache.insert(req_id, message.clone()).await;
                         }
                         if let Err(err) = ws_stream_sender.send(message).await {
                             tracing::error!("WebSocket sender error: {err:?}");
@@ -216,32 +209,6 @@ async fn send_messages(
                         break;
                     }
                 }
-
-                // if message.is_close() {
-                //     let _ = ws_stream_sender.send(message).await;
-                //     let _ = ws_stream_sender.close().await;
-                //     break;
-                // }
-                // tracing::trace!("send message {message:?}");
-                // if let Err(err) = ws_stream_sender.send(message).await {
-                //     tracing::trace!("sending message to {sending_url} error: {err:?}");
-                //     let keys = agent.iter().map(|r| *r.key()).collect_vec();
-                //     for k in keys {
-                //         if let Some((_, sender)) = agent.remove(&k) {
-                //             let _ = sender.send(Err(RawError::new(
-                //                 WS_ERROR_NO::CONN_CLOSED.as_code(),
-                //                 format!("WebSocket internal error: {err}",
-                //             )))).await;
-                //         }
-                //     }
-                // }
-                // tracing::trace!("send message done");
-            }
-            _ = close_reader.changed() => {
-                let _= ws_stream_sender.send(Message::Close(None)).await;
-                let _ = ws_stream_sender.close().await;
-                tracing::trace!("close tmq sender");
-                break;
             }
         }
     }
@@ -254,6 +221,15 @@ async fn send_ping_message(ws_stream_sender: &mut WsStreamSender) -> Result<(), 
         .map_err(Into::<WsTmqError>::into)?;
 
     Ok(())
+}
+
+async fn send_close_message(ws_stream_sender: &mut WsStreamSender) {
+    if let Err(err) = ws_stream_sender.send(Message::Close(None)).await {
+        tracing::error!("failed to send close message: {err:?}");
+    }
+    if let Err(err) = ws_stream_sender.close().await {
+        tracing::error!("failed to close WebSocket stream: {err:?}");
+    }
 }
 
 async fn read_messages(
@@ -621,5 +597,21 @@ async fn cleanup_after_disconnect(queries: WsTmqAgent) {
                 )))
                 .await;
         }
+    }
+}
+
+async fn cleanup_after_reconnect(queries: WsTmqAgent, cache: MessageCache) {
+    let req_id = cache.req_id().await;
+    if let Some(req_id) = req_id {
+        let remove_ids: Vec<_> = queries
+            .iter()
+            .map(|r| *r.key())
+            .filter(|&id| id != req_id)
+            .collect();
+        for id in remove_ids {
+            queries.remove(&id);
+        }
+    } else {
+        queries.clear();
     }
 }

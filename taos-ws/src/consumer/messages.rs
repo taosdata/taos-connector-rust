@@ -9,6 +9,7 @@ use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::common::{Field, Precision, Ty};
 use taos_query::prelude::RawError;
 use taos_query::tmq::{Assignment, VGroupId};
+use taos_query::util::generate_req_id;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::query::messages::{ToMessage, WsConnReq};
@@ -298,6 +299,13 @@ pub enum WsMessage {
 }
 
 impl WsMessage {
+    pub(crate) fn req_id(&self) -> ReqId {
+        match self {
+            WsMessage::Raw(_) => generate_req_id(),
+            WsMessage::Command(tmq_send) => tmq_send.req_id(),
+        }
+    }
+
     pub(crate) fn into_message(self) -> Message {
         match self {
             WsMessage::Raw(message) => message,

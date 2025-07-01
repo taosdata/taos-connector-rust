@@ -110,7 +110,7 @@ struct MessageCache {
 
 impl MessageCache {
     fn new() -> Self {
-        MessageCache::default()
+        Self::default()
     }
 
     fn insert(&self, req_id: ReqId, message: Message) {
@@ -128,19 +128,12 @@ impl MessageCache {
     }
 
     fn messages(&self) -> Vec<Message> {
-        if self.messages.is_empty() {
-            return Vec::new();
-        }
-
-        let mut msg_ids = Vec::with_capacity(self.messages.len());
-        self.messages.scan(|msg_id, _| {
-            msg_ids.push(*msg_id);
+        let mut pairs = Vec::with_capacity(self.messages.len());
+        self.messages.scan(|msg_id, msg| {
+            pairs.push((*msg_id, msg.clone()));
         });
-        msg_ids.sort_unstable();
-        msg_ids
-            .into_iter()
-            .filter_map(|msg_id| self.messages.get(&msg_id).map(|msg| msg.clone()))
-            .collect()
+        pairs.sort_unstable_by_key(|(msg_id, _)| *msg_id);
+        pairs.into_iter().map(|(_, msg)| msg).collect()
     }
 }
 
