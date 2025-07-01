@@ -2,10 +2,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures::stream::{SplitSink, SplitStream};
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use taos_query::prelude::{Code, RawError};
 
@@ -20,7 +20,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::Instrument;
 
 use crate::consumer::messages::{TmqInit, TmqRecv, TmqRecvData, TmqSend, WsMessage};
-use crate::consumer::{WsTmqError, WsTmqSender};
+use crate::consumer::{WsTmqAgent, WsTmqError, WsTmqSender};
 use crate::query::asyn::{is_support_binary_sql, WS_ERROR_NO};
 use crate::query::messages::ToMessage;
 use crate::query::WsConnReq;
@@ -261,258 +261,230 @@ async fn read_messages(
     tmq_sender: WsTmqSender,
     poll_cache_sender: mpsc::Sender<Option<TmqRecvData>>,
     mut close_reader: watch::Receiver<bool>,
-    _err_sender: mpsc::Sender<WsTmqError>,
+    err_sender: mpsc::Sender<WsTmqError>,
     cache: MessageCache,
 ) {
-    let instant = Instant::now();
-    let agent = tmq_sender.queries.clone();
+    tracing::trace!("start reading messages from WebSocket stream");
 
-    'ws: loop {
+    let (message_tx, message_rx) = mpsc::channel(64);
+
+    let message_handle = tokio::spawn(
+        handle_messages(
+            message_rx,
+            tmq_sender.clone(),
+            poll_cache_sender,
+            err_sender.clone(),
+            cache,
+        )
+        .in_current_span(),
+    );
+
+    let mut closed_normally = false;
+
+    loop {
         tokio::select! {
-            Some(message) = ws_stream_reader.next() => {
-                match message {
-                    Ok(message) => match message {
-                        Message::Text(text) => {
-                            tracing::trace!("json response: {}", text);
-                            let v: TmqRecv = serde_json::from_str(&text).expect(&text);
-                            let (req_id, recv, ok) = v.ok();
-                            match &recv {
-                                TmqRecvData::Subscribe => {
-                                    tracing::trace!("subscribe with: {:?}", req_id);
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        // We don't care about the result of the sender for subscribe
-                                        let _ = sender.send(ok.map(|_|recv)).await;
-                                    } else {
-                                        tracing::warn!("subscribe message received but no receiver alive");
-                                    }
-                                }
-                                TmqRecvData::Unsubscribe => {
-                                    tracing::trace!("unsubscribe with: {:?} success", req_id);
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        // We don't care about the result of the sender for unsubscribe
-                                        let _ = sender.send(ok.map(|_|recv)).await;
-                                    } else {
-                                        tracing::warn!("unsubscribe message received but no receiver alive");
-                                    }
-                                }
-                                TmqRecvData::Poll(_) => {
-                                    cache.remove().await;
-                                    let data = match agent.remove(&req_id) {
-                                        Some((_, sender)) => {
-                                            #[cfg(test)]
-                                            #[allow(static_mut_refs)]
-                                            {
-                                                if std::env::var("TEST_POLLING_LOST").is_ok() {
-                                                    static mut POLLING_LOST_IDX: u64 = 0;
-                                                    unsafe {
-                                                        POLLING_LOST_IDX += 1;
-                                                        tokio::time::sleep(Duration::from_millis(500)).await;
-                                                        tracing::warn!(lost = POLLING_LOST_IDX, "polling lost");
-                                                    }
-                                                }
-                                            }
-
-                                            match sender.send(ok.map(|_| recv)).await {
-                                                Ok(_) => None,
-                                                Err(err) => match err.0 {
-                                                    Ok(data) => Some(data),
-                                                    Err(err) => {
-                                                        tracing::warn!("poll message received, err: {err:?}");
-                                                        None
-                                                    }
-                                                },
-                                            }
-                                        },
-                                        None => Some(recv),
-                                    };
-
-                                    tracing::trace!("poll end: {data:?}");
-                                    if let Err(err) = poll_cache_sender.send(data).await {
-                                        tracing::error!("poll end notification failed, break the connection, err: {err:?}");
-                                        let keys = agent.iter().map(|r| *r.key()).collect_vec();
-                                        for key in keys {
-                                            if let Some((_, sender)) = agent.remove(&key) {
-                                                let _ = sender
-                                                    .send(Err(RawError::new(
-                                                        WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                                        "Consumer messages lost",
-                                                    )))
-                                                    .await;
-                                            }
-                                        }
-                                        break 'ws;
-                                    }
-                                }
-                                TmqRecvData::FetchJsonMeta { data } => {
-                                    tracing::trace!("fetch json meta data: {:?}", data);
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        if let Err(err) = sender.send(ok.map(|_|recv)).await {
-                                            tracing::warn!(req_id, kind = "fetch_json_meta", "fetch json meta message received but no receiver alive: {:?}", err);
-                                        }
-                                    } else {
-                                        tracing::warn!("fetch json meta message received but no receiver alive");
-                                    }
-                                }
-                                TmqRecvData::FetchRaw { .. } => {
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        if let Err(err) = sender.send(ok.map(|_|recv)).await {
-                                            tracing::warn!(req_id, kind = "fetch_raw_meta", "fetch raw meta message received but no receiver alive: {:?}", err);
-                                        }
-                                    } else {
-                                        tracing::warn!("fetch raw message received but no receiver alive");
-                                    }
-                                }
-                                TmqRecvData::Commit => {
-                                    tracing::trace!("commit done: {:?}", recv);
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        // We don't care about the result of the sender for commit
-                                        let _ = sender.send(ok.map(|_|recv)).await;
-                                    } else {
-                                        tracing::warn!("commit message received but no receiver alive");
-                                    }
-                                }
-                                TmqRecvData::Fetch(fetch) => {
-                                    tracing::trace!("fetch done: {:?}", fetch);
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        // We don't care about the result of the sender for fetch
-                                        let _ = sender.send(ok.map(|_|recv)).await;
-                                    } else {
-                                        tracing::warn!("fetch message received but no receiver alive");
-                                    }
-                                }
-                                TmqRecvData::FetchBlock{ .. } => {
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        let _ = sender.send(Err(RawError::new(
-                                            WS_ERROR_NO::WEBSOCKET_ERROR.as_code(),
-                                            format!("WebSocket internal error: {:?}", &text)
-                                        ))).await;
-                                    }
-                                    break 'ws;
-                                }
-                                TmqRecvData::Assignment(assignment) => {
-                                    tracing::trace!("assignment done: {:?}", assignment);
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        let _ = sender.send(ok.map(|_|recv)).await;
-                                    } else {
-                                        tracing::warn!("assignment message received but no receiver alive");
-                                    }
-                                }
-                                TmqRecvData::Seek { timing } => {
-                                    tracing::trace!("seek done: req_id {:?} timing {:?}", &req_id, timing);
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        let _ = sender.send(ok.map(|_|recv)).await;
-                                    } else {
-                                        tracing::warn!("seek message received but no receiver alive");
-                                    }
-                                }
-                                TmqRecvData::Committed { committed } => {
-                                    tracing::trace!("committed done: {:?}", committed);
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        let _ = sender.send(ok.map(|_|recv)).await;
-                                    } else {
-                                        tracing::warn!("committed message received but no receiver alive");
-                                    }
-                                }
-                                TmqRecvData::Position { position } => {
-                                    tracing::trace!("position done: {:?}", position);
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        let _ = sender.send(ok.map(|_|recv)).await;
-                                    } else {
-                                        tracing::warn!("position message received but no receiver alive");
-                                    }
-                                }
-                                TmqRecvData::CommitOffset { timing } => {
-                                    tracing::trace!("commit offset done: {:?}", timing);
-                                    if let Some((_, sender)) = agent.remove(&req_id) {
-                                        let _ = sender.send(ok.map(|_|recv)).await;
-                                    } else {
-                                        tracing::warn!("commit offset message received but no receiver alive");
-                                    }
-                                }
-                                _ => unreachable!("unknown tmq response"),
-                            }
+            res = ws_stream_reader.try_next() => {
+                match res {
+                    Ok(Some(message)) => {
+                        if let Err(err) = message_tx.send(message).await {
+                            tracing::error!("failed to send message to handler, err: {err:?}");
+                            let _ = err_sender.send(WsError::ConnectionClosed.into()).await;
+                            break;
                         }
-                        Message::Binary(data) => {
-                            let block = data;
-                            let mut slice = block.as_slice();
-                            use taos_query::util::InlinableRead;
-
-                            let timing = slice.read_u64().unwrap();
-                            let part: Vec<u8>;
-                            if timing != u64::MAX{
-                                let offset = 16;
-                                part = slice[offset..].to_vec();
-                            } else {
-                                // new version
-                                let offset = 26;
-                                part = slice[offset..].to_vec();
-                                let _action = slice.read_u64().unwrap();
-                                let _version = slice.read_u16().unwrap();
-                                let _time = slice.read_u64().unwrap();
-                            }
-                            let req_id = slice.read_u64().unwrap();
-
-                            if let Some((_, sender)) = agent.remove(&req_id) {
-                                tracing::trace!("send data to fetches with id {}", req_id);
-                                if sender.send(Ok(TmqRecvData::Bytes(part.into()))).await.is_err() {
-                                    tracing::warn!(req_id, kind = "binary", "req_id {req_id} not detected, message might be lost");
-                                }
-                            } else {
-                                tracing::warn!("req_id {req_id} not detected, message might be lost");
-                            }
-                        }
-                        Message::Close(close) => {
-                            tracing::warn!("websocket connection is closed (unexpected?)");
-
-                            let keys = agent.iter().map(|r| *r.key()).collect_vec();
-                            let err = if let Some(close) = close {
-                                format!("WebSocket internal error: {close}")
-                            } else {
-                                "WebSocket internal error, connection is reset by server".to_string()
-                            };
-                            for k in keys {
-                                if let Some((_, sender)) = agent.remove(&k) {
-                                    let _ = sender.send(Err(RawError::new(WS_ERROR_NO::CONN_CLOSED.as_code(), err.clone()))).await;
-                                }
-                            }
-                            break 'ws;
-                        }
-                        Message::Ping(bytes) => {
-                            let _ = tmq_sender.sender.send_async(WsMessage::Raw(Message::Pong(bytes))).await;
-                        }
-                        Message::Pong(_bytes) => {
-                            // if bytes == PING {
-                            tracing::trace!("ping/pong handshake success");
-                            // } else {
-                            //     tracing::warn!("received (unexpected) pong message, do nothing");
-                            // }
-                        }
-                        Message::Frame(frame) => {
-                            tracing::warn!("received (unexpected) frame message, do nothing");
-                            tracing::trace!("* frame data: {frame:?}");
-                        }
-                    },
+                    }
+                    Ok(None) => {
+                        tracing::info!("WebSocket stream closed by peer");
+                        closed_normally = true;
+                        break;
+                    }
                     Err(err) => {
-                        let keys = agent.iter().map(|r| *r.key()).collect_vec();
-                        for k in keys {
-                            if let Some((_, sender)) = agent.remove(&k) {
-                                let _ = sender.send(Err(RawError::new(
-                                    WS_ERROR_NO::CONN_CLOSED.as_code(),
-                                    format!("WebSocket internal error: {err}")
-                                ))).await;
-                            }
-                        }
-                        break 'ws;
+                        tracing::error!("WebSocket reader error: {err:?}");
+                        let _ = err_sender.send(err.into()).await;
+                        break;
                     }
                 }
             }
             _ = close_reader.changed() => {
-                tracing::trace!("close reader task");
-                break 'ws;
+                tracing::info!("WebSocket reader received close signal");
+                closed_normally = true;
+                break;
             }
         }
     }
-    tracing::trace!("Consuming done in {:?}", instant.elapsed());
+
+    drop(message_tx);
+
+    if let Err(err) = message_handle.await {
+        tracing::error!("handle messages task failed: {err:?}");
+    }
+
+    if closed_normally {
+        cleanup_after_disconnect(tmq_sender.queries.clone()).await;
+    }
+
+    tracing::trace!("stop reading messages from WebSocket stream");
+}
+
+async fn handle_messages(
+    mut message_reader: mpsc::Receiver<Message>,
+    tmq_sender: WsTmqSender,
+    poll_cache_sender: mpsc::Sender<Option<TmqRecvData>>,
+    err_sender: mpsc::Sender<WsTmqError>,
+    cache: MessageCache,
+) {
+    while let Some(message) = message_reader.recv().await {
+        parse_message(
+            message,
+            tmq_sender.clone(),
+            poll_cache_sender.clone(),
+            err_sender.clone(),
+            cache.clone(),
+        )
+        .await;
+    }
+}
+
+async fn parse_message(
+    message: Message,
+    tmq_sender: WsTmqSender,
+    poll_cache_sender: mpsc::Sender<Option<TmqRecvData>>,
+    err_sender: mpsc::Sender<WsTmqError>,
+    cache: MessageCache,
+) {
+    match message {
+        Message::Text(text) => {
+            parse_text_message(
+                text,
+                tmq_sender.queries.clone(),
+                poll_cache_sender,
+                err_sender,
+                cache,
+            )
+            .await;
+        }
+        Message::Binary(data) => parse_binary_message(data, tmq_sender.queries.clone()).await,
+        Message::Ping(data) => {
+            tokio::spawn(async move {
+                let _ = tmq_sender
+                    .sender
+                    .send_async(WsMessage::Raw(Message::Pong(data)))
+                    .await;
+            });
+        }
+        Message::Close(_) => {
+            // taosAdapter should never send a close frame to the client.
+            // Therefore all close frames should be treated as errors.
+            tracing::warn!("received unexpected close message, this should not happen");
+        }
+        Message::Pong(_) => tracing::trace!("received pong message, do nothing"),
+        Message::Frame(_) => {
+            tracing::warn!("received unexpected frame message, do nothing");
+            tracing::trace!("frame message: {message:?}");
+        }
+    }
+}
+
+async fn parse_text_message(
+    text: String,
+    queries: WsTmqAgent,
+    poll_cache_sender: mpsc::Sender<Option<TmqRecvData>>,
+    err_sender: mpsc::Sender<WsTmqError>,
+    cache: MessageCache,
+) {
+    tracing::trace!("received text message, text: {text}");
+
+    let resp = match serde_json::from_str::<TmqRecv>(&text) {
+        Ok(resp) => resp,
+        Err(err) => {
+            tracing::warn!("failed to deserialize json text: {text}, err: {err:?}");
+            return;
+        }
+    };
+
+    let (req_id, data, ok) = resp.ok();
+
+    match &data {
+        TmqRecvData::FetchBlock { .. }
+        | TmqRecvData::Bytes(..)
+        | TmqRecvData::FetchRawData { .. }
+        | TmqRecvData::Block(..)
+        | TmqRecvData::Version { .. }
+        | TmqRecvData::Close => unreachable!("unexpected data type: {:?}", data),
+        TmqRecvData::Poll(_) => {
+            cache.remove().await;
+
+            let data = match queries.remove(&req_id) {
+                Some((_, sender)) => {
+                    #[cfg(test)]
+                    #[allow(static_mut_refs)]
+                    {
+                        if std::env::var("TEST_POLLING_LOST").is_ok() {
+                            static mut POLLING_LOST_IDX: u64 = 0;
+                            unsafe {
+                                POLLING_LOST_IDX += 1;
+                                tokio::time::sleep(Duration::from_millis(500)).await;
+                                tracing::warn!(lost = POLLING_LOST_IDX, "polling lost");
+                            }
+                        }
+                    }
+
+                    match sender.send(ok.map(|_| data)).await {
+                        Ok(_) => None,
+                        Err(err) => match err.0 {
+                            Ok(data) => Some(data),
+                            Err(err) => {
+                                tracing::warn!("poll message received, err: {err:?}");
+                                None
+                            }
+                        },
+                    }
+                }
+                None => Some(data),
+            };
+
+            tracing::trace!("poll end: {data:?}");
+            if let Err(err) = poll_cache_sender.send(data).await {
+                tracing::error!("poll end notification failed, break the connection, err: {err:?}");
+                let _ = err_sender.send(WsTmqError::ChannelClosedError).await;
+            }
+        }
+        _ => {
+            if let Some((_, sender)) = queries.remove(&req_id) {
+                if let Err(err) = sender.send(ok.map(|_| data)).await {
+                    tracing::warn!("failed to send data, req_id: {req_id}, err: {err:?}");
+                }
+            } else {
+                tracing::warn!("no sender found for req_id: {req_id}, the message may be lost");
+            }
+        }
+    }
+}
+
+async fn parse_binary_message(data: Vec<u8>, queries: WsTmqAgent) {
+    use taos_query::util::InlinableRead;
+
+    let mut slice = data.as_slice();
+
+    let timing = slice.read_u64().unwrap();
+    let bytes = if timing != u64::MAX {
+        slice[16..].to_vec()
+    } else {
+        let bytes = slice[26..].to_vec();
+        let _action = slice.read_u64().unwrap();
+        let _version = slice.read_u16().unwrap();
+        let _time = slice.read_u64().unwrap();
+        bytes
+    };
+
+    let req_id = slice.read_u64().unwrap();
+
+    if let Some((_, sender)) = queries.remove(&req_id) {
+        if let Err(err) = sender.send(Ok(TmqRecvData::Bytes(bytes.into()))).await {
+            tracing::warn!("failed to send data, req_id: {req_id}, err: {err:?}");
+        }
+    } else {
+        tracing::warn!("no sender found for req_id: {req_id}, the message may be lost");
+    }
 }
 
 fn send_subscribe_request(
@@ -534,30 +506,23 @@ fn send_subscribe_request(
                 conn: conn_req.clone(),
             };
 
-            let resp = send_recv(ws_stream, req.to_msg()).await?;
-            let (_, data, ok) = resp.ok();
+            if let Err(err) = send_recv(ws_stream, req.to_msg()).await {
+                tracing::error!("subscribe error: {err:?}");
+                if tmq_conf.enable_batch_meta.is_none() {
+                    return Err(err);
+                }
 
-            if let TmqRecvData::Subscribe = data {
-                if let Err(err) = ok {
-                    tracing::error!("subscribe error: {err:?}");
-                    if tmq_conf.enable_batch_meta.is_none() {
-                        return Err(err);
-                    }
-
-                    let code: i32 = err.code().into();
-                    if code & 0xFFFF == 0xFFFE {
-                        let req = TmqSend::Subscribe {
-                            req_id: generate_req_id(),
-                            req: tmq_conf.disable_batch_meta().disable_auto_commit(),
-                            topics,
-                            conn: conn_req,
-                        };
-                        let resp = send_recv(ws_stream, req.to_msg()).await?;
-                        let (_, _, ok) = resp.ok();
-                        ok?;
-                    } else {
-                        return Err(err);
-                    }
+                let code: i32 = err.code().into();
+                if code & 0xFFFF == 0xFFFE {
+                    let req = TmqSend::Subscribe {
+                        req_id: generate_req_id(),
+                        req: tmq_conf.disable_batch_meta().disable_auto_commit(),
+                        topics,
+                        conn: conn_req,
+                    };
+                    let _ = send_recv(ws_stream, req.to_msg()).await?;
+                } else {
+                    return Err(err);
                 }
             }
 
@@ -566,7 +531,7 @@ fn send_subscribe_request(
     }
 }
 
-async fn send_recv(ws_stream: &mut WsStream, message: Message) -> RawResult<TmqRecv> {
+async fn send_recv(ws_stream: &mut WsStream, message: Message) -> RawResult<TmqRecvData> {
     let timeout = Duration::from_secs(8);
 
     time::timeout(timeout, ws_stream.send(message))
@@ -594,15 +559,22 @@ async fn send_recv(ws_stream: &mut WsStream, message: Message) -> RawResult<TmqR
 
         match message {
             Message::Text(text) => {
-                if text.contains("version") {
-                    continue;
-                }
-
-                return serde_json::from_str(&text).map_err(|err| {
+                let resp: TmqRecv = serde_json::from_str(&text).map_err(|err| {
                     RawError::any(err)
                         .with_code(WS_ERROR_NO::DE_ERROR.as_code())
                         .context("invalid json response")
-                });
+                })?;
+                let (_, data, ok) = resp.ok();
+                ok?;
+                match data {
+                    TmqRecvData::Subscribe => return Ok(data),
+                    TmqRecvData::Version { .. } => {}
+                    _ => {
+                        return Err(RawError::from_string(format!(
+                            "unexpected subscribe response: {data:?}"
+                        )))
+                    }
+                }
             }
             Message::Ping(bytes) => {
                 ws_stream
@@ -635,5 +607,19 @@ fn is_disconnect_error(err: &WsTmqError) -> bool {
                 | WsError::Protocol(_)
         ),
         _ => false,
+    }
+}
+
+async fn cleanup_after_disconnect(queries: WsTmqAgent) {
+    let keys = queries.iter().map(|r| *r.key()).collect_vec();
+    for key in keys {
+        if let Some((_, sender)) = queries.remove(&key) {
+            let _ = sender
+                .send(Err(RawError::new(
+                    WS_ERROR_NO::CONN_CLOSED.as_code(),
+                    "WebSocket connection is closed",
+                )))
+                .await;
+        }
     }
 }

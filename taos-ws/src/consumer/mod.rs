@@ -38,8 +38,6 @@ struct WsTmqSender {
     req_id: Arc<AtomicU64>,
     sender: WsSender,
     queries: WsTmqAgent,
-    #[allow(dead_code)]
-    timeout: Timeout,
 }
 
 impl WsTmqSender {
@@ -1105,7 +1103,6 @@ impl TmqBuilder {
             req_id: Arc::new(AtomicU64::new(1)),
             queries: WsTmqAgent::default(),
             sender: message_tx,
-            timeout: Timeout::Duration(Duration::MAX),
         };
 
         let topics: Arc<RwLock<Vec<String>>> = Arc::default();

@@ -395,7 +395,7 @@ async fn handle_messages(
 fn parse_message(message: Message, query_sender: WsQuerySender, cache: MessageCache) {
     match message {
         Message::Text(text) => parse_text_message(text, query_sender, cache),
-        Message::Binary(payload) => parse_binary_message(payload, query_sender, cache),
+        Message::Binary(data) => parse_binary_message(data, query_sender, cache),
         Message::Ping(data) => {
             tokio::spawn(async move {
                 let _ = query_sender
@@ -450,15 +450,15 @@ fn parse_text_message(text: String, query_sender: WsQuerySender, cache: MessageC
     }
 }
 
-fn parse_binary_message(payload: Vec<u8>, query_sender: WsQuerySender, cache: MessageCache) {
-    tracing::trace!("received binary message, len: {}", payload.len());
+fn parse_binary_message(data: Vec<u8>, query_sender: WsQuerySender, cache: MessageCache) {
+    tracing::trace!("received binary message, len: {}", data.len());
 
     let is_v3 = query_sender.version_info.is_v3();
 
     tokio::spawn(async move {
         use taos_query::util::InlinableRead;
 
-        let mut slice = payload.as_slice();
+        let mut slice = data.as_slice();
         let mut is_block_new = false;
 
         let timing = if is_v3 {
@@ -510,12 +510,12 @@ fn parse_binary_message(payload: Vec<u8>, query_sender: WsQuerySender, cache: Me
                 let data = if is_v3 {
                     WsRecvData::Block {
                         timing,
-                        raw: payload[16..].to_vec(),
+                        raw: data[16..].to_vec(),
                     }
                 } else {
                     WsRecvData::BlockV2 {
                         timing,
-                        raw: payload[8..].to_vec(),
+                        raw: data[8..].to_vec(),
                     }
                 };
 
