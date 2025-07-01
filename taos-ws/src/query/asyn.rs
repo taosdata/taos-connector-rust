@@ -16,7 +16,7 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use itertools::Itertools;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
-use taos_query::util::{generate_req_id, InlinableWrite};
+use taos_query::util::{generate_req_id, CleanUp, InlinableWrite};
 use taos_query::{
     block_in_place_or_global, AsyncFetchable, AsyncQueryable, DeError, DsnError, IntoDsn,
 };
@@ -724,7 +724,7 @@ pub(crate) struct WsQuerySender {
     pub(super) queries: QueryAgent,
 }
 
-const SEND_TIMEOUT: Duration = Duration::from_millis(1000);
+const SEND_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl WsQuerySender {
     fn req_id(&self) -> ReqId {
@@ -737,7 +737,13 @@ impl WsQuerySender {
         let (data_tx, data_rx) = oneshot::channel();
         let _ = self.queries.insert_async(req_id, data_tx).await;
 
-        let res_id = if let WsSend::FetchBlock(args) = message {
+        let cleanup = || {
+            tracing::warn!("send_recv, req_id: {req_id}, timeout to clean up queries");
+            let _ = self.queries.remove(&req_id);
+        };
+        let _cleanup = CleanUp { f: Some(cleanup) };
+
+        if let WsSend::FetchBlock(args) = message {
             let id = args.id;
             if self.results.contains_async(&id).await {
                 Err(RawError::from_string(format!(
@@ -745,10 +751,13 @@ impl WsQuerySender {
                 )))?;
             }
             let _ = self.results.insert_async(id, args.req_id).await;
-            Some(id)
-        } else {
-            None
-        };
+
+            let cleanup = || {
+                tracing::warn!("send_recv, res_id: {id}, timeout to clean up results");
+                let _ = self.results.remove(&id);
+            };
+            let _cleanup = CleanUp { f: Some(cleanup) };
+        }
 
         tracing::trace!("send_recv, req_id: {req_id}, sending message: {message:?}");
 
@@ -762,22 +771,9 @@ impl WsQuerySender {
 
         tracing::trace!("send_recv, req_id: {req_id}, message sent, waiting for response");
 
-        let cleanup = || {
-            tracing::warn!(
-                "send_recv, req_id: {req_id}, res_id: {res_id:?}, timeout to clean up queries and results"
-            );
-            let _ = self.queries.remove(&req_id);
-            if let Some(res_id) = res_id {
-                let _ = self.results.remove(&res_id);
-            }
-        };
-
         let data = timeout(Duration::from_secs(60), data_rx)
             .await
-            .map_err(|err| {
-                cleanup();
-                Error::from(err)
-            })?
+            .map_err(Error::from)?
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
             .map_err(Error::from)?;
 

@@ -15,7 +15,7 @@ use taos_query::tmq::{
     AsAsyncConsumer, AsConsumer, Assignment, IsAsyncData, IsAsyncMeta, IsData, IsOffset,
     MessageSet, SyncOnAsync, Timeout, VGroupId,
 };
-use taos_query::util::{generate_req_id, AsyncInlinable, Edition, InlinableRead};
+use taos_query::util::{generate_req_id, AsyncInlinable, CleanUp, Edition, InlinableRead};
 use taos_query::{DeError, DsnError, IntoDsn, RawBlock, RawResult, TBuilder};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, watch, Mutex, RwLock};
@@ -45,19 +45,37 @@ impl WsTmqSender {
         self.req_id.fetch_add(1, Ordering::SeqCst)
     }
 
-    // TODO: add log
     async fn send_recv(&self, message: TmqSend) -> RawResult<TmqRecvData> {
+        let req_id = message.req_id();
         let (data_tx, mut data_rx) = mpsc::channel(1);
-        self.queries.insert(message.req_id(), data_tx);
+        self.queries.insert(req_id, data_tx);
 
-        let timeout = Duration::from_secs(5);
+        let cleanup = || {
+            tracing::warn!("tmq send_recv, req_id: {req_id}, timeout to clean up queries");
+            let _ = self.queries.remove(&req_id);
+        };
+        let _cleanup = CleanUp { f: Some(cleanup) };
 
-        tokio::time::timeout(timeout, self.sender.send_async(WsMessage::Command(message)))
+        tracing::trace!("tmq send_recv, req_id: {req_id}, sending message: {message:?}");
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            self.sender.send_async(WsMessage::Command(message)),
+        )
+        .await
+        .map_err(WsTmqError::from)?
+        .map_err(WsTmqError::from)?;
+
+        tracing::trace!("tmq send_recv, req_id: {req_id}, message sent, waiting for response");
+
+        let data = tokio::time::timeout(Duration::from_secs(60), data_rx.recv())
             .await
             .map_err(WsTmqError::from)?
-            .map_err(WsTmqError::from)?;
+            .ok_or(WsTmqError::ChannelClosedError)?;
 
-        data_rx.recv().await.ok_or(WsTmqError::ChannelClosedError)?
+        tracing::trace!("tmq send_recv, req_id: {req_id}, received data: {data:?}");
+
+        data
     }
 }
 
