@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use itertools::Itertools;
-use taos_query::prelude::RawError;
+use taos_query::prelude::{Code, RawError};
 
+use taos_query::util::generate_req_id;
 use taos_query::RawResult;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch, Mutex, RwLock};
@@ -22,7 +23,8 @@ use crate::consumer::messages::{TmqInit, TmqRecv, TmqRecvData, TmqSend, WsMessag
 use crate::consumer::{WsTmqError, WsTmqSender};
 use crate::query::asyn::{is_support_binary_sql, WS_ERROR_NO};
 use crate::query::messages::ToMessage;
-use crate::{EndpointType, TaosBuilder};
+use crate::query::WsConnReq;
+use crate::{handle_disconnect_error, EndpointType, TaosBuilder};
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsStreamReader = SplitStream<WsStream>;
@@ -124,42 +126,28 @@ pub(super) async fn run(
 
         tracing::warn!("WebSocket disconnected, starting to reconnect");
 
-        if cache.message().await.is_some() {
-            match builder
-                .connect_with_cb(
-                    EndpointType::Tmq,
-                    subscribe(
-                        builder.clone(),
-                        tmq_sender.clone(),
-                        tmq_conf.clone(),
-                        topics.clone(),
-                    ),
-                )
-                .await
-            {
-                Ok((ws, ver)) => {
-                    ws_stream = ws;
-                    support_fetch_raw.store(is_fetch_raw_supported(&ver), Ordering::Relaxed);
-                }
-                Err(err) => {
-                    tracing::error!("WebSocket reconnection failed: {err}");
-                    // cleanup_after_disconnect(agent.clone());
-                    return;
-                }
-            };
+        let res = if cache.message().await.is_some() {
+            let cb = send_subscribe_request(
+                builder.build_conn_request(),
+                tmq_conf.clone(),
+                topics.clone(),
+            );
+            builder.connect_with_cb(EndpointType::Tmq, cb).await
         } else {
-            match builder.connect(EndpointType::Tmq).await {
-                Ok((ws, ver)) => {
-                    ws_stream = ws;
-                    support_fetch_raw.store(is_fetch_raw_supported(&ver), Ordering::Relaxed);
-                }
-                Err(err) => {
-                    tracing::error!("WebSocket reconnection failed: {err}");
-                    // cleanup_after_disconnect(agent.clone());
-                    return;
-                }
-            };
+            builder.connect_with_ty(EndpointType::Tmq).await
         };
+
+        match res {
+            Ok((ws, ver)) => {
+                ws_stream = ws;
+                support_fetch_raw.store(is_fetch_raw_supported(&ver), Ordering::Relaxed);
+            }
+            Err(err) => {
+                tracing::error!("WebSocket reconnection failed: {err}");
+                // cleanup_after_disconnect(agent.clone());
+                return;
+            }
+        }
 
         tracing::info!("WebSocket reconnected successfully");
 
@@ -527,60 +515,107 @@ async fn read_messages(
     tracing::trace!("Consuming done in {:?}", instant.elapsed());
 }
 
-fn subscribe(
-    builder: TaosBuilder,
-    tmq_sender: WsTmqSender,
+fn send_subscribe_request(
+    conn_req: WsConnReq,
     tmq_conf: TmqInit,
     topics: Arc<RwLock<Vec<String>>>,
-) -> impl for<'a> Fn(&'a mut WsStream) -> Pin<Box<dyn Future<Output = RawResult<()>> + Send + 'a>> + Clone
-{
+) -> impl for<'a> Fn(&'a mut WsStream) -> Pin<Box<dyn Future<Output = RawResult<()>> + Send + 'a>> {
     move |ws_stream| {
-        let builder = builder.clone();
-        let tmq_sender = tmq_sender.clone();
+        let conn_req = conn_req.clone();
         let tmq_conf = tmq_conf.clone();
         let topics = topics.clone();
 
         Box::pin(async move {
             let topics = topics.read().await.clone();
             let req = TmqSend::Subscribe {
-                req_id: tmq_sender.req_id(),
+                req_id: generate_req_id(),
                 req: tmq_conf.clone().disable_auto_commit(),
                 topics: topics.clone(),
-                conn: builder.build_conn_request(),
+                conn: conn_req.clone(),
             };
 
-            let timeout = Duration::from_secs(8);
+            let resp = send_recv(ws_stream, req.to_msg()).await?;
+            let (_, data, ok) = resp.ok();
 
-            // TODO: handle error
-            let _ = time::timeout(timeout, ws_stream.send(req.to_msg()))
-                .await
-                .map_err(|_| {
-                    RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
-                        .context("timeout sending conn request")
-                })?;
+            if let TmqRecvData::Subscribe = data {
+                if let Err(err) = ok {
+                    tracing::error!("subscribe error: {err:?}");
+                    if tmq_conf.enable_batch_meta.is_none() {
+                        return Err(err);
+                    }
 
-            if let Err(err) = tmq_sender.send_recv(req).await {
-                tracing::error!("subscribe error: {err:?}");
-                if tmq_conf.enable_batch_meta.is_none() {
-                    return Err(err);
-                }
-
-                let code: i32 = err.code().into();
-                if code & 0xFFFF == 0xFFFE {
-                    let action = TmqSend::Subscribe {
-                        req_id: tmq_sender.req_id(),
-                        req: tmq_conf.clone().disable_batch_meta().disable_auto_commit(),
-                        topics,
-                        conn: builder.build_conn_request(),
-                    };
-                    tmq_sender.send_recv(action).await?;
-                } else {
-                    return Err(err);
+                    let code: i32 = err.code().into();
+                    if code & 0xFFFF == 0xFFFE {
+                        let req = TmqSend::Subscribe {
+                            req_id: generate_req_id(),
+                            req: tmq_conf.disable_batch_meta().disable_auto_commit(),
+                            topics,
+                            conn: conn_req,
+                        };
+                        let resp = send_recv(ws_stream, req.to_msg()).await?;
+                        let (_, _, ok) = resp.ok();
+                        ok?;
+                    } else {
+                        return Err(err);
+                    }
                 }
             }
 
             Ok(())
         })
+    }
+}
+
+async fn send_recv(ws_stream: &mut WsStream, message: Message) -> RawResult<TmqRecv> {
+    let timeout = Duration::from_secs(8);
+
+    time::timeout(timeout, ws_stream.send(message))
+        .await
+        .map_err(|_| {
+            RawError::from_code(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT.as_code())
+                .context("timeout sending subscribe request")
+        })?
+        .map_err(handle_disconnect_error)?;
+
+    loop {
+        let res = time::timeout(timeout, ws_stream.next())
+            .await
+            .map_err(|_| {
+                RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
+                    .context("timeout waiting for subscribe response")
+            })?;
+
+        let Some(res) = res else {
+            return Err(RawError::from_code(Code::WS_DISCONNECTED));
+        };
+
+        let message = res.map_err(handle_disconnect_error)?;
+        tracing::trace!("send_subscribe_request, received message: {message}");
+
+        match message {
+            Message::Text(text) => {
+                if text.contains("version") {
+                    continue;
+                }
+
+                return serde_json::from_str(&text).map_err(|err| {
+                    RawError::any(err)
+                        .with_code(WS_ERROR_NO::DE_ERROR.as_code())
+                        .context("invalid json response")
+                });
+            }
+            Message::Ping(bytes) => {
+                ws_stream
+                    .send(Message::Pong(bytes))
+                    .await
+                    .map_err(handle_disconnect_error)?;
+            }
+            _ => {
+                return Err(RawError::from_string(format!(
+                    "unexpected message during subscribe: {message:?}"
+                )))
+            }
+        }
     }
 }
 

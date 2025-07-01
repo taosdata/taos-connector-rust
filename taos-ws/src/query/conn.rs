@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 use std::{
     collections::HashSet,
@@ -9,18 +11,95 @@ use std::{
 
 use flume::Receiver;
 use futures::{SinkExt, StreamExt, TryStreamExt};
-use taos_query::prelude::RawError;
+use taos_query::prelude::{Code, RawError};
+use taos_query::util::generate_req_id;
+use taos_query::RawResult;
 use tokio::sync::{mpsc, watch};
 use tokio::time;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tracing::Instrument;
 
+use crate::query::messages::{ToMessage, WsSend};
+use crate::query::WsConnReq;
 use crate::query::{
     asyn::{WsQuerySender, WS_ERROR_NO},
     messages::{MessageId, ReqId, WsMessage, WsRecv, WsRecvData},
     Error,
 };
-use crate::{EndpointType, TaosBuilder, WsStream, WsStreamReader, WsStreamSender};
+use crate::{handle_disconnect_error, TaosBuilder, WsStream, WsStreamReader, WsStreamSender};
+
+pub fn send_conn_request(
+    conn_req: WsConnReq,
+) -> impl for<'a> Fn(&'a mut WsStream) -> Pin<Box<dyn Future<Output = RawResult<()>> + Send + 'a>> {
+    move |ws_stream| {
+        let conn_req = conn_req.clone();
+
+        Box::pin(async move {
+            let req = WsSend::Conn {
+                req_id: generate_req_id(),
+                req: conn_req,
+            };
+
+            let timeout = Duration::from_secs(8);
+
+            time::timeout(timeout, ws_stream.send(req.to_msg()))
+                .await
+                .map_err(|_| {
+                    RawError::from_code(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT.as_code())
+                        .context("timeout sending conn request")
+                })?
+                .map_err(handle_disconnect_error)?;
+
+            loop {
+                let res = time::timeout(timeout, ws_stream.next())
+                    .await
+                    .map_err(|_| {
+                        RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
+                            .context("timeout waiting for conn response")
+                    })?;
+
+                let Some(res) = res else {
+                    return Err(RawError::from_code(Code::WS_DISCONNECTED));
+                };
+
+                let message = res.map_err(handle_disconnect_error)?;
+                tracing::trace!("send_conn_request, received message: {message}");
+
+                match message {
+                    Message::Text(text) => {
+                        let resp: WsRecv = serde_json::from_str(&text).map_err(|err| {
+                            RawError::any(err)
+                                .with_code(WS_ERROR_NO::DE_ERROR.as_code())
+                                .context("invalid json response")
+                        })?;
+                        let (_, data, ok) = resp.ok();
+                        ok?;
+                        match data {
+                            WsRecvData::Conn => return Ok(()),
+                            WsRecvData::Version { .. } => {}
+                            _ => {
+                                return Err(RawError::from_string(format!(
+                                    "unexpected conn response: {data:?}"
+                                )))
+                            }
+                        }
+                    }
+                    Message::Ping(bytes) => {
+                        ws_stream
+                            .send(Message::Pong(bytes))
+                            .await
+                            .map_err(handle_disconnect_error)?;
+                    }
+                    _ => {
+                        return Err(RawError::from_string(format!(
+                            "unexpected message during conn: {message:?}"
+                        )))
+                    }
+                }
+            }
+        })
+    }
+}
 
 #[derive(Default, Clone)]
 struct MessageCache {
@@ -130,7 +209,7 @@ pub(super) async fn run(
 
         tracing::warn!("WebSocket disconnected, starting to reconnect");
 
-        match builder.connect(EndpointType::Ws).await {
+        match builder.connect().await {
             Ok((ws, ver)) => {
                 ws_stream = ws;
                 query_sender.version_info.update(ver).await;

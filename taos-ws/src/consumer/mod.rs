@@ -1093,7 +1093,7 @@ impl TmqBuilder {
 
         let (ws_stream, version) = self
             .info
-            .connect(EndpointType::Tmq)
+            .connect_with_ty(EndpointType::Tmq)
             .instrument(span.clone())
             .await?;
 

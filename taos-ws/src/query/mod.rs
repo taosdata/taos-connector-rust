@@ -14,6 +14,7 @@ use crate::TaosBuilder;
 pub mod asyn;
 pub use asyn::check_server_status;
 mod conn;
+pub(super) use conn::send_conn_request;
 pub(crate) mod messages;
 
 #[derive(Debug)]

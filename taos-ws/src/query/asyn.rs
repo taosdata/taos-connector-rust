@@ -27,8 +27,6 @@ use tokio::time::{self, timeout};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tracing::{instrument, Instrument};
 
-use crate::EndpointType;
-
 use super::messages::*;
 use super::TaosBuilder;
 
@@ -60,10 +58,7 @@ impl WsTaos {
         let conn_id = generate_req_id();
         let span = tracing::info_span!("ws_conn", conn_id = conn_id);
 
-        let (ws_stream, version) = builder
-            .connect(EndpointType::Ws)
-            .instrument(span.clone())
-            .await?;
+        let (ws_stream, version) = builder.connect().instrument(span.clone()).await?;
 
         let (message_tx, message_rx) = flume::bounded(64);
         let (close_tx, close_rx) = watch::channel(false);
@@ -1109,7 +1104,7 @@ where
     T: Into<Option<FastStr>>,
 {
     let builder = TaosBuilder::from_dsn(dsn)?;
-    let (mut ws_stream, _) = builder.connect(EndpointType::Ws).await?;
+    let (mut ws_stream, _) = builder.connect().await?;
 
     let req = WsSend::CheckServerStatus {
         req_id: generate_req_id(),
