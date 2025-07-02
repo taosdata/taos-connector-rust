@@ -731,6 +731,7 @@ impl TaosBuilder {
         }
     }
 
+    #[inline]
     fn active_addr(&self) -> &String {
         let cur_addr_idx = self.current_addr_index.load(Ordering::Relaxed);
         &self.addrs[cur_addr_idx]

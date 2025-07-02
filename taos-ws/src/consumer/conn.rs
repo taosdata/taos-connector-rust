@@ -659,8 +659,9 @@ mod tests {
 
         let routes = warp::path!("rest" / "tmq").and(warp::ws()).map({
             move |ws: warp::ws::Ws| {
-                let poll_cnt = poll_cnt.clone();
                 let close = close_tx.clone();
+                let poll_cnt = poll_cnt.clone();
+
                 ws.on_upgrade(move |ws| async {
                     let close = close;
                     let poll_cnt = poll_cnt;
@@ -770,6 +771,7 @@ mod tests {
             move |ws: warp::ws::Ws| {
                 let close = close_tx.clone();
                 let poll_cnt = poll_cnt.clone();
+
                 ws.on_upgrade(move |ws| async {
                     let close = close;
                     let poll_cnt = poll_cnt;

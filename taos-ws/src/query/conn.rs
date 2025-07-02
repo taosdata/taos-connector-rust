@@ -582,6 +582,8 @@ fn cleanup_after_reconnect(query_sender: WsQuerySender, cache: MessageCache) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use std::time::Duration;
 
     use futures::{SinkExt, StreamExt};
@@ -601,22 +603,28 @@ mod tests {
             .with_max_level(tracing::Level::INFO)
             .try_init();
 
-        let _handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+        let query_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             let taos = TaosBuilder::from_dsn("ws://127.0.0.1:9980")?
                 .build()
                 .await?;
+            let _ = taos.query("select * from meters").await?;
             let _ = taos.query("select * from meters").await?;
             Ok(())
         });
 
         let (close_tx, close_rx) = flume::bounded(1);
+        let query_cnt = Arc::new(AtomicUsize::new(0));
 
         let routes = warp::path("ws").and(warp::ws()).map({
             move |ws: warp::ws::Ws| {
                 let close = close_tx.clone();
+                let query_cnt = query_cnt.clone();
+
                 ws.on_upgrade(move |ws| async {
                     let close = close;
+                    let query_cnt = query_cnt;
                     let (mut ws_tx, mut ws_rx) = ws.split();
+
                     while let Some(res) = ws_rx.next().await {
                         let message = res.unwrap();
                         tracing::debug!("ws recv message: {message:?}");
@@ -642,8 +650,53 @@ mod tests {
                                 let message = Message::text(data.to_string());
                                 let _ = ws_tx.send(message).await;
                             } else if text.contains("query") {
-                                let _ = close.send_async(()).await;
-                                break;
+                                let cnt = query_cnt.fetch_add(1, Ordering::Relaxed);
+                                if cnt == 0 {
+                                    let _ = close.send_async(()).await;
+                                    break;
+                                } else if cnt == 1 {
+                                    let data = json!({
+                                        "code": 0,
+                                        "message": "",
+                                        "action": "binary_query",
+                                        "req_id": 0,
+                                        "timing": 11753236,
+                                        "id": 1,
+                                        "is_update": false,
+                                        "affected_rows": 0,
+                                        "fields_count": 2,
+                                        "fields_names": ["ts", "c1"],
+                                        "fields_types": [9, 4],
+                                        "fields_lengths": [8, 4],
+                                        "precision": 0,
+                                        "fields_precisions": [0, 0],
+                                        "fields_scales": [0, 0]
+                                    });
+                                    let message = Message::text(data.to_string());
+                                    let _ = ws_tx.send(message).await;
+                                } else if cnt == 2 {
+                                    let data = json!({
+                                        "code": 0,
+                                        "message": "",
+                                        "action": "binary_query",
+                                        "req_id": 1,
+                                        "timing": 11753236,
+                                        "id": 1,
+                                        "is_update": false,
+                                        "affected_rows": 0,
+                                        "fields_count": 2,
+                                        "fields_names": ["ts", "c1"],
+                                        "fields_types": [9, 4],
+                                        "fields_lengths": [8, 4],
+                                        "precision": 0,
+                                        "fields_precisions": [0, 0],
+                                        "fields_scales": [0, 0]
+                                    });
+                                    let message = Message::text(data.to_string());
+                                    let _ = ws_tx.send(message).await;
+                                    let _ = close.send_async(()).await;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -672,6 +725,8 @@ mod tests {
 
         server2.await;
 
+        query_handle.await??;
+
         Ok(())
     }
 
@@ -699,6 +754,7 @@ mod tests {
                 ws.on_upgrade(move |ws| async {
                     let close = close;
                     let (mut ws_tx, mut ws_rx) = ws.split();
+
                     while let Some(res) = ws_rx.next().await {
                         let message = res.unwrap();
                         tracing::debug!("ws recv message: {message:?}");
