@@ -788,6 +788,46 @@ mod tests {
             "[0xE001] failed to connect to all addresses"
         );
 
+        let res = TaosBuilder::from_dsn("ws://127.0.0.1:9978,127.0.0.1:9979?conn_retries=1")?
+            .build()
+            .await;
+
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            "[0xE001] failed to connect to all addresses"
+        );
+
+        let res = TaosBuilder::from_dsn("ws://127.0.0.1:9978,127.0.0.1:9979?conn_retries=2")?
+            .build()
+            .await;
+
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            "[0xE001] failed to connect to all addresses"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_retry_backoff() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .try_init();
+
+        let res = TaosBuilder::from_dsn(
+            "ws://127.0.0.1:9978?conn_retries=10&retry_backoff_ms=200&retry_backoff_max_ms=2000",
+        )?
+        .build()
+        .await;
+
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            "[0xE001] failed to connect to all addresses"
+        );
+
         Ok(())
     }
 }
