@@ -4,6 +4,7 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::StreamExt;
 use futures_util::SinkExt;
 use once_cell::sync::OnceCell;
+use rand::seq::SliceRandom;
 use rand::Rng;
 use std::cmp;
 use std::fmt::{Debug, Display};
@@ -413,6 +414,8 @@ impl TaosBuilder {
         if addrs.is_empty() {
             addrs.push("localhost:6041".to_string());
         }
+
+        addrs.shuffle(&mut rand::rng());
 
         let compression = dsn
             .params
