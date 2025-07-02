@@ -750,4 +750,24 @@ mod tests {
 
         tokio::join!(server1, server2);
     }
+
+    #[tokio::test]
+    async fn test_connect_failed() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .try_init();
+
+        let res = TaosBuilder::from_dsn("ws://127.0.0.1:9982,127.0.0.1:9983")?
+            .build()
+            .await;
+
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            "[0xE001] failed to connect to all addresses"
+        );
+
+        Ok(())
+    }
 }
