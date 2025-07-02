@@ -38,11 +38,15 @@ impl MessageCache {
     }
 
     async fn insert(&self, req_id: ReqId, message: Message) {
-        *self.message.lock().await = Some((req_id, message));
+        let message = (req_id, message);
+        tracing::trace!("insert message into cache, message: {message:?}");
+        *self.message.lock().await = Some(message);
     }
 
     async fn remove(&self) {
-        *self.message.lock().await = None;
+        let mut guard = self.message.lock().await;
+        tracing::trace!("remove message from cache, message: {:?}", *guard);
+        *guard = None;
     }
 
     async fn req_id(&self) -> Option<ReqId> {
@@ -212,6 +216,8 @@ async fn send_messages(
             }
         }
     }
+
+    tracing::trace!("stop sending messages to WebSocket stream");
 }
 
 async fn send_ping_message(ws_stream_sender: &mut WsStreamSender) -> Result<(), WsTmqError> {
@@ -613,5 +619,153 @@ async fn cleanup_after_reconnect(queries: WsTmqAgent, cache: MessageCache) {
         }
     } else {
         queries.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use futures::{SinkExt, StreamExt};
+    use serde_json::json;
+    use taos_query::AsyncTBuilder;
+    use tokio::sync::mpsc;
+    use tokio::task::JoinHandle;
+    use warp::ws::Message;
+    use warp::Filter;
+
+    use crate::TmqBuilder;
+
+    #[tokio::test]
+    async fn test_poll_auto_reconnect() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::DEBUG)
+            .try_init();
+
+        let poll_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let tmq = TmqBuilder::from_dsn("ws://127.0.0.1:9988?group.id=10")?;
+            let consumer = tmq.build().await?;
+            let timeout = Duration::from_secs(5);
+            let res = consumer.poll_timeout(timeout).await?;
+            assert!(res.is_some());
+            Ok(())
+        });
+
+        let (close_tx, mut close_rx) = mpsc::channel(1);
+
+        let routes = warp::path!("rest" / "tmq").and(warp::ws()).map({
+            move |ws: warp::ws::Ws| {
+                let close = close_tx.clone();
+                ws.on_upgrade(move |ws| async {
+                    let close = close;
+                    let (mut ws_tx, mut ws_rx) = ws.split();
+
+                    while let Some(res) = ws_rx.next().await {
+                        let message = res.unwrap();
+                        tracing::debug!("ws recv message: {message:?}");
+                        if message.is_text() {
+                            let text = message.to_str().unwrap();
+                            if text.contains("version") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "version message",
+                                    "action": "version",
+                                    "req_id": 1001,
+                                    "version": "3.0"
+                                });
+                                let msg = Message::text(data.to_string());
+                                let _ = ws_tx.send(msg).await;
+                            } else if text.contains("poll") {
+                                let _ = close.send(()).await;
+                                break;
+                            }
+                        }
+                    }
+                })
+            }
+        });
+
+        let (_, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9988), async move {
+                let _ = close_rx.recv().await;
+                tracing::debug!("shutting down...");
+            });
+
+        server.await;
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let (close_tx, mut close_rx) = mpsc::channel(1);
+
+        let routes = warp::path!("rest" / "tmq").and(warp::ws()).map({
+            move |ws: warp::ws::Ws| {
+                let close = close_tx.clone();
+                ws.on_upgrade(move |ws| async {
+                    let close = close;
+                    let (mut ws_tx, mut ws_rx) = ws.split();
+
+                    while let Some(res) = ws_rx.next().await {
+                        let message = res.unwrap();
+                        tracing::debug!("ws recv message: {message:?}");
+                        if message.is_text() {
+                            let text = message.to_str().unwrap();
+                            if text.contains("version") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "version message",
+                                    "action": "version",
+                                    "req_id": 1001,
+                                    "version": "3.0"
+                                });
+                                let msg = Message::text(data.to_string());
+                                let _ = ws_tx.send(msg).await;
+                            } else if text.contains("subscribe") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "subscribe message",
+                                    "action": "subscribe",
+                                    "req_id": 1002,
+                                });
+                                let msg = Message::text(data.to_string());
+                                let _ = ws_tx.send(msg).await;
+                            } else if text.contains("poll") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "",
+                                    "action": "poll",
+                                    "req_id": 1,
+                                    "timing": 1277505,
+                                    "have_message": true,
+                                    "topic": "topic_1748505708",
+                                    "database": "test_1748505708",
+                                    "vgroup_id": 56,
+                                    "message_type": 1,
+                                    "message_id": 1561,
+                                    "offset": 5621
+                                });
+                                let msg = Message::text(data.to_string());
+                                let _ = ws_tx.send(msg).await;
+                                let _ = close.send(()).await;
+                                break;
+                            }
+                        }
+                    }
+                })
+            }
+        });
+
+        let (_, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9988), async move {
+                let _ = close_rx.recv().await;
+                tracing::debug!("shutting down...");
+            });
+
+        server.await;
+
+        poll_handle.await??;
+
+        Ok(())
     }
 }

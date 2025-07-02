@@ -738,8 +738,8 @@ impl WsQuerySender {
         let _ = self.queries.insert_async(req_id, data_tx).await;
 
         let cleanup = || {
-            tracing::warn!("send_recv, req_id: {req_id}, timeout to clean up queries");
-            let _ = self.queries.remove(&req_id);
+            let res = self.queries.remove(&req_id);
+            tracing::trace!("send_recv, clean up queries, req_id: {req_id}, res: {res:?}");
         };
         let _cleanup = CleanUp { f: Some(cleanup) };
 
@@ -753,8 +753,8 @@ impl WsQuerySender {
             let _ = self.results.insert_async(id, args.req_id).await;
 
             let cleanup = || {
-                tracing::warn!("send_recv, res_id: {id}, timeout to clean up results");
-                let _ = self.results.remove(&id);
+                let res = self.results.remove(&id);
+                tracing::trace!("send_recv, clean up results, res_id: {id}, res: {res:?}");
             };
             let _cleanup = CleanUp { f: Some(cleanup) };
         }
@@ -769,7 +769,7 @@ impl WsQuerySender {
         .map_err(Error::from)?
         .map_err(Error::from)?;
 
-        tracing::trace!("send_recv, req_id: {req_id}, message sent, waiting for response");
+        tracing::trace!("send_recv, message sent, waiting for response, req_id: {req_id}");
 
         let data = timeout(Duration::from_secs(60), data_rx)
             .await

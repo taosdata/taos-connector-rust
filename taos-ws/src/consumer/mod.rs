@@ -51,8 +51,8 @@ impl WsTmqSender {
         self.queries.insert(req_id, data_tx);
 
         let cleanup = || {
-            tracing::warn!("tmq send_recv, req_id: {req_id}, timeout to clean up queries");
-            let _ = self.queries.remove(&req_id);
+            let res = self.queries.remove(&req_id);
+            tracing::trace!("tmq send_recv, clean up queries, req_id: {req_id}, res: {res:?}");
         };
         let _cleanup = CleanUp { f: Some(cleanup) };
 
@@ -66,7 +66,7 @@ impl WsTmqSender {
         .map_err(WsTmqError::from)?
         .map_err(WsTmqError::from)?;
 
-        tracing::trace!("tmq send_recv, req_id: {req_id}, message sent, waiting for response");
+        tracing::trace!("tmq send_recv, message sent, waiting for response, req_id: {req_id}");
 
         let data = tokio::time::timeout(Duration::from_secs(60), data_rx.recv())
             .await
@@ -436,6 +436,7 @@ impl IsData for Data {
         taos_query::block_in_place_or_global(self.fetch_block())
     }
 }
+
 pub enum WsMessageSet {
     Meta(Meta),
     Data(Data),
@@ -1114,8 +1115,10 @@ impl TmqBuilder {
             .await?;
 
         let (message_tx, message_rx) = flume::bounded(100);
-        let (poll_cache_tx, poll_cache_rx) = mpsc::channel(8);
         let (close_tx, close_rx) = watch::channel(false);
+
+        let (poll_cache_tx, poll_cache_rx) = mpsc::channel(8);
+        let _ = poll_cache_tx.send(None).await;
 
         let tmq_sender = WsTmqSender {
             req_id: Arc::new(AtomicU64::new(1)),
