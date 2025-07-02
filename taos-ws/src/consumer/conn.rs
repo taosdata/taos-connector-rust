@@ -649,8 +649,13 @@ mod tests {
             let tmq = TmqBuilder::from_dsn("ws://127.0.0.1:9988?group.id=10")?;
             let consumer = tmq.build().await?;
             let timeout = Duration::from_secs(10);
+
             let res = consumer.poll_timeout(timeout).await?;
             assert!(res.is_some());
+
+            let res = consumer.poll_timeout(timeout).await?;
+            assert!(res.is_some());
+
             Ok(())
         });
 
@@ -692,7 +697,11 @@ mod tests {
                                 let msg = Message::text(data.to_string());
                                 let _ = ws_tx.send(msg).await;
                             } else if text.contains("poll") {
-                                if poll_cnt.load(Ordering::Relaxed) == 1 {
+                                let cnt = poll_cnt.fetch_add(1, Ordering::Relaxed);
+                                if cnt == 0 {
+                                    let _ = close.send_async(()).await;
+                                    break;
+                                } else if cnt == 1 {
                                     let data = json!({
                                         "code": 0,
                                         "message": "",
@@ -709,11 +718,26 @@ mod tests {
                                     });
                                     let msg = Message::text(data.to_string());
                                     let _ = ws_tx.send(msg).await;
+                                } else if cnt == 2 {
+                                    let data = json!({
+                                        "code": 0,
+                                        "message": "",
+                                        "action": "poll",
+                                        "req_id": 2,
+                                        "timing": 1277505,
+                                        "have_message": true,
+                                        "topic": "topic_1748505708",
+                                        "database": "test_1748505708",
+                                        "vgroup_id": 56,
+                                        "message_type": 1,
+                                        "message_id": 1561,
+                                        "offset": 5621
+                                    });
+                                    let msg = Message::text(data.to_string());
+                                    let _ = ws_tx.send(msg).await;
+                                    let _ = close.send_async(()).await;
+                                    break;
                                 }
-
-                                poll_cnt.fetch_add(1, Ordering::Relaxed);
-                                let _ = close.send_async(()).await;
-                                break;
                             }
                         }
                     }
