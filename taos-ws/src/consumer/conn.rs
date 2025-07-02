@@ -726,7 +726,7 @@ mod tests {
             ([127, 0, 0, 1], 9988),
             async move {
                 let _ = close.recv_async().await;
-                tracing::debug!("shutting down...");
+                tracing::debug!("server1 shutting down...");
             },
         );
 
@@ -737,7 +737,7 @@ mod tests {
         let (_, server2) =
             warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9988), async move {
                 let _ = close_rx.recv_async().await;
-                tracing::debug!("shutting down...");
+                tracing::debug!("server2 shutting down...");
             });
 
         server2.await;
@@ -836,14 +836,14 @@ mod tests {
             ([127, 0, 0, 1], 9984),
             async move {
                 let _ = close.recv_async().await;
-                tracing::debug!("shutting down...");
+                tracing::debug!("server1 shutting down...");
             },
         );
 
         let (_, server2) =
             warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9985), async move {
                 let _ = close_rx.recv_async().await;
-                tracing::debug!("shutting down...");
+                tracing::debug!("server2 shutting down...");
             });
 
         tokio::join!(server1, server2);
