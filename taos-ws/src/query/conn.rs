@@ -756,10 +756,30 @@ mod tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::TRACE)
+            .with_max_level(tracing::Level::INFO)
             .try_init();
 
         let res = TaosBuilder::from_dsn("ws://127.0.0.1:9982,127.0.0.1:9983")?
+            .build()
+            .await;
+
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            "[0xE001] failed to connect to all addresses"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_conn_retries() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .try_init();
+
+        let res = TaosBuilder::from_dsn("ws://127.0.0.1:9978,127.0.0.1:9979?conn_retries=0")?
             .build()
             .await;
 
