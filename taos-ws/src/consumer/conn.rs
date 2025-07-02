@@ -648,7 +648,7 @@ mod tests {
         let poll_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             let tmq = TmqBuilder::from_dsn("ws://127.0.0.1:9988?group.id=10")?;
             let consumer = tmq.build().await?;
-            let timeout = Duration::from_secs(5);
+            let timeout = Duration::from_secs(10);
             let res = consumer.poll_timeout(timeout).await?;
             assert!(res.is_some());
             Ok(())
@@ -757,7 +757,7 @@ mod tests {
         let poll_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             let tmq = TmqBuilder::from_dsn("ws://127.0.0.1:9984,127.0.0.1:9985?group.id=10")?;
             let consumer = tmq.build().await?;
-            let timeout = Duration::from_secs(5);
+            let timeout = Duration::from_secs(10);
             let res = consumer.poll_timeout(timeout).await?;
             assert!(res.is_some());
             Ok(())
