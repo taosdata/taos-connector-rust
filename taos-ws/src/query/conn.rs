@@ -600,15 +600,15 @@ mod tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::TRACE)
+            .with_max_level(tracing::Level::INFO)
             .try_init();
 
         let query_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             let taos = TaosBuilder::from_dsn("ws://127.0.0.1:9980")?
                 .build()
                 .await?;
-            let _ = taos.query("select * from meters").await?;
-            let _ = taos.query("select * from meters").await?;
+            let _ = taos.query("insert into meters values(now, 0)").await?;
+            let _ = taos.query("insert into meters values(now, 0)").await?;
             Ok(())
         });
 
@@ -660,17 +660,17 @@ mod tests {
                                         "message": "",
                                         "action": "binary_query",
                                         "req_id": 0,
-                                        "timing": 11753236,
-                                        "id": 1,
-                                        "is_update": false,
-                                        "affected_rows": 0,
-                                        "fields_count": 2,
-                                        "fields_names": ["ts", "c1"],
-                                        "fields_types": [9, 4],
-                                        "fields_lengths": [8, 4],
+                                        "timing": 4369543,
+                                        "id": 0,
+                                        "is_update": true,
+                                        "affected_rows": 1,
+                                        "fields_count": 0,
+                                        "fields_names": null,
+                                        "fields_types": null,
+                                        "fields_lengths": null,
                                         "precision": 0,
-                                        "fields_precisions": [0, 0],
-                                        "fields_scales": [0, 0]
+                                        "fields_precisions": null,
+                                        "fields_scales": null
                                     });
                                     let message = Message::text(data.to_string());
                                     let _ = ws_tx.send(message).await;
@@ -680,17 +680,17 @@ mod tests {
                                         "message": "",
                                         "action": "binary_query",
                                         "req_id": 1,
-                                        "timing": 11753236,
-                                        "id": 1,
-                                        "is_update": false,
-                                        "affected_rows": 0,
-                                        "fields_count": 2,
-                                        "fields_names": ["ts", "c1"],
-                                        "fields_types": [9, 4],
-                                        "fields_lengths": [8, 4],
+                                        "timing": 4369543,
+                                        "id": 0,
+                                        "is_update": true,
+                                        "affected_rows": 1,
+                                        "fields_count": 0,
+                                        "fields_names": null,
+                                        "fields_types": null,
+                                        "fields_lengths": null,
                                         "precision": 0,
-                                        "fields_precisions": [0, 0],
-                                        "fields_scales": [0, 0]
+                                        "fields_precisions": null,
+                                        "fields_scales": null
                                     });
                                     let message = Message::text(data.to_string());
                                     let _ = ws_tx.send(message).await;
