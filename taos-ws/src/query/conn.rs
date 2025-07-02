@@ -598,7 +598,7 @@ mod tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::DEBUG)
+            .with_max_level(tracing::Level::INFO)
             .try_init();
 
         let _handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
@@ -652,7 +652,7 @@ mod tests {
         });
 
         let close = close_rx.clone();
-        let (_, server) = warp::serve(routes.clone()).bind_with_graceful_shutdown(
+        let (_, server1) = warp::serve(routes.clone()).bind_with_graceful_shutdown(
             ([127, 0, 0, 1], 9980),
             async move {
                 let _ = close.recv_async().await;
@@ -660,17 +660,17 @@ mod tests {
             },
         );
 
-        server.await;
+        server1.await;
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        let (_, server) =
+        let (_, server2) =
             warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9980), async move {
                 let _ = close_rx.recv_async().await;
                 tracing::debug!("restarted server shutting down...");
             });
 
-        server.await;
+        server2.await;
 
         Ok(())
     }
@@ -680,7 +680,7 @@ mod tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::TRACE)
+            .with_max_level(tracing::Level::INFO)
             .try_init();
 
         let _handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
