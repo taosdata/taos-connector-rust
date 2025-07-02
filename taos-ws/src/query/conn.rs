@@ -600,7 +600,7 @@ mod tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::TRACE)
             .try_init();
 
         let query_handle: JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
