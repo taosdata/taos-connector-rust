@@ -48,7 +48,6 @@ impl Code {
 
     pub const OBJECT_IS_NULL: Code = Code(0xE100);
     pub const TMQ_TOPIC_APPEND_ERR: Code = Code(0xE101);
-    pub const WS_DISCONNECTED: Code = Code(0xE102);
 
     /// Code from raw primitive type.
     pub const fn new(code: i32) -> Self {

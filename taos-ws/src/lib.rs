@@ -78,7 +78,6 @@ pub struct TaosBuilder {
     retry_policy: RetryPolicy,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EndpointType {
     Ws,

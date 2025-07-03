@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
-use taos_query::prelude::{Code, RawError};
+use taos_query::prelude::RawError;
 
 use taos_query::util::generate_req_id;
 use taos_query::RawResult;
@@ -533,7 +533,9 @@ async fn send_recv(ws_stream: &mut WsStream, message: Message) -> RawResult<TmqR
             })?;
 
         let Some(res) = res else {
-            return Err(RawError::from_code(Code::WS_DISCONNECTED));
+            return Err(RawError::from_code(
+                WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code(),
+            ));
         };
 
         let message = res.map_err(handle_disconnect_error)?;
