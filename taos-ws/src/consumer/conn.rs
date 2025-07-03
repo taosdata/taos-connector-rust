@@ -638,7 +638,7 @@ mod tests {
     use crate::TmqBuilder;
 
     #[tokio::test]
-    async fn test_poll_auto_reconnect() -> anyhow::Result<()> {
+    async fn test_tmq_auto_reconnect() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
