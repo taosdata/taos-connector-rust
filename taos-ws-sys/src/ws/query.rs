@@ -1073,7 +1073,7 @@ pub unsafe extern "C" fn taos_fetch_rows_a(
 
             let rs = maybe_err.deref_mut().unwrap();
             let rows = if let ResultSet::Query(rs) = rs {
-                match rs.fetch_rows() {
+                match rs.fetch_rows_async().await {
                     Ok(rows) => rows,
                     Err(err) => {
                         let code = format_errno(err.errno().into());
@@ -1181,6 +1181,9 @@ pub struct QueryResultSet {
     rows: Vec<*const c_void>,
 }
 
+unsafe impl Send for QueryResultSet {}
+unsafe impl Sync for QueryResultSet {}
+
 impl Drop for QueryResultSet {
     fn drop(&mut self) {
         unsafe {
@@ -1214,6 +1217,18 @@ impl QueryResultSet {
         }
     }
 
+    pub async fn fetch_rows_async(&mut self) -> Result<usize, Error> {
+        if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
+            self.block = self.rs.fetch().await?;
+            self.row.current_row = 0;
+        }
+
+        if let Some(block) = self.block.as_ref() {
+            return Ok(block.nrows());
+        }
+
+        Ok(0)
+    }
     pub fn fetch_rows(&mut self) -> Result<usize, Error> {
         if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
             self.block = self.rs.fetch_raw_block()?;

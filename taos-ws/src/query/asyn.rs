@@ -1337,7 +1337,7 @@ async fn fetch(
 }
 
 impl ResultSet {
-    async fn fetch(&mut self) -> RawResult<Option<RawBlock>> {
+    pub async fn fetch(&mut self) -> RawResult<Option<RawBlock>> {
         if self.blocks_buffer.is_none() {
             return Ok(None);
         }
