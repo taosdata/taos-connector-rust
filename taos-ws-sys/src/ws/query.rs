@@ -1073,7 +1073,7 @@ pub unsafe extern "C" fn taos_fetch_rows_a(
 
             let rs = maybe_err.deref_mut().unwrap();
             let rows = if let ResultSet::Query(rs) = rs {
-                match rs.fetch_rows() {
+                match rs.fetch() {
                     Ok(rows) => rows,
                     Err(err) => {
                         let code = format_errno(err.errno().into());
@@ -1214,16 +1214,14 @@ impl QueryResultSet {
         }
     }
 
-    pub fn fetch_rows(&mut self) -> Result<usize, Error> {
-        if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
-            self.block = self.rs.fetch_raw_block()?;
-            self.row.current_row = 0;
-        }
-
+    pub fn fetch(&mut self) -> Result<usize, Error> {
+        self.block = self.rs.fetch_raw_block()?;
         if let Some(block) = self.block.as_ref() {
+            self.row.current_row = 0;
+            tracing::trace!("fetch new block with {} rows", block.nrows());
             return Ok(block.nrows());
         }
-
+        tracing::trace!("fetch no more rows");
         Ok(0)
     }
 }
@@ -1374,13 +1372,14 @@ impl ResultSetOperations for QueryResultSet {
 #[cfg(test)]
 mod tests {
     use std::thread::sleep;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use std::{ptr, vec};
 
     use taos_query::common::Precision;
 
     use super::*;
     use crate::ws::error::{taos_errno, taos_errstr};
-    use crate::ws::{taos_close, taos_connect, test_connect, test_exec, test_exec_many};
+    use crate::ws::{taos_close, taos_connect, taos_init, test_connect, test_exec, test_exec_many};
 
     #[test]
     fn test_taos_query() {
@@ -2209,6 +2208,77 @@ mod tests {
             sleep(Duration::from_secs(5));
 
             test_exec(taos, "drop database test_1740732937");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_fetch_rows_a_large_batch() {
+        #[repr(C)]
+        struct Param {
+            rows: usize,
+            done_sender: flume::Sender<()>,
+        }
+
+        unsafe {
+            taos_init();
+            let taos = test_connect();
+
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64;
+
+            let num = 10000;
+            let mut sql = "insert into t0 values ".to_string();
+            for i in 0..num {
+                sql.push_str(&format!("({}, {}) ", ts + i, i));
+            }
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1751610087",
+                    "create database test_1751610087",
+                    "use test_1751610087",
+                    "create table t0(ts timestamp, c1 int)",
+                    &sql,
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+
+            extern "C" fn cb(param: *mut c_void, res: *mut TAOS_RES, num_of_rows: c_int) {
+                unsafe {
+                    let para = (param as *mut Param).as_mut().unwrap();
+                    tracing::trace!("cb, num_of_rows: {}, rows: {}", num_of_rows, para.rows);
+                    if num_of_rows > 0 {
+                        para.rows += num_of_rows as usize;
+                        taos_fetch_rows_a(res, cb, param);
+                    } else if num_of_rows < 0 {
+                        let errstr = taos_errstr(res);
+                        tracing::trace!("failed to fetch rows: {:?}", CStr::from_ptr(errstr));
+                    } else {
+                        tracing::trace!("no more data, total rows fetched: {}", para.rows);
+                        let _ = para.done_sender.send(());
+                    }
+                }
+            }
+
+            let (done_tx, done_rx) = flume::bounded(1);
+
+            let mut param = Param {
+                rows: 0,
+                done_sender: done_tx,
+            };
+
+            taos_fetch_rows_a(res, cb, &mut param as *mut _ as *mut _);
+
+            let _ = done_rx.recv();
+            assert_eq!(param.rows, num as usize);
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1751610087");
             taos_close(taos);
         }
     }
