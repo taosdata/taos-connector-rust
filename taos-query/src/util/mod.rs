@@ -373,6 +373,18 @@ pub trait AsyncInlinable {
     }
 }
 
+pub struct CleanUp<F: FnOnce()> {
+    pub f: Option<F>,
+}
+
+impl<F: FnOnce()> Drop for CleanUp<F> {
+    fn drop(&mut self) {
+        if let Some(f) = self.f.take() {
+            f();
+        }
+    }
+}
+
 #[test]
 fn inlined_bytes() -> std::io::Result<()> {
     let s = "abcd";

@@ -718,9 +718,8 @@ pub(super) mod list {
                         .to_str()
                         .expect("topic name must be valid utf8 str")
                 })
-                .map(|s| {
+                .inspect(|_| {
                     self.index += 1;
-                    s
                 })
         }
     }

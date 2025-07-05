@@ -9,16 +9,14 @@ use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::common::{Field, Precision, Ty};
 use taos_query::prelude::RawError;
 use taos_query::tmq::{Assignment, VGroupId};
+use taos_query::util::generate_req_id;
+use tokio_tungstenite::tungstenite::Message;
 
-use crate::query::infra::{ToMessage, WsConnReq};
+use crate::query::messages::{ToMessage, WsConnReq};
 
 pub type ReqId = u64;
-
-/// Type for result ID.
 pub type ResId = u64;
-
 pub type ConsumerId = u64;
-
 pub type MessageId = u64;
 
 #[derive(Debug, Serialize, Default, Clone)]
@@ -291,6 +289,35 @@ impl TmqRecv {
                 Err(RawError::new(self.code, self.message.unwrap_or_default()))
             },
         )
+    }
+}
+
+#[derive(Debug)]
+pub enum WsMessage {
+    Command(TmqSend),
+    Raw(Message),
+}
+
+impl WsMessage {
+    pub(crate) fn req_id(&self) -> ReqId {
+        match self {
+            WsMessage::Raw(_) => generate_req_id(),
+            WsMessage::Command(tmq_send) => tmq_send.req_id(),
+        }
+    }
+
+    pub(crate) fn into_message(self) -> Message {
+        match self {
+            WsMessage::Raw(message) => message,
+            WsMessage::Command(tmq_send) => tmq_send.to_msg(),
+        }
+    }
+
+    pub(crate) fn should_cache(&self) -> bool {
+        match self {
+            WsMessage::Raw(_) => false,
+            WsMessage::Command(tmq_send) => matches!(tmq_send, TmqSend::Poll { .. }),
+        }
     }
 }
 

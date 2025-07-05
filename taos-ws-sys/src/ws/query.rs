@@ -875,7 +875,7 @@ pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char 
 
     let server_info = SERVER_INFO.get_or_init(|| {
         if let Some(taos) = (taos as *mut Taos).as_mut() {
-            CString::new(taos.version()).unwrap()
+            CString::new(taos.version().as_bytes()).unwrap()
         } else {
             CString::new("").unwrap()
         }
@@ -2079,6 +2079,8 @@ mod tests {
             let sql = c"select * from t0";
             let param = c"hello, world";
             taos_query_a(taos, sql.as_ptr(), cb, param.as_ptr() as _);
+
+            sleep(Duration::from_secs(1));
 
             test_exec(taos, "drop database test_1740664844");
             taos_close(taos);

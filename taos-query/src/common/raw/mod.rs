@@ -588,7 +588,7 @@ impl RawBlock {
         let code = cursor.read_i32::<byteorder::LittleEndian>()?;
         let message = cursor.get_str()?;
         if code != 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, message));
+            return Err(std::io::Error::other(message));
         }
 
         cursor.read_u64::<byteorder::LittleEndian>()?; //skip msg id
@@ -1018,7 +1018,7 @@ impl Display for PrettyBlock<'_> {
             for row in (&mut rows_iter).take(MAX_DISPLAY_ROWS) {
                 table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
-            table.add_row(std::iter::repeat("...").take(self.ncols()).collect());
+            table.add_row(std::iter::repeat_n("...", self.ncols()).collect());
             for row in rows_iter.skip(nrows - 2 * MAX_DISPLAY_ROWS) {
                 table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
