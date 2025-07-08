@@ -19,6 +19,8 @@ use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
 use tracing::{debug, error, instrument};
 
+use crate::ws::config::get_global_adapter_list;
+
 mod config;
 pub mod error;
 pub mod query;
@@ -162,53 +164,67 @@ unsafe fn connect(
     user: *const c_char,
     pass: *const c_char,
     db: *const c_char,
-    mut port: u16,
+    port: u16,
 ) -> TaosResult<Taos> {
     const DEFAULT_HOST: &str = "localhost";
     const DEFAULT_PORT: u16 = 6041;
-    const DEFAULT_PORT_CLOUD: u16 = 443;
+    const DEFAULT_CLOUD_PORT: u16 = 443;
     const DEFAULT_USER: &str = "root";
     const DEFAULT_PASS: &str = "taosdata";
     const DEFAULT_DB: &str = "";
 
-    let host = if ip.is_null() {
-        DEFAULT_HOST
+    #[inline]
+    fn is_cloud(host: &str) -> bool {
+        host.contains("cloud.tdengine") || host.contains("cloud.taosdata")
+    }
+
+    #[inline]
+    fn get_port(host: &str, port: u16) -> u16 {
+        if port != 0 {
+            port
+        } else if is_cloud(host) {
+            DEFAULT_CLOUD_PORT
+        } else {
+            DEFAULT_PORT
+        }
+    }
+
+    let addr = if !ip.is_null() {
+        let ip = CStr::from_ptr(ip).to_str()?;
+        let port = get_port(ip, port);
+        format!("{ip}:{port}")
+    } else if let Some(adapter_list) = get_global_adapter_list() {
+        adapter_list.to_string()
     } else {
-        CStr::from_ptr(ip).to_str()?
+        let host = DEFAULT_HOST;
+        let port = get_port(host, port);
+        format!("{host}:{port}")
     };
 
-    let user = if user.is_null() {
-        DEFAULT_USER
-    } else {
+    let user = if !user.is_null() {
         CStr::from_ptr(user).to_str()?
+    } else {
+        DEFAULT_USER
     };
 
-    let pass = if pass.is_null() {
-        DEFAULT_PASS
-    } else {
+    let pass = if !pass.is_null() {
         CStr::from_ptr(pass).to_str()?
+    } else {
+        DEFAULT_PASS
     };
 
-    let db = if db.is_null() {
-        DEFAULT_DB
-    } else {
+    let db = if !db.is_null() {
         CStr::from_ptr(db).to_str()?
+    } else {
+        DEFAULT_DB
     };
 
     let compression = config::get_global_compression();
 
-    let dsn = if (host.contains("cloud.tdengine") || host.contains("cloud.taosdata"))
-        && user == "token"
-    {
-        if port == 0 {
-            port = DEFAULT_PORT_CLOUD;
-        }
-        format!("wss://{host}:{port}/{db}?token={pass}&compression={compression}")
+    let dsn = if is_cloud(&addr) && user == "token" {
+        format!("wss://{addr}/{db}?token={pass}&compression={compression}")
     } else {
-        if port == 0 {
-            port = DEFAULT_PORT;
-        }
-        format!("ws://{user}:{pass}@{host}:{port}/{db}?compression={compression}")
+        format!("ws://{user}:{pass}@{addr}/{db}?compression={compression}")
     };
 
     debug!("taos_connect, dsn: {:?}", dsn);
