@@ -523,6 +523,8 @@ impl TaosBuilder {
             }
         }
 
+        let mut last_err = None;
+
         for _ in 0..self.addrs.len() {
             let mut url = self.to_url(ty);
             tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
@@ -534,30 +536,37 @@ impl TaosBuilder {
                             return Ok((ws_stream, String::new()));
                         }
 
-                        let version_res = self.send_version_request(&mut ws_stream).await;
-                        if let Err(err) = &version_res {
-                            tracing::warn!("failed to send version request: {err}");
-                            if err.code() != WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code() {
-                                break;
+                        let version = match self.send_version_request(&mut ws_stream).await {
+                            Ok(ver) => ver,
+                            Err(err) => {
+                                tracing::warn!("failed to send version request: {err}");
+                                let code = err.code();
+                                last_err = Some(err);
+                                if code != WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code() {
+                                    break;
+                                }
+                                continue;
                             }
-                            continue;
-                        }
+                        };
 
                         if let Some(ref cb) = cb {
                             if let Err(err) = cb(&mut ws_stream).await {
                                 tracing::warn!("failed to call callback: {err}");
-                                if err.code() != WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code() {
+                                let code = err.code();
+                                last_err = Some(err);
+                                if code != WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code() {
                                     break;
                                 }
                                 continue;
                             }
                         }
 
-                        return Ok((ws_stream, version_res.unwrap()));
+                        return Ok((ws_stream, version));
                     }
                     Err(e) => {
                         let errstr = e.to_string();
                         tracing::warn!("failed to connect to {url}, err: {errstr}");
+                        last_err = Some(RawError::any(e));
                         if errstr.contains("307") {
                             self.set_https(true);
                             url = url.replace("ws://", "wss://");
@@ -595,8 +604,12 @@ impl TaosBuilder {
 
         tracing::error!("failed to connect to all addresses: {:?}", self.addrs);
 
-        Err(RawError::from_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
-            .context("failed to connect to all addresses"))
+        if let Some(err) = last_err {
+            Err(err)
+        } else {
+            Err(RawError::from_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                .context("failed to connect to all addresses"))
+        }
     }
 
     async fn send_version_request(
