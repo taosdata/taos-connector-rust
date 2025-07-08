@@ -821,10 +821,8 @@ mod tests {
             .build()
             .await;
 
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            "[0xE001] failed to connect to all addresses"
-        );
+        let errstr = res.unwrap_err().to_string();
+        assert!(errstr.contains("IO error: Connection refused"));
 
         Ok(())
     }
@@ -841,28 +839,22 @@ mod tests {
             .build()
             .await;
 
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            "[0xE001] failed to connect to all addresses"
-        );
+        let errstr = res.unwrap_err().to_string();
+        assert!(errstr.contains("IO error: Connection refused"));
 
         let res = TaosBuilder::from_dsn("ws://127.0.0.1:9978,127.0.0.1:9979?conn_retries=1")?
             .build()
             .await;
 
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            "[0xE001] failed to connect to all addresses"
-        );
+        let errstr = res.unwrap_err().to_string();
+        assert!(errstr.contains("IO error: Connection refused"));
 
         let res = TaosBuilder::from_dsn("ws://127.0.0.1:9978,127.0.0.1:9979?conn_retries=2")?
             .build()
             .await;
 
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            "[0xE001] failed to connect to all addresses"
-        );
+        let errstr = res.unwrap_err().to_string();
+        assert!(errstr.contains("IO error: Connection refused"));
 
         Ok(())
     }
@@ -881,10 +873,8 @@ mod tests {
         .build()
         .await;
 
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            "[0xE001] failed to connect to all addresses"
-        );
+        let errstr = res.unwrap_err().to_string();
+        assert!(errstr.contains("IO error: Connection refused"));
 
         Ok(())
     }

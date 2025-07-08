@@ -4,6 +4,7 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::StreamExt;
 use futures_util::SinkExt;
 use once_cell::sync::OnceCell;
+use query::Error as QueryError;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::cmp;
@@ -529,7 +530,7 @@ impl TaosBuilder {
             let mut url = self.to_url(ty);
             tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
 
-            for i in 0..self.retry_policy.retries {
+            for i in 0..self.retry_policy.retries + 1 {
                 match connect_async_with_config(&url, Some(config), false).await {
                     Ok((mut ws_stream, _)) => {
                         if ty == EndpointType::Stmt {
@@ -563,10 +564,10 @@ impl TaosBuilder {
 
                         return Ok((ws_stream, version));
                     }
-                    Err(e) => {
-                        let errstr = e.to_string();
+                    Err(err) => {
+                        let errstr = err.to_string();
                         tracing::warn!("failed to connect to {url}, err: {errstr}");
-                        last_err = Some(RawError::any(e));
+                        last_err = Some(QueryError::from(err).into());
                         if errstr.contains("307") {
                             self.set_https(true);
                             url = url.replace("ws://", "wss://");
@@ -579,6 +580,7 @@ impl TaosBuilder {
                             };
                             continue;
                         } else if errstr.contains("401 Unauthorized") {
+                            last_err = Some(QueryError::Unauthorized(url).into());
                             break;
                         }
                     }
