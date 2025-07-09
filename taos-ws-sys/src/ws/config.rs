@@ -52,14 +52,6 @@ pub fn init() -> Result<(), String> {
             config.set_timezone(s);
         }
 
-        if let Ok(s) = std::env::var("TAOS_FIRST_EP") {
-            config.set_first_ep(s);
-        }
-
-        if let Ok(s) = std::env::var("TAOS_SECOND_EP") {
-            config.set_second_ep(s);
-        }
-
         if let Ok(s) = std::env::var("TAOS_FQDN") {
             config.set_fqdn(s);
         }
@@ -129,14 +121,6 @@ pub fn timezone() -> Option<FastStr> {
     CONFIG.read().unwrap().timezone().cloned()
 }
 
-pub fn first_ep() -> Option<FastStr> {
-    CONFIG.read().unwrap().first_ep().cloned()
-}
-
-pub fn second_ep() -> Option<FastStr> {
-    CONFIG.read().unwrap().second_ep().cloned()
-}
-
 pub fn fqdn() -> Option<FastStr> {
     CONFIG.read().unwrap().fqdn().cloned()
 }
@@ -165,8 +149,6 @@ pub struct Config {
     log_level: Option<LevelFilter>,
     log_output_to_screen: Option<bool>,
     timezone: Option<FastStr>,
-    first_ep: Option<FastStr>,
-    second_ep: Option<FastStr>,
     fqdn: Option<FastStr>,
     server_port: Option<u16>,
     adapter_list: Option<FastStr>,
@@ -181,8 +163,6 @@ impl Config {
             log_level: None,
             log_output_to_screen: None,
             timezone: None,
-            first_ep: None,
-            second_ep: None,
             fqdn: None,
             server_port: None,
             adapter_list: None,
@@ -224,14 +204,6 @@ impl Config {
 
     fn timezone(&self) -> Option<&FastStr> {
         self.timezone.as_ref()
-    }
-
-    fn first_ep(&self) -> Option<&FastStr> {
-        self.first_ep.as_ref()
-    }
-
-    fn second_ep(&self) -> Option<&FastStr> {
-        self.second_ep.as_ref()
     }
 
     fn fqdn(&self) -> Option<&FastStr> {
@@ -287,14 +259,6 @@ impl Config {
         if self.timezone.is_none() {
             self.timezone = Some(timezone.into());
         }
-    }
-
-    fn set_first_ep<T: Into<FastStr>>(&mut self, first_ep: T) {
-        self.first_ep = Some(first_ep.into());
-    }
-
-    fn set_second_ep<T: Into<FastStr>>(&mut self, second_ep: T) {
-        self.second_ep = Some(second_ep.into());
     }
 
     fn set_fqdn<T: Into<FastStr>>(&mut self, fqdn: T) {
@@ -358,8 +322,6 @@ impl Config {
             log_level,
             log_output_to_screen,
             timezone,
-            first_ep,
-            second_ep,
             fqdn,
             server_port,
             adapter_list
@@ -409,8 +371,6 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                 "logDir" => config.log_dir = Some(value.to_string().into()),
                 "debugFlag" => config.set_debug_flag(value),
                 "timezone" => config.set_timezone::<FastStr>(value.to_string().into()),
-                "firstEp" => config.first_ep = Some(value.to_string().into()),
-                "secondEp" => config.second_ep = Some(value.to_string().into()),
                 "fqdn" => config.fqdn = Some(value.to_string().into()),
                 "serverPort" => {
                     config.server_port = Some(value.parse::<u16>().map_err(|_| {
@@ -446,8 +406,6 @@ mod tests {
         assert_eq!(config.log_level(), LevelFilter::DEBUG);
         assert_eq!(config.log_output_to_screen(), true);
         assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
-        assert_eq!(config.first_ep(), Some(&FastStr::from("hostname:7030")));
-        assert_eq!(config.second_ep(), Some(&FastStr::from("hostname:16030")));
         assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
         assert_eq!(config.server_port(), 8030);
         assert_eq!(
@@ -466,8 +424,6 @@ mod tests {
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
             assert_eq!(config.log_output_to_screen(), true);
             assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
-            assert_eq!(config.first_ep(), Some(&FastStr::from("hostname:7030")));
-            assert_eq!(config.second_ep(), Some(&FastStr::from("hostname:16030")));
             assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
             assert_eq!(config.server_port(), 8030);
             assert_eq!(
@@ -484,8 +440,6 @@ mod tests {
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
             assert_eq!(config.log_output_to_screen(), true);
             assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
-            assert_eq!(config.first_ep(), Some(&FastStr::from("hostname:7030")));
-            assert_eq!(config.second_ep(), Some(&FastStr::from("hostname:16030")));
             assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
             assert_eq!(config.server_port(), 8030);
             assert_eq!(
@@ -531,8 +485,6 @@ mod tests {
         init()?;
 
         assert_eq!(compression(), false);
-        assert_eq!(first_ep(), Some(FastStr::from("localhost")));
-        assert_eq!(second_ep(), Some(FastStr::from("hostname:16030")));
         assert_eq!(fqdn(), Some(FastStr::from("localhost")));
         assert_eq!(server_port(), 6030);
         assert_eq!(

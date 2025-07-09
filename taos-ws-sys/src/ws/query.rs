@@ -4,7 +4,6 @@ use std::time::Duration;
 use std::{ptr, slice};
 
 use bytes::Bytes;
-use faststr::FastStr;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
 use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr};
@@ -1114,9 +1113,7 @@ pub unsafe extern "C" fn taos_check_server_status(
 ) -> TSDB_SERVER_STATUS {
     debug!("taos_check_server_status start, fqdn: {fqdn:?}, port: {port}, details: {details:?}, maxlen: {maxlen}");
 
-    let fqdn = if fqdn.is_null() {
-        config::fqdn()
-    } else {
+    let fqdn = if !fqdn.is_null() {
         match CStr::from_ptr(fqdn).to_str() {
             Ok(fqdn) => Some(fqdn.to_string().into()),
             Err(_) => {
@@ -1125,6 +1122,8 @@ pub unsafe extern "C" fn taos_check_server_status(
                 return TSDB_SERVER_STATUS::TSDB_SRV_STATUS_UNAVAILABLE;
             }
         }
+    } else {
+        config::fqdn()
     };
 
     if port == 0 {
@@ -1133,18 +1132,10 @@ pub unsafe extern "C" fn taos_check_server_status(
 
     debug!("taos_check_server_status, fqdn: {fqdn:?}, port: {port}");
 
-    let mut host = FastStr::from_static_str("localhost");
-    if let Some(ep) = config::first_ep() {
-        host = ep;
-    } else if let Some(ep) = config::second_ep() {
-        host = ep;
-    }
+    let addr = config::adapter_list()
+        .map_or_else(|| "localhost:6041".to_string(), |addr| addr.to_string());
 
-    let dsn = if host.contains(":") {
-        format!("ws://{host}")
-    } else {
-        format!("ws://{host}:6041")
-    };
+    let dsn = format!("ws://{addr}");
 
     debug!("taos_check_server_status, dsn: {dsn}");
 

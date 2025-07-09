@@ -192,8 +192,8 @@ unsafe fn connect(
         let ip = CStr::from_ptr(ip).to_str()?;
         let port = get_port(ip, port);
         format!("{ip}:{port}")
-    } else if let Some(adapter_list) = config::adapter_list() {
-        adapter_list.to_string()
+    } else if let Some(addr) = config::adapter_list() {
+        addr.to_string()
     } else {
         let host = DEFAULT_HOST;
         let port = get_port(host, port);
