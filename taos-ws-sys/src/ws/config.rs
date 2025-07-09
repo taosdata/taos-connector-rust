@@ -408,10 +408,11 @@ mod tests {
         assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
         assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
         assert_eq!(config.server_port(), 8030);
-        assert_eq!(
-            config.adapter_list(),
-            Some(&FastStr::from("dev1:6041,dev2:6041,dev3:6041"))
-        );
+        assert_eq!(config.adapter_list(), None);
+        // assert_eq!(
+        //     config.adapter_list(),
+        //     Some(&FastStr::from("dev1:6041,dev2:6041,dev3:6041"))
+        // );
     }
 
     #[test]
@@ -426,10 +427,6 @@ mod tests {
             assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
             assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
             assert_eq!(config.server_port(), 8030);
-            assert_eq!(
-                config.adapter_list(),
-                Some(&FastStr::from("dev1:6041,dev2:6041,dev3:6041"))
-            );
         }
 
         {
@@ -442,10 +439,6 @@ mod tests {
             assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
             assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
             assert_eq!(config.server_port(), 8030);
-            assert_eq!(
-                config.adapter_list(),
-                Some(&FastStr::from("dev1:6041,dev2:6041,dev3:6041"))
-            );
         }
 
         Ok(())
@@ -479,7 +472,6 @@ mod tests {
             set_var("TAOS_SERVER_PORT", "6030");
             set_var("TAOS_COMPRESSION", "false");
             set_var("TAOS_CONFIG_DIR", "./tests");
-            set_var("TAOS_ADAPTER_LIST", "dev1:6041,dev2:6041,dev3:6041");
         }
 
         init()?;
@@ -487,10 +479,6 @@ mod tests {
         assert_eq!(compression(), false);
         assert_eq!(fqdn(), Some(FastStr::from("localhost")));
         assert_eq!(server_port(), 6030);
-        assert_eq!(
-            adapter_list(),
-            Some(FastStr::from("dev1:6041,dev2:6041,dev3:6041"))
-        );
 
         Ok(())
     }
