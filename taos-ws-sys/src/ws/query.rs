@@ -1115,7 +1115,7 @@ pub unsafe extern "C" fn taos_check_server_status(
     debug!("taos_check_server_status start, fqdn: {fqdn:?}, port: {port}, details: {details:?}, maxlen: {maxlen}");
 
     let fqdn = if fqdn.is_null() {
-        config::get_global_fqdn()
+        config::fqdn()
     } else {
         match CStr::from_ptr(fqdn).to_str() {
             Ok(fqdn) => Some(fqdn.to_string().into()),
@@ -1128,15 +1128,15 @@ pub unsafe extern "C" fn taos_check_server_status(
     };
 
     if port == 0 {
-        port = config::get_global_server_port() as _;
+        port = config::server_port() as _;
     }
 
     debug!("taos_check_server_status, fqdn: {fqdn:?}, port: {port}");
 
     let mut host = FastStr::from_static_str("localhost");
-    if let Some(ep) = config::get_global_first_ep() {
+    if let Some(ep) = config::first_ep() {
         host = ep;
-    } else if let Some(ep) = config::get_global_second_ep() {
+    } else if let Some(ep) = config::second_ep() {
         host = ep;
     }
 

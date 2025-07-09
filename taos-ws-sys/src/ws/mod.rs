@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use error::{set_err_and_get_code, TaosError};
+use faststr::FastStr;
 use query::QueryResultSet;
 use sml::SchemalessResultSet;
 use taos_error::Code;
@@ -18,8 +19,6 @@ use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
 use tracing::{debug, error, instrument};
-
-use crate::ws::config::get_global_adapter_list;
 
 mod config;
 pub mod error;
@@ -193,7 +192,7 @@ unsafe fn connect(
         let ip = CStr::from_ptr(ip).to_str()?;
         let port = get_port(ip, port);
         format!("{ip}:{port}")
-    } else if let Some(adapter_list) = get_global_adapter_list() {
+    } else if let Some(adapter_list) = config::adapter_list() {
         adapter_list.to_string()
     } else {
         let host = DEFAULT_HOST;
@@ -219,7 +218,7 @@ unsafe fn connect(
         DEFAULT_DB
     };
 
-    let compression = config::get_global_compression();
+    let compression = config::compression();
 
     let dsn = if is_cloud(&addr) && user == "token" {
         format!("wss://{addr}/{db}?token={pass}&compression={compression}")
@@ -249,7 +248,6 @@ pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
-    let mut c = config::CONFIG.write().unwrap();
     match option {
         TSDB_OPTION::TSDB_OPTION_CONFIGDIR => {
             if arg.is_null() {
@@ -260,7 +258,7 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
             }
             let dir = CStr::from_ptr(arg as _);
             if let Ok(dir) = dir.to_str() {
-                c.set_config_dir(faststr::FastStr::new(dir));
+                config::set_config_dir(FastStr::new(dir));
                 0
             } else {
                 return set_err_and_get_code(TaosError::new(
@@ -278,7 +276,7 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
             }
             let tz = CStr::from_ptr(arg as _);
             if let Ok(tz) = tz.to_str() {
-                c.set_timezone(tz);
+                config::set_timezone(FastStr::new(tz));
                 0
             } else {
                 return set_err_and_get_code(TaosError::new(
@@ -343,15 +341,14 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
         return Err(TaosError::new(Code::FAILED, &err).into());
     }
 
-    let cfg = config::CONFIG.read().unwrap();
-    if let Some(timezone) = cfg.timezone() {
+    if let Some(timezone) = config::timezone() {
         unsafe { std::env::set_var("TZ", timezone.as_str()) };
     }
 
     let mut layers = Vec::new();
-    let config_dir = cfg.log_dir();
+    let log_dir = config::log_dir();
 
-    let appender = RollingFileAppender::builder(config_dir.as_str(), "taos", 16)
+    let appender = RollingFileAppender::builder(log_dir.as_str(), "taos", 16)
         .compress(true)
         .reserved_disk_size("1GB")
         .rotation_count(3)
@@ -361,15 +358,15 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     layers.push(
         TaosLayer::<Qid>::new(appender)
             .with_location()
-            .with_filter(cfg.log_level())
+            .with_filter(config::log_level())
             .boxed(),
     );
 
-    if cfg.log_output_to_screen() {
+    if config::log_output_to_screen() {
         layers.push(
             TaosLayer::<Qid, _, _>::new(std::io::stdout)
                 .with_location()
-                .with_filter(cfg.log_level())
+                .with_filter(config::log_level())
                 .boxed(),
         );
     }
@@ -378,7 +375,7 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
 
     LogTracer::init()?;
 
-    debug!("taos_init, config: {cfg:?}");
+    debug!("taos_init, config: {:?}", config::config());
 
     Ok(())
 }
@@ -640,6 +637,8 @@ mod tests {
     use std::ffi::CString;
     use std::ptr;
 
+    use faststr::FastStr;
+
     use super::*;
     use crate::ws::error::{taos_errno, taos_errstr};
 
@@ -766,9 +765,8 @@ mod tests {
             let code = taos_options(TSDB_OPTION::TSDB_OPTION_CONFIGDIR, arg.as_ptr() as *const _);
             assert_eq!(code, 0);
             drop(arg);
-            let config = config::CONFIG.read().unwrap();
-            let cfg_dir = config.config_dir.as_ref();
-            assert_eq!(cfg_dir, Some(&faststr::FastStr::from("/etc/taos")));
+            let cfg_dir = config::config_dir();
+            assert_eq!(cfg_dir, FastStr::new("/etc/taos"));
         }
     }
 }
