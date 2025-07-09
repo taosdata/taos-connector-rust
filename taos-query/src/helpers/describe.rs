@@ -149,51 +149,32 @@ impl Described {
 
     fn sql_repr_by_compression(&self, compression: Option<&CompressOptions>) -> String {
         let ty = self.ty;
-        let ty_str = if matches!(ty, Ty::Decimal | Ty::Decimal64) {
-            match self.origin_ty.clone() {
-                Some(t) => t,
-                None => ty.to_string(),
-            }
+        let is_var_ty = ty != Ty::Blob && ty.is_var_type();
+
+        let ty = if matches!(ty, Ty::Decimal | Ty::Decimal64) {
+            self.origin_ty.clone().unwrap_or_else(|| ty.to_string())
         } else {
             ty.to_string()
         };
 
-        match (self.is_primary_key(), ty.is_var_type(), compression) {
-            (true, true, None) => {
-                format!("`{}` {}({}) PRIMARY KEY", self.field, ty, self.length)
-            }
-            (true, false, None) => format!("`{}` {} PRIMARY KEY", self.field, ty_str),
-            (true, true, Some(t)) => {
-                if t.is_disabled() {
-                    format!("`{}` {}({}) PRIMARY KEY", self.field, ty, self.length)
-                } else {
-                    format!("`{}` {}({}) {} PRIMARY KEY", self.field, ty, self.length, t)
-                }
-            }
-            (true, false, Some(t)) => {
-                if t.is_disabled() {
-                    format!("`{}` {} PRIMARY KEY", self.field, ty_str)
-                } else {
-                    format!("`{}` {} {} PRIMARY KEY", self.field, ty_str, t)
-                }
-            }
-            (false, true, None) => format!("`{}` {}({})", self.field, ty, self.length),
-            (false, false, None) => format!("`{}` {}", self.field, ty_str),
-            (false, true, Some(t)) => {
-                if t.is_disabled() {
-                    format!("`{}` {}({})", self.field, ty, self.length)
-                } else {
-                    format!("`{}` {}({}) {}", self.field, ty, self.length, t)
-                }
-            }
-            (false, false, Some(t)) => {
-                if t.is_disabled() {
-                    format!("`{}` {}", self.field, ty_str)
-                } else {
-                    format!("`{}` {} {}", self.field, ty_str, t)
-                }
-            }
-        }
+        let base = if is_var_ty {
+            format!("`{}` {}({})", self.field, ty, self.length)
+        } else {
+            format!("`{}` {}", self.field, ty)
+        };
+
+        let compress = compression
+            .filter(|c| !c.is_disabled())
+            .map(|c| format!(" {c}"))
+            .unwrap_or_default();
+
+        let pk = if self.is_primary_key() {
+            " PRIMARY KEY"
+        } else {
+            ""
+        };
+
+        format!("{base}{compress}{pk}")
     }
 
     /// Create a new column description with compression feature.
@@ -751,7 +732,7 @@ mod tests {
     }
 
     #[test]
-    fn decimal_describe_test() -> anyhow::Result<()> {
+    fn test_decimal_describe() -> anyhow::Result<()> {
         let desc = Described {
             field: "v".to_string(),
             ty: Ty::Decimal,
@@ -766,6 +747,65 @@ mod tests {
 
         let desc = desc.with_origin_ty_name("DECIMAL(10, 2)");
         assert_eq!(desc.origin_ty_name(), Some("DECIMAL(10, 2)"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_blob_describe() -> anyhow::Result<()> {
+        let desc = Described {
+            field: "c1".to_string(),
+            ty: Ty::Blob,
+            origin_ty: None,
+            length: 16,
+            note: None,
+            compression: None,
+        };
+
+        let sql = desc.sql_repr();
+        assert_eq!(sql, "`c1` BLOB");
+
+        let desc = Described {
+            field: "c1".to_string(),
+            ty: Ty::Blob,
+            origin_ty: None,
+            length: 32,
+            note: Some("PRIMARY KEY".to_string()),
+            compression: None,
+        };
+
+        let sql = desc.sql_repr();
+        assert_eq!(sql, "`c1` BLOB PRIMARY KEY");
+
+        let desc = Described {
+            field: "c1".to_string(),
+            ty: Ty::Blob,
+            origin_ty: None,
+            length: 64,
+            note: None,
+            compression: Some(CompressOptions::new("delta-i", "lz4", "medium")),
+        };
+
+        let sql = desc.sql_repr();
+        assert_eq!(
+            sql,
+            "`c1` BLOB ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium'"
+        );
+
+        let desc = Described {
+            field: "c1".to_string(),
+            ty: Ty::Blob,
+            origin_ty: None,
+            length: 64,
+            note: Some("PRIMARY KEY".to_string()),
+            compression: Some(CompressOptions::new("delta-i", "lz4", "medium")),
+        };
+
+        let sql = desc.sql_repr();
+        assert_eq!(
+            sql,
+            "`c1` BLOB ENCODE 'delta-i' COMPRESS 'lz4' LEVEL 'medium' PRIMARY KEY"
+        );
 
         Ok(())
     }
