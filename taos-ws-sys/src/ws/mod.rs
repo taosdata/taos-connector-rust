@@ -655,7 +655,8 @@ mod tests {
             assert!(!taos.is_null());
             taos_close(taos);
 
-            let taos = taos_connect(ptr::null(), ptr::null(), ptr::null(), ptr::null(), 0);
+            let ip = c"127.0.0.1";
+            let taos = taos_connect(ip.as_ptr(), ptr::null(), ptr::null(), ptr::null(), 0);
             assert!(!taos.is_null());
             taos_close(taos);
 
