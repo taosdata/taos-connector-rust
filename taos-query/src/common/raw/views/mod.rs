@@ -771,28 +771,6 @@ impl ColumnView {
         }
     }
 
-    /// Get the schema of the column view.
-    ///
-    /// The schema is used to describe the column's type and properties.
-    /// It includes the type, maximum variable length, precision, and scale for decimal types.
-    /// If the column view is a decimal type, it will return the precision and scale.
-    /// If it is not a decimal type, it will return the type and maximum variable length.
-    ///
-    ///
-    pub fn schema(&self) -> DataType {
-        let ty = self.as_ty();
-        if ty.is_decimal() {
-            let (precision, scale) = match self {
-                ColumnView::Decimal(view) => view.precision_and_scale(),
-                ColumnView::Decimal64(view) => view.precision_and_scale(),
-                _ => unreachable!(),
-            };
-            DataType::new_decimal(ty, precision, scale)
-        } else {
-            DataType::new(ty, self.max_variable_length() as _)
-        }
-    }
-
     /// Cast behaviors:
     ///
     /// - BOOL to VARCHAR/NCHAR: true => "true", false => "false"
@@ -1602,9 +1580,11 @@ impl ColumnView {
                     to: ty,
                     message: "geometry can not be casted to decimal type",
                 }),
+                ColumnView::Blob(_) => todo!(),
             }
         }
     }
+
     pub fn cast_precision(&self, precision: Precision) -> ColumnView {
         match self {
             ColumnView::Timestamp(view) => ColumnView::Timestamp(view.cast_precision(precision)),
@@ -1790,7 +1770,6 @@ mod tests {
 
     #[test]
     fn test_concat_iter() {
-        let values = [
         let values = [
             BorrowedValue::Int(7),
             BorrowedValue::UInt(8),

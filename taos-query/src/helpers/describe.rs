@@ -121,11 +121,15 @@ impl PartialEq for Described {
 
 impl Described {
     /// Create a new column description without primary-key/compression feature.
+    ///
+    /// Decimal should not set as is.
     pub fn new<F, L>(field: F, ty: Ty, length: L) -> Self
     where
         F: Into<String>,
         L: Into<Option<usize>>,
     {
+        debug_assert!(!ty.is_decimal());
+
         let field = field.into();
         let length = length.into();
         let length = length.unwrap_or_else(|| {
@@ -138,7 +142,7 @@ impl Described {
 
         Self {
             field,
-            ty,
+            data_type: DataType::new(ty, length as _),
             origin_ty: None,
             length,
             note: None,
@@ -770,7 +774,7 @@ mod tests {
     fn test_blob_describe() -> anyhow::Result<()> {
         let desc = Described {
             field: "c1".to_string(),
-            ty: Ty::Blob,
+            data_type: Ty::Blob.into(),
             origin_ty: None,
             length: 16,
             note: None,
@@ -782,7 +786,7 @@ mod tests {
 
         let desc = Described {
             field: "c1".to_string(),
-            ty: Ty::Blob,
+            data_type: Ty::Blob.into(),
             origin_ty: None,
             length: 32,
             note: Some("PRIMARY KEY".to_string()),
@@ -794,7 +798,7 @@ mod tests {
 
         let desc = Described {
             field: "c1".to_string(),
-            ty: Ty::Blob,
+            data_type: Ty::Blob.into(),
             origin_ty: None,
             length: 64,
             note: None,
@@ -809,7 +813,7 @@ mod tests {
 
         let desc = Described {
             field: "c1".to_string(),
-            ty: Ty::Blob,
+            data_type: Ty::Blob.into(),
             origin_ty: None,
             length: 64,
             note: Some("PRIMARY KEY".to_string()),

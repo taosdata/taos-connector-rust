@@ -118,6 +118,7 @@ impl PartialEq for DataType {
             && self.scale() == other.scale()
     }
 }
+
 impl Eq for DataType {}
 
 impl Debug for DataType {

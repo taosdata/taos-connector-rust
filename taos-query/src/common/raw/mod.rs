@@ -1952,9 +1952,9 @@ mod tests {
         );
 
         // schema
-        bytes.extend_from_slice(ColSchema::new(Ty::Blob, 0).as_bytes());
-        bytes.extend_from_slice(ColSchema::new(Ty::Blob, 0).as_bytes());
-        bytes.extend_from_slice(ColSchema::new(Ty::Blob, 0).as_bytes());
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
 
         // length
         bytes.put_u32_ne(8);
