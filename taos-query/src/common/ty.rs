@@ -3,6 +3,7 @@ use std::os::raw::c_char;
 use std::str::FromStr;
 
 use serde::de::Visitor;
+use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
 /// TDengine data type enumeration.
 ///
@@ -34,10 +35,23 @@ use serde::de::Visitor;
 /// - VarChar sql name is BINARY in TDengine 2.0, and VARCHAR in 3.0.
 /// - Decimal and Blob types are not supported in TDengine 2.0.
 /// - MediumBlob type is not supported in TDengine 2.0 and 3.0.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde_repr::Serialize_repr)]
+#[derive(
+    Default,
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    PartialEq,
+    Eq,
+    serde_repr::Serialize_repr,
+    TryFromBytes,
+    IntoBytes,
+    Immutable,
+    KnownLayout,
+    Unaligned,
+)]
 #[repr(u8)]
 #[non_exhaustive]
-#[derive(Default)]
 pub enum Ty {
     /// Null is only a value, not a *real* type, a nullable data type could be represented as [`Option<T>`] in Rust.
     ///
@@ -244,6 +258,32 @@ impl Ty {
         )
     }
 
+    /// Check if the data type is a numeric type.
+    pub const fn is_numeric(&self) -> bool {
+        use Ty::*;
+        matches!(
+            self,
+            Bool | TinyInt
+                | SmallInt
+                | Int
+                | BigInt
+                | UTinyInt
+                | USmallInt
+                | UInt
+                | UBigInt
+                | Float
+                | Double
+                | Decimal
+                | Decimal64
+        )
+    }
+
+    /// Check if the data type is decimal.
+    pub const fn is_decimal(&self) -> bool {
+        use Ty::*;
+        matches!(self, Decimal | Decimal64)
+    }
+
     /// Get fixed length if the type is primitive.
     pub const fn fixed_length(&self) -> usize {
         use Ty::*;
@@ -445,7 +485,6 @@ macro_rules! _impl_from_primitive {
 }
 
 _impl_from_primitive!(i8 i16 i32 i64 u16 u32 u64);
-
 #[cfg(test)]
 mod tests {
     use super::*;

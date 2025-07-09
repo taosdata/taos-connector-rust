@@ -2,10 +2,10 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
+use crate::common::views::DataType;
+use crate::common::Ty;
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
-
-use crate::common::Ty;
 
 /// Compress options for column, supported since TDengine 3.3.0.0 .
 ///
@@ -94,11 +94,11 @@ impl fmt::Display for CompressOptions {
 }
 
 #[allow(clippy::partial_pub_fields)]
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Serialize, Deserialize, Eq, Clone)]
 pub struct Described {
     pub field: String,
     #[serde(rename = "type")]
-    pub ty: Ty,
+    pub data_type: DataType,
     #[serde(skip)]
     origin_ty: Option<String>,
     pub length: usize,
@@ -106,6 +106,17 @@ pub struct Described {
     pub note: Option<String>,
     #[serde(flatten, default)]
     pub compression: Option<CompressOptions>,
+}
+
+impl PartialEq for Described {
+    /// Skip origin_ty field when [PartialEq], but keep it for internal use.
+    fn eq(&self, other: &Self) -> bool {
+        self.field == other.field
+            && self.data_type == other.data_type
+            && self.length == other.length
+            && self.note == other.note
+            && self.compression == other.compression
+    }
 }
 
 impl Described {
@@ -135,6 +146,13 @@ impl Described {
         }
     }
 
+    pub fn ty(&self) -> Ty {
+        self.data_type.ty()
+    }
+
+    pub fn data_type(&self) -> &DataType {
+        &self.data_type
+    }
     /// Represent the data type in sql.
     ///
     /// For example: "INT", "VARCHAR(100)".
@@ -148,7 +166,7 @@ impl Described {
     }
 
     fn sql_repr_by_compression(&self, compression: Option<&CompressOptions>) -> String {
-        let ty = self.ty;
+        let ty = self.ty();
         let is_var_ty = ty != Ty::Blob && ty.is_var_type();
 
         let ty = if matches!(ty, Ty::Decimal | Ty::Decimal64) {
@@ -307,25 +325,11 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let field = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let origin: serde_json::Value = seq
+
+                let data_type: DataType = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(1, &self))?;
-
-                let mut origin_ty = None;
-                let ty = match origin {
-                    serde_json::Value::Number(n) => {
-                        if let Some(n) = n.as_u64() {
-                            Ty::from(n as u8)
-                        } else {
-                            return Err(de::Error::custom("invalid Ty number"));
-                        }
-                    }
-                    serde_json::Value::String(s) => {
-                        origin_ty = Some(s.clone());
-                        Ty::from_str(&s).map_err(de::Error::custom)?
-                    }
-                    _ => return Err(de::Error::custom("invalid Ty")),
-                };
+                let origin_ty = Some(data_type.to_string());
 
                 let length = seq
                     .next_element()?
@@ -358,7 +362,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
 
                 let desc = Described {
                     field,
-                    ty,
+                    data_type,
                     origin_ty,
                     length,
                     note,
@@ -379,6 +383,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 let mut field = None;
                 let mut ty = None;
                 let mut origin_ty = None;
+                let mut data_type: Option<DataType> = None;
                 let mut length = None;
                 let mut note = None;
                 let mut encode = None;
@@ -407,6 +412,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                                 }
                                 serde_json::Value::String(s) => {
                                     origin_ty = Some(s.clone());
+                                    data_type = Some(s.parse().map_err(de::Error::custom)?);
                                     Ty::from_str(&s).map_err(de::Error::custom)?
                                 }
                                 _ => return Err(de::Error::custom("invalid Ty")),
@@ -445,9 +451,12 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                         }
                     }
                 }
+                let mut data_type = data_type.ok_or_else(|| de::Error::missing_field("type"))?;
                 let field = field.ok_or_else(|| de::Error::missing_field("field"))?;
-                let ty = ty.ok_or_else(|| de::Error::missing_field("type"))?;
                 let length = length.ok_or_else(|| de::Error::missing_field("length"))?;
+                if data_type.ty().is_decimal() {
+                    data_type.set_len(length as u32);
+                }
                 let compression = if let (Some(encode), Some(compress), Some(level)) =
                     (encode, compress, level)
                 {
@@ -457,7 +466,7 @@ impl<'de> Deserialize<'de> for ColumnMeta {
                 };
                 let desc = Described {
                     field,
-                    ty,
+                    data_type,
                     origin_ty,
                     length,
                     note,
@@ -488,7 +497,13 @@ impl ColumnMeta {
 
     pub fn ty(&self) -> Ty {
         match self {
-            ColumnMeta::Column(desc) | ColumnMeta::Tag(desc) => desc.ty,
+            ColumnMeta::Column(desc) | ColumnMeta::Tag(desc) => desc.ty(),
+        }
+    }
+
+    pub fn origin_ty(&self) -> Option<&str> {
+        match self {
+            ColumnMeta::Column(desc) | ColumnMeta::Tag(desc) => desc.origin_ty.as_deref(),
         }
     }
 
@@ -518,7 +533,7 @@ mod tests {
     fn test_sql_expr() {
         let desc = Described {
             field: "ts".to_string(),
-            ty: Ty::Timestamp,
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: None,
@@ -528,7 +543,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            ty: Ty::Timestamp,
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -538,7 +553,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            ty: Ty::Timestamp,
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -548,7 +563,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            ty: Ty::Timestamp,
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: None,
@@ -558,7 +573,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            ty: Ty::VarChar,
+            data_type: DataType::new(Ty::VarChar, 100),
             origin_ty: None,
             length: 100,
             note: Some("PRIMARY KEY".to_string()),
@@ -568,7 +583,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            ty: Ty::VarChar,
+            data_type: DataType::new(Ty::VarChar, 100),
             origin_ty: None,
             length: 100,
             note: None,
@@ -578,7 +593,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            ty: Ty::Timestamp,
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -591,7 +606,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            ty: Ty::Timestamp,
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -604,7 +619,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            ty: Ty::Timestamp,
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -614,7 +629,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            ty: Ty::Timestamp,
+            data_type: DataType::from_ty(Ty::Timestamp),
             origin_ty: None,
             length: 0,
             note: Some("PRIMARY KEY".to_string()),
@@ -627,7 +642,7 @@ mod tests {
 
         let desc = Described {
             field: "ts".to_string(),
-            ty: Ty::VarBinary,
+            data_type: DataType::new(Ty::VarBinary, 100),
             origin_ty: None,
             length: 100,
             note: Some("PRIMARY KEY".to_string()),
@@ -644,7 +659,7 @@ mod tests {
         // ordinary column
         let meta = ColumnMeta::Column(Described {
             field: "name".to_string(),
-            ty: Ty::BigInt,
+            data_type: Ty::BigInt.into(),
             origin_ty: None,
             length: 8,
             note: None,
@@ -661,7 +676,7 @@ mod tests {
         // primary key column
         let meta = ColumnMeta::Column(Described {
             field: "name".to_string(),
-            ty: Ty::BigInt,
+            data_type: Ty::BigInt.into(),
             origin_ty: None,
             length: 8,
             note: Some("PRIMARY KEY".to_string()),
@@ -678,7 +693,7 @@ mod tests {
         // with compression
         let meta = ColumnMeta::Column(Described {
             field: "name".to_string(),
-            ty: Ty::BigInt,
+            data_type: Ty::BigInt.into(),
             origin_ty: None,
             length: 8,
             note: None,
@@ -698,7 +713,7 @@ mod tests {
         // primary key with compression
         let meta = ColumnMeta::Column(Described {
             field: "name".to_string(),
-            ty: Ty::BigInt,
+            data_type: Ty::BigInt.into(),
             origin_ty: None,
             length: 8,
             note: Some("PRIMARY KEY".to_string()),
@@ -722,7 +737,7 @@ mod tests {
             col_meta,
             ColumnMeta::Column(Described {
                 field: "name".to_string(),
-                ty: Ty::BigInt,
+                data_type: Ty::BigInt.into(),
                 origin_ty: Some("BIGINT".to_string()),
                 length: 8,
                 note: None,
@@ -735,7 +750,7 @@ mod tests {
     fn test_decimal_describe() -> anyhow::Result<()> {
         let desc = Described {
             field: "v".to_string(),
-            ty: Ty::Decimal,
+            data_type: DataType::new_decimal(Ty::Decimal64, 5, 2),
             origin_ty: Some("DECIMAL(5, 2)".to_string()),
             length: 16,
             note: None,

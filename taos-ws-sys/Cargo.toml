@@ -37,6 +37,9 @@ tracing-subscriber = { version = "0.3.18", default-features = false, features = 
 cbindgen = "0.27.0"
 syn = { version = "2.0.91", features = ["full", "visit"] }
 
+[dev-dependencies]
+flume = "0.11"
+
 [features]
 default = ["rustls", "rustls-ring-crypto-provider"]
 

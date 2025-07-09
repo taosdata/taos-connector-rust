@@ -842,10 +842,15 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
     } else {
         CStr::from_ptr(dsn)
     };
+
     let dsn = dsn.to_str()?;
     let builder = TaosBuilder::from_dsn(dsn)?;
 
-    if dsn.contains("kepware") {
+    if cfg!(all(windows, target_pointer_width = "32")) {
+        tracing::debug!(
+            "Connecting with dsn: {dsn}, using thread to avoid stack overflow on 32-bit Windows"
+        );
+
         let stack_size = 4 * 1024 * 1024;
 
         let handle = thread::Builder::new()
@@ -869,7 +874,6 @@ unsafe fn connect_with_dsn(dsn: *const c_char) -> WsTaos {
         }
     } else {
         let mut taos = builder.build()?;
-
         builder.ping(&mut taos)?;
         Ok(taos)
     }
@@ -955,8 +959,7 @@ pub unsafe extern "C" fn ws_get_server_info(taos: *mut WS_TAOS) -> *const c_char
 
     let version_info = VERSION_INFO.get_or_init(|| {
         if let Some(taos) = (taos as *mut Taos).as_mut() {
-            let v = taos.version();
-            CString::new(v).unwrap()
+            CString::new(taos.version().as_bytes()).unwrap()
         } else {
             CString::new("").unwrap()
         }
@@ -2005,9 +2008,10 @@ mod tests {
             }
         }
     }
+
     #[test]
     fn kepware_connect() {
-        let stack_size = 256 * 1024;
+        let stack_size = 512 * 1024;
 
         let handle = thread::Builder::new()
             .stack_size(stack_size)
@@ -2040,10 +2044,8 @@ mod tests {
     }
 
     #[test]
-    fn connect_cloud() {
-        use std::env;
-
-        let dsn = env::var("TDENGINE_CLOUD_DSN").unwrap_or("http://localhost:6041".to_string());
+    fn test_connect() {
+        let dsn = "http://localhost:6041";
 
         init_env();
         unsafe {
@@ -2543,5 +2545,90 @@ mod tests {
             ws_free_result(rs);
             ws_close(taos);
         }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_ipv6() {
+        unsafe {
+            let taos = ws_connect(b"ws://[::1]:6041\0" as *const u8 as _);
+            assert!(!taos.is_null());
+
+            macro_rules! execute {
+                ($sql:expr) => {
+                    let sql = $sql as *const u8 as _;
+                    let rs = ws_query(taos, sql);
+                    let code = ws_errno(rs);
+                    assert!(code == 0, "{:?}", CStr::from_ptr(ws_errstr(rs)));
+                    ws_free_result(rs);
+                };
+            }
+
+            execute!(b"drop database if exists test_1748918714\0");
+            execute!(b"create database test_1748918714\0");
+            execute!(b"use test_1748918714\0");
+            execute!(b"create table t0 (ts timestamp, c1 int)\0");
+            execute!(b"insert into t0 values (1741660079228, 1)\0");
+
+            let res = ws_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let row = ws_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = ws_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = ws_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = ws_print_row(str.as_mut_ptr(), str.len() as _, row, fields, num_fields);
+            assert_eq!(len, 15);
+            assert_eq!(
+                "1741660079228 1",
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap()
+            );
+
+            ws_free_result(res);
+            execute!(b"drop database test_1748918714\0");
+            ws_close(taos);
+        }
+    }
+}
+
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use super::*;
+
+    #[test]
+    fn test_connect() -> anyhow::Result<()> {
+        init_env();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+
+        unsafe {
+            let cdsn = CString::new(dsn).unwrap();
+            let taos = ws_connect(cdsn.as_ptr() as *const u8 as _);
+            assert!(!taos.is_null());
+
+            let version = ws_get_server_info(taos);
+            tracing::info!("Server version: {:?}", CStr::from_ptr(version as _));
+        }
+
+        Ok(())
     }
 }

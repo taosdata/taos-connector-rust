@@ -26,7 +26,7 @@ jobs:
         id: setup-rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.78.0
+          toolchain: 1.87.0
           components: clippy
 
       - uses: actions/cache@v4
@@ -101,7 +101,7 @@ jobs:
 
       - name: Run examples
         run: |
-          cd TDengine/release/tools/ext_taosws-prefix/src/ext_taosws
+          cd TDengine/.externals/build/ext_taosws/src/ext_taosws
           ./taos-ws-sys/ci/package.sh
           cd ./target/libtaosws
           make

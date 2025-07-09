@@ -3,7 +3,7 @@ use taos_query::common::{BorrowedValue, ColumnView, Value};
 use taos_query::stmt2::Stmt2BindParam;
 use taos_query::RawResult;
 
-use crate::query::infra::{BindType, ReqId, Stmt2Field, StmtId};
+use crate::query::messages::{BindType, ReqId, Stmt2Field, StmtId};
 
 const REQ_ID_POS: usize = 0;
 const STMT_ID_POS: usize = REQ_ID_POS + 8;
@@ -142,7 +142,7 @@ pub(super) fn bind_params_to_bytes(
 fn get_tbname_lens(params: &[Stmt2BindParam]) -> RawResult<Vec<u16>> {
     let mut tbname_lens = vec![0u16; params.len()];
     for (i, param) in params.iter().enumerate() {
-        if param.table_name().map_or(true, |s| s.is_empty()) {
+        if param.table_name().is_none_or(|s| s.is_empty()) {
             return Err("table name is empty".into());
         }
         let tbname = param.table_name().unwrap();
@@ -508,7 +508,7 @@ mod tests {
     use taos_query::common::{ColumnView, Timestamp, Ty, Value};
 
     use super::{bind_params_to_bytes, Stmt2BindParam};
-    use crate::query::infra::BindType;
+    use crate::query::messages::BindType;
     use crate::stmt2::Stmt2Field;
 
     #[test]

@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 pub(crate) use asyn::WsTaos;
 pub use asyn::{Error, ResultSet};
-pub(crate) use infra::WsConnReq;
-pub use infra::{BindType, Stmt2Field};
+use faststr::FastStr;
+pub(crate) use messages::WsConnReq;
+pub use messages::{BindType, Stmt2Field};
 use taos_query::common::{RawMeta, SmlData};
 use taos_query::prelude::RawResult;
 use taos_query::AsyncQueryable;
@@ -12,7 +13,9 @@ use crate::TaosBuilder;
 
 pub mod asyn;
 pub use asyn::check_server_status;
-pub(crate) mod infra;
+mod conn;
+pub(super) use conn::send_conn_request;
+pub(crate) mod messages;
 
 #[derive(Debug)]
 pub struct Taos {
@@ -21,28 +24,15 @@ pub struct Taos {
 }
 
 impl Taos {
-    pub(super) async fn from_builder(dsn: TaosBuilder) -> RawResult<Self> {
-        let mut retries = 0;
-        loop {
-            match WsTaos::from_wsinfo(&dsn).await {
-                Ok(client) => {
-                    return Ok(Self {
-                        dsn,
-                        async_client: Arc::new(client),
-                    })
-                }
-                Err(err) => {
-                    if retries >= dsn.conn_retries.0 {
-                        return Err(err);
-                    }
-                    tracing::warn!(remote = dsn.addr, retries, "retrying connection: {}", err);
-                    retries += 1;
-                }
-            }
-        }
+    pub(super) async fn from_builder(builder: TaosBuilder) -> RawResult<Self> {
+        let ws_taos = WsTaos::from_builder(&builder).await?;
+        Ok(Self {
+            dsn: builder,
+            async_client: Arc::new(ws_taos),
+        })
     }
 
-    pub fn version(&self) -> &str {
+    pub fn version(&self) -> FastStr {
         self.async_client.version()
     }
 
@@ -141,6 +131,7 @@ impl taos_query::Queryable for Taos {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use serde::Deserialize;
     use taos_query::util::hex::*;
 
     use crate::TaosBuilder;
@@ -148,7 +139,6 @@ mod tests {
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
         let client = TaosBuilder::from_dsn("taosws://localhost:6041/")?.build()?;
         let db = "ws_sync_json";
@@ -384,10 +374,8 @@ mod tests {
         Ok(())
     }
 
-    // #[tokio::test]
     async fn _ws_select_from_meters() -> anyhow::Result<()> {
         unsafe { std::env::set_var("RUST_LOG", "info") };
-        // pretty_env_logger::init_timed();
         use taos_query::prelude::*;
         let dsn = "taos+ws:///test";
         let client = TaosBuilder::from_dsn(dsn)?.build().await?;
@@ -409,7 +397,6 @@ mod tests {
     #[tokio::test]
     async fn test_client() -> anyhow::Result<()> {
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // pretty_env_logger::init();
         use futures::TryStreamExt;
         use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};
 
@@ -434,7 +421,6 @@ mod tests {
             1
         );
 
-        // let mut rs = client.s_query("select * from ws_test_client.tb1").unwrap().unwrap();
         let mut rs = client.query("select * from ws_test_client.tb1").await?;
 
         #[derive(Debug, serde::Deserialize)]
@@ -520,5 +506,44 @@ mod tests {
 
         server.await;
         let _ = query_rx.await;
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_ws_ipv6() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let taos = TaosBuilder::from_dsn("ws://[::1]:6041")?.build().await?;
+
+        taos.exec_many([
+            "drop database if exists test_1748584226",
+            "create database test_1748584226",
+            "use test_1748584226",
+            "create table t0(ts timestamp, c1 int)",
+            "insert into t0 values(1726803358466, 101)",
+            "insert into t0 values(1726803359466, 102)",
+        ])
+        .await?;
+
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: i32,
+        }
+
+        let mut rs = taos.query("select * from t0").await?;
+        let rows: Vec<Row> = rs.deserialize().try_collect().await?;
+
+        assert_eq!(rows.len(), 2);
+
+        assert_eq!(rows[0].ts, 1726803358466);
+        assert_eq!(rows[1].ts, 1726803359466);
+
+        assert_eq!(rows[0].c1, 101);
+        assert_eq!(rows[1].c1, 102);
+
+        taos.exec("drop database test_1748584226").await?;
+
+        Ok(())
     }
 }

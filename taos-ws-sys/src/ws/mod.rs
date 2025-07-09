@@ -684,6 +684,26 @@ mod tests {
     }
 
     #[test]
+    fn test_taos_connect_auth_failure() {
+        unsafe {
+            let taos = taos_connect(
+                c"localhost".as_ptr(),
+                c"root".as_ptr(),
+                c"hello".as_ptr(),
+                ptr::null(),
+                6041,
+            );
+            assert!(taos.is_null());
+
+            let code = taos_errno(ptr::null_mut());
+            let errstr = taos_errstr(ptr::null_mut());
+            let errstr = CStr::from_ptr(errstr).to_str().unwrap();
+            assert_eq!(Code::from(code), Code::new(0x0357));
+            assert!(errstr.contains("Authentication failure"));
+        }
+    }
+
+    #[test]
     fn test_taos_options() {
         unsafe {
             let p = taos_options(TSDB_OPTION::TSDB_OPTION_CONFIGDIR, ptr::null());

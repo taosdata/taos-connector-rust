@@ -311,7 +311,7 @@ impl Dsn {
         type ParsedAddr = (Option<String>, Option<String>, Option<String>, Vec<Address>);
         fn parse_single_addr(addr: &str) -> Result<Option<Address>, DsnError> {
             lazy_static::lazy_static! {
-                static ref AT_SINGLE_ADDR_WITH_PORT_REGEX: Regex = Regex::new(r"^([\w\-_%.]*)(:(\d{0,5}))?$").unwrap();
+                static ref AT_SINGLE_ADDR_WITH_PORT_REGEX: Regex = Regex::new(r"^(\[[0-9a-fA-F:]+\]|[\w\-_%.]*)(:(\d{0,5}))?$").unwrap();
             }
             if addr.is_empty() {
                 return Ok(None);
@@ -457,7 +457,7 @@ impl Dsn {
                 Ok((protocol, username, password, addrs))
             } else {
                 lazy_static::lazy_static! {
-                    static ref AT_MULTI_ADDR_WITH_PORT_REGEX: Regex = Regex::new(r"^(?P<host>[\w\-_%.]*)(:(?P<port>\d{0,5}))?[,(?P<addr2>(?P<host2>[\w\-_%.]*)(:(?P<port2>\d{0,5}))?)]*$").unwrap();
+                    static ref AT_MULTI_ADDR_WITH_PORT_REGEX: Regex = Regex::new(r"^(?P<host>\[[0-9a-fA-F:]+\]|[\w\-_%.]*)(:(?P<port>\d{0,5}))?[,(?P<addr2>(?P<host2>\[[0-9a-fA-F:]+\]|[\w\-_%.]*)(:(?P<port2>\d{0,5}))?)]*$").unwrap();
                 }
                 if main == ":" {
                     return Ok((protocol, None, None, vec![]));
@@ -491,7 +491,7 @@ impl Dsn {
             lazy_static::lazy_static! {
                 static ref ADDR_PREFIX_REGEX: Regex = Regex::new(r"^(?P<addr>[\w\-_%.:]*(:\d{0,5})?(,[\w\-:_.]*(:\d{0,5})?)*)").unwrap();
                 static ref URL_PARAMS_REGEX: Regex = Regex::new(r"^(?P<main>.*)(\?(?P<params>[^?]+))$").unwrap();
-                static ref ENDS_WITH_ADDR_REGEX: Regex = Regex::new(r"@[\w\-_%.]+(:\d{1,5})?(,[\w\-_%.]+(:\d{1,5})?)*$").unwrap();
+                static ref ENDS_WITH_ADDR_REGEX: Regex = Regex::new(r"@(\[[0-9a-fA-F:]+\]|[\w\-_%.])+(:\d{1,5})?(,(\[[0-9a-fA-F:]+\]|[\w\-_%.])+(:\d{1,5})?)*$").unwrap();
                 static ref PARAM_WITH_AT_REGEX: Regex = Regex::new(r"\?.*=\S+$").unwrap();
             }
             let dsn = Dsn {
@@ -1783,5 +1783,256 @@ mod tests {
             dsn.get("file_pattern").unwrap(),
             r#"^\\?\\-\\*\\-\\[\\-\\]\\-[ab]\\-[^ef]\\-.\\-.*\\.csv$"#,
         );
+    }
+
+    #[test]
+    fn test_ipv6_single_addr() {
+        {
+            let dsn = Dsn::from_str("ws://[::1]:6041").unwrap();
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+
+            let dsn = Dsn::from_str("ws://[::1]").unwrap();
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert!(dsn.addresses[0].port.is_none());
+
+            let dsn = Dsn::from_str("ws://[::1]:").unwrap();
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert!(dsn.addresses[0].port.is_none());
+        }
+
+        {
+            let dsn =
+                Dsn::from_str("ws://[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]:16041").unwrap();
+            assert_eq!(
+                dsn.addresses[0].host.as_deref().unwrap(),
+                "[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]"
+            );
+            assert_eq!(dsn.addresses[0].port.unwrap(), 16041);
+
+            let dsn = Dsn::from_str("ws://[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]").unwrap();
+            assert_eq!(
+                dsn.addresses[0].host.as_deref().unwrap(),
+                "[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]"
+            );
+            assert!(dsn.addresses[0].port.is_none());
+
+            let dsn = Dsn::from_str("ws://[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]:").unwrap();
+            assert_eq!(
+                dsn.addresses[0].host.as_deref().unwrap(),
+                "[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]"
+            );
+            assert!(dsn.addresses[0].port.is_none());
+        }
+
+        {
+            let dsn = Dsn::from_str("ws://[2002:9ba:b4e:6:be24:11ff:fe9c:3dd]:6041").unwrap();
+            assert_eq!(
+                dsn.addresses[0].host.as_deref().unwrap(),
+                "[2002:9ba:b4e:6:be24:11ff:fe9c:3dd]"
+            );
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+
+            let dsn = Dsn::from_str("ws://[2001:db8::1]:6041").unwrap();
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[2001:db8::1]");
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+        }
+    }
+
+    #[test]
+    fn test_ipv6_multi_addrs() {
+        let dsn = Dsn::from_str(
+            "ws://[::1]:6041,[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]:16041,[2001:db8::1],[2001:db8::1]:",
+        )
+        .unwrap();
+
+        assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+        assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+
+        assert_eq!(
+            dsn.addresses[1].host.as_deref().unwrap(),
+            "[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]"
+        );
+        assert_eq!(dsn.addresses[1].port.unwrap(), 16041);
+
+        assert_eq!(dsn.addresses[2].host.as_deref().unwrap(), "[2001:db8::1]");
+        assert!(dsn.addresses[2].port.is_none());
+
+        assert_eq!(dsn.addresses[3].host.as_deref().unwrap(), "[2001:db8::1]");
+        assert!(dsn.addresses[3].port.is_none());
+    }
+
+    #[test]
+    fn test_ipv6() {
+        {
+            let dsn = Dsn::from_str("tmq+ws://root:taosdata@[::1]:6041,[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]:6042,[::1]:/db?a=a&b=b&c=c").unwrap();
+            assert_eq!(dsn.driver, "tmq");
+            assert_eq!(dsn.protocol.as_deref().unwrap(), "ws");
+            assert_eq!(dsn.username.as_deref().unwrap(), "root");
+            assert_eq!(dsn.password.as_deref().unwrap(), "taosdata");
+
+            assert_eq!(dsn.addresses.len(), 3);
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+            assert_eq!(
+                dsn.addresses[1].host.as_deref().unwrap(),
+                "[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]"
+            );
+            assert_eq!(dsn.addresses[1].port.unwrap(), 6042);
+            assert_eq!(dsn.addresses[2].host.as_deref().unwrap(), "[::1]");
+            assert!(dsn.addresses[2].port.is_none());
+
+            assert_eq!(dsn.subject.as_deref().unwrap(), "db");
+
+            assert_eq!(dsn.get("a").unwrap(), "a");
+            assert_eq!(dsn.get("b").unwrap(), "b");
+            assert_eq!(dsn.get("c").unwrap(), "c");
+        }
+
+        {
+            let dsn = Dsn::from_str("tmq+ws://root:taosdata@[::1]:6041,[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]:6042,[::1]:/db?a=a&b=b&c=c").unwrap();
+            assert_eq!(dsn.driver, "tmq");
+            assert_eq!(dsn.protocol.as_deref().unwrap(), "ws");
+            assert_eq!(dsn.username.as_deref().unwrap(), "root");
+            assert_eq!(dsn.password.as_deref().unwrap(), "taosdata");
+
+            assert_eq!(dsn.addresses.len(), 3);
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+            assert_eq!(
+                dsn.addresses[1].host.as_deref().unwrap(),
+                "[2002:09ba:0b4e:0006:be24:11ff:fe9c:03dd]"
+            );
+            assert_eq!(dsn.addresses[1].port.unwrap(), 6042);
+            assert_eq!(dsn.addresses[2].host.as_deref().unwrap(), "[::1]");
+            assert!(dsn.addresses[2].port.is_none());
+
+            assert_eq!(dsn.subject.as_deref().unwrap(), "db");
+
+            assert_eq!(dsn.get("a").unwrap(), "a");
+            assert_eq!(dsn.get("b").unwrap(), "b");
+            assert_eq!(dsn.get("c").unwrap(), "c");
+        }
+
+        {
+            let dsn =
+                Dsn::from_str("ws://root:taosdata@[::1]:6041,[::1]:6042/?key1=value1&key2=value2")
+                    .unwrap();
+            assert_eq!(dsn.driver, "ws");
+            assert_eq!(dsn.username.as_deref().unwrap(), "root");
+            assert_eq!(dsn.password.as_deref().unwrap(), "taosdata");
+
+            assert_eq!(dsn.addresses.len(), 2);
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+            assert_eq!(dsn.addresses[1].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[1].port.unwrap(), 6042);
+
+            assert_eq!(dsn.get("key1").unwrap(), "value1");
+            assert_eq!(dsn.get("key2").unwrap(), "value2");
+        }
+
+        {
+            let dsn =
+                Dsn::from_str("ws://[::1]:6041,[::1]:6042/db_1748596516?key1=value1&key2=value2")
+                    .unwrap();
+            assert_eq!(dsn.driver, "ws");
+
+            assert_eq!(dsn.addresses.len(), 2);
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+            assert_eq!(dsn.addresses[1].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[1].port.unwrap(), 6042);
+
+            assert_eq!(dsn.subject.as_deref().unwrap(), "db_1748596516");
+
+            assert_eq!(dsn.get("key1").unwrap(), "value1");
+            assert_eq!(dsn.get("key2").unwrap(), "value2");
+        }
+
+        {
+            let dsn = Dsn::from_str("ws://[::1]:6041,[::1]:6042/db_1748596516").unwrap();
+            assert_eq!(dsn.driver, "ws");
+
+            assert_eq!(dsn.addresses.len(), 2);
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+            assert_eq!(dsn.addresses[1].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[1].port.unwrap(), 6042);
+
+            assert_eq!(dsn.subject.as_deref().unwrap(), "db_1748596516");
+        }
+
+        {
+            let dsn = Dsn::from_str("ws://[::1]:6041,[::1]:6042?key1=value1&key2=value2").unwrap();
+            assert_eq!(dsn.driver, "ws");
+
+            assert_eq!(dsn.addresses.len(), 2);
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+            assert_eq!(dsn.addresses[1].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[1].port.unwrap(), 6042);
+
+            assert_eq!(dsn.get("key1").unwrap(), "value1");
+            assert_eq!(dsn.get("key2").unwrap(), "value2");
+        }
+
+        {
+            let dsn = Dsn::from_str("ws://root:taosdata@[::1]:6041,[::1]:6042/?").unwrap();
+            assert_eq!(dsn.driver, "ws");
+            assert_eq!(dsn.username.as_deref().unwrap(), "root");
+            assert_eq!(dsn.password.as_deref().unwrap(), "taosdata");
+
+            assert_eq!(dsn.addresses.len(), 2);
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+            assert_eq!(dsn.addresses[1].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[1].port.unwrap(), 6042);
+        }
+
+        {
+            let dsn = Dsn::from_str("ws://@[::1]:6041,[::1]:6042/").unwrap();
+            assert_eq!(dsn.driver, "ws");
+            assert_eq!(dsn.addresses.len(), 2);
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+            assert_eq!(dsn.addresses[1].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[1].port.unwrap(), 6042);
+        }
+
+        {
+            let dsn = Dsn::from_str("ws://@[::1]:6041").unwrap();
+            assert_eq!(dsn.driver, "ws");
+            assert_eq!(dsn.addresses.len(), 1);
+            assert_eq!(dsn.addresses[0].host.as_deref().unwrap(), "[::1]");
+            assert_eq!(dsn.addresses[0].port.unwrap(), 6041);
+        }
+
+        {
+            let dsn = Dsn::from_str("ws:///db_1748596516").unwrap();
+            assert_eq!(dsn.driver, "ws");
+            assert_eq!(dsn.subject.as_deref().unwrap(), "db_1748596516");
+        }
+    }
+
+    #[test]
+    fn test_ipv6_err() {
+        let res = Dsn::from_str("ws://[::ffff:192.0.2.128]:6041");
+        assert!(res.is_err(), "incorrect host:port format");
+
+        let res = Dsn::from_str("ws://2001:db8::1:6041");
+        assert!(res.is_err(), "incorrect host:port format");
+
+        let res = Dsn::from_str("ws://[2001:db8::1:6041");
+        assert!(res.is_err(), "incorrect host:port format");
+
+        let res = Dsn::from_str("ws://2001:db8::1]:6041");
+        assert!(res.is_err(), "incorrect host:port format");
+
+        let res = Dsn::from_str("ws://[ghij:klmn::1]:6041");
+        assert!(res.is_err(), "incorrect host:port format");
+
+        let res = Dsn::from_str("ws://:::6041");
+        assert!(res.is_err(), "incorrect host:port format");
     }
 }

@@ -16,8 +16,8 @@ use taos_query::{block_in_place_or_global, IntoDsn, RawBlock};
 use tokio::sync::{oneshot, watch};
 use tokio_tungstenite::tungstenite::protocol::Message;
 
-use crate::query::infra::ToMessage;
-use crate::{Taos, TaosBuilder};
+use crate::query::messages::ToMessage;
+use crate::{EndpointType, Taos, TaosBuilder};
 
 mod messages;
 
@@ -266,16 +266,15 @@ impl Drop for Stmt {
 }
 
 impl Stmt {
-    #[allow(dead_code)]
-    pub(crate) async fn from_wsinfo(info: &TaosBuilder) -> RawResult<Self> {
-        let ws = info.build_stream(info.to_stmt_url()).await?;
+    pub(crate) async fn from_wsinfo(builder: &TaosBuilder) -> RawResult<Self> {
+        let (ws, _) = builder.connect_with_ty(EndpointType::Ws).await?;
 
         let req_id = 0;
         let (mut sender, mut reader) = ws.split();
 
         let login = StmtSend::Conn {
             req_id,
-            req: info.to_conn_request(),
+            req: builder.build_conn_request(),
         };
         sender.send(login.to_msg()).await.map_err(Error::from)?;
         if let Some(Ok(message)) = reader.next().await {
@@ -787,22 +786,20 @@ mod tests {
     use crate::stmt::Stmt;
     use crate::TaosBuilder;
 
-    #[tokio::test()]
+    #[tokio::test]
     async fn test_client() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 
-        let default_dsn = "taos://localhost:6041";
+        let dsn = "taos://localhost:6041";
         let db = "stmt";
-        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or(default_dsn.to_string());
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!("create table {db}.ctb (ts timestamp, v int)"))
             .await?;
 
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // pretty_env_logger::init();
         let dsn_stmt = format!("{dsn}/{db}", dsn = dsn, db = db);
         let mut client = Stmt::from_dsn(dsn_stmt).await?;
         let s_stmt = format!("insert into {db}.ctb values(?, ?)");
@@ -822,15 +819,14 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test()]
+    #[tokio::test]
     async fn test_stmt_stable_with_json() -> anyhow::Result<()> {
         use taos_query::AsyncQueryable;
 
-        let default_dsn = "taos://localhost:6041";
+        let dsn = "taos://localhost:6041";
         let db = "stmt_sj";
-        let dsn = std::env::var("TDENGINE_ClOUD_DSN").unwrap_or(default_dsn.to_string());
 
-        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
         taos.exec(format!("drop database if exists {db}")).await?;
         taos.exec(format!("create database {db}")).await?;
         taos.exec(format!(
@@ -839,7 +835,6 @@ mod tests {
         .await?;
 
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // pretty_env_logger::init();
         let stmt_dsn = format!("{dsn}/{db}", dsn = dsn, db = db);
         let mut client = Stmt::from_dsn(&stmt_dsn).await?;
         let stmt = client
@@ -885,7 +880,6 @@ mod tests {
             .await?;
 
         unsafe { std::env::set_var("RUST_LOG", "trace") };
-        // pretty_env_logger::init();
         let mut client = Stmt::from_dsn("taos+ws://localhost:6041/ws_stmt_sj2").await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
@@ -952,8 +946,6 @@ mod tests {
         taos.exec("insert into t1 values(1640000000000, 0)").await?;
 
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // only init for debug
-        // pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
         let stmt = client.s_stmt("select * from t1 where v < ?").await?;
 
@@ -994,8 +986,6 @@ mod tests {
         taos.exec("insert into t1 values(1640000000000, 0)").await?;
 
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // only init for debug
-        // pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
@@ -1052,8 +1042,6 @@ mod tests {
         .await?;
 
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // only init for debug
-        // pretty_env_logger::init();
         let mut client = Stmt::from_dsn(format!("{dsn}/{db}", dsn = &dsn)).await?;
         let stmt = client
             .s_stmt("insert into ? using stb tags(?) values(?, ?)")
@@ -1131,6 +1119,131 @@ mod tests {
 
         assert_eq!(res, 2);
         taos.exec("drop database stmt_s").await?;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use std::collections::HashMap;
+
+    use serde_json::json;
+    use taos_query::{AsyncQueryable, AsyncTBuilder};
+
+    use crate::{Stmt, TaosBuilder};
+
+    #[tokio::test]
+    async fn test_stmt() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        taos.exec_many([
+            "drop table if exists t_stmt",
+            "create table t_stmt (ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let mut stmt = Stmt::from_dsn(dsn).await?;
+        let stmt = stmt.s_stmt("insert into t_stmt values(?, ?)").await?;
+
+        stmt.bind_all(vec![
+            json!([
+                "2022-06-07T11:02:44.022450088+08:00",
+                "2022-06-07T11:02:45.022450088+08:00"
+            ]),
+            json!([2, 3]),
+        ])
+        .await?;
+
+        let res = stmt.stmt_exec().await?;
+        assert_eq!(res, 2);
+
+        taos.exec("drop table t_stmt").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_stmt_stable_with_json() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+
+        let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        taos.exec_many([
+            "drop table if exists t_stmt_json",
+            "create table t_stmt_json (ts timestamp, c1 int) tags(t1 json)",
+        ])
+        .await?;
+
+        let mut stmt = Stmt::from_dsn(&dsn).await?;
+        let stmt = stmt
+            .s_stmt("insert into ? using t_stmt_json tags(?) values(?, ?)")
+            .await?;
+
+        stmt.stmt_set_tbname("t_stmt_json_subt").await?;
+
+        stmt.stmt_set_tags(vec![json!(r#"{"name": "value"}"#)])
+            .await?;
+
+        stmt.bind_all(vec![
+            json!([
+                "2022-06-07T11:02:44.022450088+08:00",
+                "2022-06-07T11:02:45.022450088+08:00"
+            ]),
+            json!([2, 3]),
+        ])
+        .await?;
+
+        let res = stmt.stmt_exec().await?;
+        assert_eq!(res, 2);
+
+        let row: (i64, i32, HashMap<String, String>) =
+            taos.query_one("select * from t_stmt_json").await?.unwrap();
+
+        assert_eq!(row.0, 1654570964022);
+        assert_eq!(row.1, 2);
+        assert_eq!(row.2.get("name"), Some(&"value".to_string()));
+
+        taos.exec("drop table t_stmt_json").await?;
+
         Ok(())
     }
 }
