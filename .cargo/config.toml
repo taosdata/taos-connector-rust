@@ -6,6 +6,7 @@ rustflags = [
     # Style Group
     "-Aclippy::missing_safety_doc",
     "-Aclippy::ptr_eq",
+    "-Aclippy::needless_range_loop",
 
     # Suspicious Group
     "-Aclippy::incompatible_msrv",

@@ -14,15 +14,14 @@ async fn main() -> anyhow::Result<()> {
         a total of one billion records."
     );
 
-    // One million subtables
+    let thread_cnt = 4;
     let subtable_cnt = 1000000;
-    // One thousand records per subtable
-    let record_cnt = 1000;
+    let record_cnt = 1000; // number of records per subtable
 
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_nanos();
+        .as_millis();
 
     let db = &format!("db_{}", ts);
 
@@ -37,9 +36,8 @@ async fn main() -> anyhow::Result<()> {
 
     create_subtables(db, subtable_cnt).await;
 
-    let thread_cnt = 4;
-    let mut senders = vec![];
-    let mut receivers = vec![];
+    let mut senders = Vec::with_capacity(thread_cnt);
+    let mut receivers = Vec::with_capacity(thread_cnt);
 
     for _ in 0..thread_cnt {
         let (sender, receiver) = flume::bounded(64);
@@ -51,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    consume_sqls(db, receivers).await;
+    consume_sqls(db, receivers, subtable_cnt * record_cnt).await;
 
     check_count(&taos, subtable_cnt * record_cnt).await?;
 
@@ -66,17 +64,17 @@ async fn create_subtables(db: &str, subtable_cnt: usize) {
     let start = Instant::now();
     let batch_cnt = 10000;
     let thread_cnt = 10;
-    let thread_subtable_cnt = subtable_cnt / thread_cnt;
+    let thread_subt_cnt = subtable_cnt / thread_cnt;
     let mut tasks = vec![];
 
-    for i in (0..subtable_cnt).step_by(thread_subtable_cnt) {
+    for i in (0..subtable_cnt).step_by(thread_subt_cnt) {
         let db = db.to_owned();
 
         let task = tokio::spawn(async move {
             let taos = TaosBuilder::from_dsn(DSN).unwrap().build().await.unwrap();
             taos.exec(format!("use {db}")).await.unwrap();
 
-            for j in (0..thread_subtable_cnt).step_by(batch_cnt) {
+            for j in (0..thread_subt_cnt).step_by(batch_cnt) {
                 // creata table d0 using s0 tags(0) d1 using s0 tags(0) ...
                 let mut sql = String::with_capacity(25 * batch_cnt);
                 sql.push_str("create table ");
@@ -142,12 +140,11 @@ async fn produce_sqls(senders: Vec<Sender<String>>, subtable_cnt: usize, record_
     }
 }
 
-async fn consume_sqls(db: &str, mut receivers: Vec<Receiver<String>>) {
+async fn consume_sqls(db: &str, mut receivers: Vec<Receiver<String>>, total_record_cnt: usize) {
     let now = Local::now();
     let time = now.format("%Y-%m-%d %H:%M:%S").to_string();
     println!("Consuming sqls start, time = {time}");
 
-    let start = Instant::now();
     let mut tasks = vec![];
 
     for i in 0..receivers.len() {
@@ -169,16 +166,22 @@ async fn consume_sqls(db: &str, mut receivers: Vec<Receiver<String>>) {
                 "Consumer thread[{i}] ends consuming data, elapsed = {:?}",
                 start.elapsed()
             );
+
+            start.elapsed().as_secs()
         });
 
         tasks.push(task);
     }
 
+    let mut total_time = 0;
     for task in tasks {
-        task.await.unwrap();
+        total_time += task.await.unwrap();
     }
 
-    println!("Consuming sqls end, elapsed = {:?}\n", start.elapsed());
+    println!(
+        "Consuming data end, speed(single thread) = {:?}\n",
+        total_record_cnt / total_time as usize
+    );
 }
 
 async fn check_count(taos: &Taos, cnt: usize) -> anyhow::Result<()> {

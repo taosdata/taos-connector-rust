@@ -19,7 +19,7 @@ pub struct TimestampView {
 
 impl IsColumnView for View {
     fn ty(&self) -> Ty {
-        Ty::USmallInt
+        Ty::Timestamp
     }
     fn from_borrowed_value_iter<'b>(iter: impl Iterator<Item = BorrowedValue<'b>>) -> Self {
         Self::from_nullable_timestamp(iter.map(|v| v.to_timestamp()).collect_vec())

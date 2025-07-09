@@ -19,7 +19,8 @@ use crate::ws::error::{
     errno, errstr, format_errno, set_err_and_get_code, TaosError, TaosMaybeError, EMPTY,
 };
 use crate::ws::{
-    ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD, TAOS_RES, TAOS_ROW,
+    ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES,
+    TAOS_ROW,
 };
 
 #[allow(non_camel_case_types)]
@@ -291,12 +292,6 @@ unsafe fn list_append(list: *mut tmq_list_t, value: *const c_char) -> TaosResult
         .and_then(|list| list.deref_mut())
     {
         Some(list) => {
-            if !list.topics.is_empty() {
-                return Err(TaosError::new(
-                    Code::TMQ_TOPIC_APPEND_ERR,
-                    "only one topic is supported",
-                ));
-            }
             list.topics.push(topic);
             Ok(())
         }
@@ -1443,6 +1438,10 @@ impl ResultSetOperations for TmqResultSet {
 
     fn get_fields(&mut self) -> *mut TAOS_FIELD {
         self.fields.as_mut_ptr()
+    }
+
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E {
+        ptr::null_mut()
     }
 
     unsafe fn fetch_raw_block(
@@ -2674,6 +2673,102 @@ mod tests {
                 [
                     "drop topic topic_1741333066",
                     "drop database test_1741333066",
+                ],
+            );
+
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_show_consumers() {
+        unsafe {
+            let _ = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_line_number(true)
+                .with_file(true)
+                .try_init();
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1744006630",
+                    "drop topic if exists topic_1744008820",
+                    "drop database if exists test_1744006630",
+                    "create database test_1744006630 wal_retention_period 3600",
+                    "create topic topic_1744006630 with meta as database test_1744006630",
+                    "create topic topic_1744008820 with meta as database test_1744006630",
+                    "use test_1744006630",
+                    "create table t0(ts timestamp, c1 int)",
+                    "insert into t0 values(now, 1)",
+                    "insert into t0 values(now+1s, 1)",
+                    "insert into t0 values(now+2s, 1)",
+                    "insert into t0 values(now+3s, 1)",
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = c"topic_1744006630";
+            let errno = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(errno, 0);
+
+            let topic = c"topic_1744008820";
+            let errno = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(errno, 0);
+
+            let errno = tmq_subscribe(consumer, list);
+            assert_eq!(errno, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                tracing::debug!("poll res: {res:?}");
+                if res.is_null() {
+                    break;
+                }
+
+                if !res.is_null() {
+                    let errno = tmq_commit_sync(consumer, res);
+                    assert_eq!(errno, 0);
+
+                    taos_free_result(res);
+                }
+            }
+
+            let errno = tmq_unsubscribe(consumer);
+            assert_eq!(errno, 0);
+
+            let errno = tmq_consumer_close(consumer);
+            assert_eq!(errno, 0);
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic topic_1744006630",
+                    "drop topic topic_1744008820",
+                    "drop database test_1744006630",
                 ],
             );
 

@@ -5,7 +5,6 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::{OnceLock, RwLock};
 
-use chrono_tz::Tz;
 use faststr::FastStr;
 use taos_error::Code;
 use tracing::level_filters::LevelFilter;
@@ -19,7 +18,7 @@ pub struct Config {
     pub log_dir: Option<FastStr>,
     pub log_level: Option<LevelFilter>,
     pub log_output_to_screen: Option<bool>,
-    pub timezone: Option<Tz>,
+    pub timezone: Option<FastStr>,
     pub first_ep: Option<FastStr>,
     pub second_ep: Option<FastStr>,
     pub fqdn: Option<FastStr>,
@@ -30,8 +29,8 @@ pub static CONFIG: RwLock<Config> = RwLock::new(Config::const_new());
 
 // FIXME
 #[allow(dead_code)]
-pub fn get_global_timezone() -> Option<Tz> {
-    CONFIG.read().unwrap().timezone
+pub fn get_global_timezone() -> Option<FastStr> {
+    CONFIG.read().unwrap().timezone.clone()
 }
 #[allow(dead_code)]
 pub fn get_global_log_dir() -> FastStr {
@@ -87,7 +86,7 @@ pub fn init() -> Result<(), String> {
             config.set_log_output_to_screen(e == "1");
         }
         if let Ok(e) = std::env::var("TAOS_TIMEZONE") {
-            config.set_timezone(Tz::from_str(&e).unwrap());
+            config.set_timezone(e);
         }
         if let Ok(e) = std::env::var("TAOS_FIRST_EP") {
             config.set_first_ep(e);
@@ -156,8 +155,8 @@ impl Config {
 
     // FIXME
     #[allow(dead_code)]
-    pub fn timezone(&self) -> Option<Tz> {
-        self.timezone
+    pub fn timezone(&self) -> Option<&FastStr> {
+        self.timezone.as_ref()
     }
 
     pub fn first_ep(&self) -> Option<&FastStr> {
@@ -185,24 +184,6 @@ impl Config {
         self.log_dir = Some(log_dir.into());
     }
 
-    // FIXME
-    #[allow(dead_code)]
-    pub fn set_debug_flag(&mut self, flag: i32) {
-        match flag {
-            131 => self.log_level = Some(LevelFilter::WARN),
-            135 => self.log_level = Some(LevelFilter::DEBUG),
-            143 => self.log_level = Some(LevelFilter::TRACE),
-            199 => {
-                self.log_level = Some(LevelFilter::DEBUG);
-                self.log_output_to_screen = Some(true);
-            }
-            207 => {
-                self.log_level = Some(LevelFilter::TRACE);
-                self.log_output_to_screen = Some(true);
-            }
-            _ => {}
-        }
-    }
     pub fn set_debug_flag_str(&mut self, flag: &str) {
         match flag {
             "131" | "warn" | "WARN" => self.log_level = Some(LevelFilter::WARN),
@@ -225,9 +206,9 @@ impl Config {
     pub fn set_log_output_to_screen(&mut self, log_output_to_screen: bool) {
         self.log_output_to_screen = Some(log_output_to_screen);
     }
-    pub fn set_timezone(&mut self, timezone: Tz) {
+    pub fn set_timezone<T: Into<FastStr>>(&mut self, timezone: T) {
         if self.timezone.is_none() {
-            self.timezone = Some(timezone);
+            self.timezone = Some(timezone.into());
         }
     }
     pub fn set_first_ep<T: Into<FastStr>>(&mut self, first_ep: T) {
@@ -314,6 +295,7 @@ impl Config {
             server_port: None,
         }
     }
+
     fn new(filename: &Path) -> Result<Config, TaosError> {
         read_config_file(filename)
             .map_err(|_| {
@@ -323,10 +305,14 @@ impl Config {
                 )
             })
             .and_then(|lines| {
-                parse_config(lines).map_err(|_| {
+                parse_config(lines).map_err(|err| {
                     TaosError::new(
                         Code::INVALID_PARA,
-                        &format!("failed to parse config file: {}", filename.display()),
+                        &format!(
+                            "failed to parse config file: {}, err: {:?}",
+                            filename.display(),
+                            err
+                        ),
                     )
                 })
             })
@@ -394,11 +380,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
                 },
                 "logDir" => config.log_dir = Some(value.to_string().into()),
                 "debugFlag" => config.set_debug_flag_str(value),
-                "timezone" => {
-                    config.timezone = Some(Tz::from_str(value).map_err(|_| {
-                        ConfigError::Parse(format!("failed to parse timezone: {value}"))
-                    })?);
-                }
+                "timezone" => config.set_timezone::<FastStr>(value.to_string().into()),
                 "firstEp" => config.first_ep = Some(value.to_string().into()),
                 "secondEp" => config.second_ep = Some(value.to_string().into()),
                 "fqdn" => config.fqdn = Some(value.to_string().into()),
@@ -417,19 +399,116 @@ fn parse_config(lines: Vec<String>) -> Result<Config, ConfigError> {
 
 #[cfg(test)]
 mod tests {
+    use std::env::set_var;
+    use std::error::Error;
+
     use super::*;
+    use crate::ws::{taos_options, TSDB_OPTION};
 
     #[test]
-    fn test_config() {
+    fn test_new_config() {
         let config = Config::new("./tests/taos.cfg".as_ref()).unwrap();
         assert_eq!(config.compression(), true);
         assert_eq!(config.log_dir.as_deref().unwrap(), "/path/to/logDir/");
         assert_eq!(config.log_level.unwrap(), LevelFilter::DEBUG);
         assert_eq!(config.log_output_to_screen.unwrap(), true);
-        assert_eq!(config.timezone, Some(Tz::Asia__Shanghai));
+        assert_eq!(config.timezone.as_deref().unwrap(), "Asia/Shanghai");
         assert_eq!(config.first_ep.as_deref().unwrap(), "hostname:7030");
         assert_eq!(config.second_ep.as_deref().unwrap(), "hostname:16030");
         assert_eq!(config.fqdn.as_deref().unwrap(), "hostname");
         assert_eq!(config.server_port, Some(8030));
+    }
+
+    #[test]
+    fn test_read_config() -> Result<(), TaosError> {
+        {
+            let mut config = Config::const_new();
+            config.read_config("./tests")?;
+            assert_eq!(config.compression(), true);
+            assert_eq!(config.log_dir(), "/path/to/logDir/");
+            assert_eq!(config.log_level(), LevelFilter::DEBUG);
+            assert_eq!(config.log_output_to_screen(), true);
+            assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
+            assert_eq!(config.first_ep(), Some(&FastStr::from("hostname:7030")));
+            assert_eq!(config.second_ep(), Some(&FastStr::from("hostname:16030")));
+            assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
+            assert_eq!(config.server_port(), Some(8030));
+        }
+
+        {
+            let mut config = Config::const_new();
+            config.read_config("./tests/taos.cfg")?;
+            assert_eq!(config.compression(), true);
+            assert_eq!(config.log_dir(), "/path/to/logDir/");
+            assert_eq!(config.log_level(), LevelFilter::DEBUG);
+            assert_eq!(config.log_output_to_screen(), true);
+            assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
+            assert_eq!(config.first_ep(), Some(&FastStr::from("hostname:7030")));
+            assert_eq!(config.second_ep(), Some(&FastStr::from("hostname:16030")));
+            assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
+            assert_eq!(config.server_port(), Some(8030));
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_init() -> Result<(), String> {
+        unsafe {
+            let timezone = c"Asia/Shanghai";
+            let code = taos_options(TSDB_OPTION::TSDB_OPTION_TIMEZONE, timezone.as_ptr() as _);
+            assert_eq!(code, 0);
+
+            let config_dir = c"./tests/taos.cfg";
+            let code = taos_options(TSDB_OPTION::TSDB_OPTION_CONFIGDIR, config_dir.as_ptr() as _);
+            assert_eq!(code, 0);
+        }
+
+        unsafe {
+            set_var("RUST_LOG", "warn");
+            set_var("TAOS_LOG_DIR", "/var/log/taos");
+            set_var("TAOS_DEBUG_FLAG", "135");
+            set_var("TAOS_DEBUG_FLAG", "143");
+            set_var("TAOS_DEBUG_FLAG", "199");
+            set_var("TAOS_DEBUG_FLAG", "207");
+            set_var("TAOS_DEBUG_FLAG", "131");
+            set_var("TAOS_LOG_OUTPUT_TO_SCREEN", "0");
+            set_var("TAOS_TIMEZONE", "Asia/Shanghai");
+            set_var("TAOS_FIRST_EP", "localhost");
+            set_var("TAOS_SECOND_EP", "hostname:16030");
+            set_var("TAOS_FQDN", "localhost");
+            set_var("TAOS_SERVER_PORT", "6030");
+            set_var("TAOS_COMPRESSION", "false");
+            set_var("TAOS_CONFIG_DIR", "./tests");
+        }
+
+        init()?;
+
+        assert_eq!(get_global_timezone(), Some(FastStr::from("Asia/Shanghai")));
+        assert_eq!(get_global_log_dir(), FastStr::from("/var/log/taos"));
+        assert_eq!(get_global_log_level(), LevelFilter::WARN);
+        assert_eq!(get_global_log_output_to_screen(), false);
+        assert_eq!(get_global_compression(), false);
+        assert_eq!(get_global_first_ep(), Some(FastStr::from("localhost")));
+        assert_eq!(
+            get_global_second_ep(),
+            Some(FastStr::from("hostname:16030"))
+        );
+        assert_eq!(get_global_fqdn(), Some(FastStr::from("localhost")));
+        assert_eq!(get_global_server_port(), 6030);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_error() {
+        let cfg_err = ConfigError::Parse("xxx".to_string());
+        assert_eq!(format!("{}", cfg_err), "Config parse error: xxx");
+        assert!(cfg_err.source().is_none());
+
+        let io_err = io::Error::new(io::ErrorKind::Other, "xxx");
+        let cfg_err = ConfigError::from(io_err);
+        assert_eq!(format!("{}", cfg_err), "Config IO error: xxx");
+        assert_eq!(cfg_err.source().unwrap().to_string(), "xxx");
     }
 }

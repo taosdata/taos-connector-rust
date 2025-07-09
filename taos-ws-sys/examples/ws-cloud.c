@@ -7,16 +7,20 @@
 
 int main()
 {
-    char *dsn = getenv("TDENGINE_CLOUD_DSN");
-    assert(dsn != NULL);
-
     ws_enable_log("debug");
 
-    printf("%s\n", dsn);
-    WS_TAOS *taos = ws_connect(dsn);
+    char *url = getenv("TDENGINE_CLOUD_URL");
+    assert(url != NULL);
 
+    char *token = getenv("TDENGINE_CLOUD_TOKEN");
+    assert(token != NULL);
+
+    char dsn[1024];
+    snprintf(dsn, sizeof(dsn), "%s/rust_test?token=%s", url, token);
+
+    WS_TAOS *taos = ws_connect(dsn);
     const char *version = ws_get_server_info(taos);
-    dprintf(2, "Server version: %s\n", version);
+    printf("Server version: %s\n", version);
 
     ws_close(taos);
 }

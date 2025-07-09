@@ -9,8 +9,8 @@ use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable, RawResult};
 use tracing::Instrument;
 
-use crate::query::asyn::QueryMetrics;
-use crate::query::infra::{Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
+use crate::query::asyn::{fetch_binary, QueryMetrics};
+use crate::query::messages::{Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
 use crate::query::WsTaos;
 use crate::{ResultSet, Taos};
 
@@ -149,6 +149,8 @@ impl Stmt2 {
             fields_names,
             fields_types,
             fields_lengths,
+            fields_precisions,
+            fields_scales,
             timing,
             ..
         } = resp
@@ -171,17 +173,17 @@ impl Stmt2 {
                 .collect();
 
             let (raw_block_tx, raw_block_rx) = flume::bounded(64);
+            let (fetch_done_tx, fetch_done_rx) = flume::bounded(1);
 
-            tokio::spawn(
-                crate::query::asyn::fetch(
-                    self.client.sender(),
-                    id,
-                    raw_block_tx,
-                    precision,
-                    fields_names,
-                )
-                .in_current_span(),
-            );
+            fetch_binary(
+                self.client.sender(),
+                id,
+                raw_block_tx,
+                precision,
+                fields_names,
+                fetch_done_tx,
+            )
+            .await;
 
             let timing = match precision {
                 Precision::Millisecond => Duration::from_millis(timing),
@@ -200,9 +202,11 @@ impl Stmt2 {
                 timing,
                 block_future: None,
                 closer: Some(close_tx),
-                completed: false,
                 metrics: QueryMetrics::default(),
                 blocks_buffer: Some(raw_block_rx),
+                fields_precisions,
+                fields_scales,
+                fetch_done_reader: Some(fetch_done_rx),
             });
         }
 
@@ -793,6 +797,98 @@ mod tests {
 
         let res = stmt2.result_set().await;
         assert!(res.is_err());
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use futures::TryStreamExt;
+    use serde::Deserialize;
+    use taos_query::common::ColumnView;
+    use taos_query::stmt2::Stmt2BindParam;
+    use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};
+
+    use crate::stmt2::Stmt2;
+    use crate::TaosBuilder;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            return Ok(());
+        }
+
+        let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
+
+        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+        taos.exec_many([
+            "drop table if exists t_stmt2",
+            "create table t_stmt2 (ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+
+        stmt2.prepare("insert into t_stmt2 values(?, ?)").await?;
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![1726803356466]),
+            ColumnView::from_ints(vec![100]),
+        ];
+        let param = Stmt2BindParam::new(Some("t_stmt2".to_owned()), None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 1);
+
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+
+        stmt2.prepare("select * from t_stmt2 where c1 > ?").await?;
+
+        let cols = vec![ColumnView::from_ints(vec![0])];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 0);
+
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: i32,
+        }
+
+        let rows: Vec<Row> = stmt2
+            .result_set()
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].ts, 1726803356466);
+        assert_eq!(rows[0].c1, 100);
+
+        taos.exec("drop table t_stmt2").await?;
 
         Ok(())
     }

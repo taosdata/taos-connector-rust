@@ -11,7 +11,9 @@ use taos_ws::{Offset, Taos};
 use tracing::{debug, error};
 
 use crate::ws::error::{set_err_and_get_code, TaosError, TaosMaybeError};
-use crate::ws::{ResultSet, ResultSetOperations, TaosResult, TAOS, TAOS_FIELD, TAOS_RES, TAOS_ROW};
+use crate::ws::{
+    ResultSet, ResultSetOperations, TaosResult, TAOS, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
+};
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
@@ -500,6 +502,10 @@ impl ResultSetOperations for SchemalessResultSet {
     }
 
     fn get_fields(&mut self) -> *mut TAOS_FIELD {
+        ptr::null_mut()
+    }
+
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E {
         ptr::null_mut()
     }
 
