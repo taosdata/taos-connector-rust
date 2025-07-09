@@ -284,6 +284,11 @@ impl Ty {
         matches!(self, Decimal | Decimal64)
     }
 
+    /// Check if the data type is blob.
+    pub const fn is_blob(&self) -> bool {
+        matches!(self, Ty::Blob)
+    }
+
     /// Get fixed length if the type is primitive.
     pub const fn fixed_length(&self) -> usize {
         use Ty::*;
@@ -485,12 +490,13 @@ macro_rules! _impl_from_primitive {
 }
 
 _impl_from_primitive!(i8 i16 i32 i64 u16 u32 u64);
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn decimal_ty_test() -> anyhow::Result<()> {
+    fn test_decimal() -> anyhow::Result<()> {
         assert_eq!("DECIMAL(5,2)".parse::<Ty>().unwrap(), Ty::Decimal64);
         assert_eq!("DECIMAL(20,2)".parse::<Ty>().unwrap(), Ty::Decimal);
 
