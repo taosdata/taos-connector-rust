@@ -1562,6 +1562,14 @@ mod tests {
 
         Ok(())
     }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test]
+    async fn test_test_new_feat() {
+        let x = 1;
+        let y = 2;
+        assert_eq!(x + y, 3);
+    }
 }
 
 #[cfg(feature = "rustls-aws-lc-crypto-provider")]

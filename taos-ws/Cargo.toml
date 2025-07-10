@@ -76,3 +76,5 @@ rustls-ring-crypto-provider = [
     "_with_crypto_provider",
     "tokio-tungstenite/rustls-ring-crypto-provider",
 ]
+
+test-new-feat = []
