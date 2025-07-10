@@ -877,6 +877,7 @@ mod tests {
         assert_eq!(schema.precision(), 18);
         assert_eq!(schema.scale(), 0);
         assert_eq!(schema.to_string(), "DECIMAL(18,0)");
+
         let schema: DataType = "DECIMAL".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal64);
         assert_eq!(schema.len(), 8);

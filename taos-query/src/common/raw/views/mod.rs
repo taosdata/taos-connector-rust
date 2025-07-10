@@ -1580,7 +1580,11 @@ impl ColumnView {
                     to: ty,
                     message: "geometry can not be casted to decimal type",
                 }),
-                ColumnView::Blob(_) => todo!(),
+                ColumnView::Blob(_) => Err(CastError {
+                    from: self.as_ty(),
+                    to: ty,
+                    message: "blob can not be casted to decimal type",
+                }),
             }
         }
     }
@@ -1988,6 +1992,10 @@ mod tests {
         assert!(decimal_view.is_err());
 
         let view = ColumnView::from_geobytes(vec!["", ""]);
+        let decimal_view = view.cast_with_schema(&schema);
+        assert!(decimal_view.is_err());
+
+        let view = ColumnView::from_blob_bytes(vec!["", ""]);
         let decimal_view = view.cast_with_schema(&schema);
         assert!(decimal_view.is_err());
     }

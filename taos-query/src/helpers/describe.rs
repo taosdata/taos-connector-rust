@@ -157,6 +157,7 @@ impl Described {
     pub fn data_type(&self) -> &DataType {
         &self.data_type
     }
+
     /// Represent the data type in sql.
     ///
     /// For example: "INT", "VARCHAR(100)".
