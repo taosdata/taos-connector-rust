@@ -1,14 +1,15 @@
-use crate::{
-    common::{BorrowedValue, Column, Field, Precision, Timestamp, Ty, Value},
-    util::{Inlinable, InlinableRead, InlinableWrite},
-    BlockExt,
-};
+use std::ffi::c_void;
+use std::fmt::Debug;
+use std::mem::{size_of, transmute};
+use std::slice;
+
 use bitvec::macros::internal::funty::Numeric;
 use itertools::Itertools;
 use once_cell::unsync::OnceCell;
 
-use std::{ffi::c_void, slice};
-use std::{fmt::Debug, mem::size_of, mem::transmute};
+use crate::common::{BorrowedValue, Column, Field, Precision, Timestamp, Ty, Value};
+use crate::util::{Inlinable, InlinableRead, InlinableWrite};
+use crate::BlockExt;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -562,12 +563,7 @@ impl RawBlock {
                         );
                     }
                 }
-                Ty::Json => todo!(),
-                Ty::VarBinary => todo!(),
-                Ty::Decimal => todo!(),
-                Ty::Blob => todo!(),
-                Ty::MediumBlob => todo!(),
-                Ty::Geometry => todo!(),
+                _ => todo!(),
             }
         }
 

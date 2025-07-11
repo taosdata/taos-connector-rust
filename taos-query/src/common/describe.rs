@@ -63,6 +63,7 @@ impl Describe {
             .filter(|f| f.is_tag())
             .map(|f| f.field())
     }
+
     pub fn to_create_table_sql(&self, table: &str) -> String {
         let (cols, tags): (Vec<_>, Vec<_>) = self.fields().iter().partition(|f| !f.is_tag());
         let col_sql = cols.into_iter().map(|f| f.sql_repr()).join(",");

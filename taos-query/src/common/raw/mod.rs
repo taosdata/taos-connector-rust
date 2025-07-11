@@ -400,11 +400,7 @@ impl RawBlock {
 
                     data_lengths[i] = *length * rows as u32;
                 }
-                Ty::Decimal | Ty::Decimal64 => unimplemented!("decimal type not supported"),
-                Ty::VarBinary => todo!(),
-                Ty::Blob => todo!(),
-                Ty::MediumBlob => todo!(),
-                Ty::Geometry => todo!(),
+                _ => todo!(),
             }
         }
 
@@ -555,13 +551,20 @@ impl RawBlock {
                     let data = bytes.slice(o2..data_offset);
                     ColumnView::Geometry(GeometryView { offsets, data })
                 }
-                ty => {
-                    unreachable!("unsupported type: {ty}")
+                Ty::Blob => {
+                    let o1 = data_offset;
+                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
+                    data_offset = o2 + length;
+                    let offsets = Offsets::from(bytes.slice(o1..o2));
+                    let data = bytes.slice(o2..data_offset);
+                    ColumnView::Blob(BlobView { offsets, data })
                 }
+                ty => unreachable!("unsupported type: {ty}"),
             };
             columns.push(column);
             debug_assert!(data_offset <= len);
         }
+
         RawBlock {
             layout,
             version: Version::V3,
@@ -823,6 +826,15 @@ impl RawBlock {
                 offsets
             }
             ColumnView::Geometry(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
+            ColumnView::Blob(view) => {
                 let len = view.offsets.len();
                 let mut offsets = Vec::with_capacity(len);
                 for i in 0..len {
@@ -1919,6 +1931,81 @@ mod tests {
                 }
             );
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_blob_raw_block() -> anyhow::Result<()> {
+        let mut bytes = BytesMut::new();
+
+        // header
+        bytes.extend_from_slice(
+            Header {
+                version: 3,
+                length: 82,
+                nrows: 1,
+                ncols: 3,
+                flag: 0,
+                group_id: 0,
+            }
+            .as_bytes(),
+        );
+
+        // schema
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
+
+        // length
+        bytes.put_u32_ne(8);
+        bytes.put_u32_ne(0);
+        bytes.put_u32_ne(7);
+
+        // blobs
+        bytes.put_i32_ne(0);
+        bytes.put_u32_ne(4);
+        bytes.put_slice(&[1, 2, 3, 4]);
+
+        bytes.put_i32_le(-1);
+
+        bytes.put_i32_ne(0);
+        bytes.put_u32_ne(3);
+        bytes.put_slice(&[2, 3, 3]);
+
+        let block = RawBlock::parse_from_raw_block(bytes, Precision::Millisecond);
+        let views = block.column_views();
+        assert_eq!(views.len(), 3);
+
+        if let Some(ColumnView::Blob(view)) = views.get(0) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [Some(vec![1, 2, 3, 4])]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        if let Some(ColumnView::Blob(view)) = views.get(1) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [None]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        if let Some(ColumnView::Blob(view)) = views.get(2) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [Some(vec![2, 3, 3])]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        let offsets = block.get_col_data_offset_unchecked(0);
+        assert_eq!(offsets, &[0]);
+
+        let offsets = block.get_col_data_offset_unchecked(1);
+        assert_eq!(offsets, &[-1]);
+
+        let offsets = block.get_col_data_offset_unchecked(2);
+        assert_eq!(offsets, &[0]);
 
         Ok(())
     }

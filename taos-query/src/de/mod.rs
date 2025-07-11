@@ -309,6 +309,7 @@ mod tests {
             assert_eq!(record, Record { a: None });
         }
     }
+
     #[test]
     fn test_borrowed_values_deserializer() {
         let fields = [
@@ -396,6 +397,7 @@ mod tests {
             );
         }
     }
+
     #[test]
     fn test_record_deserializer() {
         let fields = [

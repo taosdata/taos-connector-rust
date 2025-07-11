@@ -4,13 +4,14 @@ use taos_optin::TaosBuilder;
 
 #[test]
 fn sync_json_with_req_id() -> anyhow::Result<()> {
-    unsafe { std::env::set_var("RUST_LOG", "debug") };
-    // pretty_env_logger::init();
     use taos_query::prelude::sync::*;
+
+    unsafe { std::env::set_var("RUST_LOG", "debug") };
+
     let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
     let dsn = Dsn::from_str(&dsn)?;
     let client = TaosBuilder::from_dsn(dsn)?.build()?;
-    let db = "ws_sync_json";
+    let db = "ws_sync_json_1752216090";
     assert_eq!(client.exec(format!("drop database if exists {db}"))?, 0);
     assert_eq!(client.exec(format!("create database {db} keep 36500"))?, 0);
     assert_eq!(
