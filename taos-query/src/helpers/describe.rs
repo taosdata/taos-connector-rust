@@ -172,7 +172,7 @@ impl Described {
 
     fn sql_repr_by_compression(&self, compression: Option<&CompressOptions>) -> String {
         let ty = self.ty();
-        let is_var_ty = ty != Ty::Blob && ty.is_var_type();
+        let is_var_ty = ty.is_var_type();
 
         let ty = if matches!(ty, Ty::Decimal | Ty::Decimal64) {
             self.origin_ty.clone().unwrap_or_else(|| ty.to_string())

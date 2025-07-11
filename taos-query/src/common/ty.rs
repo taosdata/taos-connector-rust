@@ -227,10 +227,10 @@ impl Ty {
         matches!(self, Ty::Null)
     }
 
-    /// Var type is one of [Ty::VarChar], [Ty::VarBinary], [Ty::NChar], [Ty::Geometry], [Ty::Blob].
+    /// Var type is one of [Ty::VarChar], [Ty::VarBinary], [Ty::NChar], [Ty::Geometry].
     pub const fn is_var_type(&self) -> bool {
         use Ty::*;
-        matches!(self, VarChar | VarBinary | NChar | Geometry | Blob)
+        matches!(self, VarChar | VarBinary | NChar | Geometry)
     }
 
     pub const fn is_json(&self) -> bool {

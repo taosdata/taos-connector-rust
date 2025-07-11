@@ -144,7 +144,7 @@ impl Display for DataType {
         if self.ty.is_decimal() {
             let dec = unsafe { self.attr.dec };
             write!(f, "{}({},{})", self.ty, dec.prec, dec.scale)
-        } else if self.ty.is_var_type() && !self.ty.is_blob() {
+        } else if self.ty.is_var_type() {
             write!(f, "{}({})", self.ty, unsafe { self.positive_var_len() })
         } else {
             write!(f, "{}", self.ty)
