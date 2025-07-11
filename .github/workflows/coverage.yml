@@ -143,7 +143,8 @@ jobs:
           tar -zxvf server.tar.gz
           cd release && sudo sh install.sh
 
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Rust
         id: setup-rust
@@ -154,7 +155,11 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - uses: actions/cache@v4
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+
+      - name: Cache .cargo
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -163,7 +168,8 @@ jobs:
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ steps.setup-rust.outputs.rustc_hash }}
 
-      - uses: actions/cache@v4
+      - name: Cache target
+        uses: actions/cache@v4
         with:
           path: target
           key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
@@ -191,7 +197,7 @@ jobs:
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
-        run: RUST_BACKTRACE=1 cargo llvm-cov -j 2 --workspace --features ws-rustls-aws-lc-crypto-provider,test-new-feat --lcov --output-path lcov.info
+        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --features ws-rustls-aws-lc-crypto-provider,test-new-feat --lcov --output-path lcov.info --no-fail-fast
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
