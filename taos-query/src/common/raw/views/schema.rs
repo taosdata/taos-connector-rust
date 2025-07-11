@@ -484,15 +484,16 @@ impl DataType {
     /// If the length is 0, returns 64 when is variable-length type (VARBINARY, VARCHAR).
     #[inline]
     pub fn len_or_fixed(&self) -> u32 {
-        if self.ty.is_var_type() {
-            let len = unsafe { self.attr.len };
-            if len == 0 {
-                64 // Default variable length for other types
-            } else {
-                len
-            }
+        let fixed = self.ty.fixed_length() as u32;
+        if fixed != 0 {
+            return fixed;
+        }
+
+        let len = unsafe { self.attr.len };
+        if len == 0 {
+            64 // Default variable length for other types
         } else {
-            self.ty.fixed_length() as u32
+            len
         }
     }
 
