@@ -58,6 +58,9 @@ jobs:
           path: target
           key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
 
+      - name: Set timezone
+        run: sudo timedatectl set-timezone Asia/Shanghai
+
       - name: Run tests
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
