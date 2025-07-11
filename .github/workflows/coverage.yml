@@ -120,10 +120,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-tdengine
     steps:
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 30
-
       - name: Get cache server by push
         if: github.event_name == 'push'
         id: get-cache-server-push
@@ -201,7 +197,7 @@ jobs:
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
-        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 2 --workspace --features ws-rustls-aws-lc-crypto-provider,test-new-feat --lcov --output-path lcov.info --no-fail-fast
+        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 4 --workspace --features ws-rustls-aws-lc-crypto-provider,test-new-feat --lcov --output-path lcov.info --no-fail-fast
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

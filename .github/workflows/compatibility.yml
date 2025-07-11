@@ -8,10 +8,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 30
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -69,4 +65,4 @@ jobs:
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
-        run: RUST_BACKTRACE=1 cargo nextest run -j 2 --workspace --features ws-rustls-aws-lc-crypto-provider --no-fail-fast
+        run: RUST_BACKTRACE=1 cargo nextest run -j 4 --workspace --features ws-rustls-aws-lc-crypto-provider --no-fail-fast
