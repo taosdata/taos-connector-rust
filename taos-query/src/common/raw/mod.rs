@@ -556,7 +556,7 @@ impl RawBlock {
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
                     data_offset = o2 + length;
                     let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data: Bytes = bytes.slice(o2..data_offset);
+                    let data = bytes.slice(o2..data_offset);
                     ColumnView::Blob(BlobView { offsets, data })
                 }
                 ty => unreachable!("unsupported type: {ty}"),
@@ -564,6 +564,7 @@ impl RawBlock {
             columns.push(column);
             debug_assert!(data_offset <= len);
         }
+
         RawBlock {
             layout,
             version: Version::V3,
