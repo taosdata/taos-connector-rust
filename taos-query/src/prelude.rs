@@ -56,7 +56,6 @@ pub mod sync {
     {
         iter: IBlockIter<'a, T>,
         block: Option<RawBlock>,
-        // row: usize,
         rows: Option<RowsIter<'a>>,
     }
 
