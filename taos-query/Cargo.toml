@@ -11,8 +11,6 @@ readme.workspace = true
 rust-version.workspace = true
 description.workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 anyhow = "1"
 bytes = { version = "1.1", features = ["serde"] }
@@ -51,7 +49,6 @@ futures = { version = "0.3.21", optional = true, features = [
 ] }
 
 byteorder = "1.4.3"
-# column
 bitflags = "2.2.1"
 bitvec = "1.0.0"
 zerocopy = { version = "0.8.26", features = ["derive"] }

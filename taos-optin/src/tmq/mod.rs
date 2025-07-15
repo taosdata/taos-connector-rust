@@ -6,8 +6,6 @@ use std::time::Duration;
 use anyhow::Context;
 use itertools::Itertools;
 use taos_query::common::RawMeta;
-use taos_query::prelude::tokio::sync::oneshot;
-use taos_query::prelude::tokio::{self, time};
 use taos_query::prelude::{RawError, RawResult};
 use taos_query::tmq::{
     AsAsyncConsumer, AsConsumer, Assignment, AsyncOnSync, IsAsyncData, IsData, IsMeta, IsOffset,
@@ -15,6 +13,8 @@ use taos_query::tmq::{
 };
 use taos_query::util::Edition;
 use taos_query::{Dsn, IntoDsn, RawBlock};
+use tokio::sync::oneshot;
+use tokio::{self, time};
 use tracing::instrument;
 
 use crate::raw::{ApiEntry, RawRes};

@@ -1,13 +1,16 @@
 pub use taos_query;
 pub use taos_query::prelude::{RawError as Error, *};
 
+#[cfg(any(feature = "deadpool", feature = "r2d2"))]
 pub type TaosPool = taos_query::prelude::Pool<TaosBuilder>;
 
 #[cfg(any(feature = "ws", feature = "optin"))]
 pub mod sync {
     pub use taos_query::prelude::sync::*;
 
-    pub use super::{Consumer, MessageSet, Offset, Stmt, Stmt2, Taos, TaosBuilder, TmqBuilder};
+    #[cfg(feature = "ws")]
+    pub use super::Stmt2;
+    pub use super::{Consumer, MessageSet, Offset, Stmt, Taos, TaosBuilder, TmqBuilder};
 }
 
 #[cfg(all(feature = "ws", feature = "optin"))]
@@ -42,8 +45,5 @@ compile_error!("Either feature \"ws\" or \"native\"|"optin" or both must be enab
 
 #[cfg(feature = "optin")]
 pub(crate) use taos_optin as sys;
-#[cfg(not(feature = "optin"))]
-#[cfg(feature = "native")]
-pub(crate) use taos_sys as sys;
 
 shadow_rs::shadow!(build);
