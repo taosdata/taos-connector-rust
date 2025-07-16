@@ -7,9 +7,9 @@ pub(super) mod tmq {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    use taos_query::prelude::tokio::sync::oneshot;
     use taos_query::tmq::{Assignment, VGroupId};
     use taos_query::RawError;
+    use tokio::sync::oneshot;
     use tracing::trace;
 
     use super::Topics;
