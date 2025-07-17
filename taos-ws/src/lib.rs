@@ -18,6 +18,7 @@ use taos_query::prelude::Code;
 use taos_query::util::Edition;
 use taos_query::{DsnError, IntoDsn, RawError, RawResult};
 use tokio::time;
+use tokio_tungstenite::tungstenite::error::ProtocolError;
 use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message;
@@ -565,10 +566,14 @@ impl TaosBuilder {
                         return Ok((ws_stream, version));
                     }
                     Err(err) => {
+                        let https =
+                            matches!(err, WsError::Protocol(ProtocolError::WrongHttpVersion));
+
                         let errstr = err.to_string();
                         tracing::warn!("failed to connect to {url}, err: {errstr}");
                         last_err = Some(QueryError::from(err).into());
-                        if errstr.contains("307") {
+
+                        if https || errstr.contains("307") {
                             self.set_https(true);
                             url = url.replace("ws://", "wss://");
                             continue;
