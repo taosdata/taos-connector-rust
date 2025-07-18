@@ -17,7 +17,7 @@ pub use r#async::*;
 pub use tokio;
 
 pub use crate::tmq::{AsAsyncConsumer, IsAsyncData, IsAsyncMeta};
-#[cfg(feature = "deadpool")]
+#[cfg(any(feature = "deadpool", feature = "r2d2"))]
 pub use crate::Pool;
 pub use crate::{AsyncTBuilder, RawResult};
 
@@ -56,7 +56,6 @@ pub mod sync {
     {
         iter: IBlockIter<'a, T>,
         block: Option<RawBlock>,
-        // row: usize,
         rows: Option<RowsIter<'a>>,
     }
 
@@ -74,6 +73,7 @@ pub mod sync {
                 Ok(None)
             }
         }
+
         fn next_row(&mut self) -> RawResult<Option<RowView<'a>>> {
             // has block
             if let Some(rows) = self.rows.as_mut() {

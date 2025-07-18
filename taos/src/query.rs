@@ -493,7 +493,6 @@ impl taos_query::Queryable for Taos {
 
 #[cfg(test)]
 mod tests {
-
     use std::str::FromStr;
 
     use taos_query::common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder, Timestamp};
@@ -530,6 +529,7 @@ mod tests {
     #[test]
     fn test_server_is_enterprise_edition() -> RawResult<()> {
         use taos_query::prelude::sync::*;
+
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let builder = TaosBuilder::from_dsn(dsn).unwrap();
@@ -669,6 +669,7 @@ mod tests {
     #[test]
     fn null_test() -> RawResult<()> {
         use taos_query::prelude::sync::*;
+
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
@@ -697,6 +698,7 @@ mod tests {
     #[test]
     fn query_with_req_id_ws() -> RawResult<()> {
         use taos_query::prelude::sync::*;
+
         let dsn = std::env::var("TEST_WS_DSN").unwrap_or("taosws://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;
         let taos = TaosBuilder::from_dsn(&dsn)?.build()?;
@@ -1111,7 +1113,6 @@ mod tests {
             match msg {
                 MessageSet::Meta(meta) => {
                     taos.write_raw_meta(&meta.as_raw_meta()?)?;
-                    // taos.w
                 }
                 MessageSet::Data(data) => {
                     for raw in data {
@@ -1168,6 +1169,7 @@ mod tests {
         taos.query(format!("drop database {db}2"))?;
         taos.query(format!("drop topic {db}")).unwrap();
         taos.query(format!("drop database {db}"))?;
+
         Ok(())
     }
 }

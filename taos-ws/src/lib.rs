@@ -18,6 +18,7 @@ use taos_query::prelude::Code;
 use taos_query::util::Edition;
 use taos_query::{DsnError, IntoDsn, RawError, RawResult};
 use tokio::time;
+use tokio_tungstenite::tungstenite::error::ProtocolError;
 use tokio_tungstenite::tungstenite::extensions::DeflateConfig;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message;
@@ -528,9 +529,8 @@ impl TaosBuilder {
 
         for _ in 0..self.addrs.len() {
             let mut url = self.to_url(ty);
-            tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
-
             for i in 0..=self.retry_policy.retries {
+                tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
                 match connect_async_with_config(&url, Some(config), false).await {
                     Ok((mut ws_stream, _)) => {
                         if ty == EndpointType::Stmt {
@@ -565,24 +565,28 @@ impl TaosBuilder {
                         return Ok((ws_stream, version));
                     }
                     Err(err) => {
-                        let errstr = err.to_string();
-                        tracing::warn!("failed to connect to {url}, err: {errstr}");
-                        last_err = Some(QueryError::from(err).into());
-                        if errstr.contains("307") {
+                        tracing::warn!("failed to connect to {url}, err: {err:?}");
+                        if matches!(&err, WsError::Protocol(ProtocolError::WrongHttpVersion))
+                            || matches!(&err, WsError::Http(resp) if resp.status() == 307)
+                        {
                             self.set_https(true);
                             url = url.replace("ws://", "wss://");
+                            last_err = Some(QueryError::from(err).into());
                             continue;
-                        } else if errstr.contains("400") || errstr.contains("404 Not Found") {
+                        } else if matches!(&err, WsError::Http(resp) if resp.status() == 400 || resp.status() == 404)
+                        {
                             url = match ty {
                                 EndpointType::Ws => self.to_query_url(),
                                 EndpointType::Stmt => self.to_stmt_url(),
                                 EndpointType::Tmq => self.to_tmq_url(),
                             };
+                            last_err = Some(QueryError::from(err).into());
                             continue;
-                        } else if errstr.contains("401 Unauthorized") {
+                        } else if matches!(&err, WsError::Http(resp) if resp.status() == 401) {
                             last_err = Some(QueryError::Unauthorized(url).into());
                             break;
                         }
+                        last_err = Some(QueryError::from(err).into());
                     }
                 }
 
