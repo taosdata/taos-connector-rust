@@ -1,5 +1,3 @@
-// #![allow(clippy::macro_metavars_in_unsafe)]
-
 use std::cell::UnsafeCell;
 use std::ffi::{c_char, CStr, CString};
 use std::mem::ManuallyDrop;
@@ -10,11 +8,11 @@ use std::time::Duration;
 use anyhow::Context;
 use once_cell::sync::OnceCell;
 use raw::{ApiEntry, BlockState, RawRes, RawTaos};
-use taos_query::prelude::tokio::sync::oneshot;
-use taos_query::prelude::tokio::{select, task, time};
 use taos_query::prelude::{Field, Precision, RawBlock, RawMeta, RawResult};
 use taos_query::util::Edition;
 use taos_query::RawError;
+use tokio::sync::oneshot;
+use tokio::{select, task, time};
 use tracing::{warn, Instrument};
 
 const MAX_CONNECT_RETRIES: u8 = 2;
@@ -249,6 +247,7 @@ impl taos_query::AsyncQueryable for Taos {
 ///
 /// ```rust
 /// use taos_optin::prelude::sync::*;
+///
 /// fn main() -> anyhow::Result<()> {
 ///     let builder = TaosBuilder::from_dsn("taos://localhost:6030")?;
 ///     let taos = builder.build()?;
@@ -280,12 +279,12 @@ impl taos_query::AsyncQueryable for Taos {
 /// ```
 #[derive(Debug)]
 pub struct TaosBuilder {
-    // dsn: Dsn,
     auth: Auth,
     lib: Arc<ApiEntry>,
     inner_conn: OnceCell<Taos>,
     server_version: OnceCell<String>,
 }
+
 impl TaosBuilder {
     fn inner_connection(&self) -> RawResult<&Taos> {
         if let Some(taos) = self.inner_conn.get() {
@@ -408,8 +407,8 @@ impl taos_query::TBuilder for TaosBuilder {
             tracing::trace!("using default library of taos");
             ApiEntry::open_default().map_err(taos_query::RawError::any)?
         };
+
         let mut auth = Auth::default();
-        // let mut builder = TaosBuilder::default();
         if let Some(addr) = dsn.addresses.first() {
             if let Some(host) = &addr.host {
                 auth.host.replace(CString::new(host.as_str()).unwrap());
@@ -441,7 +440,6 @@ impl taos_query::TBuilder for TaosBuilder {
         }
 
         Ok(Self {
-            // dsn,
             auth,
             lib: Arc::new(lib),
             inner_conn: OnceCell::new(),

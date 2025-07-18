@@ -11,7 +11,6 @@ repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [package.metadata.docs.rs]
 features = ["ws-rustls", "optin", "deadpool"]
 no-default-features = true
@@ -19,9 +18,9 @@ no-default-features = true
 [dependencies]
 async-trait = "0.1"
 bytes = "1.1.0"
-taos-optin = { path = "../taos-optin", version = "0.12.4", optional = true }
-taos-query = { path = "../taos-query", version = "0.12.4", default-features = false }
-taos-ws = { path = "../taos-ws", version = "0.12.4", optional = true }
+taos-optin = { version = "0.12.4", path = "../taos-optin", optional = true }
+taos-query = { version = "0.12.4", path = "../taos-query", default-features = false }
+taos-ws = { version = "0.12.4", path = "../taos-ws", optional = true }
 futures = { version = "0.3", features = ["executor"] }
 shadow-rs = { version = "0.33.0", default-features = false }
 tracing = { version = "0.1", features = ["log"] }
@@ -83,11 +82,11 @@ harness = false
 name = "tmq"
 
 [features]
-deadpool = ["taos-query/deadpool"]
 default = ["ws-rustls", "optin", "deadpool"]
 optin = ["taos-optin"]
 native = ["optin"]
 r2d2 = ["taos-query/r2d2"]
+deadpool = ["taos-query/deadpool"]
 ws = ["taos-ws"]
 ws-native-tls = ["ws", "taos-ws/native-tls"]
 ws-native-tls-vendored = ["ws", "taos-ws/native-tls-vendored"]

@@ -29,7 +29,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 serde_repr = "0.1.8"
 serde_with = "3.0.0"
-taos-query = { path = "../taos-query", version = "0.12.4" }
+taos-query = { version = "0.12.4", path = "../taos-query", default-features = false, features = [
+    "async",
+] }
 thiserror = "1.0.47"
 tokio = { version = "1", features = [
     "sync",
@@ -56,25 +58,17 @@ warp = "0.3.7"
 features = ["rustls"]
 
 [features]
-default = ["tmq", "deflate"]
-
-rustls = ["tokio-tungstenite/rustls-tls-native-roots"]
+default = ["deflate"]
 native-tls = ["tokio-tungstenite/native-tls"]
 native-tls-vendored = ["tokio-tungstenite/native-tls-vendored", "native-tls"]
-sync = []
-tmq = []
-deflate = ["tokio-tungstenite/deflate", "tokio-tungstenite/rustls-dangerous"]
-
-_with_crypto_provider = []
+rustls = ["tokio-tungstenite/rustls-tls-native-roots"]
 rustls-aws-lc-crypto-provider = [
     "rustls",
-    "_with_crypto_provider",
     "tokio-tungstenite/rustls-aws-lc-crypto-provider",
 ]
 rustls-ring-crypto-provider = [
     "rustls",
-    "_with_crypto_provider",
     "tokio-tungstenite/rustls-ring-crypto-provider",
 ]
-
+deflate = ["tokio-tungstenite/deflate", "tokio-tungstenite/rustls-dangerous"]
 test-new-feat = []
