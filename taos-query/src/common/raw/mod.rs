@@ -7,6 +7,7 @@ use std::ffi::c_void;
 use std::fmt::{Debug, Display};
 use std::io::Cursor;
 use std::ops::Deref;
+use std::ops::DerefMut;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::AtomicU32;
@@ -1396,7 +1397,7 @@ impl Deref for MultiBlockCursor {
         &self.cursor
     }
 }
-use std::ops::DerefMut;
+
 impl DerefMut for MultiBlockCursor {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.cursor

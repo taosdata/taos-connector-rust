@@ -277,7 +277,7 @@ impl WsTaos {
         }
     }
 
-    pub async fn s_put(&self, sml: &SmlData) -> RawResult<()> {
+    pub async fn s_put(&self, sml: &SmlData) -> RawResult<(Option<usize>, Option<usize>)> {
         let req = WsSend::Insert {
             protocol: sml.protocol() as u8,
             precision: sml.precision().into(),
@@ -290,7 +290,7 @@ impl WsTaos {
         match self.sender.send_recv(req).await? {
             WsRecvData::Insert(resp) => {
                 tracing::trace!("sml resp: {resp:?}");
-                Ok(())
+                Ok((resp.affected_rows, resp.total_rows))
             }
             _ => unreachable!(),
         }
@@ -448,7 +448,8 @@ impl AsyncQueryable for WsTaos {
     }
 
     async fn put(&self, data: &SmlData) -> RawResult<()> {
-        self.s_put(data).in_current_span().await
+        let _ = self.s_put(data).in_current_span().await?;
+        Ok(())
     }
 }
 

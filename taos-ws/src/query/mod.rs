@@ -46,7 +46,6 @@ impl Taos {
 }
 
 unsafe impl Send for Taos {}
-
 unsafe impl Sync for Taos {}
 
 #[async_trait::async_trait]
@@ -86,7 +85,8 @@ impl taos_query::AsyncQueryable for Taos {
     }
 
     async fn put(&self, data: &SmlData) -> RawResult<()> {
-        self.client().s_put(data).await
+        let _ = self.client().s_put(data).await?;
+        Ok(())
     }
 }
 
