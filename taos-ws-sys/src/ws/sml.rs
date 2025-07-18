@@ -223,11 +223,11 @@ unsafe fn sml_insert_raw(
     let (affected_rows, total_rows) = block_in_place_or_global(taos.client().s_put(&sml_data))?;
 
     if !totalRows.is_null() {
-        *totalRows = total_rows.unwrap() as _;
+        *totalRows = total_rows.unwrap_or(0) as _;
     }
 
     Ok(ResultSet::Schemaless(SchemalessResultSet::new(
-        affected_rows.unwrap() as _,
+        affected_rows.unwrap_or(0) as _,
         Precision::Millisecond,
         Duration::from_millis(0),
     )))
@@ -425,7 +425,7 @@ unsafe fn sml_insert(
     let (affected_rows, _) = block_in_place_or_global(taos.client().s_put(&sml_data))?;
 
     Ok(ResultSet::Schemaless(SchemalessResultSet::new(
-        affected_rows.unwrap() as _,
+        affected_rows.unwrap_or(0) as _,
         Precision::Millisecond,
         Duration::from_millis(0),
     )))
