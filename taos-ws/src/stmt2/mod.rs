@@ -243,7 +243,7 @@ impl Stmt2Bindable<super::Taos> for Stmt2 {
         Ok(stmt2)
     }
 
-    fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
+    fn prepare<S: AsRef<str> + Send>(&mut self, sql: S) -> RawResult<&mut Self> {
         block_in_place_or_global(self.prepare(sql))?;
         Ok(self)
     }
@@ -274,7 +274,7 @@ impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
         Ok(stmt2)
     }
 
-    async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
+    async fn prepare<S: AsRef<str> + Send>(&mut self, sql: S) -> RawResult<&mut Self> {
         self.prepare(sql).await?;
         Ok(self)
     }
