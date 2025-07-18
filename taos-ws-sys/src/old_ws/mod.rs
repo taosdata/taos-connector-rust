@@ -2011,7 +2011,7 @@ mod tests {
 
     #[test]
     fn kepware_connect() {
-        let stack_size = 512 * 1024;
+        let stack_size = 1024 * 1024;
 
         let handle = thread::Builder::new()
             .stack_size(stack_size)

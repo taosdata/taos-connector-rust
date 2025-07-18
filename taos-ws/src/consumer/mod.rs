@@ -2931,7 +2931,7 @@ mod cloud_tests {
             let mut consumer = tmq.build().await?;
             consumer.subscribe(["rust_tmq_test_topic"]).await?;
 
-            let timeout = Timeout::Duration(Duration::from_secs(2));
+            let timeout = Timeout::Duration(Duration::from_secs(5));
 
             loop {
                 tokio::select! {
@@ -2954,25 +2954,20 @@ mod cloud_tests {
             Ok(())
         });
 
-        let mut sqls = Vec::with_capacity(num);
-
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64;
 
+        let mut sql = "insert into rust_test.t_tmq values ".to_string();
         for i in 0..num {
-            sqls.push(format!(
-                "insert into rust_test.t_tmq values ({}, {})",
-                ts + i as i64,
-                i,
-            ));
+            sql.push_str(&format!("({}, {}), ", ts + i as i64, i,));
         }
 
         let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
-        taos.exec_many(&sqls).await?;
+        taos.exec(sql).await?;
 
-        tokio::time::sleep(Duration::from_secs(20)).await;
+        tokio::time::sleep(Duration::from_secs(30)).await;
 
         let _ = cancel_tx.send(true);
 

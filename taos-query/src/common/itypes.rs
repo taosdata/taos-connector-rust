@@ -38,39 +38,12 @@ impl AsRef<[u8]> for IVarChar {
     }
 }
 
-/// Alias of [IVarChar].
-pub type IBinary = IVarChar;
-
-#[derive(Debug, Deref, DerefMut, Clone, From, Deserialize, Serialize)]
-pub struct INChar(String);
-
-impl AsRef<str> for INChar {
-    fn as_ref(&self) -> &str {
-        self.0.as_str()
-    }
-}
-impl AsRef<[u8]> for INChar {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-#[derive(Debug, Deref, DerefMut, Clone, From, Deserialize, Serialize)]
-pub struct IVarBinary(Vec<u8>);
-#[allow(dead_code)]
-pub struct IGeometry(Vec<u8>);
-
-#[derive(Debug, Deref, DerefMut, Clone, From, Deserialize, Serialize)]
-pub struct IMediumBlob(Vec<u8>);
-
-#[derive(Debug, Deref, DerefMut, Clone, From, Deserialize, Serialize)]
-pub struct IBlob(Vec<u8>);
-
 impl From<String> for IVarChar {
     fn from(v: String) -> Self {
         Self(v)
     }
 }
+
 impl From<&str> for IVarChar {
     fn from(v: &str) -> Self {
         Self(v.to_string())
@@ -83,18 +56,6 @@ impl From<IVarChar> for String {
     }
 }
 
-impl From<INChar> for String {
-    fn from(v: INChar) -> Self {
-        v.0
-    }
-}
-
-// impl From<IJson> for String {
-//     fn from(v: IJson) -> Self {
-//         v.0.to_string()
-//     }
-// }
-
 impl IVarChar {
     pub const fn new() -> Self {
         Self(String::new())
@@ -104,6 +65,42 @@ impl IVarChar {
         Self(String::with_capacity(cap))
     }
 }
+
+/// Alias of [IVarChar].
+pub type IBinary = IVarChar;
+
+#[derive(Debug, Deref, DerefMut, Clone, From, Deserialize, Serialize)]
+pub struct INChar(String);
+
+impl AsRef<str> for INChar {
+    fn as_ref(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl AsRef<[u8]> for INChar {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl From<INChar> for String {
+    fn from(v: INChar) -> Self {
+        v.0
+    }
+}
+
+#[derive(Debug, Deref, DerefMut, Clone, From, Deserialize, Serialize)]
+pub struct IVarBinary(Vec<u8>);
+
+#[derive(Debug, Deref, DerefMut, Clone, From, Deserialize, Serialize)]
+pub struct IGeometry(Vec<u8>);
+
+#[derive(Debug, Deref, DerefMut, Clone, From, Deserialize, Serialize)]
+pub struct IMediumBlob(Vec<u8>);
+
+#[derive(Debug, Deref, DerefMut, Clone, From, Deserialize, Serialize)]
+pub struct IBlob(Vec<u8>);
 
 pub trait IsValue: Sized + Clone {
     const TY: Ty;
@@ -167,12 +164,15 @@ where
     fn as_var_char(&self) -> &str {
         self.as_ref().unwrap().as_var_char()
     }
+
     fn as_nchar(&self) -> &str {
         self.as_ref().unwrap().as_nchar()
     }
+
     fn as_medium_blob(&self) -> &[u8] {
         self.as_ref().unwrap().as_medium_blob()
     }
+
     fn as_blob(&self) -> &[u8] {
         self.as_ref().unwrap().as_blob()
     }
@@ -198,6 +198,7 @@ impl IValue for INull {
     fn is_null(&self) -> bool {
         true
     }
+
     fn into_value(self) -> Value {
         Value::Null(Ty::Null)
     }
@@ -365,40 +366,3 @@ impl IValue for ITimestamp {
         self.0
     }
 }
-
-// macro_rules! impl_wrapper_struct {
-//     ($($ty:ident)*) => {
-//         $(paste::paste! {
-//             impl IValue for [<I $ty>] {
-//                 const TY: Ty = Ty::$ty;
-//                 #[inline]
-//                 fn into_value(self) -> Value {
-//                     Value::$ty(self.0)
-//                 }
-//             }
-//         })*
-//     };
-//     ($($ty:ident, $inner:ty;)*) => {
-//         $(paste::paste! {
-//             #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Deserialize, Serialize)]
-//             pub struct [<I $ty>]($inner);
-
-//             impl Deref for [<I $ty>] {
-//                 type Target = $inner;
-
-//                 #[inline]
-//                 fn deref(&self) -> &Self::Target {
-//                         &self.0
-//                 }
-//             }
-
-//             impl IValue for [<I $ty>] {
-//                 const TY: Ty = Ty::$ty;
-//                 #[inline]
-//                 fn into_value(self) -> Value {
-//                     Value::$ty(self.0)
-//                 }
-//             }
-//         })*
-//     };
-// }

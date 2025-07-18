@@ -2,17 +2,16 @@ mod inner;
 
 use std::io::Write;
 
-use super::{BorrowedValue, Column, Field, Precision};
-
-use crate::{util::*, BlockExt};
-
 pub use inner::*;
 
-pub mod raw;
-pub use raw::Raw;
+use super::{BorrowedValue, Column, Field, Precision};
+use crate::util::*;
+use crate::BlockExt;
 
+pub mod raw;
 use bitflags::bitflags;
 use once_cell::unsync::OnceCell;
+pub use raw::Raw;
 
 bitflags! {
     #[derive(Default)]

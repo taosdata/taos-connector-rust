@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use mdsn::Dsn;
-// use url::ParseError;
-use mdsn::DsnError as Error;
+use mdsn::{Dsn, DsnError as Error};
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct TaosOpts {

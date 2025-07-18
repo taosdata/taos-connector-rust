@@ -65,6 +65,9 @@ pub use geometry_view::GeometryView;
 mod decimal_view;
 pub(crate) use decimal_view::DecimalView;
 
+mod blob_view;
+pub use blob_view::BlobView;
+
 mod schema;
 pub(crate) use schema::*;
 
@@ -118,6 +121,7 @@ pub enum ColumnView {
     Json(JsonView),              // 15
     VarBinary(VarBinaryView),    // 16
     Decimal(DecimalView<i128>),  // 17
+    Blob(BlobView),              // 18
     Geometry(GeometryView),      // 20
     Decimal64(DecimalView<i64>), // 21
 }
@@ -147,6 +151,7 @@ impl Debug for ColumnView {
             Self::Decimal(view) => f.debug_tuple("Decimal").field(&view.to_vec()).finish(),
             Self::Decimal64(view) => f.debug_tuple("Decimal64").field(&view.to_vec()).finish(),
             Self::Geometry(view) => f.debug_tuple("Geometry").field(&view.to_vec()).finish(),
+            Self::Blob(view) => f.debug_tuple("Blob").field(&view.to_vec()).finish(),
         }
     }
 }
@@ -359,6 +364,17 @@ impl ColumnView {
         ColumnView::Geometry(GeometryView::from_iter(iter))
     }
 
+    pub fn from_blob_bytes<
+        S: AsRef<[u8]>,
+        T: Into<Option<S>>,
+        I: ExactSizeIterator<Item = T>,
+        V: IntoIterator<Item = T, IntoIter = I>,
+    >(
+        iter: V,
+    ) -> Self {
+        ColumnView::Blob(BlobView::from_iter(iter))
+    }
+
     #[inline]
     pub fn concat_iter<'b, 'a: 'b, T: Iterator<Item = BorrowedValue<'b>>>(
         &'a self,
@@ -418,7 +434,9 @@ impl ColumnView {
             Ty::Decimal | Ty::Decimal64 => {
                 unimplemented!("Unable to determine the values for precision and scale")
             }
-            Ty::Blob => todo!(),
+            Ty::Blob => ColumnView::Blob(IsColumnView::from_borrowed_value_iter(
+                self.iter().chain(rhs),
+            )),
             Ty::MediumBlob => todo!(),
             Ty::Geometry => ColumnView::Geometry(IsColumnView::from_borrowed_value_iter(
                 self.iter().chain(rhs),
@@ -459,8 +477,8 @@ impl ColumnView {
             (ColumnView::VarChar(a), ColumnView::VarChar(b)) => ColumnView::VarChar(a.concat(b)),
             (ColumnView::NChar(a), ColumnView::NChar(b)) => ColumnView::NChar(a.concat(b)),
             (ColumnView::Json(a), ColumnView::Json(b)) => ColumnView::Json(a.concat(b)),
-            (ColumnView::VarBinary(_a), ColumnView::VarBinary(_b)) => todo!(), //ColumnView::VarBinary(a.concat(b)),
-            (ColumnView::Geometry(_a), ColumnView::Geometry(_b)) => todo!(), //ColumnView::Geometry(a.concat(b)),
+            (ColumnView::VarBinary(_a), ColumnView::VarBinary(_b)) => todo!(),
+            (ColumnView::Geometry(_a), ColumnView::Geometry(_b)) => todo!(),
             _ => panic!("strict concat needs same schema: {self:?}, {rhs:?}"),
         }
     }
@@ -492,11 +510,7 @@ impl ColumnView {
             Ty::Decimal | Ty::Decimal64 => {
                 unimplemented!("Unable to determine the values for precision and scale")
             }
-            Ty::Json => todo!(),
-            Ty::VarBinary => todo!(),
-            Ty::Blob => todo!(),
-            Ty::MediumBlob => todo!(),
-            Ty::Geometry => todo!(),
+            _ => todo!(),
         }
     }
 
@@ -522,6 +536,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.len(),
             ColumnView::Decimal(view) => view.len(),
             ColumnView::Decimal64(view) => view.len(),
+            ColumnView::Blob(view) => view.len(),
         }
     }
 
@@ -541,6 +556,7 @@ impl ColumnView {
             ColumnView::Json(view) => view.max_length(),
             ColumnView::VarBinary(view) => view.max_length(),
             ColumnView::Geometry(view) => view.max_length(),
+            ColumnView::Blob(view) => view.max_length(),
         }
     }
 
@@ -567,6 +583,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.is_null_unchecked(row),
             ColumnView::Decimal(view) => view.is_null_unchecked(row),
             ColumnView::Decimal64(view) => view.is_null_unchecked(row),
+            ColumnView::Blob(view) => view.is_null_unchecked(row),
         }
     }
 
@@ -601,6 +618,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.get_value_unchecked(row),
             ColumnView::Decimal(view) => view.get_value_unchecked(row),
             ColumnView::Decimal64(view) => view.get_value_unchecked(row),
+            ColumnView::Blob(view) => view.get_value_unchecked(row),
         }
     }
 
@@ -627,6 +645,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.get_raw_value_unchecked(row),
             ColumnView::Decimal(view) => view.get_raw_value_unchecked(row),
             ColumnView::Decimal64(view) => view.get_raw_value_unchecked(row),
+            ColumnView::Blob(view) => view.get_raw_value_unchecked(row),
         }
     }
 
@@ -653,8 +672,7 @@ impl ColumnView {
             ColumnView::Json(view) => view.slice(range).map(ColumnView::Json),
             ColumnView::Decimal(view) => view.slice(range).map(ColumnView::Decimal),
             ColumnView::Decimal64(view) => view.slice(range).map(ColumnView::Decimal64),
-            ColumnView::VarBinary(_view) => todo!(), //view.slice(range).map(ColumnView::VarBinary),
-            ColumnView::Geometry(_view) => todo!(),  //view.slice(range).map(ColumnView::Geometry),
+            _ => todo!(),
         }
     }
 
@@ -679,6 +697,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.write_raw_into(wtr),
             ColumnView::Decimal(view) => view.write_raw_into(wtr),
             ColumnView::Decimal64(view) => view.write_raw_into(wtr),
+            ColumnView::Blob(view) => view.write_raw_into(wtr),
         }
     }
 
@@ -703,6 +722,7 @@ impl ColumnView {
             ColumnView::Geometry(_) => Ty::Geometry,
             ColumnView::Decimal(_) => Ty::Decimal,
             ColumnView::Decimal64(_) => Ty::Decimal64,
+            ColumnView::Blob(_) => Ty::Blob,
         }
     }
 
@@ -727,6 +747,7 @@ impl ColumnView {
             ColumnView::Geometry(view) => view.as_raw_ptr() as _,
             ColumnView::Decimal(view) => view.as_raw_ptr() as _,
             ColumnView::Decimal64(view) => view.as_raw_ptr() as _,
+            ColumnView::Blob(view) => view.as_raw_ptr() as _,
         }
     }
 
@@ -736,8 +757,6 @@ impl ColumnView {
     /// It includes the type, maximum variable length, precision, and scale for decimal types.
     /// If the column view is a decimal type, it will return the precision and scale.
     /// If it is not a decimal type, it will return the type and maximum variable length.
-    ///
-    ///
     pub fn schema(&self) -> DataType {
         let ty = self.as_ty();
         if ty.is_decimal() {
@@ -1561,9 +1580,15 @@ impl ColumnView {
                     to: ty,
                     message: "geometry can not be casted to decimal type",
                 }),
+                ColumnView::Blob(_) => Err(CastError {
+                    from: self.as_ty(),
+                    to: ty,
+                    message: "blob can not be casted to decimal type",
+                }),
             }
         }
     }
+
     pub fn cast_precision(&self, precision: Precision) -> ColumnView {
         match self {
             ColumnView::Timestamp(view) => ColumnView::Timestamp(view.cast_precision(precision)),
@@ -1576,12 +1601,6 @@ impl ColumnView {
             ColumnView::Timestamp(view) => view,
             _ => unreachable!(),
         }
-    }
-
-    pub(crate) fn _to_nulls_vec(&self) -> Vec<bool> {
-        (0..self.len())
-            .map(|i| unsafe { self.is_null_unchecked(i) })
-            .collect()
     }
 }
 
@@ -1717,6 +1736,8 @@ _impl_from_iter!(
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
     use crate::common::decimal::Decimal;
 
@@ -1763,7 +1784,16 @@ mod tests {
 
         let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Bool);
         assert_eq!(res.len(), 6);
+        let column_view_int = ColumnView::from(vec![1, 2, 3]);
 
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Bool);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::TinyInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::SmallInt);
+        assert_eq!(res.len(), 6);
         let res = column_view_int.concat_iter(values.iter().cloned(), Ty::TinyInt);
         assert_eq!(res.len(), 6);
 
@@ -1775,7 +1805,20 @@ mod tests {
 
         let res = column_view_int.concat_iter(values.iter().cloned(), Ty::BigInt);
         assert_eq!(res.len(), 6);
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Int);
+        assert_eq!(res.len(), 6);
 
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::BigInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::UTinyInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::USmallInt);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::UInt);
+        assert_eq!(res.len(), 6);
         let res = column_view_int.concat_iter(values.iter().cloned(), Ty::UTinyInt);
         assert_eq!(res.len(), 6);
 
@@ -1804,6 +1847,9 @@ mod tests {
         assert_eq!(res.len(), 6);
 
         let res = column_view_int.concat_iter(values.iter().cloned(), Ty::VarBinary);
+        assert_eq!(res.len(), 6);
+
+        let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Blob);
         assert_eq!(res.len(), 6);
 
         let res = column_view_int.concat_iter(values.iter().cloned(), Ty::Geometry);
@@ -1948,5 +1994,75 @@ mod tests {
         let view = ColumnView::from_geobytes(vec!["", ""]);
         let decimal_view = view.cast_with_schema(&schema);
         assert!(decimal_view.is_err());
+
+        let view = ColumnView::from_blob_bytes(vec!["", ""]);
+        let decimal_view = view.cast_with_schema(&schema);
+        assert!(decimal_view.is_err());
+    }
+
+    #[test]
+    fn test_blob_column_view() -> anyhow::Result<()> {
+        let view = ColumnView::from_blob_bytes::<Vec<u8>, _, _, _>([
+            Some(vec![1, 2, 3, 4]),
+            None,
+            Some(vec![2, 3, 3]),
+        ]);
+
+        assert_eq!(view.as_ty(), Ty::Blob);
+        assert_eq!(view.len(), 3);
+        assert_eq!(view.max_variable_length(), 4);
+        assert_eq!(
+            format!("{view:?}"),
+            "Blob([Some([1, 2, 3, 4]), None, Some([2, 3, 3])])"
+        );
+
+        assert!(!view.as_raw_ptr().is_null());
+
+        unsafe {
+            assert!(!view.is_null_unchecked(0));
+            assert!(view.is_null_unchecked(1));
+            assert!(!view.is_null_unchecked(2));
+        }
+
+        assert_eq!(
+            view.get(0),
+            Some(BorrowedValue::Blob(Cow::from(vec![1, 2, 3, 4])))
+        );
+        assert_eq!(view.get(1), Some(BorrowedValue::Null(Ty::Blob)));
+        assert_eq!(
+            view.get(2),
+            Some(BorrowedValue::Blob(Cow::from(vec![2, 3, 3])))
+        );
+
+        unsafe {
+            assert_eq!(
+                view.get_ref_unchecked(0),
+                BorrowedValue::Blob(Cow::from(vec![1, 2, 3, 4]))
+            );
+            assert_eq!(view.get_ref_unchecked(1), BorrowedValue::Null(Ty::Blob));
+            assert_eq!(
+                view.get_ref_unchecked(2),
+                BorrowedValue::Blob(Cow::from(vec![2, 3, 3]))
+            );
+        }
+
+        unsafe {
+            let (ty, size, ptr) = view.get_raw_value_unchecked(0);
+            assert_eq!(ty, Ty::Blob);
+            assert_eq!(size, 4);
+            assert!(!ptr.is_null());
+
+            let (ty, size, ptr) = view.get_raw_value_unchecked(1);
+            assert_eq!(ty, Ty::Blob);
+            assert_eq!(size, 0);
+            assert!(ptr.is_null());
+
+            let (ty, size, ptr) = view.get_raw_value_unchecked(2);
+            assert_eq!(ty, Ty::Blob);
+            assert_eq!(size, 3);
+            assert!(!ptr.is_null());
+        }
+
+        Ok(())
     }
 }

@@ -849,6 +849,7 @@ mod tests {
 
         Ok(())
     }
+
     #[test]
     fn long_query() -> RawResult<()> {
         use taos_query::prelude::sync::*;
@@ -978,6 +979,7 @@ mod tests {
         assert!(err_str.contains("The table name cannot contain '.'"));
         Ok(())
     }
+
     #[tokio::test]
     async fn error_fetch_async() -> RawResult<()> {
         use taos_query::prelude::*;
@@ -1000,6 +1002,7 @@ mod tests {
 
         Ok(())
     }
+
     #[tokio::test]
     async fn error_sync() -> RawResult<()> {
         use taos_query::prelude::sync::*;
@@ -1066,6 +1069,7 @@ mod tests {
         println!("summary: {:?}", set.summary());
         Ok(())
     }
+
     #[tokio::test]
     async fn exec_async() -> RawResult<()> {
         use taos_query::prelude::*;
