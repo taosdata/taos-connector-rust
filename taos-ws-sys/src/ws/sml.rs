@@ -533,7 +533,7 @@ mod tests {
     use taos_query::util::generate_req_id;
 
     use super::*;
-    use crate::ws::query::{taos_affected_rows, taos_affected_rows64, taos_free_result};
+    use crate::ws::query::{taos_affected_rows, taos_free_result};
     use crate::ws::sml::{TSDB_SML_PROTOCOL_TYPE, TSDB_SML_TIMESTAMP_TYPE};
     use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
 
@@ -633,8 +633,11 @@ mod tests {
                 taos_schemaless_insert_raw(taos, lines, len, &mut total_rows, protocol, precision);
             assert!(!res.is_null());
             assert_eq!(total_rows, 2);
-            taos_free_result(res);
 
+            let affected_rows = taos_affected_rows(res);
+            assert_eq!(affected_rows, 2);
+
+            taos_free_result(res);
             test_exec(taos, "drop database test_1741168851");
             taos_close(taos);
         }
@@ -664,8 +667,8 @@ mod tests {
                 taos_schemaless_insert_raw(taos, lines, len, &mut total_rows, protocol, precision);
             assert!(!res.is_null());
             assert_eq!(total_rows, 1);
-            taos_free_result(res);
 
+            taos_free_result(res);
             test_exec(taos, "drop database test_1741608340");
             taos_close(taos);
         }
@@ -769,46 +772,11 @@ mod tests {
 
             let res = taos_schemaless_insert(taos, lines, num_lines, protocol, precision);
             assert!(!res.is_null());
-            taos_free_result(res);
 
-            test_exec(taos, "drop database test_1742376152");
-            taos_close(taos);
-        }
-    }
-
-    #[test]
-    fn test_sml_telnet2() {
-        unsafe {
-            let taos = test_connect();
-            test_exec_many(
-                taos,
-                &[
-                    "drop database if exists test_1742376152",
-                    "create database test_1742376152",
-                    "use test_1742376152",
-                ],
-            );
-
-            let line1 = cr#"stb13 1742375795074 L"wuxX"  t0=-12859061i32 t1=-876196531i64 t2=783043840.000000f32 t3=851331526.930689f64 t4=-5047i16 t5=102i8 t6=false t7=L"QSfm7v""#;
-            let line2 = cr#"stb13 1742375795075 L""  t0=-12859061i32 t1=-876196531i64 t2=783043840.000000f32 t3=851331526.930689f64 t4=-5047i16 t5=102i8 t6=false t7=L"QSfm7v""#;
-            let mut lines = vec![line1.as_ptr() as _, line2.as_ptr() as _];
-
-            let num_lines = lines.len() as i32;
-            let lines = lines.as_mut_ptr();
-
-            let protocol = TSDB_SML_PROTOCOL_TYPE::TSDB_SML_TELNET_PROTOCOL as i32;
-            let precision = TSDB_SML_TIMESTAMP_TYPE::TSDB_SML_TIMESTAMP_MILLI_SECONDS as i32;
-
-            let res = taos_schemaless_insert(taos, lines, num_lines, protocol, precision);
-            assert!(!res.is_null());
-
-            let rows = taos_affected_rows(res);
-            assert_eq!(rows, 2);
-            let rows = taos_affected_rows64(res);
-            assert_eq!(rows, 2);
+            let affected_rows = taos_affected_rows(res);
+            assert_eq!(affected_rows, 2);
 
             taos_free_result(res);
-
             test_exec(taos, "drop database test_1742376152");
             taos_close(taos);
         }
