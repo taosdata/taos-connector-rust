@@ -242,6 +242,7 @@ fn get_col_data_len(col: &ColumnView) -> usize {
         NChar(view) => view_iter!(view),
         VarBinary(view) => view_iter!(view),
         Geometry(view) => view_iter!(view),
+        Blob(view) => view_iter!(view),
         Json(_) => panic!("column does not support json type"),
         _ => len = col.as_ty().fixed_length() * col.len(),
     }

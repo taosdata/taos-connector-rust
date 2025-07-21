@@ -800,6 +800,87 @@ mod tests {
 
         Ok(())
     }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn test_stmt2_blob() -> anyhow::Result<()> {
+        use serde::Deserialize;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many(&[
+            "drop database if exists test_1753080278",
+            "create database test_1753080278",
+            "use test_1753080278",
+            "create table t0 (ts timestamp, c1 blob)",
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+        stmt2.prepare("insert into t0 values(?, ?)").await?;
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![
+                1726803356466,
+                1726803356467,
+                1726803356468,
+                1726803356469,
+            ]),
+            ColumnView::from_blob_bytes::<Vec<u8>, _, _, _>(vec![
+                None,
+                Some(vec![]),
+                Some(vec![0x68, 0x65, 0x6C, 0x6C, 0x6F]),
+                Some(vec![0x12, 0x34, 0x56, 0x78]),
+            ]),
+        ];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+
+        stmt2.bind(&[param]).await?;
+
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 4);
+
+        stmt2.prepare("select * from t0 where ts > ?").await?;
+
+        let cols = vec![ColumnView::from_millis_timestamp(vec![1726803356465])];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        let _ = stmt2.exec().await?;
+
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: i64,
+            c1: Option<Vec<u8>>,
+        }
+
+        let records: Vec<Record> = stmt2
+            .result_set()
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
+        assert_eq!(records.len(), 4);
+
+        assert_eq!(records[0].ts, 1726803356466);
+        assert_eq!(records[1].ts, 1726803356467);
+        assert_eq!(records[2].ts, 1726803356468);
+        assert_eq!(records[3].ts, 1726803356469);
+
+        assert_eq!(records[0].c1, None);
+        assert_eq!(records[1].c1, Some(vec![]));
+        assert_eq!(records[2].c1, Some(vec![0x68, 0x65, 0x6C, 0x6C, 0x6F]));
+        assert_eq!(records[3].c1, Some(vec![0x12, 0x34, 0x56, 0x78]));
+
+        taos.exec("drop database test_1753080278").await?;
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "rustls-aws-lc-crypto-provider")]
