@@ -869,12 +869,12 @@ impl RawBlock {
         Some(unsafe { self.get_ref_unchecked(row, col) })
     }
 
-    #[inline]
     /// Get one value at `(row, col)` of the block.
     ///
     /// # Safety
     ///
     /// Ensure that `row` and `col` not exceed the limit of the block.
+    #[inline]
     pub unsafe fn get_ref_unchecked(&self, row: usize, col: usize) -> BorrowedValue {
         self.columns.get_unchecked(col).get_ref_unchecked(row)
     }

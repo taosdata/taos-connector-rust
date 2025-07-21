@@ -165,7 +165,7 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
             },
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
             VarBinary(v) | Geometry(v) | Blob(v) | MediumBlob(v) => match v {
-                Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
+                Cow::Borrowed(v) => visitor.visit_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
             Decimal(v) => visitor.visit_string(v.to_string()),
@@ -325,6 +325,13 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 .to_vec()
                 .into_deserializer()
                 .deserialize_seq(visitor),
+            Blob(v) | VarBinary(v) | Geometry(v) => {
+                let bytes = match v {
+                    std::borrow::Cow::Borrowed(b) => b.to_vec(),
+                    std::borrow::Cow::Owned(b) => b,
+                };
+                bytes.into_deserializer().deserialize_seq(visitor)
+            }
             _ => todo!(),
         }
     }

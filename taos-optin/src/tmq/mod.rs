@@ -2770,9 +2770,8 @@ mod async_tests {
 
         use crate::{TaosBuilder, TmqBuilder};
 
-        let pool = TaosBuilder::from_dsn("taos:///")?.pool()?;
-        let conn = pool.get().await?;
-        conn.exec_many([
+        let taos = TaosBuilder::from_dsn("taos:///")?.build().await?;
+        taos.exec_many([
             "drop topic if exists tmq_poll_topic",
             "drop database if exists tmq_poll_db",
             "create database if not exists tmq_poll_db",
@@ -2801,7 +2800,7 @@ mod async_tests {
 
         consumer.unsubscribe().await;
 
-        conn.exec_many(["drop topic tmq_poll_topic", "drop database tmq_poll_db"])
+        taos.exec_many(["drop topic tmq_poll_topic", "drop database tmq_poll_db"])
             .await?;
 
         Ok(())
