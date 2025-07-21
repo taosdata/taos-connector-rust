@@ -803,7 +803,6 @@ mod tests {
 
     #[cfg(feature = "test-new-feat")]
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore]
     async fn test_stmt2_blob() -> anyhow::Result<()> {
         use serde::Deserialize;
 

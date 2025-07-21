@@ -1339,7 +1339,6 @@ mod tests {
 
     #[cfg(feature = "test-new-feat")]
     #[test]
-    #[ignore]
     fn test_blob() -> anyhow::Result<()> {
         use serde::Deserialize;
         use taos_query::prelude::sync::*;
@@ -1386,7 +1385,6 @@ mod tests {
 
     #[cfg(feature = "test-new-feat")]
     #[test]
-    #[ignore]
     fn test_blob_all_types() -> anyhow::Result<()> {
         use bytes::Bytes;
         use serde::Deserialize;

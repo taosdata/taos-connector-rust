@@ -550,7 +550,6 @@ mod tests {
 
     #[cfg(feature = "test-new-feat")]
     #[tokio::test]
-    #[ignore]
     async fn test_blob() -> anyhow::Result<()> {
         use serde::Deserialize;
         use taos_query::prelude::*;
@@ -603,7 +602,6 @@ mod tests {
 
     #[cfg(feature = "test-new-feat")]
     #[tokio::test]
-    #[ignore]
     async fn test_blob_all_types() -> anyhow::Result<()> {
         use bytes::Bytes;
         use serde::Deserialize;

@@ -2168,12 +2168,8 @@ mod async_tests {
 
     #[tokio::test]
     async fn test_tmq_offset() -> anyhow::Result<()> {
-        // pretty_env_logger::formatted_timed_builder()
-        //     .filter_level(tracing::LevelFilter::Info)
-        //     .init();
-
         use taos_query::prelude::*;
-        // let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
+
         let mut dsn = "tmq://localhost:6030?offset=10:20,11:40".to_string();
         tracing::info!("dsn: {}", dsn);
 
@@ -2185,33 +2181,31 @@ mod async_tests {
             "create topic ws_abc1 with meta as database ws_abc1",
             "use ws_abc1",
             // kind 1: create super table using all types
-            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
-            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
-            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint, \
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16), \
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned) \
             tags(t1 json)",
             // kind 2: create child table with json tag
             "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
             "create table tb1 using stb1 tags(NULL)",
-            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL)
+            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL, NULL, \
+            NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
             tb1 values(now, true, -2, -3, -4, -5, \
-            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思', \
             254, 65534, 1, 1)",
             // kind 3: create super table with all types except json (especially for tags)
-            "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
-            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
-            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
-            tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
-            t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
+            "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint, \
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10), \
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned) \
+            tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint, \
+            t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16), \
             t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
             // kind 4: create child table with all types except json
             "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
-            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思', \
             254, 65534, 1, 1)",
-            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL)",
+            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL, \
+            NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)",
             // kind 5: create common table
             "create table `table` (ts timestamp, v int)",
             // kind 6: column in super table
@@ -2255,7 +2249,6 @@ mod async_tests {
 
         dsn.push_str("&group.id=10&timeout=1000ms&auto.offset.reset=earliest");
         let builder = TmqBuilder::from_dsn(&dsn)?;
-        // dbg!(&builder.dsn);
         let mut consumer = builder.build().await?;
         consumer.subscribe(["ws_abc1"]).await?;
 
@@ -2802,6 +2795,59 @@ mod async_tests {
 
         taos.exec_many(["drop topic tmq_poll_topic", "drop database tmq_poll_db"])
             .await?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test]
+    async fn test_poll_blob() -> anyhow::Result<()> {
+        use taos_query::prelude::{AsAsyncConsumer, AsyncQueryable, AsyncTBuilder, TryStreamExt};
+        use taos_query::tmq::IsAsyncData;
+        use taos_query::tmq::Timeout;
+
+        use crate::{TaosBuilder, TmqBuilder};
+
+        let taos = TaosBuilder::from_dsn("taos:///")?.build().await?;
+        taos.exec_many([
+            "drop topic if exists topic_1753096703",
+            "drop database if exists test_1753096703",
+            "create database test_1753096703",
+            "use test_1753096703",
+            "create topic topic_1753096703 with meta as database test_1753096703",
+            "create table t0 (ts timestamp, c1 int, c2 blob)",
+            "insert into t0 values (now, 1, '\\x12345678')",
+            "insert into t0 values (now, 1, '\\x12345678')",
+        ])
+        .await?;
+
+        let tmq = TmqBuilder::from_dsn(format!(
+            "taos:///test_1753096703?group.id=10&timeout=10s&auto.offset.reset=earliest"
+        ))?;
+
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["topic_1753096703"]).await?;
+
+        {
+            let mut cnt = 0;
+            let mut stream = consumer.stream_with_timeout(Timeout::from_millis(9000));
+            while let Ok(Some((_, mut msg))) = stream.try_next().await {
+                if let Some(data) = msg.data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        cnt += block.nrows();
+                    }
+                }
+            }
+            assert_eq!(cnt, 2);
+        }
+
+        consumer.unsubscribe().await;
+
+        taos.exec_many([
+            "drop topic topic_1753096703",
+            "drop database test_1753096703",
+        ])
+        .await?;
 
         Ok(())
     }

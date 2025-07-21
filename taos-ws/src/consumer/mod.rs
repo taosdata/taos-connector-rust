@@ -1841,18 +1841,17 @@ mod tests {
             "create topic ws_tmq_meta_sync3 with meta as database ws_tmq_meta_sync3",
             "use ws_tmq_meta_sync3",
             // kind 1: create super table using all types
-            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
-            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
-            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
+            "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint, \
+            c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16), \
+            c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned) \
             tags(t1 json)",
             // kind 2: create child table with json tag
             "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
             "create table tb1 using stb1 tags(NULL)",
-            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL)
+            "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, \
+            NULL, NULL, NULL, NULL, NULL, NULL)
             tb1 values(now, true, -2, -3, -4, -5, \
-            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思', \
             254, 65534, 1, 1)",
             // kind 3: create super table with all types except json (especially for tags)
             "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
@@ -1863,11 +1862,10 @@ mod tests {
             t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
             // kind 4: create child table with all types except json
             "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
-            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
+            '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思', \
             254, 65534, 1, 1)",
-            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL)",
+            "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL, \
+            NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)",
             // kind 5: create common table
             "create table `table` (ts timestamp, v int)",
             // kind 6: column in super table
@@ -1908,7 +1906,7 @@ mod tests {
         ])?;
 
         let builder = TmqBuilder::new(
-            "taos://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
+            "ws://localhost:6041?group.id=10&timeout=1000ms&auto.offset.reset=earliest",
         )?;
         let mut consumer = builder.build()?;
         consumer.subscribe(["ws_tmq_meta_sync3"])?;
@@ -2862,6 +2860,105 @@ mod tests {
         server.await;
 
         poll_handle.await??;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test]
+    async fn test_poll_blob() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1753089865",
+            "drop database if exists test_1753089865",
+            "create database test_1753089865",
+            "create topic topic_1753089865 as database test_1753089865",
+            "use test_1753089865",
+            "create table t0 (ts timestamp, c1 int, c2 blob)",
+        ])
+        .await?;
+
+        let num = 100;
+
+        let (msg_tx, mut msg_rx) =
+            mpsc::channel::<(MessageSet<Meta, Data>, oneshot::Sender<()>)>(32);
+
+        let (cancel_tx, mut cancel_rx) = watch::channel(false);
+
+        let cnt_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let mut cnt = 0;
+            while let Some((mut msg, done_tx)) = msg_rx.recv().await {
+                if let Some(data) = msg.data() {
+                    while let Some(block) = data.fetch_block().await? {
+                        cnt += block.nrows();
+                    }
+                }
+                let _ = done_tx.send(());
+            }
+            assert_eq!(cnt, num);
+            Ok(())
+        });
+
+        let poll_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let tmq =
+                TmqBuilder::from_dsn("ws://localhost:6041?group.id=10&auto.offset.reset=earliest")?;
+            let mut consumer = tmq.build().await?;
+            consumer.subscribe(["topic_1753089865"]).await?;
+
+            let timeout = Timeout::Duration(Duration::from_secs(5));
+
+            loop {
+                tokio::select! {
+                    _ = cancel_rx.changed() => {
+                        break;
+                    }
+                    res = consumer.recv_timeout(timeout) => {
+                        if let Some((offset, message)) = res? {
+                            let (done_tx, done_rx) = oneshot::channel();
+                            msg_tx.send((message, done_tx)).await?;
+                            let _ = done_rx.await;
+                            consumer.commit(offset).await?;
+                        }
+                    }
+                }
+            }
+
+            consumer.unsubscribe().await;
+
+            Ok(())
+        });
+
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+
+        let mut sql = "insert into t0 values ".to_string();
+        for i in 0..num {
+            sql.push_str(&format!("({}, {}, 'blob_{}'), ", ts + i as i64, i, i));
+        }
+
+        taos.exec(sql).await?;
+
+        tokio::time::sleep(Duration::from_secs(20)).await;
+
+        let _ = cancel_tx.send(true);
+
+        poll_handle.await??;
+        cnt_handle.await??;
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            "drop topic topic_1753089865",
+            "drop database test_1753089865",
+        ])
+        .await?;
 
         Ok(())
     }
