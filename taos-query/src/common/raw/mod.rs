@@ -450,7 +450,7 @@ impl RawBlock {
             let schema = unsafe { schemas.get_unchecked(col) };
 
             macro_rules! _primitive_value {
-                ($ty:ident, $prim:ty) => {{
+                ($ty: ident, $prim: ty) => {{
                     let o1 = data_offset;
                     let o2 = data_offset + ((rows + 7) >> 3); // bitmap len
                     data_offset = o2 + rows * std::mem::size_of::<$prim>();
@@ -458,6 +458,20 @@ impl RawBlock {
                     let data = bytes.slice(o2..data_offset);
                     ColumnView::$ty(paste::paste! {[<$ty View>] {
                         nulls: NullBits(nulls),
+                        data,
+                    }})
+                }};
+            }
+
+            macro_rules! _variable_value {
+                ($ty: ident) => {{
+                    let o1 = data_offset;
+                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
+                    data_offset = o2 + length;
+                    let offsets = Offsets::from(bytes.slice(o1..o2));
+                    let data = bytes.slice(o2..data_offset);
+                    ColumnView::$ty(paste::paste! {[<$ty View>] {
+                        offsets,
                         data,
                     }})
                 }};
@@ -491,6 +505,13 @@ impl RawBlock {
                 Ty::UBigInt => _primitive_value!(UBigInt, u64),
                 Ty::Float => _primitive_value!(Float, f32),
                 Ty::Double => _primitive_value!(Double, f64),
+                Ty::VarChar => _variable_value!(VarChar),
+                Ty::VarBinary => _variable_value!(VarBinary),
+                Ty::Geometry => _variable_value!(Geometry),
+                Ty::Json => _variable_value!(Json),
+                Ty::Blob => _variable_value!(Blob),
+                Ty::Decimal => _decimal_value!(ColumnView::Decimal, i128),
+                Ty::Decimal64 => _decimal_value!(ColumnView::Decimal64, i64),
                 Ty::Timestamp => {
                     let o1 = data_offset;
                     let o2 = data_offset + ((rows + 7) >> 3);
@@ -502,14 +523,6 @@ impl RawBlock {
                         data,
                         precision,
                     })
-                }
-                Ty::VarChar => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-                    ColumnView::VarChar(VarCharView { offsets, data })
                 }
                 Ty::NChar => {
                     let o1 = data_offset;
@@ -524,40 +537,6 @@ impl RawBlock {
                         version: Version::V3,
                         layout: layout.clone(),
                     })
-                }
-                Ty::Json => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-                    ColumnView::Json(JsonView { offsets, data })
-                }
-                Ty::VarBinary => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data: Bytes = bytes.slice(o2..data_offset);
-                    ColumnView::VarBinary(VarBinaryView { offsets, data })
-                }
-                Ty::Decimal => _decimal_value!(ColumnView::Decimal, i128),
-                Ty::Decimal64 => _decimal_value!(ColumnView::Decimal64, i64),
-                Ty::Geometry => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-                    ColumnView::Geometry(GeometryView { offsets, data })
-                }
-                Ty::Blob => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-                    ColumnView::Blob(BlobView { offsets, data })
                 }
                 ty => unreachable!("unsupported type: {ty}"),
             };

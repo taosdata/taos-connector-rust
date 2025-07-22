@@ -6,7 +6,7 @@ use std::{ptr, slice};
 use bytes::Bytes;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
-use taos_query::util::{generate_req_id, hex, InlineBytes, InlineNChar, InlineStr};
+use taos_query::util::{generate_req_id, hex, InlineBytes, InlineStr};
 use taos_query::{
     block_in_place_or_global, global_tokio_runtime, Fetchable, Queryable, RawBlock as Block,
 };
@@ -337,7 +337,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
     fields: *mut TAOS_FIELD,
     num_fields: c_int,
 ) -> c_int {
-    unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &str) -> i32 {
+    unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &[u8]) -> i32 {
         if content.len() > *size {
             return -1;
         }
@@ -368,7 +368,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
         }
 
         let write_len = if row[i].is_null() {
-            write_to_cstr(&mut size, str.add(len), "NULL")
+            write_to_cstr(&mut size, str.add(len), b"NULL")
         } else {
             macro_rules! read_and_write {
                 ($ty:ty) => {{
@@ -376,7 +376,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                     write_to_cstr(
                         &mut size,
                         str.add(len as usize),
-                        format!("{value}").as_str(),
+                        format!("{value}").as_str().as_bytes(),
                     )
                 }};
             }
@@ -397,25 +397,28 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                     write_to_cstr(
                         &mut size,
                         str.add(len),
-                        format!("{}", value as i32).as_str(),
+                        format!("{}", value as i32).as_str().as_bytes(),
                     )
                 }
-                Ty::VarBinary | Ty::Geometry => {
+                Ty::VarBinary => {
                     let data = row[i].offset(-2) as *const InlineBytes;
                     let data = Bytes::from((*data).as_bytes());
-                    write_to_cstr(&mut size, str.add(len), &hex::bytes_to_hex_string(data))
+                    let content = format!("\\x{}", hex::bytes_to_hex_string(data).to_uppercase());
+                    write_to_cstr(&mut size, str.add(len), content.as_bytes())
                 }
-                Ty::VarChar => {
+                Ty::Blob => {
+                    let data = row[i].offset(-4) as *const InlineBytes<u32>;
+                    let data = Bytes::from((*data).as_bytes());
+                    let content = format!("\\x{}", hex::bytes_to_hex_string(data).to_uppercase());
+                    write_to_cstr(&mut size, str.add(len), content.as_bytes())
+                }
+                Ty::VarChar | Ty::NChar | Ty::Geometry => {
                     let data = row[i].offset(-2) as *const InlineStr;
-                    write_to_cstr(&mut size, str.add(len), (*data).as_str())
-                }
-                Ty::NChar => {
-                    let data = row[i].offset(-2) as *const InlineNChar;
-                    write_to_cstr(&mut size, str.add(len), &(*data).to_string())
+                    write_to_cstr(&mut size, str.add(len), (*data).as_bytes())
                 }
                 Ty::Decimal | Ty::Decimal64 => {
                     let data = CStr::from_ptr(row[i] as *mut c_char).to_str().unwrap();
-                    write_to_cstr(&mut size, str.add(len), data)
+                    write_to_cstr(&mut size, str.add(len), data.as_bytes())
                 }
                 _ => 0,
             }
@@ -2921,6 +2924,80 @@ mod tests {
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1748918064");
+            taos_close(taos);
+        }
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_blob() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1753149897",
+                    "create database test_1753149897",
+                    "use test_1753149897",
+                    "create table t0 (ts timestamp, c1 int, c2 blob)",
+                    "insert into t0 values (1741660079228, 1, NULL)",
+                    "insert into t0 values (1741660079229, 2, '')",
+                    "insert into t0 values (1741660079230, 3, 'hello')",
+                    "insert into t0 values (1741660079231, 4, '\\x12345678')",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 3);
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "1741660079228 1 NULL",
+            );
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "1741660079229 2 \\x",
+            );
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "1741660079230 3 \\x68656C6C6F",
+            );
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "1741660079231 4 \\x12345678",
+            );
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1753149897");
             taos_close(taos);
         }
     }

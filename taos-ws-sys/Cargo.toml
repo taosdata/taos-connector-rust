@@ -50,3 +50,4 @@ rustls-aws-lc-crypto-provider = [
     "rustls",
     "taos-ws/rustls-aws-lc-crypto-provider",
 ]
+test-new-feat = []
