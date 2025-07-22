@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, LittleEndian};
 use faststr::FastStr;
-use flume::Sender;
 use futures::channel::oneshot;
 use futures::{FutureExt, SinkExt, StreamExt};
 use itertools::Itertools;
@@ -202,8 +201,8 @@ impl WsTaos {
             let precision = resp.precision;
             let sender = self.sender.clone();
 
-            let (raw_block_tx, raw_block_rx) = flume::bounded(64);
-            let (fetch_done_tx, fetch_done_rx) = flume::bounded(1);
+            let (raw_block_tx, raw_block_rx) = mpsc::channel(64);
+            let (fetch_done_tx, fetch_done_rx) = mpsc::channel(1);
 
             if sender.version_info.support_binary_sql() {
                 fetch_binary(
@@ -463,10 +462,10 @@ impl Drop for WsTaos {
 pub(crate) async fn fetch_binary(
     query_sender: WsQuerySender,
     res_id: ResId,
-    raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
+    raw_block_sender: mpsc::Sender<Result<(RawBlock, Duration), RawError>>,
     precision: Precision,
     field_names: Vec<String>,
-    fetch_done_sender: flume::Sender<()>,
+    fetch_done_sender: mpsc::Sender<()>,
 ) {
     tokio::spawn(
         async move {
@@ -500,7 +499,7 @@ pub(crate) async fn fetch_binary(
                         if block_code != 0 {
                             let err = RawError::new(block_code, block_message);
                             tracing::error!("fetch binary failed, result id: {res_id}, err: {err:?}");
-                            let _ = raw_block_sender.send_async(Err(err)).await;
+                            let _ = raw_block_sender.send(Err(err)).await;
                             break;
                         }
 
@@ -515,7 +514,7 @@ pub(crate) async fn fetch_binary(
                         metrics.time_cost_in_block_parse += parse_start.elapsed();
 
                         if raw_block_sender
-                            .send_async(Ok((raw_block, timing)))
+                            .send(Ok((raw_block, timing)))
                             .await
                             .is_err()
                         {
@@ -525,7 +524,7 @@ pub(crate) async fn fetch_binary(
                     }
                     Ok(_) => unreachable!("unexpected response for result: {res_id}"),
                     Err(err) => {
-                        if raw_block_sender.send_async(Err(err)).await.is_err() {
+                        if raw_block_sender.send(Err(err)).await.is_err() {
                             tracing::warn!("fetch binary, failed to send error to receiver, result id: {res_id}");
                             break;
                         }
@@ -533,7 +532,7 @@ pub(crate) async fn fetch_binary(
                 }
             }
 
-            let _ = fetch_done_sender.send_async(()).await;
+            let _ = fetch_done_sender.send(()).await;
 
             tracing::trace!("fetch binary completed, result id: {res_id}, metrics: {metrics:?}");
         }
@@ -544,11 +543,11 @@ pub(crate) async fn fetch_binary(
 async fn fetch(
     query_sender: WsQuerySender,
     res_id: ResId,
-    raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
+    raw_block_sender: mpsc::Sender<Result<(RawBlock, Duration), RawError>>,
     precision: Precision,
     fields: Vec<Field>,
     field_names: Vec<String>,
-    fetch_done_sender: flume::Sender<()>,
+    fetch_done_sender: mpsc::Sender<()>,
 ) {
     tokio::spawn(
         async move {
@@ -568,7 +567,7 @@ async fn fetch(
                     Ok(WsRecvData::Fetch(fetch)) => fetch,
                     Ok(_) => unreachable!("unexpected response for result: {res_id}"),
                     Err(err) => {
-                        let _ = raw_block_sender.send_async(Err(err)).await;
+                        let _ = raw_block_sender.send(Err(err)).await;
                         break;
                     }
                 };
@@ -592,7 +591,7 @@ async fn fetch(
                         metrics.time_cost_in_block_parse += parse_start.elapsed();
 
                         if raw_block_sender
-                            .send_async(Ok((raw, timing)))
+                            .send(Ok((raw, timing)))
                             .await
                             .is_err()
                         {
@@ -618,7 +617,7 @@ async fn fetch(
                         metrics.time_cost_in_block_parse += parse_start.elapsed();
 
                         if raw_block_sender
-                            .send_async(Ok((raw, timing)))
+                            .send(Ok((raw, timing)))
                             .await
                             .is_err()
                         {
@@ -630,7 +629,7 @@ async fn fetch(
                     }
                     Ok(_) => unreachable!("unexpected response for result: {res_id}"),
                     Err(err) => {
-                        if raw_block_sender.send_async(Err(err)).await.is_err() {
+                        if raw_block_sender.send(Err(err)).await.is_err() {
                             tracing::warn!("fetch, failed to send error to receiver, result id: {res_id}");
                             break;
                         }
@@ -638,7 +637,7 @@ async fn fetch(
                 }
             }
 
-            let _ = fetch_done_sender.send_async(()).await;
+            let _ = fetch_done_sender.send(()).await;
 
             tracing::trace!("fetch completed, result id: {res_id}, metrics: {metrics:?}");
         }
@@ -917,10 +916,10 @@ pub struct ResultSet {
     pub(crate) block_future: Option<BlockFuture>,
     pub(crate) closer: Option<oneshot::Sender<()>>,
     pub(crate) metrics: QueryMetrics,
-    pub(crate) blocks_buffer: Option<flume::Receiver<RawResult<(RawBlock, Duration)>>>,
+    pub(crate) blocks_buffer: Option<mpsc::Receiver<RawResult<(RawBlock, Duration)>>>,
     pub(crate) fields_precisions: Option<Vec<i64>>,
     pub(crate) fields_scales: Option<Vec<i64>>,
-    pub(crate) fetch_done_reader: Option<flume::Receiver<()>>,
+    pub(crate) fetch_done_reader: Option<mpsc::Receiver<()>>,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -932,15 +931,19 @@ impl ResultSet {
             return Ok(None);
         }
         let now = Instant::now();
-        match self.blocks_buffer.as_mut().unwrap().recv_async().await {
-            Ok(Ok((raw, timing))) => {
-                self.timing = timing;
-                self.metrics.time_cost_in_flume += now.elapsed();
-                Ok(Some(raw))
-            }
-            Ok(Err(err)) => Err(err),
-            Err(_) => Ok(None),
-        }
+        self.blocks_buffer
+            .as_mut()
+            .unwrap()
+            .recv()
+            .await
+            .map(|res| {
+                res.map(|(raw, timing)| {
+                    self.metrics.time_cost_in_flume += now.elapsed();
+                    self.timing = timing;
+                    raw
+                })
+            })
+            .transpose()
     }
 
     pub fn take_timing(&self) -> Duration {
@@ -1079,9 +1082,9 @@ impl Drop for ResultSet {
             if let Some(closer) = closer {
                 let _ = closer.send(());
             }
-            if let Some(fetch_done_rx) = fetch_done_rx {
+            if let Some(mut fetch_done_rx) = fetch_done_rx {
                 tracing::trace!("waiting for fetch done, args: {args:?}");
-                let _ = fetch_done_rx.recv_timeout(Duration::from_secs(10));
+                let _ = fetch_done_rx.try_recv();
                 tracing::trace!(
                     "sending free result message after fetch done or timeout, args: {args:?}"
                 );
