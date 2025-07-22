@@ -7,6 +7,7 @@ use taos_query::common::{Field, Precision};
 use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable, RawResult};
+use tokio::sync::mpsc;
 use tracing::Instrument;
 
 use crate::query::asyn::{fetch_binary, QueryMetrics};
@@ -172,8 +173,8 @@ impl Stmt2 {
                 .map(|((name, ty), len)| Field::new(name, ty, len as _))
                 .collect();
 
-            let (raw_block_tx, raw_block_rx) = flume::bounded(64);
-            let (fetch_done_tx, fetch_done_rx) = flume::bounded(1);
+            let (raw_block_tx, raw_block_rx) = mpsc::channel(64);
+            let (fetch_done_tx, fetch_done_rx) = mpsc::channel(1);
 
             fetch_binary(
                 self.client.sender(),
