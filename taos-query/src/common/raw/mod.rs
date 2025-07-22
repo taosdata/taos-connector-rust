@@ -3,7 +3,7 @@
 
 use std::cell::{Cell, UnsafeCell};
 use std::collections::VecDeque;
-use std::ffi::c_void;
+use std::ffi::{c_void, CStr};
 use std::fmt::{Debug, Display};
 use std::io::Cursor;
 use std::ops::Deref;
@@ -30,9 +30,12 @@ use crate::common::{BorrowedValue, Field, Precision, Ty, Value};
 
 pub mod layout;
 pub mod meta;
+pub mod read;
+pub mod types;
 #[allow(clippy::missing_safety_doc)]
 #[allow(clippy::should_implement_trait)]
 pub mod views;
+pub mod write;
 
 mod data;
 mod de;
@@ -592,7 +595,7 @@ impl RawBlock {
 
         let mut raw_block_queue = VecDeque::with_capacity(block_num as usize);
         for _ in 0..block_num {
-            let block_total_len = cursor.parse_variable_byte_integer()?;
+            let block_total_len = cursor.parse_variable_byte_i32()?;
             let cur_position = cursor.position() + 17;
             cursor.set_position(cur_position);
             let precision = cursor.read_u8()?;
@@ -1454,11 +1457,11 @@ impl MultiBlockCursor {
     }
 
     fn parse_zigzag_variable_byte_integer(&mut self) -> Result<i32, std::io::Error> {
-        let i = self.parse_variable_byte_integer()?;
+        let i = self.parse_variable_byte_i32()?;
         Ok(MultiBlockCursor::zigzag_decode(i))
     }
 
-    fn parse_variable_byte_integer(&mut self) -> Result<i32, std::io::Error> {
+    fn parse_variable_byte_i32(&mut self) -> Result<i32, std::io::Error> {
         use byteorder::ReadBytesExt;
 
         let mut multiplier = 1;
@@ -1473,15 +1476,39 @@ impl MultiBlockCursor {
         }
         Ok(value)
     }
+    fn parse_variable_byte_i64(&mut self) -> Result<i64, std::io::Error> {
+        use byteorder::ReadBytesExt;
+
+        let mut multiplier = 1;
+        let mut value = 0;
+        loop {
+            let encoded_byte = self.cursor.read_u8()?;
+            value += (encoded_byte & 127) as i64 * multiplier;
+            if (encoded_byte & 128) == 0 {
+                break;
+            }
+            multiplier *= 128;
+        }
+        Ok(value)
+    }
 
     fn convert_error(err: std::string::FromUtf8Error) -> std::io::Error {
         std::io::Error::new(std::io::ErrorKind::InvalidData, err)
     }
 
+    fn read_binary(&mut self) -> Result<Bytes, std::io::Error> {
+        use std::io::Read;
+        let len = self.parse_variable_byte_i32()? as usize;
+
+        let mut buf = vec![0; len];
+        self.cursor.read_exact(&mut buf)?;
+        Ok(buf.into())
+    }
+
     fn parse_name(&mut self) -> Result<String, std::io::Error> {
         use std::io::Read;
 
-        let name_len = self.parse_variable_byte_integer()? as usize;
+        let name_len = self.parse_variable_byte_i32()? as usize;
         let mut name = vec![0; name_len - 1];
 
         self.cursor.read_exact(&mut name).unwrap();
@@ -1503,6 +1530,35 @@ impl MultiBlockCursor {
         Ok(result)
     }
 
+    fn get_option_str(&mut self) -> Result<Option<String>, std::io::Error> {
+        use std::io::Read;
+
+        use byteorder::ReadBytesExt;
+
+        let len = self.cursor.read_i32::<byteorder::LittleEndian>()?;
+        if len == 0 {
+            return Ok(None);
+        }
+        let mut str = vec![0; len as usize];
+
+        self.cursor.read_exact(&mut str).unwrap();
+        let result = String::from_utf8(str).map_err(MultiBlockCursor::convert_error)?;
+        Ok(Some(result))
+    }
+    fn parse_optional_name(&mut self) -> Result<Option<String>, std::io::Error> {
+        use std::io::Read;
+
+        let name_len = self.parse_variable_byte_i32()? as usize;
+        if name_len == 0 {
+            return Ok(None);
+        }
+        let mut name = vec![0; name_len - 1];
+
+        self.cursor.read_exact(&mut name).unwrap();
+        // self.cursor.set_position(self.cursor.position() + 1);
+        let result = String::from_utf8(name).map_err(MultiBlockCursor::convert_error)?;
+        Ok(Some(result))
+    }
     fn parse_schema(&mut self) -> Result<String, std::io::Error> {
         use std::io::Read;
 
@@ -1512,7 +1568,7 @@ impl MultiBlockCursor {
         self.parse_zigzag_variable_byte_integer()?; // skip field len
         self.parse_zigzag_variable_byte_integer()?; // skip colid
 
-        let name_len = self.parse_variable_byte_integer()? as usize;
+        let name_len = self.parse_variable_byte_i32()? as usize;
         let mut name = vec![0; name_len - 1];
         self.cursor.read_exact(&mut name).unwrap();
         self.cursor.set_position(self.cursor.position() + 1);
@@ -1914,7 +1970,12 @@ mod tests {
             9, 8, 0, 0, 0, 21, 2, 5, 0, 8, 4, 4, 0, 0, 0, 8, 0, 0, 0, 8, 0, 0, 0, 4, 0, 0, 0, 0,
             171, 120, 92, 155, 153, 1, 0, 0, 0, 57, 48, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
         ]);
-        let block = RawBlock::parse_from_raw_block(bytes, Precision::Microsecond);
+        let mut block = RawBlock::parse_from_raw_block(bytes, Precision::Microsecond);
+        block
+            .with_field_names(["a", "b", "c"])
+            .with_table_name("test");
+        println!("{}", block.pretty_format());
+
         let cols = block.column_views();
         let mut iter = cols.iter();
         while let Some(ColumnView::Decimal64(rows)) = iter.next() {
@@ -1930,7 +1991,6 @@ mod tests {
                 }
             );
         }
-
         Ok(())
     }
 
