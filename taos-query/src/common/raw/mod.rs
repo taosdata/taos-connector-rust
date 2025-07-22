@@ -450,7 +450,7 @@ impl RawBlock {
             let schema = unsafe { schemas.get_unchecked(col) };
 
             macro_rules! _primitive_value {
-                ($ty: ident, $prim: ty) => {{
+                ($ty:ident, $prim:ty) => {{
                     let o1 = data_offset;
                     let o2 = data_offset + ((rows + 7) >> 3); // bitmap len
                     data_offset = o2 + rows * std::mem::size_of::<$prim>();
@@ -464,7 +464,7 @@ impl RawBlock {
             }
 
             macro_rules! _variable_value {
-                ($ty: ident) => {{
+                ($ty:ident) => {{
                     let o1 = data_offset;
                     let o2 = data_offset + std::mem::size_of::<i32>() * rows;
                     data_offset = o2 + length;
@@ -478,7 +478,7 @@ impl RawBlock {
             }
 
             macro_rules! _decimal_value {
-                ($ty: expr, $prim: ty) => {{
+                ($ty:expr, $prim:ty) => {{
                     let o1 = data_offset;
                     let o2 = data_offset + ((rows + 7) >> 3); // null bitmap len.
                     data_offset = o2 + rows * std::mem::size_of::<$prim>();
