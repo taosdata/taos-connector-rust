@@ -2775,4 +2775,107 @@ mod tests {
             taos_close(taos);
         }
     }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_poll_blob() {
+        unsafe {
+            let _ = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_line_number(true)
+                .with_file(true)
+                .try_init();
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1753174098",
+                    "drop database if exists test_1753174098",
+                    "create database test_1753174098",
+                    "create topic topic_1753174098 as database test_1753174098",
+                    "use test_1753174098",
+                    "create table t0 (ts timestamp, c1 int, c2 blob)",
+                    "insert into t0 values(1753174694276, 1, '\\x12345678')",
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = c"topic_1753174098";
+            let code = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(code, 0);
+
+            let code = tmq_subscribe(consumer, list);
+            assert_eq!(code, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                tracing::debug!("poll res: {res:?}");
+                if res.is_null() {
+                    break;
+                }
+
+                if !res.is_null() {
+                    let fields = taos_fetch_fields(res);
+                    assert!(!fields.is_null());
+
+                    let num_fields = taos_num_fields(res);
+                    assert_eq!(num_fields, 3);
+
+                    let row = taos_fetch_row(res);
+                    assert!(!row.is_null());
+
+                    let mut str = vec![0 as c_char; 1024];
+                    let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+                    assert_eq!(
+                        CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                        "1753174694276 1 \\x12345678"
+                    );
+
+                    let code = tmq_commit_sync(consumer, res);
+                    assert_eq!(code, 0);
+
+                    taos_free_result(res);
+                }
+            }
+
+            let code = tmq_unsubscribe(consumer);
+            assert_eq!(code, 0);
+
+            let code = tmq_consumer_close(consumer);
+            assert_eq!(code, 0);
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic topic_1753174098",
+                    "drop database test_1753174098",
+                ],
+            );
+
+            taos_close(taos);
+        }
+    }
 }
