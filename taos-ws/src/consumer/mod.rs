@@ -2970,10 +2970,10 @@ mod cloud_tests {
     use std::time::Duration;
 
     use taos_query::prelude::*;
-    use tokio::sync::{mpsc, oneshot, watch};
+    use tokio::sync::{mpsc, oneshot};
 
     use crate::consumer::{Data, Meta};
-    use crate::{TaosBuilder, TmqBuilder};
+    use crate::TmqBuilder;
 
     #[tokio::test]
     async fn test_poll() -> anyhow::Result<()> {
@@ -2986,28 +2986,28 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_poll");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_poll");
             return Ok(());
         }
 
         let url = url.unwrap();
         let token = token.unwrap();
 
-        let dsn = format!("{}/rust_test?token={}", url, token);
-        let tmq_dsn = format!("{}&group.id=10&auto.offset.reset=earliest", dsn);
+        let group_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
 
-        let num = 100;
+        let dsn = format!("{url}?token={token}&group.id={group_id}&auto.offset.reset=earliest",);
 
         let (msg_tx, mut msg_rx) =
-            mpsc::channel::<(MessageSet<Meta, Data>, oneshot::Sender<()>)>(100);
-
-        let (cancel_tx, mut cancel_rx) = watch::channel(false);
+            mpsc::channel::<(MessageSet<Meta, Data>, oneshot::Sender<()>)>(64);
 
         let cnt_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
             let mut cnt = 0;
@@ -3019,30 +3019,26 @@ mod cloud_tests {
                 }
                 let _ = done_tx.send(());
             }
-            assert_eq!(cnt, num);
+            assert_eq!(cnt, 100);
             Ok(())
         });
 
         let poll_handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
-            let tmq = TmqBuilder::from_dsn(tmq_dsn)?;
+            let tmq = TmqBuilder::from_dsn(dsn)?;
             let mut consumer = tmq.build().await?;
             consumer.subscribe(["rust_tmq_test_topic"]).await?;
 
             let timeout = Timeout::Duration(Duration::from_secs(5));
 
             loop {
-                tokio::select! {
-                    _ = cancel_rx.changed() => {
-                        break;
-                    }
-                    res = consumer.recv_timeout(timeout) => {
-                        if let Some((offset, message)) = res? {
-                            let (done_tx, done_rx) = oneshot::channel();
-                            msg_tx.send((message, done_tx)).await?;
-                            let _ = done_rx.await;
-                            consumer.commit(offset).await?;
-                        }
-                    }
+                let res = consumer.recv_timeout(timeout).await;
+                if let Some((offset, message)) = res? {
+                    let (done_tx, done_rx) = oneshot::channel();
+                    msg_tx.send((message, done_tx)).await?;
+                    let _ = done_rx.await;
+                    consumer.commit(offset).await?;
+                } else {
+                    break;
                 }
             }
 
@@ -3051,27 +3047,8 @@ mod cloud_tests {
             Ok(())
         });
 
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-
-        let mut sql = "insert into rust_test.t_tmq values ".to_string();
-        for i in 0..num {
-            sql.push_str(&format!("({}, {}), ", ts + i as i64, i,));
-        }
-
-        let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
-        taos.exec(sql).await?;
-
-        tokio::time::sleep(Duration::from_secs(30)).await;
-
-        let _ = cancel_tx.send(true);
-
         poll_handle.await??;
         cnt_handle.await??;
-
-        taos.exec("delete from rust_test.t_tmq").await?;
 
         Ok(())
     }

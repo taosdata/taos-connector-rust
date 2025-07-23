@@ -905,35 +905,44 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_stmt2");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_stmt2");
             return Ok(());
         }
 
         let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
-
         let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let tbname = format!("t_stmt2_{ts}");
+
         taos.exec_many([
-            "drop table if exists t_stmt2",
-            "create table t_stmt2 (ts timestamp, c1 int)",
+            format!("drop table if exists {tbname}"),
+            format!("create table {tbname} (ts timestamp, c1 int)"),
         ])
         .await?;
 
         let mut stmt2 = Stmt2::new(taos.client());
         stmt2.init().await?;
 
-        stmt2.prepare("insert into t_stmt2 values(?, ?)").await?;
+        stmt2
+            .prepare(format!("insert into {tbname} values(?, ?)"))
+            .await?;
 
         let cols = vec![
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_ints(vec![100]),
         ];
-        let param = Stmt2BindParam::new(Some("t_stmt2".to_owned()), None, Some(cols));
+        let param = Stmt2BindParam::new(Some(tbname.clone()), None, Some(cols));
         stmt2.bind(&[param]).await?;
 
         let affected = stmt2.exec().await?;
@@ -942,7 +951,9 @@ mod cloud_tests {
         let mut stmt2 = Stmt2::new(taos.client());
         stmt2.init().await?;
 
-        stmt2.prepare("select * from t_stmt2 where c1 > ?").await?;
+        stmt2
+            .prepare(format!("select * from {tbname} where c1 > ?"))
+            .await?;
 
         let cols = vec![ColumnView::from_ints(vec![0])];
         let param = Stmt2BindParam::new(None, None, Some(cols));
@@ -968,7 +979,7 @@ mod cloud_tests {
         assert_eq!(rows[0].ts, 1726803356466);
         assert_eq!(rows[0].c1, 100);
 
-        taos.exec("drop table t_stmt2").await?;
+        taos.exec(format!("drop table {tbname}")).await?;
 
         Ok(())
     }
