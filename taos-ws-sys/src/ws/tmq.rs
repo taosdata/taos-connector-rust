@@ -19,8 +19,8 @@ use crate::ws::error::{
     errno, errstr, format_errno, set_err_and_get_code, TaosError, TaosMaybeError, EMPTY,
 };
 use crate::ws::{
-    ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES,
-    TAOS_ROW,
+    self, config, util, ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD,
+    TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
 };
 
 #[allow(non_camel_case_types)]
@@ -393,45 +393,38 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
         Some(conf) => {
             debug!("consumer_new, conf: {conf:?}");
 
-            let host = conf
+            let ip = conf.map.get("td.connect.ip");
+
+            let port = conf
                 .map
-                .get("td.connect.ip")
-                .map_or("localhost", |val| val.as_str());
+                .get("td.connect.port")
+                .map_or(0, |s| s.parse().unwrap());
 
             let user = conf
                 .map
                 .get("td.connect.user")
-                .map_or("root", |val| val.as_str());
+                .map_or(ws::DEFAULT_USER, |s| s.as_str());
 
             let pass = conf
                 .map
                 .get("td.connect.pass")
-                .map_or("taosdata", |val| val.as_str());
+                .map_or(ws::DEFAULT_PASS, |s| s.as_str());
 
-            let dsn = if (host.contains("cloud.tdengine") || host.contains("cloud.taosdata"))
-                && user == "token"
-            {
-                let mut port = conf
-                    .map
-                    .get("td.connect.port")
-                    .map_or("443", |val| val.as_str());
-
-                if port == "0" {
-                    port = "443";
-                }
-
-                format!("wss://{host}:{port}/?token={pass}")
+            let addr = if let Some(ip) = ip {
+                let port = util::resolve_port(ip, port);
+                format!("{ip}:{port}")
+            } else if let Some(addr) = config::adapter_list() {
+                addr.to_string()
             } else {
-                let mut port = conf
-                    .map
-                    .get("td.connect.port")
-                    .map_or("6041", |val| val.as_str());
+                let host = ws::DEFAULT_HOST;
+                let port = util::resolve_port(host, port);
+                format!("{host}:{port}")
+            };
 
-                if port == "0" {
-                    port = "6041";
-                }
-
-                format!("ws://{user}:{pass}@{host}:{port}")
+            let dsn = if util::is_cloud_host(&addr) && user == "token" {
+                format!("wss://{addr}?token={pass}")
+            } else {
+                format!("ws://{user}:{pass}@{addr}")
             };
 
             let mut dsn = Dsn::from_str(&dsn)?;
