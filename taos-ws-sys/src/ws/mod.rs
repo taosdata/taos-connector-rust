@@ -770,3 +770,59 @@ mod tests {
         }
     }
 }
+
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use std::ffi::CString;
+
+    use super::*;
+
+    #[test]
+    fn test_taos_connect() {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_taos_connect");
+            return;
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_taos_connect");
+            return;
+        }
+
+        let url = url.unwrap().strip_prefix("https://").unwrap().to_string();
+        let url = CString::new(url).unwrap();
+        let token = CString::new(token.unwrap()).unwrap();
+
+        unsafe {
+            let taos = taos_connect(
+                url.as_ptr(),
+                c"token".as_ptr(),
+                token.as_ptr(),
+                ptr::null(),
+                0,
+            );
+            assert!(!taos.is_null());
+            taos_close(taos);
+
+            let taos = taos_connect(
+                url.as_ptr(),
+                c"token".as_ptr(),
+                token.as_ptr(),
+                ptr::null(),
+                443,
+            );
+            assert!(!taos.is_null());
+            taos_close(taos);
+        }
+    }
+}
