@@ -118,10 +118,11 @@ impl PartialEq for DataType {
             && self.scale() == other.scale()
     }
 }
+
 impl Eq for DataType {}
 
 impl Debug for DataType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_struct("ColSchema");
         debug.field("ty", &self.ty);
         if self.ty.is_decimal() {
@@ -189,9 +190,9 @@ impl FromStr for DataType {
     /// Requires allocation only when the input string is not a valid data type or in lower cases.
     ///
     /// This function supports parsing various data types, including fixed-length types like TINYINT, SMALLINT, INT, BIGINT,
-    /// as well as variable-length types like VARCHAR, BINARY, NCHAR, VARBINARY, GEOMETRY, and JSON.
+    /// as well as variable-length types like VARCHAR, BINARY, NCHAR, VARBINARY, GEOMETRY, BLOB and JSON.
     /// It also supports decimal types with precision and scale, such as DECIMAL(p,s) or DECIMAL(p).
-    /// It returns a `ColSchema` instance representing the parsed data type.
+    /// It returns a `DataType` instance representing the parsed data type.
     ///
     /// # Errors
     ///
@@ -283,26 +284,25 @@ impl FromStr for DataType {
                             }
                         }
                     }
-                    // If only precision is provided, scale defaults to 0
-                    let p = params.trim();
-                    if p.is_empty() {
-                        // If no params, fallback to default
-                        return Ok(Self::new_decimal(
-                            Ty::Decimal64,
-                            MAX_DECIMAL64_PRECISION,
-                            MIN_DECIMAL_SCALE,
-                        ));
-                    }
 
-                    let precision: u8 = p
+                    // If only precision is provided, scale defaults to 0
+                    let precision: u8 = params
                         .parse()
                         .map_err(ParseDataTypeError::ParseDecimalPrecisionError)?;
                     match precision {
                         1..=MAX_DECIMAL64_PRECISION => {
-                            return Ok(Self::new_decimal(Ty::Decimal64, precision, 0));
+                            return Ok(Self::new_decimal(
+                                Ty::Decimal64,
+                                precision,
+                                MIN_DECIMAL_SCALE,
+                            ));
                         }
                         19..=MAX_DECIMAL_PRECISION => {
-                            return Ok(Self::new_decimal(Ty::Decimal, precision, 0));
+                            return Ok(Self::new_decimal(
+                                Ty::Decimal,
+                                precision,
+                                MIN_DECIMAL_SCALE,
+                            ));
                         }
                         _ => {
                             return Err(ParseDataTypeError::InvalidDecimalPrecision(precision));
@@ -410,6 +410,7 @@ impl From<Ty> for DataType {
         Self::from_ty(value)
     }
 }
+
 impl DataType {
     #[inline]
     pub(crate) const fn new(ty: Ty, len: u32) -> Self {
@@ -418,6 +419,7 @@ impl DataType {
             attr: LenOrDec { len },
         }
     }
+
     #[inline]
     pub(crate) const fn new_decimal(ty: Ty, precision: u8, scale: u8) -> Self {
         assert!(ty.is_decimal(), "Type must be decimal");
@@ -433,6 +435,7 @@ impl DataType {
             },
         }
     }
+
     #[inline]
     pub(crate) const fn from_ty(ty: Ty) -> Self {
         let attr = if ty.is_decimal() {
@@ -447,6 +450,7 @@ impl DataType {
         } else {
             LenOrDec::new_len(ty.fixed_length() as _)
         };
+
         Self { ty, attr }
     }
 
@@ -480,15 +484,16 @@ impl DataType {
     /// If the length is 0, returns 64 when is variable-length type (VARBINARY, VARCHAR).
     #[inline]
     pub fn len_or_fixed(&self) -> u32 {
-        if self.ty.is_var_type() {
-            let len = unsafe { self.attr.len };
-            if len == 0 {
-                64 // Default variable length for other types
-            } else {
-                len
-            }
+        let fixed = self.ty.fixed_length() as u32;
+        if fixed != 0 {
+            return fixed;
+        }
+
+        let len = unsafe { self.attr.len };
+        if len == 0 {
+            64 // Default variable length for other types
         } else {
-            self.ty.fixed_length() as u32
+            len
         }
     }
 
@@ -568,7 +573,7 @@ impl Debug for Schemas {
 }
 
 impl Schemas {
-    /// As a [ColSchema] slice.
+    /// As a [DataType] slice.
     pub fn as_slice(&self) -> &[DataType] {
         unsafe {
             std::slice::from_raw_parts(
@@ -873,6 +878,7 @@ mod tests {
         assert_eq!(schema.precision(), 18);
         assert_eq!(schema.scale(), 0);
         assert_eq!(schema.to_string(), "DECIMAL(18,0)");
+
         let schema: DataType = "DECIMAL".parse().unwrap();
         assert_eq!(schema.ty, Ty::Decimal64);
         assert_eq!(schema.len(), 8);

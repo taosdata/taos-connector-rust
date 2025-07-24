@@ -71,3 +71,4 @@ rustls-ring-crypto-provider = [
     "tokio-tungstenite/rustls-ring-crypto-provider",
 ]
 deflate = ["tokio-tungstenite/deflate", "tokio-tungstenite/rustls-dangerous"]
+test-new-feat = []

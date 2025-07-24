@@ -801,6 +801,86 @@ mod tests {
 
         Ok(())
     }
+
+    #[cfg(feature = "test-new-feat")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2_blob() -> anyhow::Result<()> {
+        use serde::Deserialize;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many(&[
+            "drop database if exists test_1753080278",
+            "create database test_1753080278",
+            "use test_1753080278",
+            "create table t0 (ts timestamp, c1 blob)",
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+        stmt2.prepare("insert into t0 values(?, ?)").await?;
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![
+                1726803356466,
+                1726803356467,
+                1726803356468,
+                1726803356469,
+            ]),
+            ColumnView::from_blob_bytes::<Vec<u8>, _, _, _>(vec![
+                None,
+                Some(vec![]),
+                Some(vec![0x68, 0x65, 0x6C, 0x6C, 0x6F]),
+                Some(vec![0x12, 0x34, 0x56, 0x78]),
+            ]),
+        ];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+
+        stmt2.bind(&[param]).await?;
+
+        let affected = stmt2.exec().await?;
+        assert_eq!(affected, 4);
+
+        stmt2.prepare("select * from t0 where ts > ?").await?;
+
+        let cols = vec![ColumnView::from_millis_timestamp(vec![1726803356465])];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        let _ = stmt2.exec().await?;
+
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: i64,
+            c1: Option<Vec<u8>>,
+        }
+
+        let records: Vec<Record> = stmt2
+            .result_set()
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
+        assert_eq!(records.len(), 4);
+
+        assert_eq!(records[0].ts, 1726803356466);
+        assert_eq!(records[1].ts, 1726803356467);
+        assert_eq!(records[2].ts, 1726803356468);
+        assert_eq!(records[3].ts, 1726803356469);
+
+        assert_eq!(records[0].c1, None);
+        assert_eq!(records[1].c1, Some(vec![]));
+        assert_eq!(records[2].c1, Some(vec![0x68, 0x65, 0x6C, 0x6C, 0x6F]));
+        assert_eq!(records[3].c1, Some(vec![0x12, 0x34, 0x56, 0x78]));
+
+        taos.exec("drop database test_1753080278").await?;
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "rustls-aws-lc-crypto-provider")]
@@ -826,35 +906,44 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_stmt2");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_stmt2");
             return Ok(());
         }
 
         let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
-
         let taos = TaosBuilder::from_dsn(dsn)?.build().await?;
+
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let tbname = format!("t_stmt2_{ts}");
+
         taos.exec_many([
-            "drop table if exists t_stmt2",
-            "create table t_stmt2 (ts timestamp, c1 int)",
+            format!("drop table if exists {tbname}"),
+            format!("create table {tbname} (ts timestamp, c1 int)"),
         ])
         .await?;
 
         let mut stmt2 = Stmt2::new(taos.client());
         stmt2.init().await?;
 
-        stmt2.prepare("insert into t_stmt2 values(?, ?)").await?;
+        stmt2
+            .prepare(format!("insert into {tbname} values(?, ?)"))
+            .await?;
 
         let cols = vec![
             ColumnView::from_millis_timestamp(vec![1726803356466]),
             ColumnView::from_ints(vec![100]),
         ];
-        let param = Stmt2BindParam::new(Some("t_stmt2".to_owned()), None, Some(cols));
+        let param = Stmt2BindParam::new(Some(tbname.clone()), None, Some(cols));
         stmt2.bind(&[param]).await?;
 
         let affected = stmt2.exec().await?;
@@ -863,7 +952,9 @@ mod cloud_tests {
         let mut stmt2 = Stmt2::new(taos.client());
         stmt2.init().await?;
 
-        stmt2.prepare("select * from t_stmt2 where c1 > ?").await?;
+        stmt2
+            .prepare(format!("select * from {tbname} where c1 > ?"))
+            .await?;
 
         let cols = vec![ColumnView::from_ints(vec![0])];
         let param = Stmt2BindParam::new(None, None, Some(cols));
@@ -889,7 +980,7 @@ mod cloud_tests {
         assert_eq!(rows[0].ts, 1726803356466);
         assert_eq!(rows[0].c1, 100);
 
-        taos.exec("drop table t_stmt2").await?;
+        taos.exec(format!("drop table {tbname}")).await?;
 
         Ok(())
     }

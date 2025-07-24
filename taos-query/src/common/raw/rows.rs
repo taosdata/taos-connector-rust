@@ -219,12 +219,6 @@ impl<'de, 'a: 'de> MapAccess<'de> for RowView<'a> {
     where
         V: DeserializeSeed<'de>,
     {
-        // let value = self
-        //     .walk_next()
-        //     .ok_or(<Self::Error as serde::de::Error>::custom(
-        //         "expect a value but no value remains",
-        //     ))?; // always be here, so it's safe to unwrap
-
         seed.deserialize(&mut *self)
             .map_err(<Self::Error as serde::de::Error>::custom)
     }
