@@ -745,7 +745,7 @@ impl WsQuerySender {
         };
         let _cleanup_queries = CleanUp { f: Some(cleanup) };
 
-        let mut _cleanup_results = None;
+        let mut cleanup_results = None;
 
         if let WsSend::FetchBlock(args) = message {
             let id = args.id;
@@ -760,8 +760,10 @@ impl WsQuerySender {
                 let res = self.results.remove(&id);
                 tracing::trace!("send_recv, clean up results, res_id: {id}, res: {res:?}");
             };
-            _cleanup_results = Some(CleanUp { f: Some(cleanup) });
+            cleanup_results = Some(CleanUp { f: Some(cleanup) });
         }
+
+        let _ = cleanup_results;
 
         tracing::trace!("send_recv, req_id: {req_id}, sending message: {message:?}");
 
