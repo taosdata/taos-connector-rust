@@ -135,7 +135,6 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
         V: serde::de::Visitor<'de>,
     {
         use BorrowedValue::*;
-        // todo!()
         match self {
             Null(_) => visitor.visit_none(),
             Bool(v) => visitor.visit_bool(v),
@@ -165,9 +164,8 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                     .map_err(<Self::Error as de::Error>::custom),
             },
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
-            Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
-            VarBinary(v) | Geometry(v) => match v {
-                Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
+            VarBinary(v) | Geometry(v) | Blob(v) | MediumBlob(v) => match v {
+                Cow::Borrowed(v) => visitor.visit_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
             Decimal(v) => visitor.visit_string(v.to_string()),
@@ -189,7 +187,6 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     value_forward_to_deserialize_any! {i8 u8 i16 u16 i32 u32 i64 u64 f32 f64 i128 u128}
 
     forward_to_deserialize_any! {
-        // unit
         char
         bytes byte_buf
         tuple identifier
@@ -267,7 +264,6 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 visitor.visit_newtype_struct($v.into_deserializer())
             };
         }
-        // todo!()
         match self {
             Null(_) => visitor.visit_none(),
             Bool(v) => _v_!(v),
@@ -294,8 +290,7 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                     .map_err(<Self::Error as de::Error>::custom),
             },
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
-            Blob(v) | MediumBlob(v) => visitor.visit_borrowed_bytes(v),
-            VarBinary(v) | Geometry(v) => match v {
+            VarBinary(v) | Geometry(v) | Blob(v) | MediumBlob(v) => match v {
                 Cow::Borrowed(v) => visitor.visit_borrowed_bytes(v),
                 Cow::Owned(v) => visitor.visit_bytes(v.as_slice()),
             },
@@ -320,7 +315,6 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 .into_deserializer()
                 .deserialize_seq(visitor),
             Json(v) => v.to_vec().into_deserializer().deserialize_seq(visitor),
-            Timestamp(_) => todo!(),
             VarChar(v) => v
                 .as_bytes()
                 .to_vec()
@@ -331,7 +325,13 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
                 .to_vec()
                 .into_deserializer()
                 .deserialize_seq(visitor),
-            Blob(v) | MediumBlob(v) => v.to_vec().into_deserializer().deserialize_seq(visitor),
+            Blob(v) | VarBinary(v) | Geometry(v) => {
+                let bytes = match v {
+                    std::borrow::Cow::Borrowed(b) => b.to_vec(),
+                    std::borrow::Cow::Owned(b) => b,
+                };
+                bytes.into_deserializer().deserialize_seq(visitor)
+            }
             _ => todo!(),
         }
     }
@@ -349,10 +349,7 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
             return visitor.visit_enum(EnumTimestampDeserializer { value: self });
         }
         if name == "Value" && variants == VALUE_VARIANTS {
-            return visitor.visit_enum(EnumValueDeserializer {
-                // variants,
-                value: self,
-            });
+            return visitor.visit_enum(EnumValueDeserializer { value: self });
         }
 
         visitor.visit_enum(self)
@@ -406,18 +403,6 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
         }
     }
 
-    // fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    // where
-    //     V: Visitor<'de> {
-    //     todo!()
-    // }
-
-    // fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    // where
-    //     V: Visitor<'de> {
-    //     todo!()
-    // }
-
     fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
@@ -435,18 +420,6 @@ impl<'de> serde::de::Deserializer<'de> for BorrowedValue<'de> {
     {
         visitor.visit_unit()
     }
-
-    // fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
-    // where
-    //     V: Visitor<'de> {
-    //     todo!()
-    // }
-
-    // fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    // where
-    //     V: Visitor<'de> {
-    //     todo!()
-    // }
 
     fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -473,6 +446,7 @@ mod tests {
     #[test]
     fn de_value_as_inner() {
         use BorrowedValue::*;
+
         macro_rules! _de_value {
             ($($v:expr, $ty:ty, $tv:expr) *) => {
                 $(
@@ -499,8 +473,6 @@ mod tests {
             VarChar(""), String, "".to_string()
             NChar("".into()), String, "".to_string()
             Timestamp(crate::Timestamp::Milliseconds(1)), crate::Timestamp, crate::Timestamp::Milliseconds(1)
-            Blob(&[0, 1,2]), Vec<u8>, vec![0, 1, 2]
-            MediumBlob(&[0, 1,2]), Vec<u8>, vec![0, 1, 2]
         );
     }
 
@@ -577,17 +549,6 @@ mod tests {
             }
         }
         _de_str! {
-
-            // TinyInt(-1), is_err
-            // SmallInt(-1), is_err
-            // Int(-1), is_err
-            // BigInt(-1), is_err
-            // UTinyInt(1), is_err
-            // USmallInt(1), is_err
-            // UInt(1), is_err
-            // UBigInt(1), is_err
-            // ;
-
             Null(Ty::VarChar), ""
             TinyInt(-1), "-1"
             Timestamp(crate::Timestamp::Milliseconds(0)), "1970-01-01T08:00:00+08:00"

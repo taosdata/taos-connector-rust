@@ -19,7 +19,8 @@ use crate::ws::error::{
     errno, errstr, format_errno, set_err_and_get_code, TaosError, TaosMaybeError, EMPTY,
 };
 use crate::ws::{
-    ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD, TAOS_RES, TAOS_ROW,
+    self, config, util, ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD,
+    TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
 };
 
 #[allow(non_camel_case_types)]
@@ -291,12 +292,6 @@ unsafe fn list_append(list: *mut tmq_list_t, value: *const c_char) -> TaosResult
         .and_then(|list| list.deref_mut())
     {
         Some(list) => {
-            if !list.topics.is_empty() {
-                return Err(TaosError::new(
-                    Code::TMQ_TOPIC_APPEND_ERR,
-                    "only one topic is supported",
-                ));
-            }
             list.topics.push(topic);
             Ok(())
         }
@@ -398,45 +393,38 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
         Some(conf) => {
             debug!("consumer_new, conf: {conf:?}");
 
-            let host = conf
+            let ip = conf.map.get("td.connect.ip");
+
+            let port = conf
                 .map
-                .get("td.connect.ip")
-                .map_or("localhost", |val| val.as_str());
+                .get("td.connect.port")
+                .map_or(0, |s| s.parse().unwrap());
 
             let user = conf
                 .map
                 .get("td.connect.user")
-                .map_or("root", |val| val.as_str());
+                .map_or(ws::DEFAULT_USER, |s| s.as_str());
 
             let pass = conf
                 .map
                 .get("td.connect.pass")
-                .map_or("taosdata", |val| val.as_str());
+                .map_or(ws::DEFAULT_PASS, |s| s.as_str());
 
-            let dsn = if (host.contains("cloud.tdengine") || host.contains("cloud.taosdata"))
-                && user == "token"
-            {
-                let mut port = conf
-                    .map
-                    .get("td.connect.port")
-                    .map_or("443", |val| val.as_str());
-
-                if port == "0" {
-                    port = "443";
-                }
-
-                format!("wss://{host}:{port}/?token={pass}")
+            let addr = if let Some(ip) = ip {
+                let port = util::resolve_port(ip, port);
+                format!("{ip}:{port}")
+            } else if let Some(addr) = config::adapter_list() {
+                addr.to_string()
             } else {
-                let mut port = conf
-                    .map
-                    .get("td.connect.port")
-                    .map_or("6041", |val| val.as_str());
+                let host = ws::DEFAULT_HOST;
+                let port = util::resolve_port(host, port);
+                format!("{host}:{port}")
+            };
 
-                if port == "0" {
-                    port = "6041";
-                }
-
-                format!("ws://{user}:{pass}@{host}:{port}")
+            let dsn = if util::is_cloud_host(&addr) && user == "token" {
+                format!("wss://{addr}?token={pass}")
+            } else {
+                format!("ws://{user}:{pass}@{addr}")
             };
 
             let mut dsn = Dsn::from_str(&dsn)?;
@@ -1443,6 +1431,10 @@ impl ResultSetOperations for TmqResultSet {
 
     fn get_fields(&mut self) -> *mut TAOS_FIELD {
         self.fields.as_mut_ptr()
+    }
+
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E {
+        ptr::null_mut()
     }
 
     unsafe fn fetch_raw_block(
@@ -2678,6 +2670,341 @@ mod tests {
             );
 
             taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_show_consumers() {
+        unsafe {
+            let _ = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_line_number(true)
+                .with_file(true)
+                .try_init();
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1744006630",
+                    "drop topic if exists topic_1744008820",
+                    "drop database if exists test_1744006630",
+                    "create database test_1744006630 wal_retention_period 3600",
+                    "create topic topic_1744006630 with meta as database test_1744006630",
+                    "create topic topic_1744008820 with meta as database test_1744006630",
+                    "use test_1744006630",
+                    "create table t0(ts timestamp, c1 int)",
+                    "insert into t0 values(now, 1)",
+                    "insert into t0 values(now+1s, 1)",
+                    "insert into t0 values(now+2s, 1)",
+                    "insert into t0 values(now+3s, 1)",
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"1".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = c"topic_1744006630";
+            let errno = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(errno, 0);
+
+            let topic = c"topic_1744008820";
+            let errno = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(errno, 0);
+
+            let errno = tmq_subscribe(consumer, list);
+            assert_eq!(errno, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                tracing::debug!("poll res: {res:?}");
+                if res.is_null() {
+                    break;
+                }
+
+                if !res.is_null() {
+                    let errno = tmq_commit_sync(consumer, res);
+                    assert_eq!(errno, 0);
+
+                    taos_free_result(res);
+                }
+            }
+
+            let errno = tmq_unsubscribe(consumer);
+            assert_eq!(errno, 0);
+
+            let errno = tmq_consumer_close(consumer);
+            assert_eq!(errno, 0);
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic topic_1744006630",
+                    "drop topic topic_1744008820",
+                    "drop database test_1744006630",
+                ],
+            );
+
+            taos_close(taos);
+        }
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_poll_blob() {
+        unsafe {
+            let _ = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::INFO)
+                .with_line_number(true)
+                .with_file(true)
+                .try_init();
+
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1753174098",
+                    "drop database if exists test_1753174098",
+                    "create database test_1753174098",
+                    "create topic topic_1753174098 as database test_1753174098",
+                    "use test_1753174098",
+                    "create table t0 (ts timestamp, c1 int, c2 blob)",
+                    "insert into t0 values(1753174694276, 1, '\\x12345678')",
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = c"topic_1753174098";
+            let code = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(code, 0);
+
+            let code = tmq_subscribe(consumer, list);
+            assert_eq!(code, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                tracing::debug!("poll res: {res:?}");
+                if res.is_null() {
+                    break;
+                }
+
+                if !res.is_null() {
+                    let fields = taos_fetch_fields(res);
+                    assert!(!fields.is_null());
+
+                    let num_fields = taos_num_fields(res);
+                    assert_eq!(num_fields, 3);
+
+                    let row = taos_fetch_row(res);
+                    assert!(!row.is_null());
+
+                    let mut str = vec![0 as c_char; 1024];
+                    let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+                    assert_eq!(
+                        CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                        "1753174694276 1 \\x12345678"
+                    );
+
+                    let code = tmq_commit_sync(consumer, res);
+                    assert_eq!(code, 0);
+
+                    taos_free_result(res);
+                }
+            }
+
+            let code = tmq_unsubscribe(consumer);
+            assert_eq!(code, 0);
+
+            let code = tmq_consumer_close(consumer);
+            assert_eq!(code, 0);
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic topic_1753174098",
+                    "drop database test_1753174098",
+                ],
+            );
+
+            taos_close(taos);
+        }
+    }
+}
+
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use std::ffi::CString;
+
+    use super::*;
+    use crate::ws::query::{
+        taos_fetch_fields, taos_fetch_row, taos_free_result, taos_num_fields, taos_print_row,
+    };
+
+    #[test]
+    fn test_tmq_poll() {
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_line_number(true)
+            .with_file(true)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_tmq_poll");
+            return;
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_tmq_poll");
+            return;
+        }
+
+        let url = url.unwrap().strip_prefix("https://").unwrap().to_string();
+        let url = CString::new(url).unwrap();
+        let token = CString::new(token.unwrap()).unwrap();
+
+        unsafe {
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let group_id = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+
+            let key = c"group.id".as_ptr();
+            let value = CString::new(group_id.to_string()).unwrap();
+            let res = tmq_conf_set(conf, key, value.as_ptr());
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"td.connect.ip".as_ptr();
+            let res = tmq_conf_set(conf, key, url.as_ptr());
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"td.connect.port".as_ptr();
+            let value = c"0".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"td.connect.user".as_ptr();
+            let value = c"token".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"td.connect.pass".as_ptr();
+            let res = tmq_conf_set(conf, key, token.as_ptr());
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = c"rust_tmq_test_topic";
+            let code = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(code, 0);
+
+            let code = tmq_subscribe(consumer, list);
+            assert_eq!(code, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                tracing::debug!("poll res: {res:?}");
+                if res.is_null() {
+                    break;
+                }
+
+                if !res.is_null() {
+                    let fields = taos_fetch_fields(res);
+                    assert!(!fields.is_null());
+
+                    let num_fields = taos_num_fields(res);
+                    assert_eq!(num_fields, 2);
+
+                    let mut cnt = 0;
+
+                    loop {
+                        let row = taos_fetch_row(res);
+                        if row.is_null() {
+                            break;
+                        }
+
+                        cnt += 1;
+
+                        let mut str = vec![0 as c_char; 1024];
+                        let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+                        tracing::debug!("{:?}", CStr::from_ptr(str.as_ptr()).to_str().unwrap());
+                    }
+
+                    assert_eq!(cnt, 100);
+
+                    let code = tmq_commit_sync(consumer, res);
+                    assert_eq!(code, 0);
+
+                    taos_free_result(res);
+                }
+            }
+
+            let code = tmq_unsubscribe(consumer);
+            assert_eq!(code, 0);
+
+            let code = tmq_consumer_close(consumer);
+            assert_eq!(code, 0);
         }
     }
 }

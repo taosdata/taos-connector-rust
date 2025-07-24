@@ -3,37 +3,55 @@ use std::os::raw::c_char;
 use std::str::FromStr;
 
 use serde::de::Visitor;
+use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned};
 
 /// TDengine data type enumeration.
 ///
-/// | enum       | int | sql name         | rust type |
-/// | ----       |:---:| --------         |:---------:|
-/// | Null       | 0   | NULL             | None      |
-/// | Bool       | 1   | BOOL             | bool      |
-/// | TinyInt    | 2   | TINYINT          | i8        |
-/// | SmallInt   | 3   | SMALLINT         | i16       |
-/// | Int        | 4   | INT              | i32       |
-/// | BitInt     | 5   | BIGINT           | i64       |
-/// | Float      | 6   | FLOAT            | f32       |
-/// | Double     | 7   | DOUBLE           | f64       |
-/// | VarChar    | 8   | BINARY/VARCHAR   | str/String        |
-/// | Timestamp  | 9   | TIMESTAMP        | i64               |
-/// | NChar      | 10  | NCHAR            | str/String        |
-/// | UTinyInt   | 11  | TINYINT UNSIGNED | u8                |
-/// | USmallInt  | 12  | SMALLINT UNSIGNED| u16               |
-/// | UInt       | 13  | INT UNSIGNED     | u32               |
-/// | UBigInt    | 14  | BIGINT UNSIGNED  | u64               |
-/// | Json       | 15  | JSON             | serde_json::Value |
-/// | VarBinary  | 16  | VARBINARY        | Vec<u8>           |
-/// | Geometry   | 20  | GEOMETRY         | Vec<u8>           |
+/// | enum      | int | sql name          | rust type              |
+/// | ----      |:---:| --- ----          |:---------:             |
+/// | Null      | 0   | NULL              | None                   |
+/// | Bool      | 1   | BOOL              | bool                   |
+/// | TinyInt   | 2   | TINYINT           | i8                     |
+/// | SmallInt  | 3   | SMALLINT          | i16                    |
+/// | Int       | 4   | INT               | i32                    |
+/// | BitInt    | 5   | BIGINT            | i64                    |
+/// | Float     | 6   | FLOAT             | f32                    |
+/// | Double    | 7   | DOUBLE            | f64                    |
+/// | VarChar   | 8   | BINARY/VARCHAR    | str/String             |
+/// | Timestamp | 9   | TIMESTAMP         | i64                    |
+/// | NChar     | 10  | NCHAR             | str/String             |
+/// | UTinyInt  | 11  | TINYINT UNSIGNED  | u8                     |
+/// | USmallInt | 12  | SMALLINT UNSIGNED | u16                    |
+/// | UInt      | 13  | INT UNSIGNED      | u32                    |
+/// | UBigInt   | 14  | BIGINT UNSIGNED   | u64                    |
+/// | Json      | 15  | JSON              | serde_json::Value      |
+/// | VarBinary | 16  | VARBINARY         | Vec<u8>                |
+/// | Decimal   | 17  | DECIMAL           | bigdecimal::BigDecimal |
+/// | Blob      | 18  | BLOB              | Vec<u8>                |
+/// | Geometry  | 20  | GEOMETRY          | Vec<u8>                |
+/// | Decimal64 | 21  | DECIMAL           | bigdecimal::BigDecimal |
 ///
-/// Note:
-/// - VarChar sql name is BINARY in v2, and VARCHAR in v3.
-/// - Decimal/Blob/MediumBlob is not supported in 2.0/3.0 .
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde_repr::Serialize_repr)]
+/// Notes:
+/// - VarChar sql name is BINARY in TDengine 2.0, and VARCHAR in 3.0.
+/// - Decimal and Blob types are not supported in TDengine 2.0.
+/// - MediumBlob type is not supported in TDengine 2.0 and 3.0.
+#[derive(
+    Default,
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    PartialEq,
+    Eq,
+    serde_repr::Serialize_repr,
+    TryFromBytes,
+    IntoBytes,
+    Immutable,
+    KnownLayout,
+    Unaligned,
+)]
 #[repr(u8)]
 #[non_exhaustive]
-#[derive(Default)]
 pub enum Ty {
     /// Null is only a value, not a *real* type, a nullable data type could be represented as [`Option<T>`] in Rust.
     ///
@@ -43,52 +61,49 @@ pub enum Ty {
     Null = 0,
     /// The `BOOL` type in sql, will be represented as [bool] in Rust.
     Bool = 1,
-    /// `TINYINT` type in sql, will be represented in Rust as [i8].
+    /// The `TINYINT` type in sql, will be represented as [i8] in Rust.
     TinyInt = 2,
-    /// `SMALLINT` type in sql, will be represented in Rust as [i16].
+    /// The `SMALLINT` type in sql, will be represented as [i16] in Rust.
     SmallInt = 3,
-    /// `INT` type in sql, will be represented in Rust as [i32].
+    /// The `INT` type in sql, will be represented as [i32] in Rust.
     Int = 4,
-    /// `BIGINT` type in sql, will be represented in Rust as [i64].
-    BigInt = 5, // 5
-    /// UTinyInt, `tinyint unsigned` in sql, [u8] in Rust.
-    UTinyInt = 11, // 11
-    /// 12: USmallInt, `smallint unsigned` in sql, [u16] in Rust.
-    USmallInt = 12, // 12
-    /// 13: UInt, `int unsigned` in sql, [u32] in Rust.
-    UInt = 13, // 13
-    /// 14: UBigInt, `bigint unsigned` in sql, [u64] in Rust.
-    UBigInt = 14, // 14
-    /// 6: Float, `float` type in sql, will be represented in Rust as [f32].
-    Float = 6, // 6
-    /// 7: Double, `tinyint` type in sql, will be represented in Rust as [f64].
-    Double = 7, // 7
-    /// 9: Timestamp, `timestamp` type in sql, will be represented as [i64] in Rust.
-    /// But can be deserialized to [chrono::naive::NaiveDateTime] or [String].
-    Timestamp = 9, // 9
-    /// 8: VarChar, `binary` type in sql for TDengine 2.x, `varchar` for TDengine 3.x,
-    ///  will be represented in Rust as [&str] or [String]. This type of data be deserialized to [`Vec<u8>`].
+    /// The `BIGINT` type in sql, will be represented as [i64] in Rust.
+    BigInt = 5,
+    /// The `FLOAT` type in sql, will be represented as [f32] in Rust.
+    Float = 6,
+    /// The `DOUBLE` type in sql, will be represented as [f64] in Rust.
+    Double = 7,
+    /// The `BINARY` type in sql for TDengine 2.x, `VARCHAR` for TDengine 3.x,
+    /// will be represented as [&str] or [String] in Rust. This type of data be deserialized to [`Vec<u8>`].
     VarChar = 8,
-    /// 10: NChar, `nchar` type in sql, the recommended way in TDengine to store utf-8 [String].
-    NChar = 10, // 10
-    /// 15: Json, `json` tag in sql, will be represented as [serde_json::value::Value] in Rust.
-    Json = 15, // 15
-
-    /// 16, VarBinary, `varbinary` in sql, [`Vec<u8>`] in Rust.
-    VarBinary = 16, // 16
-    /// 17, Not supported now.
+    /// The `TIMESTAMP` type in sql, will be represented as [i64] in Rust.
+    /// But can be deserialized to [chrono::naive::NaiveDateTime] or [String].
+    Timestamp = 9,
+    /// The `NCHAR` type in sql, will be represented as [&str] or [String] in Rust.
+    /// The recommended way in TDengine to store utf-8 [String].
+    NChar = 10,
+    /// The `TINYINT UNSIGNED` type in sql, will be represented as [u8] in Rust.
+    UTinyInt = 11,
+    /// The `SMALLINT UNSIGNED` type in sql, will be represented as [u16] in Rust.
+    USmallInt = 12,
+    /// The `INT UNSIGNED` type in sql, will be represented as [u32] in Rust.
+    UInt = 13,
+    /// The `BIGINT UNSIGNED` type in sql, will be represented as [u64] in Rust.
+    UBigInt = 14,
+    /// The `JSON` type in sql, will be represented as [serde_json::value::Value] in Rust.
+    Json = 15,
+    /// The `VARBINARY` type in sql, will be represented as [`Vec<u8>`] in Rust.
+    VarBinary = 16,
+    /// The `DECIMAL` type in sql, will be represented as [bigdecimal::BigDecimal] in Rust.
+    Decimal = 17,
+    /// The `BLOB` type in sql, will be represented as [`Vec<u8>`] in Rust.
+    Blob = 18,
+    /// Not supported now.
     #[doc(hidden)]
-    Decimal = 17, // 17
-    /// 18, Not supported now.
-    #[doc(hidden)]
-    Blob, // 18
-    /// 19, Not supported now.
-    #[doc(hidden)]
-    MediumBlob, // 19
-
-    /// 20, Geometry, `geometry` in sql, [`Vec<u8>`] in Rust.
-    Geometry, // 20
-
+    MediumBlob = 19,
+    /// The `GEOMETRY` type in sql, will be represented as [`Vec<u8>`] in Rust.
+    Geometry = 20,
+    /// The `DECIMAL` type in sql, will be represented as [bigdecimal::BigDecimal] in Rust.
     Decimal64 = 21,
 }
 
@@ -105,6 +120,7 @@ impl<'de> serde::Deserialize<'de> for Ty {
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("invalid TDengine type")
             }
+
             fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
@@ -179,6 +195,7 @@ impl FromStr for Ty {
             }
             return Ok(Self::Decimal);
         }
+
         match s.as_str() {
             "timestamp" => Ok(Ty::Timestamp),
             "bool" => Ok(Ty::Bool),
@@ -216,12 +233,6 @@ impl Ty {
         matches!(self, VarChar | VarBinary | NChar | Geometry)
     }
 
-    // /// Check if the data type need quotes, means one of [Ty::VarChar], [Ty::NChar], [Ty::Json].
-    // pub const fn is_quote(&self) -> bool {
-    //     use Ty::*;
-    //     matches!(self, Json)
-    // }
-
     pub const fn is_json(&self) -> bool {
         matches!(self, Ty::Json)
     }
@@ -245,6 +256,37 @@ impl Ty {
                 | Decimal
                 | Decimal64
         )
+    }
+
+    /// Check if the data type is a numeric type.
+    pub const fn is_numeric(&self) -> bool {
+        use Ty::*;
+        matches!(
+            self,
+            Bool | TinyInt
+                | SmallInt
+                | Int
+                | BigInt
+                | UTinyInt
+                | USmallInt
+                | UInt
+                | UBigInt
+                | Float
+                | Double
+                | Decimal
+                | Decimal64
+        )
+    }
+
+    /// Check if the data type is decimal.
+    pub const fn is_decimal(&self) -> bool {
+        use Ty::*;
+        matches!(self, Decimal | Decimal64)
+    }
+
+    /// Check if the data type is blob.
+    pub const fn is_blob(&self) -> bool {
+        matches!(self, Ty::Blob)
     }
 
     /// Get fixed length if the type is primitive.
@@ -420,6 +462,7 @@ impl Ty {
         }
     }
 }
+
 impl From<u8> for Ty {
     #[inline]
     fn from(v: u8) -> Self {
@@ -432,16 +475,17 @@ impl Display for Ty {
         write!(f, "{}", self.name())
     }
 }
+
 macro_rules! _impl_from_primitive {
     ($($ty:ty) *) => {
-      $(
-         impl From<$ty> for Ty {
-            #[inline]
-           fn from(v: $ty) -> Self {
-             Self::from_u8(v as _)
-           }
-         }
-      )*
+        $(
+            impl From<$ty> for Ty {
+                #[inline]
+                fn from(v: $ty) -> Self {
+                    Self::from_u8(v as _)
+                }
+            }
+        )*
     }
 }
 
@@ -452,7 +496,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decimal_ty_test() -> anyhow::Result<()> {
+    fn test_decimal() -> anyhow::Result<()> {
         assert_eq!("DECIMAL(5,2)".parse::<Ty>().unwrap(), Ty::Decimal64);
         assert_eq!("DECIMAL(20,2)".parse::<Ty>().unwrap(), Ty::Decimal);
 
@@ -487,5 +531,226 @@ mod tests {
         assert_eq!(format!("{}", Ty::Decimal64), "DECIMAL");
 
         Ok(())
+    }
+
+    #[test]
+    fn test_from_str() {
+        assert_eq!("timestamp".parse::<Ty>().unwrap(), Ty::Timestamp);
+        assert_eq!("bool".parse::<Ty>().unwrap(), Ty::Bool);
+        assert_eq!("tinyint".parse::<Ty>().unwrap(), Ty::TinyInt);
+        assert_eq!("smallint".parse::<Ty>().unwrap(), Ty::SmallInt);
+        assert_eq!("int".parse::<Ty>().unwrap(), Ty::Int);
+        assert_eq!("bigint".parse::<Ty>().unwrap(), Ty::BigInt);
+        assert_eq!("tinyint unsigned".parse::<Ty>().unwrap(), Ty::UTinyInt);
+        assert_eq!("smallint unsigned".parse::<Ty>().unwrap(), Ty::USmallInt);
+        assert_eq!("int unsigned".parse::<Ty>().unwrap(), Ty::UInt);
+        assert_eq!("bigint unsigned".parse::<Ty>().unwrap(), Ty::UBigInt);
+        assert_eq!("float".parse::<Ty>().unwrap(), Ty::Float);
+        assert_eq!("double".parse::<Ty>().unwrap(), Ty::Double);
+        assert_eq!("binary".parse::<Ty>().unwrap(), Ty::VarChar);
+        assert_eq!("varchar".parse::<Ty>().unwrap(), Ty::VarChar);
+        assert_eq!("nchar".parse::<Ty>().unwrap(), Ty::NChar);
+        assert_eq!("json".parse::<Ty>().unwrap(), Ty::Json);
+        assert_eq!("varbinary".parse::<Ty>().unwrap(), Ty::VarBinary);
+        assert_eq!("blob".parse::<Ty>().unwrap(), Ty::Blob);
+        assert_eq!("mediumblob".parse::<Ty>().unwrap(), Ty::MediumBlob);
+        assert_eq!("geometry".parse::<Ty>().unwrap(), Ty::Geometry);
+        assert_eq!("decimal(5,2)".parse::<Ty>().unwrap(), Ty::Decimal64);
+        assert_eq!("decimal(20,2)".parse::<Ty>().unwrap(), Ty::Decimal);
+        assert_eq!(
+            "invalid type".parse::<Ty>().unwrap_err(),
+            "not a valid data type string: invalid type".to_string()
+        );
+    }
+
+    #[test]
+    fn test_is_null() {
+        assert!(Ty::Null.is_null());
+        assert!(!Ty::Bool.is_null());
+        assert!(!Ty::Int.is_null());
+        assert!(!Ty::VarChar.is_null());
+    }
+
+    #[test]
+    fn test_name() {
+        assert_eq!(Ty::Null.name(), "NULL");
+        assert_eq!(Ty::Bool.name(), "BOOL");
+        assert_eq!(Ty::TinyInt.name(), "TINYINT");
+        assert_eq!(Ty::SmallInt.name(), "SMALLINT");
+        assert_eq!(Ty::Int.name(), "INT");
+        assert_eq!(Ty::BigInt.name(), "BIGINT");
+        assert_eq!(Ty::Float.name(), "FLOAT");
+        assert_eq!(Ty::Double.name(), "DOUBLE");
+        assert_eq!(Ty::VarChar.name(), "BINARY");
+        assert_eq!(Ty::Timestamp.name(), "TIMESTAMP");
+        assert_eq!(Ty::NChar.name(), "NCHAR");
+        assert_eq!(Ty::UTinyInt.name(), "TINYINT UNSIGNED");
+        assert_eq!(Ty::USmallInt.name(), "SMALLINT UNSIGNED");
+        assert_eq!(Ty::UInt.name(), "INT UNSIGNED");
+        assert_eq!(Ty::UBigInt.name(), "BIGINT UNSIGNED");
+        assert_eq!(Ty::Json.name(), "JSON");
+        assert_eq!(Ty::VarBinary.name(), "VARBINARY");
+        assert_eq!(Ty::Decimal.name(), "DECIMAL");
+        assert_eq!(Ty::Decimal64.name(), "DECIMAL");
+        assert_eq!(Ty::Blob.name(), "BLOB");
+        assert_eq!(Ty::MediumBlob.name(), "MEDIUMBLOB");
+        assert_eq!(Ty::Geometry.name(), "GEOMETRY");
+    }
+
+    #[test]
+    fn test_lowercase_name() {
+        assert_eq!(Ty::Null.lowercase_name(), "null");
+        assert_eq!(Ty::Bool.lowercase_name(), "bool");
+        assert_eq!(Ty::TinyInt.lowercase_name(), "tinyint");
+        assert_eq!(Ty::SmallInt.lowercase_name(), "smallint");
+        assert_eq!(Ty::Int.lowercase_name(), "int");
+        assert_eq!(Ty::BigInt.lowercase_name(), "bigint");
+        assert_eq!(Ty::Float.lowercase_name(), "float");
+        assert_eq!(Ty::Double.lowercase_name(), "double");
+        assert_eq!(Ty::VarChar.lowercase_name(), "binary");
+        assert_eq!(Ty::Timestamp.lowercase_name(), "timestamp");
+        assert_eq!(Ty::NChar.lowercase_name(), "nchar");
+        assert_eq!(Ty::UTinyInt.lowercase_name(), "tinyint unsigned");
+        assert_eq!(Ty::USmallInt.lowercase_name(), "smallint unsigned");
+        assert_eq!(Ty::UInt.lowercase_name(), "int unsigned");
+        assert_eq!(Ty::UBigInt.lowercase_name(), "bigint unsigned");
+        assert_eq!(Ty::Json.lowercase_name(), "json");
+        assert_eq!(Ty::VarBinary.lowercase_name(), "varbinary");
+        assert_eq!(Ty::Decimal.lowercase_name(), "decimal");
+        assert_eq!(Ty::Decimal64.lowercase_name(), "decimal");
+        assert_eq!(Ty::Blob.lowercase_name(), "blob");
+        assert_eq!(Ty::MediumBlob.lowercase_name(), "mediumblob");
+        assert_eq!(Ty::Geometry.lowercase_name(), "geometry");
+    }
+
+    #[test]
+    fn test_tsdb_name() {
+        use std::ffi::CStr;
+
+        unsafe {
+            assert_eq!(CStr::from_ptr(Ty::Null.tsdb_name()), c"TSDB_DATA_TYPE_NULL");
+            assert_eq!(CStr::from_ptr(Ty::Bool.tsdb_name()), c"TSDB_DATA_TYPE_BOOL");
+            assert_eq!(
+                CStr::from_ptr(Ty::TinyInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_TINYINT"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::SmallInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_SMALLINT"
+            );
+            assert_eq!(CStr::from_ptr(Ty::Int.tsdb_name()), c"TSDB_DATA_TYPE_INT");
+            assert_eq!(
+                CStr::from_ptr(Ty::BigInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_BIGINT"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Float.tsdb_name()),
+                c"TSDB_DATA_TYPE_FLOAT"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Double.tsdb_name()),
+                c"TSDB_DATA_TYPE_DOUBLE"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::VarChar.tsdb_name()),
+                c"TSDB_DATA_TYPE_VARCHAR"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Timestamp.tsdb_name()),
+                c"TSDB_DATA_TYPE_TIMESTAMP"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::NChar.tsdb_name()),
+                c"TSDB_DATA_TYPE_NCHAR"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::UTinyInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_UTINYINT"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::USmallInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_USMALLINT"
+            );
+            assert_eq!(CStr::from_ptr(Ty::UInt.tsdb_name()), c"TSDB_DATA_TYPE_UINT");
+            assert_eq!(
+                CStr::from_ptr(Ty::UBigInt.tsdb_name()),
+                c"TSDB_DATA_TYPE_UBIGINT"
+            );
+            assert_eq!(CStr::from_ptr(Ty::Json.tsdb_name()), c"TSDB_DATA_TYPE_JSON");
+            assert_eq!(
+                CStr::from_ptr(Ty::VarBinary.tsdb_name()),
+                c"TSDB_DATA_TYPE_VARBINARY"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Decimal.tsdb_name()),
+                c"TSDB_DATA_TYPE_DECIMAL"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Decimal64.tsdb_name()),
+                c"TSDB_DATA_TYPE_DECIMAL64"
+            );
+            assert_eq!(CStr::from_ptr(Ty::Blob.tsdb_name()), c"TSDB_DATA_TYPE_BLOB");
+            assert_eq!(
+                CStr::from_ptr(Ty::MediumBlob.tsdb_name()),
+                c"TSDB_DATA_TYPE_MEDIUMBLOB"
+            );
+            assert_eq!(
+                CStr::from_ptr(Ty::Geometry.tsdb_name()),
+                c"TSDB_DATA_TYPE_GEOMETRY"
+            );
+        }
+    }
+
+    #[test]
+    fn test_from_u8_option() {
+        assert_eq!(Ty::from_u8_option(0), Some(Ty::Null));
+        assert_eq!(Ty::from_u8_option(1), Some(Ty::Bool));
+        assert_eq!(Ty::from_u8_option(2), Some(Ty::TinyInt));
+        assert_eq!(Ty::from_u8_option(3), Some(Ty::SmallInt));
+        assert_eq!(Ty::from_u8_option(4), Some(Ty::Int));
+        assert_eq!(Ty::from_u8_option(5), Some(Ty::BigInt));
+        assert_eq!(Ty::from_u8_option(6), Some(Ty::Float));
+        assert_eq!(Ty::from_u8_option(7), Some(Ty::Double));
+        assert_eq!(Ty::from_u8_option(8), Some(Ty::VarChar));
+        assert_eq!(Ty::from_u8_option(9), Some(Ty::Timestamp));
+        assert_eq!(Ty::from_u8_option(10), Some(Ty::NChar));
+        assert_eq!(Ty::from_u8_option(11), Some(Ty::UTinyInt));
+        assert_eq!(Ty::from_u8_option(12), Some(Ty::USmallInt));
+        assert_eq!(Ty::from_u8_option(13), Some(Ty::UInt));
+        assert_eq!(Ty::from_u8_option(14), Some(Ty::UBigInt));
+        assert_eq!(Ty::from_u8_option(15), Some(Ty::Json));
+        assert_eq!(Ty::from_u8_option(16), Some(Ty::VarBinary));
+        assert_eq!(Ty::from_u8_option(17), Some(Ty::Decimal));
+        assert_eq!(Ty::from_u8_option(18), Some(Ty::Blob));
+        assert_eq!(Ty::from_u8_option(19), Some(Ty::MediumBlob));
+        assert_eq!(Ty::from_u8_option(20), Some(Ty::Geometry));
+        assert_eq!(Ty::from_u8_option(21), Some(Ty::Decimal64));
+        assert_eq!(Ty::from_u8_option(22), None);
+    }
+
+    #[test]
+    fn test_from_u8() {
+        assert_eq!(Ty::from(0), Ty::Null);
+        assert_eq!(Ty::from(1), Ty::Bool);
+        assert_eq!(Ty::from(2), Ty::TinyInt);
+        assert_eq!(Ty::from(3), Ty::SmallInt);
+        assert_eq!(Ty::from(4), Ty::Int);
+        assert_eq!(Ty::from(5), Ty::BigInt);
+        assert_eq!(Ty::from(6), Ty::Float);
+        assert_eq!(Ty::from(7), Ty::Double);
+        assert_eq!(Ty::from(8), Ty::VarChar);
+        assert_eq!(Ty::from(9), Ty::Timestamp);
+        assert_eq!(Ty::from(10), Ty::NChar);
+        assert_eq!(Ty::from(11), Ty::UTinyInt);
+        assert_eq!(Ty::from(12), Ty::USmallInt);
+        assert_eq!(Ty::from(13), Ty::UInt);
+        assert_eq!(Ty::from(14), Ty::UBigInt);
+        assert_eq!(Ty::from(15), Ty::Json);
+        assert_eq!(Ty::from(16), Ty::VarBinary);
+        assert_eq!(Ty::from(17), Ty::Decimal);
+        assert_eq!(Ty::from(18), Ty::Blob);
+        assert_eq!(Ty::from(19), Ty::MediumBlob);
+        assert_eq!(Ty::from(20), Ty::Geometry);
+        assert_eq!(Ty::from(21), Ty::Decimal64);
     }
 }

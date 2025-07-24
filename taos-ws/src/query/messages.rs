@@ -5,12 +5,13 @@ use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, NoneAsEmptyString};
 use taos_query::common::{Precision, Ty};
 use taos_query::prelude::RawError;
+use taos_query::util::generate_req_id;
+use tokio_tungstenite::tungstenite::Message;
 
 pub type ReqId = u64;
-pub type StmtId = u64;
-
-/// Type for result ID.
 pub type ResId = u64;
+pub type StmtId = u64;
+pub type MessageId = u64;
 
 #[serde_as]
 #[derive(Debug, Serialize, Default, Clone)]
@@ -37,8 +38,8 @@ impl WsConnReq {
 
 #[derive(Debug, Serialize, Clone, Copy)]
 pub struct WsResArgs {
-    pub req_id: ReqId,
     pub id: ResId,
+    pub req_id: ReqId,
 }
 
 #[derive(Debug, Serialize)]
@@ -135,6 +136,8 @@ pub struct WsQueryResp {
     pub precision: Precision,
     #[serde_as(as = "serde_with::DurationNanoSeconds")]
     pub timing: Duration,
+    pub fields_precisions: Option<Vec<i64>>,
+    pub fields_scales: Option<Vec<i64>>,
 }
 
 #[serde_as]
@@ -143,6 +146,8 @@ pub struct WsQueryResp {
 pub struct InsertResp {
     #[serde_as(as = "serde_with::DurationNanoSeconds")]
     pub timing: Duration,
+    pub affected_rows: Option<usize>,
+    pub total_rows: Option<usize>,
 }
 
 #[serde_as]
@@ -279,6 +284,10 @@ pub enum WsRecvData {
         precision: Precision,
         #[serde(default)]
         timing: u64,
+        #[serde(default)]
+        fields_precisions: Option<Vec<i64>>,
+        #[serde(default)]
+        fields_scales: Option<Vec<i64>>,
     },
     Stmt2Close {
         #[serde(default)]
@@ -366,19 +375,61 @@ impl<'de> Deserialize<'de> for BindType {
 }
 
 pub trait ToMessage: Serialize {
-    fn to_msg(&self) -> tokio_tungstenite::tungstenite::Message {
-        tokio_tungstenite::tungstenite::Message::Text(serde_json::to_string(self).unwrap())
+    fn to_msg(&self) -> Message {
+        Message::Text(serde_json::to_string(self).unwrap())
     }
 }
 
 impl ToMessage for WsSend {}
 
+#[derive(Debug)]
+pub enum WsMessage {
+    Command(WsSend),
+    Raw(Message),
+}
+
+impl WsMessage {
+    pub(crate) fn req_id(&self) -> ReqId {
+        match self {
+            WsMessage::Raw(_) => generate_req_id(),
+            WsMessage::Command(ws_send) => ws_send.req_id(),
+        }
+    }
+
+    pub(crate) fn into_message(self) -> Message {
+        match self {
+            WsMessage::Raw(message) => message,
+            WsMessage::Command(ws_send) => match ws_send {
+                WsSend::Binary(bytes) => Message::Binary(bytes),
+                _ => ws_send.to_msg(),
+            },
+        }
+    }
+
+    pub(crate) fn should_cache(&self) -> bool {
+        match self {
+            WsMessage::Raw(_) => false,
+            WsMessage::Command(ws_send) => match ws_send {
+                WsSend::Insert { .. } | WsSend::Query { .. } | WsSend::CheckServerStatus { .. } => {
+                    true
+                }
+                WsSend::Binary(bytes) => {
+                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+                    matches!(action, 4 | 5 | 6 | 10)
+                }
+                _ => false,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::BindType;
-    use crate::query::infra::{WsRecv, WsSend};
+    use crate::query::messages::{WsRecv, WsSend};
     use crate::query::WsConnReq;
     use crate::TaosBuilder;
+
+    use super::*;
 
     #[test]
     fn test_serde_send() {
@@ -442,5 +493,26 @@ mod tests {
 
         let res: Result<BindType, _> = serde_json::from_value(serde_json::json!("invalid"));
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_insert_resp_deserialize() {
+        let json = r#"{
+            "timing": 123456789,
+            "affected_rows": 10,
+            "total_rows": 20
+        }"#;
+        let resp: InsertResp = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.timing, Duration::from_nanos(123456789));
+        assert_eq!(resp.affected_rows, Some(10));
+        assert_eq!(resp.total_rows, Some(20));
+
+        let json = r#"{
+            "timing": 123456789
+        }"#;
+        let resp: InsertResp = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.timing, Duration::from_nanos(123456789));
+        assert_eq!(resp.affected_rows, None);
+        assert_eq!(resp.total_rows, None);
     }
 }

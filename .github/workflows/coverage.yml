@@ -61,7 +61,16 @@ jobs:
         if: >
           (github.event_name == 'workflow_dispatch' && steps.cache-server-manually.outputs.cache-hit != 'true') ||
           (github.event_name == 'push' && steps.cache-server-push.outputs.cache-hit != 'true')
-        run: sudo apt install -y libgeos-dev
+        run: |
+          sudo apt update && sudo apt install -y libgeos-dev
+
+      - name: Get CMake
+        uses: lukka/get-cmake@latest
+        if: >
+          (github.event_name == 'workflow_dispatch' && steps.cache-server-manually.outputs.cache-hit != 'true') ||
+          (github.event_name == 'push' && steps.cache-server-push.outputs.cache-hit != 'true')
+        with:
+          cmakeVersion: 3.31.6
 
       - name: Install TDengine
         if: >
@@ -71,7 +80,7 @@ jobs:
           cd TDengine
           mkdir debug
           cd debug
-          cmake .. -DBUILD_TEST=off -DBUILD_HTTP=false -DVERNUMBER=3.9.9.9  -DBUILD_DEPENDENCY_TESTS=false
+          cmake .. -DBUILD_TEST=off -DBUILD_HTTP=false -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
           make -j 8
 
       - name: Package
@@ -83,7 +92,8 @@ jobs:
           cp ./TDengine/debug/build/bin/taos ./release/
           cp ./TDengine/debug/build/bin/taosd ./release/
           cp ./TDengine/debug/build/bin/taosadapter ./release/
-          cp ./TDengine/debug/build/lib/libtaos.so.3.9.9.9 ./release/
+          cp ./TDengine/debug/build/lib/libtaos.so* ./release/
+          cp ./TDengine/debug/build/lib/libtaosnative.so* ./release/
           cp ./TDengine/debug/build/lib/librocksdb.so.8.1.1 ./release/ ||:
           cp ./TDengine/include/client/taos.h ./release/
           cat >./release/install.sh<<EOF 
@@ -93,10 +103,13 @@ jobs:
           cp ./taos /bin/
           cp ./taosd /bin/
           cp ./taosadapter /bin/
-          cp ./libtaos.so.3.9.9.9 /usr/lib
+          cp ./libtaos.so* /usr/lib
+          cp ./libtaosnative.so* /usr/lib
           cp ./librocksdb.so.8.1.1 /usr/lib
-          ln -sf /usr/lib/libtaos.so.3.9.9.9 /usr/lib/libtaos.so.1
+          ln -sf /usr/lib/libtaos.so* /usr/lib/libtaos.so.1
           ln -sf /usr/lib/libtaos.so.1 /usr/lib/libtaos.so
+          ln -sf /usr/lib/libtaosnative.so* /usr/lib/libtaosnative.so.1
+          ln -sf /usr/lib/libtaosnative.so.1 /usr/lib/libtaosnative.so
           ln -sf /usr/lib/librocksdb.so.8.1.1 /usr/lib/librocksdb.so.8 ||:
           ln -sf /usr/lib/librocksdb.so.8 /usr/lib/librocksdb.so ||:
           cp ./taos.h /usr/include
@@ -130,18 +143,23 @@ jobs:
           tar -zxvf server.tar.gz
           cd release && sudo sh install.sh
 
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Rust
         id: setup-rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.78.0
+          toolchain: 1.87.0
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - uses: actions/cache@v4
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+
+      - name: Cache .cargo
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -150,13 +168,15 @@ jobs:
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ steps.setup-rust.outputs.rustc_hash }}
 
-      - uses: actions/cache@v4
+      - name: Cache target
+        uses: actions/cache@v4
         with:
           path: target
           key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
 
       - name: Prepare development tools
         run: |
+          sudo apt update
           sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config libgflags2.2 libgflags-dev libgeos-dev -y
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
@@ -174,7 +194,10 @@ jobs:
           sleep 1
 
       - name: Generate code coverage
-        run: RUST_BACKTRACE=1 cargo llvm-cov -j 2 --workspace --lcov --output-path lcov.info
+        env:
+          TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
+          TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
+        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 4 --workspace --features ws-rustls-aws-lc-crypto-provider,test-new-feat --lcov --output-path lcov.info --no-fail-fast
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

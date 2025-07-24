@@ -1,6 +1,5 @@
 use std::ffi::{c_void, CStr};
 
-// use super::Ty;
 use taos_query::common::{Field, Ty};
 
 #[repr(C)]

@@ -18,7 +18,7 @@ impl Debug for Lengths {
 }
 
 impl Lengths {
-    /// As a [ColSchema] slice.
+    /// As a `[ColSchema]` slice.
     pub fn as_slice(&self) -> &[u32] {
         debug_assert!(self.0.len() % std::mem::size_of::<u32>() == 0);
         unsafe {
@@ -34,11 +34,6 @@ impl Lengths {
             std::ptr::read_unaligned(self.0.as_ptr().add(index * std::mem::size_of::<u32>()) as _)
         }
     }
-
-    // /// As a [u8] slice.
-    // pub fn as_bytes(&self) -> &[u8] {
-    //     &self.0.as_ref()
-    // }
 }
 
 impl Deref for Lengths {

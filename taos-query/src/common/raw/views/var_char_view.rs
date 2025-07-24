@@ -109,7 +109,7 @@ impl VarCharView {
     pub fn max_length(&self) -> usize {
         (0..self.len())
             .filter_map(|i| unsafe { self.get_length_unchecked(i) })
-            .min()
+            .max()
             .unwrap_or(0)
     }
 

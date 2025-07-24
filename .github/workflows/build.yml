@@ -26,7 +26,7 @@ jobs:
         id: setup-rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.78.0
+          toolchain: 1.87.0
           components: clippy
 
       - uses: actions/cache@v4
@@ -60,13 +60,19 @@ jobs:
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "3.0"
+          ref: "main"
 
       - name: Prepare development tools
         run: |
+          sudo apt update
           sudo apt install libjansson-dev libsnappy-dev liblzma-dev libz-dev pkg-config -y
           sudo timedatectl set-timezone Asia/Shanghai
           sudo date
+
+      - name: Get CMake
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: 3.31.6
 
       - name: Build TDengine
         env:
@@ -74,7 +80,7 @@ jobs:
         run: |
           cd TDengine
           echo use commit ${BRANCH_NAME}
-          sed -iE "s#GIT_TAG.*#GIT_TAG ${BRANCH_NAME}#" cmake/taosws_CMakeLists.txt.in
+          sed -iE "/ExternalProject_Add(ext_taosws/,/GIT_TAG.*/s#GIT_TAG.*#GIT_TAG ${BRANCH_NAME}#" tools/CMakeLists.txt
           mkdir release && cd release
           cmake .. -DBUILD_JDBC=false -DBUILD_HTTP=false -DWEBSOCKET=true -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
 
@@ -88,14 +94,14 @@ jobs:
         run: |
           cd TDengine/release/
           make -j8 || exit 1
-          sudo make install
+          make install
           nohup sudo taosd > /dev/null 2>&1 &
           sleep 5
           nohup sudo taosadapter > /dev/null 2>&1 &
 
       - name: Run examples
         run: |
-          cd TDengine/tools/taosws-rs
+          cd TDengine/.externals/build/ext_taosws/src/ext_taosws
           ./taos-ws-sys/ci/package.sh
           cd ./target/libtaosws
           make

@@ -16,7 +16,7 @@ use crate::ws::error::{
     TaosMaybeError,
 };
 use crate::ws::query::QueryResultSet;
-use crate::ws::{ResultSet, TaosResult, TAOS, TAOS_RES};
+use crate::ws::{ResultSet, TaosResult, TAOS, TAOS_FIELD_E, TAOS_RES};
 
 #[allow(non_camel_case_types)]
 pub type TAOS_STMT = c_void;
@@ -40,17 +40,6 @@ pub struct TAOS_MULTI_BIND {
     pub length: *mut i32,
     pub is_null: *mut c_char,
     pub num: c_int,
-}
-
-#[repr(C)]
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub struct TAOS_FIELD_E {
-    pub name: [c_char; 65],
-    pub r#type: i8,
-    pub precision: u8,
-    pub scale: u8,
-    pub bytes: i32,
 }
 
 #[derive(Debug)]
@@ -767,7 +756,7 @@ pub unsafe extern "C" fn taos_stmt_get_param(
         .as_ref()
         .map_or(0, |fields| fields.len());
 
-    if idx < 0 || idx >= col_cnt as _ {
+    if idx < 0 || (idx as usize) >= col_cnt {
         maybe_err.with_err(Some(TaosError::new(
             Code::INVALID_PARA,
             "idx is out of range",

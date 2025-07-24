@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn test_bindable_sync() -> RawResult<()> {
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // pretty_env_logger::init();
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         let dsn = Dsn::from_str(&dsn)?;
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn test_ws_stmt_with_req_id_sync() -> RawResult<()> {
-        std::env::set_var("RUST_LOG", "debug");
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
         // pretty_env_logger::init();
         let dsn = std::env::var("TEST_DSN").unwrap_or("http://localhost:6041".to_string());
         let dsn = Dsn::from_str(&dsn)?;

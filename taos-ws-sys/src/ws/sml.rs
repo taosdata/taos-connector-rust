@@ -3,15 +3,17 @@ use std::time::Duration;
 use std::{ptr, slice};
 
 use taos_error::Code;
+use taos_query::block_in_place_or_global;
 use taos_query::common::{Precision, SchemalessPrecision, SchemalessProtocol, SmlDataBuilder, Ty};
 use taos_query::util::generate_req_id;
-use taos_query::Queryable;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
 use tracing::{debug, error};
 
 use crate::ws::error::{set_err_and_get_code, TaosError, TaosMaybeError};
-use crate::ws::{ResultSet, ResultSetOperations, TaosResult, TAOS, TAOS_FIELD, TAOS_RES, TAOS_ROW};
+use crate::ws::{
+    ResultSet, ResultSetOperations, TaosResult, TAOS, TAOS_FIELD, TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
+};
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
@@ -189,22 +191,6 @@ unsafe fn sml_insert_raw(
 
     let slice: &[u8] = slice::from_raw_parts(lines as _, len as _);
 
-    if !totalRows.is_null() {
-        let mut num_lines = 0;
-        let mut idx = 0;
-        for (i, b) in slice.iter().enumerate() {
-            if *b == b'\n' || i == len as usize - 1 {
-                if !(protocol == TSDB_SML_PROTOCOL_TYPE::TSDB_SML_LINE_PROTOCOL as i32
-                    && slice[idx] == b'#')
-                {
-                    num_lines += 1;
-                }
-                idx = i + 1;
-            }
-        }
-        *totalRows = num_lines;
-    }
-
     let data = String::from_utf8(slice.to_vec())?;
 
     debug!("sml_insert_raw, data: {data:?}");
@@ -234,10 +220,14 @@ unsafe fn sml_insert_raw(
 
     debug!("sml_insert_raw, sml_data: {sml_data:?}");
 
-    taos.put(&sml_data)?;
+    let (affected_rows, total_rows) = block_in_place_or_global(taos.client().s_put(&sml_data))?;
+
+    if !totalRows.is_null() {
+        *totalRows = total_rows.unwrap_or(0) as _;
+    }
 
     Ok(ResultSet::Schemaless(SchemalessResultSet::new(
-        0,
+        affected_rows.unwrap_or(0) as _,
         Precision::Millisecond,
         Duration::from_millis(0),
     )))
@@ -432,10 +422,10 @@ unsafe fn sml_insert(
 
     debug!("sml_insert, sml_data: {sml_data:?}");
 
-    taos.put(&sml_data)?;
+    let (affected_rows, _) = block_in_place_or_global(taos.client().s_put(&sml_data))?;
 
     Ok(ResultSet::Schemaless(SchemalessResultSet::new(
-        0,
+        affected_rows.unwrap_or(0) as _,
         Precision::Millisecond,
         Duration::from_millis(0),
     )))
@@ -503,6 +493,10 @@ impl ResultSetOperations for SchemalessResultSet {
         ptr::null_mut()
     }
 
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E {
+        ptr::null_mut()
+    }
+
     unsafe fn fetch_raw_block(
         &mut self,
         ptr: *mut *mut c_void,
@@ -539,7 +533,7 @@ mod tests {
     use taos_query::util::generate_req_id;
 
     use super::*;
-    use crate::ws::query::taos_free_result;
+    use crate::ws::query::{taos_affected_rows, taos_free_result};
     use crate::ws::sml::{TSDB_SML_PROTOCOL_TYPE, TSDB_SML_TIMESTAMP_TYPE};
     use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
 
@@ -639,8 +633,11 @@ mod tests {
                 taos_schemaless_insert_raw(taos, lines, len, &mut total_rows, protocol, precision);
             assert!(!res.is_null());
             assert_eq!(total_rows, 2);
-            taos_free_result(res);
 
+            let affected_rows = taos_affected_rows(res);
+            assert_eq!(affected_rows, 2);
+
+            taos_free_result(res);
             test_exec(taos, "drop database test_1741168851");
             taos_close(taos);
         }
@@ -670,8 +667,8 @@ mod tests {
                 taos_schemaless_insert_raw(taos, lines, len, &mut total_rows, protocol, precision);
             assert!(!res.is_null());
             assert_eq!(total_rows, 1);
-            taos_free_result(res);
 
+            taos_free_result(res);
             test_exec(taos, "drop database test_1741608340");
             taos_close(taos);
         }
@@ -775,8 +772,11 @@ mod tests {
 
             let res = taos_schemaless_insert(taos, lines, num_lines, protocol, precision);
             assert!(!res.is_null());
-            taos_free_result(res);
 
+            let affected_rows = taos_affected_rows(res);
+            assert_eq!(affected_rows, 2);
+
+            taos_free_result(res);
             test_exec(taos, "drop database test_1742376152");
             taos_close(taos);
         }

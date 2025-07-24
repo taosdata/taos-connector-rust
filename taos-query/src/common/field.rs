@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display};
 use serde::{Deserialize, Serialize};
 
 use super::ty::Ty;
-use super::views::ColSchema;
+use super::views::DataType;
 use crate::util::{Inlinable, InlinableRead, InlinableWrite};
 
 #[repr(C)]
@@ -127,8 +127,8 @@ impl Field {
     }
 
     #[inline]
-    pub(crate) fn to_column_schema(&self) -> ColSchema {
-        ColSchema::new(self.ty(), self.bytes() as _)
+    pub(crate) fn to_column_schema(&self) -> DataType {
+        DataType::new(self.ty(), self.bytes() as _)
     }
 }
 
