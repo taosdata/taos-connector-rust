@@ -1590,22 +1590,29 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_sql");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_sql");
             return Ok(());
         }
 
         let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
         let taos = WsTaos::from_dsn(dsn).await?;
 
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let tbname = format!("t_sql_{ts}");
+
         taos.exec_many([
-            "create table t_sql(ts timestamp, c1 int)",
-            "insert into t_sql values(1655793421375, 1)",
+            format!("create table {tbname} (ts timestamp, c1 int)"),
+            format!("insert into {tbname} values(1655793421375, 1)"),
         ])
         .await?;
 
@@ -1616,14 +1623,14 @@ mod cloud_tests {
             c1: i32,
         }
 
-        let mut rs = taos.query("select * from t_sql").await?;
+        let mut rs = taos.query(format!("select * from {tbname}")).await?;
         let records: Vec<Record> = rs.deserialize().try_collect().await?;
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].ts, 1655793421375);
         assert_eq!(records[0].c1, 1);
 
-        let mut rs = taos.query("select * from t_sql").await?;
+        let mut rs = taos.query(format!("select * from {tbname}")).await?;
         let values = rs.to_records().await?;
 
         assert_eq!(values.len(), 1);
@@ -1634,7 +1641,7 @@ mod cloud_tests {
         );
         assert_eq!(values[0][1], Value::Int(1));
 
-        taos.exec("drop table t_sql").await?;
+        taos.exec(format!("drop table {tbname}")).await?;
 
         Ok(())
     }
@@ -1650,22 +1657,29 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_write_raw_block");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_write_raw_block");
             return Ok(());
         }
 
         let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
         let taos = WsTaos::from_dsn(dsn).await?;
 
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let tbname = format!("t_raw_block_{ts}");
+
         taos.exec_many([
-            "drop table if exists t_raw_block",
-            "create table t_raw_block(ts timestamp, c1 bool)",
+            format!("drop table if exists {tbname}"),
+            format!("create table {tbname} (ts timestamp, c1 bool)"),
         ])
         .await?;
 
@@ -1680,13 +1694,13 @@ mod cloud_tests {
             Precision::Millisecond,
         );
 
-        raw.with_table_name("t_raw_block");
+        raw.with_table_name(&tbname);
 
         dbg!(&raw);
 
         taos.write_raw_block(&raw).await?;
 
-        let mut rs = taos.query("select * from t_raw_block").await?;
+        let mut rs = taos.query(format!("select * from {tbname}")).await?;
 
         #[derive(Debug, serde::Deserialize)]
         struct Record {
@@ -1700,7 +1714,7 @@ mod cloud_tests {
         assert_eq!(records[0].ts, 2199023255552);
         assert_eq!(records[0].c1, None);
 
-        taos.exec("drop table t_raw_block").await?;
+        taos.exec(format!("drop table {tbname}")).await?;
 
         Ok(())
     }

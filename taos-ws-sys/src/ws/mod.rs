@@ -41,6 +41,13 @@ pub type TAOS_ROW = *mut *mut c_void;
 #[allow(non_camel_case_types)]
 pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
 
+const DEFAULT_HOST: &str = "localhost";
+const DEFAULT_PORT: u16 = 6041;
+const DEFAULT_CLOUD_PORT: u16 = 443;
+const DEFAULT_USER: &str = "root";
+const DEFAULT_PASS: &str = "taosdata";
+const DEFAULT_DB: &str = "";
+
 #[repr(C)]
 #[derive(Debug, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -165,38 +172,15 @@ unsafe fn connect(
     db: *const c_char,
     port: u16,
 ) -> TaosResult<Taos> {
-    const DEFAULT_HOST: &str = "localhost";
-    const DEFAULT_PORT: u16 = 6041;
-    const DEFAULT_CLOUD_PORT: u16 = 443;
-    const DEFAULT_USER: &str = "root";
-    const DEFAULT_PASS: &str = "taosdata";
-    const DEFAULT_DB: &str = "";
-
-    #[inline]
-    fn is_cloud(host: &str) -> bool {
-        host.contains("cloud.tdengine") || host.contains("cloud.taosdata")
-    }
-
-    #[inline]
-    fn get_port(host: &str, port: u16) -> u16 {
-        if port != 0 {
-            port
-        } else if is_cloud(host) {
-            DEFAULT_CLOUD_PORT
-        } else {
-            DEFAULT_PORT
-        }
-    }
-
     let addr = if !ip.is_null() {
         let ip = CStr::from_ptr(ip).to_str()?;
-        let port = get_port(ip, port);
+        let port = util::resolve_port(ip, port);
         format!("{ip}:{port}")
     } else if let Some(addr) = config::adapter_list() {
         addr.to_string()
     } else {
         let host = DEFAULT_HOST;
-        let port = get_port(host, port);
+        let port = util::resolve_port(host, port);
         format!("{host}:{port}")
     };
 
@@ -220,7 +204,7 @@ unsafe fn connect(
 
     let compression = config::compression();
 
-    let dsn = if is_cloud(&addr) && user == "token" {
+    let dsn = if util::is_cloud_host(&addr) && user == "token" {
         format!("wss://{addr}/{db}?token={pass}&compression={compression}")
     } else {
         format!("ws://{user}:{pass}@{addr}/{db}?compression={compression}")
@@ -767,6 +751,62 @@ mod tests {
             drop(arg);
             let cfg_dir = config::config_dir();
             assert_eq!(cfg_dir, FastStr::new("/etc/taos"));
+        }
+    }
+}
+
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use std::ffi::CString;
+
+    use super::*;
+
+    #[test]
+    fn test_taos_connect() {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_taos_connect");
+            return;
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_taos_connect");
+            return;
+        }
+
+        let url = url.unwrap().strip_prefix("https://").unwrap().to_string();
+        let url = CString::new(url).unwrap();
+        let token = CString::new(token.unwrap()).unwrap();
+
+        unsafe {
+            let taos = taos_connect(
+                url.as_ptr(),
+                c"token".as_ptr(),
+                token.as_ptr(),
+                ptr::null(),
+                0,
+            );
+            assert!(!taos.is_null());
+            taos_close(taos);
+
+            let taos = taos_connect(
+                url.as_ptr(),
+                c"token".as_ptr(),
+                token.as_ptr(),
+                ptr::null(),
+                443,
+            );
+            assert!(!taos.is_null());
+            taos_close(taos);
         }
     }
 }

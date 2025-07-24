@@ -149,6 +149,7 @@ impl<M, D> MessageSet<M, D> {
             MessageSet::Data(_) => None,
         }
     }
+
     pub fn data(&mut self) -> Option<&mut D> {
         match self {
             MessageSet::Meta(_) => None,

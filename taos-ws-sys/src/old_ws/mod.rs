@@ -2011,7 +2011,7 @@ mod tests {
 
     #[test]
     fn kepware_connect() {
-        let stack_size = 512 * 1024;
+        let stack_size = 1024 * 1024;
 
         let handle = thread::Builder::new()
             .stack_size(stack_size)
@@ -2608,13 +2608,13 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_connect");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_connect");
             return Ok(());
         }
 

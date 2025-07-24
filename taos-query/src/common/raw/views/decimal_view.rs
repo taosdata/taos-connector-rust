@@ -205,6 +205,7 @@ macro_rules! impl_from_iter {
         {
             Self::from_decimals(values.into_iter().map(|v| v.as_ref().parse().ok()))
         }
+
         /// Convert decimals to TDengine values.
         ///
         /// Returns the list if error.
@@ -240,9 +241,10 @@ macro_rules! impl_from_iter {
             });
             Ok(Self::from_values(values, precision, scale))
         }
+
         pub(super) fn from_bigdecimal_with<I, T>(values: I, prec_scale: PrecScale) -> Self
         where
-            T: TryInto<Option<bigdecimal::BigDecimal>>,
+            T: TryInto<Option<BigDecimal>>,
             I: IntoIterator<Item = T>,
         {
             let values = values.into_iter().map(|v| {
@@ -257,6 +259,7 @@ macro_rules! impl_from_iter {
             });
             Self::from_values(values, prec_scale.prec, prec_scale.scale)
         }
+
         pub fn from_values<I, T>(values: I, precision: u8, scale: u8) -> Self
         where
             T: Into<Option<$ty>>,
@@ -358,7 +361,7 @@ mod tests {
     use crate::common::decimal::Decimal;
 
     #[test]
-    fn from_iter_64_test() -> anyhow::Result<()> {
+    fn test_from_iter_64() -> anyhow::Result<()> {
         let view = DecimalView::<i64>::from_values([Some(12345), None, Some(22), Some(5)], 10, 2);
 
         let (precision, scale) = view.precision_and_scale();
@@ -415,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn from_iter_128_test() -> anyhow::Result<()> {
+    fn test_from_iter_128() -> anyhow::Result<()> {
         let view = DecimalView::<i128>::from_values([Some(12345), None, Some(22), Some(5)], 10, 2);
 
         let (precision, scale) = view.precision_and_scale();
@@ -519,9 +522,9 @@ mod tests {
         assert_eq!(d1.as_bigint_and_exponent().1, 2);
         let d2 = d1.with_scale(3);
         assert_eq!(d2.as_bigint_and_exponent().1, 3);
+
         let ps = PrecScale::new(16, 21, 4);
         let view = DecimalView::<i128>::from_bigdecimal_with([Some(d1), Some(d2)], ps);
-
         assert_eq!(view.len(), 2);
         assert_eq!(view.precision_and_scale(), (21, 4));
 
@@ -529,7 +532,8 @@ mod tests {
         assert_eq!(decimal.data, 123456789012345678900);
         assert_eq!(decimal.precision, 21);
         assert_eq!(decimal.scale, 4);
-        let decimal = unsafe { view.get_unchecked(0) }.unwrap();
+
+        let decimal = unsafe { view.get_unchecked(1) }.unwrap();
         assert_eq!(decimal.data, 123456789012345678900);
         assert_eq!(decimal.precision, 21);
         assert_eq!(decimal.scale, 4);
@@ -540,6 +544,7 @@ mod tests {
     #[test]
     fn test_from_decimals() {
         use bigdecimal::BigDecimal;
+
         let decimals = ["1.2", "1.23", "10.234"];
         let values = decimals
             .into_iter()

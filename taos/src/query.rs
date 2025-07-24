@@ -1557,13 +1557,13 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_sml_line");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_sml_line");
             return Ok(());
         }
 
@@ -1626,13 +1626,13 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_sml_telnet");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_sml_telnet");
             return Ok(());
         }
 
@@ -1702,13 +1702,13 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_sml_json");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_sml_json");
             return Ok(());
         }
 
@@ -1763,13 +1763,13 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_is_enterprise_edition");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_is_enterprise_edition");
             return Ok(());
         }
 
@@ -1790,20 +1790,18 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_get_edition");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_get_edition");
             return Ok(());
         }
 
         let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
-
         let builder = TaosBuilder::from_dsn(dsn)?;
-
         assert!(builder.ready().await);
 
         let edition = builder.assert_enterprise_edition().await;

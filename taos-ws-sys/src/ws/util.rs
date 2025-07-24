@@ -2,6 +2,8 @@ use std::ffi::CStr;
 
 use libc::{setlocale, LC_CTYPE};
 
+use crate::ws;
+
 pub fn get_system_locale() -> String {
     #[cfg(target_os = "windows")]
     {
@@ -21,6 +23,20 @@ pub fn get_system_locale() -> String {
             }
         }
         "en_US.UTF-8".to_string()
+    }
+}
+
+pub fn is_cloud_host(host: &str) -> bool {
+    host.contains("cloud.tdengine") || host.contains("cloud.taosdata")
+}
+
+pub fn resolve_port(host: &str, port: u16) -> u16 {
+    if port != 0 {
+        port
+    } else if is_cloud_host(host) {
+        ws::DEFAULT_CLOUD_PORT
+    } else {
+        ws::DEFAULT_PORT
     }
 }
 
