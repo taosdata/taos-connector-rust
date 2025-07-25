@@ -32,10 +32,10 @@ macro_rules! _impl_inline_lines {
             }
 
             impl InlineBytes<$ty> {
-                #[inline]
                 /// # Safety
                 ///
                 /// Do not use it directly.
+                #[inline]
                 pub unsafe fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
                     &*ptr.cast::<InlineBytes<$ty>>()
                 }

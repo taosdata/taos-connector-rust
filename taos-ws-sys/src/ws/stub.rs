@@ -4,17 +4,25 @@ use std::ffi::{c_char, c_int, c_void};
 use std::ptr;
 
 use crate::ws::query::{__taos_notify_fn_t, TAOS_DB_ROUTE_INFO};
-use crate::ws::stmt::TAOS_FIELD_E;
 use crate::ws::tmq::{tmq_raw_data, tmq_t};
 use crate::ws::{TAOS, TAOS_FIELD, TAOS_RES, TSDB_OPTION_CONNECTION};
 
 #[allow(non_camel_case_types)]
 pub type __taos_async_whitelist_fn_t = extern "C" fn(
     param: *mut c_void,
-    code: i32,
+    code: c_int,
     taos: *mut TAOS,
-    numOfWhiteLists: i32,
+    numOfWhiteLists: c_int,
     pWhiteLists: *mut u64,
+);
+
+#[allow(non_camel_case_types)]
+pub type __taos_async_whitelist_dual_stack_fn_t = extern "C" fn(
+    param: *mut c_void,
+    code: c_int,
+    taos: *mut TAOS,
+    numOfWhiteLists: c_int,
+    pWhiteLists: *mut *mut c_char,
 );
 
 #[no_mangle]
@@ -150,6 +158,14 @@ pub extern "C" fn taos_fetch_whitelist_a(
 }
 
 #[no_mangle]
+pub extern "C" fn taos_fetch_whitelist_dual_stack_a(
+    taos: *mut TAOS,
+    fp: __taos_async_whitelist_dual_stack_fn_t,
+    param: *mut c_void,
+) {
+}
+
+#[no_mangle]
 pub extern "C" fn tmq_get_raw(res: *mut TAOS_RES, raw: *mut tmq_raw_data) -> i32 {
     0
 }
@@ -240,11 +256,6 @@ pub extern "C" fn taos_options_connection(
 #[allow(non_snake_case)]
 pub extern "C" fn taos_write_crashinfo(signum: c_int, sigInfo: *mut c_void, context: *mut c_void) {}
 
-#[no_mangle]
-pub extern "C" fn taos_fetch_fields_e(res: *mut TAOS_RES) -> *mut TAOS_FIELD_E {
-    ptr::null_mut()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,16 +316,40 @@ mod tests {
         #[allow(non_snake_case)]
         extern "C" fn taos_fetch_whitelist_a_cb(
             param: *mut c_void,
-            code: i32,
+            code: c_int,
             taos: *mut TAOS,
-            numOfWhiteLists: i32,
+            numOfWhiteLists: c_int,
             pWhiteLists: *mut u64,
+        ) {
+        }
+
+        #[allow(non_snake_case)]
+        extern "C" fn taos_fetch_whitelist_dual_stack_a_cb(
+            param: *mut c_void,
+            code: c_int,
+            taos: *mut TAOS,
+            numOfWhiteLists: c_int,
+            pWhiteLists: *mut *mut c_char,
         ) {
         }
 
         taos_fetch_whitelist_a_cb(ptr::null_mut(), 0, ptr::null_mut(), 0, ptr::null_mut());
 
         taos_fetch_whitelist_a(ptr::null_mut(), taos_fetch_whitelist_a_cb, ptr::null_mut());
+
+        taos_fetch_whitelist_dual_stack_a_cb(
+            ptr::null_mut(),
+            0,
+            ptr::null_mut(),
+            0,
+            ptr::null_mut(),
+        );
+
+        taos_fetch_whitelist_dual_stack_a(
+            ptr::null_mut(),
+            taos_fetch_whitelist_dual_stack_a_cb,
+            ptr::null_mut(),
+        );
 
         let code = tmq_get_raw(ptr::null_mut(), ptr::null_mut());
         assert_eq!(code, 0);
@@ -380,8 +415,5 @@ mod tests {
         assert_eq!(code, 0);
 
         taos_write_crashinfo(0, ptr::null_mut(), ptr::null_mut());
-
-        let field_e = taos_fetch_fields_e(ptr::null_mut());
-        assert_eq!(field_e, ptr::null_mut());
     }
 }

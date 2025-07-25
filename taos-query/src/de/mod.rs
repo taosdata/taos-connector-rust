@@ -309,14 +309,15 @@ mod tests {
             assert_eq!(record, Record { a: None });
         }
     }
+
     #[test]
     fn test_borrowed_values_deserializer() {
-        let fields = vec![
+        let fields = [
             Field::new("a", Ty::Int, 4),
             Field::new("b", Ty::VarChar, 128),
             Field::new("c", Ty::NChar, 128),
         ];
-        let values = vec![
+        let values = [
             BorrowedValue::Null(Ty::Int),
             BorrowedValue::Null(Ty::VarChar),
             BorrowedValue::Null(Ty::NChar),
@@ -396,14 +397,15 @@ mod tests {
             );
         }
     }
+
     #[test]
     fn test_record_deserializer() {
-        let fields = vec![
+        let fields = [
             Field::new("a", Ty::Int, 4),
             Field::new("b", Ty::Int, 4),
             Field::new("c", Ty::Int, 4),
         ];
-        let values = vec![
+        let values = [
             BorrowedValue::Int(1),
             BorrowedValue::Int(2),
             BorrowedValue::Int(3),

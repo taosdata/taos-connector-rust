@@ -7,6 +7,7 @@ use std::ffi::c_void;
 use std::fmt::{Debug, Display};
 use std::io::Cursor;
 use std::ops::Deref;
+use std::ops::DerefMut;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::AtomicU32;
@@ -246,7 +247,7 @@ impl RawBlock {
         let cols = fields.len();
 
         let mut schemas_bytes =
-            bytes::BytesMut::with_capacity(cols * std::mem::size_of::<ColSchema>());
+            bytes::BytesMut::with_capacity(cols * std::mem::size_of::<DataType>());
         fields
             .iter()
             .for_each(|f| schemas_bytes.put(f.to_column_schema().as_bytes()));
@@ -400,11 +401,7 @@ impl RawBlock {
 
                     data_lengths[i] = *length * rows as u32;
                 }
-                Ty::Decimal | Ty::Decimal64 => unimplemented!("decimal type not supported"),
-                Ty::VarBinary => todo!(),
-                Ty::Blob => todo!(),
-                Ty::MediumBlob => todo!(),
-                Ty::Geometry => todo!(),
+                _ => todo!(),
             }
         }
 
@@ -441,7 +438,7 @@ impl RawBlock {
         debug_assert_eq!(bytes.len(), len);
         let group_id = header.group_id;
 
-        let schema_end = schema_start + cols * std::mem::size_of::<ColSchema>();
+        let schema_end = schema_start + cols * std::mem::size_of::<DataType>();
         let schemas = Schemas::from(bytes.slice(schema_start..schema_end));
 
         let lengths_end = schema_end + std::mem::size_of::<u32>() * cols;
@@ -467,28 +464,36 @@ impl RawBlock {
                 }};
             }
 
+            macro_rules! _variable_value {
+                ($ty:ident) => {{
+                    let o1 = data_offset;
+                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
+                    data_offset = o2 + length;
+                    let offsets = Offsets::from(bytes.slice(o1..o2));
+                    let data = bytes.slice(o2..data_offset);
+                    ColumnView::$ty(paste::paste! {[<$ty View>] {
+                        offsets,
+                        data,
+                    }})
+                }};
+            }
+
             macro_rules! _decimal_value {
-                ($ty: expr, $prim: ty) => {{
+                ($ty:expr, $prim:ty) => {{
                     let o1 = data_offset;
                     let o2 = data_offset + ((rows + 7) >> 3); // null bitmap len.
                     data_offset = o2 + rows * std::mem::size_of::<$prim>();
                     let nulls = bytes.slice(o1..o2);
                     let data = bytes.slice(o2..data_offset);
-                    // precision + scale
-                    let decimal_schema = schema.len;
-                    let precision = ((decimal_schema >> 8) & 0xFF) as _;
-                    let scale = (decimal_schema & 0xFF) as _;
-                    $ty(DecimalView {
-                        nulls: NullBits(nulls),
+                    $ty(DecimalView::new(
+                        NullBits(nulls),
                         data,
-                        precision,
-                        scale,
-                        _p: std::marker::PhantomData,
-                    })
+                        schema.as_prec_scale_unchecked(),
+                    ))
                 }};
             }
 
-            let column = match schema.ty {
+            let column = match schema.ty() {
                 Ty::Null => unreachable!("raw block does not contains type NULL"),
                 Ty::Bool => _primitive_value!(Bool, i8),
                 Ty::TinyInt => _primitive_value!(TinyInt, i8),
@@ -501,6 +506,13 @@ impl RawBlock {
                 Ty::UBigInt => _primitive_value!(UBigInt, u64),
                 Ty::Float => _primitive_value!(Float, f32),
                 Ty::Double => _primitive_value!(Double, f64),
+                Ty::VarChar => _variable_value!(VarChar),
+                Ty::VarBinary => _variable_value!(VarBinary),
+                Ty::Geometry => _variable_value!(Geometry),
+                Ty::Json => _variable_value!(Json),
+                Ty::Blob => _variable_value!(Blob),
+                Ty::Decimal => _decimal_value!(ColumnView::Decimal, i128),
+                Ty::Decimal64 => _decimal_value!(ColumnView::Decimal64, i64),
                 Ty::Timestamp => {
                     let o1 = data_offset;
                     let o2 = data_offset + ((rows + 7) >> 3);
@@ -512,14 +524,6 @@ impl RawBlock {
                         data,
                         precision,
                     })
-                }
-                Ty::VarChar => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-                    ColumnView::VarChar(VarCharView { offsets, data })
                 }
                 Ty::NChar => {
                     let o1 = data_offset;
@@ -535,39 +539,12 @@ impl RawBlock {
                         layout: layout.clone(),
                     })
                 }
-                Ty::Json => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-                    ColumnView::Json(JsonView { offsets, data })
-                }
-                Ty::VarBinary => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data: Bytes = bytes.slice(o2..data_offset);
-                    ColumnView::VarBinary(VarBinaryView { offsets, data })
-                }
-                Ty::Decimal => _decimal_value!(ColumnView::Decimal, i128),
-                Ty::Decimal64 => _decimal_value!(ColumnView::Decimal64, i64),
-                Ty::Geometry => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-                    ColumnView::Geometry(GeometryView { offsets, data })
-                }
-                ty => {
-                    unreachable!("unsupported type: {ty}")
-                }
+                ty => unreachable!("unsupported type: {ty}"),
             };
             columns.push(column);
             debug_assert!(data_offset <= len);
         }
+
         RawBlock {
             layout,
             version: Version::V3,
@@ -594,7 +571,7 @@ impl RawBlock {
         let code = cursor.read_i32::<byteorder::LittleEndian>()?;
         let message = cursor.get_str()?;
         if code != 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, message));
+            return Err(std::io::Error::other(message));
         }
 
         cursor.read_u64::<byteorder::LittleEndian>()?; //skip msg id
@@ -708,7 +685,7 @@ impl RawBlock {
     }
 
     #[inline]
-    pub fn schemas(&self) -> &[ColSchema] {
+    pub fn schemas(&self) -> &[DataType] {
         &self.schemas
     }
 
@@ -837,6 +814,15 @@ impl RawBlock {
                 }
                 offsets
             }
+            ColumnView::Blob(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
             _ => vec![],
         }
     }
@@ -863,12 +849,12 @@ impl RawBlock {
         Some(unsafe { self.get_ref_unchecked(row, col) })
     }
 
-    #[inline]
     /// Get one value at `(row, col)` of the block.
     ///
     /// # Safety
     ///
     /// Ensure that `row` and `col` not exceed the limit of the block.
+    #[inline]
     pub unsafe fn get_ref_unchecked(&self, row: usize, col: usize) -> BorrowedValue {
         self.columns.get_unchecked(col).get_ref_unchecked(row)
     }
@@ -892,7 +878,7 @@ impl RawBlock {
         self.schemas()
             .iter()
             .zip(self.field_names())
-            .map(|(schema, name)| Field::new(name, schema.ty, schema.len))
+            .map(|(schema, name)| Field::new(name, schema.ty(), schema.len()))
             .collect_vec()
     }
 
@@ -990,14 +976,29 @@ impl Display for PrettyBlock<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use prettytable::{Row, Table};
         let mut table = Table::new();
-        writeln!(
-            f,
-            "Table view with {} rows, {} columns, table name \"{}\"",
-            self.nrows(),
-            self.ncols(),
-            self.table_name().unwrap_or_default(),
-        )?;
+        if let Some(table) = self.table_name() {
+            writeln!(
+                f,
+                "Table view with {} rows, {} columns, table name \"{}\"",
+                self.nrows(),
+                self.ncols(),
+                table
+            )?;
+        } else {
+            writeln!(
+                f,
+                "Table view with {} rows, {} columns",
+                self.nrows(),
+                self.ncols(),
+            )?;
+        }
         table.set_titles(Row::from_iter(self.field_names()));
+        let types: Row = self
+            .column_views()
+            .iter()
+            .map(|view| view.schema().to_string())
+            .collect();
+        table.add_row(types);
         let nrows = self.nrows();
         const MAX_DISPLAY_ROWS: usize = 10;
         let mut rows_iter = self.raw.rows();
@@ -1009,7 +1010,7 @@ impl Display for PrettyBlock<'_> {
             for row in (&mut rows_iter).take(MAX_DISPLAY_ROWS) {
                 table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
-            table.add_row(std::iter::repeat("...").take(self.ncols()).collect());
+            table.add_row(std::iter::repeat_n("...", self.ncols()).collect());
             for row in rows_iter.skip(nrows - 2 * MAX_DISPLAY_ROWS) {
                 table.add_row(row.map(|s| s.1.to_string().unwrap_or_default()).collect());
             }
@@ -1387,7 +1388,7 @@ impl Deref for MultiBlockCursor {
         &self.cursor
     }
 }
-use std::ops::DerefMut;
+
 impl DerefMut for MultiBlockCursor {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.cursor
@@ -1744,9 +1745,8 @@ fn test_from_v2() {
 mod tests {
     use bytes::{BufMut, BytesMut};
 
-    use crate::common::decimal::Decimal;
-
     use super::*;
+    use crate::common::decimal::Decimal;
 
     #[test]
     fn parse_decimal64_raw_block_test() -> anyhow::Result<()> {
@@ -1768,13 +1768,13 @@ mod tests {
 
         // schema (1+4) * 3
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 2).as_bytes(), // 123.45
+            DataType::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 2).as_bytes(), // 123.45
         );
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 0).as_bytes(), // 12345
+            DataType::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 0).as_bytes(), // 12345
         );
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 5).as_bytes(), // 0.12345
+            DataType::new(Ty::Decimal64, 16 << 24 | 0 << 16 | 5 << 8 | 5).as_bytes(), // 0.12345
         );
         // 43
 
@@ -1838,13 +1838,13 @@ mod tests {
 
         // schema (1+4) * 3
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 2).as_bytes(), // 123.45
+            DataType::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 2).as_bytes(), // 123.45
         );
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 0).as_bytes(), // 12345
+            DataType::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 0).as_bytes(), // 12345
         );
         bytes.extend_from_slice(
-            ColSchema::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 5).as_bytes(), // 0.12345
+            DataType::new(Ty::Decimal, 16 << 24 | 0 << 16 | 5 << 8 | 5).as_bytes(), // 0.12345
         );
         // 43
 
@@ -1911,6 +1911,81 @@ mod tests {
                 }
             );
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_blob_raw_block() -> anyhow::Result<()> {
+        let mut bytes = BytesMut::new();
+
+        // header
+        bytes.extend_from_slice(
+            Header {
+                version: 3,
+                length: 82,
+                nrows: 1,
+                ncols: 3,
+                flag: 0,
+                group_id: 0,
+            }
+            .as_bytes(),
+        );
+
+        // schema
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
+
+        // length
+        bytes.put_u32_ne(8);
+        bytes.put_u32_ne(0);
+        bytes.put_u32_ne(7);
+
+        // blobs
+        bytes.put_i32_ne(0);
+        bytes.put_u32_ne(4);
+        bytes.put_slice(&[1, 2, 3, 4]);
+
+        bytes.put_i32_le(-1);
+
+        bytes.put_i32_ne(0);
+        bytes.put_u32_ne(3);
+        bytes.put_slice(&[2, 3, 3]);
+
+        let block = RawBlock::parse_from_raw_block(bytes, Precision::Millisecond);
+        let views = block.column_views();
+        assert_eq!(views.len(), 3);
+
+        if let Some(ColumnView::Blob(view)) = views.get(0) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [Some(vec![1, 2, 3, 4])]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        if let Some(ColumnView::Blob(view)) = views.get(1) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [None]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        if let Some(ColumnView::Blob(view)) = views.get(2) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [Some(vec![2, 3, 3])]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        let offsets = block.get_col_data_offset_unchecked(0);
+        assert_eq!(offsets, &[0]);
+
+        let offsets = block.get_col_data_offset_unchecked(1);
+        assert_eq!(offsets, &[-1]);
+
+        let offsets = block.get_col_data_offset_unchecked(2);
+        assert_eq!(offsets, &[0]);
 
         Ok(())
     }

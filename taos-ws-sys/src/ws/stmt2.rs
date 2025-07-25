@@ -568,7 +568,7 @@ impl TAOS_STMT2_BIND {
             },
             Ty::NChar => unsafe {
                 let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                let val = std::str::from_utf8_unchecked(slice).to_owned();
+                let val = str::from_utf8_unchecked(slice).to_owned();
                 Value::NChar(val)
             },
             Ty::Json => unsafe {
@@ -607,7 +607,7 @@ impl TAOS_STMT2_BIND {
 
         debug!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}, total_len: {len}");
 
-        macro_rules! view {
+        macro_rules! _fixed_view {
             ($from:expr) => {{
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const _, num) };
                 let mut vals = vec![None; num];
@@ -626,111 +626,76 @@ impl TAOS_STMT2_BIND {
             }};
         }
 
+        macro_rules! _variable_str_view {
+            ($from:ident) => {{
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
+                let mut vals = vec![None; num];
+                let mut idx = 0;
+
+                if let Some(is_nulls) = is_nulls {
+                    for i in 0..num {
+                        if is_nulls[i] == 0 {
+                            let bytes = &slice[idx..idx + lens[i] as usize];
+                            vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
+                            idx += lens[i] as usize;
+                        }
+                    }
+                } else {
+                    for i in 0..num {
+                        let bytes = &slice[idx..idx + lens[i] as usize];
+                        vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
+                        idx += lens[i] as usize;
+                    }
+                }
+
+                ColumnView::$from::<&str, _, _, _>(vals)
+            }};
+        }
+
+        macro_rules! _variable_bytes_view {
+            ($from:ident) => {{
+                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
+                let mut vals = vec![None; num];
+                let mut idx = 0;
+
+                if let Some(is_nulls) = is_nulls {
+                    for i in 0..num {
+                        if is_nulls[i] == 0 {
+                            let val = &slice[idx..idx + lens[i] as usize];
+                            vals[i] = Some(val);
+                            idx += lens[i] as usize;
+                        }
+                    }
+                } else {
+                    for i in 0..num {
+                        let val = &slice[idx..idx + lens[i] as usize];
+                        vals[i] = Some(val);
+                        idx += lens[i] as usize;
+                    }
+                }
+
+                ColumnView::$from::<&[u8], _, _, _>(vals)
+            }};
+        }
+
         let view = match ty {
-            Ty::Bool => view!(ColumnView::from_bools),
-            Ty::TinyInt => view!(ColumnView::from_tiny_ints),
-            Ty::SmallInt => view!(ColumnView::from_small_ints),
-            Ty::Int => view!(ColumnView::from_ints),
-            Ty::BigInt => view!(ColumnView::from_big_ints),
-            Ty::UTinyInt => view!(ColumnView::from_unsigned_tiny_ints),
-            Ty::USmallInt => view!(ColumnView::from_unsigned_small_ints),
-            Ty::UInt => view!(ColumnView::from_unsigned_ints),
-            Ty::UBigInt => view!(ColumnView::from_unsigned_big_ints),
-            Ty::Float => view!(ColumnView::from_floats),
-            Ty::Double => view!(ColumnView::from_doubles),
-            Ty::Timestamp => view!(ColumnView::from_millis_timestamp),
-            Ty::VarChar => {
-                let slice = unsafe { slice::from_raw_parts(self.buffer as *const _, len) };
-                let mut vals = vec![None; num];
-                let mut idx = 0;
-
-                if let Some(is_nulls) = is_nulls {
-                    for i in 0..num {
-                        if is_nulls[i] == 0 {
-                            let bytes = &slice[idx..idx + lens[i] as usize];
-                            vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
-                            idx += lens[i] as usize;
-                        }
-                    }
-                } else {
-                    for i in 0..num {
-                        let bytes = &slice[idx..idx + lens[i] as usize];
-                        vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
-                        idx += lens[i] as usize;
-                    }
-                }
-
-                ColumnView::from_varchar::<&str, _, _, _>(vals)
-            }
-            Ty::NChar => {
-                let slice = unsafe { slice::from_raw_parts(self.buffer as *const _, len) };
-                let mut vals = vec![None; num];
-                let mut idx = 0;
-
-                if let Some(is_nulls) = is_nulls {
-                    for i in 0..num {
-                        if is_nulls[i] == 0 {
-                            let bytes = &slice[idx..idx + lens[i] as usize];
-                            vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
-                            idx += lens[i] as usize;
-                        }
-                    }
-                } else {
-                    for i in 0..num {
-                        let bytes = &slice[idx..idx + lens[i] as usize];
-                        vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
-                        idx += lens[i] as usize;
-                    }
-                }
-
-                ColumnView::from_nchar::<&str, _, _, _>(vals)
-            }
-            Ty::VarBinary => {
-                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
-                let mut vals = vec![None; num];
-                let mut idx = 0;
-
-                if let Some(is_nulls) = is_nulls {
-                    for i in 0..num {
-                        if is_nulls[i] == 0 {
-                            let val = &slice[idx..idx + lens[i] as usize];
-                            vals[i] = Some(val);
-                            idx += lens[i] as usize;
-                        }
-                    }
-                } else {
-                    for i in 0..num {
-                        let val = &slice[idx..idx + lens[i] as usize];
-                        vals[i] = Some(val);
-                        idx += lens[i] as usize;
-                    }
-                }
-
-                ColumnView::from_bytes::<&[u8], _, _, _>(vals)
-            }
-            Ty::Geometry => {
-                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
-                let mut vals = vec![None; num];
-                let mut idx = 0;
-
-                if let Some(is_nulls) = is_nulls {
-                    for i in 0..num {
-                        if is_nulls[i] == 0 {
-                            let val = &slice[idx..idx + lens[i] as usize];
-                            vals[i] = Some(val);
-                            idx += lens[i] as usize;
-                        }
-                    }
-                } else {
-                    for i in 0..num {
-                        let val = &slice[idx..idx + lens[i] as usize];
-                        vals[i] = Some(val);
-                        idx += lens[i] as usize;
-                    }
-                }
-
-                ColumnView::from_geobytes::<&[u8], _, _, _>(vals)
-            }
+            Ty::Bool => _fixed_view!(ColumnView::from_bools),
+            Ty::TinyInt => _fixed_view!(ColumnView::from_tiny_ints),
+            Ty::SmallInt => _fixed_view!(ColumnView::from_small_ints),
+            Ty::Int => _fixed_view!(ColumnView::from_ints),
+            Ty::BigInt => _fixed_view!(ColumnView::from_big_ints),
+            Ty::UTinyInt => _fixed_view!(ColumnView::from_unsigned_tiny_ints),
+            Ty::USmallInt => _fixed_view!(ColumnView::from_unsigned_small_ints),
+            Ty::UInt => _fixed_view!(ColumnView::from_unsigned_ints),
+            Ty::UBigInt => _fixed_view!(ColumnView::from_unsigned_big_ints),
+            Ty::Float => _fixed_view!(ColumnView::from_floats),
+            Ty::Double => _fixed_view!(ColumnView::from_doubles),
+            Ty::Timestamp => _fixed_view!(ColumnView::from_millis_timestamp),
+            Ty::VarChar => _variable_str_view!(from_varchar),
+            Ty::NChar => _variable_str_view!(from_nchar),
+            Ty::Blob => _variable_str_view!(from_blob_bytes),
+            Ty::VarBinary => _variable_bytes_view!(from_bytes),
+            Ty::Geometry => _variable_bytes_view!(from_geobytes),
             _ => todo!(),
         };
 
@@ -1581,6 +1546,147 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1739876374");
+            taos_close(taos);
+        }
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_stmt2_blob() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1753168041",
+                    "create database test_1753168041",
+                    "use test_1753168041",
+                    "create table t0 (ts timestamp, c1 int, c2 blob)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into t0 values(?, ?, ?)";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![
+                1739521477831i64,
+                1739521477832,
+                1739521477833,
+                1739521477834,
+            ];
+            let mut length = vec![8, 8, 8, 8];
+            let mut is_null = vec![0, 0, 0, 0];
+            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+
+            let mut buffer = vec![1, 2, 3, 4];
+            let mut length = vec![4, 4, 4, 4];
+            let mut is_null = vec![0, 0, 0, 0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let mut buffer = "hello".as_bytes().to_vec();
+            buffer.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]);
+            let mut length = vec![0, 0, 5, 4];
+            let mut is_null = vec![1, 0, 0, 0];
+            let c2 = new_bind!(Ty::Blob, buffer, length, is_null);
+
+            let mut col = vec![ts, c1, c2];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: cols.len() as _,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+            assert_eq!(affected_rows, 4);
+
+            let sql = c"select * from t0 where ts > ?";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![1739521477830i64];
+            let mut length = vec![8];
+            let mut is_null = vec![0];
+            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+
+            let mut col = vec![ts];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: cols.len() as _,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+            assert_eq!(affected_rows, 0);
+
+            let res = taos_stmt2_result(stmt2);
+            assert!(!res.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 3);
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "1739521477831 1 NULL",
+            );
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "1739521477832 2 \\x",
+            );
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "1739521477833 3 \\x68656C6C6F",
+            );
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut str = vec![0 as c_char; 1024];
+            let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "1739521477834 4 \\x12345678",
+            );
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1753168041");
             taos_close(taos);
         }
     }

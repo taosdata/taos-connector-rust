@@ -7,9 +7,9 @@ pub(super) mod tmq {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    use taos_query::prelude::tokio::sync::oneshot;
     use taos_query::tmq::{Assignment, VGroupId};
     use taos_query::RawError;
+    use tokio::sync::oneshot;
     use tracing::trace;
 
     use super::Topics;
@@ -718,9 +718,8 @@ pub(super) mod list {
                         .to_str()
                         .expect("topic name must be valid utf8 str")
                 })
-                .map(|s| {
+                .inspect(|_| {
                     self.index += 1;
-                    s
                 })
         }
     }

@@ -23,16 +23,15 @@ impl Debug for Code {
 }
 
 impl Code {
-    // Constants
-    #[allow(non_upper_case_globals)]
-    #[deprecated(since = "0.9.0", note = "Use Code::FAILED instead")]
-    pub const Failed: Code = Code(0xFFFF);
     #[allow(non_upper_case_globals)]
     #[deprecated(since = "0.9.0", note = "Use Code::SUCCESS instead")]
     pub const Success: Code = Code(0);
+    #[allow(non_upper_case_globals)]
+    #[deprecated(since = "0.9.0", note = "Use Code::FAILED instead")]
+    pub const Failed: Code = Code(0xFFFF);
 
-    pub const FAILED: Code = Code(0xFFFF);
     pub const SUCCESS: Code = Code(0);
+    pub const FAILED: Code = Code(0xFFFF);
 
     pub const INVALID_PARA: Code = Code(0x0118);
     pub const COLUMN_EXISTS: Code = Code(0x036B);

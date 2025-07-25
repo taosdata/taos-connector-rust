@@ -8,7 +8,6 @@ use std::collections::BTreeMap;
 use std::fmt::{Debug, Display};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 pub use common::RawBlock;
@@ -70,6 +69,7 @@ pub trait BlockCodec {
 pub struct PingError {
     msg: String,
 }
+
 impl Display for PingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.msg)
@@ -129,13 +129,15 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
     ///
     /// Here we will use some default options with [r2d2::Builder]
     ///
-    /// - max_lifetime: 12h,
-    /// - max_size: 500,
-    /// - min_idle: 2.
-    /// - connection_timeout: 60s.
+    /// - max_lifetime: 12h
+    /// - max_size: 500
+    /// - min_idle: 2
+    /// - connection_timeout: 60s
     #[cfg(feature = "r2d2")]
-    fn pool(self) -> RawResult<r2d2::Pool<Manager<Self>>, r2d2::Error> {
-        self.pool_builder().build(Manager::new(self))
+    fn pool(self) -> RawResult<r2d2::Pool<Manager<Self>>> {
+        self.pool_builder()
+            .build(Manager::new(self))
+            .map_err(RawError::from_any)
     }
 
     /// [r2d2::Builder] generation from config.
@@ -155,16 +157,17 @@ pub trait TBuilder: Sized + Send + Sync + 'static {
     fn with_pool_builder(
         self,
         builder: r2d2::Builder<Manager<Self>>,
-    ) -> RawResult<r2d2::Pool<Manager<Self>>, r2d2::Error> {
-        builder.build(Manager::new(self))
+    ) -> RawResult<r2d2::Pool<Manager<Self>>> {
+        builder
+            .build(Manager::new(self))
+            .map_err(RawError::from_any)
     }
 }
 
 #[cfg(feature = "r2d2")]
 impl<T: TBuilder> r2d2::ManageConnection for Manager<T> {
     type Connection = T::Target;
-
-    type Error = T::Error;
+    type Error = RawError;
 
     fn connect(&self) -> RawResult<Self::Connection> {
         self.deref().build()
@@ -254,7 +257,7 @@ pub trait AsyncTBuilder: Sized + Send + Sync + 'static {
             max_size: 5000,
             timeouts: deadpool::managed::Timeouts {
                 wait: None,
-                create: Some(Duration::from_secs(30)),
+                create: Some(std::time::Duration::from_secs(30)),
                 recycle: None,
             },
             queue_mode: deadpool::managed::QueueMode::Fifo,
@@ -288,6 +291,7 @@ impl<T> Deref for Manager<T> {
         &self.manager
     }
 }
+
 impl<T> DerefMut for Manager<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.manager
@@ -325,8 +329,8 @@ impl<T: TBuilder> Manager<T> {
 
     #[cfg(feature = "r2d2")]
     #[inline]
-    pub fn into_pool(self) -> RawResult<r2d2::Pool<Self>, r2d2::Error> {
-        r2d2::Pool::new(self)
+    pub fn into_pool(self) -> RawResult<r2d2::Pool<Self>> {
+        r2d2::Pool::new(self).map_err(RawError::from_any)
     }
 
     #[cfg(feature = "r2d2")]
@@ -334,8 +338,8 @@ impl<T: TBuilder> Manager<T> {
     pub fn into_pool_with_builder(
         self,
         builder: r2d2::Builder<Self>,
-    ) -> RawResult<r2d2::Pool<Self>, r2d2::Error> {
-        builder.build(self)
+    ) -> RawResult<r2d2::Pool<Self>> {
+        builder.build(self).map_err(RawError::from_any)
     }
 }
 
@@ -345,12 +349,13 @@ compile_error!("Use only ONE of r2d2 or deadpool");
 #[cfg(feature = "r2d2")]
 pub type Pool<T> = r2d2::Pool<Manager<T>>;
 
-#[cfg(all(feature = "deadpool", not(feature = "r2d2")))]
+#[cfg(feature = "deadpool")]
 pub type Pool<T> = deadpool::managed::Pool<Manager<T>>;
 
 #[cfg(feature = "r2d2")]
 pub type PoolBuilder<T> = r2d2::Builder<Manager<T>>;
 
+#[cfg(feature = "deadpool")]
 #[async_trait]
 impl<T: AsyncTBuilder> deadpool::managed::Manager for Manager<T> {
     type Type = <T as AsyncTBuilder>::Target;
@@ -375,6 +380,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     use super::*;
+
     #[derive(Debug)]
     struct Conn;
 
@@ -541,6 +547,7 @@ mod tests {
             Ok(())
         }
     }
+
     #[test]
     fn query_deserialize() {
         let conn = Conn;
@@ -551,9 +558,10 @@ mod tests {
         let mut rs = conn.query("abc").unwrap();
 
         for record in rs.deserialize::<(i32, String, u8)>() {
-            let _ = dbg!(record);
+            println!("{:?}", record);
         }
     }
+
     #[test]
     fn block_deserialize_borrowed() {
         let conn = Conn;
@@ -565,10 +573,11 @@ mod tests {
         for block in &mut set {
             let block = block.unwrap();
             for record in block.deserialize::<(i32,)>() {
-                dbg!(record.unwrap());
+                assert_eq!(record.unwrap(), (1i32,));
             }
         }
     }
+
     #[test]
     fn block_deserialize_borrowed_bytes() {
         let conn = Conn;
@@ -581,10 +590,11 @@ mod tests {
         for block in &mut set {
             let block = block.unwrap();
             for record in block.deserialize::<String>() {
-                dbg!(record.unwrap());
+                assert_eq!(record.unwrap(), "1");
             }
         }
     }
+
     #[cfg(feature = "async")]
     #[tokio::test]
     async fn block_deserialize_borrowed_bytes_stream() {
@@ -597,9 +607,10 @@ mod tests {
 
         for row in set.deserialize::<u8>() {
             let row = row.unwrap();
-            dbg!(row);
+            assert_eq!(row, 1);
         }
     }
+
     #[test]
     fn with_iter() {
         let conn = Conn;

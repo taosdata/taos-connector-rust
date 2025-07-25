@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use error::{set_err_and_get_code, TaosError};
+use faststr::FastStr;
 use query::QueryResultSet;
 use sml::SchemalessResultSet;
 use taos_error::Code;
@@ -13,12 +14,11 @@ use taos_log::QidManager;
 use taos_query::common::{Field, Precision, Ty};
 use taos_query::util::generate_req_id;
 use taos_query::TBuilder;
+use taos_ws::query::asyn::WS_ERROR_NO;
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
-use tracing::{debug, instrument};
-
-use crate::ws::query::TAOS_FIELD;
+use tracing::{debug, error, instrument};
 
 mod config;
 pub mod error;
@@ -28,6 +28,7 @@ pub mod stmt;
 pub mod stmt2;
 pub mod stub;
 pub mod tmq;
+pub mod util;
 
 pub type TAOS = c_void;
 
@@ -39,6 +40,13 @@ pub type TAOS_ROW = *mut *mut c_void;
 
 #[allow(non_camel_case_types)]
 pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
+
+const DEFAULT_HOST: &str = "localhost";
+const DEFAULT_PORT: u16 = 6041;
+const DEFAULT_CLOUD_PORT: u16 = 443;
+const DEFAULT_USER: &str = "root";
+const DEFAULT_PASS: &str = "taosdata";
+const DEFAULT_DB: &str = "";
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Eq)]
@@ -73,6 +81,48 @@ pub struct SafePtr<T>(pub T);
 unsafe impl<T> Send for SafePtr<T> {}
 unsafe impl<T> Sync for SafePtr<T> {}
 
+#[repr(C)]
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_FIELD_E {
+    pub name: [c_char; 65],
+    pub r#type: i8,
+    pub precision: u8,
+    pub scale: u8,
+    pub bytes: i32,
+}
+
+impl TAOS_FIELD_E {
+    pub fn new(field: &Field, precision: u8, scale: u8) -> Self {
+        let mut name = [0 as c_char; 65];
+        let field_name = field.name();
+        unsafe {
+            ptr::copy_nonoverlapping(
+                field_name.as_ptr(),
+                name.as_mut_ptr() as _,
+                field_name.len(),
+            );
+        };
+
+        Self {
+            name,
+            r#type: field.ty() as _,
+            precision,
+            scale,
+            bytes: field.bytes() as _,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub struct TAOS_FIELD {
+    pub name: [c_char; 65],
+    pub r#type: i8,
+    pub bytes: i32,
+}
+
 impl From<&Field> for TAOS_FIELD {
     fn from(field: &Field) -> Self {
         let mut name = [0 as c_char; 65];
@@ -104,7 +154,11 @@ pub unsafe extern "C" fn taos_connect(
 ) -> *mut TAOS {
     match connect(ip, user, pass, db, port) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
-        Err(err) => {
+        Err(mut err) => {
+            error!("taos_connect failed, err: {err:?}");
+            if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
+                err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
+            }
             set_err_and_get_code(err);
             ptr::null_mut()
         }
@@ -116,53 +170,44 @@ unsafe fn connect(
     user: *const c_char,
     pass: *const c_char,
     db: *const c_char,
-    mut port: u16,
+    port: u16,
 ) -> TaosResult<Taos> {
-    const DEFAULT_HOST: &str = "localhost";
-    const DEFAULT_PORT: u16 = 6041;
-    const DEFAULT_PORT_CLOUD: u16 = 443;
-    const DEFAULT_USER: &str = "root";
-    const DEFAULT_PASS: &str = "taosdata";
-    const DEFAULT_DB: &str = "";
-
-    let host = if ip.is_null() {
-        DEFAULT_HOST
+    let addr = if !ip.is_null() {
+        let ip = CStr::from_ptr(ip).to_str()?;
+        let port = util::resolve_port(ip, port);
+        format!("{ip}:{port}")
+    } else if let Some(addr) = config::adapter_list() {
+        addr.to_string()
     } else {
-        CStr::from_ptr(ip).to_str()?
+        let host = DEFAULT_HOST;
+        let port = util::resolve_port(host, port);
+        format!("{host}:{port}")
     };
 
-    let user = if user.is_null() {
-        DEFAULT_USER
-    } else {
+    let user = if !user.is_null() {
         CStr::from_ptr(user).to_str()?
+    } else {
+        DEFAULT_USER
     };
 
-    let pass = if pass.is_null() {
-        DEFAULT_PASS
-    } else {
+    let pass = if !pass.is_null() {
         CStr::from_ptr(pass).to_str()?
+    } else {
+        DEFAULT_PASS
     };
 
-    let db = if db.is_null() {
-        DEFAULT_DB
-    } else {
+    let db = if !db.is_null() {
         CStr::from_ptr(db).to_str()?
+    } else {
+        DEFAULT_DB
     };
 
-    let compression = config::get_global_compression();
+    let compression = config::compression();
 
-    let dsn = if (host.contains("cloud.tdengine") || host.contains("cloud.taosdata"))
-        && user == "token"
-    {
-        if port == 0 {
-            port = DEFAULT_PORT_CLOUD;
-        }
-        format!("wss://{host}:{port}/{db}?token={pass}&compression={compression}")
+    let dsn = if util::is_cloud_host(&addr) && user == "token" {
+        format!("wss://{addr}/{db}?token={pass}&compression={compression}")
     } else {
-        if port == 0 {
-            port = DEFAULT_PORT;
-        }
-        format!("ws://{user}:{pass}@{host}:{port}/{db}?compression={compression}")
+        format!("ws://{user}:{pass}@{addr}/{db}?compression={compression}")
     };
 
     debug!("taos_connect, dsn: {:?}", dsn);
@@ -187,7 +232,6 @@ pub unsafe extern "C" fn taos_close(taos: *mut TAOS) {
 #[no_mangle]
 #[instrument(level = "debug", ret)]
 pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, ...) -> c_int {
-    let mut c = config::CONFIG.write().unwrap();
     match option {
         TSDB_OPTION::TSDB_OPTION_CONFIGDIR => {
             if arg.is_null() {
@@ -198,7 +242,7 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
             }
             let dir = CStr::from_ptr(arg as _);
             if let Ok(dir) = dir.to_str() {
-                c.set_config_dir(dir);
+                config::set_config_dir(FastStr::new(dir));
                 0
             } else {
                 return set_err_and_get_code(TaosError::new(
@@ -216,18 +260,8 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
             }
             let tz = CStr::from_ptr(arg as _);
             if let Ok(tz) = tz.to_str() {
-                match tz.parse() {
-                    Ok(tz) => {
-                        c.set_timezone(tz);
-                        0
-                    }
-                    Err(err) => {
-                        return set_err_and_get_code(TaosError::new(
-                            Code::INVALID_PARA,
-                            &format!("taos timezone `{tz}` is invalid, err: {err}"),
-                        ));
-                    }
-                }
+                config::set_timezone(FastStr::new(tz));
+                0
             } else {
                 return set_err_and_get_code(TaosError::new(
                     Code::INVALID_PARA,
@@ -262,13 +296,11 @@ impl From<u64> for Qid {
 #[no_mangle]
 pub extern "C" fn taos_init() -> c_int {
     static ONCE: OnceLock<c_int> = OnceLock::new();
-    *ONCE.get_or_init(|| match taos_init_impl() {
-        Ok(_) => 0,
-        Err(err) => {
-            // set_err_and_get_code(TaosError::new(Code::FAILED, &err.to_string()));
-            // -1
-            0
+    *ONCE.get_or_init(|| {
+        if let Err(e) = taos_init_impl() {
+            error!("taos_init failed, err: {e:?}");
         }
+        0
     })
 }
 
@@ -280,19 +312,27 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::Layer;
 
+    unsafe {
+        let locale = util::get_system_locale();
+        let locale = std::ffi::CString::new(locale).unwrap();
+        let locale_ptr = libc::setlocale(libc::LC_CTYPE, locale.as_ptr());
+        if locale_ptr.is_null() {
+            return Err(TaosError::new(Code::FAILED, "setlocale failed").into());
+        }
+    }
+
     if let Err(err) = config::init() {
         return Err(TaosError::new(Code::FAILED, &err).into());
     }
 
-    let cfg = config::CONFIG.read().unwrap();
-    if let Some(timezone) = cfg.timezone() {
-        std::env::set_var("TZ", timezone.name());
+    if let Some(timezone) = config::timezone() {
+        unsafe { std::env::set_var("TZ", timezone.as_str()) };
     }
 
     let mut layers = Vec::new();
-    let config_dir = cfg.log_dir();
+    let log_dir = config::log_dir();
 
-    let appender = RollingFileAppender::builder(config_dir.as_str(), "taos", 16)
+    let appender = RollingFileAppender::builder(log_dir.as_str(), "taos", 16)
         .compress(true)
         .reserved_disk_size("1GB")
         .rotation_count(3)
@@ -302,15 +342,15 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     layers.push(
         TaosLayer::<Qid>::new(appender)
             .with_location()
-            .with_filter(cfg.log_level())
+            .with_filter(config::log_level())
             .boxed(),
     );
 
-    if cfg.log_output_to_screen() {
+    if config::log_output_to_screen() {
         layers.push(
             TaosLayer::<Qid, _, _>::new(std::io::stdout)
                 .with_location()
-                .with_filter(cfg.log_level())
+                .with_filter(config::log_level())
                 .boxed(),
         );
     }
@@ -318,6 +358,8 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry().with(layers).init();
 
     LogTracer::init()?;
+
+    debug!("taos_init, config: {:?}", config::config());
 
     Ok(())
 }
@@ -356,6 +398,8 @@ pub trait ResultSetOperations {
     fn num_of_fields(&self) -> i32;
 
     fn get_fields(&mut self) -> *mut TAOS_FIELD;
+
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E;
 
     unsafe fn fetch_raw_block(
         &mut self,
@@ -470,6 +514,14 @@ impl ResultSetOperations for ResultSet {
         }
     }
 
+    fn get_fields_e(&mut self) -> *mut TAOS_FIELD_E {
+        match self {
+            ResultSet::Query(rs) => rs.get_fields_e(),
+            ResultSet::Schemaless(rs) => rs.get_fields_e(),
+            ResultSet::Tmq(rs) => rs.get_fields_e(),
+        }
+    }
+
     unsafe fn fetch_raw_block(
         &mut self,
         ptr: *mut *mut c_void,
@@ -569,6 +621,8 @@ mod tests {
     use std::ffi::CString;
     use std::ptr;
 
+    use faststr::FastStr;
+
     use super::*;
     use crate::ws::error::{taos_errno, taos_errstr};
 
@@ -603,6 +657,48 @@ mod tests {
 
             let taos = taos_connect(ptr::null(), ptr::null(), ptr::null(), invalid_utf8_ptr, 0);
             assert!(taos.is_null());
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_unable_to_establish_connection() {
+        unsafe {
+            let taos = taos_connect(
+                c"invalid_host".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                ptr::null(),
+                6041,
+            );
+            assert!(taos.is_null());
+
+            let code = taos_errno(ptr::null_mut());
+            let errstr = taos_errstr(ptr::null_mut());
+            assert_eq!(Code::from(code), Code::new(0x000B));
+            assert_eq!(
+                CStr::from_ptr(errstr).to_str().unwrap(),
+                "Unable to establish connection"
+            );
+        }
+    }
+
+    #[test]
+    fn test_taos_connect_auth_failure() {
+        unsafe {
+            let taos = taos_connect(
+                c"localhost".as_ptr(),
+                c"root".as_ptr(),
+                c"hello".as_ptr(),
+                ptr::null(),
+                6041,
+            );
+            assert!(taos.is_null());
+
+            let code = taos_errno(ptr::null_mut());
+            let errstr = taos_errstr(ptr::null_mut());
+            let errstr = CStr::from_ptr(errstr).to_str().unwrap();
+            assert_eq!(Code::from(code), Code::new(0x0357));
+            assert!(errstr.contains("Authentication failure"));
         }
     }
 
@@ -643,6 +739,74 @@ mod tests {
                 TSDB_OPTION::TSDB_OPTION_TIMEZONE,
                 CString::new("invalid_timezone").unwrap().as_ptr() as *const c_void,
             );
+        }
+    }
+
+    #[test]
+    fn test_taos_options_release_arg_memory() {
+        unsafe {
+            let arg = CString::new("/etc/taos").unwrap();
+            let code = taos_options(TSDB_OPTION::TSDB_OPTION_CONFIGDIR, arg.as_ptr() as *const _);
+            assert_eq!(code, 0);
+            drop(arg);
+            let cfg_dir = config::config_dir();
+            assert_eq!(cfg_dir, FastStr::new("/etc/taos"));
+        }
+    }
+}
+
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(test)]
+mod cloud_tests {
+    use std::ffi::CString;
+
+    use super::*;
+
+    #[test]
+    fn test_taos_connect() {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_taos_connect");
+            return;
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_taos_connect");
+            return;
+        }
+
+        let url = url.unwrap().strip_prefix("https://").unwrap().to_string();
+        let url = CString::new(url).unwrap();
+        let token = CString::new(token.unwrap()).unwrap();
+
+        unsafe {
+            let taos = taos_connect(
+                url.as_ptr(),
+                c"token".as_ptr(),
+                token.as_ptr(),
+                ptr::null(),
+                0,
+            );
+            assert!(!taos.is_null());
+            taos_close(taos);
+
+            let taos = taos_connect(
+                url.as_ptr(),
+                c"token".as_ptr(),
+                token.as_ptr(),
+                ptr::null(),
+                443,
+            );
+            assert!(!taos.is_null());
+            taos_close(taos);
         }
     }
 }

@@ -131,7 +131,7 @@ impl Display for MetaCreate {
                         "`{}` USING `{}` TAGS({})",
                         table_name,
                         using,
-                        std::iter::repeat("NULL").take(tag_num.unwrap()).join(",")
+                        std::iter::repeat_n("NULL", tag_num.unwrap()).join(",")
                     ))?;
                 }
             }
@@ -352,7 +352,6 @@ impl Display for MetaUnit {
             MetaUnit::Alter(alter) => alter.fmt(f),
             MetaUnit::Drop(drop) => drop.fmt(f),
             MetaUnit::Delete(delete) => delete.fmt(f),
-            // _ => Ok(()),
         }
     }
 }

@@ -6,7 +6,10 @@ use bigdecimal::{BigDecimal, Zero};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use super::{decimal::Decimal, Timestamp, Ty};
+use super::decimal::Decimal;
+use super::{Timestamp, Ty};
+
+mod de;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BorrowedValue<'b> {
@@ -27,9 +30,9 @@ pub enum BorrowedValue<'b> {
     UBigInt(u64),
     Json(Cow<'b, [u8]>),
     VarBinary(Cow<'b, [u8]>),
-    Decimal(Decimal<i128>), // 17
-    Blob(&'b [u8]),
-    MediumBlob(&'b [u8]),
+    Decimal(Decimal<i128>),
+    Blob(Cow<'b, [u8]>),
+    MediumBlob(Cow<'b, [u8]>),
     Geometry(Cow<'b, [u8]>),
     Decimal64(Decimal<i64>),
 }
@@ -54,12 +57,9 @@ macro_rules! borrowed_value_to_native {
             BorrowedValue::UInt(v) => Some(*v as _),
             BorrowedValue::UBigInt(v) => Some(*v as _),
             BorrowedValue::Json(v) => serde_json::from_slice(&v).ok(),
-            BorrowedValue::VarBinary(_v) => todo!(),
             BorrowedValue::Decimal(v) => v.as_bigdecimal().to_i128().map(|v| v as _),
             BorrowedValue::Decimal64(v) => v.as_bigdecimal().to_i64().map(|v| v as _),
-            BorrowedValue::Blob(_) => todo!(),
-            BorrowedValue::MediumBlob(_) => todo!(),
-            BorrowedValue::Geometry(_) => todo!(),
+            _ => todo!(),
         }
     }};
 }
@@ -84,12 +84,9 @@ macro_rules! borrowed_value_to_float {
             BorrowedValue::UInt(v) => Some(*v as _),
             BorrowedValue::UBigInt(v) => Some(*v as _),
             BorrowedValue::Json(v) => serde_json::from_slice(&v).ok(),
-            BorrowedValue::VarBinary(_) => todo!(),
             BorrowedValue::Decimal(v) => v.as_bigdecimal().to_f64().map(|v| v as _),
             BorrowedValue::Decimal64(v) => v.as_bigdecimal().to_f64().map(|v| v as _),
-            BorrowedValue::Blob(_) => todo!(),
-            BorrowedValue::MediumBlob(_) => todo!(),
-            BorrowedValue::Geometry(_) => todo!(),
+            _ => todo!(),
         }
     }};
 }
@@ -143,12 +140,9 @@ impl BorrowedValue<'_> {
             UInt(v) => format!("{v}"),
             UBigInt(v) => format!("{v}"),
             Json(v) => format!("\"{}\"", unsafe { std::str::from_utf8_unchecked(v) }),
-            VarBinary(_) => todo!(),
             Decimal(v) => v.to_string(),
             Decimal64(v) => v.to_string(),
-            Blob(_) => todo!(),
-            MediumBlob(_) => todo!(),
-            Geometry(_) => todo!(),
+            _ => todo!(),
         }
     }
 
@@ -171,12 +165,9 @@ impl BorrowedValue<'_> {
             UInt(v) => format!("{v}"),
             UBigInt(v) => format!("{v}"),
             Json(v) => format!("\"{}\"", unsafe { std::str::from_utf8_unchecked(v) }),
-            VarBinary(_) => todo!(),
             Decimal(v) => v.to_string(),
             Decimal64(v) => v.to_string(),
-            Blob(_) => todo!(),
-            MediumBlob(_) => todo!(),
-            Geometry(_) => todo!(),
+            _ => todo!(),
         }
     }
 
@@ -246,7 +237,7 @@ impl BorrowedValue<'_> {
             VarBinary(v) => Value::VarBinary(Bytes::copy_from_slice(v.as_ref())),
             Decimal(v) => Value::Decimal(v.as_bigdecimal()),
             Decimal64(v) => Value::Decimal64(v.as_bigdecimal()),
-            Blob(_) => todo!(),
+            Blob(v) => Value::Blob(Bytes::copy_from_slice(v.as_ref())),
             MediumBlob(_) => todo!(),
             Geometry(v) => Value::Geometry(Bytes::copy_from_slice(v.as_ref())),
         }
@@ -271,12 +262,11 @@ impl BorrowedValue<'_> {
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => serde_json::from_slice(v).expect("json should always be deserialized"),
             NChar(str) => serde_json::Value::String(str.to_string()),
-            VarBinary(_) => todo!(),
             Decimal(v) => serde_json::Value::String(format!("{v}")),
             Decimal64(v) => serde_json::Value::String(format!("{v}")),
-            Blob(_) => todo!(),
-            MediumBlob(_) => todo!(),
-            Geometry(_) => todo!(),
+            Blob(v) | MediumBlob(v) | VarBinary(v) | Geometry(v) => {
+                serde_json::Value::String(format!("{:?}", v.to_vec()))
+            }
         }
     }
 
@@ -305,7 +295,7 @@ impl BorrowedValue<'_> {
             VarBinary(v) => Value::VarBinary(Bytes::from(v.into_owned())),
             Decimal(v) => Value::Decimal(v.as_bigdecimal()),
             Decimal64(v) => Value::Decimal64(v.as_bigdecimal()),
-            Blob(_) => todo!(),
+            Blob(v) => Value::Blob(Bytes::from(v.into_owned())),
             MediumBlob(_) => todo!(),
             Geometry(v) => Value::Geometry(Bytes::from(v.into_owned())),
         }
@@ -338,10 +328,7 @@ impl BorrowedValue<'_> {
             BorrowedValue::UBigInt(v) => Some(*v != 0),
             BorrowedValue::Decimal(v) => Some(v.as_bigdecimal() > bigdecimal::BigDecimal::zero()),
             BorrowedValue::Decimal64(v) => Some(v.as_bigdecimal() > bigdecimal::BigDecimal::zero()),
-            BorrowedValue::VarBinary(_)
-            | BorrowedValue::Blob(_)
-            | BorrowedValue::MediumBlob(_)
-            | BorrowedValue::Geometry(_) => todo!(),
+            _ => todo!(),
         }
     }
 
@@ -398,18 +385,15 @@ impl BorrowedValue<'_> {
             BorrowedValue::UInt(v) => Some(v.to_string().into()),
             BorrowedValue::UBigInt(v) => Some(v.to_string().into()),
             BorrowedValue::Json(v) => Some(unsafe { std::str::from_utf8_unchecked(v) }.into()),
-            BorrowedValue::VarBinary(_) => todo!(),
             BorrowedValue::Decimal(v) => Some(v.to_string().into()),
             BorrowedValue::Decimal64(v) => Some(v.to_string().into()),
-            BorrowedValue::Blob(_) => todo!(),
-            BorrowedValue::MediumBlob(_) => todo!(),
-            BorrowedValue::Geometry(_) => todo!(),
+            _ => todo!(),
         }
     }
-    #[allow(dead_code)]
+
     pub(crate) fn to_bytes(&self) -> Option<Bytes> {
         match self {
-            BorrowedValue::VarBinary(v) | BorrowedValue::Geometry(v) => {
+            BorrowedValue::VarBinary(v) | BorrowedValue::Geometry(v) | BorrowedValue::Blob(v) => {
                 Some(Bytes::from(v.to_vec()))
             }
             _ => None,
@@ -445,10 +429,10 @@ impl Display for BorrowedValue<'_> {
             UInt(v) => f.write_fmt(format_args!("{v}")),
             UBigInt(v) => f.write_fmt(format_args!("{v}")),
             Json(v) => f.write_fmt(format_args!("{}", v.as_ref().escape_ascii())),
-            VarBinary(v) | Geometry(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
+            VarBinary(v) | Geometry(v) | Blob(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
             Decimal(v) => f.write_fmt(format_args!("{v}")),
             Decimal64(v) => f.write_fmt(format_args!("{v}")),
-            Blob(_) | MediumBlob(_) => todo!(),
+            MediumBlob(_) => todo!(),
         }
     }
 }
@@ -457,9 +441,9 @@ unsafe impl Send for BorrowedValue<'_> {}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub enum Value {
-    Null(Ty),    // 0
-    Bool(bool),  // 1
-    TinyInt(i8), // 2
+    Null(Ty),
+    Bool(bool),
+    TinyInt(i8),
     SmallInt(i16),
     Int(i32),
     BigInt(i64),
@@ -471,14 +455,14 @@ pub enum Value {
     UTinyInt(u8),
     USmallInt(u16),
     UInt(u32),
-    UBigInt(u64), // 14
+    UBigInt(u64),
     Json(serde_json::Value),
     VarBinary(Bytes),
-    Decimal(BigDecimal), // 17
-    Blob(Vec<u8>),
-    MediumBlob(Vec<u8>),
+    Decimal(BigDecimal),
+    Blob(Bytes),
+    MediumBlob(Bytes),
     Geometry(Bytes),
-    Decimal64(BigDecimal), // 21
+    Decimal64(BigDecimal),
 }
 
 impl Display for Value {
@@ -500,9 +484,9 @@ impl Display for Value {
             UInt(v) => f.write_fmt(format_args!("{v}")),
             UBigInt(v) => f.write_fmt(format_args!("{v}")),
             Json(v) => f.write_fmt(format_args!("{v}")),
-            VarBinary(v) | Geometry(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
+            VarBinary(v) | Geometry(v) | Blob(v) => f.write_fmt(format_args!("{:?}", v.to_vec())),
             Decimal(v) | Decimal64(v) => f.write_fmt(format_args!("{v}")),
-            Blob(_) | MediumBlob(_) => todo!(),
+            MediumBlob(_) => todo!(),
         }
     }
 }
@@ -565,8 +549,8 @@ impl Value {
                 super::decimal::Decimal::<i64>::from_bigdecimal(v)
                     .expect("cannot convert to raw decimal type"),
             ),
-            Blob(v) => BorrowedValue::Blob(v),
-            MediumBlob(v) => BorrowedValue::MediumBlob(v),
+            Blob(v) => BorrowedValue::Blob(Cow::Borrowed(v.as_ref())),
+            MediumBlob(v) => BorrowedValue::MediumBlob(Cow::Borrowed(v.as_ref())),
             Geometry(v) => BorrowedValue::Geometry(Cow::Borrowed(v.as_ref())),
         }
     }
@@ -575,6 +559,7 @@ impl Value {
     pub const fn is_null(&self) -> bool {
         matches!(self, Value::Null(_))
     }
+
     /// Only VarChar, NChar, Json could be treated as [&str].
     pub fn strict_as_str(&self) -> &str {
         use Value::*;
@@ -605,11 +590,8 @@ impl Value {
             UInt(v) => format!("{v}"),
             UBigInt(v) => format!("{v}"),
             Json(v) => format!("\"{v}\""),
-            VarBinary(_) => todo!(),
             Decimal(v) | Decimal64(v) => format!("{v}"),
-            Blob(_) => todo!(),
-            MediumBlob(_) => todo!(),
-            Geometry(_) => todo!(),
+            _ => todo!(),
         }
     }
 
@@ -631,11 +613,8 @@ impl Value {
             UInt(v) => format!("{v}"),
             UBigInt(v) => format!("{v}"),
             Json(v) => format!("\"{v}\""),
-            VarBinary(_) => todo!(),
             Decimal(v) | Decimal64(v) => format!("{v}"),
-            Blob(_) => todo!(),
-            MediumBlob(_) => todo!(),
-            Geometry(_) => todo!(),
+            _ => todo!(),
         }
     }
 
@@ -662,7 +641,6 @@ impl Value {
         }
     }
 
-    #[warn(unreachable_patterns)]
     pub fn to_json_value(&self) -> serde_json::Value {
         use Value::*;
         match self {
@@ -683,8 +661,9 @@ impl Value {
             Json(v) => v.clone(),
             NChar(str) => serde_json::Value::String(str.to_string()),
             Decimal(v) | Decimal64(v) => serde_json::Value::String(format!("{v}")),
-            Blob(v) | MediumBlob(v) => serde_json::Value::String(format!("{v:?}")),
-            VarBinary(v) | Geometry(v) => serde_json::Value::String(format!("{:?}", v.to_vec())),
+            Blob(v) | MediumBlob(v) | VarBinary(v) | Geometry(v) => {
+                serde_json::Value::String(format!("{:?}", v.to_vec()))
+            }
         }
     }
 }
@@ -714,13 +693,12 @@ impl PartialEq<Value> for BorrowedValue<'_> {
             (Self::UInt(l0), Value::UInt(r0)) => l0 == r0,
             (Self::UBigInt(l0), Value::UBigInt(r0)) => l0 == r0,
             (Self::Json(l0), Value::Json(r0)) => l0.as_ref() == serde_json::to_vec(r0).unwrap(),
-            (Self::VarBinary(l0), Value::VarBinary(r0))
-            | (Self::Geometry(l0), Value::Geometry(r0)) => l0.as_ref() == r0.as_ref(),
             (Self::Decimal(l0), Value::Decimal(r0)) => &l0.as_bigdecimal() == r0,
             (Self::Decimal64(l0), Value::Decimal64(r0)) => &l0.as_bigdecimal() == r0,
-            (Self::Blob(l0), Value::Blob(r0)) | (Self::MediumBlob(l0), Value::MediumBlob(r0)) => {
-                l0 == r0
-            }
+            (Self::VarBinary(l0), Value::VarBinary(r0))
+            | (Self::Geometry(l0), Value::Geometry(r0))
+            | (Self::Blob(l0), Value::Blob(r0))
+            | (Self::MediumBlob(l0), Value::MediumBlob(r0)) => l0.as_ref() == r0.as_ref(),
             _ => false,
         }
     }
@@ -747,12 +725,12 @@ impl<'b> PartialEq<BorrowedValue<'b>> for Value {
             (BorrowedValue::Json(l0), Value::Json(r0)) => {
                 l0.as_ref() == serde_json::to_vec(r0).unwrap()
             }
-            (BorrowedValue::VarBinary(l0), Value::VarBinary(r0))
-            | (BorrowedValue::Geometry(l0), Value::Geometry(r0)) => l0.as_ref() == r0.as_ref(),
             (BorrowedValue::Decimal(l0), Value::Decimal(r0)) => &l0.as_bigdecimal() == r0,
             (BorrowedValue::Decimal64(l0), Value::Decimal64(r0)) => &l0.as_bigdecimal() == r0,
-            (BorrowedValue::Blob(l0), Value::Blob(r0))
-            | (BorrowedValue::MediumBlob(l0), Value::MediumBlob(r0)) => l0 == r0,
+            (BorrowedValue::VarBinary(l0), Value::VarBinary(r0))
+            | (BorrowedValue::Geometry(l0), Value::Geometry(r0))
+            | (BorrowedValue::Blob(l0), Value::Blob(r0))
+            | (BorrowedValue::MediumBlob(l0), Value::MediumBlob(r0)) => l0.as_ref() == r0.as_ref(),
             _ => false,
         }
     }
@@ -788,7 +766,6 @@ _impl_primitive_from!(u64, UBigInt);
 _impl_primitive_from!(f32, Float);
 _impl_primitive_from!(f64, Double);
 _impl_primitive_from!(Timestamp, Timestamp);
-mod de;
 
 #[cfg(test)]
 mod tests {
@@ -1346,11 +1323,17 @@ mod tests {
         let timestamp_value = BorrowedValue::Timestamp(Timestamp::new(1, Precision::Millisecond));
         assert_eq!(timestamp_value.ty(), Ty::Timestamp);
 
-        let blob_value = BorrowedValue::Blob(&[1, 2, 3]);
+        let blob_value = BorrowedValue::Blob(Cow::from(vec![1, 2, 3]));
         assert_eq!(blob_value.ty(), Ty::Blob);
 
-        let medium_blob_value = BorrowedValue::MediumBlob(&[1, 2, 3]);
+        let medium_blob_value = BorrowedValue::MediumBlob(Cow::from(vec![1, 2, 3]));
         assert_eq!(medium_blob_value.ty(), Ty::MediumBlob);
+
+        let varbinary_value = BorrowedValue::VarBinary(Cow::from(vec![1, 2, 3]));
+        assert_eq!(varbinary_value.ty(), Ty::VarBinary);
+
+        let geometry_value = BorrowedValue::Geometry(Cow::from(vec![1, 2, 3]));
+        assert_eq!(geometry_value.ty(), Ty::Geometry);
     }
 
     #[test]
@@ -1421,8 +1404,16 @@ mod tests {
             .contains("1970-01-01T"));
 
         let nchar_value = Value::NChar("hello".to_string());
-        let b_nchar_value = nchar_value.to_borrowed_value();
-        assert_eq!(b_nchar_value.to_sql_value(), "\"hello\"".to_string());
+        assert_eq!(
+            nchar_value.to_sql_value_with_rfc3339(),
+            "\"hello\"".to_string()
+        );
+
+        let json_value = Value::Json(serde_json::json!({"hello": "world"}));
+        assert_eq!(
+            json_value.to_sql_value_with_rfc3339(),
+            "\"{\"hello\":\"world\"}\"".to_string()
+        );
     }
 
     #[test]
@@ -1890,6 +1881,60 @@ mod tests {
             serde_json::Value::String("12345".to_string())
         );
         assert!(value.eq(&BorrowedValue::Decimal64(Decimal::new(12345, 5, 0))));
+        Ok(())
+    }
+
+    #[test]
+    fn test_borrowed_value_strict_as_str() {
+        let varchar_value_borrowed = BorrowedValue::VarChar("hello");
+        let str = varchar_value_borrowed.strict_as_str();
+        assert_eq!(str, "hello");
+
+        let nchar_value_borrowed = BorrowedValue::NChar(Cow::from("hello"));
+        let str = nchar_value_borrowed.strict_as_str();
+        assert_eq!(str, "hello");
+    }
+
+    #[test]
+    fn test_value_strict_as_str() {
+        let varchar_value = Value::VarChar("hello".to_string());
+        let str = varchar_value.strict_as_str();
+        assert_eq!(str, "hello");
+
+        let nchar_value = Value::NChar("hello".to_string());
+        let str = nchar_value.strict_as_str();
+        assert_eq!(str, "hello");
+    }
+
+    #[test]
+    fn test_blob_value() -> anyhow::Result<()> {
+        let blob_value = Value::Blob(Bytes::from(vec![1, 2, 3]));
+        assert_eq!(blob_value.ty(), Ty::Blob);
+        assert_eq!(
+            blob_value.to_json_value(),
+            serde_json::Value::String("[1, 2, 3]".to_string())
+        );
+        assert_eq!(format!("{}", blob_value), "[1, 2, 3]");
+
+        let blob_value_borrowed = blob_value.to_borrowed_value();
+        assert_eq!(blob_value_borrowed.ty(), Ty::Blob);
+        assert_eq!(
+            blob_value_borrowed.to_json_value(),
+            serde_json::Value::String("[1, 2, 3]".to_string())
+        );
+        assert_eq!(format!("{}", blob_value_borrowed), "[1, 2, 3]");
+
+        assert_eq!(blob_value_borrowed.to_value(), blob_value);
+        assert_eq!(blob_value_borrowed.clone().into_value(), blob_value);
+        assert_eq!(
+            blob_value_borrowed.to_bytes(),
+            Some(Bytes::from(vec![1, 2, 3]))
+        );
+
+        assert_eq!(blob_value_borrowed, blob_value);
+        assert_eq!(blob_value, blob_value_borrowed);
+        assert_eq!(blob_value_borrowed, &blob_value);
+
         Ok(())
     }
 }
