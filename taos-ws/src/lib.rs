@@ -252,10 +252,8 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
     fn client_version() -> &'static str {
         "0"
     }
-    async fn ping(&self, taos: &mut Self::Target) -> RawResult<()> {
-        taos_query::AsyncQueryable::exec(taos, "select server_version()")
-            .await
-            .map(|_| ())
+    async fn ping(&self, _taos: &mut Self::Target) -> RawResult<()> {
+        Ok(())
     }
 
     async fn ready(&self) -> bool {
