@@ -38,8 +38,6 @@ impl<'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer {
     where
         V: DeserializeSeed<'de>,
     {
-        // let variant = self.value.ty().as_variant_str();
-        // use BorrowedValue::*;
         match self.value {
             Value::Timestamp(Timestamp::Microseconds(v)) => Ok((
                 seed.deserialize(StringDeserializer {
@@ -193,8 +191,9 @@ impl<'de> serde::de::Deserializer<'de> for Value {
                 .deserialize_any(visitor)
                 .map_err(<Self::Error as de::Error>::custom),
             Timestamp(v) => visitor.visit_i64(v.as_raw_i64()),
-            Blob(v) | MediumBlob(v) => v.into_deserializer().deserialize_any(visitor),
-            VarBinary(v) | Geometry(v) => v.into_deserializer().deserialize_any(visitor),
+            Blob(v) | MediumBlob(v) | VarBinary(v) | Geometry(v) => {
+                v.into_deserializer().deserialize_any(visitor)
+            }
             Decimal(v) | Decimal64(v) => visitor.visit_string(v.to_string()),
         }
     }
@@ -295,13 +294,8 @@ impl<'de> serde::de::Deserializer<'de> for Value {
                 .visit_newtype_struct(v.into_deserializer())
                 .map_err(<Self::Error as de::Error>::custom),
             Timestamp(v) => _v_!(v.as_raw_i64()),
-            Blob(v) | MediumBlob(v) => {
-                visitor.visit_newtype_struct(v.as_slice().into_deserializer())
-            }
-            VarBinary(_v) | Geometry(_v) => {
-                todo!()
-            }
             v @ (Decimal(_) | Decimal64(_)) => visitor.visit_newtype_struct(v),
+            _ => todo!(),
         }
     }
 
@@ -330,8 +324,9 @@ impl<'de> serde::de::Deserializer<'de> for Value {
                 .to_vec()
                 .into_deserializer()
                 .deserialize_seq(visitor),
-            Blob(v) | MediumBlob(v) => v.into_deserializer().deserialize_seq(visitor),
-            VarBinary(v) | Geometry(v) => v.into_deserializer().deserialize_seq(visitor),
+            Blob(v) | MediumBlob(v) | VarBinary(v) | Geometry(v) => {
+                v.into_deserializer().deserialize_seq(visitor)
+            }
             _ => todo!(),
         }
     }
@@ -396,6 +391,7 @@ mod tests {
         use std::cmp::PartialEq;
 
         use Value::*;
+
         macro_rules! _de_value {
             ($($v:expr) *) => {
                 $(
@@ -407,14 +403,16 @@ mod tests {
                 )*
             }
         }
+
         _de_value!(
-                Bool(true) TinyInt(0xf) SmallInt(0xfff) Int(0xffff) BigInt(-1) Float(1.0) Double(1.0)
-                UTinyInt(0xf) USmallInt(0xfff) UInt(0xffff) UBigInt(0xffffffff)
-                Decimal(bigdecimal::BigDecimal::from_bigint(123.into(), 1))
-                Decimal(bigdecimal::BigDecimal::from_bigint(456.into(), 1))
-                Timestamp(crate::common::timestamp::Timestamp::Milliseconds(0)) VarChar("anything".to_string())
-                NChar("你好，世界".to_string()) VarBinary(Bytes::from(vec![1,2,3])) Blob(vec![1,2, 3]) MediumBlob(vec![1,2,3])
-                Json(serde_json::json!({"name": "ABC"}))
+            Bool(true) TinyInt(0xf) SmallInt(0xfff) Int(0xffff) BigInt(-1) Float(1.0) Double(1.0)
+            UTinyInt(0xf) USmallInt(0xfff) UInt(0xffff) UBigInt(0xffffffff)
+            Decimal(bigdecimal::BigDecimal::from_bigint(123.into(), 1))
+            Decimal(bigdecimal::BigDecimal::from_bigint(456.into(), 1))
+            Timestamp(crate::common::timestamp::Timestamp::Milliseconds(0))
+            VarChar("anything".to_string()) NChar("你好，世界".to_string())
+            VarBinary(Bytes::from(vec![1, 2, 3])) Blob(Bytes::from(vec![1, 2, 3])) MediumBlob(Bytes::from(vec![1, 2, 3]))
+            Json(serde_json::json!({"name": "ABC"}))
         );
     }
 
@@ -447,9 +445,9 @@ mod tests {
             VarChar("".to_string()), String, "".to_string()
             NChar("".to_string()), String, "".to_string()
             Timestamp(crate::Timestamp::Milliseconds(1)), crate::Timestamp, crate::Timestamp::Milliseconds(1)
-            VarBinary(Bytes::from(vec![0, 1,2])), Bytes, Bytes::from(vec![0, 1,2])
-            Blob(vec![0, 1,2]), Vec<u8>, vec![0, 1, 2]
-            MediumBlob(vec![0, 1,2]), Vec<u8>, vec![0, 1, 2]
+            VarBinary(Bytes::from(vec![0, 1, 2])), Bytes, Bytes::from(vec![0, 1, 2])
+            Blob(Bytes::from(vec![0, 1, 2])), Bytes, Bytes::from(vec![0, 1, 2])
+            MediumBlob(Bytes::from(vec![0, 1, 2])), Bytes, Bytes::from(vec![0, 1, 2])
         );
     }
 

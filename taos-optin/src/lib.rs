@@ -849,6 +849,7 @@ mod tests {
 
         Ok(())
     }
+
     #[test]
     fn long_query() -> RawResult<()> {
         use taos_query::prelude::sync::*;
@@ -907,6 +908,7 @@ mod tests {
     #[tokio::test]
     async fn long_query_async() -> RawResult<()> {
         use taos_query::prelude::*;
+
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
         let taos = builder.build().await?;
         let mut set = taos.query("show databases").await?;
@@ -935,12 +937,13 @@ mod tests {
 
         Ok(())
     }
+
     #[tokio::test]
     async fn show_databases_async() -> RawResult<()> {
         use taos_query::prelude::*;
 
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // let _ = pretty_env_logger::try_init();
+
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
         let taos = builder.build().await?;
         let mut set = taos.query("show databases").await?;
@@ -963,14 +966,13 @@ mod tests {
         use taos_query::prelude::*;
 
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // let _ = pretty_env_logger::try_init();
+
         let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build().await?;
         let err = taos
             .exec("create table test.`abc.` (ts timestamp, val int)")
             .await
             .unwrap_err();
-        // dbg!(err);
         println!("{:?}", err);
         assert!(err.code() == 0x2617);
         let err_str = err.to_string();
@@ -978,12 +980,13 @@ mod tests {
         assert!(err_str.contains("The table name cannot contain '.'"));
         Ok(())
     }
+
     #[tokio::test]
     async fn error_fetch_async() -> RawResult<()> {
         use taos_query::prelude::*;
 
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // let _ = pretty_env_logger::try_init();
+
         let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build().await?;
         let err = taos
@@ -1000,29 +1003,32 @@ mod tests {
 
         Ok(())
     }
+
     #[tokio::test]
     async fn error_sync() -> RawResult<()> {
         use taos_query::prelude::sync::*;
 
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // let _ = pretty_env_logger::try_init();
+
         let builder = TaosBuilder::from_dsn("taos:///")?;
         let taos = builder.build()?;
         let err = taos
             .exec("create table test.`abc.` (ts timestamp, val int)")
             .unwrap_err();
-        // dbg!(err);
+
         assert!(err.code() == 0x2617);
         let err_str = err.to_string();
         assert!(err_str.contains("0x2617"));
         assert!(err_str.contains("The table name cannot contain '.'"));
         println!("{:?}", err);
+
         Ok(())
     }
 
     #[test]
     fn show_databases_v2() -> RawResult<()> {
         use taos_query::prelude::sync::*;
+
         let builder = TaosBuilder::from_dsn(crate::constants::DSN_V2)?;
         let taos = builder.build()?;
         let mut set = taos.query("show databases")?;
@@ -1050,6 +1056,7 @@ mod tests {
     #[tokio::test]
     async fn show_databases_async_v2() -> RawResult<()> {
         use taos_query::prelude::*;
+
         let builder = TaosBuilder::from_dsn(DSN_V2)?;
         let taos = builder.build().await?;
         let mut set = taos.query("show databases").await?;
@@ -1064,11 +1071,14 @@ mod tests {
         }
 
         println!("summary: {:?}", set.summary());
+
         Ok(())
     }
+
     #[tokio::test]
     async fn exec_async() -> RawResult<()> {
         use taos_query::prelude::*;
+
         let builder = TaosBuilder::from_dsn(DSN_V3)?;
         let taos = builder.build().await?;
         let affected_rows = taos
@@ -1098,10 +1108,9 @@ mod tests {
 
     #[test]
     fn test_put_line() -> anyhow::Result<()> {
-        // std::env::set_var("RUST_LOG", "taos=trace");
-        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // let _ = pretty_env_logger::try_init();
         use taos_query::prelude::sync::*;
+
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         tracing::debug!("dsn: {:?}", &dsn);
@@ -1164,10 +1173,9 @@ mod tests {
 
     #[test]
     fn test_put_telnet() -> anyhow::Result<()> {
-        // std::env::set_var("RUST_LOG", "taos=trace");
-        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
+
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         tracing::debug!("dsn: {:?}", &dsn);
@@ -1234,10 +1242,9 @@ mod tests {
 
     #[test]
     fn test_put_json() -> anyhow::Result<()> {
-        // std::env::set_var("RUST_LOG", "taos=trace");
-        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
+
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         tracing::debug!("dsn: {:?}", &dsn);
@@ -1297,10 +1304,9 @@ mod tests {
 
     #[test]
     fn test_error_details() -> anyhow::Result<()> {
-        // std::env::set_var("RUST_LOG", "taos=trace");
-        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
-        // pretty_env_logger::init();
         use taos_query::prelude::sync::*;
+
+        unsafe { std::env::set_var("RUST_LOG", "taos=debug") };
 
         let dsn = std::env::var("TEST_DSN").unwrap_or("taos://localhost:6030".to_string());
         tracing::debug!("dsn: {:?}", &dsn);
@@ -1327,6 +1333,174 @@ mod tests {
 
         let err = client.write_raw_block(&block).unwrap_err();
         dbg!(&err);
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_blob() -> anyhow::Result<()> {
+        use serde::Deserialize;
+        use taos_query::prelude::sync::*;
+
+        let taos = TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
+        taos.exec_many([
+            "drop database if exists test_1753066385",
+            "create database test_1753066385",
+            "use test_1753066385",
+            "create table t0(ts timestamp, c1 blob)",
+            "insert into t0 values(1752218982761, null)",
+            "insert into t0 values(1752218982762, '')",
+            "insert into t0 values(1752218982763, 'hello')",
+            "insert into t0 values(1752218982764, '\\x12345678')",
+        ])?;
+
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: i64,
+            c1: Option<Vec<u8>>,
+        }
+
+        let records: Vec<Record> = taos
+            .query("select * from t0")?
+            .deserialize()
+            .try_collect()?;
+
+        assert_eq!(records.len(), 4);
+
+        assert_eq!(records[0].ts, 1752218982761);
+        assert_eq!(records[1].ts, 1752218982762);
+        assert_eq!(records[2].ts, 1752218982763);
+        assert_eq!(records[3].ts, 1752218982764);
+
+        assert_eq!(records[0].c1, None);
+        assert_eq!(records[1].c1, Some(vec![]));
+        assert_eq!(records[2].c1, Some(vec![0x68, 0x65, 0x6C, 0x6C, 0x6F]));
+        assert_eq!(records[3].c1, Some(vec![0x12, 0x34, 0x56, 0x78]));
+
+        taos.exec("drop database test_1753066385")?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "test-new-feat")]
+    #[test]
+    fn test_blob_all_types() -> anyhow::Result<()> {
+        use bytes::Bytes;
+        use serde::Deserialize;
+        use taos_query::prelude::sync::*;
+        use taos_query::util::hex::hex_string_to_bytes;
+
+        let taos = TaosBuilder::from_dsn("taos://localhost:6030")?.build()?;
+        taos.exec_many([
+            "drop database if exists test_1752220387",
+            "create database test_1752220387",
+            "use test_1752220387",
+            "create table t0 (ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, \
+                c5 bigint, c6 tinyint unsigned, c7 smallint unsigned, c8 int unsigned, \
+                c9 bigint unsigned, c10 float, c11 double, c12 varchar(10), c13 nchar(10), \
+                c14 varbinary(10), c15 geometry(50), c16 decimal(10, 5), c17 decimal(20, 5), \
+                c18 blob)",
+            "insert into t0 values (1741780784752, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.1, 1.1, \
+                'hello', 'hello', 'hello', 'POINT(1 1)', 12345.12345, 123456789012345.12345, \
+                '\\x12345678')",
+            "insert into t0 values (1741780784753, null, null, null, null, null, null, \
+                null, null, null, null, null, null, null, null, null, null, null, null)",
+        ])?;
+
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: i64,
+            c1: Option<bool>,
+            c2: Option<i8>,
+            c3: Option<i16>,
+            c4: Option<i32>,
+            c5: Option<i64>,
+            c6: Option<u8>,
+            c7: Option<u16>,
+            c8: Option<u32>,
+            c9: Option<u64>,
+            c10: Option<f32>,
+            c11: Option<f64>,
+            c12: Option<String>,
+            c13: Option<String>,
+            c14: Option<Bytes>,
+            c15: Option<Bytes>,
+            c16: Option<String>,
+            c17: Option<String>,
+            c18: Option<Bytes>,
+        }
+
+        let records: Vec<Record> = taos
+            .query("select * from t0")?
+            .deserialize()
+            .try_collect()?;
+
+        assert_eq!(records.len(), 2);
+
+        assert_eq!(records[0].ts, 1741780784752);
+        assert_eq!(records[1].ts, 1741780784753);
+
+        assert_eq!(records[0].c1, Some(true));
+        assert_eq!(records[1].c1, None);
+
+        assert_eq!(records[0].c2, Some(1));
+        assert_eq!(records[1].c2, None);
+
+        assert_eq!(records[0].c3, Some(1));
+        assert_eq!(records[1].c3, None);
+
+        assert_eq!(records[0].c4, Some(1));
+        assert_eq!(records[1].c4, None);
+
+        assert_eq!(records[0].c5, Some(1));
+        assert_eq!(records[1].c5, None);
+
+        assert_eq!(records[0].c6, Some(1));
+        assert_eq!(records[1].c6, None);
+
+        assert_eq!(records[0].c7, Some(1));
+        assert_eq!(records[1].c7, None);
+
+        assert_eq!(records[0].c8, Some(1));
+        assert_eq!(records[1].c8, None);
+
+        assert_eq!(records[0].c9, Some(1));
+        assert_eq!(records[1].c9, None);
+
+        assert_eq!(records[0].c10, Some(1.1));
+        assert_eq!(records[1].c10, None);
+
+        assert_eq!(records[0].c11, Some(1.1));
+        assert_eq!(records[1].c11, None);
+
+        assert_eq!(records[0].c12, Some("hello".to_string()));
+        assert_eq!(records[1].c12, None);
+
+        assert_eq!(records[0].c13, Some("hello".to_string()));
+        assert_eq!(records[1].c13, None);
+
+        assert_eq!(records[0].c14, Some(Bytes::from("hello")));
+        assert_eq!(records[1].c14, None);
+
+        assert_eq!(
+            records[0].c15,
+            Some(hex_string_to_bytes(
+                "0101000000000000000000f03f000000000000f03f"
+            ))
+        );
+        assert_eq!(records[1].c15, None);
+
+        assert_eq!(records[0].c16, Some("12345.12345".to_string()));
+        assert_eq!(records[1].c16, None);
+
+        assert_eq!(records[0].c17, Some("123456789012345.12345".to_string()));
+        assert_eq!(records[1].c17, None);
+
+        assert_eq!(records[0].c18, Some(Bytes::from("\x12\x34\x56\x78")));
+        assert_eq!(records[1].c18, None);
+
+        taos.exec("drop database test_1752220387")?;
 
         Ok(())
     }

@@ -146,6 +146,8 @@ pub struct WsQueryResp {
 pub struct InsertResp {
     #[serde_as(as = "serde_with::DurationNanoSeconds")]
     pub timing: Duration,
+    pub affected_rows: Option<usize>,
+    pub total_rows: Option<usize>,
 }
 
 #[serde_as]
@@ -423,10 +425,11 @@ impl WsMessage {
 
 #[cfg(test)]
 mod tests {
-    use super::BindType;
     use crate::query::messages::{WsRecv, WsSend};
     use crate::query::WsConnReq;
     use crate::TaosBuilder;
+
+    use super::*;
 
     #[test]
     fn test_serde_send() {
@@ -490,5 +493,26 @@ mod tests {
 
         let res: Result<BindType, _> = serde_json::from_value(serde_json::json!("invalid"));
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_insert_resp_deserialize() {
+        let json = r#"{
+            "timing": 123456789,
+            "affected_rows": 10,
+            "total_rows": 20
+        }"#;
+        let resp: InsertResp = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.timing, Duration::from_nanos(123456789));
+        assert_eq!(resp.affected_rows, Some(10));
+        assert_eq!(resp.total_rows, Some(20));
+
+        let json = r#"{
+            "timing": 123456789
+        }"#;
+        let resp: InsertResp = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.timing, Duration::from_nanos(123456789));
+        assert_eq!(resp.affected_rows, None);
+        assert_eq!(resp.total_rows, None);
     }
 }

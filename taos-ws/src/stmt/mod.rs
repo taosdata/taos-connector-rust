@@ -1144,27 +1144,36 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_stmt");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_stmt");
             return Ok(());
         }
 
         let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
-
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let tbname = format!("t_stmt_{ts}");
+
         taos.exec_many([
-            "drop table if exists t_stmt",
-            "create table t_stmt (ts timestamp, c1 int)",
+            format!("drop table if exists {tbname}"),
+            format!("create table {tbname} (ts timestamp, c1 int)"),
         ])
         .await?;
 
         let mut stmt = Stmt::from_dsn(dsn).await?;
-        let stmt = stmt.s_stmt("insert into t_stmt values(?, ?)").await?;
+
+        let sql = format!("insert into {tbname} values(?, ?)");
+        let stmt = stmt.s_stmt(&sql).await?;
 
         stmt.bind_all(vec![
             json!([
@@ -1178,7 +1187,7 @@ mod cloud_tests {
         let res = stmt.stmt_exec().await?;
         assert_eq!(res, 2);
 
-        taos.exec("drop table t_stmt").await?;
+        taos.exec(format!("drop table {tbname}")).await?;
 
         Ok(())
     }
@@ -1194,31 +1203,39 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_stmt_stable_with_json");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_stmt_stable_with_json");
             return Ok(());
         }
 
         let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
-
         let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let tbname = format!("t_stmt_json_{ts}");
+        let sub_tbname = format!("t_stmt_json_subt_{ts}");
+
         taos.exec_many([
-            "drop table if exists t_stmt_json",
-            "create table t_stmt_json (ts timestamp, c1 int) tags(t1 json)",
+            format!("drop table if exists {tbname}"),
+            format!("create table {tbname} (ts timestamp, c1 int) tags(t1 json)"),
         ])
         .await?;
 
         let mut stmt = Stmt::from_dsn(&dsn).await?;
-        let stmt = stmt
-            .s_stmt("insert into ? using t_stmt_json tags(?) values(?, ?)")
-            .await?;
 
-        stmt.stmt_set_tbname("t_stmt_json_subt").await?;
+        let sql = format!("insert into ? using {tbname} tags(?) values(?, ?)");
+        let stmt = stmt.s_stmt(&sql).await?;
+
+        stmt.stmt_set_tbname(&sub_tbname).await?;
 
         stmt.stmt_set_tags(vec![json!(r#"{"name": "value"}"#)])
             .await?;
@@ -1235,14 +1252,16 @@ mod cloud_tests {
         let res = stmt.stmt_exec().await?;
         assert_eq!(res, 2);
 
-        let row: (i64, i32, HashMap<String, String>) =
-            taos.query_one("select * from t_stmt_json").await?.unwrap();
+        let row: (i64, i32, HashMap<String, String>) = taos
+            .query_one(format!("select * from {tbname}"))
+            .await?
+            .unwrap();
 
         assert_eq!(row.0, 1654570964022);
         assert_eq!(row.1, 2);
         assert_eq!(row.2.get("name"), Some(&"value".to_string()));
 
-        taos.exec("drop table t_stmt_json").await?;
+        taos.exec(format!("drop table {tbname}")).await?;
 
         Ok(())
     }

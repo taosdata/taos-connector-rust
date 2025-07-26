@@ -213,8 +213,7 @@ fn get_tag_data_len(tag: &Value) -> usize {
     match tag {
         Null(_) => 0,
         VarChar(v) | NChar(v) => v.len(),
-        Blob(v) | MediumBlob(v) => v.len(),
-        VarBinary(v) | Geometry(v) => v.len(),
+        Blob(v) | MediumBlob(v) | VarBinary(v) | Geometry(v) => v.len(),
         Json(v) => serde_json::to_vec(v).unwrap().len(),
         _ => tag.ty().fixed_length(),
     }
@@ -243,6 +242,7 @@ fn get_col_data_len(col: &ColumnView) -> usize {
         NChar(view) => view_iter!(view),
         VarBinary(view) => view_iter!(view),
         Geometry(view) => view_iter!(view),
+        Blob(view) => view_iter!(view),
         Json(_) => panic!("column does not support json type"),
         _ => len = col.as_ty().fixed_length() * col.len(),
     }
@@ -478,6 +478,7 @@ fn write_col(bytes: &mut [u8], col: &ColumnView) -> usize {
             Json(view) => variable_view_iter!(view),
             VarBinary(view) => variable_view_iter!(view),
             Geometry(view) => variable_view_iter!(view),
+            Blob(view) => variable_view_iter!(view),
             Decimal(_) | Decimal64(_) => unimplemented!("decimal type is unsupported in stmt2"),
         }
     }

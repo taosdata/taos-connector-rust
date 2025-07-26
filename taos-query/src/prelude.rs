@@ -158,7 +158,6 @@ pub mod sync {
             IRowsIter {
                 iter: self.blocks(),
                 block: None,
-                // row: 0,
                 rows: None,
             }
         }

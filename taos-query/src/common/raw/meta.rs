@@ -352,7 +352,6 @@ impl Display for MetaUnit {
             MetaUnit::Alter(alter) => alter.fmt(f),
             MetaUnit::Drop(drop) => drop.fmt(f),
             MetaUnit::Delete(delete) => delete.fmt(f),
-            // _ => Ok(()),
         }
     }
 }

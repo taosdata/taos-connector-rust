@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, LittleEndian};
 use faststr::FastStr;
-use flume::Sender;
 use futures::channel::oneshot;
 use futures::{FutureExt, SinkExt, StreamExt};
 use itertools::Itertools;
@@ -202,8 +201,8 @@ impl WsTaos {
             let precision = resp.precision;
             let sender = self.sender.clone();
 
-            let (raw_block_tx, raw_block_rx) = flume::bounded(64);
-            let (fetch_done_tx, fetch_done_rx) = flume::bounded(1);
+            let (raw_block_tx, raw_block_rx) = mpsc::channel(64);
+            let (fetch_done_tx, fetch_done_rx) = mpsc::channel(1);
 
             if sender.version_info.support_binary_sql() {
                 fetch_binary(
@@ -277,7 +276,7 @@ impl WsTaos {
         }
     }
 
-    pub async fn s_put(&self, sml: &SmlData) -> RawResult<()> {
+    pub async fn s_put(&self, sml: &SmlData) -> RawResult<(Option<usize>, Option<usize>)> {
         let req = WsSend::Insert {
             protocol: sml.protocol() as u8,
             precision: sml.precision().into(),
@@ -290,7 +289,7 @@ impl WsTaos {
         match self.sender.send_recv(req).await? {
             WsRecvData::Insert(resp) => {
                 tracing::trace!("sml resp: {resp:?}");
-                Ok(())
+                Ok((resp.affected_rows, resp.total_rows))
             }
             _ => unreachable!(),
         }
@@ -448,7 +447,8 @@ impl AsyncQueryable for WsTaos {
     }
 
     async fn put(&self, data: &SmlData) -> RawResult<()> {
-        self.s_put(data).in_current_span().await
+        let _ = self.s_put(data).in_current_span().await?;
+        Ok(())
     }
 }
 
@@ -463,10 +463,10 @@ impl Drop for WsTaos {
 pub(crate) async fn fetch_binary(
     query_sender: WsQuerySender,
     res_id: ResId,
-    raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
+    raw_block_sender: mpsc::Sender<Result<(RawBlock, Duration), RawError>>,
     precision: Precision,
     field_names: Vec<String>,
-    fetch_done_sender: flume::Sender<()>,
+    fetch_done_sender: mpsc::Sender<()>,
 ) {
     tokio::spawn(
         async move {
@@ -500,7 +500,7 @@ pub(crate) async fn fetch_binary(
                         if block_code != 0 {
                             let err = RawError::new(block_code, block_message);
                             tracing::error!("fetch binary failed, result id: {res_id}, err: {err:?}");
-                            let _ = raw_block_sender.send_async(Err(err)).await;
+                            let _ = raw_block_sender.send(Err(err)).await;
                             break;
                         }
 
@@ -515,7 +515,7 @@ pub(crate) async fn fetch_binary(
                         metrics.time_cost_in_block_parse += parse_start.elapsed();
 
                         if raw_block_sender
-                            .send_async(Ok((raw_block, timing)))
+                            .send(Ok((raw_block, timing)))
                             .await
                             .is_err()
                         {
@@ -525,7 +525,7 @@ pub(crate) async fn fetch_binary(
                     }
                     Ok(_) => unreachable!("unexpected response for result: {res_id}"),
                     Err(err) => {
-                        if raw_block_sender.send_async(Err(err)).await.is_err() {
+                        if raw_block_sender.send(Err(err)).await.is_err() {
                             tracing::warn!("fetch binary, failed to send error to receiver, result id: {res_id}");
                             break;
                         }
@@ -533,7 +533,7 @@ pub(crate) async fn fetch_binary(
                 }
             }
 
-            let _ = fetch_done_sender.send_async(()).await;
+            let _ = fetch_done_sender.send(()).await;
 
             tracing::trace!("fetch binary completed, result id: {res_id}, metrics: {metrics:?}");
         }
@@ -544,11 +544,11 @@ pub(crate) async fn fetch_binary(
 async fn fetch(
     query_sender: WsQuerySender,
     res_id: ResId,
-    raw_block_sender: Sender<Result<(RawBlock, Duration), RawError>>,
+    raw_block_sender: mpsc::Sender<Result<(RawBlock, Duration), RawError>>,
     precision: Precision,
     fields: Vec<Field>,
     field_names: Vec<String>,
-    fetch_done_sender: flume::Sender<()>,
+    fetch_done_sender: mpsc::Sender<()>,
 ) {
     tokio::spawn(
         async move {
@@ -568,7 +568,7 @@ async fn fetch(
                     Ok(WsRecvData::Fetch(fetch)) => fetch,
                     Ok(_) => unreachable!("unexpected response for result: {res_id}"),
                     Err(err) => {
-                        let _ = raw_block_sender.send_async(Err(err)).await;
+                        let _ = raw_block_sender.send(Err(err)).await;
                         break;
                     }
                 };
@@ -592,7 +592,7 @@ async fn fetch(
                         metrics.time_cost_in_block_parse += parse_start.elapsed();
 
                         if raw_block_sender
-                            .send_async(Ok((raw, timing)))
+                            .send(Ok((raw, timing)))
                             .await
                             .is_err()
                         {
@@ -618,7 +618,7 @@ async fn fetch(
                         metrics.time_cost_in_block_parse += parse_start.elapsed();
 
                         if raw_block_sender
-                            .send_async(Ok((raw, timing)))
+                            .send(Ok((raw, timing)))
                             .await
                             .is_err()
                         {
@@ -630,7 +630,7 @@ async fn fetch(
                     }
                     Ok(_) => unreachable!("unexpected response for result: {res_id}"),
                     Err(err) => {
-                        if raw_block_sender.send_async(Err(err)).await.is_err() {
+                        if raw_block_sender.send(Err(err)).await.is_err() {
                             tracing::warn!("fetch, failed to send error to receiver, result id: {res_id}");
                             break;
                         }
@@ -638,7 +638,7 @@ async fn fetch(
                 }
             }
 
-            let _ = fetch_done_sender.send_async(()).await;
+            let _ = fetch_done_sender.send(()).await;
 
             tracing::trace!("fetch completed, result id: {res_id}, metrics: {metrics:?}");
         }
@@ -743,7 +743,9 @@ impl WsQuerySender {
             let res = self.queries.remove(&req_id);
             tracing::trace!("send_recv, clean up queries, req_id: {req_id}, res: {res:?}");
         };
-        let _cleanup = CleanUp { f: Some(cleanup) };
+        let _cleanup_queries = CleanUp { f: Some(cleanup) };
+
+        let mut cleanup_results = None;
 
         if let WsSend::FetchBlock(args) = message {
             let id = args.id;
@@ -754,12 +756,14 @@ impl WsQuerySender {
             }
             let _ = self.results.insert_async(id, args.req_id).await;
 
-            let cleanup = || {
+            let cleanup = move || {
                 let res = self.results.remove(&id);
                 tracing::trace!("send_recv, clean up results, res_id: {id}, res: {res:?}");
             };
-            let _cleanup = CleanUp { f: Some(cleanup) };
+            cleanup_results = Some(CleanUp { f: Some(cleanup) });
         }
+
+        let _ = cleanup_results;
 
         tracing::trace!("send_recv, req_id: {req_id}, sending message: {message:?}");
 
@@ -917,10 +921,10 @@ pub struct ResultSet {
     pub(crate) block_future: Option<BlockFuture>,
     pub(crate) closer: Option<oneshot::Sender<()>>,
     pub(crate) metrics: QueryMetrics,
-    pub(crate) blocks_buffer: Option<flume::Receiver<RawResult<(RawBlock, Duration)>>>,
+    pub(crate) blocks_buffer: Option<mpsc::Receiver<RawResult<(RawBlock, Duration)>>>,
     pub(crate) fields_precisions: Option<Vec<i64>>,
     pub(crate) fields_scales: Option<Vec<i64>>,
-    pub(crate) fetch_done_reader: Option<flume::Receiver<()>>,
+    pub(crate) fetch_done_reader: Option<mpsc::Receiver<()>>,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -932,15 +936,19 @@ impl ResultSet {
             return Ok(None);
         }
         let now = Instant::now();
-        match self.blocks_buffer.as_mut().unwrap().recv_async().await {
-            Ok(Ok((raw, timing))) => {
-                self.timing = timing;
-                self.metrics.time_cost_in_flume += now.elapsed();
-                Ok(Some(raw))
-            }
-            Ok(Err(err)) => Err(err),
-            Err(_) => Ok(None),
-        }
+        self.blocks_buffer
+            .as_mut()
+            .unwrap()
+            .recv()
+            .await
+            .map(|res| {
+                res.map(|(raw, timing)| {
+                    self.metrics.time_cost_in_flume += now.elapsed();
+                    self.timing = timing;
+                    raw
+                })
+            })
+            .transpose()
     }
 
     pub fn take_timing(&self) -> Duration {
@@ -1079,9 +1087,9 @@ impl Drop for ResultSet {
             if let Some(closer) = closer {
                 let _ = closer.send(());
             }
-            if let Some(fetch_done_rx) = fetch_done_rx {
+            if let Some(mut fetch_done_rx) = fetch_done_rx {
                 tracing::trace!("waiting for fetch done, args: {args:?}");
-                let _ = fetch_done_rx.recv_timeout(Duration::from_secs(10));
+                let _ = fetch_done_rx.try_recv();
                 tracing::trace!(
                     "sending free result message after fetch done or timeout, args: {args:?}"
                 );
@@ -1586,22 +1594,29 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_sql");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_sql");
             return Ok(());
         }
 
         let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
         let taos = WsTaos::from_dsn(dsn).await?;
 
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let tbname = format!("t_sql_{ts}");
+
         taos.exec_many([
-            "create table t_sql(ts timestamp, c1 int)",
-            "insert into t_sql values(1655793421375, 1)",
+            format!("create table {tbname} (ts timestamp, c1 int)"),
+            format!("insert into {tbname} values(1655793421375, 1)"),
         ])
         .await?;
 
@@ -1612,14 +1627,14 @@ mod cloud_tests {
             c1: i32,
         }
 
-        let mut rs = taos.query("select * from t_sql").await?;
+        let mut rs = taos.query(format!("select * from {tbname}")).await?;
         let records: Vec<Record> = rs.deserialize().try_collect().await?;
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].ts, 1655793421375);
         assert_eq!(records[0].c1, 1);
 
-        let mut rs = taos.query("select * from t_sql").await?;
+        let mut rs = taos.query(format!("select * from {tbname}")).await?;
         let values = rs.to_records().await?;
 
         assert_eq!(values.len(), 1);
@@ -1630,7 +1645,7 @@ mod cloud_tests {
         );
         assert_eq!(values[0][1], Value::Int(1));
 
-        taos.exec("drop table t_sql").await?;
+        taos.exec(format!("drop table {tbname}")).await?;
 
         Ok(())
     }
@@ -1646,22 +1661,29 @@ mod cloud_tests {
 
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_write_raw_block");
             return Ok(());
         }
 
         let token = std::env::var("TDENGINE_CLOUD_TOKEN");
         if token.is_err() {
-            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_put_line_cloud");
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_write_raw_block");
             return Ok(());
         }
 
         let dsn = format!("{}/rust_test?token={}", url.unwrap(), token.unwrap());
         let taos = WsTaos::from_dsn(dsn).await?;
 
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let tbname = format!("t_raw_block_{ts}");
+
         taos.exec_many([
-            "drop table if exists t_raw_block",
-            "create table t_raw_block(ts timestamp, c1 bool)",
+            format!("drop table if exists {tbname}"),
+            format!("create table {tbname} (ts timestamp, c1 bool)"),
         ])
         .await?;
 
@@ -1676,13 +1698,13 @@ mod cloud_tests {
             Precision::Millisecond,
         );
 
-        raw.with_table_name("t_raw_block");
+        raw.with_table_name(&tbname);
 
         dbg!(&raw);
 
         taos.write_raw_block(&raw).await?;
 
-        let mut rs = taos.query("select * from t_raw_block").await?;
+        let mut rs = taos.query(format!("select * from {tbname}")).await?;
 
         #[derive(Debug, serde::Deserialize)]
         struct Record {
@@ -1696,7 +1718,7 @@ mod cloud_tests {
         assert_eq!(records[0].ts, 2199023255552);
         assert_eq!(records[0].c1, None);
 
-        taos.exec("drop table t_raw_block").await?;
+        taos.exec(format!("drop table {tbname}")).await?;
 
         Ok(())
     }

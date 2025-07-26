@@ -7,6 +7,7 @@ use std::ffi::c_void;
 use std::fmt::{Debug, Display};
 use std::io::Cursor;
 use std::ops::Deref;
+use std::ops::DerefMut;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::AtomicU32;
@@ -400,11 +401,7 @@ impl RawBlock {
 
                     data_lengths[i] = *length * rows as u32;
                 }
-                Ty::Decimal | Ty::Decimal64 => unimplemented!("decimal type not supported"),
-                Ty::VarBinary => todo!(),
-                Ty::Blob => todo!(),
-                Ty::MediumBlob => todo!(),
-                Ty::Geometry => todo!(),
+                _ => todo!(),
             }
         }
 
@@ -467,8 +464,22 @@ impl RawBlock {
                 }};
             }
 
+            macro_rules! _variable_value {
+                ($ty:ident) => {{
+                    let o1 = data_offset;
+                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
+                    data_offset = o2 + length;
+                    let offsets = Offsets::from(bytes.slice(o1..o2));
+                    let data = bytes.slice(o2..data_offset);
+                    ColumnView::$ty(paste::paste! {[<$ty View>] {
+                        offsets,
+                        data,
+                    }})
+                }};
+            }
+
             macro_rules! _decimal_value {
-                ($ty: expr, $prim: ty) => {{
+                ($ty:expr, $prim:ty) => {{
                     let o1 = data_offset;
                     let o2 = data_offset + ((rows + 7) >> 3); // null bitmap len.
                     data_offset = o2 + rows * std::mem::size_of::<$prim>();
@@ -495,6 +506,13 @@ impl RawBlock {
                 Ty::UBigInt => _primitive_value!(UBigInt, u64),
                 Ty::Float => _primitive_value!(Float, f32),
                 Ty::Double => _primitive_value!(Double, f64),
+                Ty::VarChar => _variable_value!(VarChar),
+                Ty::VarBinary => _variable_value!(VarBinary),
+                Ty::Geometry => _variable_value!(Geometry),
+                Ty::Json => _variable_value!(Json),
+                Ty::Blob => _variable_value!(Blob),
+                Ty::Decimal => _decimal_value!(ColumnView::Decimal, i128),
+                Ty::Decimal64 => _decimal_value!(ColumnView::Decimal64, i64),
                 Ty::Timestamp => {
                     let o1 = data_offset;
                     let o2 = data_offset + ((rows + 7) >> 3);
@@ -506,14 +524,6 @@ impl RawBlock {
                         data,
                         precision,
                     })
-                }
-                Ty::VarChar => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-                    ColumnView::VarChar(VarCharView { offsets, data })
                 }
                 Ty::NChar => {
                     let o1 = data_offset;
@@ -529,39 +539,12 @@ impl RawBlock {
                         layout: layout.clone(),
                     })
                 }
-                Ty::Json => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-                    ColumnView::Json(JsonView { offsets, data })
-                }
-                Ty::VarBinary => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data: Bytes = bytes.slice(o2..data_offset);
-                    ColumnView::VarBinary(VarBinaryView { offsets, data })
-                }
-                Ty::Decimal => _decimal_value!(ColumnView::Decimal, i128),
-                Ty::Decimal64 => _decimal_value!(ColumnView::Decimal64, i64),
-                Ty::Geometry => {
-                    let o1 = data_offset;
-                    let o2 = data_offset + std::mem::size_of::<i32>() * rows;
-                    data_offset = o2 + length;
-                    let offsets = Offsets::from(bytes.slice(o1..o2));
-                    let data = bytes.slice(o2..data_offset);
-                    ColumnView::Geometry(GeometryView { offsets, data })
-                }
-                ty => {
-                    unreachable!("unsupported type: {ty}")
-                }
+                ty => unreachable!("unsupported type: {ty}"),
             };
             columns.push(column);
             debug_assert!(data_offset <= len);
         }
+
         RawBlock {
             layout,
             version: Version::V3,
@@ -831,6 +814,15 @@ impl RawBlock {
                 }
                 offsets
             }
+            ColumnView::Blob(view) => {
+                let len = view.offsets.len();
+                let mut offsets = Vec::with_capacity(len);
+                for i in 0..len {
+                    let offset = unsafe { view.offsets.get_unchecked(i) };
+                    offsets.push(offset);
+                }
+                offsets
+            }
             _ => vec![],
         }
     }
@@ -857,12 +849,12 @@ impl RawBlock {
         Some(unsafe { self.get_ref_unchecked(row, col) })
     }
 
-    #[inline]
     /// Get one value at `(row, col)` of the block.
     ///
     /// # Safety
     ///
     /// Ensure that `row` and `col` not exceed the limit of the block.
+    #[inline]
     pub unsafe fn get_ref_unchecked(&self, row: usize, col: usize) -> BorrowedValue {
         self.columns.get_unchecked(col).get_ref_unchecked(row)
     }
@@ -1396,7 +1388,7 @@ impl Deref for MultiBlockCursor {
         &self.cursor
     }
 }
-use std::ops::DerefMut;
+
 impl DerefMut for MultiBlockCursor {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.cursor
@@ -1919,6 +1911,81 @@ mod tests {
                 }
             );
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_blob_raw_block() -> anyhow::Result<()> {
+        let mut bytes = BytesMut::new();
+
+        // header
+        bytes.extend_from_slice(
+            Header {
+                version: 3,
+                length: 82,
+                nrows: 1,
+                ncols: 3,
+                flag: 0,
+                group_id: 0,
+            }
+            .as_bytes(),
+        );
+
+        // schema
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
+        bytes.extend_from_slice(DataType::new(Ty::Blob, 0).as_bytes());
+
+        // length
+        bytes.put_u32_ne(8);
+        bytes.put_u32_ne(0);
+        bytes.put_u32_ne(7);
+
+        // blobs
+        bytes.put_i32_ne(0);
+        bytes.put_u32_ne(4);
+        bytes.put_slice(&[1, 2, 3, 4]);
+
+        bytes.put_i32_le(-1);
+
+        bytes.put_i32_ne(0);
+        bytes.put_u32_ne(3);
+        bytes.put_slice(&[2, 3, 3]);
+
+        let block = RawBlock::parse_from_raw_block(bytes, Precision::Millisecond);
+        let views = block.column_views();
+        assert_eq!(views.len(), 3);
+
+        if let Some(ColumnView::Blob(view)) = views.get(0) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [Some(vec![1, 2, 3, 4])]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        if let Some(ColumnView::Blob(view)) = views.get(1) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [None]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        if let Some(ColumnView::Blob(view)) = views.get(2) {
+            assert_eq!(view.len(), 1);
+            assert_eq!(view.to_vec(), [Some(vec![2, 3, 3])]);
+        } else {
+            panic!("expected blob column");
+        }
+
+        let offsets = block.get_col_data_offset_unchecked(0);
+        assert_eq!(offsets, &[0]);
+
+        let offsets = block.get_col_data_offset_unchecked(1);
+        assert_eq!(offsets, &[-1]);
+
+        let offsets = block.get_col_data_offset_unchecked(2);
+        assert_eq!(offsets, &[0]);
 
         Ok(())
     }
