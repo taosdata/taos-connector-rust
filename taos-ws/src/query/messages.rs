@@ -447,6 +447,7 @@ mod tests {
                 "user": "root",
                 "password": "taosdata",
                 "db": "",
+                "tz": null,
             }
         });
         assert_eq!(v, j);
