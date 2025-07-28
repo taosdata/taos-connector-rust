@@ -99,6 +99,7 @@ impl Error {
     pub const fn errno(&self) -> Code {
         self.code
     }
+
     pub fn errstr(&self) -> String {
         self.source.to_string()
     }
@@ -782,7 +783,6 @@ fn handle_disconnect_error(err: WsError) -> RawError {
 #[cfg(test)]
 mod tests {
     use futures::{SinkExt, StreamExt};
-    use serde::Deserialize;
     use taos_query::prelude::*;
 
     use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
@@ -814,112 +814,6 @@ mod tests {
                 }
             }
         }
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_timezone_default() -> Result<(), anyhow::Error> {
-        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
-            .build()
-            .await?;
-
-        taos.exec_many([
-            "drop database if exists test_1753683795",
-            "create database test_1753683795",
-            "use test_1753683795",
-            "create table t0 (ts timestamp, c1 int)",
-            "insert into t0 values ('2025-01-01 12:00:00', 1)",
-            "insert into t0 values ('2025-01-02 15:30:00', 2)",
-        ])
-        .await?;
-
-        let timezone = taos
-            .query("select timezone()")
-            .await?
-            .deserialize()
-            .try_collect::<Vec<String>>()
-            .await?
-            .into_iter()
-            .next();
-
-        assert_eq!(timezone, Some("Asia/Shanghai (CST, +0800)".to_string()));
-
-        #[derive(Debug, Deserialize)]
-        struct Record {
-            ts: String,
-            c1: i32,
-        }
-
-        let records: Vec<Record> = taos
-            .query("select * from t0")
-            .await?
-            .deserialize()
-            .try_collect()
-            .await?;
-
-        assert_eq!(records.len(), 2);
-
-        assert_eq!(records[0].ts, "2025-01-01T12:00:00+08:00");
-        assert_eq!(records[1].ts, "2025-01-02T15:30:00+08:00");
-
-        assert_eq!(records[0].c1, 1);
-        assert_eq!(records[1].c1, 2);
-
-        taos.exec("drop database test_1753683795").await?;
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_timezone_custom() -> Result<(), anyhow::Error> {
-        let taos = TaosBuilder::from_dsn("ws://localhost:6041?timezone=America/New_York")?
-            .build()
-            .await?;
-
-        taos.exec_many([
-            "drop database if exists test_1753435476",
-            "create database test_1753435476",
-            "use test_1753435476",
-            "create table t0 (ts timestamp, c1 int)",
-            "insert into t0 values ('2025-01-01 12:00:00', 1)",
-            "insert into t0 values ('2025-01-02 15:30:00', 2)",
-        ])
-        .await?;
-
-        let timezone = taos
-            .query("select timezone()")
-            .await?
-            .deserialize()
-            .try_collect::<Vec<String>>()
-            .await?
-            .into_iter()
-            .next();
-
-        assert_eq!(timezone, Some("America/New_York (EDT, -0400)".to_string()));
-
-        #[derive(Debug, Deserialize)]
-        struct Record {
-            ts: String,
-            c1: i32,
-        }
-
-        let records: Vec<Record> = taos
-            .query("select * from t0")
-            .await?
-            .deserialize()
-            .try_collect()
-            .await?;
-
-        assert_eq!(records.len(), 2);
-
-        assert_eq!(records[0].ts, "2025-01-01T12:00:00-05:00");
-        assert_eq!(records[1].ts, "2025-01-02T15:30:00-05:00");
-
-        assert_eq!(records[0].c1, 1);
-        assert_eq!(records[1].c1, 2);
-
-        taos.exec("drop database test_1753435476").await?;
 
         Ok(())
     }

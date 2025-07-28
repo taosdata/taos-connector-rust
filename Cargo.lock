@@ -3721,6 +3721,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "chrono-tz",
  "clap",
  "criterion",
  "flume",
