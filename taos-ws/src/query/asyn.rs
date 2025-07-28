@@ -89,7 +89,7 @@ impl WsTaos {
             conn_id,
             close_signal: close_tx,
             sender: query_sender,
-            tz: builder.tz.clone(),
+            tz: builder.tz,
         })
     }
 
@@ -246,7 +246,7 @@ impl WsTaos {
                 fields_precisions: resp.fields_precisions,
                 fields_scales: resp.fields_scales,
                 fetch_done_reader: Some(fetch_done_rx),
-                tz: self.tz.clone(),
+                tz: self.tz,
             })
         } else {
             Ok(ResultSet {
@@ -265,7 +265,7 @@ impl WsTaos {
                 fields_precisions: None,
                 fields_scales: None,
                 fetch_done_reader: None,
-                tz: None,
+                tz: self.tz,
             })
         }
     }
@@ -343,7 +343,7 @@ impl WsTaos {
     }
 
     pub(crate) fn timezone(&self) -> Option<Tz> {
-        self.tz.clone()
+        self.tz
     }
 
     async fn s_write_raw_block(&self, raw: &RawBlock) -> RawResult<()> {
@@ -1037,7 +1037,7 @@ impl AsyncFetchable for ResultSet {
     }
 
     fn timezone(&self) -> Option<Tz> {
-        self.tz.clone()
+        self.tz
     }
 }
 

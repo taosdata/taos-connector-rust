@@ -417,7 +417,7 @@ mod r#async {
         fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             use futures::stream::*;
 
-            let tz = self.tz.clone();
+            let tz = self.tz;
 
             Pin::get_mut(self).rows.poll_next_unpin(cx).map(|row| {
                 row.map(|row| {
