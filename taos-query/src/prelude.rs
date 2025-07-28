@@ -294,6 +294,7 @@ mod r#async {
 
     #[cfg(feature = "async")]
     use async_trait::async_trait;
+    use chrono_tz::Tz;
     pub use futures::stream::{Stream, StreamExt, TryStreamExt};
     pub use mdsn::Address;
     pub use serde::de::value::Error as DeError;
@@ -385,6 +386,7 @@ mod r#async {
 
     pub struct AsyncDeserialized<'a, T, V> {
         rows: AsyncRows<'a, T>,
+        tz: Option<Tz>,
         _marker: PhantomData<V>,
     }
 
@@ -399,10 +401,17 @@ mod r#async {
 
         fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             use futures::stream::*;
-            Pin::get_mut(self)
-                .rows
-                .poll_next_unpin(cx)
-                .map(|row| row.map(|row| row.and_then(|mut row| V::deserialize(&mut row))))
+
+            let tz = self.tz.clone();
+
+            Pin::get_mut(self).rows.poll_next_unpin(cx).map(|row| {
+                row.map(|row| {
+                    row.and_then(|mut row| {
+                        row.set_timezone(tz);
+                        V::deserialize(&mut row)
+                    })
+                })
+            })
         }
     }
 
@@ -453,10 +462,16 @@ mod r#async {
         where
             R: serde::de::DeserializeOwned,
         {
+            let tz = self.timezone();
             AsyncDeserialized {
                 rows: self.rows(),
+                tz,
                 _marker: PhantomData,
             }
+        }
+
+        fn timezone(&self) -> Option<Tz> {
+            None
         }
     }
 

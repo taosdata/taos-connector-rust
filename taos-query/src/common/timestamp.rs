@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug, Display};
 
-use chrono::Local;
+use chrono::{Local, TimeZone};
 use serde::{Deserialize, Serialize};
 
 use super::Precision;
@@ -48,6 +48,7 @@ impl Timestamp {
             Timestamp::Nanoseconds(_) => Precision::Nanosecond,
         }
     }
+
     pub fn as_raw_i64(&self) -> i64 {
         match self {
             Timestamp::Milliseconds(raw)
@@ -55,12 +56,14 @@ impl Timestamp {
             | Timestamp::Nanoseconds(raw) => *raw,
         }
     }
+
     pub fn to_naive_datetime(&self) -> chrono::NaiveDateTime {
         let duration = match self {
             Timestamp::Milliseconds(raw) => chrono::Duration::milliseconds(*raw),
             Timestamp::Microseconds(raw) => chrono::Duration::microseconds(*raw),
             Timestamp::Nanoseconds(raw) => chrono::Duration::nanoseconds(*raw),
         };
+
         chrono::DateTime::from_timestamp(0, 0)
             .expect("timestamp value could always be mapped to a chrono::NaiveDateTime")
             .checked_add_signed(duration)
@@ -68,10 +71,14 @@ impl Timestamp {
             .naive_utc()
     }
 
-    // todo: support to tz.
+    #[inline]
     pub fn to_datetime_with_tz(&self) -> chrono::DateTime<Local> {
-        use chrono::TimeZone;
-        Local.from_utc_datetime(&self.to_naive_datetime())
+        self.to_datetime_with_custom_tz(&Local)
+    }
+
+    #[inline]
+    pub fn to_datetime_with_custom_tz<Tz: TimeZone>(&self, tz: &Tz) -> chrono::DateTime<Tz> {
+        tz.from_utc_datetime(&self.to_naive_datetime())
     }
 
     pub fn cast_precision(&self, precision: Precision) -> Timestamp {

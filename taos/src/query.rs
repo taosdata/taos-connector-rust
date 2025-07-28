@@ -38,6 +38,7 @@ impl Taos {
         matches!(&self.0, TaosInner::Ws(_))
     }
 }
+
 pub struct ResultSet(pub(super) ResultSetInner);
 
 impl taos_query::TBuilder for TaosBuilder {

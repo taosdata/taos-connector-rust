@@ -735,9 +735,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "chrono"
-version = "0.4.40"
+version = "0.4.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a7964611d71df112cb1730f2ee67324fcf4d0fc6606acbbe9bfe06df124637c"
+checksum = "c469d952047f47f91b68d1cba3f10d63c11d73e4636f24f08daf0278abf01c4d"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -746,6 +746,16 @@ dependencies = [
  "serde",
  "wasm-bindgen",
  "windows-link",
+]
+
+[[package]]
+name = "chrono-tz"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
+dependencies = [
+ "chrono",
+ "phf",
 ]
 
 [[package]]
@@ -2722,6 +2732,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "phf"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
+dependencies = [
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
+dependencies = [
+ "siphasher",
+]
+
+[[package]]
 name = "pin-project"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3530,6 +3558,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "siphasher"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
+
+[[package]]
 name = "slab"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3795,6 +3829,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
+ "chrono-tz",
  "deadpool",
  "derive_builder",
  "derive_more 1.0.0",
@@ -3838,6 +3873,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "cfg-if",
+ "chrono-tz",
  "criterion",
  "crossbeam",
  "dashmap",
