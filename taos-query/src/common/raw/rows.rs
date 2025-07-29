@@ -12,6 +12,7 @@ use crate::RawBlock;
 pub struct IntoRowsIter<'a> {
     pub(crate) raw: RawBlock,
     pub(crate) row: usize,
+    pub(super) tz: Option<Tz>,
     pub(crate) _marker: PhantomData<&'a bool>,
 }
 
@@ -31,7 +32,7 @@ impl<'a> Iterator for IntoRowsIter<'a> {
                 raw: unsafe { &*(&self.raw as *const RawBlock) },
                 row,
                 col: 0,
-                tz: None,
+                tz: self.tz,
             })
         }
     }
@@ -40,6 +41,7 @@ impl<'a> Iterator for IntoRowsIter<'a> {
 pub struct RowsIter<'a> {
     pub(super) raw: NonNull<RawBlock>,
     pub(super) row: usize,
+    pub(super) tz: Option<Tz>,
     pub(crate) _marker: PhantomData<&'a usize>,
 }
 
@@ -59,7 +61,7 @@ impl<'a> Iterator for RowsIter<'a> {
                 raw: unsafe { self.raw.as_mut() },
                 row,
                 col: 0,
-                tz: None,
+                tz: self.tz,
             })
         }
     }
@@ -79,7 +81,7 @@ impl RowsIter<'_> {
             raw: unsafe { self.raw.as_mut() },
             row: self.row,
             col: 0,
-            tz: None,
+            tz: self.tz,
         }
     }
 }

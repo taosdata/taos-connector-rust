@@ -25,8 +25,10 @@ pub struct RawData {
     free: unsafe extern "C" fn(raw: raw_data_t) -> i32,
     raw: raw_data_t,
 }
+
 unsafe impl Send for RawData {}
 unsafe impl Sync for RawData {}
+
 impl Drop for RawData {
     /// Use native free function to free raw_data_t
     fn drop(&mut self) {
@@ -40,15 +42,19 @@ impl RawData {
     pub fn new(raw: raw_data_t, free: unsafe extern "C" fn(raw: raw_data_t) -> i32) -> Self {
         RawData { free, raw }
     }
+
     pub fn raw_ptr(&self) -> *const c_void {
         self.raw.raw
     }
+
     pub fn raw_len(&self) -> u32 {
         self.raw.raw_len
     }
+
     pub fn raw_type(&self) -> u16 {
         self.raw.raw_type
     }
+
     pub fn raw_slice(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.raw.raw as *const u8, self.raw.raw_len as _) }
     }
@@ -79,6 +85,7 @@ extern "C" fn _rust_free_raw(raw: raw_data_t) -> i32 {
     }
     0
 }
+
 impl Inlinable for RawData {
     fn read_inlined<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
@@ -175,15 +182,18 @@ impl crate::util::AsyncInlinable for RawData {
 mod tests {
     use super::*;
     use crate::util::AsyncInlinable;
+
     #[tokio::test]
     async fn test_raw_data_async_io() {
         use std::io::Cursor;
+
         let mut buff = Cursor::new(vec![0; 15]);
         const RAW: &[u8] = b"hello rawdata";
 
         extern "C" fn _empty_free_raw(_raw: raw_data_t) -> i32 {
             0
         }
+
         let rawdata = RawData::new(
             raw_data_t {
                 raw: RAW.as_ptr() as _,
@@ -204,15 +214,18 @@ mod tests {
         assert_eq!(raw.raw_type(), 0);
         assert_eq!(raw.raw_slice(), RAW);
     }
+
     #[test]
     fn test_raw_data_io() {
         use std::io::Cursor;
+
         let mut buff = Cursor::new(vec![0; 15]);
         const RAW: &[u8] = b"hello rawdata";
 
         extern "C" fn _empty_free_raw(_raw: raw_data_t) -> i32 {
             0
         }
+
         let rawdata = RawData::new(
             raw_data_t {
                 raw: RAW.as_ptr() as _,

@@ -126,7 +126,6 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
 
     fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
-        // dbg!(&dsn);
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
             ("ws" | "wss" | "http" | "https" | "taosws", _) => Ok(Self(TmqBuilderInner::Ws(
                 taos_ws::consumer::TmqBuilder::from_dsn(dsn)?,
@@ -565,6 +564,8 @@ mod tests {
 mod async_tests {
     use std::str::FromStr;
     use std::time::Duration;
+
+    use serde::Deserialize;
 
     use super::TmqBuilder;
     use crate::TaosBuilder;
@@ -2421,260 +2422,155 @@ mod async_tests {
             format!("drop database {db}"),
         ])
         .await?;
+
         Ok(())
     }
-}
 
-#[cfg(feature = "deflate")]
-#[cfg(test)]
-mod tmq_deflate_tests {
+    #[tokio::test]
+    async fn test_timezone_default() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
 
-    // use crate::*;
-    // use std::time::Duration;
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
 
-    // #[cfg(feature = "deflate")]
-    // #[tokio::test]
-    // async fn test_ws_tmq_deflate() -> taos_query::RawResult<()> {
-    //     // pretty_env_logger::formatted_timed_builder()
-    //     //     .filter_level(tracing::LevelFilter::Info)
-    //     //     .init();
+        taos.exec_many([
+            "drop topic if exists topic_1753758290",
+            "drop database if exists test_1753758290",
+            "create database test_1753758290",
+            "create topic topic_1753758290 as database test_1753758290",
+            "use test_1753758290",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values ('2025-01-01 12:00:00', 1)",
+            "insert into t0 values ('2025-01-02 15:30:00', 2)",
+        ])
+        .await?;
 
-    //     use std::str::FromStr;
-    //     use taos_query::prelude::*;
+        let tmq =
+            TmqBuilder::from_dsn("ws://localhost:6041?group.id=10&auto.offset.reset=earliest")?;
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["topic_1753758290"]).await?;
 
-    //     let dsn = "tmq+ws://localhost:6041?".to_string();
-    //     tracing::trace!("dsn: {}", dsn);
-    //     let mut dsn = Dsn::from_str(&dsn)?;
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: String,
+            c1: i32,
+        }
 
-    //     let taos = TaosBuilder::from_dsn(&dsn)?.build().await?;
+        let mut cnt = 0;
+        let mut records: Vec<Record> = Vec::new();
 
-    //     let db = "ws_tmq_deflate";
-    //     let db2 = "ws_tmq_deflate_dest";
+        let timeout = Timeout::Duration(Duration::from_secs(2));
 
-    //     taos.exec(format!("drop topic if exists {db}")).await?;
-    //     taos.exec(format!("drop database if exists {db}")).await?;
+        loop {
+            if let Some((offset, mut message)) = consumer.recv_timeout(timeout).await? {
+                if let Some(data) = message.data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        cnt += block.nrows();
+                        records.append(&mut block.deserialize().try_collect()?);
+                    }
+                }
+                consumer.commit(offset).await?;
+            }
 
-    //     std::thread::sleep(std::time::Duration::from_secs(1));
+            if cnt == 2 {
+                break;
+            }
+        }
 
-    //     taos.exec(format!(
-    //         "create database if not exists {db} wal_retention_period 3600"
-    //     ))
-    //     .await?;
+        consumer.unsubscribe().await;
 
-    //     std::thread::sleep(std::time::Duration::from_secs(1));
+        assert_eq!(records.len(), 2);
 
-    //     taos.exec_many([
-    //         format!("create topic {db} with meta as database {db}").as_str(),
-    //         format!("use {db}").as_str(),
-    //         // kind 1: create super table using all types
-    //         "create table stb1(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
-    //         c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(16),\
-    //         c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
-    //         tags(t1 json)",
-    //         // kind 2: create child table with json tag
-    //         "create table tb0 using stb1 tags('{\"name\":\"value\"}')",
-    //         "create table tb1 using stb1 tags(NULL)",
-    //         "insert into tb0 values(now, NULL, NULL, NULL, NULL, NULL,
-    //         NULL, NULL, NULL, NULL, NULL,
-    //         NULL, NULL, NULL, NULL)
-    //         tb1 values(now, true, -2, -3, -4, -5, \
-    //         '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
-    //         254, 65534, 1, 1)",
-    //         // kind 3: create super table with all types except json (especially for tags)
-    //         "create table stb2(ts timestamp, c1 bool, c2 tinyint, c3 smallint, c4 int, c5 bigint,\
-    //         c6 timestamp, c7 float, c8 double, c9 varchar(10), c10 nchar(10),\
-    //         c11 tinyint unsigned, c12 smallint unsigned, c13 int unsigned, c14 bigint unsigned)\
-    //         tags(t1 bool, t2 tinyint, t3 smallint, t4 int, t5 bigint,\
-    //         t6 timestamp, t7 float, t8 double, t9 varchar(10), t10 nchar(16),\
-    //         t11 tinyint unsigned, t12 smallint unsigned, t13 int unsigned, t14 bigint unsigned)",
-    //         // kind 4: create child table with all types except json
-    //         "create table tb2 using stb2 tags(true, -2, -3, -4, -5, \
-    //         '2022-02-02 02:02:02.222', -0.1, -0.12345678910, 'abc 和我', 'Unicode + 涛思',\
-    //         254, 65534, 1, 1)",
-    //         "create table tb3 using stb2 tags( NULL, NULL, NULL, NULL, NULL,
-    //         NULL, NULL, NULL, NULL, NULL,
-    //         NULL, NULL, NULL, NULL)",
-    //         // kind 5: create common table
-    //         "create table `table` (ts timestamp, v int)",
-    //         // kind 6: column in super table
-    //         "alter table stb1 add column new1 bool",
-    //         "alter table stb1 add column new2 tinyint",
-    //         "alter table stb1 add column new10 nchar(16)",
-    //         "alter table stb1 modify column new10 nchar(32)",
-    //         "alter table stb1 drop column new10",
-    //         "alter table stb1 drop column new2",
-    //         "alter table stb1 drop column new1",
-    //         // kind 7: add tag in super table
-    //         "alter table `stb2` add tag new1 bool",
-    //         "alter table `stb2` rename tag new1 new1_new",
-    //         "alter table `stb2` modify tag t10 nchar(32)",
-    //         "alter table `stb2` drop tag new1_new",
-    //         // kind 8: column in common table
-    //         "alter table `table` add column new1 bool",
-    //         "alter table `table` add column new2 tinyint",
-    //         "alter table `table` add column new10 nchar(16)",
-    //         "alter table `table` modify column new10 nchar(32)",
-    //         "alter table `table` rename column new10 new10_new",
-    //         "alter table `table` drop column new10_new",
-    //         "alter table `table` drop column new2",
-    //         "alter table `table` drop column new1",
-    //         // kind 9: drop normal table
-    //         "drop table `table`",
-    //         // kind 10: drop child table
-    //         "drop table `tb2`, `tb1`",
-    //         // kind 11: drop super table
-    //         "drop table `stb2`",
-    //         "drop table `stb1`",
-    //     ])
-    //     .await?;
+        assert_eq!(records[0].ts, "2025-01-01T12:00:00+08:00");
+        assert_eq!(records[1].ts, "2025-01-02T15:30:00+08:00");
 
-    //     taos.exec_many([
-    //         format!("drop database if exists {db2}"),
-    //         format!("create database if not exists {db2} wal_retention_period 3600"),
-    //         format!("use {db2}"),
-    //     ])
-    //     .await?;
+        assert_eq!(records[0].c1, 1);
+        assert_eq!(records[1].c1, 2);
 
-    //     dsn.params
-    //         .insert("group.id".to_string(), "ws_tmq_deflate_1".to_string());
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
-    //     dsn.params
-    //         .insert("auto.offset.reset".to_string(), "earliest".to_string());
-    //     let builder = TmqBuilder::from_dsn(&dsn)?;
-    //     // dbg!(&builder);
-    //     let mut consumer = builder.build().await?;
+        taos.exec_many([
+            "drop topic topic_1753758290",
+            "drop database test_1753758290",
+        ])
+        .await?;
 
-    //     let topics = consumer.list_topics().await?;
-    //     tracing::info!("topics: {:?}", topics);
-    //     consumer.subscribe([db]).await?;
-    //     let topics = consumer.list_topics().await?;
-    //     tracing::info!("topics: {:?}", topics);
+        Ok(())
+    }
 
-    //     {
-    //         let mut stream = consumer.stream_with_timeout(Timeout::from_secs(1));
+    #[tokio::test]
+    async fn test_timezone_custom() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
 
-    //         while let Some((offset, message)) = stream.try_next().await? {
-    //             let topic: &str = offset.topic();
-    //             let database = offset.database();
-    //             let vgroup_id = offset.vgroup_id();
-    //             tracing::debug!(
-    //                 "topic: {}, database: {}, vgroup_id: {}",
-    //                 topic,
-    //                 database,
-    //                 vgroup_id
-    //             );
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041?timezone=America/New_York")?
+            .build()
+            .await?;
 
-    //             match message {
-    //                 MessageSet::Meta(meta) => {
-    //                     tracing::debug!("Meta");
-    //                     let raw = meta.as_raw_meta().await?;
-    //                     taos.write_raw_meta(&raw).await?;
+        taos.exec_many([
+            "drop topic if exists topic_1753759808",
+            "drop database if exists test_1753759808",
+            "create database test_1753759808",
+            "create topic topic_1753759808 as database test_1753759808",
+            "use test_1753759808",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values ('2025-01-01 12:00:00', 1)",
+            "insert into t0 values ('2025-01-02 15:30:00', 2)",
+        ])
+        .await?;
 
-    //                     let json = meta.as_json_meta().await?;
-    //                     let sql = json.to_string();
-    //                     if let Err(err) = taos.exec(sql).await {
-    //                         tracing::trace!("maybe error: {}", err);
-    //                     }
-    //                 }
-    //                 MessageSet::Data(data) => {
-    //                     tracing::debug!("Data");
+        let tmq = TmqBuilder::from_dsn(
+            "ws://localhost:6041?group.id=10&auto.offset.reset=earliest&timezone=America/New_York",
+        )?;
 
-    //                     while let Some(data) = data.fetch_raw_block().await? {
-    //                         tracing::debug!("table_name: {:?}", data.table_name());
-    //                         tracing::debug!("data: {:?}", data);
-    //                     }
-    //                 }
-    //                 MessageSet::MetaData(meta, data) => {
-    //                     tracing::debug!("MetaData");
-    //                     let raw = meta.as_raw_meta().await?;
-    //                     taos.write_raw_meta(&raw).await?;
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["topic_1753759808"]).await?;
 
-    //                     let json = meta.as_json_meta().await?;
-    //                     let sql = json.to_string();
-    //                     if let Err(err) = taos.exec(sql).await {
-    //                         println!("maybe error: {}", err);
-    //                     }
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: String,
+            c1: i32,
+        }
 
-    //                     while let Some(data) = data.fetch_raw_block().await? {
-    //                         tracing::debug!("table_name: {:?}", data.table_name());
-    //                         tracing::debug!("data: {:?}", data);
-    //                     }
-    //                 }
-    //             }
-    //             consumer.commit(offset).await?;
-    //         }
-    //     }
+        let mut cnt = 0;
+        let mut records: Vec<Record> = Vec::new();
 
-    //     let assignments = consumer.assignments().await.unwrap();
-    //     tracing::info!("assignments: {:?}", assignments);
+        let timeout = Timeout::Duration(Duration::from_secs(2));
 
-    //     // seek offset
-    //     for topic_vec_assignment in assignments {
-    //         let topic = &topic_vec_assignment.0;
-    //         let vec_assignment = topic_vec_assignment.1;
-    //         for assignment in vec_assignment {
-    //             let vgroup_id = assignment.vgroup_id();
-    //             let current = assignment.current_offset();
-    //             let begin = assignment.begin();
-    //             let end = assignment.end();
-    //             tracing::info!(
-    //                 "topic: {}, vgroup_id: {}, current offset: {} begin {}, end: {}",
-    //                 topic,
-    //                 vgroup_id,
-    //                 current,
-    //                 begin,
-    //                 end
-    //             );
+        loop {
+            if let Some((offset, mut message)) = consumer.recv_timeout(timeout).await? {
+                if let Some(data) = message.data() {
+                    while let Some(block) = data.fetch_raw_block().await? {
+                        cnt += block.nrows();
+                        records.append(&mut block.deserialize().try_collect()?);
+                    }
+                }
+                consumer.commit(offset).await?;
+            }
 
-    //             let committed = consumer.committed(topic, vgroup_id).await?;
-    //             tracing::info!("committed: {:?}", committed);
+            if cnt == 2 {
+                break;
+            }
+        }
 
-    //             let position = consumer.position(topic, vgroup_id).await?;
-    //             tracing::info!("position: {:?}", position);
+        consumer.unsubscribe().await;
 
-    //             let res = consumer.offset_seek(topic, vgroup_id, end).await;
-    //             if res.is_err() {
-    //                 tracing::error!("seek offset error: {:?}", res);
-    //                 let a = consumer.assignments().await.unwrap();
-    //                 tracing::error!("assignments: {:?}", a);
-    //             }
+        assert_eq!(records.len(), 2);
 
-    //             let committed = consumer.committed(topic, vgroup_id).await?;
-    //             tracing::info!("after seek committed: {:?}", committed);
+        assert_eq!(records[0].ts, "2025-01-01T12:00:00-05:00");
+        assert_eq!(records[1].ts, "2025-01-02T15:30:00-05:00");
 
-    //             let position = consumer.position(topic, vgroup_id).await?;
-    //             tracing::info!("after seek position: {:?}", position);
+        assert_eq!(records[0].c1, 1);
+        assert_eq!(records[1].c1, 2);
 
-    //             let res = consumer.commit_offset(topic, vgroup_id, end).await;
-    //             if res.is_err() {
-    //                 tracing::error!("commit offset response: {:?}", res);
-    //             }
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
-    //             let committed = consumer.committed(topic, vgroup_id).await?;
-    //             tracing::info!("after commit committed: {:?}", committed);
+        taos.exec_many([
+            "drop topic topic_1753759808",
+            "drop database test_1753759808",
+        ])
+        .await?;
 
-    //             let position = consumer.position(topic, vgroup_id).await?;
-    //             tracing::info!("after commit position: {:?}", position);
-    //         }
-
-    //         let topic_assignment = consumer.topic_assignment(topic).await;
-    //         tracing::info!("topic assignment: {:?}", topic_assignment);
-    //     }
-
-    //     // after seek offset
-    //     let assignments = consumer.assignments().await.unwrap();
-    //     tracing::debug!("after seek offset assignments: {:?}", assignments);
-
-    //     consumer.unsubscribe().await;
-
-    //     tokio::time::sleep(Duration::from_secs(1)).await;
-
-    //     taos.exec_many([
-    //         format!("drop database {db2}"),
-    //         format!("drop topic {db}"),
-    //         format!("drop database {db}"),
-    //     ])
-    //     .await?;
-    //     Ok(())
-    // }
+        Ok(())
+    }
 }

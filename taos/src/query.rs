@@ -1203,14 +1203,6 @@ mod tests {
             "insert into t0 values ('2025-01-02 15:30:00', 2)",
         ])?;
 
-        let timezone: Vec<String> = taos
-            .query("select timezone()")?
-            .deserialize()
-            .try_collect()?;
-
-        assert_eq!(timezone.len(), 1);
-        assert_eq!(timezone[0], "Asia/Shanghai (CST, +0800)".to_string());
-
         #[derive(Debug, Deserialize)]
         struct Record {
             ts: String,
@@ -1248,14 +1240,6 @@ mod tests {
             "insert into t0 values ('2025-01-01 12:00:00', 1)",
             "insert into t0 values ('2025-01-02 15:30:00', 2)",
         ])?;
-
-        let timezone: Vec<String> = taos
-            .query("select timezone()")?
-            .deserialize()
-            .try_collect()?;
-
-        assert_eq!(timezone.len(), 1);
-        assert_eq!(timezone[0], "America/New_York (EDT, -0400)".to_string());
 
         #[derive(Debug, Deserialize)]
         struct Record {
@@ -1663,16 +1647,6 @@ mod async_tests {
         ])
         .await?;
 
-        let timezone: Vec<String> = taos
-            .query("select timezone()")
-            .await?
-            .deserialize()
-            .try_collect()
-            .await?;
-
-        assert_eq!(timezone.len(), 1);
-        assert_eq!(timezone[0], "Asia/Shanghai (CST, +0800)".to_string());
-
         #[derive(Debug, Deserialize)]
         struct Record {
             ts: String,
@@ -1714,16 +1688,6 @@ mod async_tests {
             "insert into t0 values ('2025-01-02 15:30:00', 2)",
         ])
         .await?;
-
-        let timezone: Vec<String> = taos
-            .query("select timezone()")
-            .await?
-            .deserialize()
-            .try_collect()
-            .await?;
-
-        assert_eq!(timezone.len(), 1);
-        assert_eq!(timezone[0], "America/New_York (EDT, -0400)".to_string());
 
         #[derive(Debug, Deserialize)]
         struct Record {

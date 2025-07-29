@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use chrono_tz::Tz;
 use dashmap::DashMap as HashMap;
 use itertools::Itertools;
 use messages::*;
@@ -269,24 +270,33 @@ struct WsMessageBase {
     sender: WsTmqSender,
     message_id: MessageId,
     raw_blocks: Arc<Mutex<Option<VecDeque<RawBlock>>>>,
+    tz: Option<Tz>,
 }
 
 impl WsMessageBase {
-    fn new(is_support_fetch_raw: bool, sender: WsTmqSender, message_id: MessageId) -> Self {
+    fn new(
+        is_support_fetch_raw: bool,
+        sender: WsTmqSender,
+        message_id: MessageId,
+        tz: Option<Tz>,
+    ) -> Self {
         Self {
             is_support_fetch_raw,
             sender,
             message_id,
             raw_blocks: Arc::new(Mutex::new(None)),
+            tz,
         }
     }
 
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
-        if self.is_support_fetch_raw {
-            self.fetch_raw_block_new().await
+        let block = if self.is_support_fetch_raw {
+            self.fetch_raw_block_new().await?
         } else {
-            self.fetch_raw_block_old().await
-        }
+            self.fetch_raw_block_old().await?
+        };
+
+        Ok(block.map(|b| b.with_timezone(self.tz)))
     }
 
     async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
@@ -594,8 +604,12 @@ impl Consumer {
 
             self.message_id.store(message_id, Ordering::Relaxed);
 
-            let message =
-                WsMessageBase::new(self.support_fetch_raw(), self.sender.clone(), message_id);
+            let message = WsMessageBase::new(
+                self.support_fetch_raw(),
+                self.sender.clone(),
+                message_id,
+                self.tz,
+            );
 
             return match message_type {
                 MessageType::Meta => Some((offset, MessageSet::Meta(Meta(message)))),
@@ -608,6 +622,7 @@ impl Consumer {
                             self.support_fetch_raw(),
                             self.sender.clone(),
                             message_id,
+                            self.tz,
                         )),
                     ),
                 )),
@@ -1168,6 +1183,7 @@ impl TmqBuilder {
             cache_sender: poll_cache_tx,
             cache_reader: Mutex::new(poll_cache_rx),
             last_poll_time: AtomicU64::new(0),
+            tz: self.info.tz,
         })
     }
 }
@@ -1189,6 +1205,7 @@ pub struct Consumer {
     cache_sender: mpsc::Sender<Option<TmqRecvData>>,
     cache_reader: Mutex<mpsc::Receiver<Option<TmqRecvData>>>,
     last_poll_time: AtomicU64,
+    tz: Option<Tz>,
 }
 
 impl Drop for Consumer {
