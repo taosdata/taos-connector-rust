@@ -11,6 +11,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set timezone
+        run: sudo timedatectl set-timezone Asia/Shanghai
+
       - name: Get TDengine
         run: |
           wget https://github.com/taosdata/TDengine/releases/download/ver-3.3.6.0/TDengine-server-3.3.6.0-Linux-x64.tar.gz
@@ -57,9 +60,6 @@ jobs:
         with:
           path: target
           key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
-
-      - name: Set timezone
-        run: sudo timedatectl set-timezone Asia/Shanghai
 
       - name: Run tests
         env:
