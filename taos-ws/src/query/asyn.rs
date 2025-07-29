@@ -9,6 +9,7 @@ use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, LittleEndian};
+use chrono_tz::Tz;
 use faststr::FastStr;
 use futures::channel::oneshot;
 use futures::{FutureExt, SinkExt, StreamExt};
@@ -41,6 +42,7 @@ pub struct WsTaos {
     conn_id: u64,
     sender: WsQuerySender,
     close_signal: watch::Sender<bool>,
+    tz: Option<Tz>,
 }
 
 impl WsTaos {
@@ -87,6 +89,7 @@ impl WsTaos {
             conn_id,
             close_signal: close_tx,
             sender: query_sender,
+            tz: builder.tz,
         })
     }
 
@@ -243,6 +246,7 @@ impl WsTaos {
                 fields_precisions: resp.fields_precisions,
                 fields_scales: resp.fields_scales,
                 fetch_done_reader: Some(fetch_done_rx),
+                tz: self.tz,
             })
         } else {
             Ok(ResultSet {
@@ -261,6 +265,7 @@ impl WsTaos {
                 fields_precisions: None,
                 fields_scales: None,
                 fetch_done_reader: None,
+                tz: self.tz,
             })
         }
     }
@@ -335,6 +340,10 @@ impl WsTaos {
 
     pub(crate) fn sender(&self) -> WsQuerySender {
         self.sender.clone()
+    }
+
+    pub(crate) fn timezone(&self) -> Option<Tz> {
+        self.tz
     }
 
     async fn s_write_raw_block(&self, raw: &RawBlock) -> RawResult<()> {
@@ -925,6 +934,7 @@ pub struct ResultSet {
     pub(crate) fields_precisions: Option<Vec<i64>>,
     pub(crate) fields_scales: Option<Vec<i64>>,
     pub(crate) fetch_done_reader: Option<mpsc::Receiver<()>>,
+    pub(crate) tz: Option<Tz>,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -1024,6 +1034,10 @@ impl AsyncFetchable for ResultSet {
                 }
             }
         }
+    }
+
+    fn timezone(&self) -> Option<Tz> {
+        self.tz
     }
 }
 

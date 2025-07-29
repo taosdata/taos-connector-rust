@@ -22,6 +22,7 @@ pub struct WsConnReq {
     pub(crate) db: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) mode: Option<u32>,
+    pub(crate) tz: Option<String>,
 }
 
 impl WsConnReq {
@@ -32,6 +33,7 @@ impl WsConnReq {
             password: Some(password.into()),
             db: None,
             mode: None,
+            tz: None,
         }
     }
 }
@@ -445,6 +447,7 @@ mod tests {
                 "user": "root",
                 "password": "taosdata",
                 "db": "",
+                "tz": null,
             }
         });
         assert_eq!(v, j);

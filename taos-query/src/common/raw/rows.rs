@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 use bigdecimal::ToPrimitive;
+use chrono_tz::Tz;
 use serde::de::{DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor};
 use serde::Deserializer;
 
@@ -11,6 +12,7 @@ use crate::RawBlock;
 pub struct IntoRowsIter<'a> {
     pub(crate) raw: RawBlock,
     pub(crate) row: usize,
+    pub(super) tz: Option<Tz>,
     pub(crate) _marker: PhantomData<&'a bool>,
 }
 
@@ -30,6 +32,7 @@ impl<'a> Iterator for IntoRowsIter<'a> {
                 raw: unsafe { &*(&self.raw as *const RawBlock) },
                 row,
                 col: 0,
+                tz: self.tz,
             })
         }
     }
@@ -38,6 +41,7 @@ impl<'a> Iterator for IntoRowsIter<'a> {
 pub struct RowsIter<'a> {
     pub(super) raw: NonNull<RawBlock>,
     pub(super) row: usize,
+    pub(super) tz: Option<Tz>,
     pub(crate) _marker: PhantomData<&'a usize>,
 }
 
@@ -57,6 +61,7 @@ impl<'a> Iterator for RowsIter<'a> {
                 raw: unsafe { self.raw.as_mut() },
                 row,
                 col: 0,
+                tz: self.tz,
             })
         }
     }
@@ -70,11 +75,13 @@ impl RowsIter<'_> {
             col: 0,
         }
     }
+
     pub fn named_values(&mut self) -> RowView {
         RowView {
             raw: unsafe { self.raw.as_mut() },
             row: self.row,
             col: 0,
+            tz: self.tz,
         }
     }
 }
@@ -105,6 +112,7 @@ pub struct RowView<'a> {
     raw: &'a RawBlock,
     row: usize,
     col: usize,
+    tz: Option<Tz>,
 }
 
 impl<'a> Iterator for RowView<'a> {
@@ -144,9 +152,11 @@ impl std::fmt::Debug for RowView<'_> {
             .field("raw", &self.raw)
             .field("row", &self.row)
             .field("col", &self.col)
+            .field("tz", &self.tz)
             .finish()
     }
 }
+
 pub struct RowViewOfValue<'a>(RowView<'a>);
 
 impl<'a> Iterator for RowViewOfValue<'a> {
@@ -180,6 +190,10 @@ impl<'a> RowView<'a> {
 
     pub fn into_values(self) -> Vec<Value> {
         self.map(|(_, b)| b.to_value()).collect()
+    }
+
+    pub fn set_timezone(&mut self, tz: Option<Tz>) {
+        self.tz = tz;
     }
 }
 
@@ -302,6 +316,13 @@ impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
         V: Visitor<'de>,
     {
         match self.walk_next() {
+            Some(BorrowedValue::Timestamp(v)) => {
+                if let Some(tz) = &self.tz {
+                    visitor.visit_string(v.to_datetime_with_custom_tz(tz).to_rfc3339())
+                } else {
+                    visitor.visit_string(v.to_datetime_with_tz().to_rfc3339())
+                }
+            }
             Some(v) => v
                 .deserialize_str(visitor)
                 .map_err(<Self::Error as serde::de::Error>::custom),
@@ -444,7 +465,6 @@ impl<'de, 'a: 'de> Deserializer<'de> for &mut RowView<'a> {
 
 #[cfg(test)]
 mod tests {
-
     use serde::Deserialize;
 
     use super::*;

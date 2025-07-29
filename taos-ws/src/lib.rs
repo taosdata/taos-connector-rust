@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 
+use chrono_tz::Tz;
 use futures::stream::{SplitSink, SplitStream};
 use futures::StreamExt;
 use futures_util::SinkExt;
@@ -78,6 +79,7 @@ pub struct TaosBuilder {
     conn_mode: Option<u32>,
     compression: bool,
     retry_policy: RetryPolicy,
+    tz: Option<Tz>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +99,7 @@ impl Error {
     pub const fn errno(&self) -> Code {
         self.code
     }
+
     pub fn errstr(&self) -> String {
         self.source.to_string()
     }
@@ -116,6 +119,7 @@ impl From<DsnError> for Error {
         }
     }
 }
+
 impl From<query::asyn::Error> for Error {
     fn from(err: query::asyn::Error) -> Self {
         Error {
@@ -451,6 +455,14 @@ impl TaosBuilder {
             backoff_max_ms,
         };
 
+        let tz = dsn
+            .remove("timezone")
+            .map(|s| {
+                s.parse::<Tz>()
+                    .map_err(|_| DsnError::InvalidParam("timezone".to_string(), s.clone()))
+            })
+            .transpose()?;
+
         if let Some(token) = token {
             Ok(TaosBuilder {
                 https,
@@ -462,6 +474,7 @@ impl TaosBuilder {
                 compression,
                 retry_policy,
                 current_addr_index: Arc::new(AtomicUsize::new(0)),
+                tz,
             })
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
@@ -476,6 +489,7 @@ impl TaosBuilder {
                 compression,
                 retry_policy,
                 current_addr_index: Arc::new(AtomicUsize::new(0)),
+                tz,
             })
         }
     }
@@ -688,24 +702,17 @@ impl TaosBuilder {
     }
 
     pub(crate) fn build_conn_request(&self) -> WsConnReq {
-        let mode = match self.conn_mode {
-            Some(1) => Some(0), // for adapter, 0 is bi mode
-            _ => None,
+        let (user, password) = match &self.auth {
+            WsAuth::Token(_) => ("root", "taosdata"),
+            WsAuth::Plain(user, pass) => (user.as_str(), pass.as_str()),
         };
 
-        match &self.auth {
-            WsAuth::Token(_) => WsConnReq {
-                user: Some("root".to_string()),
-                password: Some("taosdata".to_string()),
-                db: self.database.clone(),
-                mode,
-            },
-            WsAuth::Plain(user, pass) => WsConnReq {
-                user: Some(user.to_string()),
-                password: Some(pass.to_string()),
-                db: self.database.clone(),
-                mode,
-            },
+        WsConnReq {
+            user: Some(user.to_string()),
+            password: Some(password.to_string()),
+            db: self.database.clone(),
+            mode: (self.conn_mode == Some(1)).then_some(0), // for adapter, 0 is bi mode
+            tz: self.tz.map(|s| s.to_string()),
         }
     }
 
@@ -776,6 +783,7 @@ fn handle_disconnect_error(err: WsError) -> RawError {
 #[cfg(test)]
 mod tests {
     use futures::{SinkExt, StreamExt};
+    use taos_query::prelude::*;
 
     use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
     use crate::*;

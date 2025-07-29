@@ -80,6 +80,7 @@ impl<'de> de::VariantAccess<'de> for UnitOnly {
 struct VariantTimestampDeserializer {
     value: i64,
 }
+
 impl<'de> de::Deserializer<'de> for VariantTimestampDeserializer {
     type Error = Error;
 
