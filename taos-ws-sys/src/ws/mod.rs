@@ -679,6 +679,7 @@ mod tests {
 
     use super::*;
     use crate::ws::error::{taos_errno, taos_errstr};
+    use crate::ws::query::*;
 
     #[test]
     fn test_taos_connect() {
@@ -805,6 +806,130 @@ mod tests {
             drop(arg);
             let cfg_dir = config::config_dir();
             assert_eq!(cfg_dir, FastStr::new("/etc/taos"));
+        }
+    }
+
+    #[test]
+    fn test_taos_options_connection() {
+        let taos = test_connect();
+
+        unsafe {
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CLEAR,
+                ptr::null(),
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_USER_IP,
+                c"127.0.0.1".as_ptr() as *const c_void,
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_USER_APP,
+                c"test".as_ptr() as *const c_void,
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_USER_APP,
+                ptr::null(),
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CLEAR,
+                c"clear".as_ptr() as *const c_void,
+            );
+            assert_eq!(code, 0);
+        }
+
+        unsafe {
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CHARSET,
+                ptr::null(),
+            );
+            assert_eq!(code, 0x80000118u32 as i32);
+
+            let errstr = taos_errstr(ptr::null_mut());
+            assert_eq!(
+                CStr::from_ptr(errstr).to_str().unwrap(),
+                "unsupported option: TSDB_OPTION_CONNECTION_CHARSET"
+            );
+        }
+
+        unsafe { taos_close(taos) };
+    }
+
+    #[test]
+    fn test_timezone_default() {
+        unsafe {
+            let taos = test_connect();
+
+            let res = taos_query(taos, c"select timezone()".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 1);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "Asia/Shanghai (CST, +0800)"
+            );
+
+            taos_free_result(res);
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_timezone_custom() {
+        unsafe {
+            let taos = test_connect();
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_TIMEZONE,
+                c"America/New_York".as_ptr() as *const c_void,
+            );
+            assert_eq!(code, 0);
+
+            let res = taos_query(taos, c"select timezone()".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 1);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "America/New_York (EDT, -0400)"
+            );
+
+            taos_free_result(res);
+            taos_close(taos);
         }
     }
 }
