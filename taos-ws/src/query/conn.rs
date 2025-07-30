@@ -585,12 +585,13 @@ mod tests {
     use std::time::Duration;
 
     use futures::{SinkExt, StreamExt};
-    use serde_json::json;
+    use serde_json::{json, Value};
     use taos_query::{AsyncQueryable, AsyncTBuilder};
     use tokio::task::JoinHandle;
     use warp::ws::Message;
     use warp::Filter;
 
+    use crate::query::ConnOption;
     use crate::TaosBuilder;
 
     #[tokio::test]
@@ -605,8 +606,23 @@ mod tests {
             let taos = TaosBuilder::from_dsn("ws://127.0.0.1:9980")?
                 .build()
                 .await?;
+
+            let options = &[
+                ConnOption {
+                    option: 2,
+                    value: Some("127.0.0.1".to_string()),
+                },
+                ConnOption {
+                    option: 3,
+                    value: Some("test".to_string()),
+                },
+            ];
+
+            taos.client().options_connection(options).await?;
+
             let _ = taos.query("insert into meters values(now, 0)").await?;
             let _ = taos.query("insert into meters values(now, 0)").await?;
+
             Ok(())
         });
 
@@ -628,13 +644,30 @@ mod tests {
                         tracing::debug!("ws recv message: {message:?}");
                         if message.is_text() {
                             let text = message.to_str().unwrap();
+                            let req = serde_json::from_str::<Value>(text).unwrap();
+                            let req_id = req
+                                .get("args")
+                                .and_then(|v| v.get("req_id"))
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0);
+
                             if text.contains("version") {
                                 let data = json!({
                                     "code": 0,
                                     "message": "message",
                                     "action": "version",
-                                    "req_id": 100,
+                                    "req_id": req_id,
                                     "version": "3.0"
+                                });
+                                let message = Message::text(data.to_string());
+                                let _ = ws_tx.send(message).await;
+                            } else if text.contains("options_connection") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "message",
+                                    "action": "options_connection",
+                                    "req_id": req_id,
+                                    "timing": 99,
                                 });
                                 let message = Message::text(data.to_string());
                                 let _ = ws_tx.send(message).await;
@@ -643,7 +676,7 @@ mod tests {
                                     "code": 0,
                                     "message": "message",
                                     "action": "conn",
-                                    "req_id": 100
+                                    "req_id": req_id
                                 });
                                 let message = Message::text(data.to_string());
                                 let _ = ws_tx.send(message).await;
@@ -657,7 +690,7 @@ mod tests {
                                         "code": 0,
                                         "message": "",
                                         "action": "binary_query",
-                                        "req_id": 0,
+                                        "req_id": req_id,
                                         "timing": 4369543,
                                         "id": 0,
                                         "is_update": true,
@@ -677,7 +710,7 @@ mod tests {
                                         "code": 0,
                                         "message": "",
                                         "action": "binary_query",
-                                        "req_id": 1,
+                                        "req_id": req_id,
                                         "timing": 4369543,
                                         "id": 0,
                                         "is_update": true,

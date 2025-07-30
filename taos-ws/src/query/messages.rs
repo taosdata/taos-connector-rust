@@ -426,9 +426,10 @@ impl WsMessage {
         match self {
             WsMessage::Raw(_) => false,
             WsMessage::Command(ws_send) => match ws_send {
-                WsSend::Insert { .. } | WsSend::Query { .. } | WsSend::CheckServerStatus { .. } => {
-                    true
-                }
+                WsSend::Insert { .. }
+                | WsSend::Query { .. }
+                | WsSend::CheckServerStatus { .. }
+                | WsSend::OptionsConnection { .. } => true,
                 WsSend::Binary(bytes) => {
                     let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
                     matches!(action, 4 | 5 | 6 | 10)

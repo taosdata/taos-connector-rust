@@ -571,10 +571,12 @@ impl TaosBuilder {
                             call!(cb(&mut ws_stream), "call callback");
                         }
 
-                        call!(
-                            self.send_options_connection_request(&mut ws_stream),
-                            "send options_connection request"
-                        );
+                        if !self.conn_options.is_empty() {
+                            call!(
+                                self.send_options_connection_request(&mut ws_stream),
+                                "send options_connection request"
+                            );
+                        }
 
                         return Ok((ws_stream, version));
                     }
@@ -698,11 +700,6 @@ impl TaosBuilder {
         &self,
         ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> RawResult<()> {
-        if self.conn_options.is_empty() {
-            tracing::trace!("no connection options to send");
-            return Ok(());
-        }
-
         let mut options = Vec::with_capacity(self.conn_options.len());
         for entry in &self.conn_options {
             options.push(ConnOption {
