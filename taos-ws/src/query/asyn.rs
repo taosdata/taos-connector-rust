@@ -43,6 +43,7 @@ pub struct WsTaos {
     sender: WsQuerySender,
     close_signal: watch::Sender<bool>,
     tz: Option<Tz>,
+    builder: Arc<TaosBuilder>,
 }
 
 impl WsTaos {
@@ -74,6 +75,8 @@ impl WsTaos {
             results: Arc::default(),
         };
 
+        let builder = Arc::new(builder.clone());
+
         tokio::spawn(
             super::conn::run(
                 builder.clone(),
@@ -90,6 +93,7 @@ impl WsTaos {
             close_signal: close_tx,
             sender: query_sender,
             tz: builder.tz,
+            builder,
         })
     }
 
@@ -319,6 +323,28 @@ impl WsTaos {
                 }
             }
             _ => unreachable!(),
+        }
+    }
+
+    pub async fn options_connection(&self, options: &[ConnOption]) -> RawResult<()> {
+        for opt in options {
+            if opt.option == -1 {
+                self.builder.conn_options.clear();
+            } else {
+                self.builder
+                    .conn_options
+                    .insert(opt.option, opt.value.clone());
+            }
+        }
+
+        let req = WsSend::OptionsConnection {
+            req_id: self.sender.req_id(),
+            options: options.to_vec(),
+        };
+        tracing::trace!("options_connection req: {req:?}");
+        match self.sender.send_recv(req).await? {
+            WsRecvData::OptionsConnection { .. } => Ok(()),
+            _ => unreachable!("Unexpected response type for options_connection"),
         }
     }
 

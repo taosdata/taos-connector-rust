@@ -26,7 +26,10 @@ use crate::query::{
     messages::{MessageId, ReqId, WsMessage, WsRecv, WsRecvData},
     Error,
 };
-use crate::{handle_disconnect_error, TaosBuilder, WsStream, WsStreamReader, WsStreamSender};
+use crate::{
+    handle_disconnect_error, send_request_with_timeout, TaosBuilder, WsStream, WsStreamReader,
+    WsStreamSender,
+};
 
 pub fn send_conn_request(
     conn_req: WsConnReq,
@@ -41,14 +44,7 @@ pub fn send_conn_request(
             };
 
             let timeout = Duration::from_secs(8);
-
-            time::timeout(timeout, ws_stream.send(req.to_msg()))
-                .await
-                .map_err(|_| {
-                    RawError::from_code(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT.as_code())
-                        .context("timeout sending conn request")
-                })?
-                .map_err(handle_disconnect_error)?;
+            send_request_with_timeout(ws_stream, req.to_msg(), timeout).await?;
 
             loop {
                 let res = time::timeout(timeout, ws_stream.next())
@@ -140,7 +136,7 @@ impl MessageCache {
 }
 
 pub(super) async fn run(
-    builder: TaosBuilder,
+    builder: Arc<TaosBuilder>,
     mut ws_stream: WsStream,
     query_sender: WsQuerySender,
     message_reader: Receiver<WsMessage>,

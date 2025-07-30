@@ -46,23 +46,23 @@ type WsSender = tokio::sync::mpsc::Sender<Message>;
 
 impl Bindable<super::Taos> for Stmt {
     fn init(taos: &super::Taos) -> RawResult<Self> {
-        let mut dsn = taos.dsn.clone();
+        let mut builder = taos.builder.clone();
         let database: Option<String> = block_in_place_or_global(
             <Taos as taos_query::AsyncQueryable>::query_one(taos, "select database()"),
         )?;
-        dsn.database = database;
-        let mut stmt = block_in_place_or_global(Self::from_wsinfo(&dsn))?;
+        builder.database = database;
+        let mut stmt = block_in_place_or_global(Self::from_wsinfo(&builder))?;
         crate::block_in_place_or_global(stmt.stmt_init())?;
         Ok(stmt)
     }
 
     fn init_with_req_id(taos: &super::Taos, req_id: u64) -> RawResult<Self> {
-        let mut dsn = taos.dsn.clone();
+        let mut builder = taos.builder.clone();
         let database: Option<String> = block_in_place_or_global(
             <Taos as taos_query::AsyncQueryable>::query_one(taos, "select database()"),
         )?;
-        dsn.database = database;
-        let mut stmt = block_in_place_or_global(Self::from_wsinfo(&dsn))?;
+        builder.database = database;
+        let mut stmt = block_in_place_or_global(Self::from_wsinfo(&builder))?;
         crate::block_in_place_or_global(stmt.taos_stmt_init_with_req_id(req_id))?;
         Ok(stmt)
     }
@@ -113,21 +113,21 @@ impl Bindable<super::Taos> for Stmt {
 #[async_trait::async_trait]
 impl AsyncBindable<super::Taos> for Stmt {
     async fn init(taos: &super::Taos) -> RawResult<Self> {
-        let mut dsn = taos.dsn.clone();
+        let mut builder = taos.builder.clone();
         let database: Option<String> =
             <Taos as taos_query::AsyncQueryable>::query_one(taos, "select database()").await?;
-        dsn.database = database;
-        let mut stmt = Self::from_wsinfo(&dsn).await?;
+        builder.database = database;
+        let mut stmt = Self::from_wsinfo(&builder).await?;
         stmt.stmt_init().await?;
         Ok(stmt)
     }
 
     async fn init_with_req_id(taos: &super::Taos, req_id: u64) -> RawResult<Self> {
-        let mut dsn = taos.dsn.clone();
+        let mut builder = taos.builder.clone();
         let database: Option<String> =
             <Taos as taos_query::AsyncQueryable>::query_one(taos, "select database()").await?;
-        dsn.database = database;
-        let mut stmt = Self::from_wsinfo(&dsn).await?;
+        builder.database = database;
+        let mut stmt = Self::from_wsinfo(&builder).await?;
         stmt.taos_stmt_init_with_req_id(req_id).await?;
         Ok(stmt)
     }

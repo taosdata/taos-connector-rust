@@ -15,7 +15,7 @@ use taos_query::common::{Field, Precision, Ty};
 use taos_query::util::generate_req_id;
 use taos_query::TBuilder;
 use taos_ws::query::asyn::WS_ERROR_NO;
-use taos_ws::query::Error;
+use taos_ws::query::{ConnOption, Error};
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
 use tracing::{debug, error, instrument};
@@ -63,15 +63,15 @@ pub enum TSDB_OPTION {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum TSDB_OPTION_CONNECTION {
     TSDB_OPTION_CONNECTION_CLEAR = -1,
-    TSDB_OPTION_CONNECTION_CHARSET = 0,
-    TSDB_OPTION_CONNECTION_TIMEZONE = 1,
-    TSDB_OPTION_CONNECTION_USER_IP = 2,
-    TSDB_OPTION_CONNECTION_USER_APP = 3,
-    TSDB_MAX_OPTIONS_CONNECTION = 4,
+    TSDB_OPTION_CONNECTION_CHARSET,
+    TSDB_OPTION_CONNECTION_TIMEZONE,
+    TSDB_OPTION_CONNECTION_USER_IP,
+    TSDB_OPTION_CONNECTION_USER_APP,
+    TSDB_MAX_OPTIONS_CONNECTION,
 }
 
 type TaosResult<T> = Result<T, TaosError>;
@@ -270,6 +270,60 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
             }
         }
         _ => 0,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn taos_options_connection(
+    taos: *mut TAOS,
+    option: TSDB_OPTION_CONNECTION,
+    arg: *const c_void,
+) -> c_int {
+    debug!("taos_options_connection start, taos: {taos:?}, option: {option:?}, arg: {arg:?}");
+
+    if taos.is_null() {
+        error!("taos_options_connection failed, taos is null");
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
+    }
+
+    if option == TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CHARSET {
+        error!("taos_options_connection failed, TSDB_OPTION_CONNECTION_CHARSET not supported");
+        return set_err_and_get_code(TaosError::new(
+            Code::INVALID_PARA,
+            "unsupported option: TSDB_OPTION_CONNECTION_CHARSET",
+        ));
+    }
+
+    let value = if !arg.is_null() {
+        Some(match CStr::from_ptr(arg as *const c_char).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                error!("taos_options_connection failed, arg is invalid utf-8");
+                return set_err_and_get_code(TaosError::new(
+                    Code::INVALID_PARA,
+                    "arg is invalid utf-8",
+                ));
+            }
+        })
+    } else {
+        None
+    };
+
+    let taos = &mut *(taos as *mut Taos);
+    let option = ConnOption {
+        option: option as i32,
+        value: value,
+    };
+
+    match taos_query::block_in_place_or_global(taos.client().options_connection(&[option])) {
+        Ok(()) => {
+            debug!("taos_options_connection succ");
+            0
+        }
+        Err(err) => {
+            error!("taos_options_connection failed, err: {err:?}");
+            set_err_and_get_code(err.into())
+        }
     }
 }
 
