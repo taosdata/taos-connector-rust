@@ -312,7 +312,7 @@ pub unsafe extern "C" fn taos_options_connection(
     let taos = &mut *(taos as *mut Taos);
     let option = ConnOption {
         option: option as i32,
-        value: value,
+        value,
     };
 
     match taos_query::block_in_place_or_global(taos.client().options_connection(&[option])) {
