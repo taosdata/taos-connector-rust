@@ -286,14 +286,6 @@ pub unsafe extern "C" fn taos_options_connection(
         return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
     }
 
-    if option == TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CHARSET {
-        error!("taos_options_connection failed, TSDB_OPTION_CONNECTION_CHARSET not supported");
-        return set_err_and_get_code(TaosError::new(
-            Code::INVALID_PARA,
-            "unsupported option: TSDB_OPTION_CONNECTION_CHARSET",
-        ));
-    }
-
     let value = if !arg.is_null() {
         Some(match CStr::from_ptr(arg as *const c_char).to_str() {
             Ok(s) => s.to_string(),
@@ -308,6 +300,22 @@ pub unsafe extern "C" fn taos_options_connection(
     } else {
         None
     };
+
+    if option == TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CHARSET {
+        let valid = value
+            .as_deref()
+            .is_none_or(|v| v.eq_ignore_ascii_case("utf-8"));
+
+        if !valid {
+            let charset = value.unwrap();
+            error!("taos_options_connection failed, unsupported charset: {charset}",);
+            return set_err_and_get_code(TaosError::new(
+                Code::INVALID_PARA,
+                &format!("unsupported charset: {charset}"),
+            ));
+        }
+        return 0;
+    }
 
     let taos = &mut *(taos as *mut Taos);
     let option = ConnOption {
@@ -823,6 +831,20 @@ mod tests {
 
             let code = taos_options_connection(
                 taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CHARSET,
+                c"UTF-8".as_ptr() as *const c_void,
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CHARSET,
+                ptr::null(),
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
                 TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_USER_IP,
                 c"127.0.0.1".as_ptr() as *const c_void,
             );
@@ -854,14 +876,14 @@ mod tests {
             let code = taos_options_connection(
                 taos,
                 TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CHARSET,
-                ptr::null(),
+                c"GB2312".as_ptr() as *const c_void,
             );
             assert_eq!(code, 0x80000118u32 as i32);
 
             let errstr = taos_errstr(ptr::null_mut());
             assert_eq!(
                 CStr::from_ptr(errstr).to_str().unwrap(),
-                "unsupported option: TSDB_OPTION_CONNECTION_CHARSET"
+                "unsupported charset: GB2312"
             );
         }
 
