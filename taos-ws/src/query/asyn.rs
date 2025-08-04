@@ -9,6 +9,7 @@ use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, LittleEndian};
+use chrono_tz::Tz;
 use faststr::FastStr;
 use futures::channel::oneshot;
 use futures::{FutureExt, SinkExt, StreamExt};
@@ -41,6 +42,8 @@ pub struct WsTaos {
     conn_id: u64,
     sender: WsQuerySender,
     close_signal: watch::Sender<bool>,
+    tz: Option<Tz>,
+    builder: Arc<TaosBuilder>,
 }
 
 impl WsTaos {
@@ -72,6 +75,8 @@ impl WsTaos {
             results: Arc::default(),
         };
 
+        let builder = Arc::new(builder.clone());
+
         tokio::spawn(
             super::conn::run(
                 builder.clone(),
@@ -87,6 +92,8 @@ impl WsTaos {
             conn_id,
             close_signal: close_tx,
             sender: query_sender,
+            tz: builder.tz,
+            builder,
         })
     }
 
@@ -243,6 +250,7 @@ impl WsTaos {
                 fields_precisions: resp.fields_precisions,
                 fields_scales: resp.fields_scales,
                 fetch_done_reader: Some(fetch_done_rx),
+                tz: self.tz,
             })
         } else {
             Ok(ResultSet {
@@ -261,6 +269,7 @@ impl WsTaos {
                 fields_precisions: None,
                 fields_scales: None,
                 fetch_done_reader: None,
+                tz: self.tz,
             })
         }
     }
@@ -317,6 +326,28 @@ impl WsTaos {
         }
     }
 
+    pub async fn options_connection(&self, options: &[ConnOption]) -> RawResult<()> {
+        for opt in options {
+            if opt.option == -1 {
+                self.builder.conn_options.clear();
+            } else {
+                self.builder
+                    .conn_options
+                    .insert(opt.option, opt.value.clone());
+            }
+        }
+
+        let req = WsSend::OptionsConnection {
+            req_id: self.sender.req_id(),
+            options: options.to_vec(),
+        };
+        tracing::trace!("options_connection req: {req:?}");
+        match self.sender.send_recv(req).await? {
+            WsRecvData::OptionsConnection { .. } => Ok(()),
+            _ => unreachable!("Unexpected response type for options_connection"),
+        }
+    }
+
     pub fn version(&self) -> FastStr {
         block_in_place_or_global(self.sender.version_info.version())
     }
@@ -335,6 +366,10 @@ impl WsTaos {
 
     pub(crate) fn sender(&self) -> WsQuerySender {
         self.sender.clone()
+    }
+
+    pub(crate) fn timezone(&self) -> Option<Tz> {
+        self.tz
     }
 
     async fn s_write_raw_block(&self, raw: &RawBlock) -> RawResult<()> {
@@ -925,6 +960,7 @@ pub struct ResultSet {
     pub(crate) fields_precisions: Option<Vec<i64>>,
     pub(crate) fields_scales: Option<Vec<i64>>,
     pub(crate) fetch_done_reader: Option<mpsc::Receiver<()>>,
+    pub(crate) tz: Option<Tz>,
 }
 
 unsafe impl Sync for ResultSet {}
@@ -1024,6 +1060,10 @@ impl AsyncFetchable for ResultSet {
                 }
             }
         }
+    }
+
+    fn timezone(&self) -> Option<Tz> {
+        self.tz
     }
 }
 

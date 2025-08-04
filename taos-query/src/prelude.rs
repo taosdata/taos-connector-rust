@@ -34,6 +34,7 @@ pub trait Helpers {
 pub mod sync {
     use std::borrow::Cow;
 
+    use chrono_tz::Tz;
     pub use mdsn::{Address, Dsn, DsnError, IntoDsn};
     #[cfg(feature = "r2d2")]
     pub use r2d2::ManageConnection;
@@ -57,6 +58,7 @@ pub mod sync {
         iter: IBlockIter<'a, T>,
         block: Option<RawBlock>,
         rows: Option<RowsIter<'a>>,
+        tz: Option<Tz>,
     }
 
     impl<'a, T> IRowsIter<'a, T>
@@ -97,7 +99,14 @@ pub mod sync {
         type Item = RawResult<RowView<'a>>;
 
         fn next(&mut self) -> Option<Self::Item> {
-            self.next_row().transpose()
+            match self.next_row() {
+                Ok(Some(mut row)) => {
+                    row.set_timezone(self.tz);
+                    Some(Ok(row))
+                }
+                Ok(None) => None,
+                Err(e) => Some(Err(e)),
+            }
         }
     }
 
@@ -155,10 +164,12 @@ pub mod sync {
 
         /// Iterator for querying by rows.
         fn rows(&mut self) -> IRowsIter<'_, Self> {
+            let tz = self.timezone();
             IRowsIter {
                 iter: self.blocks(),
                 block: None,
                 rows: None,
+                tz,
             }
         }
 
@@ -173,6 +184,10 @@ pub mod sync {
                 .map_ok(|raw| raw.to_values())
                 .flatten_ok()
                 .try_collect()
+        }
+
+        fn timezone(&self) -> Option<Tz> {
+            None
         }
     }
 
@@ -294,6 +309,7 @@ mod r#async {
 
     #[cfg(feature = "async")]
     use async_trait::async_trait;
+    use chrono_tz::Tz;
     pub use futures::stream::{Stream, StreamExt, TryStreamExt};
     pub use mdsn::Address;
     pub use serde::de::value::Error as DeError;
@@ -385,6 +401,7 @@ mod r#async {
 
     pub struct AsyncDeserialized<'a, T, V> {
         rows: AsyncRows<'a, T>,
+        tz: Option<Tz>,
         _marker: PhantomData<V>,
     }
 
@@ -399,10 +416,17 @@ mod r#async {
 
         fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             use futures::stream::*;
-            Pin::get_mut(self)
-                .rows
-                .poll_next_unpin(cx)
-                .map(|row| row.map(|row| row.and_then(|mut row| V::deserialize(&mut row))))
+
+            let tz = self.tz;
+
+            Pin::get_mut(self).rows.poll_next_unpin(cx).map(|row| {
+                row.map(|row| {
+                    row.and_then(|mut row| {
+                        row.set_timezone(tz);
+                        V::deserialize(&mut row)
+                    })
+                })
+            })
         }
     }
 
@@ -453,10 +477,16 @@ mod r#async {
         where
             R: serde::de::DeserializeOwned,
         {
+            let tz = self.timezone();
             AsyncDeserialized {
                 rows: self.rows(),
+                tz,
                 _marker: PhantomData,
             }
+        }
+
+        fn timezone(&self) -> Option<Tz> {
+            None
         }
     }
 

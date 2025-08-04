@@ -85,9 +85,6 @@ impl<'de> serde::de::EnumAccess<'de> for EnumTimestampDeserializer<'_> {
     where
         V: de::DeserializeSeed<'de>,
     {
-        // let variant = self.value.ty().as_variant_str();
-        // use BorrowedValue::*;
-
         match &self.value {
             BorrowedValue::Timestamp(Timestamp::Microseconds(v)) => Ok((
                 seed.deserialize("Microseconds".into_deserializer())?,

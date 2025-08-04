@@ -128,6 +128,7 @@ impl<M, D> MessageSet<M, D> {
             MessageSet::Data(_) => None,
         }
     }
+
     pub fn into_data(self) -> Option<D> {
         match self {
             MessageSet::Meta(_) => None,
@@ -194,7 +195,6 @@ where
 
 pub trait IsMeta {
     fn as_raw_meta(&self) -> RawResult<RawMeta>;
-
     fn as_json_meta(&self) -> RawResult<JsonMeta>;
 }
 

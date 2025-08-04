@@ -13,6 +13,7 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicU32;
 
 use bytes::Bytes;
+use chrono_tz::Tz;
 pub use data::*;
 use derive_builder::Builder;
 use itertools::Itertools;
@@ -121,6 +122,8 @@ pub struct RawBlock {
     lengths: Lengths,
     /// A vector of [ColumnView] that represent column of values efficiently.
     columns: Vec<ColumnView>,
+    /// Time zone for the block, if applicable.
+    tz: Option<Tz>,
 }
 
 unsafe impl Send for RawBlock {}
@@ -419,6 +422,7 @@ impl RawBlock {
             fields: fields.iter().map(|s| s.name().to_string()).collect(),
             columns,
             group_id: 0,
+            tz: None,
         }
     }
 
@@ -559,6 +563,7 @@ impl RawBlock {
             table: None,
             fields: Vec::new(),
             columns,
+            tz: None,
         }
     }
 
@@ -646,9 +651,19 @@ impl RawBlock {
         self
     }
 
+    pub fn with_timezone(mut self, tz: Option<Tz>) -> Self {
+        self.tz = tz;
+        self
+    }
+
     fn with_layout(mut self, layout: Layout) -> Self {
         self.layout = Rc::new(AtomicU32::new(layout.as_inner()));
         self
+    }
+
+    #[inline]
+    pub fn timezone(&self) -> Option<Tz> {
+        self.tz
     }
 
     /// Number of columns
@@ -710,6 +725,7 @@ impl RawBlock {
         RowsIter {
             raw: NonNull::new(self as *const Self as *mut Self).unwrap(),
             row: 0,
+            tz: self.tz,
             _marker: std::marker::PhantomData,
         }
     }
@@ -719,9 +735,11 @@ impl RawBlock {
     where
         Self: 'a,
     {
+        let tz = self.tz;
         IntoRowsIter {
             raw: self,
             row: 0,
+            tz,
             _marker: std::marker::PhantomData,
         }
     }
@@ -870,6 +888,7 @@ impl RawBlock {
     fn layout(&self) -> Layout {
         unsafe { *(self.layout.as_ptr() as *mut Layout) }
     }
+
     fn set_layout(&self, layout: Layout) {
         unsafe { *(self.layout.as_ptr() as *mut Layout) = layout }
     }

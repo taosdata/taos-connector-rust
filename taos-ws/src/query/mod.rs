@@ -3,6 +3,7 @@ use std::sync::Arc;
 pub(crate) use asyn::WsTaos;
 pub use asyn::{Error, ResultSet};
 use faststr::FastStr;
+pub use messages::ConnOption;
 pub(crate) use messages::WsConnReq;
 pub use messages::{BindType, Stmt2Field};
 use taos_query::common::{RawMeta, SmlData};
@@ -19,29 +20,29 @@ pub(crate) mod messages;
 
 #[derive(Debug)]
 pub struct Taos {
-    pub(crate) dsn: TaosBuilder,
-    pub(crate) async_client: Arc<WsTaos>,
+    pub(crate) builder: TaosBuilder,
+    pub(crate) client: Arc<WsTaos>,
 }
 
 impl Taos {
     pub(super) async fn from_builder(builder: TaosBuilder) -> RawResult<Self> {
         let ws_taos = WsTaos::from_builder(&builder).await?;
         Ok(Self {
-            dsn: builder,
-            async_client: Arc::new(ws_taos),
+            builder,
+            client: Arc::new(ws_taos),
         })
     }
 
     pub fn version(&self) -> FastStr {
-        self.async_client.version()
+        self.client.version()
     }
 
     pub fn get_req_id(&self) -> u64 {
-        self.async_client.get_req_id()
+        self.client.get_req_id()
     }
 
     pub fn client(&self) -> Arc<WsTaos> {
-        self.async_client.clone()
+        self.client.clone()
     }
 }
 

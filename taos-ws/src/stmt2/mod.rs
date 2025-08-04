@@ -208,6 +208,7 @@ impl Stmt2 {
                 fields_precisions,
                 fields_scales,
                 fetch_done_reader: Some(fetch_done_rx),
+                tz: self.client.timezone(),
             });
         }
 

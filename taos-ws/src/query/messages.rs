@@ -22,6 +22,7 @@ pub struct WsConnReq {
     pub(crate) db: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) mode: Option<u32>,
+    pub(crate) tz: Option<String>,
 }
 
 impl WsConnReq {
@@ -32,6 +33,7 @@ impl WsConnReq {
             password: Some(password.into()),
             db: None,
             mode: None,
+            tz: None,
         }
     }
 }
@@ -40,6 +42,12 @@ impl WsConnReq {
 pub struct WsResArgs {
     pub id: ResId,
     pub req_id: ReqId,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ConnOption {
+    pub option: i32,
+    pub value: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -51,6 +59,10 @@ pub enum WsSend {
         req_id: ReqId,
         #[serde(flatten)]
         req: WsConnReq,
+    },
+    OptionsConnection {
+        req_id: ReqId,
+        options: Vec<ConnOption>,
     },
     Insert {
         protocol: u8,
@@ -102,6 +114,7 @@ impl WsSend {
     pub(crate) fn req_id(&self) -> ReqId {
         match self {
             WsSend::Conn { req_id, .. }
+            | WsSend::OptionsConnection { req_id, .. }
             | WsSend::Query { req_id, .. }
             | WsSend::Stmt2Init { req_id, .. }
             | WsSend::Stmt2Prepare { req_id, .. }
@@ -197,6 +210,9 @@ impl WsRecv {
 #[serde(rename_all = "snake_case")]
 pub enum WsRecvData {
     Conn,
+    OptionsConnection {
+        timing: u64,
+    },
     Version {
         version: String,
     },
@@ -410,9 +426,10 @@ impl WsMessage {
         match self {
             WsMessage::Raw(_) => false,
             WsMessage::Command(ws_send) => match ws_send {
-                WsSend::Insert { .. } | WsSend::Query { .. } | WsSend::CheckServerStatus { .. } => {
-                    true
-                }
+                WsSend::Insert { .. }
+                | WsSend::Query { .. }
+                | WsSend::CheckServerStatus { .. }
+                | WsSend::OptionsConnection { .. } => true,
                 WsSend::Binary(bytes) => {
                     let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
                     matches!(action, 4 | 5 | 6 | 10)
@@ -445,6 +462,7 @@ mod tests {
                 "user": "root",
                 "password": "taosdata",
                 "db": "",
+                "tz": null,
             }
         });
         assert_eq!(v, j);

@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use chrono_tz::Tz;
 use taos_query::util::Edition;
 
 use super::*;
@@ -38,6 +39,7 @@ impl Taos {
         matches!(&self.0, TaosInner::Ws(_))
     }
 }
+
 pub struct ResultSet(pub(super) ResultSetInner);
 
 impl taos_query::TBuilder for TaosBuilder {
@@ -284,6 +286,13 @@ impl AsyncFetchable for ResultSet {
             }
         }
     }
+
+    fn timezone(&self) -> Option<Tz> {
+        match &self.0 {
+            ResultSetInner::Native(rs) => <crate::sys::ResultSet as AsyncFetchable>::timezone(rs),
+            ResultSetInner::Ws(rs) => <taos_ws::ResultSet as AsyncFetchable>::timezone(rs),
+        }
+    }
 }
 
 impl taos_query::Fetchable for ResultSet {
@@ -336,6 +345,13 @@ impl taos_query::Fetchable for ResultSet {
             ResultSetInner::Ws(rs) => {
                 <taos_ws::ResultSet as taos_query::Fetchable>::fetch_raw_block(rs)
             }
+        }
+    }
+
+    fn timezone(&self) -> Option<Tz> {
+        match &self.0 {
+            ResultSetInner::Native(rs) => <crate::sys::ResultSet as AsyncFetchable>::timezone(rs),
+            ResultSetInner::Ws(rs) => <taos_ws::ResultSet as AsyncFetchable>::timezone(rs),
         }
     }
 }
@@ -495,8 +511,10 @@ impl taos_query::Queryable for Taos {
 mod tests {
     use std::str::FromStr;
 
+    use itertools::Itertools;
+    use serde::Deserialize;
     use taos_query::common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder, Timestamp};
-    use taos_query::{RawResult, TBuilder};
+    use taos_query::{Fetchable, Queryable, RawResult, TBuilder};
 
     use super::TaosBuilder;
 
@@ -1172,13 +1190,89 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_timezone_default() -> Result<(), anyhow::Error> {
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?.build()?;
+        taos.exec_many([
+            "drop database if exists test_1753685294",
+            "create database test_1753685294",
+            "use test_1753685294",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values ('2025-01-01 12:00:00', 1)",
+            "insert into t0 values ('2025-01-02 15:30:00', 2)",
+        ])?;
+
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: String,
+            c1: i32,
+        }
+
+        let records: Vec<Record> = taos
+            .query("select * from t0")?
+            .deserialize()
+            .try_collect()?;
+
+        assert_eq!(records.len(), 2);
+
+        assert_eq!(records[0].ts, "2025-01-01T12:00:00+08:00");
+        assert_eq!(records[1].ts, "2025-01-02T15:30:00+08:00");
+
+        assert_eq!(records[0].c1, 1);
+        assert_eq!(records[1].c1, 2);
+
+        taos.exec("drop database test_1753685294")?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_timezone_custom() -> Result<(), anyhow::Error> {
+        let taos =
+            TaosBuilder::from_dsn("ws://localhost:6041?timezone=America/New_York")?.build()?;
+
+        taos.exec_many([
+            "drop database if exists test_1753690051",
+            "create database test_1753690051",
+            "use test_1753690051",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values ('2025-01-01 12:00:00', 1)",
+            "insert into t0 values ('2025-01-02 15:30:00', 2)",
+        ])?;
+
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: String,
+            c1: i32,
+        }
+
+        let records: Vec<Record> = taos
+            .query("select * from t0")?
+            .deserialize()
+            .try_collect()?;
+
+        assert_eq!(records.len(), 2);
+
+        assert_eq!(records[0].ts, "2025-01-01T12:00:00-05:00");
+        assert_eq!(records[1].ts, "2025-01-02T15:30:00-05:00");
+
+        assert_eq!(records[0].c1, 1);
+        assert_eq!(records[1].c1, 2);
+
+        taos.exec("drop database test_1753690051")?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod async_tests {
     use anyhow::Context;
+    use futures::TryStreamExt;
+    use serde::Deserialize;
     use taos_query::common::{SchemalessPrecision, SchemalessProtocol, SmlDataBuilder};
-    use taos_query::RawResult;
+    use taos_query::{AsyncFetchable, RawResult};
 
     use crate::{AsyncQueryable, AsyncTBuilder, TaosBuilder};
 
@@ -1533,6 +1627,90 @@ mod async_tests {
                 assert_eq!(len, 6);
             }
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_timezone_default() -> Result<(), anyhow::Error> {
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop database if exists test_1753683795",
+            "create database test_1753683795",
+            "use test_1753683795",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values ('2025-01-01 12:00:00', 1)",
+            "insert into t0 values ('2025-01-02 15:30:00', 2)",
+        ])
+        .await?;
+
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: String,
+            c1: i32,
+        }
+
+        let records: Vec<Record> = taos
+            .query("select * from t0")
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
+        assert_eq!(records.len(), 2);
+
+        assert_eq!(records[0].ts, "2025-01-01T12:00:00+08:00");
+        assert_eq!(records[1].ts, "2025-01-02T15:30:00+08:00");
+
+        assert_eq!(records[0].c1, 1);
+        assert_eq!(records[1].c1, 2);
+
+        taos.exec("drop database test_1753683795").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_timezone_custom() -> Result<(), anyhow::Error> {
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041?timezone=America/New_York")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop database if exists test_1753435476",
+            "create database test_1753435476",
+            "use test_1753435476",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values ('2025-01-01 12:00:00', 1)",
+            "insert into t0 values ('2025-01-02 15:30:00', 2)",
+        ])
+        .await?;
+
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: String,
+            c1: i32,
+        }
+
+        let records: Vec<Record> = taos
+            .query("select * from t0")
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
+        assert_eq!(records.len(), 2);
+
+        assert_eq!(records[0].ts, "2025-01-01T12:00:00-05:00");
+        assert_eq!(records[1].ts, "2025-01-02T15:30:00-05:00");
+
+        assert_eq!(records[0].c1, 1);
+        assert_eq!(records[1].c1, 2);
+
+        taos.exec("drop database test_1753435476").await?;
 
         Ok(())
     }
