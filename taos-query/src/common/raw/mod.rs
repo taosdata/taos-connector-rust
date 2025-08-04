@@ -661,6 +661,11 @@ impl RawBlock {
         self
     }
 
+    #[inline]
+    pub fn timezone(&self) -> Option<Tz> {
+        self.tz
+    }
+
     /// Number of columns
     #[inline]
     pub fn ncols(&self) -> usize {
