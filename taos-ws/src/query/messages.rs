@@ -405,6 +405,8 @@ pub enum WsMessage {
 }
 
 impl WsMessage {
+    // TODO: judge stmt2 request
+
     pub(crate) fn req_id(&self) -> ReqId {
         match self {
             WsMessage::Raw(_) => generate_req_id(),

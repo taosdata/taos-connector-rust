@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -7,30 +8,71 @@ use taos_query::common::{Field, Precision};
 use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable, RawResult};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tracing::Instrument;
 
 use crate::query::asyn::{fetch_binary, QueryMetrics};
-use crate::query::messages::{Stmt2Field, StmtId, WsRecvData, WsResArgs, WsSend};
+use crate::query::messages::{Stmt2Field, WsRecvData, WsResArgs, WsSend};
 use crate::query::WsTaos;
 use crate::{ResultSet, Taos};
 
 mod bind;
 
+#[derive(Debug, Clone)]
+enum Stmt2Request {
+    Init,
+    Prepare,
+    Bind,
+    Exec,
+    ResultSet,
+}
+
 #[derive(Debug)]
+struct Stmt2Cache {
+    req_id: Option<u64>,
+    req: Option<Stmt2Request>,
+    init_options: Option<(bool, bool)>,
+    sql: Option<String>,
+    params: Option<Vec<Vec<Stmt2BindParam>>>,
+}
+
+impl Stmt2Cache {
+    fn new() -> Self {
+        todo!()
+    }
+
+    fn build_conn_req(&self) -> WsSend {
+        let (single_stb_insert, single_table_bind_once) = self.init_options.unwrap();
+        WsSend::Stmt2Init {
+            req_id: self.req_id.unwrap(),
+            single_stb_insert,
+            single_table_bind_once,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Stmt2 {
+    id: u64,
     client: Arc<WsTaos>,
-    stmt_id: Option<StmtId>,
+    stmt_id: Option<Arc<AtomicU64>>, // update
     is_insert: Option<bool>,
     fields: Option<Vec<Stmt2Field>>,
     fields_count: Option<usize>,
     affected_rows: usize,
     affected_rows_once: usize,
+    cache: Arc<Mutex<Stmt2Cache>>,
+    // share stmt_id and cache
 }
 
 impl Stmt2 {
+    // reconnect
+    // init + prepare + bind + exec + result_set
+    // close not need
+
     pub fn new(client: Arc<WsTaos>) -> Self {
-        Self {
+        let stmt2 = Self {
+            id: generate_req_id(),
             client,
             stmt_id: None,
             is_insert: None,
@@ -38,7 +80,12 @@ impl Stmt2 {
             fields_count: None,
             affected_rows: 0,
             affected_rows_once: 0,
-        }
+            cache: Arc::new(Mutex::new(Stmt2Cache::new())),
+        };
+
+        // let a = Arc::downgrade(&Arc::new(stmt2));
+
+        stmt2
     }
 
     async fn init(&mut self) -> RawResult<()> {
@@ -51,6 +98,17 @@ impl Stmt2 {
         single_stb_insert: bool,
         single_table_bind_once: bool,
     ) -> RawResult<()> {
+        // TODO: determine whether it has been registered
+        self.client.register_stmt2(self.clone());
+        self.client.wait_until_connected().await;
+
+        // not need update
+        let mut guard = self.cache.lock().await;
+        // req_id cannot be modified
+        guard.req_id = Some(req_id);
+        guard.req = Some(Stmt2Request::Init);
+        guard.init_options = Some((single_stb_insert, single_table_bind_once));
+
         let req = WsSend::Stmt2Init {
             req_id,
             single_stb_insert,
@@ -58,16 +116,24 @@ impl Stmt2 {
         };
         let resp = self.client.send_request(req).await?;
         if let WsRecvData::Stmt2Init { stmt_id, .. } = resp {
-            self.stmt_id = Some(stmt_id);
+            self.stmt_id = Some(Arc::new(AtomicU64::new(stmt_id)));
             return Ok(());
         }
         unreachable!()
     }
 
     async fn prepare<S: AsRef<str> + Send>(&mut self, sql: S) -> RawResult<()> {
+        let req_id = generate_req_id();
+        self.client.wait_until_connected().await;
+
+        let mut guard = self.cache.lock().await;
+        guard.req_id = Some(req_id);
+        guard.req = Some(Stmt2Request::Prepare);
+        guard.sql = Some(sql.as_ref().to_string());
+
         let req = WsSend::Stmt2Prepare {
-            req_id: generate_req_id(),
-            stmt_id: self.stmt_id.unwrap(),
+            req_id,
+            stmt_id: self.stmt_id().unwrap(),
             sql: sql.as_ref().to_string(),
             get_fields: true,
         };
@@ -88,10 +154,23 @@ impl Stmt2 {
     }
 
     async fn bind(&self, params: &[Stmt2BindParam]) -> RawResult<()> {
+        // TODO: cache bytes, update stmt_id and req_id
+        let req_id = generate_req_id();
+        self.client.wait_until_connected().await;
+
+        let mut guard = self.cache.lock().await;
+        guard.req_id = Some(req_id);
+        guard.req = Some(Stmt2Request::Bind);
+        if guard.params.is_none() {
+            guard.params = Some(vec![params.to_vec()]);
+        } else {
+            guard.params.as_mut().unwrap().push(params.to_vec());
+        }
+
         let bytes = bind::bind_params_to_bytes(
             params,
-            generate_req_id(),
-            self.stmt_id.unwrap(),
+            req_id,
+            self.stmt_id().unwrap(),
             self.is_insert.unwrap(),
             self.fields.as_ref(),
             self.fields_count.unwrap(),
@@ -105,9 +184,16 @@ impl Stmt2 {
     }
 
     async fn exec(&mut self) -> RawResult<usize> {
+        let req_id = generate_req_id();
+        self.client.wait_until_connected().await;
+
+        let mut guard = self.cache.lock().await;
+        guard.req_id = Some(req_id);
+        guard.req = Some(Stmt2Request::Exec);
+
         let req = WsSend::Stmt2Exec {
-            req_id: generate_req_id(),
-            stmt_id: self.stmt_id.unwrap(),
+            req_id,
+            stmt_id: self.stmt_id().unwrap(),
         };
         let resp = self.client.send_request(req).await?;
         if let WsRecvData::Stmt2Exec { affected, .. } = resp {
@@ -119,9 +205,15 @@ impl Stmt2 {
     }
 
     fn close(&self) {
+        if self.client.state() != crate::query::asyn::ConnState::Connected {
+            tracing::warn!("Cannot close Stmt2 when client is not connected");
+            return;
+        }
+
+        // self.client.wait_until_connected().await;
         let req = WsSend::Stmt2Close {
             req_id: generate_req_id(),
-            stmt_id: self.stmt_id.unwrap(),
+            stmt_id: self.stmt_id().unwrap(),
         };
         let resp = block_in_place_or_global(self.client.send_request(req));
         match resp {
@@ -136,10 +228,16 @@ impl Stmt2 {
             return Err("Only query can use result".into());
         }
 
+        self.client.wait_until_connected().await;
         let req_id = generate_req_id();
+
+        let mut guard = self.cache.lock().await;
+        guard.req_id = Some(req_id);
+        guard.req = Some(Stmt2Request::ResultSet);
+
         let req = WsSend::Stmt2Result {
             req_id,
-            stmt_id: self.stmt_id.unwrap(),
+            stmt_id: self.stmt_id().unwrap(),
         };
 
         let resp = self.client.send_request(req).await?;
@@ -215,6 +313,37 @@ impl Stmt2 {
         unreachable!()
     }
 
+    fn stmt_id(&self) -> Option<u64> {
+        self.stmt_id.as_ref().map(|id| id.load(Ordering::Relaxed))
+    }
+
+    pub async fn reconnect(&self) -> RawResult<()> {
+        let guard = self.cache.lock().await;
+        if let Some(req) = &guard.req {
+            match req {
+                Stmt2Request::Init => {
+                    let req = guard.build_conn_req();
+                    self.client.send_only(req).await?;
+                }
+                // _ => {
+                // }
+                Stmt2Request::Prepare => {
+                    // let req = guard.build_conn_req();
+                    // let resp = self.client.send_request(req).await?;
+                }
+                Stmt2Request::Bind => todo!(),
+                Stmt2Request::Exec => todo!(),
+                Stmt2Request::ResultSet => todo!(),
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
     pub fn is_insert(&self) -> Option<bool> {
         self.is_insert
     }
@@ -235,6 +364,7 @@ impl Stmt2 {
 impl Drop for Stmt2 {
     fn drop(&mut self) {
         self.close();
+        self.client.unregister_stmt2(self.id);
     }
 }
 

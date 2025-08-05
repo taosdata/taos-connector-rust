@@ -29,7 +29,7 @@ impl Taos {
         let ws_taos = WsTaos::from_builder(&builder).await?;
         Ok(Self {
             builder,
-            client: Arc::new(ws_taos),
+            client: ws_taos,
         })
     }
 

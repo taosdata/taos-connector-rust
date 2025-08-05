@@ -3,13 +3,14 @@ use std::future::Future;
 use std::io::Write;
 use std::mem::transmute;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, LittleEndian};
 use chrono_tz::Tz;
+use dashmap::DashMap;
 use faststr::FastStr;
 use futures::channel::oneshot;
 use futures::{FutureExt, SinkExt, StreamExt};
@@ -22,12 +23,12 @@ use taos_query::{
 };
 use thiserror::Error;
 use tokio::select;
-use tokio::sync::{mpsc, watch, RwLock};
+use tokio::sync::{mpsc, watch, Notify, RwLock};
 use tokio::time::{self, timeout};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tracing::{instrument, Instrument};
 
-use crate::EndpointType;
+use crate::{EndpointType, Stmt2};
 
 use super::messages::*;
 use super::TaosBuilder;
@@ -37,6 +38,13 @@ type QueryInner = scc::HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = scc::HashMap<ResId, ReqId>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnState {
+    Connected,
+    Reconnecting,
+    Disconnected,
+}
+
 #[derive(Debug)]
 pub struct WsTaos {
     conn_id: u64,
@@ -44,6 +52,10 @@ pub struct WsTaos {
     close_signal: watch::Sender<bool>,
     tz: Option<Tz>,
     builder: Arc<TaosBuilder>,
+    // cache stmt2
+    stmt2_cache: DashMap<u64, Stmt2>,
+    state: AtomicUsize,
+    notify: Notify,
 }
 
 impl WsTaos {
@@ -52,13 +64,13 @@ impl WsTaos {
     /// ```text
     /// ws://localhost:6041
     /// ```
-    pub async fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
+    pub async fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Arc<Self>> {
         let dsn = dsn.into_dsn()?;
         let builder = TaosBuilder::from_dsn(dsn)?;
         Self::from_builder(&builder).await
     }
 
-    pub(super) async fn from_builder(builder: &TaosBuilder) -> RawResult<Self> {
+    pub(super) async fn from_builder(builder: &TaosBuilder) -> RawResult<Arc<Self>> {
         let conn_id = generate_req_id();
         let span = tracing::info_span!("ws_conn", conn_id = conn_id);
 
@@ -77,24 +89,32 @@ impl WsTaos {
 
         let builder = Arc::new(builder.clone());
 
+        let ws_taos = Arc::new(WsTaos {
+            conn_id,
+            close_signal: close_tx,
+            sender: query_sender.clone(),
+            tz: builder.tz,
+            builder: builder.clone(),
+            stmt2_cache: DashMap::new(),
+            state: AtomicUsize::new(ConnState::Connected as usize),
+            notify: Notify::new(),
+        });
+
         tokio::spawn(
             super::conn::run(
-                builder.clone(),
+                ws_taos.clone(),
+                // builder.clone(),
+                builder,
                 ws_stream,
-                query_sender.clone(),
+                // query_sender.clone(),
+                query_sender,
                 message_rx,
                 close_rx,
             )
             .instrument(span),
         );
 
-        Ok(WsTaos {
-            conn_id,
-            close_signal: close_tx,
-            sender: query_sender,
-            tz: builder.tz,
-            builder,
-        })
+        Ok(ws_taos)
     }
 
     pub async fn write_meta(&self, raw: &RawMeta) -> RawResult<()> {
@@ -360,8 +380,43 @@ impl WsTaos {
         self.sender.req_id()
     }
 
+    // use only by stmt2
     pub(crate) async fn send_request(&self, req: WsSend) -> RawResult<WsRecvData> {
+        // self.wait_until_connected().await;
         self.sender.send_recv(req).await
+    }
+
+    pub(crate) async fn wait_until_connected(&self) {
+        while self.state.load(Ordering::Acquire) != ConnState::Connected as usize {
+            self.notify.notified().await;
+        }
+    }
+
+    pub(crate) fn set_state(&self, state: ConnState) {
+        self.state.store(state as usize, Ordering::Release);
+        self.notify.notify_waiters();
+    }
+
+    pub fn state(&self) -> ConnState {
+        match self.state.load(Ordering::Acquire) {
+            0 => ConnState::Connected,
+            1 => ConnState::Reconnecting,
+            _ => ConnState::Disconnected,
+        }
+    }
+
+    pub(crate) async fn send_only(&self, req: WsSend) -> RawResult<()> {
+        self.sender.send_only(req).await
+    }
+
+    pub(crate) async fn recover_stmt2(&self) -> RawResult<()> {
+        tracing::trace!("Recovering all stmt2 for connection {}", self.conn_id);
+        for stmt2 in self.stmt2_cache.iter() {
+            let stmt2 = stmt2.value();
+            stmt2.reconnect().await?;
+        }
+        tracing::trace!("Recovered all stmt2 for connection {}", self.conn_id);
+        Ok(())
     }
 
     pub(crate) fn sender(&self) -> WsQuerySender {
@@ -443,6 +498,14 @@ impl WsTaos {
                 _ => Err(RawError::from_string("write raw block error"))?,
             }
         }
+    }
+
+    pub fn register_stmt2(&self, stmt2: Stmt2) {
+        self.stmt2_cache.insert(stmt2.id(), stmt2);
+    }
+
+    pub fn unregister_stmt2(&self, id: u64) {
+        self.stmt2_cache.remove(&id);
     }
 }
 

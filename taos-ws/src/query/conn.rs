@@ -19,13 +19,14 @@ use tokio::time;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tracing::Instrument;
 
+use crate::query::asyn::ConnState;
 use crate::query::messages::{ToMessage, WsSend};
-use crate::query::WsConnReq;
 use crate::query::{
     asyn::{WsQuerySender, WS_ERROR_NO},
     messages::{MessageId, ReqId, WsMessage, WsRecv, WsRecvData},
     Error,
 };
+use crate::query::{WsConnReq, WsTaos};
 use crate::{
     handle_disconnect_error, send_request_with_timeout, TaosBuilder, WsStream, WsStreamReader,
     WsStreamSender,
@@ -136,6 +137,7 @@ impl MessageCache {
 }
 
 pub(super) async fn run(
+    ws_taos: Arc<WsTaos>,
     builder: Arc<TaosBuilder>,
     mut ws_stream: WsStream,
     query_sender: WsQuerySender,
@@ -174,6 +176,7 @@ pub(super) async fn run(
         tokio::select! {
             err = err_rx.recv() => {
                 if let Some(err) = err {
+                    ws_taos.set_state(ConnState::Disconnected);
                     tracing::error!("WebSocket error: {err}");
                     let _ = close_tx.send(true);
                     if !is_disconnect_error(&err) {
@@ -204,6 +207,12 @@ pub(super) async fn run(
             Ok((ws, ver)) => {
                 ws_stream = ws;
                 query_sender.version_info.update(ver).await;
+                // notify
+                // update WsTaos version
+                // cleanup stmt2 in the channel
+                // TODO: handle error
+                let _err = ws_taos.recover_stmt2().await;
+                ws_taos.set_state(ConnState::Connected);
             }
             Err(err) => {
                 tracing::error!("WebSocket reconnection failed: {err}");
