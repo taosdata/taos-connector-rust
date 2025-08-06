@@ -13,7 +13,7 @@ use chrono_tz::Tz;
 use dashmap::DashMap;
 use faststr::FastStr;
 use futures::channel::oneshot;
-use futures::{FutureExt, SinkExt, StreamExt};
+use futures::{future, FutureExt, SinkExt, StreamExt};
 use itertools::Itertools;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
@@ -52,8 +52,7 @@ pub struct WsTaos {
     close_signal: watch::Sender<bool>,
     tz: Option<Tz>,
     builder: Arc<TaosBuilder>,
-    // cache stmt2
-    stmt2_cache: DashMap<u64, Stmt2>,
+    stmt2s: DashMap<u64, Stmt2>,
     state: AtomicUsize,
     notify: Notify,
 }
@@ -88,14 +87,13 @@ impl WsTaos {
         };
 
         let builder = Arc::new(builder.clone());
-
         let ws_taos = Arc::new(WsTaos {
             conn_id,
             close_signal: close_tx,
             sender: query_sender.clone(),
             tz: builder.tz,
             builder: builder.clone(),
-            stmt2_cache: DashMap::new(),
+            stmt2s: DashMap::new(),
             state: AtomicUsize::new(ConnState::Connected as usize),
             notify: Notify::new(),
         });
@@ -103,10 +101,8 @@ impl WsTaos {
         tokio::spawn(
             super::conn::run(
                 ws_taos.clone(),
-                // builder.clone(),
                 builder,
                 ws_stream,
-                // query_sender.clone(),
                 query_sender,
                 message_rx,
                 close_rx,
@@ -380,15 +376,77 @@ impl WsTaos {
         self.sender.req_id()
     }
 
-    // use only by stmt2
     pub(crate) async fn send_request(&self, req: WsSend) -> RawResult<WsRecvData> {
-        // self.wait_until_connected().await;
         self.sender.send_recv(req).await
     }
 
-    pub(crate) async fn wait_until_connected(&self) {
-        while self.state.load(Ordering::Acquire) != ConnState::Connected as usize {
-            self.notify.notified().await;
+    pub(crate) async fn send_only(&self, req: WsSend) -> RawResult<()> {
+        self.sender.send_only(req).await
+    }
+
+    pub(crate) fn insert_stmt2(&self, stmt2: Stmt2) {
+        self.stmt2s.insert(stmt2.id(), stmt2);
+    }
+
+    pub(crate) fn remove_stmt2(&self, id: u64) {
+        self.stmt2s.remove(&id);
+    }
+
+    pub(crate) async fn recover_stmt2(&self) {
+        tracing::trace!(
+            "recovering {} stmt2 instances for connection {}",
+            self.stmt2s.len(),
+            self.conn_id
+        );
+
+        let mut errors = Vec::new();
+        let futs = self.stmt2s.iter().map(|entry| {
+            let stmt2 = entry.value().clone();
+            async move {
+                if let Err(e) = stmt2.recover().await {
+                    Some((stmt2.id(), e))
+                } else {
+                    None
+                }
+            }
+        });
+
+        for res in future::join_all(futs).await {
+            if let Some(err) = res {
+                errors.push(err);
+            }
+        }
+
+        if errors.is_empty() {
+            tracing::info!(
+                "successfully recovered {} stmt2 instances for connection {}",
+                self.stmt2s.len(),
+                self.conn_id
+            );
+        } else {
+            tracing::warn!(
+                "recovered {}/{} stmt2 instances for connection {}, {} failed",
+                self.stmt2s.len() - errors.len(),
+                self.stmt2s.len(),
+                self.conn_id,
+                errors.len()
+            );
+            for (id, err) in &errors {
+                tracing::error!("failed to recover stmt2 id {id}: {err:?}");
+            }
+        }
+    }
+
+    pub(crate) async fn wait_for_reconnect(&self) -> RawResult<()> {
+        loop {
+            match self.state() {
+                ConnState::Connected => return Ok(()),
+                ConnState::Reconnecting => self.notify.notified().await,
+                ConnState::Disconnected => {
+                    return Err(RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
+                        .context("WebSocket connection is closed"));
+                }
+            }
         }
     }
 
@@ -397,26 +455,12 @@ impl WsTaos {
         self.notify.notify_waiters();
     }
 
-    pub fn state(&self) -> ConnState {
+    pub(crate) fn state(&self) -> ConnState {
         match self.state.load(Ordering::Acquire) {
             0 => ConnState::Connected,
             1 => ConnState::Reconnecting,
             _ => ConnState::Disconnected,
         }
-    }
-
-    pub(crate) async fn send_only(&self, req: WsSend) -> RawResult<()> {
-        self.sender.send_only(req).await
-    }
-
-    pub(crate) async fn recover_stmt2(&self) -> RawResult<()> {
-        tracing::trace!("Recovering all stmt2 for connection {}", self.conn_id);
-        for stmt2 in self.stmt2_cache.iter() {
-            let stmt2 = stmt2.value();
-            stmt2.reconnect().await?;
-        }
-        tracing::trace!("Recovered all stmt2 for connection {}", self.conn_id);
-        Ok(())
     }
 
     pub(crate) fn sender(&self) -> WsQuerySender {
@@ -498,14 +542,6 @@ impl WsTaos {
                 _ => Err(RawError::from_string("write raw block error"))?,
             }
         }
-    }
-
-    pub fn register_stmt2(&self, stmt2: Stmt2) {
-        self.stmt2_cache.insert(stmt2.id(), stmt2);
-    }
-
-    pub fn unregister_stmt2(&self, id: u64) {
-        self.stmt2_cache.remove(&id);
     }
 }
 

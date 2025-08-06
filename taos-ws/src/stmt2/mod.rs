@@ -51,18 +51,33 @@ impl Stmt2Cache {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Stmt2 {
     id: u64,
     client: Arc<WsTaos>,
-    stmt_id: Option<Arc<AtomicU64>>, // update
+    stmt_id: Option<Arc<AtomicU64>>,
     is_insert: Option<bool>,
     fields: Option<Vec<Stmt2Field>>,
     fields_count: Option<usize>,
     affected_rows: usize,
     affected_rows_once: usize,
     cache: Arc<Mutex<Stmt2Cache>>,
-    // share stmt_id and cache
+}
+
+impl Clone for Stmt2 {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            client: self.client.clone(),
+            stmt_id: self.stmt_id.clone(),
+            cache: self.cache.clone(),
+            is_insert: None,
+            fields: None,
+            fields_count: None,
+            affected_rows: 0,
+            affected_rows_once: 0,
+        }
+    }
 }
 
 impl Stmt2 {
@@ -99,8 +114,8 @@ impl Stmt2 {
         single_table_bind_once: bool,
     ) -> RawResult<()> {
         // TODO: determine whether it has been registered
-        self.client.register_stmt2(self.clone());
-        self.client.wait_until_connected().await;
+        self.client.insert_stmt2(self.clone());
+        self.client.wait_for_reconnect().await?;
 
         // not need update
         let mut guard = self.cache.lock().await;
@@ -124,7 +139,7 @@ impl Stmt2 {
 
     async fn prepare<S: AsRef<str> + Send>(&mut self, sql: S) -> RawResult<()> {
         let req_id = generate_req_id();
-        self.client.wait_until_connected().await;
+        self.client.wait_for_reconnect().await?;
 
         let mut guard = self.cache.lock().await;
         guard.req_id = Some(req_id);
@@ -156,7 +171,7 @@ impl Stmt2 {
     async fn bind(&self, params: &[Stmt2BindParam]) -> RawResult<()> {
         // TODO: cache bytes, update stmt_id and req_id
         let req_id = generate_req_id();
-        self.client.wait_until_connected().await;
+        self.client.wait_for_reconnect().await?;
 
         let mut guard = self.cache.lock().await;
         guard.req_id = Some(req_id);
@@ -185,7 +200,7 @@ impl Stmt2 {
 
     async fn exec(&mut self) -> RawResult<usize> {
         let req_id = generate_req_id();
-        self.client.wait_until_connected().await;
+        self.client.wait_for_reconnect().await?;
 
         let mut guard = self.cache.lock().await;
         guard.req_id = Some(req_id);
@@ -228,7 +243,7 @@ impl Stmt2 {
             return Err("Only query can use result".into());
         }
 
-        self.client.wait_until_connected().await;
+        self.client.wait_for_reconnect().await?;
         let req_id = generate_req_id();
 
         let mut guard = self.cache.lock().await;
@@ -317,7 +332,8 @@ impl Stmt2 {
         self.stmt_id.as_ref().map(|id| id.load(Ordering::Relaxed))
     }
 
-    pub async fn reconnect(&self) -> RawResult<()> {
+    pub async fn recover(&self) -> RawResult<()> {
+        // TODO: add log
         let guard = self.cache.lock().await;
         if let Some(req) = &guard.req {
             match req {
@@ -364,7 +380,7 @@ impl Stmt2 {
 impl Drop for Stmt2 {
     fn drop(&mut self) {
         self.close();
-        self.client.unregister_stmt2(self.id);
+        self.client.remove_stmt2(self.id);
     }
 }
 

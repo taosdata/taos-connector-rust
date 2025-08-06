@@ -405,8 +405,6 @@ pub enum WsMessage {
 }
 
 impl WsMessage {
-    // TODO: judge stmt2 request
-
     pub(crate) fn req_id(&self) -> ReqId {
         match self {
             WsMessage::Raw(_) => generate_req_id(),
@@ -438,6 +436,31 @@ impl WsMessage {
                 }
                 _ => false,
             },
+        }
+    }
+
+    pub(crate) fn is_stmt2(&self) -> bool {
+        match self {
+            WsMessage::Raw(_) => false,
+            WsMessage::Command(ws_send) => match ws_send {
+                WsSend::Stmt2Init { .. }
+                | WsSend::Stmt2Prepare { .. }
+                | WsSend::Stmt2Exec { .. }
+                | WsSend::Stmt2Result { .. }
+                | WsSend::Stmt2Close { .. } => true,
+                WsSend::Binary(bytes) => {
+                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+                    action == 9
+                }
+                _ => false,
+            },
+        }
+    }
+
+    pub(crate) fn is_stmt2_close(&self) -> bool {
+        match self {
+            WsMessage::Raw(_) => false,
+            WsMessage::Command(ws_send) => matches!(ws_send, WsSend::Stmt2Close { .. }),
         }
     }
 }

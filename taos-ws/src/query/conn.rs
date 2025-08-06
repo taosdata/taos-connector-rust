@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use flume::Receiver;
+use flume::{Receiver, Sender};
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use taos_query::prelude::RawError;
 use taos_query::util::generate_req_id;
@@ -176,11 +176,11 @@ pub(super) async fn run(
         tokio::select! {
             err = err_rx.recv() => {
                 if let Some(err) = err {
-                    ws_taos.set_state(ConnState::Disconnected);
                     tracing::error!("WebSocket error: {err}");
                     let _ = close_tx.send(true);
                     if !is_disconnect_error(&err) {
                         tracing::error!("non-disconnect error detected, cleaning up all pending queries");
+                        ws_taos.set_state(ConnState::Disconnected);
                         cleanup_after_disconnect(query_sender.clone());
                         return;
                     }
@@ -190,6 +190,7 @@ pub(super) async fn run(
             _ = close_reader.changed() => {
                 tracing::info!("WebSocket received close signal");
                 let _ = close_tx.send(true);
+                ws_taos.set_state(ConnState::Disconnected);
                 return;
             }
         }
@@ -203,19 +204,15 @@ pub(super) async fn run(
 
         tracing::warn!("WebSocket disconnected, starting to reconnect");
 
+        ws_taos.set_state(ConnState::Reconnecting);
         match builder.connect().await {
             Ok((ws, ver)) => {
                 ws_stream = ws;
                 query_sender.version_info.update(ver).await;
-                // notify
-                // update WsTaos version
-                // cleanup stmt2 in the channel
-                // TODO: handle error
-                let _err = ws_taos.recover_stmt2().await;
-                ws_taos.set_state(ConnState::Connected);
             }
             Err(err) => {
                 tracing::error!("WebSocket reconnection failed: {err}");
+                ws_taos.set_state(ConnState::Disconnected);
                 cleanup_after_disconnect(query_sender.clone());
                 return;
             }
@@ -223,7 +220,18 @@ pub(super) async fn run(
 
         tracing::info!("WebSocket reconnected successfully");
 
-        cleanup_after_reconnect(query_sender.clone(), cache.clone());
+        let stmt2_req_ids = cleanup_stmt2(query_sender.sender.clone(), message_reader.clone());
+
+        let ws_taos = ws_taos.clone();
+        tokio::spawn(
+            async move {
+                ws_taos.recover_stmt2().await;
+                ws_taos.set_state(ConnState::Connected);
+            }
+            .in_current_span(),
+        );
+
+        cleanup_after_reconnect(query_sender.clone(), cache.clone(), stmt2_req_ids);
     }
 }
 
@@ -564,11 +572,15 @@ fn cleanup_after_disconnect(query_sender: WsQuerySender) {
     }
 }
 
-fn cleanup_after_reconnect(query_sender: WsQuerySender, cache: MessageCache) {
+fn cleanup_after_reconnect(
+    query_sender: WsQuerySender,
+    cache: MessageCache,
+    stmt2_req_ids: Vec<ReqId>,
+) {
     let mut req_ids = HashSet::new();
 
     query_sender.queries.scan(|req_id, _| {
-        if !cache.req_to_msg.contains(req_id) {
+        if !cache.req_to_msg.contains(req_id) && !stmt2_req_ids.contains(req_id) {
             req_ids.insert(*req_id);
         }
     });
@@ -585,6 +597,36 @@ fn cleanup_after_reconnect(query_sender: WsQuerySender, cache: MessageCache) {
                 .context("WebSocket connection is closed")));
         }
     }
+}
+
+fn cleanup_stmt2(
+    message_sender: Sender<WsMessage>,
+    message_reader: Receiver<WsMessage>,
+) -> Vec<ReqId> {
+    let mut dropped_cnt = 0;
+    let mut req_ids = Vec::new();
+    let mut kept_messages = Vec::new();
+
+    while let Ok(message) = message_reader.try_recv() {
+        if message.is_stmt2() {
+            dropped_cnt += 1;
+            if !message.is_stmt2_close() {
+                req_ids.push(message.req_id());
+            }
+        } else {
+            kept_messages.push(message);
+        }
+    }
+
+    for message in kept_messages {
+        let _ = message_sender.send(message);
+    }
+
+    if dropped_cnt > 0 {
+        tracing::info!("dropped {dropped_cnt} stmt2 messages during cleanup");
+    }
+
+    req_ids
 }
 
 #[cfg(test)]
