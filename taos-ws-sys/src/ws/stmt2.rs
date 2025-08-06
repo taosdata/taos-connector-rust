@@ -543,7 +543,9 @@ impl TAOS_STMT2_BIND {
         }
 
         assert!(!self.buffer.is_null());
-        assert!(!self.length.is_null());
+        if self.ty().fixed_length() == 0 {
+            assert!(!self.length.is_null());
+        }
 
         let val = match self.ty() {
             Ty::Null => Value::Null(self.ty()),
@@ -592,20 +594,25 @@ impl TAOS_STMT2_BIND {
         val
     }
 
-    fn to_column_view(&self) -> ColumnView {
+    fn to_column_view(&self) -> TaosResult<ColumnView> {
         debug!("to_column_view, bind: {self:?}");
 
         let ty = self.ty();
         let num = self.num as usize;
-        let lens = unsafe { slice::from_raw_parts(self.length, num) };
-        let len = lens.iter().sum::<i32>() as usize;
+
+        if ty.fixed_length() == 0 && self.length.is_null() {
+            return Err(TaosError::new(
+                Code::INVALID_PARA,
+                "length is null for variable length type",
+            ));
+        }
 
         let mut is_nulls = None;
         if !self.is_null.is_null() {
             is_nulls = Some(unsafe { slice::from_raw_parts(self.is_null, num) });
         }
 
-        debug!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}, lens: {lens:?}, total_len: {len}");
+        debug!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}");
 
         macro_rules! _fixed_view {
             ($from:expr) => {{
@@ -628,6 +635,8 @@ impl TAOS_STMT2_BIND {
 
         macro_rules! _variable_str_view {
             ($from:ident) => {{
+                let lens = unsafe { slice::from_raw_parts(self.length, num) };
+                let len = lens.iter().sum::<i32>() as usize;
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
                 let mut vals = vec![None; num];
                 let mut idx = 0;
@@ -654,6 +663,8 @@ impl TAOS_STMT2_BIND {
 
         macro_rules! _variable_bytes_view {
             ($from:ident) => {{
+                let lens = unsafe { slice::from_raw_parts(self.length, num) };
+                let len = lens.iter().sum::<i32>() as usize;
                 let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
                 let mut vals = vec![None; num];
                 let mut idx = 0;
@@ -701,7 +712,7 @@ impl TAOS_STMT2_BIND {
 
         debug!("to_column_view, view: {view:?}");
 
-        view
+        Ok(view)
     }
 
     fn ty(&self) -> Ty {
@@ -775,7 +786,7 @@ impl TAOS_STMT2_BINDV {
                 let mut views = Vec::with_capacity(col_cnt);
                 let binds = unsafe { slice::from_raw_parts(slice[i], col_cnt) };
                 for bind in binds {
-                    views.push(bind.to_column_view());
+                    views.push(bind.to_column_view()?);
                 }
                 cols[i] = Some(views);
             }
@@ -1372,6 +1383,88 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1739966021");
+            taos_close(taos);
+        }
+
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1754448810",
+                    "create database test_1754448810",
+                    "use test_1754448810",
+                    "create table s0 (ts timestamp, c1 int) tags (t1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into ? using s0 tags(?) values(?, ?)";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let tbname = c"d0";
+            let mut tbnames = vec![tbname.as_ptr() as _];
+
+            let mut buffer = vec![101];
+            let t1 = TAOS_STMT2_BIND {
+                buffer_type: Ty::Int as _,
+                buffer: buffer.as_mut_ptr() as _,
+                length: ptr::null_mut(),
+                is_null: ptr::null_mut(),
+                num: buffer.len() as _,
+            };
+
+            let mut tag = vec![t1];
+            let mut tags = vec![tag.as_mut_ptr()];
+
+            let mut buffer = vec![
+                1739521477831i64,
+                1739521477832,
+                1739521477833,
+                1739521477834,
+            ];
+            let ts = TAOS_STMT2_BIND {
+                buffer_type: Ty::Timestamp as _,
+                buffer: buffer.as_mut_ptr() as _,
+                length: ptr::null_mut(),
+                is_null: ptr::null_mut(),
+                num: buffer.len() as _,
+            };
+
+            let mut buffer = vec![1, 2, 3, 4];
+            let c1 = TAOS_STMT2_BIND {
+                buffer_type: Ty::Int as _,
+                buffer: buffer.as_mut_ptr() as _,
+                length: ptr::null_mut(),
+                is_null: ptr::null_mut(),
+                num: buffer.len() as _,
+            };
+
+            let mut col = vec![ts, c1];
+            let mut cols = vec![col.as_mut_ptr()];
+
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: tbnames.len() as _,
+                tbnames: tbnames.as_mut_ptr(),
+                tags: tags.as_mut_ptr(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+            assert_eq!(affected_rows, 4);
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1754448810");
             taos_close(taos);
         }
     }
