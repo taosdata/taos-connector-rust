@@ -447,7 +447,7 @@ impl WsTaos {
 
         let mut errors = Vec::new();
         let futs = self.stmt2s.iter().map(|entry| {
-            let stmt2 = entry.value().clone();
+            let mut stmt2 = entry.value().clone();
             async move {
                 if let Err(e) = stmt2.recover().await {
                     Some((stmt2.id(), e))
