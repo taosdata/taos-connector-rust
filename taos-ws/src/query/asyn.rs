@@ -967,6 +967,11 @@ impl WsQuerySender {
     }
 
     async fn send_only(&self, message: WsSend) -> RawResult<()> {
+        tracing::trace!(
+            "send_only, req_id: {}, sending message: {:?}",
+            message.req_id(),
+            message
+        );
         timeout(
             SEND_TIMEOUT,
             self.sender.send_async(WsMessage::Command(message)),
