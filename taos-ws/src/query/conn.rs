@@ -220,17 +220,9 @@ pub(super) async fn run(
 
         tracing::info!("WebSocket reconnected successfully");
 
+        ws_taos.wait_for_previous_recover_stmt2().await;
         let stmt2_req_ids = cleanup_stmt2(query_sender.sender.clone(), message_reader.clone());
-
-        let ws_taos = ws_taos.clone();
-        tokio::spawn(
-            async move {
-                ws_taos.recover_stmt2().await;
-                ws_taos.set_state(ConnState::Connected);
-            }
-            .in_current_span(),
-        );
-
+        ws_taos.clone().recover_stmt2().await;
         cleanup_after_reconnect(query_sender.clone(), cache.clone(), stmt2_req_ids);
     }
 }

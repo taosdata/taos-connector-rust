@@ -23,9 +23,11 @@ use taos_query::{
 };
 use thiserror::Error;
 use tokio::select;
-use tokio::sync::{mpsc, watch, Notify, RwLock};
+use tokio::sync::{mpsc, watch, Mutex, Notify, RwLock};
+use tokio::task::JoinHandle;
 use tokio::time::{self, timeout};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+use tokio_util::sync::CancellationToken;
 use tracing::{instrument, Instrument};
 
 use crate::{EndpointType, Stmt2};
@@ -52,9 +54,11 @@ pub struct WsTaos {
     close_signal: watch::Sender<bool>,
     tz: Option<Tz>,
     builder: Arc<TaosBuilder>,
-    stmt2s: DashMap<u64, Stmt2>,
-    state: AtomicUsize,
+    stmt2s: Arc<DashMap<u64, Stmt2>>,
+    state: Arc<AtomicUsize>,
     notify: Notify,
+    recover_token: Arc<Mutex<Option<CancellationToken>>>,
+    recover_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl WsTaos {
@@ -93,9 +97,11 @@ impl WsTaos {
             sender: query_sender.clone(),
             tz: builder.tz,
             builder: builder.clone(),
-            stmt2s: DashMap::new(),
-            state: AtomicUsize::new(ConnState::Connected as usize),
+            stmt2s: Arc::default(),
+            state: Arc::new(AtomicUsize::new(ConnState::Connected as usize)),
             notify: Notify::new(),
+            recover_token: Arc::default(),
+            recover_handle: Arc::default(),
         });
 
         tokio::spawn(
@@ -392,12 +398,52 @@ impl WsTaos {
         self.stmt2s.remove(&id);
     }
 
-    pub(crate) async fn recover_stmt2(&self) {
-        tracing::trace!(
-            "recovering {} stmt2 instances for connection {}",
-            self.stmt2s.len(),
-            self.conn_id
+    pub(crate) async fn wait_for_previous_recover_stmt2(&self) {
+        let mut token_guard = self.recover_token.lock().await;
+        if let Some(token) = token_guard.take() {
+            token.cancel();
+            tracing::trace!("cancelled stmt2 recover task");
+        }
+
+        let mut handle_guard = self.recover_handle.lock().await;
+        if let Some(handle) = handle_guard.take() {
+            tracing::trace!("waiting for stmt2 recover task to finish");
+            let _ = handle.await;
+        }
+    }
+
+    pub(crate) async fn recover_stmt2(self: Arc<Self>) {
+        let mut token_guard = self.recover_token.lock().await;
+        let recover_token = CancellationToken::new();
+        let token = recover_token.clone();
+        *token_guard = Some(recover_token);
+
+        let ws_taos = self.clone();
+        let recover_handle = tokio::spawn(
+            async move {
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        tracing::trace!("stmt2 recover cancelled");
+                    }
+                    _ = ws_taos._recover_stmt2() => {
+                        ws_taos.set_state(ConnState::Connected);
+                        let mut token_guard = ws_taos.recover_token.lock().await;
+                        *token_guard = None;
+                        let mut handle_guard = ws_taos.recover_handle.lock().await;
+                        *handle_guard = None;
+                        tracing::trace!("stmt2 recover finished");
+                    }
+                }
+            }
+            .in_current_span(),
         );
+
+        let mut handle_guard = self.recover_handle.lock().await;
+        *handle_guard = Some(recover_handle);
+    }
+
+    async fn _recover_stmt2(&self) {
+        tracing::trace!("recovering {} stmt2 instances", self.stmt2s.len());
 
         let mut errors = Vec::new();
         let futs = self.stmt2s.iter().map(|entry| {
@@ -419,20 +465,18 @@ impl WsTaos {
 
         if errors.is_empty() {
             tracing::info!(
-                "successfully recovered {} stmt2 instances for connection {}",
-                self.stmt2s.len(),
-                self.conn_id
+                "successfully recovered {} stmt2 instances",
+                self.stmt2s.len()
             );
         } else {
             tracing::warn!(
-                "recovered {}/{} stmt2 instances for connection {}, {} failed",
+                "recovered {}/{} stmt2 instances, {} failed",
                 self.stmt2s.len() - errors.len(),
                 self.stmt2s.len(),
-                self.conn_id,
                 errors.len()
             );
             for (id, err) in &errors {
-                tracing::error!("failed to recover stmt2 id {id}: {err:?}");
+                tracing::error!("failed to recover stmt2, id: {id}, err: {err:?}");
             }
         }
     }
