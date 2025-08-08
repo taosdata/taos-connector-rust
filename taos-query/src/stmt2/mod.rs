@@ -7,7 +7,7 @@ where
 {
     fn init(taos: &Q) -> RawResult<Self>;
 
-    fn prepare(&mut self, sql: &str) -> RawResult<&mut Self>;
+    fn prepare<S: AsRef<str> + Send>(&mut self, sql: S) -> RawResult<&mut Self>;
 
     fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self>;
 
@@ -26,7 +26,7 @@ where
 {
     async fn init(taos: &Q) -> RawResult<Self>;
 
-    async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self>;
+    async fn prepare<S: AsRef<str> + Send>(&mut self, sql: S) -> RawResult<&mut Self>;
 
     async fn bind(&mut self, params: &[Stmt2BindParam]) -> RawResult<&mut Self>;
 
