@@ -3,16 +3,17 @@ use std::future::Future;
 use std::io::Write;
 use std::mem::transmute;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, LittleEndian};
 use chrono_tz::Tz;
+use dashmap::DashMap;
 use faststr::FastStr;
 use futures::channel::oneshot;
-use futures::{FutureExt, SinkExt, StreamExt};
+use futures::{future, FutureExt, SinkExt, StreamExt};
 use itertools::Itertools;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
 use taos_query::prelude::{Code, RawError, RawResult};
@@ -22,12 +23,14 @@ use taos_query::{
 };
 use thiserror::Error;
 use tokio::select;
-use tokio::sync::{mpsc, watch, RwLock};
+use tokio::sync::{mpsc, watch, Mutex, Notify, RwLock};
+use tokio::task::JoinHandle;
 use tokio::time::{self, timeout};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+use tokio_util::sync::CancellationToken;
 use tracing::{instrument, Instrument};
 
-use crate::EndpointType;
+use crate::{EndpointType, Stmt2};
 
 use super::messages::*;
 use super::TaosBuilder;
@@ -37,6 +40,13 @@ type QueryInner = scc::HashMap<ReqId, QueryChannelSender>;
 type QueryAgent = Arc<QueryInner>;
 type QueryResMapper = scc::HashMap<ResId, ReqId>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnState {
+    Connected,
+    Reconnecting,
+    Disconnected,
+}
+
 #[derive(Debug)]
 pub struct WsTaos {
     conn_id: u64,
@@ -44,6 +54,11 @@ pub struct WsTaos {
     close_signal: watch::Sender<bool>,
     tz: Option<Tz>,
     builder: Arc<TaosBuilder>,
+    stmt2s: Arc<DashMap<u64, Stmt2>>,
+    state: Arc<AtomicUsize>,
+    notify: Notify,
+    recover_token: Arc<Mutex<Option<CancellationToken>>>,
+    recover_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl WsTaos {
@@ -52,13 +67,13 @@ impl WsTaos {
     /// ```text
     /// ws://localhost:6041
     /// ```
-    pub async fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
+    pub async fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Arc<Self>> {
         let dsn = dsn.into_dsn()?;
         let builder = TaosBuilder::from_dsn(dsn)?;
         Self::from_builder(&builder).await
     }
 
-    pub(super) async fn from_builder(builder: &TaosBuilder) -> RawResult<Self> {
+    pub(super) async fn from_builder(builder: &TaosBuilder) -> RawResult<Arc<Self>> {
         let conn_id = generate_req_id();
         let span = tracing::info_span!("ws_conn", conn_id = conn_id);
 
@@ -76,25 +91,32 @@ impl WsTaos {
         };
 
         let builder = Arc::new(builder.clone());
+        let ws_taos = Arc::new(WsTaos {
+            conn_id,
+            close_signal: close_tx,
+            sender: query_sender.clone(),
+            tz: builder.tz,
+            builder: builder.clone(),
+            stmt2s: Arc::default(),
+            state: Arc::new(AtomicUsize::new(ConnState::Connected as usize)),
+            notify: Notify::new(),
+            recover_token: Arc::default(),
+            recover_handle: Arc::default(),
+        });
 
         tokio::spawn(
             super::conn::run(
-                builder.clone(),
+                ws_taos.clone(),
+                builder,
                 ws_stream,
-                query_sender.clone(),
+                query_sender,
                 message_rx,
                 close_rx,
             )
             .instrument(span),
         );
 
-        Ok(WsTaos {
-            conn_id,
-            close_signal: close_tx,
-            sender: query_sender,
-            tz: builder.tz,
-            builder,
-        })
+        Ok(ws_taos)
     }
 
     pub async fn write_meta(&self, raw: &RawMeta) -> RawResult<()> {
@@ -362,6 +384,125 @@ impl WsTaos {
 
     pub(crate) async fn send_request(&self, req: WsSend) -> RawResult<WsRecvData> {
         self.sender.send_recv(req).await
+    }
+
+    pub(crate) async fn send_only(&self, req: WsSend) -> RawResult<()> {
+        self.sender.send_only(req).await
+    }
+
+    pub(crate) fn insert_stmt2(&self, stmt2: Stmt2) {
+        self.stmt2s.insert(stmt2.id(), stmt2);
+    }
+
+    pub(crate) fn remove_stmt2(&self, id: u64) {
+        self.stmt2s.remove(&id);
+    }
+
+    pub(crate) async fn wait_for_previous_recover_stmt2(&self) {
+        let mut token_guard = self.recover_token.lock().await;
+        if let Some(token) = token_guard.take() {
+            token.cancel();
+            tracing::trace!("cancelled stmt2 recover task");
+        }
+
+        let mut handle_guard = self.recover_handle.lock().await;
+        if let Some(handle) = handle_guard.take() {
+            tracing::trace!("waiting for stmt2 recover task to finish");
+            let _ = handle.await;
+        }
+    }
+
+    pub(crate) async fn recover_stmt2(self: Arc<Self>) {
+        let mut token_guard = self.recover_token.lock().await;
+        let recover_token = CancellationToken::new();
+        let token = recover_token.clone();
+        *token_guard = Some(recover_token);
+
+        let ws_taos = self.clone();
+        let recover_handle = tokio::spawn(
+            async move {
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        tracing::trace!("stmt2 recover cancelled");
+                    }
+                    _ = ws_taos._recover_stmt2() => {
+                        ws_taos.set_state(ConnState::Connected);
+                        let mut token_guard = ws_taos.recover_token.lock().await;
+                        *token_guard = None;
+                        let mut handle_guard = ws_taos.recover_handle.lock().await;
+                        *handle_guard = None;
+                        tracing::trace!("stmt2 recover finished");
+                    }
+                }
+            }
+            .in_current_span(),
+        );
+
+        let mut handle_guard = self.recover_handle.lock().await;
+        *handle_guard = Some(recover_handle);
+    }
+
+    async fn _recover_stmt2(&self) {
+        tracing::trace!("recovering {} stmt2 instances", self.stmt2s.len());
+
+        let mut errors = Vec::new();
+        let futs = self.stmt2s.iter().map(|entry| {
+            let mut stmt2 = entry.value().clone();
+            async move {
+                if let Err(e) = stmt2.recover().await {
+                    Some((stmt2.id(), e))
+                } else {
+                    None
+                }
+            }
+        });
+
+        for err in (future::join_all(futs).await).into_iter().flatten() {
+            errors.push(err);
+        }
+
+        if errors.is_empty() {
+            tracing::info!(
+                "successfully recovered {} stmt2 instances",
+                self.stmt2s.len()
+            );
+        } else {
+            tracing::warn!(
+                "recovered {}/{} stmt2 instances, {} failed",
+                self.stmt2s.len() - errors.len(),
+                self.stmt2s.len(),
+                errors.len()
+            );
+            for (id, err) in &errors {
+                tracing::error!("failed to recover stmt2, id: {id}, err: {err:?}");
+            }
+        }
+    }
+
+    pub(crate) async fn wait_for_reconnect(&self) -> RawResult<()> {
+        loop {
+            match self.state() {
+                ConnState::Connected => return Ok(()),
+                ConnState::Reconnecting => self.notify.notified().await,
+                ConnState::Disconnected => {
+                    return Err(RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
+                        .context("WebSocket connection is closed"));
+                }
+            }
+        }
+    }
+
+    pub(crate) fn set_state(&self, state: ConnState) {
+        self.state.store(state as usize, Ordering::Release);
+        self.notify.notify_waiters();
+    }
+
+    pub(crate) fn state(&self) -> ConnState {
+        match self.state.load(Ordering::Acquire) {
+            0 => ConnState::Connected,
+            1 => ConnState::Reconnecting,
+            _ => ConnState::Disconnected,
+        }
     }
 
     pub(crate) fn sender(&self) -> WsQuerySender {
@@ -824,6 +965,11 @@ impl WsQuerySender {
     }
 
     async fn send_only(&self, message: WsSend) -> RawResult<()> {
+        tracing::trace!(
+            "send_only, req_id: {}, sending message: {:?}",
+            message.req_id(),
+            message
+        );
         timeout(
             SEND_TIMEOUT,
             self.sender.send_async(WsMessage::Command(message)),
