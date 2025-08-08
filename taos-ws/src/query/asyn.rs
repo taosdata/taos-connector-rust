@@ -457,10 +457,8 @@ impl WsTaos {
             }
         });
 
-        for res in future::join_all(futs).await {
-            if let Some(err) = res {
-                errors.push(err);
-            }
+        for err in (future::join_all(futs).await).into_iter().flatten() {
+            errors.push(err);
         }
 
         if errors.is_empty() {
