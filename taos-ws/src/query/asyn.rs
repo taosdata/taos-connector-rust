@@ -4,7 +4,7 @@ use std::io::Write;
 use std::mem::transmute;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
@@ -30,7 +30,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_util::sync::CancellationToken;
 use tracing::{instrument, Instrument};
 
-use crate::{EndpointType, Stmt2};
+use crate::{EndpointType, Stmt2, Stmt2Inner};
 
 use super::messages::*;
 use super::TaosBuilder;
@@ -54,9 +54,9 @@ pub struct WsTaos {
     close_signal: watch::Sender<bool>,
     tz: Option<Tz>,
     builder: Arc<TaosBuilder>,
-    stmt2s: Arc<DashMap<u64, Stmt2>>,
+    stmt2s: Arc<DashMap<u64, Weak<Stmt2Inner>>>,
     state: Arc<AtomicUsize>,
-    notify: Notify,
+    notify: Arc<Notify>,
     recover_token: Arc<Mutex<Option<CancellationToken>>>,
     recover_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
@@ -99,7 +99,7 @@ impl WsTaos {
             builder: builder.clone(),
             stmt2s: Arc::default(),
             state: Arc::new(AtomicUsize::new(ConnState::Connected as usize)),
-            notify: Notify::new(),
+            notify: Arc::default(),
             recover_token: Arc::default(),
             recover_handle: Arc::default(),
         });
@@ -390,12 +390,31 @@ impl WsTaos {
         self.sender.send_only(req).await
     }
 
-    pub(crate) fn insert_stmt2(&self, stmt2: Stmt2) {
-        self.stmt2s.insert(stmt2.id(), stmt2);
+    pub(crate) fn insert_stmt2(&self, stmt2: Arc<Stmt2Inner>) {
+        tracing::trace!("insert stmt2: {stmt2:?}");
+        let id = stmt2.id();
+        let stmt2 = Arc::downgrade(&stmt2);
+        self.stmt2s.insert(id, stmt2);
     }
 
     pub(crate) fn remove_stmt2(&self, id: u64) {
+        tracing::trace!("remove stmt2 with id: {id}");
         self.stmt2s.remove(&id);
+    }
+
+    pub(crate) async fn stmt2_req_ids(&self) -> Vec<ReqId> {
+        let mut futs = Vec::with_capacity(self.stmt2s.len());
+        for entry in self.stmt2s.iter() {
+            let stmt2 = entry.value().clone();
+            futs.push(async move {
+                if let Some(stmt2) = stmt2.upgrade() {
+                    stmt2.req_id().await
+                } else {
+                    1
+                }
+            });
+        }
+        future::join_all(futs).await
     }
 
     pub(crate) async fn wait_for_previous_recover_stmt2(&self) {
@@ -413,6 +432,11 @@ impl WsTaos {
     }
 
     pub(crate) async fn recover_stmt2(self: Arc<Self>) {
+        if self.stmt2s.is_empty() {
+            tracing::trace!("no stmt2 instances to recover");
+            return;
+        }
+
         let mut token_guard = self.recover_token.lock().await;
         let recover_token = CancellationToken::new();
         let token = recover_token.clone();
@@ -447,10 +471,14 @@ impl WsTaos {
 
         let mut errors = Vec::new();
         let futs = self.stmt2s.iter().map(|entry| {
-            let mut stmt2 = entry.value().clone();
+            let stmt2 = entry.value().clone();
             async move {
-                if let Err(e) = stmt2.recover().await {
-                    Some((stmt2.id(), e))
+                if let Some(stmt2) = stmt2.upgrade() {
+                    if let Err(e) = stmt2.recover().await {
+                        Some((stmt2.id(), e))
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -486,13 +514,14 @@ impl WsTaos {
                 ConnState::Reconnecting => self.notify.notified().await,
                 ConnState::Disconnected => {
                     return Err(RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
-                        .context("WebSocket connection is closed"));
+                        .context("WebSocket connection is closed (wait)"));
                 }
             }
         }
     }
 
     pub(crate) fn set_state(&self, state: ConnState) {
+        tracing::trace!("set connection state to: {state:?}");
         self.state.store(state as usize, Ordering::Release);
         self.notify.notify_waiters();
     }

@@ -9,6 +9,9 @@ mod inline_write;
 
 pub mod req_id;
 
+// #[cfg(test)]
+pub mod ws_proxy;
+
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 

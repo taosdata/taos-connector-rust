@@ -221,8 +221,9 @@ pub(super) async fn run(
         tracing::info!("WebSocket reconnected successfully");
 
         ws_taos.wait_for_previous_recover_stmt2().await;
-        let stmt2_req_ids = cleanup_stmt2(query_sender.sender.clone(), message_reader.clone());
+        let mut stmt2_req_ids = cleanup_stmt2(query_sender.sender.clone(), message_reader.clone());
         ws_taos.clone().recover_stmt2().await;
+        stmt2_req_ids.extend(ws_taos.stmt2_req_ids().await);
         cleanup_after_reconnect(query_sender.clone(), cache.clone(), stmt2_req_ids);
     }
 }
@@ -559,7 +560,7 @@ fn cleanup_after_disconnect(query_sender: WsQuerySender) {
     for req_id in req_ids {
         if let Some((_, sender)) = query_sender.queries.remove(&req_id) {
             let _ = sender.send(Err(RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
-                .context("WebSocket connection is closed")));
+                .context("WebSocket connection is closed (disconnect)")));
         }
     }
 }
@@ -586,7 +587,7 @@ fn cleanup_after_reconnect(
     for req_id in req_ids {
         if let Some((_, sender)) = query_sender.queries.remove(&req_id) {
             let _ = sender.send(Err(RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
-                .context("WebSocket connection is closed")));
+                .context("WebSocket connection is closed (reconnect)")));
         }
     }
 }
