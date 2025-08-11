@@ -30,7 +30,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_util::sync::CancellationToken;
 use tracing::{instrument, Instrument};
 
-use crate::{EndpointType, Stmt2, Stmt2Inner};
+use crate::{EndpointType, Stmt2Inner};
 
 use super::messages::*;
 use super::TaosBuilder;
