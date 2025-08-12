@@ -1,43 +1,41 @@
 use futures::{SinkExt, StreamExt};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::TcpListener;
+use std::time::Duration;
+use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::sync::{Mutex, Notify};
 use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message};
 
-// pub type JudgeFn = Arc<dyn Fn(&Message) -> bool + Send + Sync>;
+pub type ProxyFn = Arc<dyn Fn(&Message, &mut ProxyContext) -> ProxyAction + Send + Sync>;
 
-pub type JudgeFn = Arc<dyn Fn(&Message, &mut JudgeState) -> JudgeAction + Send + Sync>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JudgeAction {
-    RestartProxy,
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy)]
+pub enum ProxyAction {
+    Restart,
     Forward,
-    // 你可以扩展更多动作
 }
 
-// TODO: use context
-pub struct JudgeState {
-    pub init_count: usize,
-    // 你可以加更多字段
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct ProxyContext {
+    pub req_count: usize,
 }
 
-#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub struct WsProxy {
-    stop_notify: Arc<Notify>,
     running: Arc<Mutex<bool>>,
+    stop_notify: Arc<Notify>,
 }
 
 impl WsProxy {
-    // TODO: <A: ToSocketAddrs>
-    pub async fn start(listen_addr: SocketAddr, backend_url: String, judge: JudgeFn) -> Arc<Self> {
+    pub async fn start(listen_addr: SocketAddr, backend_url: String, judge: ProxyFn) -> Arc<Self> {
         let stop_notify = Arc::new(Notify::new());
         let running = Arc::new(Mutex::new(true));
         let proxy = Arc::new(Self {
             stop_notify: stop_notify.clone(),
             running: running.clone(),
         });
-        let judge_state = Arc::new(Mutex::new(JudgeState { init_count: 0 }));
+        let judge_state = Arc::new(Mutex::new(ProxyContext { req_count: 0 }));
 
         let proxy_clone = proxy.clone();
         tokio::spawn(async move {
@@ -91,7 +89,7 @@ impl WsProxy {
                                             tracing::trace!("received message from client: {:?}", msg);
                                             let mut state = judge_state.lock().await;
                                             match judge(&msg, &mut *state) {
-                                                JudgeAction::RestartProxy => {
+                                                ProxyAction::Restart => {
                                                     {
                                                         let mut running_guard = running.lock().await;
                                                         *running_guard = false;
@@ -99,26 +97,13 @@ impl WsProxy {
                                                     stop_notify.notify_waiters();
                                                     break;
                                                 }
-                                                JudgeAction::Forward => {
-                                                    // backend_ws_sink.send(msg).await.ok();
+                                                ProxyAction::Forward => {
                                                     if backend_ws_sink.send(msg).await.is_err() {
+                                                        tracing::error!("failed to send message to backend");
                                                         break;
                                                     }
                                                 }
                                             }
-                                            // if judge(&msg) {
-                                            //     // 满足条件，优雅重启
-                                            //     {
-                                            //         let mut running_guard = running.lock().await;
-                                            //         *running_guard = false;
-                                            //     }
-                                            //     stop_notify.notify_waiters();
-                                            //     break;
-                                            // } else {
-                                            //     if backend_ws_sink.send(msg).await.is_err() {
-                                            //         break;
-                                            //     }
-                                            // }
                                         }
                                     };
 
@@ -146,16 +131,13 @@ impl WsProxy {
 
                 accept_loop.await;
 
-                // 检查是否需要重启
                 let mut running_guard = running.lock().await;
                 if *running_guard {
-                    break; // 正常停止
+                    break;
                 } else {
-                    // 重启
                     *running_guard = true;
-                    println!("Proxy restarting...");
-                    // 等待端口释放
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    tracing::info!("ws proxy is restarting...");
+                    tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
                 }
             }

@@ -79,7 +79,7 @@ impl WsTaos {
 
         let (ws_stream, version) = builder.connect().instrument(span.clone()).await?;
 
-        let (message_tx, message_rx) = flume::bounded(64);
+        let (message_tx, message_rx) = flume::bounded(1024);
         let (close_tx, close_rx) = watch::channel(false);
 
         let query_sender = WsQuerySender {
@@ -467,7 +467,8 @@ impl WsTaos {
     }
 
     async fn _recover_stmt2(&self) {
-        tracing::trace!("recovering {} stmt2 instances", self.stmt2s.len());
+        let len = self.stmt2s.len();
+        tracing::trace!("recovering {len} stmt2 instances");
 
         let mut errors = Vec::new();
         let futs = self.stmt2s.iter().map(|entry| {
@@ -485,20 +486,18 @@ impl WsTaos {
             }
         });
 
+        // let len = futs.len();
         for err in (future::join_all(futs).await).into_iter().flatten() {
             errors.push(err);
         }
 
         if errors.is_empty() {
-            tracing::info!(
-                "successfully recovered {} stmt2 instances",
-                self.stmt2s.len()
-            );
+            tracing::info!("successfully recovered {len} stmt2 instances");
         } else {
             tracing::warn!(
                 "recovered {}/{} stmt2 instances, {} failed",
-                self.stmt2s.len() - errors.len(),
-                self.stmt2s.len(),
+                len - errors.len(),
+                len,
                 errors.len()
             );
             for (id, err) in &errors {
@@ -931,7 +930,7 @@ pub(crate) struct WsQuerySender {
     pub(super) queries: QueryAgent,
 }
 
-const SEND_TIMEOUT: Duration = Duration::from_secs(1);
+const SEND_TIMEOUT: Duration = Duration::from_secs(600);
 
 impl WsQuerySender {
     fn req_id(&self) -> ReqId {
@@ -977,14 +976,20 @@ impl WsQuerySender {
             self.sender.send_async(WsMessage::Command(message)),
         )
         .await
-        .map_err(Error::from)?
+        .map_err(|e| {
+            tracing::error!("send_recv, send message timeout, req_id: {req_id}, err: {e}");
+            Error::from(e)
+        })?
         .map_err(Error::from)?;
 
         tracing::trace!("send_recv, message sent, waiting for response, req_id: {req_id}");
 
         let data = timeout(Duration::from_secs(60), data_rx)
             .await
-            .map_err(Error::from)?
+            .map_err(|e| {
+                tracing::error!("send_recv, receive response timeout, req_id: {req_id}, err: {e}");
+                Error::from(e)
+            })?
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
             .map_err(Error::from)?;
 

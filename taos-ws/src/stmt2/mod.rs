@@ -134,21 +134,21 @@ impl Stmt2Inner {
     pub async fn recover(&self) -> RawResult<()> {
         tracing::trace!("recovering Stmt2 with id: {}", self.id);
 
-        let (action, single_stb_insert, single_table_bind_once, sql, mut bind_bytes) = {
+        let (action, single_stb_insert, single_table_bind_once, sql) = {
             let cache = self.cache.lock().await;
             (
                 cache.action,
                 cache.single_stb_insert,
                 cache.single_table_bind_once,
                 cache.sql.clone(),
-                cache.build_bind_bytes(),
+                // cache.build_bind_bytes(),
             )
         };
 
         // add exec
         tracing::trace!(
             "recovering Stmt2, action: {action:?}, single_stb_insert: {single_stb_insert}, \
-            single_table_bind_once: {single_table_bind_once}, sql: {sql}, bind_bytes: {bind_bytes:?}"
+            single_table_bind_once: {single_table_bind_once}, sql: {sql}"
         );
 
         match action {
@@ -169,6 +169,7 @@ impl Stmt2Inner {
                 .await?;
             }
             Stmt2Action::Bind => {
+                let mut bind_bytes = { self.cache.lock().await.build_bind_bytes() };
                 let req = WsSend::Binary(bind_bytes.remove(bind_bytes.len() - 1));
                 self.recover_with_steps(
                     Some((single_stb_insert, single_table_bind_once)),
@@ -181,6 +182,7 @@ impl Stmt2Inner {
             }
             Stmt2Action::Exec => {
                 let req = { self.cache.lock().await.build_exec_req() };
+                let bind_bytes = { self.cache.lock().await.build_bind_bytes() };
                 self.recover_with_steps(
                     Some((single_stb_insert, single_table_bind_once)),
                     Some(sql),
@@ -192,6 +194,7 @@ impl Stmt2Inner {
             }
             Stmt2Action::ResultSet => {
                 let req = { self.cache.lock().await.build_result_req() };
+                let bind_bytes = { self.cache.lock().await.build_bind_bytes() };
                 self.recover_with_steps(
                     Some((single_stb_insert, single_table_bind_once)),
                     Some(sql),
@@ -250,9 +253,16 @@ impl Stmt2Inner {
             single_stb_insert,
             single_table_bind_once,
         };
+        tracing::trace!(
+            "stmt2 init, id: {}, stmt_id: {}, req: {:?}",
+            self.id,
+            self.stmt_id(),
+            req
+        );
         let resp = self.client.send_request(req).await?;
         if let WsRecvData::Stmt2Init { stmt_id, .. } = resp {
-            self.stmt_id.store(stmt_id, Ordering::Relaxed);
+            self.stmt_id.store(stmt_id, Ordering::Release);
+            tracing::trace!("init id: {}, stmt_id: {}", self.id, self.stmt_id());
             self.cache.lock().await.stmt_id = stmt_id;
             return Ok(());
         }
@@ -260,12 +270,19 @@ impl Stmt2Inner {
     }
 
     async fn _prepare<S: AsRef<str> + Send>(&self, req_id: ReqId, sql: S) -> RawResult<()> {
+        tracing::trace!("prepare id: {}, stmt_id: {}", self.id, self.stmt_id());
         let req = WsSend::Stmt2Prepare {
             req_id,
             stmt_id: self.stmt_id(),
             sql: sql.as_ref().to_string(),
             get_fields: true,
         };
+        tracing::trace!(
+            "stmt2 prepare, id: {}, stmt_id: {}, req: {:?}",
+            self.id,
+            self.stmt_id(),
+            req
+        );
         let resp = self.client.send_request(req).await?;
         if let WsRecvData::Stmt2Prepare {
             is_insert,
@@ -291,6 +308,12 @@ impl Stmt2Inner {
 
     async fn _bind(&self, bytes: Vec<u8>) -> RawResult<()> {
         let req = WsSend::Binary(bytes);
+        tracing::trace!(
+            "stmt2 bind, id: {}, stmt_id: {}, req: {:?}",
+            self.id,
+            self.stmt_id(),
+            req
+        );
         let resp = self.client.send_request(req).await?;
         if let WsRecvData::Stmt2Bind { .. } = resp {
             return Ok(());
@@ -303,6 +326,12 @@ impl Stmt2Inner {
             req_id,
             stmt_id: self.stmt_id(),
         };
+        tracing::trace!(
+            "stmt2 exec, id: {}, stmt_id: {}, req: {:?}",
+            self.id,
+            self.stmt_id(),
+            req
+        );
         let resp = self.client.send_request(req).await?;
         if let WsRecvData::Stmt2Exec { affected, .. } = resp {
             // self.affected_rows += affected;
@@ -347,7 +376,7 @@ impl Stmt2Inner {
     }
 
     fn stmt_id(&self) -> StmtId {
-        self.stmt_id.load(Ordering::Relaxed)
+        self.stmt_id.load(Ordering::Acquire)
     }
 
     fn is_insert(&self) -> bool {
@@ -450,9 +479,15 @@ impl Stmt2 {
             single_stb_insert,
             single_table_bind_once,
         };
+        tracing::trace!(
+            "stmt2 init2, id: {}, stmt_id: {}, req: {:?}",
+            self.inner.id,
+            self.stmt_id(),
+            req
+        );
         let resp = self.inner.client.send_request(req).await?;
         if let WsRecvData::Stmt2Init { stmt_id, .. } = resp {
-            self.inner.stmt_id.store(stmt_id, Ordering::Relaxed);
+            self.inner.stmt_id.store(stmt_id, Ordering::Release);
             self.inner.cache.lock().await.stmt_id = stmt_id;
             return Ok(());
         }
@@ -479,6 +514,12 @@ impl Stmt2 {
             sql: sql.as_ref().to_string(),
             get_fields: true,
         };
+        tracing::trace!(
+            "stmt2 prepare2, id: {}, stmt_id: {}, req: {:?}",
+            self.inner.id,
+            self.stmt_id(),
+            req
+        );
         let resp = self.inner.client.send_request(req).await?;
         if let WsRecvData::Stmt2Prepare {
             is_insert,
@@ -537,6 +578,12 @@ impl Stmt2 {
 
     async fn _bind(&self, bytes: Vec<u8>) -> RawResult<()> {
         let req = WsSend::Binary(bytes);
+        tracing::trace!(
+            "stmt2 bind2, id: {}, stmt_id: {}, req: {:?}",
+            self.inner.id,
+            self.stmt_id(),
+            req
+        );
         let resp = self.inner.client.send_request(req).await?;
         if let WsRecvData::Stmt2Bind { .. } = resp {
             return Ok(());
@@ -561,6 +608,12 @@ impl Stmt2 {
             req_id,
             stmt_id: self.stmt_id(),
         };
+        tracing::trace!(
+            "stmt2 exec, id: {}, stmt_id: {}, req: {:?}",
+            self.inner.id,
+            self.stmt_id(),
+            req
+        );
         let resp = self.inner.client.send_request(req).await?;
         if let WsRecvData::Stmt2Exec { affected, .. } = resp {
             self.affected_rows += affected;
@@ -616,6 +669,12 @@ impl Stmt2 {
             req_id,
             stmt_id: self.stmt_id(),
         };
+        tracing::trace!(
+            "stmt2 result, id: {}, stmt_id: {}, req: {:?}",
+            self.inner.id,
+            self.stmt_id(),
+            req
+        );
 
         let resp = self.inner.client.send_request(req).await?;
         if let WsRecvData::Stmt2Result {
@@ -693,7 +752,7 @@ impl Stmt2 {
     }
 
     fn stmt_id(&self) -> StmtId {
-        self.inner.stmt_id.load(Ordering::Relaxed)
+        self.inner.stmt_id.load(Ordering::Acquire)
     }
 
     #[allow(dead_code)]
@@ -716,8 +775,10 @@ impl Stmt2 {
             )
         };
 
+        // add id
+        let id = self.inner.id;
         tracing::trace!(
-            "recovering Stmt2, action: {action:?}, single_stb_insert: {single_stb_insert}, \
+            "recovering Stmt2, id: {id}, action: {action:?}, single_stb_insert: {single_stb_insert}, \
             single_table_bind_once: {single_table_bind_once}, sql: {sql}, bind_bytes: {bind_bytes:?}"
         );
 
@@ -1585,12 +1646,13 @@ mod tests_proxy {
     use std::sync::Arc;
 
     use futures::TryStreamExt;
+    use rand::Rng;
     use serde::Deserialize;
     use serde_json::Value;
     use taos_query::common::ColumnView;
     use taos_query::stmt2::Stmt2BindParam;
-    use taos_query::util::ws_proxy::{JudgeAction, JudgeFn, WsProxy};
-    use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder};
+    use taos_query::util::ws_proxy::{ProxyAction, ProxyFn, WsProxy};
+    use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder, RawError};
     use tokio_tungstenite::tungstenite::Message;
 
     use crate::{Stmt2, TaosBuilder};
@@ -1607,18 +1669,18 @@ mod tests_proxy {
         {
             // let judge_state = Arc::new(Mutex::new(JudgeState { init_count: 0 }));
 
-            let judge: JudgeFn = {
+            let judge: ProxyFn = {
                 // let judge_state = judge_state.clone();
                 Arc::new(move |msg, state| {
                     if let Message::Text(text) = msg {
                         if text.contains("init") {
-                            state.init_count += 1;
-                            if state.init_count == 1 {
-                                return JudgeAction::RestartProxy;
+                            state.req_count += 1;
+                            if state.req_count == 1 {
+                                return ProxyAction::Restart;
                             }
                         }
                     }
-                    JudgeAction::Forward
+                    ProxyAction::Forward
                 })
             };
 
@@ -1680,17 +1742,17 @@ mod tests_proxy {
             .compact()
             .try_init();
 
-        let judge: JudgeFn = {
+        let judge: ProxyFn = {
             Arc::new(move |msg, state| {
                 if let Message::Text(text) = msg {
                     if text.contains("prepare") {
-                        state.init_count += 1;
-                        if state.init_count == 1 {
-                            return JudgeAction::RestartProxy;
+                        state.req_count += 1;
+                        if state.req_count == 1 {
+                            return ProxyAction::Restart;
                         }
                     }
                 }
-                JudgeAction::Forward
+                ProxyAction::Forward
             })
         };
 
@@ -1740,14 +1802,14 @@ mod tests_proxy {
             .compact()
             .try_init();
 
-        let judge: JudgeFn = {
+        let judge: ProxyFn = {
             Arc::new(move |msg, state| {
                 if let Message::Binary(bytes) = msg {
                     let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
                     if action == 9 {
-                        state.init_count += 1;
-                        if state.init_count == 1 {
-                            return JudgeAction::RestartProxy;
+                        state.req_count += 1;
+                        if state.req_count == 1 {
+                            return ProxyAction::Restart;
                         }
                     }
                 }
@@ -1765,7 +1827,7 @@ mod tests_proxy {
                 //         }
                 //     }
                 // }
-                JudgeAction::Forward
+                ProxyAction::Forward
             })
         };
 
@@ -1825,7 +1887,7 @@ mod tests_proxy {
             .compact()
             .try_init();
 
-        let judge: JudgeFn = {
+        let judge: ProxyFn = {
             Arc::new(move |msg, state| {
                 if let Message::Text(text) = msg {
                     tracing::trace!("Judge got message: {}", text);
@@ -1837,13 +1899,13 @@ mod tests_proxy {
                         .unwrap_or("");
                     // let action = action.as_str().unwrap();
                     if action == "stmt2_exec" {
-                        state.init_count += 1;
-                        if state.init_count == 1 {
-                            return JudgeAction::RestartProxy;
+                        state.req_count += 1;
+                        if state.req_count == 1 {
+                            return ProxyAction::Restart;
                         }
                     }
                 }
-                JudgeAction::Forward
+                ProxyAction::Forward
             })
         };
 
@@ -1912,20 +1974,20 @@ mod tests_proxy {
             .compact()
             .try_init();
 
-        let judge: JudgeFn = {
+        let judge: ProxyFn = {
             Arc::new(move |msg, state| {
                 // common func
                 if let Message::Text(text) = msg {
                     let req = serde_json::from_str::<Value>(text).unwrap();
                     let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
                     if action == "stmt2_result" {
-                        state.init_count += 1;
-                        if state.init_count == 1 {
-                            return JudgeAction::RestartProxy;
+                        state.req_count += 1;
+                        if state.req_count == 1 {
+                            return ProxyAction::Restart;
                         }
                     }
                 }
-                JudgeAction::Forward
+                ProxyAction::Forward
             })
         };
 
@@ -1986,6 +2048,153 @@ mod tests_proxy {
 
         proxy.stop().await;
 
+        Ok(())
+    }
+
+    /// 并发多实例自动重连测试：多个 stmt2 并发 prepare/bind/exec/query，期间 proxy 重启，验证所有实例都能自动恢复。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stmt2_concurrent_auto_reconnect() -> anyhow::Result<()> {
+        use futures::future::try_join_all;
+        use std::sync::Arc;
+        use taos_query::common::ColumnView;
+        use taos_query::stmt2::Stmt2BindParam;
+        use taos_query::util::ws_proxy::{ProxyAction, ProxyFn, WsProxy};
+        use taos_query::AsyncFetchable;
+        use taos_query::AsyncQueryable;
+        // use tokio::sync::Barrier;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .compact()
+            .try_init();
+
+        let judge: ProxyFn = {
+            Arc::new(move |msg, state| {
+                // 每次有 prepare 或 exec 就重启 proxy 一次
+                if let Message::Text(text) = msg {
+                    if text.contains("stmt") {
+                        if rand::rng().random_bool(0.05) {
+                            return ProxyAction::Restart;
+                        }
+                        // state.init_count += 1;
+                        // if state.init_count % 50 == 0 {
+                        //     return JudgeAction::RestartProxy;
+                        // }
+                    }
+                }
+                if let Message::Binary(bytes) = msg {
+                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+                    if action == 9 {
+                        // if rand::rng().random_bool(0.2) {
+                        //     return JudgeAction::RestartProxy;
+                        // }
+                        // state.init_count += 1;
+                        // if state.init_count % 3 == 0 {
+                        //     return JudgeAction::RestartProxy;
+                        // }
+                        // if state.init_count == 1 {
+                        //     return JudgeAction::RestartProxy;
+                        // }
+                    }
+                }
+                // }
+                // }
+                ProxyAction::Forward
+            })
+        };
+
+        let proxy = WsProxy::start(
+            "127.0.0.1:8820".parse().unwrap(),
+            "ws://localhost:6041/ws".to_string(),
+            judge.clone(),
+        )
+        .await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:8820")?
+            .build()
+            .await?;
+
+        taos.exec_many(&[
+            "drop database if exists test_concurrent_reconnect",
+            "create database test_concurrent_reconnect",
+            "use test_concurrent_reconnect",
+            "create table t0 (ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let n = 20;
+        // let barrier = Arc::new(Barrier::new(n));
+        let mut tasks = Vec::new();
+        for i in 0..n {
+            // let taos = taos.clone();
+            let client = taos.client();
+            // let barrier = barrier.clone();
+            tasks.push(tokio::spawn(async move {
+                let mut stmt2 = Stmt2::new(client);
+                stmt2.init().await?;
+                stmt2
+                    .prepare("insert into test_concurrent_reconnect.t0 values(?, ?)")
+                    .await?;
+                let ts = 1726803356466 + i as i64;
+                let c1 = 100 + i as i32;
+                let cols = vec![
+                    ColumnView::from_millis_timestamp(vec![ts]),
+                    ColumnView::from_ints(vec![c1]),
+                ];
+                let param = Stmt2BindParam::new(None, None, Some(cols));
+                stmt2.bind(&[param]).await?;
+                // barrier.wait().await; // 保证所有 stmt2 都已 bind 后再 exec
+                let affected = stmt2.exec().await?;
+                assert_eq!(affected, 1);
+
+                // 查询验证
+
+                // stmt2
+                //     .prepare("select * from test_concurrent_reconnect.t0 where c1 = ?")
+                //     .await
+                //     .unwrap();
+                // let cols = vec![ColumnView::from_ints(vec![c1])];
+                // let param = Stmt2BindParam::new(None, None, Some(cols));
+                // stmt2.bind(&[param]).await.unwrap();
+                // stmt2.exec().await.unwrap();
+
+                // #[derive(Debug, Deserialize)]
+                // struct Record {
+                //     ts: i64,
+                //     c1: i32,
+                // }
+
+                // let records: Result<Vec<Record>, RawError> = stmt2
+                //     .result_set()
+                //     .await
+                //     .unwrap()
+                //     .deserialize()
+                //     .try_collect()
+                //     .await;
+                // if records.is_err() {
+                //     tracing::error!("Failed to deserialize records: {:?}", records.err());
+                // } else {
+                //     let records = records.unwrap();
+                //     assert_eq!(records.len(), 1);
+                //     assert_eq!(records[0].ts, ts);
+                //     assert_eq!(records[0].c1, c1);
+                // }
+
+                Ok::<_, anyhow::Error>(())
+            }));
+        }
+        // 并发等待所有任务
+        let results = try_join_all(tasks).await.unwrap();
+        for r in results {
+            r?;
+        }
+
+        taos.exec("drop database test_concurrent_reconnect")
+            .await
+            .unwrap();
+        proxy.stop().await;
         Ok(())
     }
 }
