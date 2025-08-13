@@ -392,9 +392,7 @@ impl WsTaos {
 
     pub(crate) fn insert_stmt2(&self, stmt2: Arc<Stmt2Inner>) {
         tracing::trace!("insert stmt2: {stmt2:?}");
-        let id = stmt2.id();
-        let stmt2 = Arc::downgrade(&stmt2);
-        self.stmt2s.insert(id, stmt2);
+        self.stmt2s.insert(stmt2.id(), Arc::downgrade(&stmt2));
     }
 
     pub(crate) fn remove_stmt2(&self, id: u64) {
@@ -486,7 +484,6 @@ impl WsTaos {
             }
         });
 
-        // let len = futs.len();
         for err in (future::join_all(futs).await).into_iter().flatten() {
             errors.push(err);
         }
