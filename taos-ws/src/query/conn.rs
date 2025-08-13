@@ -376,9 +376,9 @@ async fn read_messages(
         tracing::error!("handle messages task failed: {err:?}");
     }
 
-    if closed_normally {
-        cleanup_after_disconnect(query_sender.clone());
-    }
+    // if closed_normally {
+    //     cleanup_after_disconnect(query_sender.clone());
+    // }
 
     tracing::trace!("stop reading messages from WebSocket stream");
 }

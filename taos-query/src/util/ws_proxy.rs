@@ -137,7 +137,7 @@ impl WsProxy {
                 } else {
                     *running_guard = true;
                     tracing::info!("ws proxy is restarting...");
-                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    tokio::time::sleep(Duration::from_millis(300)).await;
                     continue;
                 }
             }
