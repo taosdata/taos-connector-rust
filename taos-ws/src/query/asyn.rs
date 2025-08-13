@@ -534,7 +534,7 @@ pub(crate) async fn fetch_binary(
 
                         if block_code != 0 {
                             let err = RawError::new(block_code, block_message);
-                            tracing::error!("fetch binary failed, result id: {res_id}, err: {err:?}");
+                            tracing::debug!("fetch binary failed, result id: {res_id}, err: {err:?}");
                             let _ = raw_block_sender.send(Err(err)).await;
                             break;
                         }
