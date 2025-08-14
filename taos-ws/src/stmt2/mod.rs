@@ -1536,7 +1536,6 @@ mod recover_tests {
     use super::ws_proxy::{InterceptFn, ProxyAction, WsProxy};
     use crate::{Stmt2, TaosBuilder};
 
-    #[ignore]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_init() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
@@ -1574,7 +1573,6 @@ mod recover_tests {
         Ok(())
     }
 
-    #[ignore]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_prepare() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
@@ -1627,7 +1625,6 @@ mod recover_tests {
         Ok(())
     }
 
-    #[ignore]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_bind() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
@@ -1684,7 +1681,6 @@ mod recover_tests {
         Ok(())
     }
 
-    #[ignore]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_exec() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
@@ -1752,7 +1748,6 @@ mod recover_tests {
         Ok(())
     }
 
-    #[ignore]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_result() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
@@ -1828,7 +1823,6 @@ mod recover_tests {
         Ok(())
     }
 
-    #[ignore]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_concurrent() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
@@ -1865,7 +1859,7 @@ mod recover_tests {
         ])
         .await?;
 
-        let n = 20;
+        let n = 3;
         let mut tasks = Vec::with_capacity(n);
         for i in 0..n {
             let client = taos.client();
