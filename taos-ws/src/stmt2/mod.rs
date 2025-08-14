@@ -1541,7 +1541,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::TRACE)
+            .with_max_level(tracing::Level::INFO)
             .compact()
             .try_init();
 
@@ -1578,7 +1578,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::TRACE)
+            .with_max_level(tracing::Level::INFO)
             .compact()
             .try_init();
 
@@ -1630,7 +1630,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::TRACE)
+            .with_max_level(tracing::Level::INFO)
             .compact()
             .try_init();
 
@@ -1686,7 +1686,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::TRACE)
+            .with_max_level(tracing::Level::INFO)
             .compact()
             .try_init();
 
@@ -1753,7 +1753,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::TRACE)
+            .with_max_level(tracing::Level::INFO)
             .compact()
             .try_init();
 
@@ -1828,7 +1828,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::TRACE)
+            .with_max_level(tracing::Level::INFO)
             .compact()
             .try_init();
 
