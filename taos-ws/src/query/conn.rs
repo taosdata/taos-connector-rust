@@ -337,8 +337,6 @@ async fn read_messages(
     let message_handle =
         tokio::spawn(handle_messages(message_rx, query_sender.clone(), cache).in_current_span());
 
-    let mut closed_normally = false;
-
     loop {
         tokio::select! {
             res = ws_stream_reader.try_next() => {
@@ -352,7 +350,6 @@ async fn read_messages(
                     }
                     Ok(None) => {
                         tracing::info!("WebSocket stream closed by peer");
-                        closed_normally = true;
                         break;
                     }
                     Err(err) => {
@@ -364,7 +361,6 @@ async fn read_messages(
             }
             _ = close_reader.changed() => {
                 tracing::info!("WebSocket reader received close signal");
-                closed_normally = true;
                 break;
             }
         }
@@ -375,10 +371,6 @@ async fn read_messages(
     if let Err(err) = message_handle.await {
         tracing::error!("handle messages task failed: {err:?}");
     }
-
-    // if closed_normally {
-    //     cleanup_after_disconnect(query_sender.clone());
-    // }
 
     tracing::trace!("stop reading messages from WebSocket stream");
 }

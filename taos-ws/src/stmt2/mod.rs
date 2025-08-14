@@ -1311,555 +1311,408 @@ mod cloud_tests {
     }
 }
 
-// #[cfg(test)]
-// mod tests_proxy {
-//     use std::sync::Arc;
-
-//     use futures::TryStreamExt;
-//     use rand::Rng;
-//     use serde::Deserialize;
-//     use serde_json::Value;
-//     use taos_query::common::ColumnView;
-//     use taos_query::stmt2::Stmt2BindParam;
-//     use taos_query::util::ws_proxy::{ProxyAction, ProxyFn, WsProxy};
-//     use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder, RawError};
-//     use tokio_tungstenite::tungstenite::Message;
-
-//     use crate::{Stmt2, TaosBuilder};
-
-//     #[tokio::test(flavor = "multi_thread")]
-//     async fn test_init() -> anyhow::Result<()> {
-//         let _ = tracing_subscriber::fmt()
-//             .with_file(true)
-//             .with_line_number(true)
-//             .with_max_level(tracing::Level::TRACE)
-//             .compact()
-//             .try_init();
-
-//         {
-//             // let judge_state = Arc::new(Mutex::new(JudgeState { init_count: 0 }));
-
-//             let judge: ProxyFn = {
-//                 // let judge_state = judge_state.clone();
-//                 Arc::new(move |msg, state| {
-//                     if let Message::Text(text) = msg {
-//                         if text.contains("init") {
-//                             state.req_count += 1;
-//                             if state.req_count == 1 {
-//                                 return ProxyAction::Restart;
-//                             }
-//                         }
-//                     }
-//                     ProxyAction::Forward
-//                 })
-//             };
-
-//             // let judge: JudgeFn = Arc::new(|msg| {
-//             //     if let Message::Text(text) = msg {
-//             //         text.contains("init")
-//             //     } else {
-//             //         false
-//             //     }
-//             // });
-
-//             let proxy = WsProxy::start(
-//                 "127.0.0.1:8811".parse().unwrap(),
-//                 "ws://localhost:6041/ws".to_string(),
-//                 judge.clone(),
-//             )
-//             .await;
-
-//             let taos = TaosBuilder::from_dsn("ws://localhost:8811")?
-//                 .build()
-//                 .await?;
-
-//             // let affected_rows = taos
-//             //     .exec_many(&[
-//             //         "drop database if exists test_1753080278",
-//             //         "create database test_1753080278",
-//             //         "use test_1753080278",
-//             //         "create table t0 (ts timestamp, c1 int)",
-//             //         "insert into t0 values(1726803356466, 99)",
-//             //         "insert into t0 values(1726803357466, 100)",
-//             //     ])
-//             //     .await?;
-
-//             // assert_eq!(affected_rows, 2);
-
-//             let stmt2 = Stmt2::new(taos.client());
-//             stmt2.init().await?;
-
-//             proxy.stop().await;
-
-//             // tracing::trace!("stmt2 scope end");
-//             // drop(stmt2);
-//             // drop(taos);
-//             // drop(taos.client());
-//         }
-
-//         // tokio::time::sleep(Duration::from_secs(50)).await;
-//         // std::thread::sleep(Duration::from_secs(5));
-
-//         Ok(())
-//     }
-
-//     #[tokio::test(flavor = "multi_thread")]
-//     async fn test_prepare() -> anyhow::Result<()> {
-//         let _ = tracing_subscriber::fmt()
-//             .with_file(true)
-//             .with_line_number(true)
-//             .with_max_level(tracing::Level::TRACE)
-//             .compact()
-//             .try_init();
-
-//         let judge: ProxyFn = {
-//             Arc::new(move |msg, state| {
-//                 if let Message::Text(text) = msg {
-//                     if text.contains("prepare") {
-//                         state.req_count += 1;
-//                         if state.req_count == 1 {
-//                             return ProxyAction::Restart;
-//                         }
-//                     }
-//                 }
-//                 ProxyAction::Forward
-//             })
-//         };
-
-//         let proxy = WsProxy::start(
-//             "127.0.0.1:8812".parse().unwrap(),
-//             "ws://localhost:6041/ws".to_string(),
-//             judge.clone(),
-//         )
-//         .await;
-
-//         let taos = TaosBuilder::from_dsn("ws://localhost:8812")?
-//             .build()
-//             .await?;
-
-//         let affected_rows = taos
-//             .exec_many(&[
-//                 "drop database if exists test_1754906189",
-//                 "create database test_1754906189",
-//                 "use test_1754906189",
-//                 "create table t0 (ts timestamp, c1 int)",
-//                 "insert into t0 values(1726803356466, 99)",
-//                 "insert into t0 values(1726803357466, 100)",
-//             ])
-//             .await?;
-
-//         assert_eq!(affected_rows, 2);
-
-//         let mut stmt2 = Stmt2::new(taos.client());
-//         stmt2.init().await?;
-//         stmt2
-//             .prepare("select * from test_1754906189.t0 where c1 > ?")
-//             .await?;
-
-//         taos.exec("drop database test_1754906189").await?;
-
-//         proxy.stop().await;
-
-//         Ok(())
-//     }
-
-//     #[tokio::test(flavor = "multi_thread")]
-//     async fn test_bind() -> anyhow::Result<()> {
-//         let _ = tracing_subscriber::fmt()
-//             .with_file(true)
-//             .with_line_number(true)
-//             .with_max_level(tracing::Level::TRACE)
-//             .compact()
-//             .try_init();
-
-//         let judge: ProxyFn = {
-//             Arc::new(move |msg, state| {
-//                 if let Message::Binary(bytes) = msg {
-//                     let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
-//                     if action == 9 {
-//                         state.req_count += 1;
-//                         if state.req_count == 1 {
-//                             return ProxyAction::Restart;
-//                         }
-//                     }
-//                 }
-
-//                 // if let Message::Text(text) = msg {
-//                 //     // let text = message.to_str().unwrap();
-//                 //     let req: Value = serde_json::from_str::<Value>(text).unwrap();
-//                 //     let action = req.get("args").and_then(|v| v.get("action")).unwrap();
-//                 //     let action = action.as_str().unwrap();
-
-//                 //     if text.contains("bind") {
-//                 //         state.init_count += 1;
-//                 //         if state.init_count == 1 {
-//                 //             return JudgeAction::RestartProxy;
-//                 //         }
-//                 //     }
-//                 // }
-//                 ProxyAction::Forward
-//             })
-//         };
-
-//         let proxy = WsProxy::start(
-//             "127.0.0.1:8813".parse().unwrap(),
-//             "ws://localhost:6041/ws".to_string(),
-//             judge.clone(),
-//         )
-//         .await;
-
-//         let taos = TaosBuilder::from_dsn("ws://localhost:8813")?
-//             .build()
-//             .await?;
-
-//         let affected_rows = taos
-//             .exec_many(&[
-//                 "drop database if exists test_1754906156",
-//                 "create database test_1754906156",
-//                 "use test_1754906156",
-//                 "create table t0 (ts timestamp, c1 int)",
-//                 "insert into t0 values(1726803356466, 99)",
-//                 "insert into t0 values(1726803357466, 100)",
-//             ])
-//             .await?;
-
-//         assert_eq!(affected_rows, 2);
-
-//         let mut stmt2 = Stmt2::new(taos.client());
-//         stmt2.init().await?;
-//         stmt2
-//             .prepare("insert into test_1754906156.t0 values(?, ?)")
-//             .await?;
-
-//         // let tbname = "d0";
-//         // let tags = vec![Value::Int(100)];
-//         let cols = vec![
-//             ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
-//             ColumnView::from_ints(vec![100, 200]),
-//         ];
-//         let param = Stmt2BindParam::new(None, None, Some(cols));
-
-//         stmt2.bind(&[param]).await?;
-
-//         proxy.stop().await;
-
-//         taos.exec("drop database test_1754906156").await?;
-
-//         Ok(())
-//     }
-
-//     #[tokio::test(flavor = "multi_thread")]
-//     async fn test_exec() -> anyhow::Result<()> {
-//         let _ = tracing_subscriber::fmt()
-//             .with_file(true)
-//             .with_line_number(true)
-//             .with_max_level(tracing::Level::TRACE)
-//             .compact()
-//             .try_init();
-
-//         let judge: ProxyFn = {
-//             Arc::new(move |msg, state| {
-//                 if let Message::Text(text) = msg {
-//                     tracing::trace!("Judge got message: {}", text);
-//                     let req = serde_json::from_str::<Value>(text).unwrap();
-//                     let action = req
-//                         .get("action")
-//                         // .and_then(|v| v.get("action"))
-//                         .and_then(|v| v.as_str())
-//                         .unwrap_or("");
-//                     // let action = action.as_str().unwrap();
-//                     if action == "stmt2_exec" {
-//                         state.req_count += 1;
-//                         if state.req_count == 1 {
-//                             return ProxyAction::Restart;
-//                         }
-//                     }
-//                 }
-//                 ProxyAction::Forward
-//             })
-//         };
-
-//         let proxy = WsProxy::start(
-//             "127.0.0.1:8814".parse().unwrap(),
-//             "ws://localhost:6041/ws".to_string(),
-//             judge.clone(),
-//         )
-//         .await;
-
-//         let taos = TaosBuilder::from_dsn("ws://localhost:8814")?
-//             .build()
-//             .await?;
-
-//         let affected_rows = taos
-//             .exec_many(&[
-//                 "drop database if exists test_1754906118",
-//                 "create database test_1754906118",
-//                 "use test_1754906118",
-//                 "create table t0 (ts timestamp, c1 int)",
-//                 "insert into t0 values(1726803356466, 99)",
-//                 "insert into t0 values(1726803357466, 100)",
-//             ])
-//             .await?;
-
-//         assert_eq!(affected_rows, 2);
-
-//         let mut stmt2 = Stmt2::new(taos.client());
-//         stmt2.init().await?;
-//         stmt2
-//             .prepare("insert into test_1754906118.t0 values(?, ?)")
-//             .await?;
-
-//         // let tbname = "d0";
-//         // let tags = vec![Value::Int(100)];
-//         let cols = vec![
-//             ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
-//             ColumnView::from_ints(vec![100, 200]),
-//         ];
-//         let param = Stmt2BindParam::new(None, None, Some(cols));
-//         stmt2.bind(&[param]).await?;
-
-//         let cols = vec![
-//             ColumnView::from_millis_timestamp(vec![1726803358466, 1726803359466]),
-//             ColumnView::from_ints(vec![100, 200]),
-//         ];
-//         let param = Stmt2BindParam::new(None, None, Some(cols));
-//         stmt2.bind(&[param]).await?;
-
-//         let rows = stmt2.exec().await?;
-//         assert_eq!(rows, 4);
-
-//         taos.exec("drop database test_1754906118").await?;
-
-//         proxy.stop().await;
-
-//         Ok(())
-//     }
-
-//     #[tokio::test(flavor = "multi_thread")]
-//     async fn test_result() -> anyhow::Result<()> {
-//         let _ = tracing_subscriber::fmt()
-//             .with_file(true)
-//             .with_line_number(true)
-//             .with_max_level(tracing::Level::TRACE)
-//             .compact()
-//             .try_init();
-
-//         let judge: ProxyFn = {
-//             Arc::new(move |msg, state| {
-//                 // common func
-//                 if let Message::Text(text) = msg {
-//                     let req = serde_json::from_str::<Value>(text).unwrap();
-//                     let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
-//                     if action == "stmt2_result" {
-//                         state.req_count += 1;
-//                         if state.req_count == 1 {
-//                             return ProxyAction::Restart;
-//                         }
-//                     }
-//                 }
-//                 ProxyAction::Forward
-//             })
-//         };
-
-//         let proxy = WsProxy::start(
-//             "127.0.0.1:8815".parse().unwrap(),
-//             "ws://localhost:6041/ws".to_string(),
-//             judge.clone(),
-//         )
-//         .await;
-
-//         let taos = TaosBuilder::from_dsn("ws://localhost:8815")?
-//             .build()
-//             .await?;
-
-//         let affected_rows = taos
-//             .exec_many(&[
-//                 "drop database if exists test_1754906085",
-//                 "create database test_1754906085",
-//                 "use test_1754906085",
-//                 "create table t0 (ts timestamp, c1 int)",
-//                 "insert into t0 values(1726803356466, 99)",
-//                 "insert into t0 values(1726803357466, 100)",
-//             ])
-//             .await?;
-
-//         assert_eq!(affected_rows, 2);
-
-//         let mut stmt2 = Stmt2::new(taos.client());
-//         stmt2.init().await?;
-//         stmt2
-//             .prepare("select * from test_1754906085.t0 where c1 > ?")
-//             .await?;
-
-//         let cols = vec![ColumnView::from_ints(vec![99])];
-//         let param = Stmt2BindParam::new(None, None, Some(cols));
-//         stmt2.bind(&[param]).await?;
-
-//         stmt2.exec().await?;
-
-//         #[derive(Debug, Deserialize)]
-//         struct Record {
-//             ts: i64,
-//             c1: i32,
-//         }
-
-//         let records: Vec<Record> = stmt2
-//             .result_set()
-//             .await?
-//             .deserialize()
-//             .try_collect()
-//             .await?;
-
-//         assert_eq!(records.len(), 1);
-//         assert_eq!(records[0].ts, 1726803357466);
-//         assert_eq!(records[0].c1, 100);
-
-//         taos.exec("drop database test_1754906085").await?;
-
-//         proxy.stop().await;
-
-//         Ok(())
-//     }
-
-//     /// 并发多实例自动重连测试：多个 stmt2 并发 prepare/bind/exec/query，期间 proxy 重启，验证所有实例都能自动恢复。
-//     #[tokio::test(flavor = "multi_thread")]
-//     async fn test_stmt2_concurrent_auto_reconnect() -> anyhow::Result<()> {
-//         use futures::future::try_join_all;
-//         use std::sync::Arc;
-//         use taos_query::common::ColumnView;
-//         use taos_query::stmt2::Stmt2BindParam;
-//         use taos_query::util::ws_proxy::{ProxyAction, ProxyFn, WsProxy};
-//         use taos_query::AsyncFetchable;
-//         use taos_query::AsyncQueryable;
-//         // use tokio::sync::Barrier;
-
-//         let _ = tracing_subscriber::fmt()
-//             .with_file(true)
-//             .with_line_number(true)
-//             .with_max_level(tracing::Level::TRACE)
-//             .compact()
-//             .try_init();
-
-//         let judge: ProxyFn = {
-//             Arc::new(move |msg, state| {
-//                 // 每次有 prepare 或 exec 就重启 proxy 一次
-//                 if let Message::Text(text) = msg {
-//                     if text.contains("stmt") {
-//                         if rand::rng().random_bool(0.05) {
-//                             return ProxyAction::Restart;
-//                         }
-//                         // state.init_count += 1;
-//                         // if state.init_count % 50 == 0 {
-//                         //     return JudgeAction::RestartProxy;
-//                         // }
-//                     }
-//                 }
-//                 if let Message::Binary(bytes) = msg {
-//                     let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
-//                     if action == 9 {
-//                         // if rand::rng().random_bool(0.2) {
-//                         //     return JudgeAction::RestartProxy;
-//                         // }
-//                         // state.init_count += 1;
-//                         // if state.init_count % 3 == 0 {
-//                         //     return JudgeAction::RestartProxy;
-//                         // }
-//                         // if state.init_count == 1 {
-//                         //     return JudgeAction::RestartProxy;
-//                         // }
-//                     }
-//                 }
-//                 // }
-//                 // }
-//                 ProxyAction::Forward
-//             })
-//         };
-
-//         let proxy = WsProxy::start(
-//             "127.0.0.1:8820".parse().unwrap(),
-//             "ws://localhost:6041/ws".to_string(),
-//             judge.clone(),
-//         )
-//         .await;
-
-//         let taos = TaosBuilder::from_dsn("ws://localhost:8820")?
-//             .build()
-//             .await?;
-
-//         taos.exec_many(&[
-//             "drop database if exists test_concurrent_reconnect",
-//             "create database test_concurrent_reconnect",
-//             "use test_concurrent_reconnect",
-//             "create table t0 (ts timestamp, c1 int)",
-//         ])
-//         .await?;
-
-//         let n = 20;
-//         // let barrier = Arc::new(Barrier::new(n));
-//         let mut tasks = Vec::new();
-//         for i in 0..n {
-//             // let taos = taos.clone();
-//             let client = taos.client();
-//             // let barrier = barrier.clone();
-//             tasks.push(tokio::spawn(async move {
-//                 let mut stmt2 = Stmt2::new(client);
-//                 stmt2.init().await?;
-//                 stmt2
-//                     .prepare("insert into test_concurrent_reconnect.t0 values(?, ?)")
-//                     .await?;
-//                 let ts = 1726803356466 + i as i64;
-//                 let c1 = 100 + i as i32;
-//                 let cols = vec![
-//                     ColumnView::from_millis_timestamp(vec![ts]),
-//                     ColumnView::from_ints(vec![c1]),
-//                 ];
-//                 let param = Stmt2BindParam::new(None, None, Some(cols));
-//                 stmt2.bind(&[param]).await?;
-//                 // barrier.wait().await; // 保证所有 stmt2 都已 bind 后再 exec
-//                 let affected = stmt2.exec().await?;
-//                 // assert_eq!(affected, 1);
-
-//                 // 查询验证
-
-//                 stmt2
-//                     .prepare("select * from test_concurrent_reconnect.t0 where c1 = ?")
-//                     .await?;
-//                 let cols = vec![ColumnView::from_ints(vec![c1])];
-//                 let param = Stmt2BindParam::new(None, None, Some(cols));
-//                 stmt2.bind(&[param]).await?;
-//                 stmt2.exec().await?;
-
-//                 #[derive(Debug, Deserialize)]
-//                 struct Record {
-//                     ts: i64,
-//                     c1: i32,
-//                 }
-
-//                 let records: Result<Vec<Record>, RawError> =
-//                     stmt2.result_set().await?.deserialize().try_collect().await;
-//                 if records.is_err() {
-//                     tracing::error!("Failed to deserialize records: {:?}", records.err());
-//                 } else {
-//                     let records = records.unwrap();
-//                     tracing::trace!("records: {records:?}");
-//                     // assert_eq!(records.len(), 1);
-//                     // assert_eq!(records[0].ts, ts);
-//                     // assert_eq!(records[0].c1, c1);
-//                 }
-
-//                 Ok::<_, anyhow::Error>(())
-//             }));
-//         }
-//         // 并发等待所有任务
-//         let results = try_join_all(tasks).await.unwrap();
-//         for r in results {
-//             r?;
-//         }
-
-//         taos.exec("drop database test_concurrent_reconnect")
-//             .await
-//             .unwrap();
-//         proxy.stop().await;
-//         Ok(())
-//     }
-// }
+#[cfg(test)]
+mod recover_tests {
+    use std::sync::Arc;
+
+    use futures::future::try_join_all;
+    use futures::TryStreamExt;
+    use rand::Rng;
+    use serde::Deserialize;
+    use serde_json::Value;
+    use taos_query::common::ColumnView;
+    use taos_query::stmt2::Stmt2BindParam;
+    use taos_query::util::ws_proxy::{InterceptFn, ProxyAction, WsProxy};
+    use taos_query::{AsyncFetchable, AsyncQueryable, AsyncTBuilder, RawError};
+    use tokio_tungstenite::tungstenite::Message;
+
+    use crate::{Stmt2, TaosBuilder};
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_init() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, ctx| {
+                if let Message::Text(text) = msg {
+                    let req = serde_json::from_str::<Value>(text).unwrap();
+                    let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                    if action == "stmt2_init" {
+                        ctx.req_count += 1;
+                        if ctx.req_count == 1 {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8811", "ws://localhost:6041/ws", intercept_fn).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:8811")?
+            .build()
+            .await?;
+
+        let stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_prepare() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, ctx| {
+                if let Message::Text(text) = msg {
+                    let req = serde_json::from_str::<Value>(text).unwrap();
+                    let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                    if action == "stmt2_prepare" {
+                        ctx.req_count += 1;
+                        if ctx.req_count == 1 {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8812", "ws://localhost:6041/ws", intercept_fn).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:8812")?
+            .build()
+            .await?;
+
+        taos.exec_many(&[
+            "drop database if exists test_1755136975",
+            "create database test_1755136975",
+            "use test_1755136975",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values(1726803356466, 99)",
+            "insert into t0 values(1726803357466, 100)",
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+        stmt2
+            .prepare("select * from test_1755136975.t0 where c1 > ?")
+            .await?;
+
+        taos.exec("drop database test_1755136975").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_bind() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, ctx| {
+                if let Message::Binary(bytes) = msg {
+                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+                    if action == 9 {
+                        ctx.req_count += 1;
+                        if ctx.req_count == 1 {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8813", "ws://localhost:6041/ws", intercept_fn).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:8813")?
+            .build()
+            .await?;
+
+        taos.exec_many(&[
+            "drop database if exists test_1755137215",
+            "create database test_1755137215",
+            "use test_1755137215",
+            "create table t0 (ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+        stmt2
+            .prepare("insert into test_1755137215.t0 values(?, ?)")
+            .await?;
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
+            ColumnView::from_ints(vec![100, 200]),
+        ];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        taos.exec("drop database test_1755137215").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_exec() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, ctx| {
+                if let Message::Text(text) = msg {
+                    let req = serde_json::from_str::<Value>(text).unwrap();
+                    let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                    if action == "stmt2_exec" {
+                        ctx.req_count += 1;
+                        if ctx.req_count == 1 {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8814", "ws://localhost:6041/ws", intercept_fn).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:8814")?
+            .build()
+            .await?;
+
+        taos.exec_many(&[
+            "drop database if exists test_1755137720",
+            "create database test_1755137720",
+            "use test_1755137720",
+            "create table t0 (ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+        stmt2
+            .prepare("insert into test_1755137720.t0 values(?, ?)")
+            .await?;
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![1726803356466, 1726803357466]),
+            ColumnView::from_ints(vec![100, 200]),
+        ];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(vec![1726803358466, 1726803359466]),
+            ColumnView::from_ints(vec![100, 200]),
+        ];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        let rows = stmt2.exec().await?;
+        assert_eq!(rows, 4);
+
+        taos.exec("drop database test_1755137720").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_result() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, ctx| {
+                if let Message::Text(text) = msg {
+                    let req = serde_json::from_str::<Value>(text).unwrap();
+                    let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                    if action == "stmt2_result" {
+                        ctx.req_count += 1;
+                        if ctx.req_count == 1 {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8815", "ws://localhost:6041/ws", intercept_fn).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:8815")?
+            .build()
+            .await?;
+
+        taos.exec_many(&[
+            "drop database if exists test_1755138202",
+            "create database test_1755138202",
+            "use test_1755138202",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values(1726803356466, 99)",
+            "insert into t0 values(1726803357466, 100)",
+        ])
+        .await?;
+
+        let mut stmt2 = Stmt2::new(taos.client());
+        stmt2.init().await?;
+        stmt2
+            .prepare("select * from test_1755138202.t0 where c1 > ?")
+            .await?;
+
+        let cols = vec![ColumnView::from_ints(vec![99])];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+        stmt2.bind(&[param]).await?;
+
+        stmt2.exec().await?;
+
+        #[derive(Debug, Deserialize)]
+        struct Record {
+            ts: i64,
+            c1: i32,
+        }
+
+        let records: Vec<Record> = stmt2
+            .result_set()
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].ts, 1726803357466);
+        assert_eq!(records[0].c1, 100);
+
+        taos.exec("drop database test_1755138202").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_concurrent() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, _ctx| {
+                if let Message::Text(text) = msg {
+                    if text.contains("stmt") {
+                        if rand::rng().random_bool(0.05) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8816", "ws://localhost:6041/ws", intercept_fn).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:8816")?
+            .build()
+            .await?;
+
+        taos.exec_many(&[
+            "drop database if exists test_1755138447",
+            "create database test_1755138447",
+            "use test_1755138447",
+            "create table t0 (ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let n = 20;
+        let mut tasks = Vec::with_capacity(n);
+        for i in 0..n {
+            let client = taos.client();
+            tasks.push(tokio::spawn(async move {
+                let mut stmt2 = Stmt2::new(client);
+                stmt2.init().await?;
+                stmt2
+                    .prepare("insert into test_1755138447.t0 values(?, ?)")
+                    .await?;
+
+                let ts = 1726803356466 + i as i64;
+                let c1 = 100 + i as i32;
+                let cols = vec![
+                    ColumnView::from_millis_timestamp(vec![ts]),
+                    ColumnView::from_ints(vec![c1]),
+                ];
+                let param = Stmt2BindParam::new(None, None, Some(cols));
+                stmt2.bind(&[param]).await?;
+
+                let affected = stmt2.exec().await?;
+                assert_eq!(affected, 1);
+
+                stmt2
+                    .prepare("select * from test_1755138447.t0 where c1 = ?")
+                    .await?;
+
+                let cols = vec![ColumnView::from_ints(vec![c1])];
+                let param = Stmt2BindParam::new(None, None, Some(cols));
+                stmt2.bind(&[param]).await?;
+
+                stmt2.exec().await?;
+
+                #[derive(Debug, Deserialize)]
+                struct Record {
+                    ts: i64,
+                    c1: i32,
+                }
+
+                let res: Result<Vec<Record>, RawError> =
+                    stmt2.result_set().await?.deserialize().try_collect().await;
+
+                if let Err(err) = res {
+                    tracing::error!("failed to deserialize records: {err:?}");
+                } else {
+                    let records = res.unwrap();
+                    assert_eq!(records.len(), 1);
+                    assert_eq!(records[0].ts, ts);
+                    assert_eq!(records[0].c1, c1);
+                }
+
+                Ok::<_, anyhow::Error>(())
+            }));
+        }
+
+        let results = try_join_all(tasks).await.unwrap();
+        for res in results {
+            res?;
+        }
+
+        taos.exec("drop database test_1755138447").await?;
+
+        Ok(())
+    }
+}

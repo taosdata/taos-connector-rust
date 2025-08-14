@@ -27,13 +27,11 @@ pub struct WsProxy {
 }
 
 impl WsProxy {
-    pub async fn start(
-        listen_addr: SocketAddr,
-        backend_url: String,
-        intercept_fn: InterceptFn,
-    ) -> Self {
+    pub async fn start(listen_addr: &str, backend_url: &str, intercept_fn: InterceptFn) -> Self {
         tracing::info!("starting WebSocket proxy on {listen_addr}, backend: {backend_url}");
 
+        let listen_addr = listen_addr.parse().unwrap();
+        let backend_url = backend_url.to_string();
         let running = Arc::new(AtomicBool::new(true));
         let ctx = Arc::new(Mutex::new(ProxyContext { req_count: 0 }));
         let stop_notify = Arc::new(Notify::new());
@@ -64,8 +62,11 @@ impl WsProxy {
 
         Self { stop }
     }
+}
 
-    pub async fn stop(&self) {
+impl Drop for WsProxy {
+    fn drop(&mut self) {
+        tracing::info!("dropping WebSocket proxy");
         self.stop.notify_waiters();
     }
 }
