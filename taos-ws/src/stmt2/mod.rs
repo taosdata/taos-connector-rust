@@ -1298,7 +1298,7 @@ mod cloud_tests {
         ])
         .await?;
 
-        let mut stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client());
         stmt2.init().await?;
 
         stmt2
@@ -1315,7 +1315,7 @@ mod cloud_tests {
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 1);
 
-        let mut stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client());
         stmt2.init().await?;
 
         stmt2
@@ -1541,7 +1541,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::ERROR)
             .compact()
             .try_init();
 
@@ -1578,7 +1578,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::ERROR)
             .compact()
             .try_init();
 
@@ -1630,7 +1630,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::ERROR)
             .compact()
             .try_init();
 
@@ -1686,7 +1686,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::ERROR)
             .compact()
             .try_init();
 
@@ -1753,7 +1753,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::ERROR)
             .compact()
             .try_init();
 
@@ -1828,7 +1828,7 @@ mod recover_tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::ERROR)
             .compact()
             .try_init();
 
