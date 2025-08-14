@@ -3859,7 +3859,6 @@ dependencies = [
  "taos-error",
  "thiserror 1.0.69",
  "tokio",
- "tokio-tungstenite 0.23.1",
  "tracing",
  "url",
  "uuid",
