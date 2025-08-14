@@ -79,7 +79,7 @@ impl WsTaos {
 
         let (ws_stream, version) = builder.connect().instrument(span.clone()).await?;
 
-        let (message_tx, message_rx) = flume::bounded(1024);
+        let (message_tx, message_rx) = flume::bounded(64);
         let (close_tx, close_rx) = watch::channel(false);
 
         let query_sender = WsQuerySender {
@@ -401,17 +401,12 @@ impl WsTaos {
     }
 
     pub(crate) async fn stmt2_req_ids(&self) -> Vec<ReqId> {
-        let mut futs = Vec::with_capacity(self.stmt2s.len());
-        for entry in self.stmt2s.iter() {
-            let stmt2 = entry.value().clone();
-            futs.push(async move {
-                if let Some(stmt2) = stmt2.upgrade() {
-                    stmt2.req_id().await
-                } else {
-                    1
-                }
-            });
-        }
+        let futs = self.stmt2s.iter().filter_map(|entry| {
+            entry
+                .value()
+                .upgrade()
+                .map(|stmt2| async move { stmt2.req_id().await })
+        });
         future::join_all(futs).await
     }
 
@@ -464,22 +459,16 @@ impl WsTaos {
         let len = self.stmt2s.len();
         tracing::trace!("recovering {len} stmt2 instances");
 
-        let mut errors = Vec::new();
-        let futs = self.stmt2s.iter().map(|entry| {
-            let stmt2 = entry.value().clone();
-            async move {
-                if let Some(stmt2) = stmt2.upgrade() {
-                    if let Err(e) = stmt2.recover().await {
-                        Some((stmt2.id(), e))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
+        let futs = self.stmt2s.iter().filter_map(|entry| {
+            entry.value().upgrade().map(|stmt2| async move {
+                match stmt2.recover().await {
+                    Err(err) => Some((stmt2.id(), err)),
+                    Ok(_) => None,
                 }
-            }
+            })
         });
 
+        let mut errors = Vec::new();
         for err in (future::join_all(futs).await).into_iter().flatten() {
             errors.push(err);
         }
@@ -488,9 +477,8 @@ impl WsTaos {
             tracing::info!("successfully recovered {len} stmt2 instances");
         } else {
             tracing::warn!(
-                "recovered {}/{} stmt2 instances, {} failed",
+                "recovered {}/{len} stmt2 instances, {} failed",
                 len - errors.len(),
-                len,
                 errors.len()
             );
             for (id, err) in &errors {
@@ -923,7 +911,7 @@ pub(crate) struct WsQuerySender {
     pub(super) queries: QueryAgent,
 }
 
-const SEND_TIMEOUT: Duration = Duration::from_secs(600);
+const SEND_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl WsQuerySender {
     fn req_id(&self) -> ReqId {
@@ -970,7 +958,7 @@ impl WsQuerySender {
         )
         .await
         .map_err(|e| {
-            tracing::error!("send_recv, send message timeout, req_id: {req_id}, err: {e}");
+            tracing::error!("send_recv, send request timeout, req_id: {req_id}, err: {e}");
             Error::from(e)
         })?
         .map_err(Error::from)?;
@@ -993,9 +981,8 @@ impl WsQuerySender {
 
     async fn send_only(&self, message: WsSend) -> RawResult<()> {
         tracing::trace!(
-            "send_only, req_id: {}, sending message: {:?}",
+            "send_only, req_id: {}, message: {message:?}",
             message.req_id(),
-            message
         );
         timeout(
             SEND_TIMEOUT,
