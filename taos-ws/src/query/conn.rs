@@ -189,11 +189,13 @@ pub(super) async fn run(
             }
             _ = close_reader.changed() => {
                 tracing::info!("WebSocket received close signal");
-                let _ = close_tx.send(true);
                 ws_taos.set_state(ConnState::Disconnected);
+                let _ = close_tx.send(true);
                 return;
             }
         }
+
+        ws_taos.set_state(ConnState::Reconnecting);
 
         if let Err(err) = send_handle.await {
             tracing::error!("send messages task failed: {err:?}");
@@ -204,7 +206,6 @@ pub(super) async fn run(
 
         tracing::warn!("WebSocket disconnected, starting to reconnect");
 
-        ws_taos.set_state(ConnState::Reconnecting);
         match builder.connect().await {
             Ok((ws, ver)) => {
                 ws_stream = ws;

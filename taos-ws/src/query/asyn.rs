@@ -435,12 +435,10 @@ impl WsTaos {
             return;
         }
 
-        let mut token_guard = self.recover_token.lock().await;
+        let ws_taos = self.clone();
         let recover_token = CancellationToken::new();
         let token = recover_token.clone();
-        *token_guard = Some(recover_token);
 
-        let ws_taos = self.clone();
         let recover_handle = tokio::spawn(
             async move {
                 tokio::select! {
@@ -449,10 +447,8 @@ impl WsTaos {
                     }
                     _ = ws_taos._recover_stmt2() => {
                         ws_taos.set_state(ConnState::Connected);
-                        let mut token_guard = ws_taos.recover_token.lock().await;
-                        *token_guard = None;
-                        let mut handle_guard = ws_taos.recover_handle.lock().await;
-                        *handle_guard = None;
+                        *ws_taos.recover_token.lock().await = None;
+                        *ws_taos.recover_handle.lock().await = None;
                         tracing::trace!("stmt2 recover finished");
                     }
                 }
@@ -460,8 +456,8 @@ impl WsTaos {
             .in_current_span(),
         );
 
-        let mut handle_guard = self.recover_handle.lock().await;
-        *handle_guard = Some(recover_handle);
+        *self.recover_token.lock().await = Some(recover_token);
+        *self.recover_handle.lock().await = Some(recover_handle);
     }
 
     async fn _recover_stmt2(&self) {
