@@ -26,11 +26,8 @@ pub struct Taos {
 
 impl Taos {
     pub(super) async fn from_builder(builder: TaosBuilder) -> RawResult<Self> {
-        let ws_taos = WsTaos::from_builder(&builder).await?;
-        Ok(Self {
-            builder,
-            client: Arc::new(ws_taos),
-        })
+        let client = WsTaos::from_builder(&builder).await?;
+        Ok(Self { builder, client })
     }
 
     pub fn version(&self) -> FastStr {

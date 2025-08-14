@@ -30,6 +30,7 @@ pub use stmt::Stmt;
 
 pub mod stmt2;
 pub use stmt2::Stmt2;
+pub(crate) use stmt2::Stmt2Inner;
 
 pub mod consumer;
 pub use consumer::{Consumer, Offset, TmqBuilder};

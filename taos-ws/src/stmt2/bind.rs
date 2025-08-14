@@ -5,8 +5,8 @@ use taos_query::RawResult;
 
 use crate::query::messages::{BindType, ReqId, Stmt2Field, StmtId};
 
-const REQ_ID_POS: usize = 0;
-const STMT_ID_POS: usize = REQ_ID_POS + 8;
+pub(super) const REQ_ID_POS: usize = 0;
+pub(super) const STMT_ID_POS: usize = REQ_ID_POS + 8;
 const ACTION_POS: usize = STMT_ID_POS + 8;
 const VERSION_POS: usize = ACTION_POS + 8;
 const COL_IDX_POS: usize = VERSION_POS + 2;

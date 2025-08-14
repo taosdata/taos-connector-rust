@@ -2990,7 +2990,7 @@ mod cloud_tests {
     use tokio::sync::{mpsc, oneshot};
 
     use crate::consumer::{Data, Meta};
-    use crate::TmqBuilder;
+    use crate::{TaosBuilder, TmqBuilder};
 
     #[tokio::test]
     async fn test_poll() -> anyhow::Result<()> {
@@ -3066,6 +3066,15 @@ mod cloud_tests {
 
         poll_handle.await??;
         cnt_handle.await??;
+
+        let taos = TaosBuilder::from_dsn(format!("{url}/rust_test?token={token}"))?
+            .build()
+            .await?;
+
+        taos.exec(format!(
+            "drop consumer group `{group_id}` on rust_tmq_test_topic"
+        ))
+        .await?;
 
         Ok(())
     }

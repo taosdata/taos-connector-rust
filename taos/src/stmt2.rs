@@ -92,7 +92,7 @@ impl taos_query::stmt2::Stmt2AsyncBindable<super::Taos> for Stmt2 {
 
     async fn affected_rows(&self) -> usize {
         match &self.0 {
-            Stmt2Inner::Ws(stmt2) => stmt2.affected_rows().await,
+            Stmt2Inner::Ws(stmt2) => stmt2.affected_rows(),
         }
     }
 
