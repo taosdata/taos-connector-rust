@@ -125,6 +125,7 @@ pub(super) struct Stmt2Inner {
     affected_rows: Arc<AtomicUsize>,
     affected_rows_once: Arc<AtomicUsize>,
     cache: Arc<Mutex<Stmt2Cache>>,
+    is_complete: Arc<AtomicBool>,
 }
 
 impl Stmt2Inner {
@@ -138,6 +139,7 @@ impl Stmt2Inner {
             fields_count: Arc::default(),
             affected_rows: Arc::default(),
             affected_rows_once: Arc::default(),
+            is_complete: Arc::default(),
             cache: Arc::default(),
         }
     }
@@ -182,7 +184,7 @@ impl Stmt2Inner {
             self.id,
             self.stmt_id(),
         );
-        let resp = self.client.send_request(req).await?;
+        let resp = self.send_request(req).await?;
         if let WsRecvData::Stmt2Init { stmt_id, .. } = resp {
             self.stmt_id.store(stmt_id, Ordering::Release);
             tracing::trace!(
@@ -216,7 +218,7 @@ impl Stmt2Inner {
             get_fields: true,
         };
         tracing::trace!("stmt2 prepare, id: {}, req: {req:?}", self.id);
-        let resp = self.client.send_request(req).await?;
+        let resp = self.send_request(req).await?;
         if let WsRecvData::Stmt2Prepare {
             is_insert,
             fields,
@@ -267,7 +269,7 @@ impl Stmt2Inner {
     async fn _bind(&self, bytes: Vec<u8>) -> RawResult<()> {
         let req = WsSend::Binary(bytes);
         tracing::trace!("stmt2 bind, id: {}, req: {req:?}", self.id);
-        let resp = self.client.send_request(req).await?;
+        let resp = self.send_request(req).await?;
         if let WsRecvData::Stmt2Bind { .. } = resp {
             return Ok(());
         }
@@ -292,7 +294,7 @@ impl Stmt2Inner {
             stmt_id: self.stmt_id(),
         };
         tracing::trace!("stmt2 exec, id: {}, req: {req:?}", self.id);
-        let resp = self.client.send_request(req).await?;
+        let resp = self.send_request(req).await?;
         if let WsRecvData::Stmt2Exec { affected, .. } = resp {
             if self.is_insert() {
                 self.cache.lock().await.bind_bytes.clear();
@@ -347,7 +349,7 @@ impl Stmt2Inner {
             stmt_id: self.stmt_id(),
         };
         tracing::trace!("stmt2 result, id: {}, req: {req:?}", self.id);
-        let resp = self.client.send_request(req).await?;
+        let resp = self.send_request(req).await?;
         if let WsRecvData::Stmt2Result {
             id,
             precision,
@@ -441,31 +443,70 @@ impl Stmt2Inner {
             self.id
         );
 
-        if matches!(action, Prepare | Bind | Exec | Result) {
+        if !self.is_complete() {
+            if matches!(action, Prepare | Bind | Exec | Result) {
+                self._init_with_options(
+                    generate_req_id(),
+                    single_stb_insert,
+                    single_table_bind_once,
+                )
+                .await?;
+            }
+
+            if matches!(action, Bind | Exec | Result) {
+                self._prepare(generate_req_id(), sql).await?;
+            }
+
+            let (req, bind_bytes) = {
+                self.cache
+                    .lock()
+                    .await
+                    .build_req_and_bind_bytes(self.stmt_id())
+            };
+
+            for bytes in bind_bytes {
+                self._bind(bytes).await?;
+            }
+
+            if matches!(action, Result) {
+                self._exec(generate_req_id(), true).await?;
+            }
+
+            self.client.send_only(req).await?;
+        } else {
             self._init_with_options(generate_req_id(), single_stb_insert, single_table_bind_once)
                 .await?;
-        }
-        if matches!(action, Bind | Exec | Result) {
-            self._prepare(generate_req_id(), sql).await?;
-        }
 
-        let (req, bind_bytes) = {
-            self.cache
-                .lock()
-                .await
-                .build_req_and_bind_bytes(self.stmt_id())
-        };
+            if matches!(action, Prepare | Bind | Exec | Result) {
+                self._prepare(generate_req_id(), sql.clone()).await?;
+            }
 
-        for bytes in bind_bytes {
-            self._bind(bytes).await?;
-        }
-        if matches!(action, Result) {
-            self._exec(generate_req_id(), true).await?;
-        }
+            let bind_bytes = { self.cache.lock().await.build_bind_bytes(self.stmt_id()) };
+            for bytes in bind_bytes {
+                self._bind(bytes).await?;
+            }
 
-        self.client.send_only(req).await?;
+            if action == Exec && !self.is_insert() {
+                self._exec(generate_req_id(), true).await?;
+            }
+        }
 
         Ok(())
+    }
+
+    async fn send_request(&self, req: WsSend) -> RawResult<WsRecvData> {
+        self.set_complete(false);
+        let res = self.client.send_request(req).await;
+        self.set_complete(true);
+        res
+    }
+
+    fn set_complete(&self, completed: bool) {
+        self.is_complete.store(completed, Ordering::Relaxed);
+    }
+
+    fn is_complete(&self) -> bool {
+        self.is_complete.load(Ordering::Relaxed)
     }
 
     fn stmt_id(&self) -> StmtId {
