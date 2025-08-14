@@ -20,7 +20,7 @@ impl taos_query::stmt2::Stmt2Bindable<super::Taos> for Stmt2 {
         }
     }
 
-    fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
+    fn prepare<S: AsRef<str> + Send>(&mut self, sql: S) -> RawResult<&mut Self> {
         match &mut self.0 {
             Stmt2Inner::Ws(stmt2) => {
                 stmt2.prepare(sql)?;
@@ -66,7 +66,7 @@ impl taos_query::stmt2::Stmt2AsyncBindable<super::Taos> for Stmt2 {
         }
     }
 
-    async fn prepare(&mut self, sql: &str) -> RawResult<&mut Self> {
+    async fn prepare<S: AsRef<str> + Send>(&mut self, sql: S) -> RawResult<&mut Self> {
         match &mut self.0 {
             Stmt2Inner::Ws(stmt2) => {
                 stmt2.prepare(sql).await?;
