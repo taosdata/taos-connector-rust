@@ -25,7 +25,7 @@ pub fn init() -> Result<(), String> {
         let mut config = CONFIG.write().unwrap();
 
         if let Ok(s) = std::env::var("TAOS_COMPRESSION") {
-            if let Ok(compression) = s.parse::<bool>() {
+            if let Ok(compression) = s.parse() {
                 config.set_compression(compression);
             }
         }
@@ -64,6 +64,24 @@ pub fn init() -> Result<(), String> {
 
         if let Ok(s) = std::env::var("TAOS_ADAPTER_LIST") {
             config.set_adapter_list(s);
+        }
+
+        if let Ok(s) = std::env::var("TAOS_CONN_RETRIES") {
+            if let Ok(retries) = s.parse() {
+                config.set_conn_retries(retries);
+            }
+        }
+
+        if let Ok(s) = std::env::var("TAOS_RETRY_BACKOFF_MS") {
+            if let Ok(backoff_ms) = s.parse() {
+                config.set_retry_backoff_ms(backoff_ms);
+            }
+        }
+
+        if let Ok(s) = std::env::var("TAOS_RETRY_BACKOFF_MAX_MS") {
+            if let Ok(backoff_max_ms) = s.parse() {
+                config.set_retry_backoff_max_ms(backoff_max_ms);
+            }
         }
 
         let cfg_dir = if let Some(dir) = &config.config_dir {
@@ -133,6 +151,18 @@ pub fn adapter_list() -> Option<FastStr> {
     CONFIG.read().unwrap().adapter_list().cloned()
 }
 
+pub fn conn_retries() -> u32 {
+    CONFIG.read().unwrap().conn_retries()
+}
+
+pub fn retry_backoff_ms() -> u64 {
+    CONFIG.read().unwrap().retry_backoff_ms()
+}
+
+pub fn retry_backoff_max_ms() -> u64 {
+    CONFIG.read().unwrap().retry_backoff_max_ms()
+}
+
 pub fn set_config_dir<T: Into<FastStr>>(cfg_dir: T) {
     CONFIG.write().unwrap().set_config_dir(cfg_dir);
 }
@@ -152,6 +182,9 @@ pub struct Config {
     fqdn: Option<FastStr>,
     server_port: Option<u16>,
     adapter_list: Option<FastStr>,
+    conn_retries: Option<u32>,
+    retry_backoff_ms: Option<u64>,
+    retry_backoff_max_ms: Option<u64>,
 }
 
 impl Config {
@@ -166,6 +199,9 @@ impl Config {
             fqdn: None,
             server_port: None,
             adapter_list: None,
+            conn_retries: None,
+            retry_backoff_ms: None,
+            retry_backoff_max_ms: None,
         }
     }
 
@@ -216,6 +252,18 @@ impl Config {
 
     fn adapter_list(&self) -> Option<&FastStr> {
         self.adapter_list.as_ref()
+    }
+
+    fn conn_retries(&self) -> u32 {
+        self.conn_retries.unwrap_or(5)
+    }
+
+    fn retry_backoff_ms(&self) -> u64 {
+        self.retry_backoff_ms.unwrap_or(200)
+    }
+
+    fn retry_backoff_max_ms(&self) -> u64 {
+        self.retry_backoff_max_ms.unwrap_or(2000)
     }
 
     fn set_config_dir<T: Into<FastStr>>(&mut self, cfg_dir: T) {
@@ -271,6 +319,18 @@ impl Config {
 
     fn set_adapter_list<T: Into<FastStr>>(&mut self, adapter_list: T) {
         self.adapter_list = Some(adapter_list.into());
+    }
+
+    fn set_conn_retries(&mut self, conn_retries: u32) {
+        self.conn_retries = Some(conn_retries);
+    }
+
+    fn set_retry_backoff_ms(&mut self, retry_backoff_ms: u64) {
+        self.retry_backoff_ms = Some(retry_backoff_ms);
+    }
+
+    fn set_retry_backoff_max_ms(&mut self, retry_backoff_max_ms: u64) {
+        self.retry_backoff_max_ms = Some(retry_backoff_max_ms);
     }
 
     fn load_from_path(&mut self, path: &str) -> Result<(), TaosError> {
@@ -383,6 +443,30 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                 "adapterList" => {
                     config.adapter_list = Some(value.to_string().into());
                 }
+                "connRetries" => {
+                    config.conn_retries = Some(value.parse::<u32>().map_err(|_| {
+                        TaosError::new(
+                            Code::INVALID_PARA,
+                            &format!("invalid value for connRetries: {value}"),
+                        )
+                    })?);
+                }
+                "retryBackoffMs" => {
+                    config.retry_backoff_ms = Some(value.parse::<u64>().map_err(|_| {
+                        TaosError::new(
+                            Code::INVALID_PARA,
+                            &format!("invalid value for retryBackoffMs: {value}"),
+                        )
+                    })?);
+                }
+                "retryBackoffMaxMs" => {
+                    config.retry_backoff_max_ms = Some(value.parse::<u64>().map_err(|_| {
+                        TaosError::new(
+                            Code::INVALID_PARA,
+                            &format!("invalid value for retryBackoffMaxMs: {value}"),
+                        )
+                    })?);
+                }
                 _ => {}
             }
         }
@@ -409,10 +493,9 @@ mod tests {
         assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
         assert_eq!(config.server_port(), 8030);
         assert_eq!(config.adapter_list(), None);
-        // assert_eq!(
-        //     config.adapter_list(),
-        //     Some(&FastStr::from("dev1:6041,dev2:6041,dev3:6041"))
-        // );
+        assert_eq!(config.conn_retries(), 5);
+        assert_eq!(config.retry_backoff_ms(), 200);
+        assert_eq!(config.retry_backoff_max_ms(), 2000);
     }
 
     #[test]
@@ -427,6 +510,10 @@ mod tests {
             assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
             assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
             assert_eq!(config.server_port(), 8030);
+            assert_eq!(config.adapter_list(), None);
+            assert_eq!(config.conn_retries(), 5);
+            assert_eq!(config.retry_backoff_ms(), 200);
+            assert_eq!(config.retry_backoff_max_ms(), 2000);
         }
 
         {
@@ -439,6 +526,10 @@ mod tests {
             assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
             assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
             assert_eq!(config.server_port(), 8030);
+            assert_eq!(config.adapter_list(), None);
+            assert_eq!(config.conn_retries(), 5);
+            assert_eq!(config.retry_backoff_ms(), 200);
+            assert_eq!(config.retry_backoff_max_ms(), 2000);
         }
 
         Ok(())
@@ -472,6 +563,9 @@ mod tests {
             set_var("TAOS_SERVER_PORT", "6030");
             set_var("TAOS_COMPRESSION", "false");
             set_var("TAOS_CONFIG_DIR", "./tests");
+            set_var("TAOS_CONN_RETRIES", "3");
+            set_var("TAOS_RETRY_BACKOFF_MS", "100");
+            set_var("TAOS_RETRY_BACKOFF_MAX_MS", "1000");
         }
 
         init()?;
@@ -479,6 +573,9 @@ mod tests {
         assert_eq!(compression(), false);
         assert_eq!(fqdn(), Some(FastStr::from("localhost")));
         assert_eq!(server_port(), 6030);
+        assert_eq!(conn_retries(), 3);
+        assert_eq!(retry_backoff_ms(), 100);
+        assert_eq!(retry_backoff_max_ms(), 1000);
 
         Ok(())
     }
