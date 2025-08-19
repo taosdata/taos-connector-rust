@@ -2,7 +2,7 @@ use std::cmp::{self, Reverse};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{self, AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread;
 
@@ -94,18 +94,18 @@ impl<'a> RollingFileAppenderBuilder<'a> {
                 .canonicalize()
                 .context(GetLogAbsolutePathSnafu)?;
         }
-        // init log dir
+        // Init log dir
         if !self.log_dir.is_dir() {
             fs::create_dir_all(&self.log_dir).context(CreateLogDirSnafu {
                 path: &self.log_dir,
             })?;
         }
 
-        // current max seq id
+        // Current max seq id
         let mut max_seq_id =
             today_max_seq_id(&self.component_name, self.instance_id, &self.log_dir)?;
 
-        // init log file
+        // Init log file
         let now = Local::now();
         let today = time_format(now);
         let (file_path, file) = loop {
@@ -127,7 +127,7 @@ impl<'a> RollingFileAppenderBuilder<'a> {
             }
         };
 
-        // next rotate time
+        // Next rotate time
         let rotation = Rotation {
             file_size: parse_unit_size(self.rotation_size)?,
         };
@@ -137,7 +137,7 @@ impl<'a> RollingFileAppenderBuilder<'a> {
             file_path,
         };
 
-        // calc disk available space
+        // Calc disk available space
         let mut disks = Disks::new();
         disks.refresh_list();
         let mut disks = Vec::from(disks);
@@ -153,7 +153,7 @@ impl<'a> RollingFileAppenderBuilder<'a> {
             move || -> ! {
                 loop {
                     disk.refresh();
-                    disk_available_space.store(disk.available_space(), atomic::Ordering::SeqCst);
+                    disk_available_space.store(disk.available_space(), Ordering::SeqCst);
                     std::thread::sleep(std::time::Duration::from_secs(30));
                 }
             }
@@ -182,7 +182,7 @@ impl<'a> RollingFileAppenderBuilder<'a> {
             }
         });
 
-        // 处理旧文件
+        // Dealing with old files
         event_tx.send(()).ok();
 
         let this = RollingFileAppender {
@@ -229,13 +229,13 @@ impl RollingFileAppender {
     fn rotate(&self) -> Result<Option<File>> {
         let mut state = self.state.write();
 
-        // rotate by time
+        // Rotate by time
         if let Some(file) = self.check_today_file_exists(&mut state)? {
             return Ok(Some(file));
         }
 
         let now = Local::now();
-        // rotate by size
+        // Rotate by size
         let cur_size = self
             .writer
             .read()
@@ -245,9 +245,10 @@ impl RollingFileAppender {
             })?
             .len();
         if cur_size >= self.config.rotation.file_size {
-            // 创建新文件
+            // Create a new file
             state.max_seq_id += 1;
             let (filename, file) = loop {
+                // TODO: modify filename
                 let filename = format!(
                     "{}_{}_{}.log.{}",
                     self.config.component_name,
@@ -261,13 +262,13 @@ impl RollingFileAppender {
                     None => state.max_seq_id += 1,
                 }
             };
-            // 处理旧文件
+            // Dealing with old files
             self.event_tx.try_send(()).ok();
             state.file_path = filename;
             return Ok(Some(file));
         }
 
-        // 当前文件被误删除的情况
+        // The current file is accidentally deleted
         if !state.file_path.is_file() {
             let mut max_seq_id = today_max_seq_id(
                 &self.config.component_name,
@@ -307,7 +308,7 @@ impl RollingFileAppender {
     }
 
     fn check_today_file_exists(&self, state: &mut State) -> Result<Option<File>> {
-        // check curent file name first
+        // Check curent file name first
         let today = time_format(Local::now());
         let filename = state
             .file_path
@@ -392,7 +393,7 @@ struct Config {
 
 impl Config {
     fn handle_old_files(&self) -> Result<()> {
-        // 删除多余的旧文件
+        // Delete redundant old files
         let mut files = fs::read_dir(&self.log_dir)
             .context(ReadDirSnafu {
                 path: &self.log_dir,
@@ -413,7 +414,7 @@ impl Config {
             .collect::<Vec<(String, (DateTime<Local>, usize))>>();
         files.sort_by(|(_, a), (_, b)| filename_cmp(a, b));
 
-        // 取出新建的文件，不进行处理
+        // Remove the newly created file without processing it
         files.pop();
         files.reverse();
 
@@ -494,15 +495,14 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RollingFileAppender {
 
     fn make_writer(&'a self) -> Self::Writer {
         if let Ok(Some(file)) = self.rotate() {
-            let mut writer = self.writer.write();
-            *writer = file;
+            *self.writer.write() = file;
         }
         TaosLogWriter::Rolling(RollingWriter(self.writer.read()))
     }
 
     fn make_writer_for(&'a self, meta: &tracing::Metadata<'_>) -> Self::Writer {
         let level = meta.level();
-        let current_disk_space = self.disk_available_space.load(atomic::Ordering::SeqCst);
+        let current_disk_space = self.disk_available_space.load(Ordering::SeqCst);
         if current_disk_space as f64 / self.config.reserved_disk_size as f64
             <= self.config.stop_logging_threshold
         {
@@ -513,12 +513,7 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RollingFileAppender {
         if level_downgrade
             && self
                 .level_downgrade
-                .compare_exchange(
-                    false,
-                    true,
-                    atomic::Ordering::AcqRel,
-                    atomic::Ordering::Acquire,
-                )
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
                 .is_ok_and(|x| !x)
         {
             let mut writer = self.make_writer();
@@ -528,12 +523,7 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RollingFileAppender {
         if !level_downgrade
             && self
                 .level_downgrade
-                .compare_exchange(
-                    true,
-                    false,
-                    atomic::Ordering::AcqRel,
-                    atomic::Ordering::Acquire,
-                )
+                .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
                 .is_ok_and(|x| x)
         {
             let mut writer = self.make_writer();

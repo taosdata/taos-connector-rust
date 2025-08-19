@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-actix-web = { version = "*", default-features = false }
-tracing-actix-web = { version = "*" }
 tracing = { version = "*", default-features = false }
 tracing-subscriber = { version = "*", default-features = false, features = [
     "fmt",
@@ -19,8 +17,6 @@ thread-id = "4.2.2"
 regex = "1"
 sysinfo = { version = "0.31.4", default-features = false, features = ["disk"] }
 flume = "0.11.0"
-arrow-schema = "*"
-http = "0.2.12"
 nu-ansi-term = { version = "0.50.1", optional = true }
 rayon = "1"
 
