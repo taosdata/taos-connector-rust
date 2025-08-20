@@ -2879,8 +2879,11 @@ mod cloud_tests {
     use std::ffi::CString;
 
     use super::*;
-    use crate::ws::query::{
-        taos_fetch_fields, taos_fetch_row, taos_free_result, taos_num_fields, taos_print_row,
+    use crate::ws::{
+        query::{
+            taos_fetch_fields, taos_fetch_row, taos_free_result, taos_num_fields, taos_print_row,
+        },
+        taos_close, taos_connect, test_exec,
     };
 
     #[test]
@@ -3005,6 +3008,22 @@ mod cloud_tests {
 
             let code = tmq_consumer_close(consumer);
             assert_eq!(code, 0);
+
+            let taos = taos_connect(
+                url.as_ptr(),
+                c"token".as_ptr(),
+                token.as_ptr(),
+                ptr::null(),
+                0,
+            );
+            assert!(!taos.is_null());
+
+            test_exec(
+                taos,
+                format!("drop consumer group `{group_id}` on rust_tmq_test_topic"),
+            );
+
+            taos_close(taos);
         }
     }
 }

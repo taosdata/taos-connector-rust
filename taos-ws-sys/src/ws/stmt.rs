@@ -189,7 +189,7 @@ unsafe fn stmt_init(
         .as_mut()
         .ok_or(TaosError::new(Code::FAILED, "taos is null"))?;
 
-    let mut stmt2 = Stmt2::new(taos.client());
+    let stmt2 = Stmt2::new(taos.client());
 
     block_in_place_or_global(stmt2.init_with_options(
         req_id,
