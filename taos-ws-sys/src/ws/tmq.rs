@@ -421,10 +421,15 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
                 format!("{host}:{port}")
             };
 
+            let compression = config::compression();
+            let conn_retries = config::conn_retries();
+            let retry_backoff_ms = config::retry_backoff_ms();
+            let retry_backoff_max_ms = config::retry_backoff_max_ms();
+
             let dsn = if util::is_cloud_host(&addr) && user == "token" {
-                format!("wss://{addr}?token={pass}")
+                format!("wss://{addr}?token={pass}&compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
             } else {
-                format!("ws://{user}:{pass}@{addr}")
+                format!("ws://{user}:{pass}@{addr}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
             };
 
             let mut dsn = Dsn::from_str(&dsn)?;
