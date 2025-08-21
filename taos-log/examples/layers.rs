@@ -29,7 +29,7 @@ impl From<u64> for Qid {
 
 fn main() {
     let mut layers = Vec::with_capacity(2);
-    let appender = RollingFileAppender::builder(".", "explorer", 16)
+    let appender = RollingFileAppender::builder(".")
         .compress(true)
         .reserved_disk_size("1GB")
         .rotation_count(3)
@@ -45,7 +45,6 @@ fn main() {
     if cfg!(debug_assertions) {
         layers.push(
             TaosLayer::<Qid, _, _>::new(std::io::stdout)
-                // .with_ansi()
                 .with_location()
                 .with_filter(LevelFilter::INFO)
                 .boxed(),
@@ -53,7 +52,6 @@ fn main() {
     }
 
     tracing_subscriber::registry().with(layers).init();
-
     LogTracer::init().unwrap();
 
     let stdin = std::io::stdin();
