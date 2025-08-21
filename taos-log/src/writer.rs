@@ -287,14 +287,17 @@ impl Config {
         files.sort_by(|a, b| b.1.cmp(&a.1));
 
         let mut index = files.len();
-        let rotation_count = self.rotation_count.saturating_sub(active_count);
-        if rotation_count > 0 && files.len() > rotation_count {
-            index = rotation_count;
+        if self.rotation_count > 0 {
+            if self.rotation_count > active_count {
+                index = index.min(self.rotation_count - active_count);
+            } else {
+                index = 0;
+            }
         }
 
         if !self.log_keep_days.is_zero() {
             let cutoff_time = Local::now().with_time(NaiveTime::MIN).unwrap() - self.log_keep_days;
-            let cutoff_ts = cutoff_time.timestamp();
+            let cutoff_ts = cutoff_time.timestamp_nanos_opt().unwrap();
             index = index.min(files.partition_point(|(_, ts)| *ts >= cutoff_ts));
         }
 
@@ -424,7 +427,7 @@ fn calc_disk_available_space(log_dir: &Path) -> Result<Arc<AtomicU64>> {
 }
 
 fn compress(path: &Path) -> Result<()> {
-    let ts = Local::now().timestamp();
+    let ts = Local::now().timestamp_nanos_opt().unwrap();
     let compressed_name = format!("taoslog.{ts}.gz");
     let dest_path = path.parent().unwrap().join(compressed_name);
 
@@ -582,8 +585,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let log_dir = dir.path();
 
-        let now = Local::now().timestamp();
-        let two_days_ago = (Local::now() - Duration::from_secs(2 * 24 * 60 * 60)).timestamp();
+        let now = Local::now().timestamp_nanos_opt().unwrap();
+        let two_days_ago = (Local::now() - Duration::from_secs(2 * 24 * 60 * 60))
+            .timestamp_nanos_opt()
+            .unwrap();
 
         let today_file = log_dir.join(format!("taoslog.{now}.gz"));
         let old_file = log_dir.join(format!("taoslog.{two_days_ago}.gz"));
@@ -618,7 +623,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let log_dir = dir.path();
 
-        let ts = Local::now().timestamp();
+        let ts = Local::now().timestamp_nanos_opt().unwrap();
         for i in 0..5 {
             let file = log_dir.join(format!("taoslog.{}.gz", ts + i));
             fs::write(&file, format!("file{i}")).unwrap();
@@ -679,7 +684,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let log_dir = dir.path();
 
-        let ts = Local::now().timestamp();
+        let ts = Local::now().timestamp_nanos_opt().unwrap();
         for i in 0..5 {
             let file = log_dir.join(format!("taoslog.{}.gz", ts + i));
             std::fs::write(&file, format!("file{i}")).unwrap();
