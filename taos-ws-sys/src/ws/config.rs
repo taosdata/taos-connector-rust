@@ -84,6 +84,22 @@ pub fn init() -> Result<(), String> {
             }
         }
 
+        if let Ok(s) = std::env::var("TAOS_LOG_KEEP_DAYS") {
+            if let Ok(days) = s.parse() {
+                config.set_log_keep_days(days);
+            }
+        }
+
+        if let Ok(s) = std::env::var("TAOS_ROTATION_COUNT") {
+            if let Ok(count) = s.parse() {
+                config.set_rotation_count(count);
+            }
+        }
+
+        if let Ok(s) = std::env::var("TAOS_ROTATION_SIZE") {
+            config.set_rotation_size(s);
+        }
+
         let cfg_dir = if let Some(dir) = &config.config_dir {
             dir.to_string()
         } else if let Ok(dir) = std::env::var("TAOS_CONFIG_DIR") {
@@ -135,8 +151,8 @@ pub fn log_output_to_screen() -> bool {
     CONFIG.read().unwrap().log_output_to_screen()
 }
 
-pub fn timezone() -> Option<FastStr> {
-    CONFIG.read().unwrap().timezone().cloned()
+pub fn timezone() -> FastStr {
+    CONFIG.read().unwrap().timezone().clone()
 }
 
 pub fn fqdn() -> Option<FastStr> {
@@ -163,6 +179,18 @@ pub fn retry_backoff_max_ms() -> u64 {
     CONFIG.read().unwrap().retry_backoff_max_ms()
 }
 
+pub fn log_keep_days() -> u16 {
+    CONFIG.read().unwrap().log_keep_days()
+}
+
+pub fn rotation_count() -> u16 {
+    CONFIG.read().unwrap().rotation_count()
+}
+
+pub fn rotation_size() -> FastStr {
+    CONFIG.read().unwrap().rotation_size().clone()
+}
+
 pub fn set_config_dir<T: Into<FastStr>>(cfg_dir: T) {
     CONFIG.write().unwrap().set_config_dir(cfg_dir);
 }
@@ -170,6 +198,35 @@ pub fn set_config_dir<T: Into<FastStr>>(cfg_dir: T) {
 pub fn set_timezone<T: Into<FastStr>>(timezone: T) {
     CONFIG.write().unwrap().set_timezone(timezone);
 }
+
+pub fn print() {
+    CONFIG.read().unwrap().print()
+}
+
+const DEFAULT_CONFIG_DIR: &str = if cfg!(windows) {
+    "C:\\TDengine\\cfg"
+} else {
+    "/etc/taos"
+};
+
+const DEFAULT_LOG_DIR: &str = if cfg!(windows) {
+    "C:\\TDengine\\log"
+} else {
+    "/var/log/taos"
+};
+
+const DEFAULT_COMPRESSION: bool = false;
+const DEFAULT_LOG_LEVEL: LevelFilter = LevelFilter::WARN;
+const DEFAULT_LOG_OUTPUT_TO_SCREEN: bool = false;
+const DEFAULT_TIMEZONE: &str = "Asia/Shanghai";
+const DEFAULT_SERVER_PORT: u16 = 0;
+const DEFAULT_CONN_RETRIES: u32 = 5;
+const DEFAULT_RETRY_BACKOFF_MS: u64 = 200;
+const DEFAULT_RETRY_BACKOFF_MAX_MS: u64 = 2000;
+const DEFAULT_LOG_KEEP_DAYS: u16 = 30;
+const DEFAULT_ROTATION_COUNT: u16 = 30;
+const DEFAULT_ROTATION_SIZE: &str = "1GB";
+const DEFAULT_DEBUG_FLAG: u16 = 0;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -185,6 +242,9 @@ pub struct Config {
     conn_retries: Option<u32>,
     retry_backoff_ms: Option<u64>,
     retry_backoff_max_ms: Option<u64>,
+    log_keep_days: Option<u16>,
+    rotation_count: Option<u16>,
+    rotation_size: Option<FastStr>,
 }
 
 impl Config {
@@ -202,44 +262,39 @@ impl Config {
             conn_retries: None,
             retry_backoff_ms: None,
             retry_backoff_max_ms: None,
+            log_keep_days: None,
+            rotation_count: None,
+            rotation_size: None,
         }
     }
 
     #[allow(dead_code)]
     fn config_dir(&self) -> &FastStr {
-        static DEFAULT_CONFIG_DIR: FastStr = FastStr::from_static_str(if cfg!(windows) {
-            "C:\\TDengine\\cfg"
-        } else {
-            "/etc/taos"
-        });
-
-        self.config_dir.as_ref().unwrap_or(&DEFAULT_CONFIG_DIR)
+        static CONFIG_DIR: FastStr = FastStr::from_static_str(DEFAULT_CONFIG_DIR);
+        self.config_dir.as_ref().unwrap_or(&CONFIG_DIR)
     }
 
     fn compression(&self) -> bool {
-        self.compression.unwrap_or(false)
+        self.compression.unwrap_or(DEFAULT_COMPRESSION)
     }
 
     fn log_dir(&self) -> &FastStr {
-        static DEFAULT_LOG_DIR: FastStr = FastStr::from_static_str(if cfg!(windows) {
-            "C:\\TDengine\\log"
-        } else {
-            "/var/log/taos"
-        });
-
-        self.log_dir.as_ref().unwrap_or(&DEFAULT_LOG_DIR)
+        static LOG_DIR: FastStr = FastStr::from_static_str(DEFAULT_LOG_DIR);
+        self.log_dir.as_ref().unwrap_or(&LOG_DIR)
     }
 
     fn log_level(&self) -> LevelFilter {
-        self.log_level.unwrap_or(LevelFilter::WARN)
+        self.log_level.unwrap_or(DEFAULT_LOG_LEVEL)
     }
 
     fn log_output_to_screen(&self) -> bool {
-        self.log_output_to_screen.unwrap_or(false)
+        self.log_output_to_screen
+            .unwrap_or(DEFAULT_LOG_OUTPUT_TO_SCREEN)
     }
 
-    fn timezone(&self) -> Option<&FastStr> {
-        self.timezone.as_ref()
+    fn timezone(&self) -> &FastStr {
+        static TIMEZONE: FastStr = FastStr::from_static_str(DEFAULT_TIMEZONE);
+        self.timezone.as_ref().unwrap_or(&TIMEZONE)
     }
 
     fn fqdn(&self) -> Option<&FastStr> {
@@ -247,7 +302,7 @@ impl Config {
     }
 
     fn server_port(&self) -> u16 {
-        self.server_port.unwrap_or(0)
+        self.server_port.unwrap_or(DEFAULT_SERVER_PORT)
     }
 
     fn adapter_list(&self) -> Option<&FastStr> {
@@ -255,15 +310,50 @@ impl Config {
     }
 
     fn conn_retries(&self) -> u32 {
-        self.conn_retries.unwrap_or(5)
+        self.conn_retries.unwrap_or(DEFAULT_CONN_RETRIES)
     }
 
     fn retry_backoff_ms(&self) -> u64 {
-        self.retry_backoff_ms.unwrap_or(200)
+        self.retry_backoff_ms.unwrap_or(DEFAULT_RETRY_BACKOFF_MS)
     }
 
     fn retry_backoff_max_ms(&self) -> u64 {
-        self.retry_backoff_max_ms.unwrap_or(2000)
+        self.retry_backoff_max_ms
+            .unwrap_or(DEFAULT_RETRY_BACKOFF_MAX_MS)
+    }
+
+    fn log_keep_days(&self) -> u16 {
+        self.log_keep_days.unwrap_or(DEFAULT_LOG_KEEP_DAYS)
+    }
+
+    fn rotation_count(&self) -> u16 {
+        self.rotation_count.unwrap_or(DEFAULT_ROTATION_COUNT)
+    }
+
+    fn rotation_size(&self) -> &FastStr {
+        static ROTATION_SIZE: FastStr = FastStr::from_static_str(DEFAULT_ROTATION_SIZE);
+        self.rotation_size.as_ref().unwrap_or(&ROTATION_SIZE)
+    }
+
+    fn debug_flag(&self) -> Option<u16> {
+        match self.log_level {
+            Some(LevelFilter::WARN) => Some(131),
+            Some(LevelFilter::DEBUG) => {
+                if self.log_output_to_screen() {
+                    Some(199)
+                } else {
+                    Some(135)
+                }
+            }
+            Some(LevelFilter::TRACE) => {
+                if self.log_output_to_screen() {
+                    Some(207)
+                } else {
+                    Some(143)
+                }
+            }
+            _ => None,
+        }
     }
 
     fn set_config_dir<T: Into<FastStr>>(&mut self, cfg_dir: T) {
@@ -333,6 +423,18 @@ impl Config {
         self.retry_backoff_max_ms = Some(retry_backoff_max_ms);
     }
 
+    fn set_log_keep_days(&mut self, days: u16) {
+        self.log_keep_days = Some(days);
+    }
+
+    fn set_rotation_count(&mut self, count: u16) {
+        self.rotation_count = Some(count);
+    }
+
+    fn set_rotation_size<T: Into<FastStr>>(&mut self, size: T) {
+        self.rotation_size = Some(size.into());
+    }
+
     fn load_from_path(&mut self, path: &str) -> Result<(), TaosError> {
         let path = Path::new(path);
         let config_file = if path.is_file() {
@@ -384,8 +486,55 @@ impl Config {
             timezone,
             fqdn,
             server_port,
-            adapter_list
+            adapter_list,
+            conn_retries,
+            retry_backoff_ms,
+            retry_backoff_max_ms,
+            log_keep_days,
+            rotation_count,
+            rotation_size
         );
+    }
+
+    fn print(&self) {
+        tracing::info!("{}global config{}", " ".repeat(31), " ".repeat(32));
+        tracing::info!("{}", "=".repeat(76));
+
+        macro_rules! show {
+            ($opt:expr, $key:expr, $default:expr) => {
+                if let Some(ref v) = $opt {
+                    tracing::info!("{: <13}{: <33}{: <30}", "cfg_file", $key, v);
+                } else {
+                    tracing::info!("{: <13}{: <33}{: <30}", "default", $key, $default);
+                }
+            };
+        }
+
+        show!(self.adapter_list, "adapterList", "");
+        show!(
+            self.compression.map(|b| b as u8),
+            "compression",
+            DEFAULT_COMPRESSION as u8
+        );
+        show!(self.timezone, "timezone", DEFAULT_TIMEZONE);
+        show!(self.log_dir, "logDir", DEFAULT_LOG_DIR);
+        show!(self.debug_flag(), "debugFlag", DEFAULT_DEBUG_FLAG);
+        show!(self.log_keep_days, "logKeepDays", DEFAULT_LOG_KEEP_DAYS);
+        show!(self.rotation_count, "rotationCount", DEFAULT_ROTATION_COUNT);
+        show!(self.rotation_size, "rotationSize", DEFAULT_ROTATION_SIZE);
+        show!(self.conn_retries, "connRetries", DEFAULT_CONN_RETRIES);
+        show!(
+            self.retry_backoff_ms,
+            "retryBackoffMs",
+            DEFAULT_RETRY_BACKOFF_MS
+        );
+        show!(
+            self.retry_backoff_max_ms,
+            "retryBackoffMaxMs",
+            DEFAULT_RETRY_BACKOFF_MAX_MS
+        );
+
+        tracing::info!("{}", "=".repeat(76));
     }
 }
 
@@ -467,6 +616,25 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                         )
                     })?);
                 }
+                "logKeepDays" => {
+                    config.log_keep_days = Some(value.parse::<u16>().map_err(|_| {
+                        TaosError::new(
+                            Code::INVALID_PARA,
+                            &format!("invalid value for logKeepDays: {value}"),
+                        )
+                    })?);
+                }
+                "rotationCount" => {
+                    config.rotation_count = Some(value.parse::<u16>().map_err(|_| {
+                        TaosError::new(
+                            Code::INVALID_PARA,
+                            &format!("invalid value for rotationCount: {value}"),
+                        )
+                    })?);
+                }
+                "rotationSize" => {
+                    config.rotation_size = Some(value.to_string().into());
+                }
                 _ => {}
             }
         }
@@ -489,13 +657,16 @@ mod tests {
         assert_eq!(config.log_dir(), "/path/to/logDir/");
         assert_eq!(config.log_level(), LevelFilter::DEBUG);
         assert_eq!(config.log_output_to_screen(), true);
-        assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
+        assert_eq!(config.timezone(), &FastStr::from("Asia/Shanghai"));
         assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
         assert_eq!(config.server_port(), 8030);
         assert_eq!(config.adapter_list(), None);
         assert_eq!(config.conn_retries(), 5);
         assert_eq!(config.retry_backoff_ms(), 200);
         assert_eq!(config.retry_backoff_max_ms(), 2000);
+        assert_eq!(config.log_keep_days(), 30);
+        assert_eq!(config.rotation_count(), 30);
+        assert_eq!(config.rotation_size(), "1GB");
     }
 
     #[test]
@@ -507,13 +678,16 @@ mod tests {
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
             assert_eq!(config.log_output_to_screen(), true);
-            assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
+            assert_eq!(config.timezone(), &FastStr::from("Asia/Shanghai"));
             assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
             assert_eq!(config.server_port(), 8030);
             assert_eq!(config.adapter_list(), None);
             assert_eq!(config.conn_retries(), 5);
             assert_eq!(config.retry_backoff_ms(), 200);
             assert_eq!(config.retry_backoff_max_ms(), 2000);
+            assert_eq!(config.log_keep_days(), 30);
+            assert_eq!(config.rotation_count(), 30);
+            assert_eq!(config.rotation_size(), "1GB");
         }
 
         {
@@ -523,13 +697,16 @@ mod tests {
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
             assert_eq!(config.log_output_to_screen(), true);
-            assert_eq!(config.timezone(), Some(&FastStr::from("Asia/Shanghai")));
+            assert_eq!(config.timezone(), &FastStr::from("Asia/Shanghai"));
             assert_eq!(config.fqdn(), Some(&FastStr::from("hostname")));
             assert_eq!(config.server_port(), 8030);
             assert_eq!(config.adapter_list(), None);
             assert_eq!(config.conn_retries(), 5);
             assert_eq!(config.retry_backoff_ms(), 200);
             assert_eq!(config.retry_backoff_max_ms(), 2000);
+            assert_eq!(config.log_keep_days(), 30);
+            assert_eq!(config.rotation_count(), 30);
+            assert_eq!(config.rotation_size(), "1GB");
         }
 
         Ok(())
@@ -566,6 +743,9 @@ mod tests {
             set_var("TAOS_CONN_RETRIES", "3");
             set_var("TAOS_RETRY_BACKOFF_MS", "100");
             set_var("TAOS_RETRY_BACKOFF_MAX_MS", "1000");
+            set_var("TAOS_LOG_KEEP_DAYS", "30");
+            set_var("TAOS_ROTATION_COUNT", "30");
+            set_var("TAOS_ROTATION_SIZE", "1GB");
         }
 
         init()?;
@@ -576,6 +756,9 @@ mod tests {
         assert_eq!(conn_retries(), 3);
         assert_eq!(retry_backoff_ms(), 100);
         assert_eq!(retry_backoff_max_ms(), 1000);
+        assert_eq!(log_keep_days(), 30);
+        assert_eq!(rotation_count(), 30);
+        assert_eq!(rotation_size(), FastStr::from("1GB"));
 
         Ok(())
     }

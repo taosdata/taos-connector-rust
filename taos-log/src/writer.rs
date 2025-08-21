@@ -161,9 +161,9 @@ impl RollingFileAppender {
         RollingFileAppenderBuilder {
             log_dir: log_dir.as_ref().to_path_buf(),
             rotation_count: 30,
-            log_keep_days: TimeDelta::days(30),
             rotation_size: "1GB",
-            compress: false,
+            compress: true,
+            log_keep_days: TimeDelta::days(30),
             reserved_disk_size: "2GB",
             stop_logging_threshold: 50,
         }
@@ -470,125 +470,40 @@ fn parse_unit_size(size: &str) -> Result<u64> {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     #[test]
-//     fn parse_filename_test() {
-//         let component = "taosx";
+    #[test]
+    fn test_is_active_log_file() {
+        assert!(is_active_log_file(TAOS_LOG_00));
+        assert!(is_active_log_file(TAOS_LOG_01));
+        assert!(!is_active_log_file("taoslog.123.gz"));
+        assert!(!is_active_log_file("taoslog.123"));
+    }
 
-//         assert_eq!(
-//             parse_filename(component, 1, "taosx_1_20240909.log"),
-//             Some((parse_date_str("20240909").unwrap(), 0))
-//         );
-//         assert_eq!(
-//             parse_filename(component, 2, "taosx_1_20240909.log.1"),
-//             Some((parse_date_str("20240909").unwrap(), 1))
-//         );
-//         assert_eq!(
-//             parse_filename(component, 3, "taosx_1_20240909.log.gz"),
-//             Some((parse_date_str("20240909").unwrap(), 0))
-//         );
-//         assert_eq!(
-//             parse_filename(component, 4, "taosx_1_20240909.log.1.gz"),
-//             Some((parse_date_str("20240909").unwrap(), 1))
-//         );
-//         assert_eq!(
-//             parse_filename(component, 1, "taosx_agent_1_20240909.log"),
-//             None
-//         );
-//         assert_eq!(
-//             parse_filename(component, 1, "taosx_agent_1_20240909.log"),
-//             None
-//         );
-//     }
+    #[test]
+    fn test_parse_compressed_filename() {
+        assert_eq!(parse_compressed_filename("taoslog.0.gz"), Some(0));
+        assert_eq!(
+            parse_compressed_filename("taoslog.1692600000.gz"),
+            Some(1692600000)
+        );
 
-//     #[test]
-//     fn time_format_test() {
-//         let dt_str = "20250626";
-//         assert_eq!(
-//             time_format(parse_date_str(dt_str).unwrap()).to_string(),
-//             "20250626"
-//         );
-//     }
+        assert_eq!(parse_compressed_filename("taoslog.gz"), None);
+        assert_eq!(parse_compressed_filename("taoslog.abc.gz"), None);
+        assert_eq!(parse_compressed_filename("taoslog.123.txt"), None);
+        assert_eq!(parse_compressed_filename("randomfile.gz"), None);
+        assert_eq!(parse_compressed_filename("taoslog.1234567890"), None);
+    }
 
-//     #[test]
-//     fn parse_unit_size_test() {
-//         assert_eq!(parse_unit_size("5KB").unwrap(), 5 * 1024);
-//         assert_eq!(parse_unit_size("5MB").unwrap(), 5 * 1024 * 1024);
-//         assert_eq!(parse_unit_size("5GB").unwrap(), 5 * 1024 * 1024 * 1024);
+    #[test]
+    fn test_parse_unit_size() {
+        assert_eq!(parse_unit_size("5KB").unwrap(), 5 * 1024);
+        assert_eq!(parse_unit_size("5MB").unwrap(), 5 * 1024 * 1024);
+        assert_eq!(parse_unit_size("5GB").unwrap(), 5 * 1024 * 1024 * 1024);
 
-//         assert!(parse_unit_size("5GBK").is_err());
-//         assert!(parse_unit_size("GB").is_err());
-//     }
-
-//     #[test]
-//     fn filename_cmp_test() {
-//         assert_eq!(
-//             filename_cmp(
-//                 &(parse_date_str("20240909").unwrap(), 1),
-//                 &(parse_date_str("20240909").unwrap(), 1)
-//             ),
-//             cmp::Ordering::Equal
-//         );
-//         assert_eq!(
-//             filename_cmp(
-//                 &(parse_date_str("20240909").unwrap(), 2),
-//                 &(parse_date_str("20240909").unwrap(), 1)
-//             ),
-//             cmp::Ordering::Greater
-//         );
-//         assert_eq!(
-//             filename_cmp(
-//                 &(parse_date_str("20240909").unwrap(), 1),
-//                 &(parse_date_str("20240909").unwrap(), 2)
-//             ),
-//             cmp::Ordering::Less
-//         );
-
-//         assert_eq!(
-//             filename_cmp(
-//                 &(parse_date_str("20240910").unwrap(), 1),
-//                 &(parse_date_str("20240909").unwrap(), 1)
-//             ),
-//             cmp::Ordering::Greater
-//         );
-//         assert_eq!(
-//             filename_cmp(
-//                 &(parse_date_str("20240910").unwrap(), 2),
-//                 &(parse_date_str("20240909").unwrap(), 1)
-//             ),
-//             cmp::Ordering::Greater
-//         );
-//         assert_eq!(
-//             filename_cmp(
-//                 &(parse_date_str("20240910").unwrap(), 0),
-//                 &(parse_date_str("20240909").unwrap(), 1)
-//             ),
-//             cmp::Ordering::Greater
-//         );
-
-//         assert_eq!(
-//             filename_cmp(
-//                 &(parse_date_str("20240909").unwrap(), 1),
-//                 &(parse_date_str("20240910").unwrap(), 1)
-//             ),
-//             cmp::Ordering::Less
-//         );
-//         assert_eq!(
-//             filename_cmp(
-//                 &(parse_date_str("20240909").unwrap(), 2),
-//                 &(parse_date_str("20240910").unwrap(), 1)
-//             ),
-//             cmp::Ordering::Less
-//         );
-//         assert_eq!(
-//             filename_cmp(
-//                 &(parse_date_str("20240909").unwrap(), 0),
-//                 &(parse_date_str("20240910").unwrap(), 1)
-//             ),
-//             cmp::Ordering::Less
-//         );
-//     }
-// }
+        assert!(parse_unit_size("5GBK").is_err());
+        assert!(parse_unit_size("GB").is_err());
+    }
+}
