@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use flume::Receiver;
+use flume::{Receiver, Sender};
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use taos_query::prelude::RawError;
 use taos_query::util::generate_req_id;
@@ -19,13 +19,14 @@ use tokio::time;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tracing::Instrument;
 
+use crate::query::asyn::ConnState;
 use crate::query::messages::{ToMessage, WsSend};
-use crate::query::WsConnReq;
 use crate::query::{
     asyn::{WsQuerySender, WS_ERROR_NO},
     messages::{MessageId, ReqId, WsMessage, WsRecv, WsRecvData},
     Error,
 };
+use crate::query::{WsConnReq, WsTaos};
 use crate::{
     handle_disconnect_error, send_request_with_timeout, TaosBuilder, WsStream, WsStreamReader,
     WsStreamSender,
@@ -136,6 +137,7 @@ impl MessageCache {
 }
 
 pub(super) async fn run(
+    ws_taos: Arc<WsTaos>,
     builder: Arc<TaosBuilder>,
     mut ws_stream: WsStream,
     query_sender: WsQuerySender,
@@ -178,6 +180,7 @@ pub(super) async fn run(
                     let _ = close_tx.send(true);
                     if !is_disconnect_error(&err) {
                         tracing::error!("non-disconnect error detected, cleaning up all pending queries");
+                        ws_taos.set_state(ConnState::Disconnected);
                         cleanup_after_disconnect(query_sender.clone());
                         return;
                     }
@@ -186,10 +189,13 @@ pub(super) async fn run(
             }
             _ = close_reader.changed() => {
                 tracing::info!("WebSocket received close signal");
+                ws_taos.set_state(ConnState::Disconnected);
                 let _ = close_tx.send(true);
                 return;
             }
         }
+
+        ws_taos.set_state(ConnState::Reconnecting);
 
         if let Err(err) = send_handle.await {
             tracing::error!("send messages task failed: {err:?}");
@@ -207,6 +213,7 @@ pub(super) async fn run(
             }
             Err(err) => {
                 tracing::error!("WebSocket reconnection failed: {err}");
+                ws_taos.set_state(ConnState::Disconnected);
                 cleanup_after_disconnect(query_sender.clone());
                 return;
             }
@@ -214,7 +221,11 @@ pub(super) async fn run(
 
         tracing::info!("WebSocket reconnected successfully");
 
-        cleanup_after_reconnect(query_sender.clone(), cache.clone());
+        ws_taos.wait_for_previous_recover_stmt2().await;
+        let mut stmt2_req_ids = cleanup_stmt2(query_sender.sender.clone(), message_reader.clone());
+        ws_taos.clone().recover_stmt2().await;
+        stmt2_req_ids.extend(ws_taos.stmt2_req_ids().await);
+        cleanup_after_reconnect(query_sender.clone(), cache.clone(), stmt2_req_ids);
     }
 }
 
@@ -327,8 +338,6 @@ async fn read_messages(
     let message_handle =
         tokio::spawn(handle_messages(message_rx, query_sender.clone(), cache).in_current_span());
 
-    let mut closed_normally = false;
-
     loop {
         tokio::select! {
             res = ws_stream_reader.try_next() => {
@@ -342,7 +351,6 @@ async fn read_messages(
                     }
                     Ok(None) => {
                         tracing::info!("WebSocket stream closed by peer");
-                        closed_normally = true;
                         break;
                     }
                     Err(err) => {
@@ -354,7 +362,6 @@ async fn read_messages(
             }
             _ = close_reader.changed() => {
                 tracing::info!("WebSocket reader received close signal");
-                closed_normally = true;
                 break;
             }
         }
@@ -364,10 +371,6 @@ async fn read_messages(
 
     if let Err(err) = message_handle.await {
         tracing::error!("handle messages task failed: {err:?}");
-    }
-
-    if closed_normally {
-        cleanup_after_disconnect(query_sender.clone());
     }
 
     tracing::trace!("stop reading messages from WebSocket stream");
@@ -550,16 +553,20 @@ fn cleanup_after_disconnect(query_sender: WsQuerySender) {
     for req_id in req_ids {
         if let Some((_, sender)) = query_sender.queries.remove(&req_id) {
             let _ = sender.send(Err(RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
-                .context("WebSocket connection is closed")));
+                .context("WebSocket connection is closed (disconnect)")));
         }
     }
 }
 
-fn cleanup_after_reconnect(query_sender: WsQuerySender, cache: MessageCache) {
+fn cleanup_after_reconnect(
+    query_sender: WsQuerySender,
+    cache: MessageCache,
+    stmt2_req_ids: Vec<ReqId>,
+) {
     let mut req_ids = HashSet::new();
 
     query_sender.queries.scan(|req_id, _| {
-        if !cache.req_to_msg.contains(req_id) {
+        if !cache.req_to_msg.contains(req_id) && !stmt2_req_ids.contains(req_id) {
             req_ids.insert(*req_id);
         }
     });
@@ -573,9 +580,39 @@ fn cleanup_after_reconnect(query_sender: WsQuerySender, cache: MessageCache) {
     for req_id in req_ids {
         if let Some((_, sender)) = query_sender.queries.remove(&req_id) {
             let _ = sender.send(Err(RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
-                .context("WebSocket connection is closed")));
+                .context("WebSocket connection is closed (reconnect)")));
         }
     }
+}
+
+fn cleanup_stmt2(
+    message_sender: Sender<WsMessage>,
+    message_reader: Receiver<WsMessage>,
+) -> Vec<ReqId> {
+    let mut dropped_cnt = 0;
+    let mut req_ids = Vec::new();
+    let mut kept_messages = Vec::new();
+
+    while let Ok(message) = message_reader.try_recv() {
+        if message.is_stmt2() {
+            dropped_cnt += 1;
+            if !message.is_stmt2_close() {
+                req_ids.push(message.req_id());
+            }
+        } else {
+            kept_messages.push(message);
+        }
+    }
+
+    for message in kept_messages {
+        let _ = message_sender.send(message);
+    }
+
+    if dropped_cnt > 0 {
+        tracing::info!("dropped {dropped_cnt} stmt2 messages during cleanup");
+    }
+
+    req_ids
 }
 
 #[cfg(test)]
