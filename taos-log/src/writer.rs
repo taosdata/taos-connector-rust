@@ -257,6 +257,7 @@ struct Config {
 
 impl Config {
     fn handle_old_files(&self) -> Result<()> {
+        let mut active_count = 0;
         let mut files = fs::read_dir(&self.log_dir)
             .context(ReadDirSnafu {
                 path: &self.log_dir,
@@ -270,6 +271,7 @@ impl Config {
 
                 let filename = entry.file_name().to_str()?.to_string();
                 if is_active_log_file(&filename) {
+                    active_count += 1;
                     return None;
                 }
 
@@ -284,23 +286,21 @@ impl Config {
 
         files.sort_by(|a, b| b.1.cmp(&a.1));
 
-        let mut split_index = files.len();
-        if self.rotation_count > 0 && files.len() > self.rotation_count {
-            split_index = self.rotation_count;
+        let mut index = files.len();
+        let rotation_count = self.rotation_count.saturating_sub(active_count);
+        if rotation_count > 0 && files.len() > rotation_count {
+            index = rotation_count;
         }
 
         if !self.log_keep_days.is_zero() {
             let cutoff_time = Local::now().with_time(NaiveTime::MIN).unwrap() - self.log_keep_days;
             let cutoff_ts = cutoff_time.timestamp();
-            let index = files.partition_point(|(_, ts)| *ts >= cutoff_ts);
-            split_index = split_index.min(index);
+            index = index.min(files.partition_point(|(_, ts)| *ts >= cutoff_ts));
         }
 
-        files[..split_index]
-            .into_par_iter()
-            .for_each(|(filename, _)| {
-                fs::remove_file(self.log_dir.join(filename)).ok();
-            });
+        files[index..].into_par_iter().for_each(|(filename, _)| {
+            fs::remove_file(self.log_dir.join(filename)).ok();
+        });
 
         Ok(())
     }
@@ -476,6 +476,13 @@ fn parse_unit_size(size: &str) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+    use std::sync::Arc;
+    use std::thread;
+
+    use tempfile::tempdir;
+    use tracing_subscriber::fmt::MakeWriter;
+
     use super::*;
 
     #[test]
@@ -509,5 +516,274 @@ mod tests {
 
         assert!(parse_unit_size("5GBK").is_err());
         assert!(parse_unit_size("GB").is_err());
+    }
+
+    #[test]
+    fn test_log_file_naming_and_rotation() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let appender = RollingFileAppender::builder(log_dir)
+            .rotation_size("1KB")
+            .rotation_count(2)
+            .keep_days(1)
+            .compress(false)
+            .build()
+            .unwrap();
+
+        {
+            let mut writer = appender.make_writer();
+            for _ in 0..1100 {
+                writer.write_all(b"x").unwrap();
+            }
+            writer.flush().unwrap();
+        }
+
+        {
+            let mut writer = appender.make_writer();
+            for _ in 0..1100 {
+                writer.write_all(b"y").unwrap();
+            }
+            writer.flush().unwrap();
+        }
+
+        let files: Vec<_> = fs::read_dir(log_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+
+        assert!(files.contains(&TAOS_LOG_00.to_string()));
+        assert!(files.contains(&TAOS_LOG_01.to_string()));
+    }
+
+    #[test]
+    fn test_compress_and_compressed_filename() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+        let log_path = log_dir.join(TAOS_LOG_00);
+
+        fs::write(&log_path, b"hello world").unwrap();
+        compress(&log_path).unwrap();
+        assert!(!log_path.exists());
+
+        let files: Vec<_> = fs::read_dir(log_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+
+        let gz_file = files.iter().find(|f| f.ends_with(".gz")).unwrap();
+        assert!(parse_compressed_filename(gz_file).is_some());
+    }
+
+    #[test]
+    fn test_keep_days_removes_old_files() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let now = Local::now().timestamp();
+        let two_days_ago = (Local::now() - Duration::from_secs(2 * 24 * 60 * 60)).timestamp();
+
+        let today_file = log_dir.join(format!("taoslog.{now}.gz"));
+        let old_file = log_dir.join(format!("taoslog.{two_days_ago}.gz"));
+        fs::write(&today_file, b"today").unwrap();
+        fs::write(&old_file, b"two_days_ago").unwrap();
+
+        let config = Config {
+            log_dir: log_dir.to_path_buf(),
+            rotation: Rotation { file_size: 1024 },
+            reserved_disk_size: 1024 * 1024,
+            compress: true,
+            rotation_count: 10,
+            log_keep_days: TimeDelta::days(1),
+            stop_logging_threshold: 0.1,
+        };
+        config.handle_old_files().unwrap();
+
+        let files: Vec<_> = fs::read_dir(log_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+
+        assert!(files.iter().any(|f| f == &format!("taoslog.{now}.gz")));
+        assert!(!files
+            .iter()
+            .any(|f| f == &format!("taoslog.{two_days_ago}.gz")));
+    }
+
+    #[test]
+    fn test_rotation_count_limit() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let ts = Local::now().timestamp();
+        for i in 0..5 {
+            let file = log_dir.join(format!("taoslog.{}.gz", ts + i));
+            fs::write(&file, format!("file{i}")).unwrap();
+        }
+
+        let config = Config {
+            log_dir: log_dir.to_path_buf(),
+            rotation: Rotation { file_size: 1024 },
+            reserved_disk_size: 1024 * 1024,
+            compress: true,
+            rotation_count: 3,
+            log_keep_days: TimeDelta::days(30),
+            stop_logging_threshold: 0.1,
+        };
+        config.handle_old_files().unwrap();
+
+        let files: Vec<_> = fs::read_dir(log_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+
+        assert_eq!(files.iter().filter(|f| f.ends_with(".gz")).count(), 3);
+    }
+
+    #[test]
+    fn test_log_file_auto_recreate_after_delete() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let appender = RollingFileAppender::builder(log_dir)
+            .rotation_size("1KB")
+            .build()
+            .unwrap();
+
+        {
+            let mut writer = appender.make_writer();
+            writer.write_all(b"abc").unwrap();
+            writer.flush().unwrap();
+        }
+
+        let state = appender.state.read();
+        let file_path = state.file_path.clone();
+        drop(state);
+        std::fs::remove_file(&file_path).unwrap();
+
+        {
+            let mut writer = appender.make_writer();
+            writer.write_all(b"def").unwrap();
+            writer.flush().unwrap();
+        }
+
+        assert!(file_path.exists());
+    }
+
+    #[test]
+    fn test_rotation_count_zero_keeps_all_files() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let ts = Local::now().timestamp();
+        for i in 0..5 {
+            let file = log_dir.join(format!("taoslog.{}.gz", ts + i));
+            std::fs::write(&file, format!("file{i}")).unwrap();
+        }
+
+        let config = Config {
+            log_dir: log_dir.to_path_buf(),
+            rotation: Rotation { file_size: 1024 },
+            reserved_disk_size: 1024 * 1024,
+            compress: true,
+            rotation_count: 0,
+            log_keep_days: TimeDelta::days(30),
+            stop_logging_threshold: 0.1,
+        };
+        config.handle_old_files().unwrap();
+
+        let files: Vec<_> = std::fs::read_dir(log_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+
+        assert!(files.iter().filter(|f| f.ends_with(".gz")).count() >= 5);
+    }
+
+    #[test]
+    fn test_log_content_integrity_after_rotation_and_compress() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let appender = RollingFileAppender::builder(log_dir)
+            .rotation_size("1KB")
+            .compress(true)
+            .build()
+            .unwrap();
+
+        let content = vec![b'a'; 1030];
+
+        {
+            let mut writer = appender.make_writer();
+            writer.write_all(&content).unwrap();
+            writer.flush().unwrap();
+        }
+        {
+            let mut writer = appender.make_writer();
+            writer.write_all(&content).unwrap();
+            writer.flush().unwrap();
+        }
+
+        let files: Vec<_> = std::fs::read_dir(log_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+        let gz_file = files.iter().find(|f| f.ends_with(".gz")).unwrap();
+        let gz_path = log_dir.join(gz_file);
+
+        let gz_file = std::fs::File::open(&gz_path).unwrap();
+        let mut decoder = flate2::read::GzDecoder::new(gz_file);
+        let mut buf = Vec::new();
+        decoder.read_to_end(&mut buf).unwrap();
+        assert_eq!(buf, content);
+    }
+
+    #[test]
+    fn test_parallel_write_and_rotate() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let appender = Arc::new(
+            RollingFileAppender::builder(log_dir)
+                .rotation_size("1KB")
+                .rotation_count(2)
+                .compress(false)
+                .build()
+                .unwrap(),
+        );
+
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let appender = appender.clone();
+                thread::spawn(move || {
+                    let mut writer = appender.make_writer();
+                    for _ in 0..600 {
+                        writer.write_all(b"x").unwrap();
+                    }
+                    writer.flush().unwrap();
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let files: Vec<_> = std::fs::read_dir(log_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+        let count = files
+            .iter()
+            .filter(|f| f == &TAOS_LOG_00 || f == &TAOS_LOG_01)
+            .count();
+        assert!(count <= 2);
     }
 }

@@ -24,6 +24,7 @@ rayon = "1"
 crossbeam = "0.8.4"
 log = "0.4.22"
 rand = "0.8.5"
+tempfile = "3.21.0"
 tokio = { version = "*", features = ["full"] }
 tracing = { version = "*", features = ["log"] }
 tracing-log = "0.2.0"
