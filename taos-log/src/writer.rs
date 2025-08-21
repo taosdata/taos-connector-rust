@@ -157,7 +157,7 @@ pub struct RollingFileAppender {
 }
 
 impl RollingFileAppender {
-    pub fn builder<'a>(log_dir: impl AsRef<Path>) -> RollingFileAppenderBuilder<'a> {
+    pub fn builder<'a, P: AsRef<Path>>(log_dir: P) -> RollingFileAppenderBuilder<'a> {
         RollingFileAppenderBuilder {
             log_dir: log_dir.as_ref().to_path_buf(),
             rotation_count: 30,
@@ -408,12 +408,16 @@ fn calc_disk_available_space(log_dir: &Path) -> Result<Arc<AtomicU64>> {
         .context(DiskMountPointNotFoundSnafu)?;
     disk.refresh();
     let disk_available_space = Arc::new(AtomicU64::new(disk.available_space()));
-    let disk_available_space_clone = disk_available_space.clone();
 
-    thread::spawn(move || loop {
-        disk.refresh();
-        disk_available_space_clone.store(disk.available_space(), Ordering::SeqCst);
-        thread::sleep(Duration::from_secs(30));
+    thread::spawn({
+        let disk_available_space = disk_available_space.clone();
+        move || -> ! {
+            loop {
+                disk.refresh();
+                disk_available_space.store(disk.available_space(), Ordering::SeqCst);
+                std::thread::sleep(Duration::from_secs(30));
+            }
+        }
     });
 
     Ok(disk_available_space)
@@ -421,7 +425,7 @@ fn calc_disk_available_space(log_dir: &Path) -> Result<Arc<AtomicU64>> {
 
 fn compress(path: &Path) -> Result<()> {
     let ts = Local::now().timestamp();
-    let compressed_name = format!("taoslog.{}.gz", ts);
+    let compressed_name = format!("taoslog.{ts}.gz");
     let dest_path = path.parent().unwrap().join(compressed_name);
 
     let mut src_file = File::open(path).context(CompressSnafu { path })?;

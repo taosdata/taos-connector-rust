@@ -200,7 +200,7 @@ pub fn set_timezone<T: Into<FastStr>>(timezone: T) {
 }
 
 pub fn print() {
-    CONFIG.read().unwrap().print()
+    CONFIG.read().unwrap().print();
 }
 
 const DEFAULT_CONFIG_DIR: &str = if cfg!(windows) {
