@@ -390,18 +390,15 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
         return Err(TaosError::new(Code::FAILED, &err).into());
     }
 
-    if let Some(timezone) = config::timezone() {
-        unsafe { std::env::set_var("TZ", timezone.as_str()) };
-    }
+    unsafe { std::env::set_var("TZ", config::timezone().as_str()) };
 
     let mut layers = Vec::new();
     let log_dir = config::log_dir();
 
-    let appender = RollingFileAppender::builder(log_dir.as_str(), "taos", 16)
-        .compress(true)
-        .reserved_disk_size("1GB")
-        .rotation_count(3)
-        .rotation_size("1GB")
+    let appender = RollingFileAppender::builder(log_dir.as_str())
+        .keep_days(config::log_keep_days())
+        .rotation_count(config::rotation_count())
+        .rotation_size(&config::rotation_size())
         .build()?;
 
     layers.push(
@@ -421,11 +418,9 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tracing_subscriber::registry().with(layers).init();
-
     LogTracer::init()?;
-
     debug!("taos_init, config: {:?}", config::config());
-
+    config::print();
     Ok(())
 }
 
