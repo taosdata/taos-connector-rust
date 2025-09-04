@@ -86,7 +86,7 @@ unsafe fn stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> TaosRes
         .as_mut()
         .ok_or(TaosError::new(Code::INVALID_PARA, "taos is null"))?;
 
-    let stmt2 = Stmt2::new(taos.client());
+    let stmt2 = Stmt2::new(taos.client_cloned());
 
     let (req_id, single_stb_insert, single_table_bind_once, async_exec_fn, userdata) =
         match option.as_ref() {

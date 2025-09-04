@@ -605,7 +605,7 @@ impl Stmt2 {
 
 impl Stmt2Bindable<super::Taos> for Stmt2 {
     fn init(taos: &super::Taos) -> RawResult<Self> {
-        let stmt2 = Self::new(taos.client());
+        let stmt2 = Self::new(taos.client_cloned());
         block_in_place_or_global(stmt2.init())?;
         Ok(stmt2)
     }
@@ -636,7 +636,7 @@ impl Stmt2Bindable<super::Taos> for Stmt2 {
 #[async_trait::async_trait]
 impl Stmt2AsyncBindable<super::Taos> for Stmt2 {
     async fn init(taos: &super::Taos) -> RawResult<Self> {
-        let stmt2 = Self::new(taos.client());
+        let stmt2 = Self::new(taos.client_cloned());
         stmt2.init().await?;
         Ok(stmt2)
     }
@@ -691,7 +691,7 @@ mod tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2
             .prepare("insert into t0 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -783,7 +783,7 @@ mod tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2.prepare("insert into t0 values(?, ?)").await?;
 
@@ -852,7 +852,7 @@ mod tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2
             .prepare("select * from t0 where c8 > ? and c10 > ? and c12 = ?")
@@ -937,7 +937,7 @@ mod tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2.prepare("select * from t0 where c1 > ?").await?;
 
@@ -988,7 +988,7 @@ mod tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2
             .prepare("insert into ? using s0 tags(?) values(?, ?)")
@@ -1073,7 +1073,7 @@ mod tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2
             .prepare("insert into s0 (tbname, ts, c1, t1) values(?, ?, ?, ?)")
@@ -1158,7 +1158,7 @@ mod tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2.prepare("insert into t0 values(?, ?)").await?;
 
@@ -1185,7 +1185,7 @@ mod tests {
         ])
         .await?;
 
-        let mut stmt2 = Stmt2::new(taos.client());
+        let mut stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2.prepare("insert into t0 values(?, ?)").await?;
 
@@ -1298,7 +1298,7 @@ mod cloud_tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
 
         stmt2
@@ -1315,7 +1315,7 @@ mod cloud_tests {
         let affected = stmt2.exec().await?;
         assert_eq!(affected, 1);
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
 
         stmt2
@@ -1567,7 +1567,7 @@ mod recover_tests {
             .build()
             .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
 
         Ok(())
@@ -1614,7 +1614,7 @@ mod recover_tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2
             .prepare("select * from test_1755136975.t0 where c1 > ?")
@@ -1663,7 +1663,7 @@ mod recover_tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2
             .prepare("insert into test_1755137215.t0 values(?, ?)")
@@ -1720,7 +1720,7 @@ mod recover_tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2
             .prepare("insert into test_1755137720.t0 values(?, ?)")
@@ -1789,7 +1789,7 @@ mod recover_tests {
         ])
         .await?;
 
-        let stmt2 = Stmt2::new(taos.client());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2
             .prepare("select * from test_1755138202.t0 where c1 > ?")
@@ -1862,7 +1862,7 @@ mod recover_tests {
         let n = 3;
         let mut tasks = Vec::with_capacity(n);
         for i in 0..n {
-            let client = taos.client();
+            let client = taos.client_cloned();
             tasks.push(tokio::spawn(async move {
                 let stmt2 = Stmt2::new(client);
                 stmt2.init().await?;

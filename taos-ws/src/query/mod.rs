@@ -38,7 +38,11 @@ impl Taos {
         self.client.get_req_id()
     }
 
-    pub fn client(&self) -> Arc<WsTaos> {
+    pub fn client(&self) -> &Arc<WsTaos> {
+        &self.client
+    }
+
+    pub fn client_cloned(&self) -> Arc<WsTaos> {
         self.client.clone()
     }
 }
