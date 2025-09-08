@@ -21,8 +21,8 @@ use crate::{
     GetLogAbsolutePathSnafu, InvalidRotationSizeSnafu, OpenLogFileSnafu, ReadDirSnafu, Result,
 };
 
-const TAOS_LOG_00: &str = "taoslog0.0";
-const TAOS_LOG_01: &str = "taoslog0.1";
+const TAOS_WS_LOG_00: &str = "taoswslog0.0";
+const TAOS_WS_LOG_01: &str = "taoswslog0.1";
 
 #[derive(Debug, Clone)]
 struct Rotation {
@@ -183,9 +183,9 @@ impl RollingFileAppender {
 
         if cur_size >= self.config.rotation.file_size {
             let (old_filename, new_filename) = if state.current_index == 0 {
-                (TAOS_LOG_00, TAOS_LOG_01)
+                (TAOS_WS_LOG_00, TAOS_WS_LOG_01)
             } else {
-                (TAOS_LOG_01, TAOS_LOG_00)
+                (TAOS_WS_LOG_01, TAOS_WS_LOG_00)
             };
 
             let old_filename = self.config.log_dir.join(old_filename);
@@ -205,9 +205,9 @@ impl RollingFileAppender {
 
         if !state.file_path.is_file() {
             let filename = if state.current_index == 0 {
-                TAOS_LOG_00
+                TAOS_WS_LOG_00
             } else {
-                TAOS_LOG_01
+                TAOS_WS_LOG_01
             };
 
             let file_path = self.config.log_dir.join(filename);
@@ -221,8 +221,8 @@ impl RollingFileAppender {
 }
 
 fn determine_current_file(log_dir: &Path) -> Result<(u8, PathBuf)> {
-    let path0 = log_dir.join(TAOS_LOG_00);
-    let path1 = log_dir.join(TAOS_LOG_01);
+    let path0 = log_dir.join(TAOS_WS_LOG_00);
+    let path1 = log_dir.join(TAOS_WS_LOG_01);
     match (path0.exists(), path1.exists()) {
         (_, false) => Ok((0, path0.clone())),
         (false, true) => Ok((1, path1.clone())),
@@ -428,7 +428,7 @@ fn calc_disk_available_space(log_dir: &Path) -> Result<Arc<AtomicU64>> {
 
 fn compress(path: &Path) -> Result<()> {
     let ts = Local::now().timestamp_nanos_opt().unwrap();
-    let compressed_name = format!("taoslog.{ts}.gz");
+    let compressed_name = format!("taoswslog.{ts}.gz");
     let dest_path = path.parent().unwrap().join(compressed_name);
 
     let mut src_file = File::open(path).context(CompressSnafu { path })?;
@@ -451,12 +451,12 @@ fn compress(path: &Path) -> Result<()> {
 }
 
 fn is_active_log_file(filename: &str) -> bool {
-    filename == TAOS_LOG_00 || filename == TAOS_LOG_01
+    filename == TAOS_WS_LOG_00 || filename == TAOS_WS_LOG_01
 }
 
 fn parse_compressed_filename(filename: &str) -> Option<i64> {
     static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| Regex::new(r"^taoslog\.(?<timestamp>\d+)\.gz$").unwrap());
+    let re = RE.get_or_init(|| Regex::new(r"^taoswslog\.(?<timestamp>\d+)\.gz$").unwrap());
     let caps = re.captures(filename)?;
     caps.name("timestamp")?.as_str().parse().ok()
 }
@@ -490,25 +490,25 @@ mod tests {
 
     #[test]
     fn test_is_active_log_file() {
-        assert!(is_active_log_file(TAOS_LOG_00));
-        assert!(is_active_log_file(TAOS_LOG_01));
-        assert!(!is_active_log_file("taoslog.123.gz"));
-        assert!(!is_active_log_file("taoslog.123"));
+        assert!(is_active_log_file(TAOS_WS_LOG_00));
+        assert!(is_active_log_file(TAOS_WS_LOG_01));
+        assert!(!is_active_log_file("taoswslog.123.gz"));
+        assert!(!is_active_log_file("taoswslog.123"));
     }
 
     #[test]
     fn test_parse_compressed_filename() {
-        assert_eq!(parse_compressed_filename("taoslog.0.gz"), Some(0));
+        assert_eq!(parse_compressed_filename("taoswslog.0.gz"), Some(0));
         assert_eq!(
-            parse_compressed_filename("taoslog.1692600000.gz"),
+            parse_compressed_filename("taoswslog.1692600000.gz"),
             Some(1692600000)
         );
 
-        assert_eq!(parse_compressed_filename("taoslog.gz"), None);
-        assert_eq!(parse_compressed_filename("taoslog.abc.gz"), None);
-        assert_eq!(parse_compressed_filename("taoslog.123.txt"), None);
+        assert_eq!(parse_compressed_filename("taoswslog.gz"), None);
+        assert_eq!(parse_compressed_filename("taoswslog.abc.gz"), None);
+        assert_eq!(parse_compressed_filename("taoswslog.123.txt"), None);
         assert_eq!(parse_compressed_filename("randomfile.gz"), None);
-        assert_eq!(parse_compressed_filename("taoslog.1234567890"), None);
+        assert_eq!(parse_compressed_filename("taoswslog.1234567890"), None);
     }
 
     #[test]
@@ -556,15 +556,15 @@ mod tests {
             .map(|e| e.file_name().into_string().unwrap())
             .collect();
 
-        assert!(files.contains(&TAOS_LOG_00.to_string()));
-        assert!(files.contains(&TAOS_LOG_01.to_string()));
+        assert!(files.contains(&TAOS_WS_LOG_00.to_string()));
+        assert!(files.contains(&TAOS_WS_LOG_01.to_string()));
     }
 
     #[test]
     fn test_compress_and_compressed_filename() {
         let dir = tempdir().unwrap();
         let log_dir = dir.path();
-        let log_path = log_dir.join(TAOS_LOG_00);
+        let log_path = log_dir.join(TAOS_WS_LOG_00);
 
         fs::write(&log_path, b"hello world").unwrap();
         compress(&log_path).unwrap();
@@ -590,8 +590,8 @@ mod tests {
             .timestamp_nanos_opt()
             .unwrap();
 
-        let today_file = log_dir.join(format!("taoslog.{now}.gz"));
-        let old_file = log_dir.join(format!("taoslog.{two_days_ago}.gz"));
+        let today_file = log_dir.join(format!("taoswslog.{now}.gz"));
+        let old_file = log_dir.join(format!("taoswslog.{two_days_ago}.gz"));
         fs::write(&today_file, b"today").unwrap();
         fs::write(&old_file, b"two_days_ago").unwrap();
 
@@ -612,10 +612,10 @@ mod tests {
             .map(|e| e.file_name().into_string().unwrap())
             .collect();
 
-        assert!(files.iter().any(|f| f == &format!("taoslog.{now}.gz")));
+        assert!(files.iter().any(|f| f == &format!("taoswslog.{now}.gz")));
         assert!(!files
             .iter()
-            .any(|f| f == &format!("taoslog.{two_days_ago}.gz")));
+            .any(|f| f == &format!("taoswslog.{two_days_ago}.gz")));
     }
 
     #[test]
@@ -625,7 +625,7 @@ mod tests {
 
         let ts = Local::now().timestamp_nanos_opt().unwrap();
         for i in 0..5 {
-            let file = log_dir.join(format!("taoslog.{}.gz", ts + i));
+            let file = log_dir.join(format!("taoswslog.{}.gz", ts + i));
             fs::write(&file, format!("file{i}")).unwrap();
         }
 
@@ -686,7 +686,7 @@ mod tests {
 
         let ts = Local::now().timestamp_nanos_opt().unwrap();
         for i in 0..5 {
-            let file = log_dir.join(format!("taoslog.{}.gz", ts + i));
+            let file = log_dir.join(format!("taoswslog.{}.gz", ts + i));
             std::fs::write(&file, format!("file{i}")).unwrap();
         }
 
@@ -787,7 +787,7 @@ mod tests {
             .collect();
         let count = files
             .iter()
-            .filter(|f| f == &TAOS_LOG_00 || f == &TAOS_LOG_01)
+            .filter(|f| f == &TAOS_WS_LOG_00 || f == &TAOS_WS_LOG_01)
             .count();
         assert!(count <= 2);
     }
