@@ -546,27 +546,46 @@ impl AsAsyncConsumer for Consumer {
         let now = time::Instant::now();
         let (tx, rx) = oneshot::channel();
 
-        self.tmq
-            .sender()
-            .send_async(tx)
-            .await
-            .map_err(RawError::from_any)?;
-
         let duration = match timeout {
             Timeout::Duration(duration) => duration,
             _ => Duration::MAX,
         };
+
+        tracing::debug!("Send request to TMQ");
+        // self.tmq
+        // .sender()
+        // .send_async(tx)
+        // .await
+        // .map_err(RawError::from_any)?;
+        let sender = self.tmq.sender();
+        let mut send_fut = sender.send_async(tx);
+        let send_deadline = tokio::time::sleep(duration);
+        tokio::pin!(send_deadline);
+        tokio::select! {
+            res = &mut send_fut => {
+                res.map_err(RawError::from_any)?;
+            }
+            _ = &mut send_deadline => {
+                // 队列满，视为暂时无消息，也可以选择返回 Err(...) 看你的需求
+                tracing::debug!("Send request to TMQ timed out (queue full)");
+                return Ok(None);
+            }
+        }
+        tracing::debug!("Send request to TMQ done");
+
         let sleep = tokio::time::sleep(duration);
         tokio::pin!(sleep);
 
         tracing::trace!("Waiting for next message");
 
         let res = tokio::select! {
-            _ = &mut sleep, if !sleep.is_elapsed() => {
+            // _ = &mut sleep, if !sleep.is_elapsed() => {
+            _ = &mut sleep => {
                 tracing::trace!("sleep is elapsed");
                 Ok(None)
             }
             res = rx => {
+                tracing::debug!("Received response from TMQ");
                 let raw = res.map_err(RawError::from_any)??.map(|raw| {
                     (
                         Offset(raw.clone()),
