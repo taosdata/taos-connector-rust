@@ -543,14 +543,30 @@ impl AsAsyncConsumer for Consumer {
             taos_query::tmq::MessageSet<Self::Meta, Self::Data>,
         )>,
     > {
-        let now = time::Instant::now();
-        let (tx, rx) = oneshot::channel();
+        let recv_fut = async move {
+            let (tx, rx) = oneshot::channel();
+            self.tmq
+                .sender()
+                .send_async(tx)
+                .await
+                .map_err(RawError::from_any)?;
+            let res = rx.await;
+            let raw = res.map_err(RawError::from_any)??.map(|raw| {
+                (
+                    Offset(raw.clone()),
+                    match raw.tmq_message_type() {
+                        tmq_res_t::TMQ_RES_INVALID => unreachable!(),
+                        tmq_res_t::TMQ_RES_DATA => MessageSet::Data(Data::new(raw)),
+                        tmq_res_t::TMQ_RES_TABLE_META => MessageSet::Meta(Meta::new(raw)),
+                        // TODO: new variant RAWDATA since 3.3.6.0
+                        _ => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw)),
+                    },
+                )
+            });
+            Ok(raw)
+        };
 
-        self.tmq
-            .sender()
-            .send_async(tx)
-            .await
-            .map_err(RawError::from_any)?;
+        let now = time::Instant::now();
 
         let duration = match timeout {
             Timeout::Duration(duration) => duration,
@@ -566,22 +582,7 @@ impl AsAsyncConsumer for Consumer {
                 tracing::trace!("sleep is elapsed");
                 Ok(None)
             }
-            res = rx => {
-                let raw = res.map_err(RawError::from_any)??.map(|raw| {
-                    (
-                        Offset(raw.clone()),
-                        match raw.tmq_message_type() {
-                            tmq_res_t::TMQ_RES_INVALID => unreachable!(),
-                            tmq_res_t::TMQ_RES_DATA => MessageSet::Data(Data::new(raw)),
-                            tmq_res_t::TMQ_RES_TABLE_META => MessageSet::Meta(Meta::new(raw)),
-                            // tmq_res_t::TMQ_RES_METADATA => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw)),
-                            // TODO: New variant RAWDATA since 3.3.6.0
-                            _ => MessageSet::MetaData(Meta::new(raw.clone()), Data::new(raw)),
-                        },
-                    )
-                });
-                Ok(raw)
-            }
+            res = recv_fut => res,
         };
 
         let elapsed = now.elapsed();
@@ -2848,6 +2849,37 @@ mod async_tests {
             "drop database test_1753096703",
         ])
         .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_tmq_recv_timeout() -> anyhow::Result<()> {
+        use taos_query::prelude::{AsAsyncConsumer, AsyncQueryable, AsyncTBuilder};
+        use taos_query::tmq::Timeout;
+
+        use crate::{TaosBuilder, TmqBuilder};
+
+        let taos = TaosBuilder::from_dsn("taos://localhost:6030")?
+            .build()
+            .await?;
+        taos.exec_many([
+            "drop topic if exists topic_1757409605",
+            "drop database if exists test_1757409605",
+            "create database test_1757409605",
+            "create table test_1757409605.t0 (ts timestamp, c1 int)",
+            "create topic topic_1757409605 as select * from test_1757409605.t0",
+        ])
+        .await?;
+
+        let tmq = TmqBuilder::from_dsn("taos://localhost:6030?group.id=10&timeout=never")?;
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["topic_1757409605"]).await?;
+
+        for _ in 0..15 {
+            let res = consumer.recv_timeout(Timeout::from_millis(1)).await?;
+            assert!(res.is_none());
+        }
 
         Ok(())
     }
