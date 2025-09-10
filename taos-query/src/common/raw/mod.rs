@@ -35,7 +35,6 @@ pub mod meta;
 pub mod views;
 
 mod data;
-mod de;
 mod rows;
 
 #[derive(Debug, Clone, Copy)]
@@ -251,9 +250,9 @@ impl RawBlock {
 
         let mut schemas_bytes =
             bytes::BytesMut::with_capacity(cols * std::mem::size_of::<DataType>());
-        fields
-            .iter()
-            .for_each(|f| schemas_bytes.put(f.to_column_schema().as_bytes()));
+        for field in fields.iter() {
+            schemas_bytes.put(field.to_column_schema().as_bytes());
+        }
         let schemas = Schemas::from(schemas_bytes);
 
         let mut data_lengths = LengthsMut::new(cols);
@@ -711,7 +710,7 @@ impl RawBlock {
 
     /// Data view in columns.
     #[inline]
-    pub fn columns(&self) -> std::slice::Iter<ColumnView> {
+    pub fn columns(&self) -> std::slice::Iter<'_, ColumnView> {
         self.columns.iter()
     }
 
@@ -860,7 +859,7 @@ impl RawBlock {
         view.get_raw_value_unchecked(row)
     }
 
-    pub fn get_ref(&self, row: usize, col: usize) -> Option<BorrowedValue> {
+    pub fn get_ref(&self, row: usize, col: usize) -> Option<BorrowedValue<'_>> {
         if row >= self.nrows() || col >= self.ncols() {
             return None;
         }
@@ -873,7 +872,7 @@ impl RawBlock {
     ///
     /// Ensure that `row` and `col` not exceed the limit of the block.
     #[inline]
-    pub unsafe fn get_ref_unchecked(&self, row: usize, col: usize) -> BorrowedValue {
+    pub unsafe fn get_ref_unchecked(&self, row: usize, col: usize) -> BorrowedValue<'_> {
         self.columns.get_unchecked(col).get_ref_unchecked(row)
     }
 
@@ -901,7 +900,7 @@ impl RawBlock {
             .collect_vec()
     }
 
-    pub fn pretty_format(&self) -> PrettyBlock {
+    pub fn pretty_format(&self) -> PrettyBlock<'_> {
         PrettyBlock::new(self)
     }
 

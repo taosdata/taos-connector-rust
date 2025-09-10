@@ -38,7 +38,7 @@ impl VarCharView {
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
-    pub fn is_null_iter(&self) -> VarCharNullsIter {
+    pub fn is_null_iter(&self) -> VarCharNullsIter<'_> {
         VarCharNullsIter { view: self, row: 0 }
     }
 
@@ -74,7 +74,7 @@ impl VarCharView {
         }
     }
 
-    pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
+    pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue<'_> {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::VarChar), |s| {
                 BorrowedValue::VarChar(s.as_str())
@@ -134,7 +134,7 @@ impl VarCharView {
         }
     }
 
-    pub fn iter(&self) -> VarCharIter {
+    pub fn iter(&self) -> VarCharIter<'_> {
         VarCharIter { view: self, row: 0 }
     }
 

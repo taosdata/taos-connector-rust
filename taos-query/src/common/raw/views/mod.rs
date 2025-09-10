@@ -587,7 +587,7 @@ impl ColumnView {
         }
     }
 
-    pub fn get(&self, row: usize) -> Option<BorrowedValue> {
+    pub fn get(&self, row: usize) -> Option<BorrowedValue<'_>> {
         if row < self.len() {
             Some(unsafe { self.get_ref_unchecked(row) })
         } else {
@@ -597,7 +597,7 @@ impl ColumnView {
 
     /// Get one value at `row` index of the column view.
     #[inline]
-    pub(super) unsafe fn get_ref_unchecked(&self, row: usize) -> BorrowedValue {
+    pub(super) unsafe fn get_ref_unchecked(&self, row: usize) -> BorrowedValue<'_> {
         match self {
             ColumnView::Bool(view) => view.get_value_unchecked(row),
             ColumnView::TinyInt(view) => view.get_value_unchecked(row),
@@ -649,7 +649,7 @@ impl ColumnView {
         }
     }
 
-    pub fn iter(&self) -> ColumnViewIter {
+    pub fn iter(&self) -> ColumnViewIter<'_> {
         ColumnViewIter { view: self, row: 0 }
     }
 

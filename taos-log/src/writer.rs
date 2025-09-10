@@ -141,17 +141,15 @@ fn process_log_filename(log_dir: &Path) -> (u32, u8, PathBuf, File) {
             (Some(f0), None) => return (x, 0, p0, f0),
             (None, Some(f1)) => return (x, 1, p1, f1),
             (None, None) => {
-                match OpenOptions::new()
+                if let Ok(f0) = OpenOptions::new()
                     .create_new(true)
                     .read(true)
                     .append(true)
                     .open(&p0)
                 {
-                    Ok(f0) => match f0.try_lock() {
-                        Ok(()) => return (x, 0, p0, f0),
-                        Err(_) => continue,
-                    },
-                    Err(_) => continue,
+                    if f0.try_lock().is_ok() {
+                        return (x, 0, p0, f0);
+                    }
                 }
             }
             (Some(f0), Some(f1)) => {
@@ -165,9 +163,8 @@ fn process_log_filename(log_dir: &Path) -> (u32, u8, PathBuf, File) {
 
                 if m0 >= m1 {
                     return (x, 0, p0, f0);
-                } else {
-                    return (x, 1, p1, f1);
                 }
+                return (x, 1, p1, f1);
             }
         }
     }
