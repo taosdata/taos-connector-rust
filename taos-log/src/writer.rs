@@ -134,8 +134,29 @@ fn process_log_filename(log_dir: &Path) -> (u32, u8, PathBuf, File) {
         let p0 = log_dir.join(format!("taoswslog{x}.0"));
         let p1 = log_dir.join(format!("taoswslog{x}.1"));
 
-        let mut f0_opt = try_open_lock(&p0);
-        let mut f1_opt = try_open_lock(&p1);
+        let mut f0_opt = if p0.exists() {
+            match OpenOptions::new().read(true).append(true).open(&p0) {
+                Ok(file) => match file.try_lock() {
+                    Ok(()) => Some(file),
+                    Err(_) => continue,
+                },
+                Err(_) => continue,
+            }
+        } else {
+            None
+        };
+
+        let mut f1_opt = if p1.exists() {
+            match OpenOptions::new().read(true).append(true).open(&p1) {
+                Ok(file) => match file.try_lock() {
+                    Ok(()) => Some(file),
+                    Err(_) => continue,
+                },
+                Err(_) => continue,
+            }
+        } else {
+            None
+        };
 
         match (f0_opt.take(), f1_opt.take()) {
             (Some(f0), None) => return (x, 0, p0, f0),
@@ -170,19 +191,6 @@ fn process_log_filename(log_dir: &Path) -> (u32, u8, PathBuf, File) {
     }
 
     unreachable!("u32 range exhausted");
-}
-
-fn try_open_lock(path: &Path) -> Option<File> {
-    if !path.exists() {
-        return None;
-    }
-    match OpenOptions::new().read(true).append(true).open(path) {
-        Ok(file) => match file.try_lock() {
-            Ok(()) => Some(file),
-            Err(_) => None,
-        },
-        Err(_) => None,
-    }
 }
 
 pub struct RollingFileAppender {
