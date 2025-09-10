@@ -43,6 +43,11 @@ pub enum Error {
     GetLogAbsolutePath { source: std::io::Error },
     #[snafu(display("Get CPU nums error: {source}"))]
     GetCpuNums { source: std::io::Error },
+    #[snafu(display("Lock file {} error: {source}", path.display()))]
+    FileLock {
+        path: PathBuf,
+        source: std::fs::TryLockError,
+    },
 }
 
 pub trait QidManager: Send + Sync + 'static + Clone + From<u64> {
