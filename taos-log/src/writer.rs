@@ -235,7 +235,7 @@ impl RollingFileAppender {
             if self.config.compress {
                 let old_filename = format!("taoswslog{}.{}", state.x, state.y);
                 let old_file_path = self.config.log_dir.join(old_filename);
-                compress(&old_file_path)?;
+                compress(&old_file_path).ok();
             }
 
             self.event_tx.try_send(()).ok();
