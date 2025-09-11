@@ -81,7 +81,7 @@ impl NullBits {
         nulls
     }
 
-    pub fn iter(&self) -> NullsIter {
+    pub fn iter(&self) -> NullsIter<'_> {
         self.into_iter()
     }
 }

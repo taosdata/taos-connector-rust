@@ -397,7 +397,6 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
 
     let appender = RollingFileAppender::builder(log_dir.as_str())
         .keep_days(config::log_keep_days())
-        .rotation_count(config::rotation_count())
         .rotation_size(&config::rotation_size())
         .build()?;
 

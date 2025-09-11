@@ -676,7 +676,7 @@ pub(super) mod list {
             Ok(Self { api, ptr })
         }
 
-        pub fn iter(&self) -> Iter {
+        pub fn iter(&self) -> Iter<'_> {
             let inner = self.api.as_c_str_slice(self.as_ptr());
             let len = inner.len();
             Iter {

@@ -32,7 +32,6 @@ fn main() {
     let appender = RollingFileAppender::builder(".")
         .compress(true)
         .reserved_disk_size("1GB")
-        .rotation_count(3)
         .rotation_size("1GB")
         .build()
         .unwrap();

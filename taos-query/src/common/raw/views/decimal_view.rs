@@ -59,7 +59,7 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
-    pub fn is_null_iter(&self) -> NullsIter {
+    pub fn is_null_iter(&self) -> NullsIter<'_> {
         NullsIter {
             nulls: &self.nulls,
             row: 0,
@@ -120,7 +120,7 @@ impl<T: DecimalAllowedTy> DecimalView<T> {
     }
 
     /// A iterator to nullable values of current row.
-    pub fn iter(&self) -> DecimalViewIter<T> {
+    pub fn iter(&self) -> DecimalViewIter<'_, T> {
         DecimalViewIter { view: self, row: 0 }
     }
 
@@ -309,7 +309,7 @@ macro_rules! impl_from_iter {
 }
 
 impl DecimalView<i128> {
-    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
+    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue<'_> {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::Decimal), BorrowedValue::Decimal)
     }
@@ -317,7 +317,7 @@ impl DecimalView<i128> {
 }
 
 impl DecimalView<i64> {
-    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
+    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue<'_> {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::Decimal64), BorrowedValue::Decimal64)
     }

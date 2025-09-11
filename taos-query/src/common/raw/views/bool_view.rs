@@ -83,7 +83,7 @@ impl BoolView {
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
-    pub fn is_null_iter(&self) -> NullsIter {
+    pub fn is_null_iter(&self) -> NullsIter<'_> {
         NullsIter {
             nulls: &self.nulls,
             row: 0,
@@ -141,7 +141,7 @@ impl BoolView {
         }
     }
 
-    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
+    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue<'_> {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::Bool), BorrowedValue::Bool)
     }
@@ -175,7 +175,7 @@ impl BoolView {
     }
 
     /// A iterator to nullable values of current row.
-    pub fn iter(&self) -> BoolViewIter {
+    pub fn iter(&self) -> BoolViewIter<'_> {
         BoolViewIter { view: self, row: 0 }
     }
 

@@ -90,12 +90,6 @@ pub fn init() -> Result<(), String> {
             }
         }
 
-        if let Ok(s) = std::env::var("TAOS_ROTATION_COUNT") {
-            if let Ok(count) = s.parse() {
-                config.set_rotation_count(count);
-            }
-        }
-
         if let Ok(s) = std::env::var("TAOS_ROTATION_SIZE") {
             config.set_rotation_size(s);
         }
@@ -183,10 +177,6 @@ pub fn log_keep_days() -> u16 {
     CONFIG.read().unwrap().log_keep_days()
 }
 
-pub fn rotation_count() -> u16 {
-    CONFIG.read().unwrap().rotation_count()
-}
-
 pub fn rotation_size() -> FastStr {
     CONFIG.read().unwrap().rotation_size().clone()
 }
@@ -224,7 +214,6 @@ const DEFAULT_CONN_RETRIES: u32 = 5;
 const DEFAULT_RETRY_BACKOFF_MS: u64 = 200;
 const DEFAULT_RETRY_BACKOFF_MAX_MS: u64 = 2000;
 const DEFAULT_LOG_KEEP_DAYS: u16 = 30;
-const DEFAULT_ROTATION_COUNT: u16 = 30;
 const DEFAULT_ROTATION_SIZE: &str = "1GB";
 const DEFAULT_DEBUG_FLAG: u16 = 0;
 
@@ -243,7 +232,6 @@ pub struct Config {
     retry_backoff_ms: Option<u64>,
     retry_backoff_max_ms: Option<u64>,
     log_keep_days: Option<u16>,
-    rotation_count: Option<u16>,
     rotation_size: Option<FastStr>,
 }
 
@@ -263,7 +251,6 @@ impl Config {
             retry_backoff_ms: None,
             retry_backoff_max_ms: None,
             log_keep_days: None,
-            rotation_count: None,
             rotation_size: None,
         }
     }
@@ -324,10 +311,6 @@ impl Config {
 
     fn log_keep_days(&self) -> u16 {
         self.log_keep_days.unwrap_or(DEFAULT_LOG_KEEP_DAYS)
-    }
-
-    fn rotation_count(&self) -> u16 {
-        self.rotation_count.unwrap_or(DEFAULT_ROTATION_COUNT)
     }
 
     fn rotation_size(&self) -> &FastStr {
@@ -427,10 +410,6 @@ impl Config {
         self.log_keep_days = Some(days);
     }
 
-    fn set_rotation_count(&mut self, count: u16) {
-        self.rotation_count = Some(count);
-    }
-
     fn set_rotation_size<T: Into<FastStr>>(&mut self, size: T) {
         self.rotation_size = Some(size.into());
     }
@@ -491,7 +470,6 @@ impl Config {
             retry_backoff_ms,
             retry_backoff_max_ms,
             log_keep_days,
-            rotation_count,
             rotation_size
         );
     }
@@ -520,7 +498,6 @@ impl Config {
         show!(self.log_dir, "logDir", DEFAULT_LOG_DIR);
         show!(self.debug_flag(), "debugFlag", DEFAULT_DEBUG_FLAG);
         show!(self.log_keep_days, "logKeepDays", DEFAULT_LOG_KEEP_DAYS);
-        show!(self.rotation_count, "rotationCount", DEFAULT_ROTATION_COUNT);
         show!(self.rotation_size, "rotationSize", DEFAULT_ROTATION_SIZE);
         show!(self.conn_retries, "connRetries", DEFAULT_CONN_RETRIES);
         show!(
@@ -624,14 +601,6 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                         )
                     })?);
                 }
-                "rotationCount" => {
-                    config.rotation_count = Some(value.parse::<u16>().map_err(|_| {
-                        TaosError::new(
-                            Code::INVALID_PARA,
-                            &format!("invalid value for rotationCount: {value}"),
-                        )
-                    })?);
-                }
                 "rotationSize" => {
                     config.rotation_size = Some(value.to_string().into());
                 }
@@ -665,7 +634,6 @@ mod tests {
         assert_eq!(config.retry_backoff_ms(), 200);
         assert_eq!(config.retry_backoff_max_ms(), 2000);
         assert_eq!(config.log_keep_days(), 30);
-        assert_eq!(config.rotation_count(), 30);
         assert_eq!(config.rotation_size(), "1GB");
     }
 
@@ -686,7 +654,6 @@ mod tests {
             assert_eq!(config.retry_backoff_ms(), 200);
             assert_eq!(config.retry_backoff_max_ms(), 2000);
             assert_eq!(config.log_keep_days(), 30);
-            assert_eq!(config.rotation_count(), 30);
             assert_eq!(config.rotation_size(), "1GB");
         }
 
@@ -705,7 +672,6 @@ mod tests {
             assert_eq!(config.retry_backoff_ms(), 200);
             assert_eq!(config.retry_backoff_max_ms(), 2000);
             assert_eq!(config.log_keep_days(), 30);
-            assert_eq!(config.rotation_count(), 30);
             assert_eq!(config.rotation_size(), "1GB");
         }
 
@@ -744,7 +710,6 @@ mod tests {
             set_var("TAOS_RETRY_BACKOFF_MS", "100");
             set_var("TAOS_RETRY_BACKOFF_MAX_MS", "1000");
             set_var("TAOS_LOG_KEEP_DAYS", "30");
-            set_var("TAOS_ROTATION_COUNT", "30");
             set_var("TAOS_ROTATION_SIZE", "1GB");
         }
 
@@ -757,7 +722,6 @@ mod tests {
         assert_eq!(retry_backoff_ms(), 100);
         assert_eq!(retry_backoff_max_ms(), 1000);
         assert_eq!(log_keep_days(), 30);
-        assert_eq!(rotation_count(), 30);
         assert_eq!(rotation_size(), FastStr::from("1GB"));
 
         Ok(())

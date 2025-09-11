@@ -12,54 +12,6 @@ pub type ReqId = u64;
 /// Type for result ID.
 pub type StmtId = u64;
 
-#[derive(Debug, Serialize)]
-pub struct StmtInit {
-    req_id: ReqId,
-}
-#[derive(Debug, Serialize)]
-pub struct StmtPrepare {
-    req_id: ReqId,
-    stmt_id: StmtId,
-    sql: String,
-}
-#[derive(Debug, Serialize)]
-pub struct StmtSetTableName {
-    req_id: ReqId,
-    stmt_id: StmtId,
-    name: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct StmtSetTags {
-    req_id: ReqId,
-    stmt_id: StmtId,
-    tags: Vec<Value>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct StmtBind {
-    req_id: ReqId,
-    stmt_id: StmtId,
-    columns: Vec<Value>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct StmtAddBatch {
-    req_id: ReqId,
-    stmt_id: StmtId,
-}
-#[derive(Debug, Serialize)]
-pub struct StmtExec {
-    req_id: ReqId,
-    stmt_id: StmtId,
-}
-
-#[derive(Debug, Serialize)]
-pub struct StmtClose {
-    req_id: ReqId,
-    stmt_id: StmtId,
-}
-
 #[derive(Debug, Serialize, Clone, Copy)]
 pub struct StmtArgs {
     pub req_id: ReqId,

@@ -156,7 +156,7 @@ impl NCharView {
         self.get_inline_str_unchecked(row).map(|s| s.as_str())
     }
 
-    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
+    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue<'_> {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::NChar), |s| {
                 BorrowedValue::NChar(s.into())
@@ -199,7 +199,7 @@ impl NCharView {
 
     /// Iterator for NCharView.
     #[inline]
-    pub fn iter(&self) -> NCharViewIter {
+    pub fn iter(&self) -> NCharViewIter<'_> {
         NCharViewIter { view: self, row: 0 }
     }
 

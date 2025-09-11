@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -17,27 +17,23 @@ use sysinfo::Disks;
 use tracing::Level;
 
 use crate::{
-    CompressSnafu, CreateLogDirSnafu, DiskMountPointNotFoundSnafu, GetFileSizeSnafu,
+    CompressSnafu, CreateLogDirSnafu, DiskMountPointNotFoundSnafu, FileLockSnafu, GetFileSizeSnafu,
     GetLogAbsolutePathSnafu, InvalidRotationSizeSnafu, OpenLogFileSnafu, ReadDirSnafu, Result,
 };
 
-const TAOS_LOG_00: &str = "taoslog0.0";
-const TAOS_LOG_01: &str = "taoslog0.1";
-
 #[derive(Debug, Clone)]
 struct Rotation {
-    /// file size in bytes
     file_size: u64,
 }
 
 struct State {
-    current_index: u8,
+    x: u32,
+    y: u8,
     file_path: PathBuf,
 }
 
 pub struct RollingFileAppenderBuilder<'a> {
     log_dir: PathBuf,
-    rotation_count: usize,
     log_keep_days: TimeDelta,
     rotation_size: &'a str,
     compress: bool,
@@ -46,13 +42,6 @@ pub struct RollingFileAppenderBuilder<'a> {
 }
 
 impl<'a> RollingFileAppenderBuilder<'a> {
-    pub fn rotation_count(self, rotation_count: u16) -> Self {
-        Self {
-            rotation_count: rotation_count as usize,
-            ..self
-        }
-    }
-
     pub fn keep_days(self, log_keep_days: u16) -> Self {
         Self {
             log_keep_days: TimeDelta::days(log_keep_days as _),
@@ -99,8 +88,7 @@ impl<'a> RollingFileAppenderBuilder<'a> {
             })?;
         }
 
-        let (current_index, file_path) = determine_current_file(&self.log_dir)?;
-        let file = create_or_open_file(&file_path)?;
+        let (x, y, file, file_path) = process_log_filename(&self.log_dir);
 
         let rotation = Rotation {
             file_size: parse_unit_size(self.rotation_size)?,
@@ -113,7 +101,6 @@ impl<'a> RollingFileAppenderBuilder<'a> {
             rotation,
             reserved_disk_size: parse_unit_size(self.reserved_disk_size)?,
             compress: self.compress,
-            rotation_count: self.rotation_count,
             log_keep_days: self.log_keep_days,
             stop_logging_threshold: self.stop_logging_threshold as f64 / 100f64,
         };
@@ -131,20 +118,79 @@ impl<'a> RollingFileAppenderBuilder<'a> {
 
         event_tx.send(()).ok();
 
-        let state = State {
-            current_index,
-            file_path,
-        };
-
         Ok(RollingFileAppender {
             config,
             disk_available_space,
             level_downgrade: AtomicBool::default(),
             event_tx,
-            state: RwLock::new(state),
+            state: RwLock::new(State { x, y, file_path }),
             writer: RwLock::new(file),
         })
     }
+}
+
+fn process_log_filename(log_dir: &Path) -> (u32, u8, File, PathBuf) {
+    for x in 0u32.. {
+        let p0 = log_dir.join(format!("taoswslog{x}.0"));
+        let p1 = log_dir.join(format!("taoswslog{x}.1"));
+
+        let mut f0_opt = if p0.exists() {
+            match OpenOptions::new().read(true).append(true).open(&p0) {
+                Ok(file) => match file.try_lock() {
+                    Ok(()) => Some(file),
+                    Err(_) => continue,
+                },
+                Err(_) => continue,
+            }
+        } else {
+            None
+        };
+
+        let mut f1_opt = if p1.exists() {
+            match OpenOptions::new().read(true).append(true).open(&p1) {
+                Ok(file) => match file.try_lock() {
+                    Ok(()) => Some(file),
+                    Err(_) => continue,
+                },
+                Err(_) => continue,
+            }
+        } else {
+            None
+        };
+
+        match (f0_opt.take(), f1_opt.take()) {
+            (Some(f0), None) => return (x, 0, f0, p0),
+            (None, Some(f1)) => return (x, 1, f1, p1),
+            (None, None) => {
+                if let Ok(f0) = OpenOptions::new()
+                    .create_new(true)
+                    .read(true)
+                    .append(true)
+                    .open(&p0)
+                {
+                    if f0.try_lock().is_ok() {
+                        return (x, 0, f0, p0);
+                    }
+                }
+            }
+            (Some(f0), Some(f1)) => {
+                let (m0, m1) = match (
+                    f0.metadata().and_then(|md| md.modified()),
+                    f1.metadata().and_then(|md| md.modified()),
+                ) {
+                    (Ok(m0), Ok(m1)) => (m0, m1),
+                    _ => continue,
+                };
+
+                if m0 >= m1 {
+                    return (x, 0, f0, p0);
+                }
+                return (x, 1, f1, p1);
+            }
+        }
+    }
+
+    unreachable!("u32 range exhausted");
 }
 
 pub struct RollingFileAppender {
@@ -160,7 +206,6 @@ impl RollingFileAppender {
     pub fn builder<'a, P: AsRef<Path>>(log_dir: P) -> RollingFileAppenderBuilder<'a> {
         RollingFileAppenderBuilder {
             log_dir: log_dir.as_ref().to_path_buf(),
-            rotation_count: 30,
             rotation_size: "1GB",
             compress: true,
             log_keep_days: TimeDelta::days(30),
@@ -182,65 +227,30 @@ impl RollingFileAppender {
             .len();
 
         if cur_size >= self.config.rotation.file_size {
-            let (old_filename, new_filename) = if state.current_index == 0 {
-                (TAOS_LOG_00, TAOS_LOG_01)
-            } else {
-                (TAOS_LOG_01, TAOS_LOG_00)
-            };
-
-            let old_filename = self.config.log_dir.join(old_filename);
-            let new_filename = self.config.log_dir.join(new_filename);
-            let file = create_or_open_file(&new_filename)?;
+            let y = 1 - state.y;
+            let new_filename = format!("taoswslog{}.{}", state.x, y);
+            let new_file_path = self.config.log_dir.join(new_filename);
+            let new_file = create_or_open_file(&new_file_path)?;
 
             if self.config.compress {
-                compress(&old_filename).ok();
+                let old_filename = format!("taoswslog{}.{}", state.x, state.y);
+                let old_file_path = self.config.log_dir.join(old_filename);
+                compress(&old_file_path).ok();
             }
 
             self.event_tx.try_send(()).ok();
 
-            state.current_index = 1 - state.current_index;
-            state.file_path = new_filename;
-            return Ok(Some(file));
+            state.y = y;
+            state.file_path = new_file_path;
+            return Ok(Some(new_file));
         }
 
         if !state.file_path.is_file() {
-            let filename = if state.current_index == 0 {
-                TAOS_LOG_00
-            } else {
-                TAOS_LOG_01
-            };
-
-            let file_path = self.config.log_dir.join(filename);
-            let file = create_or_open_file(&file_path)?;
-            state.file_path = file_path;
+            let file = create_or_open_file(&state.file_path)?;
             return Ok(Some(file));
         }
 
         Ok(None)
-    }
-}
-
-fn determine_current_file(log_dir: &Path) -> Result<(u8, PathBuf)> {
-    let path0 = log_dir.join(TAOS_LOG_00);
-    let path1 = log_dir.join(TAOS_LOG_01);
-    match (path0.exists(), path1.exists()) {
-        (_, false) => Ok((0, path0.clone())),
-        (false, true) => Ok((1, path1.clone())),
-        (true, true) => {
-            let modified0 = fs::metadata(&path0)
-                .context(OpenLogFileSnafu { path: &path0 })?
-                .modified()
-                .context(OpenLogFileSnafu { path: &path0 })?;
-            let modified1 = fs::metadata(&path1)
-                .context(OpenLogFileSnafu { path: &path1 })?
-                .modified()
-                .context(OpenLogFileSnafu { path: &path1 })?;
-            if modified0 > modified1 {
-                Ok((0, path0))
-            } else {
-                Ok((1, path1))
-            }
-        }
     }
 }
 
@@ -250,28 +260,25 @@ struct Config {
     rotation: Rotation,
     reserved_disk_size: u64,
     compress: bool,
-    rotation_count: usize,
     log_keep_days: TimeDelta,
     stop_logging_threshold: f64,
 }
 
 impl Config {
     fn handle_old_files(&self) -> Result<()> {
-        let mut active_count = 0;
         let mut files = fs::read_dir(&self.log_dir)
             .context(ReadDirSnafu {
                 path: &self.log_dir,
             })?
             .filter_map(|entry| {
                 let entry = entry.ok()?;
-                let metadata = entry.metadata().ok()?;
-                if !metadata.is_file() {
+                let md = entry.metadata().ok()?;
+                if !md.is_file() {
                     return None;
                 }
 
                 let filename = entry.file_name().to_str()?.to_string();
                 if is_active_log_file(&filename) {
-                    active_count += 1;
                     return None;
                 }
 
@@ -286,24 +293,14 @@ impl Config {
 
         files.sort_by(|a, b| b.1.cmp(&a.1));
 
-        let mut index = files.len();
-        if self.rotation_count > 0 {
-            if self.rotation_count > active_count {
-                index = index.min(self.rotation_count - active_count);
-            } else {
-                index = 0;
-            }
-        }
-
         if !self.log_keep_days.is_zero() {
             let cutoff_time = Local::now().with_time(NaiveTime::MIN).unwrap() - self.log_keep_days;
             let cutoff_ts = cutoff_time.timestamp_nanos_opt().unwrap();
-            index = index.min(files.partition_point(|(_, ts)| *ts >= cutoff_ts));
+            let idx = files.partition_point(|(_, ts)| *ts >= cutoff_ts);
+            files[idx..].into_par_iter().for_each(|(filename, _)| {
+                fs::remove_file(self.log_dir.join(filename)).ok();
+            });
         }
-
-        files[index..].into_par_iter().for_each(|(filename, _)| {
-            fs::remove_file(self.log_dir.join(filename)).ok();
-        });
 
         Ok(())
     }
@@ -391,13 +388,15 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RollingFileAppender {
     }
 }
 
-fn create_or_open_file(name: impl AsRef<Path>) -> Result<File> {
-    let path = name.as_ref();
-    fs::OpenOptions::new()
+fn create_or_open_file(path: &Path) -> Result<File> {
+    let file = OpenOptions::new()
         .create(true)
+        .read(true)
         .append(true)
         .open(path)
-        .context(OpenLogFileSnafu { path })
+        .context(OpenLogFileSnafu { path })?;
+    file.try_lock().context(FileLockSnafu { path })?;
+    Ok(file)
 }
 
 fn calc_disk_available_space(log_dir: &Path) -> Result<Arc<AtomicU64>> {
@@ -428,13 +427,13 @@ fn calc_disk_available_space(log_dir: &Path) -> Result<Arc<AtomicU64>> {
 
 fn compress(path: &Path) -> Result<()> {
     let ts = Local::now().timestamp_nanos_opt().unwrap();
-    let compressed_name = format!("taoslog.{ts}.gz");
+    let compressed_name = format!("taoswslog.{ts}.gz");
     let dest_path = path.parent().unwrap().join(compressed_name);
 
     let mut src_file = File::open(path).context(CompressSnafu { path })?;
-    let dest_file = match fs::OpenOptions::new()
-        .write(true)
+    let dest_file = match OpenOptions::new()
         .create_new(true)
+        .write(true)
         .open(&dest_path)
     {
         Ok(file) => file,
@@ -451,12 +450,14 @@ fn compress(path: &Path) -> Result<()> {
 }
 
 fn is_active_log_file(filename: &str) -> bool {
-    filename == TAOS_LOG_00 || filename == TAOS_LOG_01
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"^taoswslog\d+\.[01]$").unwrap());
+    re.is_match(filename)
 }
 
 fn parse_compressed_filename(filename: &str) -> Option<i64> {
     static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| Regex::new(r"^taoslog\.(?<timestamp>\d+)\.gz$").unwrap());
+    let re = RE.get_or_init(|| Regex::new(r"^taoswslog\.(?<timestamp>\d+)\.gz$").unwrap());
     let caps = re.captures(filename)?;
     caps.name("timestamp")?.as_str().parse().ok()
 }
@@ -490,25 +491,25 @@ mod tests {
 
     #[test]
     fn test_is_active_log_file() {
-        assert!(is_active_log_file(TAOS_LOG_00));
-        assert!(is_active_log_file(TAOS_LOG_01));
-        assert!(!is_active_log_file("taoslog.123.gz"));
-        assert!(!is_active_log_file("taoslog.123"));
+        assert!(is_active_log_file("taoswslog0.0"));
+        assert!(is_active_log_file("taoswslog1.1"));
+        assert!(!is_active_log_file("taoswslog.123"));
+        assert!(!is_active_log_file("taoswslog.123.gz"));
     }
 
     #[test]
     fn test_parse_compressed_filename() {
-        assert_eq!(parse_compressed_filename("taoslog.0.gz"), Some(0));
+        assert_eq!(parse_compressed_filename("taoswslog.0.gz"), Some(0));
         assert_eq!(
-            parse_compressed_filename("taoslog.1692600000.gz"),
+            parse_compressed_filename("taoswslog.1692600000.gz"),
             Some(1692600000)
         );
 
-        assert_eq!(parse_compressed_filename("taoslog.gz"), None);
-        assert_eq!(parse_compressed_filename("taoslog.abc.gz"), None);
-        assert_eq!(parse_compressed_filename("taoslog.123.txt"), None);
+        assert_eq!(parse_compressed_filename("taoswslog.gz"), None);
+        assert_eq!(parse_compressed_filename("taoswslog.abc.gz"), None);
+        assert_eq!(parse_compressed_filename("taoswslog.123.txt"), None);
         assert_eq!(parse_compressed_filename("randomfile.gz"), None);
-        assert_eq!(parse_compressed_filename("taoslog.1234567890"), None);
+        assert_eq!(parse_compressed_filename("taoswslog.1234567890"), None);
     }
 
     #[test]
@@ -528,7 +529,6 @@ mod tests {
 
         let appender = RollingFileAppender::builder(log_dir)
             .rotation_size("1KB")
-            .rotation_count(2)
             .keep_days(1)
             .compress(false)
             .build()
@@ -556,15 +556,15 @@ mod tests {
             .map(|e| e.file_name().into_string().unwrap())
             .collect();
 
-        assert!(files.contains(&TAOS_LOG_00.to_string()));
-        assert!(files.contains(&TAOS_LOG_01.to_string()));
+        assert!(files.contains(&"taoswslog0.0".to_string()));
+        assert!(files.contains(&"taoswslog0.1".to_string()));
     }
 
     #[test]
     fn test_compress_and_compressed_filename() {
         let dir = tempdir().unwrap();
         let log_dir = dir.path();
-        let log_path = log_dir.join(TAOS_LOG_00);
+        let log_path = log_dir.join("taoswslog0.0");
 
         fs::write(&log_path, b"hello world").unwrap();
         compress(&log_path).unwrap();
@@ -590,8 +590,8 @@ mod tests {
             .timestamp_nanos_opt()
             .unwrap();
 
-        let today_file = log_dir.join(format!("taoslog.{now}.gz"));
-        let old_file = log_dir.join(format!("taoslog.{two_days_ago}.gz"));
+        let today_file = log_dir.join(format!("taoswslog.{now}.gz"));
+        let old_file = log_dir.join(format!("taoswslog.{two_days_ago}.gz"));
         fs::write(&today_file, b"today").unwrap();
         fs::write(&old_file, b"two_days_ago").unwrap();
 
@@ -600,7 +600,6 @@ mod tests {
             rotation: Rotation { file_size: 1024 },
             reserved_disk_size: 1024 * 1024,
             compress: true,
-            rotation_count: 10,
             log_keep_days: TimeDelta::days(1),
             stop_logging_threshold: 0.1,
         };
@@ -612,41 +611,10 @@ mod tests {
             .map(|e| e.file_name().into_string().unwrap())
             .collect();
 
-        assert!(files.iter().any(|f| f == &format!("taoslog.{now}.gz")));
+        assert!(files.iter().any(|f| f == &format!("taoswslog.{now}.gz")));
         assert!(!files
             .iter()
-            .any(|f| f == &format!("taoslog.{two_days_ago}.gz")));
-    }
-
-    #[test]
-    fn test_rotation_count_limit() {
-        let dir = tempdir().unwrap();
-        let log_dir = dir.path();
-
-        let ts = Local::now().timestamp_nanos_opt().unwrap();
-        for i in 0..5 {
-            let file = log_dir.join(format!("taoslog.{}.gz", ts + i));
-            fs::write(&file, format!("file{i}")).unwrap();
-        }
-
-        let config = Config {
-            log_dir: log_dir.to_path_buf(),
-            rotation: Rotation { file_size: 1024 },
-            reserved_disk_size: 1024 * 1024,
-            compress: true,
-            rotation_count: 3,
-            log_keep_days: TimeDelta::days(30),
-            stop_logging_threshold: 0.1,
-        };
-        config.handle_old_files().unwrap();
-
-        let files: Vec<_> = fs::read_dir(log_dir)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().into_string().unwrap())
-            .collect();
-
-        assert_eq!(files.iter().filter(|f| f.ends_with(".gz")).count(), 3);
+            .any(|f| f == &format!("taoswslog.{two_days_ago}.gz")));
     }
 
     #[test]
@@ -677,37 +645,6 @@ mod tests {
         }
 
         assert!(file_path.exists());
-    }
-
-    #[test]
-    fn test_rotation_count_zero_keeps_all_files() {
-        let dir = tempdir().unwrap();
-        let log_dir = dir.path();
-
-        let ts = Local::now().timestamp_nanos_opt().unwrap();
-        for i in 0..5 {
-            let file = log_dir.join(format!("taoslog.{}.gz", ts + i));
-            std::fs::write(&file, format!("file{i}")).unwrap();
-        }
-
-        let config = Config {
-            log_dir: log_dir.to_path_buf(),
-            rotation: Rotation { file_size: 1024 },
-            reserved_disk_size: 1024 * 1024,
-            compress: true,
-            rotation_count: 0,
-            log_keep_days: TimeDelta::days(30),
-            stop_logging_threshold: 0.1,
-        };
-        config.handle_old_files().unwrap();
-
-        let files: Vec<_> = std::fs::read_dir(log_dir)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().into_string().unwrap())
-            .collect();
-
-        assert!(files.iter().filter(|f| f.ends_with(".gz")).count() >= 5);
     }
 
     #[test]
@@ -757,7 +694,6 @@ mod tests {
         let appender = Arc::new(
             RollingFileAppender::builder(log_dir)
                 .rotation_size("1KB")
-                .rotation_count(2)
                 .compress(false)
                 .build()
                 .unwrap(),
@@ -787,8 +723,157 @@ mod tests {
             .collect();
         let count = files
             .iter()
-            .filter(|f| f == &TAOS_LOG_00 || f == &TAOS_LOG_01)
+            .filter(|&f| f == "taoswslog0.0" || f == "taoswslog0.1")
             .count();
         assert!(count <= 2);
+    }
+
+    #[test]
+    fn test_lock_exclusivity_same_process() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let appender = RollingFileAppender::builder(log_dir)
+            .rotation_size("4KB")
+            .build()
+            .unwrap();
+
+        {
+            let mut writer = appender.make_writer();
+            writer.write_all(b"hello").unwrap();
+            writer.flush().unwrap();
+        }
+
+        let path = { appender.state.read().file_path.clone() };
+        let file = OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+        assert!(file.try_lock().is_err());
+    }
+
+    #[test]
+    fn test_multiple_appenders_allocate_distinct_x() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let a1 = RollingFileAppender::builder(log_dir)
+            .rotation_size("4KB")
+            .build()
+            .unwrap();
+        let a2 = RollingFileAppender::builder(log_dir)
+            .rotation_size("4KB")
+            .build()
+            .unwrap();
+
+        let x1 = a1.state.read().x;
+        let x2 = a2.state.read().x;
+        assert_ne!(x1, x2);
+    }
+
+    #[test]
+    fn test_rotation_preserves_new_lock() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let appender = RollingFileAppender::builder(log_dir)
+            .rotation_size("1KB")
+            .build()
+            .unwrap();
+
+        let (old_path, old_y) = {
+            let st = appender.state.read();
+            (st.file_path.clone(), st.y)
+        };
+
+        for _ in 0..1100 {
+            let mut writer = appender.make_writer();
+            writer.write_all(b"x").unwrap();
+        }
+
+        let (new_path, new_y) = {
+            let st = appender.state.read();
+            (st.file_path.clone(), st.y)
+        };
+
+        assert_ne!(old_y, new_y);
+        assert_ne!(old_path, new_path);
+
+        let new_file = OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(&new_path)
+            .unwrap();
+        assert!(new_file.try_lock().is_err());
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        assert!(!old_path.exists())
+    }
+
+    #[test]
+    fn test_no_creation_during_probe_missing_files() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let log_path = log_dir.join("taoswslog0.0");
+        fs::write(&log_path, b"seed").unwrap();
+        let file = OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(&log_path)
+            .unwrap();
+        file.try_lock().unwrap();
+
+        let appender = RollingFileAppender::builder(log_dir)
+            .rotation_size("4KB")
+            .build()
+            .unwrap();
+        let st = appender.state.read();
+        assert_eq!(st.x, 1);
+    }
+
+    #[test]
+    fn test_second_appender_rotates_independently() {
+        let dir = tempdir().unwrap();
+        let log_dir = dir.path();
+
+        let a1 = RollingFileAppender::builder(log_dir)
+            .rotation_size("1KB")
+            .build()
+            .unwrap();
+        let a2 = RollingFileAppender::builder(log_dir)
+            .rotation_size("1KB")
+            .build()
+            .unwrap();
+
+        for _ in 0..1200 {
+            let mut w1 = a1.make_writer();
+            w1.write_all(b"x").unwrap();
+            let mut w2 = a2.make_writer();
+            w2.write_all(b"y").unwrap();
+        }
+
+        let s1 = a1.state.read();
+        let s2 = a2.state.read();
+        assert_ne!(s1.x, s2.x);
+
+        let files: Vec<_> = fs::read_dir(log_dir)
+            .unwrap()
+            .filter_map(|res| res.ok())
+            .map(|de| de.file_name().into_string().unwrap())
+            .collect();
+
+        let count_x1 = files
+            .iter()
+            .filter(|f| f.starts_with(&format!("taoswslog{}.", s1.x)))
+            .count();
+        let count_x2 = files
+            .iter()
+            .filter(|f| f.starts_with(&format!("taoswslog{}.", s2.x)))
+            .count();
+        assert!(count_x1 <= 2);
+        assert!(count_x2 <= 2);
     }
 }

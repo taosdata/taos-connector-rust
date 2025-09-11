@@ -125,6 +125,7 @@ impl<T> TaosMaybeError<T> {
         unsafe { self.data.as_ref() }
     }
 
+    #[allow(clippy::mut_from_ref)]
     pub fn deref_mut(&self) -> Option<&mut T> {
         unsafe { self.data.as_mut() }
     }

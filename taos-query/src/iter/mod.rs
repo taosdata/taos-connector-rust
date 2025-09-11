@@ -36,7 +36,7 @@ pub trait BlockExt: Debug + Sized {
     /// # Safety
     ///
     /// **DO NOT** call it directly.
-    unsafe fn cell_unchecked(&self, row: usize, col: usize) -> (&Field, BorrowedValue);
+    unsafe fn cell_unchecked(&self, row: usize, col: usize) -> (&'_ Field, BorrowedValue<'_>);
 
     /// # Safety
     /// **DO NOT** call it directly.
@@ -91,39 +91,6 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct RowsIter<'b, T: BlockExt> {
-    block: &'b T,
-    row: usize,
-}
-
-impl<'b, T> Iterator for RowsIter<'b, T>
-where
-    T: BlockExt,
-{
-    type Item = RowInBlock<'b, T>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let row = self.row;
-
-        if row < self.block.num_of_rows() {
-            self.row += 1;
-            Some(RowInBlock {
-                block: self.block,
-                row,
-            })
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct IntoRowsIter<T: BlockExt> {
-    block: Rc<T>,
-    row: usize,
-}
-
 pub struct QueryRowIter<T: BlockExt> {
     block: Rc<T>,
     row: usize,
@@ -142,27 +109,6 @@ where
             block: &self.block,
             row: self.row,
             col: 0,
-        }
-    }
-}
-
-impl<T> Iterator for IntoRowsIter<T>
-where
-    T: BlockExt,
-{
-    type Item = QueryRowIter<T>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let row = self.row;
-
-        if row < self.block.num_of_rows() {
-            self.row += 1;
-            Some(QueryRowIter {
-                block: self.block.clone(),
-                row,
-            })
-        } else {
-            None
         }
     }
 }

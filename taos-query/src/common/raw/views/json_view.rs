@@ -64,7 +64,7 @@ impl JsonView {
         }
     }
 
-    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
+    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue<'_> {
         // todo: use simd_json::BorrowedValue as Json.
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::Json), |s| {
@@ -125,7 +125,7 @@ impl JsonView {
         }
     }
 
-    pub fn iter(&self) -> VarCharIter {
+    pub fn iter(&self) -> VarCharIter<'_> {
         VarCharIter { view: self, row: 0 }
     }
 

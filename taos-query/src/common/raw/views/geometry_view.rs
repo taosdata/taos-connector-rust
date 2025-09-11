@@ -36,7 +36,7 @@ impl GeometryView {
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
-    pub fn is_null_iter(&self) -> GeometryNullsIter {
+    pub fn is_null_iter(&self) -> GeometryNullsIter<'_> {
         GeometryNullsIter { view: self, row: 0 }
     }
 
@@ -72,7 +72,7 @@ impl GeometryView {
         }
     }
 
-    pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
+    pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue<'_> {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::Geometry), |s| {
                 BorrowedValue::Geometry(Cow::Borrowed(s.as_bytes()))
@@ -111,7 +111,7 @@ impl GeometryView {
             .unwrap_or(0)
     }
 
-    pub fn iter(&self) -> GeometryIter {
+    pub fn iter(&self) -> GeometryIter<'_> {
         GeometryIter { view: self, row: 0 }
     }
 

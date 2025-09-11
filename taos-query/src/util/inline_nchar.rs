@@ -99,7 +99,7 @@ macro_rules! _impl_inline_str {
                     self.len() / std::mem::size_of::<char>()
                 }
 
-                pub fn chars(&self) -> Chars<$ty> {
+                pub fn chars(&self) -> Chars<'_, $ty> {
                     Chars {
                         data: self,
                         i: 0,
@@ -181,7 +181,6 @@ fn test_inline_nchar_2() {
     let bytes = bytes.as_mut_slice();
     let inline = unsafe { InlineNChar::<u16>::from_ptr(bytes.as_mut_ptr()) };
     dbg!(&inline);
-    // assert_eq!(inline.len(), 8);
     assert_eq!(inline.inlined(), bytes);
     dbg!(inline.printable_inlined().as_str());
     let p = unsafe { inline.into_inline_str().as_str() };

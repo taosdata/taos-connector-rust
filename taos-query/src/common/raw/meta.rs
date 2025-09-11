@@ -400,7 +400,7 @@ impl JsonMeta {
         matches!(self, JsonMeta::Plural { .. })
     }
 
-    pub fn iter(&self) -> JsonMetaIter {
+    pub fn iter(&self) -> JsonMetaIter<'_> {
         match self {
             JsonMeta::Plural { metas, .. } => JsonMetaIter {
                 iter: Either::Left(metas.iter()),
@@ -411,7 +411,7 @@ impl JsonMeta {
         }
     }
 
-    pub fn iter_mut(&mut self) -> JsonMetaIterMut {
+    pub fn iter_mut(&mut self) -> JsonMetaIterMut<'_> {
         match self {
             JsonMeta::Plural { metas, .. } => JsonMetaIterMut {
                 iter: Either::Left(metas.iter_mut()),

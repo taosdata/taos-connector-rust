@@ -68,7 +68,7 @@ impl<'a> Iterator for RowsIter<'a> {
 }
 
 impl RowsIter<'_> {
-    pub fn values(&mut self) -> ValueIter {
+    pub fn values(&mut self) -> ValueIter<'_> {
         ValueIter {
             raw: unsafe { self.raw.as_mut() },
             row: self.row,
@@ -76,7 +76,7 @@ impl RowsIter<'_> {
         }
     }
 
-    pub fn named_values(&mut self) -> RowView {
+    pub fn named_values(&mut self) -> RowView<'_> {
         RowView {
             raw: unsafe { self.raw.as_mut() },
             row: self.row,

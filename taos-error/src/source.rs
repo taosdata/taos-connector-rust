@@ -118,7 +118,7 @@ impl Inner {
         }
     }
 
-    pub fn chain(&self) -> Chain {
+    pub fn chain(&self) -> Chain<'_> {
         match self {
             Inner::Empty { .. } => Chain::Empty,
             Inner::Raw { raw, .. } => Chain::Raw([raw.deref()].into_iter()),
