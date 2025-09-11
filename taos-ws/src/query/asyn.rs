@@ -106,7 +106,7 @@ impl WsTaos {
 
         tokio::spawn(
             super::conn::run(
-                ws_taos.clone(),
+                Arc::downgrade(&ws_taos),
                 builder,
                 ws_stream,
                 query_sender,
@@ -640,6 +640,7 @@ impl AsyncQueryable for WsTaos {
 impl Drop for WsTaos {
     fn drop(&mut self) {
         tracing::trace!("dropping ws connection, conn_id: {}", self.conn_id);
+        self.set_state(ConnState::Disconnected);
         // Send close signal to reader/writer spawned tasks.
         let _ = self.close_signal.send(true);
     }
