@@ -88,7 +88,7 @@ impl<'a> RollingFileAppenderBuilder<'a> {
             })?;
         }
 
-        let (x, y, file_path, file) = process_log_filename(&self.log_dir);
+        let (x, y, file, file_path) = process_log_filename(&self.log_dir);
 
         let rotation = Rotation {
             file_size: parse_unit_size(self.rotation_size)?,
@@ -129,7 +129,7 @@ impl<'a> RollingFileAppenderBuilder<'a> {
     }
 }
 
-fn process_log_filename(log_dir: &Path) -> (u32, u8, PathBuf, File) {
+fn process_log_filename(log_dir: &Path) -> (u32, u8, File, PathBuf) {
     for x in 0u32.. {
         let p0 = log_dir.join(format!("taoswslog{x}.0"));
         let p1 = log_dir.join(format!("taoswslog{x}.1"));
@@ -159,8 +159,8 @@ fn process_log_filename(log_dir: &Path) -> (u32, u8, PathBuf, File) {
         };
 
         match (f0_opt.take(), f1_opt.take()) {
-            (Some(f0), None) => return (x, 0, p0, f0),
-            (None, Some(f1)) => return (x, 1, p1, f1),
+            (Some(f0), None) => return (x, 0, f0, p0),
+            (None, Some(f1)) => return (x, 1, f1, p1),
             (None, None) => {
                 if let Ok(f0) = OpenOptions::new()
                     .create_new(true)
@@ -169,7 +169,7 @@ fn process_log_filename(log_dir: &Path) -> (u32, u8, PathBuf, File) {
                     .open(&p0)
                 {
                     if f0.try_lock().is_ok() {
-                        return (x, 0, p0, f0);
+                        return (x, 0, f0, p0);
                     }
                 }
             }
@@ -183,9 +183,9 @@ fn process_log_filename(log_dir: &Path) -> (u32, u8, PathBuf, File) {
                 };
 
                 if m0 >= m1 {
-                    return (x, 0, p0, f0);
+                    return (x, 0, f0, p0);
                 }
-                return (x, 1, p1, f1);
+                return (x, 1, f1, p1);
             }
         }
     }
