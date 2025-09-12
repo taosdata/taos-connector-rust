@@ -1,14 +1,15 @@
 use std::ffi::{c_char, c_int, c_ulong, c_void, CStr};
 use std::{ptr, slice, str};
 
+use byteorder::{ByteOrder, LittleEndian};
 use taos_error::Code;
-use taos_query::common::{ColumnView, Timestamp, Ty, Value};
-use taos_query::stmt2::{Stmt2BindParam, Stmt2Bindable};
+use taos_query::common::Ty;
+use taos_query::stmt2::Stmt2Bindable;
 use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, global_tokio_runtime};
 use taos_ws::query::{BindType, Stmt2Field};
 use taos_ws::{Stmt2, Taos};
-use tracing::{debug, error, Instrument};
+use tracing::{debug, error, trace, Instrument};
 
 use crate::ws::error::*;
 use crate::ws::query::QueryResultSet;
@@ -207,8 +208,22 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
         }
     };
 
-    let params = match bindv.to_bind_params(stmt2) {
-        Ok(params) => params,
+    let mut tag_cnt = 0;
+    let mut col_cnt = 0;
+    if stmt2.is_insert().unwrap() {
+        for field in stmt2.fields().unwrap() {
+            match field.bind_type {
+                BindType::Tag => tag_cnt += 1,
+                BindType::Column => col_cnt += 1,
+                BindType::TableName => {}
+            }
+        }
+    } else {
+        col_cnt = stmt2.fields_count().unwrap();
+    }
+
+    let bytes = match bindv.to_bytes(generate_req_id(), stmt2.stmt_id(), tag_cnt, col_cnt) {
+        Ok(bytes) => bytes,
         Err(err) => {
             error!("taos_stmt2_bind_param failed, err: {err:?}");
             let code = err.code();
@@ -217,9 +232,9 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
         }
     };
 
-    debug!("taos_stmt2_bind_param, params: {params:?}");
+    trace!("taos_stmt2_bind_param, bind bytes: {bytes:?}");
 
-    match stmt2.bind(&params) {
+    match block_in_place_or_global(stmt2.bind_bytes(bytes)) {
         Ok(_) => {
             debug!("taos_stmt2_bind_param succ");
             maybe_err.clear_err();
@@ -533,272 +548,338 @@ impl TaosStmt2 {
 }
 
 impl TAOS_STMT2_BIND {
-    fn to_value(&self) -> Value {
-        debug!("to_value, bind: {self:?}");
-
-        if !self.is_null.is_null() && unsafe { self.is_null.read() != 0 } {
-            let val = Value::Null(self.ty());
-            debug!("to_value, value: {val:?}");
-            return val;
-        }
-
-        assert!(!self.buffer.is_null());
-        if self.ty().fixed_length() == 0 {
-            assert!(!self.length.is_null());
-        }
-
-        let val = match self.ty() {
-            Ty::Null => Value::Null(self.ty()),
-            Ty::Bool => unsafe { Value::Bool(*(self.buffer as *const _)) },
-            Ty::TinyInt => unsafe { Value::TinyInt(*(self.buffer as *const _)) },
-            Ty::SmallInt => unsafe { Value::SmallInt(*(self.buffer as *const _)) },
-            Ty::Int => unsafe { Value::Int(*(self.buffer as *const _)) },
-            Ty::BigInt => unsafe { Value::BigInt(*(self.buffer as *const _)) },
-            Ty::UTinyInt => unsafe { Value::UTinyInt(*(self.buffer as *const _)) },
-            Ty::USmallInt => unsafe { Value::USmallInt(*(self.buffer as *const _)) },
-            Ty::UInt => unsafe { Value::UInt(*(self.buffer as *const _)) },
-            Ty::UBigInt => unsafe { Value::UBigInt(*(self.buffer as *const _)) },
-            Ty::Float => unsafe { Value::Float(*(self.buffer as *const _)) },
-            Ty::Double => unsafe { Value::Double(*(self.buffer as *const _)) },
-            Ty::Timestamp => unsafe {
-                Value::Timestamp(Timestamp::Milliseconds(*(self.buffer as *const _)))
-            },
-            Ty::VarChar => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                let val = str::from_utf8_unchecked(slice).to_owned();
-                Value::VarChar(val)
-            },
-            Ty::NChar => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                let val = str::from_utf8_unchecked(slice).to_owned();
-                Value::NChar(val)
-            },
-            Ty::Json => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                let val = serde_json::from_slice(slice).unwrap();
-                Value::Json(val)
-            },
-            Ty::VarBinary => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                Value::VarBinary(slice.into())
-            },
-            Ty::Geometry => unsafe {
-                let slice = slice::from_raw_parts(self.buffer as *const _, self.length.read() as _);
-                Value::Geometry(slice.into())
-            },
-            _ => todo!(),
-        };
-
-        debug!("to_value, value: {val:?}");
-
-        val
-    }
-
-    fn to_column_view(&self) -> TaosResult<ColumnView> {
-        debug!("to_column_view, bind: {self:?}");
-
-        let ty = self.ty();
-        let num = self.num as usize;
-
-        if ty.fixed_length() == 0 && self.length.is_null() {
-            return Err(TaosError::new(
-                Code::INVALID_PARA,
-                "length is null for variable length type",
-            ));
-        }
-
-        let mut is_nulls = None;
-        if !self.is_null.is_null() {
-            is_nulls = Some(unsafe { slice::from_raw_parts(self.is_null, num) });
-        }
-
-        debug!("to_column_view, ty: {ty}, num: {num}, is_nulls: {is_nulls:?}");
-
-        macro_rules! _fixed_view {
-            ($from:expr) => {{
-                let slice = unsafe { slice::from_raw_parts(self.buffer as *const _, num) };
-                let mut vals = vec![None; num];
-                if let Some(is_nulls) = is_nulls {
-                    for i in 0..num {
-                        if is_nulls[i] == 0 {
-                            vals[i] = Some(slice[i]);
-                        }
-                    }
-                } else {
-                    for i in 0..num {
-                        vals[i] = Some(slice[i]);
-                    }
-                }
-                $from(vals)
-            }};
-        }
-
-        macro_rules! _variable_str_view {
-            ($from:ident) => {{
-                let lens = unsafe { slice::from_raw_parts(self.length, num) };
-                let len = lens.iter().sum::<i32>() as usize;
-                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
-                let mut vals = vec![None; num];
-                let mut idx = 0;
-
-                if let Some(is_nulls) = is_nulls {
-                    for i in 0..num {
-                        if is_nulls[i] == 0 {
-                            let bytes = &slice[idx..idx + lens[i] as usize];
-                            vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
-                            idx += lens[i] as usize;
-                        }
-                    }
-                } else {
-                    for i in 0..num {
-                        let bytes = &slice[idx..idx + lens[i] as usize];
-                        vals[i] = unsafe { Some(str::from_utf8_unchecked(bytes)) };
-                        idx += lens[i] as usize;
-                    }
-                }
-
-                ColumnView::$from::<&str, _, _, _>(vals)
-            }};
-        }
-
-        macro_rules! _variable_bytes_view {
-            ($from:ident) => {{
-                let lens = unsafe { slice::from_raw_parts(self.length, num) };
-                let len = lens.iter().sum::<i32>() as usize;
-                let slice = unsafe { slice::from_raw_parts(self.buffer as *const u8, len) };
-                let mut vals = vec![None; num];
-                let mut idx = 0;
-
-                if let Some(is_nulls) = is_nulls {
-                    for i in 0..num {
-                        if is_nulls[i] == 0 {
-                            let val = &slice[idx..idx + lens[i] as usize];
-                            vals[i] = Some(val);
-                            idx += lens[i] as usize;
-                        }
-                    }
-                } else {
-                    for i in 0..num {
-                        let val = &slice[idx..idx + lens[i] as usize];
-                        vals[i] = Some(val);
-                        idx += lens[i] as usize;
-                    }
-                }
-
-                ColumnView::$from::<&[u8], _, _, _>(vals)
-            }};
-        }
-
-        let view = match ty {
-            Ty::Bool => _fixed_view!(ColumnView::from_bools),
-            Ty::TinyInt => _fixed_view!(ColumnView::from_tiny_ints),
-            Ty::SmallInt => _fixed_view!(ColumnView::from_small_ints),
-            Ty::Int => _fixed_view!(ColumnView::from_ints),
-            Ty::BigInt => _fixed_view!(ColumnView::from_big_ints),
-            Ty::UTinyInt => _fixed_view!(ColumnView::from_unsigned_tiny_ints),
-            Ty::USmallInt => _fixed_view!(ColumnView::from_unsigned_small_ints),
-            Ty::UInt => _fixed_view!(ColumnView::from_unsigned_ints),
-            Ty::UBigInt => _fixed_view!(ColumnView::from_unsigned_big_ints),
-            Ty::Float => _fixed_view!(ColumnView::from_floats),
-            Ty::Double => _fixed_view!(ColumnView::from_doubles),
-            Ty::Timestamp => _fixed_view!(ColumnView::from_millis_timestamp),
-            Ty::VarChar => _variable_str_view!(from_varchar),
-            Ty::NChar => _variable_str_view!(from_nchar),
-            Ty::Blob => _variable_str_view!(from_blob_bytes),
-            Ty::VarBinary => _variable_bytes_view!(from_bytes),
-            Ty::Geometry => _variable_bytes_view!(from_geobytes),
-            _ => todo!(),
-        };
-
-        debug!("to_column_view, view: {view:?}");
-
-        Ok(view)
-    }
-
     fn ty(&self) -> Ty {
         self.buffer_type.into()
     }
 }
 
 impl TAOS_STMT2_BINDV {
-    fn to_bind_params(&self, stmt2: &Stmt2) -> TaosResult<Vec<Stmt2BindParam>> {
-        if stmt2.is_insert().is_none() {
-            return Err(TaosError::new(
-                Code::FAILED,
-                "taos_stmt2_prepare is not called",
-            ));
-        }
+    fn to_bytes(
+        &self,
+        req_id: u64,
+        stmt_id: u64,
+        tag_cnt: usize,
+        col_cnt: usize,
+    ) -> TaosResult<Vec<u8>> {
+        debug!("to_bytes, req_id: {req_id}, stmt_id: {stmt_id}, tag_cnt: {tag_cnt}, col_cnt: {col_cnt}");
 
-        let cnt = self.count as usize;
-        let mut tag_cnt = 0;
-        let mut col_cnt = 0;
-
-        if stmt2.is_insert().unwrap() {
-            for field in stmt2.fields().unwrap() {
-                match field.bind_type {
-                    BindType::Tag => tag_cnt += 1,
-                    BindType::Column => col_cnt += 1,
-                    BindType::TableName => {}
-                }
-            }
+        let (tbname_total_len, tbname_lens) = if !self.tbnames.is_null() {
+            self.calc_tbname_lens()?
         } else {
-            col_cnt = stmt2.fields_count().unwrap();
+            (0, vec![])
+        };
+
+        let (tag_total_len, tag_lens, tag_total_lens, tag_buf_lens) = if !self.tags.is_null() {
+            self.calc_tag_or_col_lens(self.tags, tag_cnt)?
+        } else {
+            (0, vec![], vec![], vec![])
+        };
+
+        let (col_total_len, col_lens, col_total_lens, col_buf_lens) = if !self.bind_cols.is_null() {
+            self.calc_tag_or_col_lens(self.bind_cols, col_cnt)?
+        } else {
+            (0, vec![], vec![], vec![])
+        };
+
+        trace!("to_bytes, tbname_total_len: {tbname_total_len}, tbname_lens: {tbname_lens:?}");
+        trace!("to_bytes, tag_total_len: {tag_total_len}, tag_lens: {tag_lens:?}, tag_total_lens: {tag_total_lens:?}, tag_buf_lens: {tag_buf_lens:?}");
+        trace!("to bytes, col_total_len: {col_total_len}, col_lens: {col_lens:?}, col_total_lens: {col_total_lens:?}, col_buf_lens: {col_buf_lens:?}");
+
+        let have_tbname = tbname_total_len > 0;
+        let have_tag = tag_total_len > 0;
+        let have_col = col_total_len > 0;
+
+        let tbname_total_len = tbname_lens.len() * 2 + tbname_total_len;
+        let tag_total_len = tag_lens.len() * 4 + tag_total_len as usize;
+        let col_total_len = col_lens.len() * 4 + col_total_len as usize;
+        // let total_len = 30 + 28 + tbname_total_len + tag_total_len + col_total_len;
+        let total_len = 28 + tbname_total_len + tag_total_len + col_total_len;
+
+        tracing::trace!("tbname_total_len2: {tbname_total_len}");
+        tracing::trace!("tag_total_len2: {tag_total_len}");
+        tracing::trace!("col_total_len2: {col_total_len}");
+        tracing::trace!("total_len2: {total_len}");
+
+        // let total_len = 30 + 28;
+        let mut tbname_offset = 0;
+        let mut tags_offset = 0;
+        let mut cols_offset = 0;
+        let cnt = self.count;
+        if have_tbname {
+            // total_len += tbname_total_len as u32 + 2 * cnt;
+            tbname_offset = 28;
+        }
+        if have_tag {
+            // total_len += tag_total_len as u32 + 4 * cnt;
+            // if !have_table_name {
+            //     tag_offset = 28;
+            // } else {
+            tags_offset = 28 + tbname_total_len;
+            // tag_offset = tbname_offset + tbname_total_len + 2 * cnt as u32;
+            // }
+        }
+        if have_col {
+            cols_offset = 28 + tbname_total_len + tag_total_len;
+            // total_len += col_total_len + 4 * cnt as u32;
+            // if tags_offset == 0 {
+            //     cols_offset = 28;
+            // } else {
+            //     cols_offset = tags_offset + tag_total_len + 4 * cnt as u32;
+            // }
         }
 
-        let mut tbnames = vec![None; cnt];
-        if !self.tbnames.is_null() {
-            let slice = unsafe { slice::from_raw_parts(self.tbnames, cnt) };
-            for i in 0..cnt {
-                if !slice[i].is_null() {
-                    let tbname = unsafe {
-                        match CStr::from_ptr(slice[i]).to_str() {
-                            Ok(tbname) => tbname.to_owned(),
-                            Err(_) => {
-                                return Err(TaosError::new(
-                                    Code::INVALID_PARA,
-                                    "tbname is invalid utf-8",
-                                ));
+        let mut data = vec![0u8; 30 + total_len as usize];
+        LittleEndian::write_u64(&mut data[0..], req_id);
+        LittleEndian::write_u64(&mut data[8..], stmt_id);
+        LittleEndian::write_u64(&mut data[16..], 9);
+        LittleEndian::write_u16(&mut data[24..], 1);
+        LittleEndian::write_i32(&mut data[26..], -1);
+        LittleEndian::write_u32(&mut data[30..], total_len as u32);
+        LittleEndian::write_i32(&mut data[34..], cnt as i32);
+        LittleEndian::write_i32(&mut data[38..], tag_cnt as i32);
+        LittleEndian::write_i32(&mut data[42..], col_cnt as i32);
+        LittleEndian::write_u32(&mut data[46..], tbname_offset as _);
+        LittleEndian::write_u32(&mut data[50..], tags_offset as _);
+        LittleEndian::write_u32(&mut data[54..], cols_offset as _);
+
+        let bytes = &mut data[30..];
+
+        if have_tbname {
+            self.write_tbnames(&mut bytes[28..], &tbname_lens);
+        }
+
+        if have_tag {
+            self.write_tags(
+                self.tags,
+                &mut bytes[tags_offset..],
+                tag_cnt,
+                &tag_lens,
+                &tag_total_lens,
+                &tag_buf_lens,
+            );
+        }
+
+        if have_col {
+            self.write_tags(
+                self.bind_cols,
+                &mut bytes[cols_offset..],
+                col_cnt,
+                &col_lens,
+                &col_total_lens,
+                &col_buf_lens,
+            );
+        }
+
+        Ok(data)
+    }
+
+    fn calc_tbname_lens(&self) -> TaosResult<(usize, Vec<u16>)> {
+        let mut total_len = 0;
+        let mut lens = vec![0u16; self.count as usize];
+        for i in 0..self.count as usize {
+            let tbname_ptr = unsafe { self.tbnames.add(i).read() };
+            if tbname_ptr.is_null() {
+                return Err(TaosError::new(
+                    Code::INVALID_PARA,
+                    "stmt2 bind tbname is null",
+                ));
+            }
+            lens[i] = unsafe { CStr::from_ptr(tbname_ptr).to_bytes_with_nul().len() } as _;
+            total_len += lens[i] as usize;
+        }
+        Ok((total_len, lens))
+    }
+
+    fn calc_tag_or_col_lens(
+        &self,
+        bind_ptr: *mut *mut TAOS_STMT2_BIND,
+        tc_cnt: usize,
+    ) -> TaosResult<(u32, Vec<u32>, Vec<u32>, Vec<u32>)> {
+        let cnt = self.count as usize;
+        let mut total_len = 0;
+        let mut lens = vec![0; cnt];
+        let mut total_lens = vec![0; cnt * tc_cnt];
+        let mut buf_lens = vec![0; cnt * tc_cnt];
+
+        for i in 0..cnt {
+            let bind_ptr = unsafe { bind_ptr.add(i).read() };
+            if bind_ptr.is_null() {
+                return Err(TaosError::new(
+                    Code::INVALID_PARA,
+                    "stmt2 bind tag or column is null",
+                ));
+            }
+
+            for j in 0..tc_cnt {
+                let bind = unsafe { bind_ptr.add(j).read() };
+                let have_len = bind.ty().fixed_length() == 0;
+                let buf_len = if self.check_tag_or_col_is_null(bind.is_null, bind.num as _) {
+                    0
+                } else {
+                    if have_len {
+                        if bind.length.is_null() {
+                            return Err(TaosError::new(
+                                Code::INVALID_PARA,
+                                "stmt2 bind tag or column length is null",
+                            ));
+                        }
+
+                        let mut buf_len = 0;
+                        let lens = unsafe { slice::from_raw_parts(bind.length, bind.num as _) };
+                        for k in 0..bind.num as usize {
+                            if bind.is_null.is_null() || unsafe { bind.is_null.add(k).read() } == 0
+                            {
+                                buf_len += lens[k] as u32;
                             }
                         }
-                    };
-                    tbnames[i] = Some(tbname);
-                }
+                        buf_len
+                    } else {
+                        bind.num as u32 * bind.ty().fixed_length() as u32
+                    }
+                };
+
+                let idx = i * tc_cnt + j;
+                buf_lens[idx] = buf_len;
+                total_lens[idx] =
+                    self.calc_tag_or_col_header_len(bind.num as _, have_len) + buf_len;
+                lens[i] += total_lens[idx];
+                total_len += total_lens[idx];
             }
         }
 
-        let mut tags = vec![None; cnt];
-        if !self.tags.is_null() && tag_cnt > 0 {
-            let slice = unsafe { slice::from_raw_parts(self.tags, cnt) };
-            for i in 0..cnt {
-                let mut vals = Vec::with_capacity(tag_cnt);
-                let binds = unsafe { slice::from_raw_parts(slice[i], tag_cnt) };
-                for bind in binds {
-                    vals.push(bind.to_value());
-                }
-                tags[i] = Some(vals);
-            }
+        Ok((total_len, lens, total_lens, buf_lens))
+    }
+
+    fn check_tag_or_col_is_null(&self, is_null: *const c_char, len: usize) -> bool {
+        if is_null.is_null() {
+            return false;
+        }
+        let slice = unsafe { slice::from_raw_parts(is_null, len) };
+        slice.iter().all(|&v| v == 1)
+    }
+
+    fn calc_tag_or_col_header_len(&self, num: u32, have_len: bool) -> u32 {
+        let mut len = 17 + num;
+        if have_len {
+            len += num * 4;
+        }
+        len
+    }
+
+    fn write_tbnames(&self, data: &mut [u8], tbname_lens: &[u16]) {
+        // if have_table_name {
+        // let mut offset = table_name_offset as usize;
+        let mut offset = 0;
+        for len in tbname_lens {
+            LittleEndian::write_u16(&mut data[offset..], *len);
+            offset += 2;
+        }
+        for i in 0..self.count as usize {
+            let tbname_ptr = unsafe { self.tbnames.add(i).read() };
+            let tbname = unsafe { CStr::from_ptr(tbname_ptr).to_bytes_with_nul() };
+            data[offset..offset + tbname.len()].copy_from_slice(tbname);
+            offset += tbname.len();
+        }
+        // }
+    }
+
+    fn write_tags(
+        &self,
+        bind_ptr: *mut *mut TAOS_STMT2_BIND,
+        data: &mut [u8],
+        tag_cnt: usize,
+        tag_lens: &[u32],
+        tag_total_lens: &[u32],
+        tag_buf_lens: &[u32],
+    ) {
+        // if have_tag {
+        // let mut offset = tag_offset as usize;
+        let mut offset = 0;
+        let cnt = self.count as usize;
+        // for i in 0..cnt {
+        for len in tag_lens {
+            LittleEndian::write_u32(&mut data[offset..], *len);
+            offset += 4;
         }
 
-        let mut cols = vec![None; cnt];
-        if !self.bind_cols.is_null() && col_cnt > 0 {
-            let slice = unsafe { slice::from_raw_parts(self.bind_cols, cnt) };
-            for i in 0..cnt {
-                let mut views = Vec::with_capacity(col_cnt);
-                let binds = unsafe { slice::from_raw_parts(slice[i], col_cnt) };
-                for bind in binds {
-                    views.push(bind.to_column_view()?);
-                }
-                cols[i] = Some(views);
-            }
-        }
-
-        let mut params = Vec::with_capacity(cnt);
         for i in 0..cnt {
-            let param = Stmt2BindParam::new(tbnames[i].take(), tags[i].take(), cols[i].take());
-            params.push(param);
-        }
+            // self.bind_cols
+            // let tags_ptr = unsafe { self.tags.add(i).read() };
+            let tags_ptr = unsafe { bind_ptr.add(i).read() };
+            for j in 0..tag_cnt {
+                let tag = unsafe { tags_ptr.add(j).read() };
+                // TotalLength
+                // 当前 tag 的总长度
+                LittleEndian::write_u32(&mut data[offset..], tag_total_lens[i * tag_cnt + j]);
+                offset += 4;
+                // Type
+                LittleEndian::write_i32(&mut data[offset..], tag.ty() as _);
+                offset += 4;
+                // Num
+                LittleEndian::write_i32(&mut data[offset..], tag.num);
+                offset += 4;
+                // IsNull
+                // 可能会有问题 tag_bind.is_null 可能会为 null
+                if !tag.is_null.is_null() {
+                    let src = tag.is_null as *const u8;
+                    // let dst = &mut data[offset..];
+                    unsafe {
+                        // std::ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), tag.num as usize);
+                        std::ptr::copy_nonoverlapping(src, &mut data[offset], tag.num as usize);
+                    }
+                }
+                offset += tag.num as usize;
+                // haveLength
+                let have_len = tag.ty().fixed_length() == 0;
+                if have_len {
+                    data[offset] = 1;
+                } else {
+                    data[offset] = 0;
+                }
+                offset += 1;
+                // Length
+                if have_len {
+                    let src = tag.length as *const u8;
+                    let dst = unsafe { data.as_mut_ptr().add(offset) };
+                    unsafe {
+                        // std::ptr::copy_nonoverlapping(src, &mut data[offset], tag.num as usize * 4);
+                        std::ptr::copy_nonoverlapping(src, dst, tag.num as usize * 4);
+                    }
+                    offset += tag.num as usize * 4;
+                }
+                // buffer_length
+                let buf_len = tag_buf_lens[i * tag_cnt + j];
+                LittleEndian::write_u32(&mut data[offset..], buf_len);
+                offset += 4;
+                // buffer
 
-        Ok(params)
+                if !tag.buffer.is_null() {
+                    // let buffer = tag.buffer as *const u8;
+                    let src = tag.buffer as *const u8;
+                    // let dst = &mut data[offset..offset + buf_len as usize];
+                    // let dst = &mut data[offset..];
+                    // let dst = dst.as_mut_ptr();
+                    let dst = unsafe { data.as_mut_ptr().add(offset) };
+                    // debug_assert!(!src.is_null());
+                    // debug_assert!(!dst.is_null());
+                    assert!(!src.is_null(), "Source pointer is null");
+                    assert!(!dst.is_null(), "Destination pointer is null");
+                    assert!(
+                        offset + buf_len as usize <= data.len(),
+                        "Destination buffer is too small: required {}, available {}",
+                        buf_len,
+                        data.len() - offset
+                    );
+                    unsafe {
+                        // std::ptr::copy_nonoverlapping(src, &mut data[offset], buf_len as usize);
+                        std::ptr::copy_nonoverlapping(src, dst, buf_len as usize);
+                    }
+                    // ??
+                    offset += buf_len as usize;
+                }
+            }
+        }
+        // }
     }
 }
 
@@ -1639,6 +1720,112 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1739876374");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_insert_and_query() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1757667641",
+                    "create database test_1757667641",
+                    "use test_1757667641",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into t0 values(?, ?)";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![
+                1739521477831i64,
+                1739521477832,
+                1739521477833,
+                1739521477834,
+            ];
+            let mut length = vec![8, 8, 8, 8];
+            let mut is_null = vec![0, 0, 0, 0];
+            let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+
+            let mut buffer = vec![45i32, 46, -45, 0];
+            let mut length = vec![4, 4, 4, 4];
+            let mut is_null = vec![0, 0, 0, 1];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let mut col = vec![ts, c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+            assert_eq!(affected_rows, 4);
+
+            let sql = c"select * from t0 where c1 > ?";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut buffer = vec![45];
+            let mut length = vec![4];
+            let mut is_null = vec![0];
+            let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+            let mut col = vec![c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+            assert_eq!(code, 0);
+
+            let mut affected_rows = 0;
+            let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+            assert_eq!(code, 0);
+            assert_eq!(affected_rows, 0);
+
+            let res = taos_stmt2_result(stmt2);
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert!(len > 0);
+            println!("str: {:?}, len: {}", CStr::from_ptr(str.as_ptr()), len);
+
+            taos_free_result(res);
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database test_1757667641");
             taos_close(taos);
         }
     }
