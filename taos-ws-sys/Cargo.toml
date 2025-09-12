@@ -11,6 +11,7 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 anyhow = "1"
 bytes = "1.1.0"
+byteorder = "1.5.0"
 cargo_metadata = "0.18.1"
 ctor = "0.2.9"
 dashmap = "6.1.0"
