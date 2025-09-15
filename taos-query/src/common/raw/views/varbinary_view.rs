@@ -36,7 +36,7 @@ impl VarBinaryView {
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
-    pub fn is_null_iter(&self) -> VarBinaryNullsIter {
+    pub fn is_null_iter(&self) -> VarBinaryNullsIter<'_> {
         VarBinaryNullsIter { view: self, row: 0 }
     }
 
@@ -72,7 +72,7 @@ impl VarBinaryView {
         }
     }
 
-    pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
+    pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue<'_> {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::VarBinary), |s| {
                 BorrowedValue::VarBinary(Cow::Borrowed(s.as_bytes()))
@@ -111,7 +111,7 @@ impl VarBinaryView {
             .unwrap_or(0)
     }
 
-    pub fn iter(&self) -> VarBinaryIter {
+    pub fn iter(&self) -> VarBinaryIter<'_> {
         VarBinaryIter { view: self, row: 0 }
     }
 

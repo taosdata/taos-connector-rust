@@ -372,7 +372,7 @@ impl BorrowedValue<'_> {
         borrowed_value_to_float!(self)
     }
 
-    pub(crate) fn to_str(&self) -> Option<Cow<str>> {
+    pub(crate) fn to_str(&self) -> Option<Cow<'_, str>> {
         match self {
             BorrowedValue::Null(_) => None,
             BorrowedValue::Bool(v) => Some(v.to_string().into()),
@@ -526,7 +526,7 @@ impl Value {
         }
     }
 
-    pub fn to_borrowed_value(&self) -> BorrowedValue {
+    pub fn to_borrowed_value(&self) -> BorrowedValue<'_> {
         use Value::*;
         match self {
             Null(ty) => BorrowedValue::Null(*ty),
