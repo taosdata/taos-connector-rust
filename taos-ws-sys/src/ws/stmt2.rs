@@ -553,6 +553,26 @@ impl TAOS_STMT2_BIND {
     }
 }
 
+const REQ_ID_POS: usize = 0;
+const STMT_ID_POS: usize = REQ_ID_POS + 8;
+const ACTION_POS: usize = STMT_ID_POS + 8;
+const VERSION_POS: usize = ACTION_POS + 8;
+const COL_IDX_POS: usize = VERSION_POS + 2;
+const HEADER_LEN: usize = COL_IDX_POS + 4;
+
+const TOTAL_LENGTH_POS: usize = 0;
+const TABLE_COUNT_POS: usize = TOTAL_LENGTH_POS + 4;
+const TAG_COUNT_POS: usize = TABLE_COUNT_POS + 4;
+const COL_COUNT_POS: usize = TAG_COUNT_POS + 4;
+const TABLE_NAMES_OFFSET_POS: usize = COL_COUNT_POS + 4;
+const TAGS_OFFSET_POS: usize = TABLE_NAMES_OFFSET_POS + 4;
+const COLS_OFFSET_POS: usize = TAGS_OFFSET_POS + 4;
+const DATA_POS: usize = COLS_OFFSET_POS + 4;
+
+const ACTION: u64 = 9;
+const VERSION: u16 = 1;
+const COL_IDX: i32 = -1;
+
 impl TAOS_STMT2_BINDV {
     fn to_bytes(
         &self,
@@ -563,95 +583,58 @@ impl TAOS_STMT2_BINDV {
     ) -> TaosResult<Vec<u8>> {
         debug!("to_bytes, req_id: {req_id}, stmt_id: {stmt_id}, tag_cnt: {tag_cnt}, col_cnt: {col_cnt}");
 
-        let (tbname_total_len, tbname_lens) = if !self.tbnames.is_null() {
+        let (tbname_buf_len, tbname_lens) = if !self.tbnames.is_null() {
             self.calc_tbname_lens()?
         } else {
             (0, vec![])
         };
 
-        let (tag_total_len, tag_lens, tag_total_lens, tag_buf_lens) = if !self.tags.is_null() {
+        let (tag_buf_len, tag_lens, tag_total_lens, tag_buf_lens) = if !self.tags.is_null() {
             self.calc_tag_or_col_lens(self.tags, tag_cnt)?
         } else {
             (0, vec![], vec![], vec![])
         };
 
-        let (col_total_len, col_lens, col_total_lens, col_buf_lens) = if !self.bind_cols.is_null() {
+        let (col_buf_len, col_lens, col_total_lens, col_buf_lens) = if !self.bind_cols.is_null() {
             self.calc_tag_or_col_lens(self.bind_cols, col_cnt)?
         } else {
             (0, vec![], vec![], vec![])
         };
 
-        trace!("to_bytes, tbname_total_len: {tbname_total_len}, tbname_lens: {tbname_lens:?}");
-        trace!("to_bytes, tag_total_len: {tag_total_len}, tag_lens: {tag_lens:?}, tag_total_lens: {tag_total_lens:?}, tag_buf_lens: {tag_buf_lens:?}");
-        trace!("to bytes, col_total_len: {col_total_len}, col_lens: {col_lens:?}, col_total_lens: {col_total_lens:?}, col_buf_lens: {col_buf_lens:?}");
+        let have_tbname = tbname_buf_len > 0;
+        let have_tag = tag_buf_len > 0;
+        let have_col = col_buf_len > 0;
 
-        let have_tbname = tbname_total_len > 0;
-        let have_tag = tag_total_len > 0;
-        let have_col = col_total_len > 0;
-
-        let tbname_total_len = tbname_lens.len() * 2 + tbname_total_len;
-        let tag_total_len = tag_lens.len() * 4 + tag_total_len as usize;
-        let col_total_len = col_lens.len() * 4 + col_total_len as usize;
-        // let total_len = 30 + 28 + tbname_total_len + tag_total_len + col_total_len;
+        let tbname_total_len = tbname_lens.len() * 2 + tbname_buf_len;
+        let tag_total_len = tag_lens.len() * 4 + tag_buf_len as usize;
+        let col_total_len = col_lens.len() * 4 + col_buf_len as usize;
         let total_len = 28 + tbname_total_len + tag_total_len + col_total_len;
 
-        tracing::trace!("tbname_total_len2: {tbname_total_len}");
-        tracing::trace!("tag_total_len2: {tag_total_len}");
-        tracing::trace!("col_total_len2: {col_total_len}");
-        tracing::trace!("total_len2: {total_len}");
+        trace!("to_bytes, tbname_buf_len: {tbname_buf_len}, tbname_lens: {tbname_lens:?}");
+        trace!("to_bytes, tag_buf_len: {tag_buf_len}, tag_lens: {tag_lens:?}, tag_total_lens: {tag_total_lens:?}, tag_buf_lens: {tag_buf_lens:?}");
+        trace!("to bytes, col_buf_len: {col_buf_len}, col_lens: {col_lens:?}, col_total_lens: {col_total_lens:?}, col_buf_lens: {col_buf_lens:?}");
+        trace!("to bytes, tbname_total_len: {tbname_total_len}, tag_total_len: {tag_total_len}, col_total_len: {col_total_len}, total_len: {total_len}");
 
-        // let total_len = 30 + 28;
-        let mut tbname_offset = 0;
-        let mut tags_offset = 0;
-        let mut cols_offset = 0;
-        let cnt = self.count;
-        if have_tbname {
-            // total_len += tbname_total_len as u32 + 2 * cnt;
-            tbname_offset = 28;
-        }
-        if have_tag {
-            // total_len += tag_total_len as u32 + 4 * cnt;
-            // if !have_table_name {
-            //     tag_offset = 28;
-            // } else {
-            tags_offset = 28 + tbname_total_len;
-            // tag_offset = tbname_offset + tbname_total_len + 2 * cnt as u32;
-            // }
-        }
-        if have_col {
-            cols_offset = 28 + tbname_total_len + tag_total_len;
-            // total_len += col_total_len + 4 * cnt as u32;
-            // if tags_offset == 0 {
-            //     cols_offset = 28;
-            // } else {
-            //     cols_offset = tags_offset + tag_total_len + 4 * cnt as u32;
-            // }
-        }
+        let mut data = vec![0u8; HEADER_LEN + total_len];
+        self.write_headers(&mut data, req_id, stmt_id);
 
-        let mut data = vec![0u8; 30 + total_len as usize];
-        LittleEndian::write_u64(&mut data[0..], req_id);
-        LittleEndian::write_u64(&mut data[8..], stmt_id);
-        LittleEndian::write_u64(&mut data[16..], 9);
-        LittleEndian::write_u16(&mut data[24..], 1);
-        LittleEndian::write_i32(&mut data[26..], -1);
-        LittleEndian::write_u32(&mut data[30..], total_len as u32);
-        LittleEndian::write_i32(&mut data[34..], cnt as i32);
-        LittleEndian::write_i32(&mut data[38..], tag_cnt as i32);
-        LittleEndian::write_i32(&mut data[42..], col_cnt as i32);
-        LittleEndian::write_u32(&mut data[46..], tbname_offset as _);
-        LittleEndian::write_u32(&mut data[50..], tags_offset as _);
-        LittleEndian::write_u32(&mut data[54..], cols_offset as _);
-
-        let bytes = &mut data[30..];
+        let bytes = &mut data[HEADER_LEN..];
+        LittleEndian::write_u32(&mut bytes[TOTAL_LENGTH_POS..], total_len as _);
+        LittleEndian::write_i32(&mut bytes[TABLE_COUNT_POS..], self.count);
+        LittleEndian::write_i32(&mut bytes[TAG_COUNT_POS..], tag_cnt as _);
+        LittleEndian::write_i32(&mut bytes[COL_COUNT_POS..], col_cnt as _);
 
         if have_tbname {
-            self.write_tbnames(&mut bytes[28..], &tbname_lens);
+            LittleEndian::write_u32(&mut bytes[TABLE_NAMES_OFFSET_POS..], DATA_POS as _);
+            self.write_tbnames(&mut bytes[DATA_POS..], &tbname_lens);
         }
 
         if have_tag {
-            self.write_tags(
-                self.tags,
+            let tags_offset = DATA_POS + tbname_total_len;
+            LittleEndian::write_u32(&mut bytes[TAGS_OFFSET_POS..], tags_offset as _);
+            self.write_tags_or_cols(
                 &mut bytes[tags_offset..],
+                self.tags,
                 tag_cnt,
                 &tag_lens,
                 &tag_total_lens,
@@ -660,9 +643,11 @@ impl TAOS_STMT2_BINDV {
         }
 
         if have_col {
-            self.write_tags(
-                self.bind_cols,
+            let cols_offset = DATA_POS + tbname_total_len + tag_total_len;
+            LittleEndian::write_u32(&mut bytes[COLS_OFFSET_POS..], cols_offset as _);
+            self.write_tags_or_cols(
                 &mut bytes[cols_offset..],
+                self.bind_cols,
                 col_cnt,
                 &col_lens,
                 &col_total_lens,
@@ -674,7 +659,7 @@ impl TAOS_STMT2_BINDV {
     }
 
     fn calc_tbname_lens(&self) -> TaosResult<(usize, Vec<u16>)> {
-        let mut total_len = 0;
+        let mut len = 0;
         let mut lens = vec![0u16; self.count as usize];
         for i in 0..self.count as usize {
             let tbname_ptr = unsafe { self.tbnames.add(i).read() };
@@ -685,24 +670,25 @@ impl TAOS_STMT2_BINDV {
                 ));
             }
             lens[i] = unsafe { CStr::from_ptr(tbname_ptr).to_bytes_with_nul().len() } as _;
-            total_len += lens[i] as usize;
+            len += lens[i] as usize;
         }
-        Ok((total_len, lens))
+        Ok((len, lens))
     }
 
+    #[allow(clippy::type_complexity)]
     fn calc_tag_or_col_lens(
         &self,
-        bind_ptr: *mut *mut TAOS_STMT2_BIND,
+        binds_ptr: *mut *mut TAOS_STMT2_BIND,
         tc_cnt: usize,
     ) -> TaosResult<(u32, Vec<u32>, Vec<u32>, Vec<u32>)> {
         let cnt = self.count as usize;
-        let mut total_len = 0;
-        let mut lens = vec![0; cnt];
+        let mut len = 0;
+        let mut data_lens = vec![0; cnt];
         let mut total_lens = vec![0; cnt * tc_cnt];
         let mut buf_lens = vec![0; cnt * tc_cnt];
 
         for i in 0..cnt {
-            let bind_ptr = unsafe { bind_ptr.add(i).read() };
+            let bind_ptr = unsafe { binds_ptr.add(i).read() };
             if bind_ptr.is_null() {
                 return Err(TaosError::new(
                     Code::INVALID_PARA,
@@ -715,39 +701,36 @@ impl TAOS_STMT2_BINDV {
                 let have_len = bind.ty().fixed_length() == 0;
                 let buf_len = if self.check_tag_or_col_is_null(bind.is_null, bind.num as _) {
                     0
-                } else {
-                    if have_len {
-                        if bind.length.is_null() {
-                            return Err(TaosError::new(
-                                Code::INVALID_PARA,
-                                "stmt2 bind tag or column length is null",
-                            ));
-                        }
-
-                        let mut buf_len = 0;
-                        let lens = unsafe { slice::from_raw_parts(bind.length, bind.num as _) };
-                        for k in 0..bind.num as usize {
-                            if bind.is_null.is_null() || unsafe { bind.is_null.add(k).read() } == 0
-                            {
-                                buf_len += lens[k] as u32;
-                            }
-                        }
-                        buf_len
-                    } else {
-                        bind.num as u32 * bind.ty().fixed_length() as u32
+                } else if have_len {
+                    if bind.length.is_null() {
+                        return Err(TaosError::new(
+                            Code::INVALID_PARA,
+                            "stmt2 bind tag or column length is null",
+                        ));
                     }
+
+                    let lens = unsafe { slice::from_raw_parts(bind.length, bind.num as _) };
+                    let is_null = bind.is_null.is_null();
+                    let mut buf_len = 0;
+                    for (k, len) in lens.iter().enumerate() {
+                        if is_null || unsafe { bind.is_null.add(k).read() } == 0 {
+                            buf_len += lens[k] as u32;
+                        }
+                    }
+                    buf_len
+                } else {
+                    bind.num as u32 * bind.ty().fixed_length() as u32
                 };
 
-                let idx = i * tc_cnt + j;
-                buf_lens[idx] = buf_len;
-                total_lens[idx] =
-                    self.calc_tag_or_col_header_len(bind.num as _, have_len) + buf_len;
-                lens[i] += total_lens[idx];
-                total_len += total_lens[idx];
+                let k = i * tc_cnt + j;
+                buf_lens[k] = buf_len;
+                total_lens[k] = self.calc_tag_or_col_header_len(bind.num as _, have_len) + buf_len;
+                data_lens[i] += total_lens[k];
+                len += total_lens[k];
             }
         }
 
-        Ok((total_len, lens, total_lens, buf_lens))
+        Ok((len, data_lens, total_lens, buf_lens))
     }
 
     fn check_tag_or_col_is_null(&self, is_null: *const c_char, len: usize) -> bool {
@@ -766,120 +749,99 @@ impl TAOS_STMT2_BINDV {
         len
     }
 
-    fn write_tbnames(&self, data: &mut [u8], tbname_lens: &[u16]) {
-        // if have_table_name {
-        // let mut offset = table_name_offset as usize;
+    fn write_headers(&self, bytes: &mut [u8], req_id: u64, stmt_id: u64) {
+        LittleEndian::write_u64(&mut bytes[REQ_ID_POS..], req_id);
+        LittleEndian::write_u64(&mut bytes[STMT_ID_POS..], stmt_id);
+        LittleEndian::write_u64(&mut bytes[ACTION_POS..], ACTION);
+        LittleEndian::write_u16(&mut bytes[VERSION_POS..], VERSION);
+        LittleEndian::write_i32(&mut bytes[COL_IDX_POS..], COL_IDX);
+    }
+
+    fn write_tbnames(&self, bytes: &mut [u8], tbname_lens: &[u16]) {
         let mut offset = 0;
         for len in tbname_lens {
-            LittleEndian::write_u16(&mut data[offset..], *len);
+            LittleEndian::write_u16(&mut bytes[offset..], *len);
             offset += 2;
         }
         for i in 0..self.count as usize {
             let tbname_ptr = unsafe { self.tbnames.add(i).read() };
             let tbname = unsafe { CStr::from_ptr(tbname_ptr).to_bytes_with_nul() };
-            data[offset..offset + tbname.len()].copy_from_slice(tbname);
+            bytes[offset..offset + tbname.len()].copy_from_slice(tbname);
             offset += tbname.len();
         }
-        // }
     }
 
-    fn write_tags(
+    fn write_tags_or_cols(
         &self,
-        bind_ptr: *mut *mut TAOS_STMT2_BIND,
-        data: &mut [u8],
-        tag_cnt: usize,
-        tag_lens: &[u32],
-        tag_total_lens: &[u32],
-        tag_buf_lens: &[u32],
+        bytes: &mut [u8],
+        binds_ptr: *mut *mut TAOS_STMT2_BIND,
+        tc_cnt: usize,
+        tc_lens: &[u32],
+        tc_total_lens: &[u32],
+        tc_buf_lens: &[u32],
     ) {
-        // if have_tag {
-        // let mut offset = tag_offset as usize;
         let mut offset = 0;
-        let cnt = self.count as usize;
-        // for i in 0..cnt {
-        for len in tag_lens {
-            LittleEndian::write_u32(&mut data[offset..], *len);
+        for len in tc_lens {
+            LittleEndian::write_u32(&mut bytes[offset..], *len);
             offset += 4;
         }
 
-        for i in 0..cnt {
-            // self.bind_cols
-            // let tags_ptr = unsafe { self.tags.add(i).read() };
-            let tags_ptr = unsafe { bind_ptr.add(i).read() };
-            for j in 0..tag_cnt {
-                let tag = unsafe { tags_ptr.add(j).read() };
-                // TotalLength
-                // 当前 tag 的总长度
-                LittleEndian::write_u32(&mut data[offset..], tag_total_lens[i * tag_cnt + j]);
+        for i in 0..self.count as usize {
+            let bind_ptr = unsafe { binds_ptr.add(i).read() };
+            for j in 0..tc_cnt {
+                let bind = unsafe { bind_ptr.add(j).read() };
+                LittleEndian::write_u32(&mut bytes[offset..], tc_total_lens[i * tc_cnt + j]);
                 offset += 4;
-                // Type
-                LittleEndian::write_i32(&mut data[offset..], tag.ty() as _);
+                LittleEndian::write_i32(&mut bytes[offset..], bind.ty() as _);
                 offset += 4;
-                // Num
-                LittleEndian::write_i32(&mut data[offset..], tag.num);
+                LittleEndian::write_i32(&mut bytes[offset..], bind.num);
                 offset += 4;
-                // IsNull
-                // 可能会有问题 tag_bind.is_null 可能会为 null
-                if !tag.is_null.is_null() {
-                    let src = tag.is_null as *const u8;
-                    // let dst = &mut data[offset..];
+
+                if !bind.is_null.is_null() {
                     unsafe {
-                        // std::ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), tag.num as usize);
-                        std::ptr::copy_nonoverlapping(src, &mut data[offset], tag.num as usize);
+                        ptr::copy_nonoverlapping(
+                            bind.is_null as *const u8,
+                            bytes.as_mut_ptr().add(offset),
+                            bind.num as _,
+                        );
                     }
                 }
-                offset += tag.num as usize;
-                // haveLength
-                let have_len = tag.ty().fixed_length() == 0;
+                offset += bind.num as usize;
+
+                let have_len = bind.ty().fixed_length() == 0;
                 if have_len {
-                    data[offset] = 1;
-                } else {
-                    data[offset] = 0;
+                    bytes[offset] = 1;
                 }
                 offset += 1;
-                // Length
-                if have_len {
-                    let src = tag.length as *const u8;
-                    let dst = unsafe { data.as_mut_ptr().add(offset) };
-                    unsafe {
-                        // std::ptr::copy_nonoverlapping(src, &mut data[offset], tag.num as usize * 4);
-                        std::ptr::copy_nonoverlapping(src, dst, tag.num as usize * 4);
-                    }
-                    offset += tag.num as usize * 4;
-                }
-                // buffer_length
-                let buf_len = tag_buf_lens[i * tag_cnt + j];
-                LittleEndian::write_u32(&mut data[offset..], buf_len);
-                offset += 4;
-                // buffer
 
-                if !tag.buffer.is_null() {
-                    // let buffer = tag.buffer as *const u8;
-                    let src = tag.buffer as *const u8;
-                    // let dst = &mut data[offset..offset + buf_len as usize];
-                    // let dst = &mut data[offset..];
-                    // let dst = dst.as_mut_ptr();
-                    let dst = unsafe { data.as_mut_ptr().add(offset) };
-                    // debug_assert!(!src.is_null());
-                    // debug_assert!(!dst.is_null());
-                    assert!(!src.is_null(), "Source pointer is null");
-                    assert!(!dst.is_null(), "Destination pointer is null");
-                    assert!(
-                        offset + buf_len as usize <= data.len(),
-                        "Destination buffer is too small: required {}, available {}",
-                        buf_len,
-                        data.len() - offset
-                    );
+                if have_len {
+                    let cnt = bind.num as usize * 4;
                     unsafe {
-                        // std::ptr::copy_nonoverlapping(src, &mut data[offset], buf_len as usize);
-                        std::ptr::copy_nonoverlapping(src, dst, buf_len as usize);
+                        ptr::copy_nonoverlapping(
+                            bind.length as *const u8,
+                            bytes.as_mut_ptr().add(offset),
+                            cnt,
+                        );
                     }
-                    // ??
+                    offset += cnt;
+                }
+
+                let buf_len = tc_buf_lens[i * tc_cnt + j];
+                LittleEndian::write_u32(&mut bytes[offset..], buf_len);
+                offset += 4;
+
+                if !bind.buffer.is_null() {
+                    unsafe {
+                        ptr::copy_nonoverlapping(
+                            bind.buffer as *const u8,
+                            bytes.as_mut_ptr().add(offset),
+                            buf_len as _,
+                        );
+                    }
                     offset += buf_len as usize;
                 }
             }
         }
-        // }
     }
 }
 
