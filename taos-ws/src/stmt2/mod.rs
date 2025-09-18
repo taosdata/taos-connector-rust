@@ -263,10 +263,10 @@ impl Stmt2Inner {
 
         tracing::trace!("stmt2 bind, id: {}, req_id: {req_id}", self.id);
 
-        self._bind(bytes).await
+        self.bind_bytes(bytes).await
     }
 
-    async fn _bind(&self, bytes: Vec<u8>) -> RawResult<()> {
+    async fn bind_bytes(&self, bytes: Vec<u8>) -> RawResult<()> {
         let req = WsSend::Binary(bytes);
         tracing::trace!("stmt2 bind, id: {}, req: {req:?}", self.id);
         let resp = self.send_request(req).await?;
@@ -465,7 +465,7 @@ impl Stmt2Inner {
             };
 
             for bytes in bind_bytes {
-                self._bind(bytes).await?;
+                self.bind_bytes(bytes).await?;
             }
 
             if matches!(action, Result) {
@@ -483,7 +483,7 @@ impl Stmt2Inner {
 
             let bind_bytes = { self.cache.lock().await.build_bind_bytes(self.stmt_id()) };
             for bytes in bind_bytes {
-                self._bind(bytes).await?;
+                self.bind_bytes(bytes).await?;
             }
 
             if action == Exec && !self.is_insert() {
@@ -574,6 +574,10 @@ impl Stmt2 {
         self.inner.bind(params).await
     }
 
+    pub async fn bind_bytes(&self, bytes: Vec<u8>) -> RawResult<()> {
+        self.inner.bind_bytes(bytes).await
+    }
+
     async fn exec(&self) -> RawResult<usize> {
         self.inner.exec().await
     }
@@ -600,6 +604,10 @@ impl Stmt2 {
 
     pub fn affected_rows_once(&self) -> usize {
         self.inner.affected_rows_once()
+    }
+
+    pub fn stmt_id(&self) -> StmtId {
+        self.inner.stmt_id()
     }
 }
 
