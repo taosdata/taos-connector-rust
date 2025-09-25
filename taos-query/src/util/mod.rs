@@ -439,6 +439,25 @@ impl std::fmt::Display for SingleQuoteSqlValueEscaped<'_> {
 }
 
 #[test]
+fn test_sql_value_escape() {
+    let expects = [
+        ("", "''"),
+        ("'", "''''"),
+        ("\0", "''"),
+        ("\t", "'\\t'"),
+        ("\r", "'\\r'"),
+        ("\n", "'\\n'"),
+        ("\\", "'\\\\'"),
+        ("\"", "'\\\"'"),
+        ("A", "'A'"),
+    ];
+    for (i, e) in expects {
+        let o = sql_value_escape(i);
+        assert_eq!(e, o);
+    }
+}
+
+#[test]
 fn inlined_bytes() -> std::io::Result<()> {
     let s = "abcd";
     let mut vec: Vec<u8> = Vec::new();
