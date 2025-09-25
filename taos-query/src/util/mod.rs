@@ -385,6 +385,59 @@ impl<F: FnOnce()> Drop for CleanUp<F> {
     }
 }
 
+/// Escape a string value for SQL.
+pub fn sql_value_escape(value: &str) -> String {
+    SingleQuoteSqlValueEscaped(value).to_string()
+}
+
+pub fn sql_value_escaped_fmt(value: &str) -> SingleQuoteSqlValueEscaped<'_> {
+    SingleQuoteSqlValueEscaped(value)
+}
+
+/// Escape a string value for SQL.
+pub struct SingleQuoteSqlValueEscaped<'a>(&'a str);
+
+impl std::fmt::Display for SingleQuoteSqlValueEscaped<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = self.0;
+        write!(f, "'")?;
+
+        for c in value.chars() {
+            match c {
+                '\0' => {
+                    // taosc uses C escape syntax for SQL which not support null byte escape,
+                    // so we need to ignore null byte.
+                }
+                '\'' => {
+                    write!(f, "'")?;
+                    write!(f, "'")?;
+                }
+
+                '\t' => {
+                    write!(f, "\\")?;
+                    write!(f, "t")?;
+                }
+                '\r' => {
+                    write!(f, "\\")?;
+                    write!(f, "r")?;
+                }
+                '\n' => {
+                    write!(f, "\\")?;
+                    write!(f, "n")?;
+                }
+                '\\' | '"' => {
+                    write!(f, "\\")?;
+                    write!(f, "{c}")?;
+                }
+                _ => {
+                    write!(f, "{c}")?;
+                }
+            }
+        }
+        write!(f, "'")
+    }
+}
+
 #[test]
 fn inlined_bytes() -> std::io::Result<()> {
     let s = "abcd";
