@@ -20,7 +20,7 @@ impl Debug for Lengths {
 impl Lengths {
     /// As a `[ColSchema]` slice.
     pub fn as_slice(&self) -> &[u32] {
-        debug_assert!(self.0.len() % std::mem::size_of::<u32>() == 0);
+        debug_assert!(self.0.len().is_multiple_of(std::mem::size_of::<u32>()));
         unsafe {
             std::slice::from_raw_parts(
                 self.0.as_ptr() as *const u32,

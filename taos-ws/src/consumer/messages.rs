@@ -15,7 +15,6 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::query::messages::{ToMessage, WsConnReq};
 
 pub type ReqId = u64;
-pub type ConsumerId = u64;
 pub type MessageId = u64;
 
 #[derive(Debug, Serialize, Default, Clone)]
@@ -98,13 +97,6 @@ impl TmqInit {
         self.auto_commit = "false".to_string();
         self
     }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TmqArgs {
-    pub req_id: ReqId,
-    #[serde(default)]
-    pub message_id: ConsumerId,
 }
 
 #[derive(Debug, Serialize)]
