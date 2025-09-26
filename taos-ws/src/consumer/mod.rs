@@ -3001,10 +3001,8 @@ mod tests {
             Ok(())
         });
 
-        let now = std::time::Instant::now();
-        let _ = tokio::time::timeout(Duration::from_secs(100), handle).await;
-        let elapsed = now.elapsed();
-        assert!(elapsed.as_secs() >= 90);
+        let res = tokio::time::timeout(Duration::from_secs(90), handle).await;
+        assert!(res.is_err());
 
         Ok(())
     }
