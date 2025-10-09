@@ -263,10 +263,24 @@ impl Stmt2Inner {
 
         tracing::trace!("stmt2 bind, id: {}, req_id: {req_id}", self.id);
 
-        self.bind_bytes(bytes).await
+        self._bind_bytes(bytes).await
     }
 
-    async fn bind_bytes(&self, bytes: Vec<u8>) -> RawResult<()> {
+    async fn bind_bytes(&self, req_id: ReqId, bytes: Vec<u8>) -> RawResult<()> {
+        self.client.wait_for_reconnect().await?;
+
+        let mut cache = self.cache.lock().await;
+        cache.req_id = req_id;
+        cache.action = Stmt2Action::Bind;
+        cache.bind_bytes.push(bytes.clone());
+        drop(cache);
+
+        tracing::trace!("stmt2 bind_bytes, id: {}, req_id: {req_id}", self.id);
+
+        self._bind_bytes(bytes).await
+    }
+
+    async fn _bind_bytes(&self, bytes: Vec<u8>) -> RawResult<()> {
         let req = WsSend::Binary(bytes);
         tracing::trace!("stmt2 bind, id: {}, req: {req:?}", self.id);
         let resp = self.send_request(req).await?;
@@ -437,13 +451,15 @@ impl Stmt2Inner {
             )
         };
 
+        let is_complete = self.is_complete();
+
         tracing::trace!(
-            "stmt2 recover, id: {}, action: {action:?}, single_stb_insert: {single_stb_insert}, \
+            "stmt2 recover, id: {}, action: {action:?}, is_complete: {is_complete}, single_stb_insert: {single_stb_insert}, \
             single_table_bind_once: {single_table_bind_once}, sql: {sql}",
             self.id
         );
 
-        if !self.is_complete() {
+        if !is_complete {
             if matches!(action, Prepare | Bind | Exec | Result) {
                 self._init_with_options(
                     generate_req_id(),
@@ -465,7 +481,7 @@ impl Stmt2Inner {
             };
 
             for bytes in bind_bytes {
-                self.bind_bytes(bytes).await?;
+                self._bind_bytes(bytes).await?;
             }
 
             if matches!(action, Result) {
@@ -483,7 +499,7 @@ impl Stmt2Inner {
 
             let bind_bytes = { self.cache.lock().await.build_bind_bytes(self.stmt_id()) };
             for bytes in bind_bytes {
-                self.bind_bytes(bytes).await?;
+                self._bind_bytes(bytes).await?;
             }
 
             if action == Exec && !self.is_insert() {
@@ -574,8 +590,8 @@ impl Stmt2 {
         self.inner.bind(params).await
     }
 
-    pub async fn bind_bytes(&self, bytes: Vec<u8>) -> RawResult<()> {
-        self.inner.bind_bytes(bytes).await
+    pub async fn bind_bytes(&self, req_id: ReqId, bytes: Vec<u8>) -> RawResult<()> {
+        self.inner.bind_bytes(req_id, bytes).await
     }
 
     async fn exec(&self) -> RawResult<usize> {

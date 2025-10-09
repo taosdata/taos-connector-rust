@@ -222,7 +222,8 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
         col_cnt = stmt2.fields_count().unwrap();
     }
 
-    let bytes = match bindv.to_bytes(generate_req_id(), stmt2.stmt_id(), tag_cnt, col_cnt) {
+    let req_id = generate_req_id();
+    let bytes = match bindv.to_bytes(req_id, stmt2.stmt_id(), tag_cnt, col_cnt) {
         Ok(bytes) => bytes,
         Err(err) => {
             error!("taos_stmt2_bind_param failed, err: {err:?}");
@@ -234,7 +235,7 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
 
     trace!("taos_stmt2_bind_param, bind bytes: {bytes:?}");
 
-    match block_in_place_or_global(stmt2.bind_bytes(bytes)) {
+    match block_in_place_or_global(stmt2.bind_bytes(req_id, bytes)) {
         Ok(_) => {
             debug!("taos_stmt2_bind_param succ");
             maybe_err.clear_err();
