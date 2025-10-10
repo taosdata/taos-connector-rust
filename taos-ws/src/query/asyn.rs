@@ -981,16 +981,17 @@ impl WsQuerySender {
     }
 
     async fn send_only(&self, message: WsSend) -> RawResult<()> {
-        tracing::trace!(
-            "send_only, req_id: {}, message: {message:?}",
-            message.req_id(),
-        );
+        let req_id = message.req_id();
+        tracing::trace!("send_only, req_id: {req_id}, message: {message:?}");
         timeout(
             SEND_TIMEOUT,
             self.sender.send_async(WsMessage::Command(message)),
         )
         .await
-        .map_err(Error::from)?
+        .map_err(|e| {
+            tracing::error!("send_only, send request timeout, req_id: {req_id}, err: {e}");
+            Error::from(e)
+        })?
         .map_err(Error::from)?;
         Ok(())
     }

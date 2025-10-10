@@ -164,7 +164,7 @@ impl Stmt2Inner {
         cache.single_table_bind_once = single_table_bind_once;
         drop(cache);
 
-        self._init_with_options(req_id, single_stb_insert, single_table_bind_once)
+        self._init_with_options(req_id, single_stb_insert, single_table_bind_once, false)
             .await
     }
 
@@ -173,6 +173,7 @@ impl Stmt2Inner {
         req_id: ReqId,
         single_stb_insert: bool,
         single_table_bind_once: bool,
+        recovering: bool,
     ) -> RawResult<()> {
         let req = WsSend::Stmt2Init {
             req_id,
@@ -184,7 +185,13 @@ impl Stmt2Inner {
             self.id,
             self.stmt_id(),
         );
-        let resp = self.send_request(req).await?;
+
+        let resp = if recovering {
+            self.client.send_request(req).await?
+        } else {
+            self.send_request(req).await?
+        };
+
         if let WsRecvData::Stmt2Init { stmt_id, .. } = resp {
             self.stmt_id.store(stmt_id, Ordering::Release);
             tracing::trace!(
@@ -207,10 +214,15 @@ impl Stmt2Inner {
         cache.sql = sql.as_ref().to_string();
         drop(cache);
 
-        self._prepare(req_id, sql).await
+        self._prepare(req_id, sql, false).await
     }
 
-    async fn _prepare<S: AsRef<str> + Send>(&self, req_id: ReqId, sql: S) -> RawResult<()> {
+    async fn _prepare<S: AsRef<str> + Send>(
+        &self,
+        req_id: ReqId,
+        sql: S,
+        recovering: bool,
+    ) -> RawResult<()> {
         let req = WsSend::Stmt2Prepare {
             req_id,
             stmt_id: self.stmt_id(),
@@ -218,7 +230,13 @@ impl Stmt2Inner {
             get_fields: true,
         };
         tracing::trace!("stmt2 prepare, id: {}, req: {req:?}", self.id);
-        let resp = self.send_request(req).await?;
+
+        let resp = if recovering {
+            self.client.send_request(req).await?
+        } else {
+            self.send_request(req).await?
+        };
+
         if let WsRecvData::Stmt2Prepare {
             is_insert,
             fields,
@@ -263,7 +281,7 @@ impl Stmt2Inner {
 
         tracing::trace!("stmt2 bind, id: {}, req_id: {req_id}", self.id);
 
-        self._bind_bytes(bytes).await
+        self._bind_bytes(bytes, false).await
     }
 
     async fn bind_bytes(&self, req_id: ReqId, bytes: Vec<u8>) -> RawResult<()> {
@@ -277,16 +295,23 @@ impl Stmt2Inner {
 
         tracing::trace!("stmt2 bind_bytes, id: {}, req_id: {req_id}", self.id);
 
-        self._bind_bytes(bytes).await
+        self._bind_bytes(bytes, false).await
     }
 
-    async fn _bind_bytes(&self, bytes: Vec<u8>) -> RawResult<()> {
+    async fn _bind_bytes(&self, bytes: Vec<u8>, recovering: bool) -> RawResult<()> {
         let req = WsSend::Binary(bytes);
         tracing::trace!("stmt2 bind, id: {}, req: {req:?}", self.id);
-        let resp = self.send_request(req).await?;
+
+        let resp = if recovering {
+            self.client.send_request(req).await?
+        } else {
+            self.send_request(req).await?
+        };
+
         if let WsRecvData::Stmt2Bind { .. } = resp {
             return Ok(());
         }
+
         unreachable!("unexpected stmt2 bind response: {resp:?}");
     }
 
@@ -308,10 +333,20 @@ impl Stmt2Inner {
             stmt_id: self.stmt_id(),
         };
         tracing::trace!("stmt2 exec, id: {}, req: {req:?}", self.id);
-        let resp = self.send_request(req).await?;
+
+        let resp = if recovering {
+            self.client.send_request(req).await?
+        } else {
+            self.send_request(req).await?
+        };
+
         if let WsRecvData::Stmt2Exec { affected, .. } = resp {
             if self.is_insert() {
                 self.cache.lock().await.bind_bytes.clear();
+                tracing::trace!(
+                    "stmt2 exec insert, clear bind_bytes cache, id: {}, req_id: {req_id}",
+                    self.id
+                );
             }
             if !recovering {
                 self.affected_rows.fetch_add(affected, Ordering::Relaxed);
@@ -378,6 +413,10 @@ impl Stmt2Inner {
         } = resp
         {
             self.cache.lock().await.bind_bytes.clear();
+            tracing::trace!(
+                "stmt2 result, clear bind_bytes cache, id: {}, req_id: {req_id}",
+                self.id
+            );
 
             let (close_tx, close_rx) = oneshot::channel();
             tokio::spawn(
@@ -454,9 +493,9 @@ impl Stmt2Inner {
         let is_complete = self.is_complete();
 
         tracing::trace!(
-            "stmt2 recover, id: {}, action: {action:?}, is_complete: {is_complete}, single_stb_insert: {single_stb_insert}, \
-            single_table_bind_once: {single_table_bind_once}, sql: {sql}",
-            self.id
+            "stmt2 recover, id: {}, req_id: {}, action: {action:?}, is_complete: {is_complete}, \
+            single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}, sql: {sql}",
+            self.id, self.req_id().await
         );
 
         if !is_complete {
@@ -465,12 +504,13 @@ impl Stmt2Inner {
                     generate_req_id(),
                     single_stb_insert,
                     single_table_bind_once,
+                    true,
                 )
                 .await?;
             }
 
             if matches!(action, Bind | Exec | Result) {
-                self._prepare(generate_req_id(), sql).await?;
+                self._prepare(generate_req_id(), sql, true).await?;
             }
 
             let (req, bind_bytes) = {
@@ -480,8 +520,10 @@ impl Stmt2Inner {
                     .build_req_and_bind_bytes(self.stmt_id())
             };
 
-            for bytes in bind_bytes {
-                self._bind_bytes(bytes).await?;
+            if matches!(action, Bind | Exec | Result) {
+                for bytes in bind_bytes {
+                    self._bind_bytes(bytes, true).await?;
+                }
             }
 
             if matches!(action, Result) {
@@ -490,16 +532,23 @@ impl Stmt2Inner {
 
             self.client.send_only(req).await?;
         } else {
-            self._init_with_options(generate_req_id(), single_stb_insert, single_table_bind_once)
-                .await?;
+            self._init_with_options(
+                generate_req_id(),
+                single_stb_insert,
+                single_table_bind_once,
+                true,
+            )
+            .await?;
 
             if matches!(action, Prepare | Bind | Exec | Result) {
-                self._prepare(generate_req_id(), sql.clone()).await?;
+                self._prepare(generate_req_id(), sql.clone(), true).await?;
             }
 
-            let bind_bytes = { self.cache.lock().await.build_bind_bytes(self.stmt_id()) };
-            for bytes in bind_bytes {
-                self._bind_bytes(bytes).await?;
+            if matches!(action, Bind | Exec | Result) {
+                let bind_bytes = { self.cache.lock().await.build_bind_bytes(self.stmt_id()) };
+                for bytes in bind_bytes {
+                    self._bind_bytes(bytes, true).await?;
+                }
             }
 
             if action == Exec && !self.is_insert() {
@@ -512,7 +561,16 @@ impl Stmt2Inner {
 
     async fn send_request(&self, req: WsSend) -> RawResult<WsRecvData> {
         self.set_complete(false);
+        let req_id = req.req_id();
+        tracing::trace!(
+            "send_request, id: {}, req_id: {req_id}, req: {req:?}",
+            self.id
+        );
         let res = self.client.send_request(req).await;
+        tracing::trace!(
+            "send_request completed, id: {}, req_id: {req_id}, resp: {res:?}",
+            self.id
+        );
         self.set_complete(true);
         res
     }
@@ -1860,7 +1918,7 @@ mod recover_tests {
             Arc::new(move |msg, _ctx| {
                 if let Message::Text(text) = msg {
                     if text.contains("stmt") {
-                        if rand::rng().random_bool(0.05) {
+                        if rand::rng().random_bool(0.03) {
                             return ProxyAction::Restart;
                         }
                     }
@@ -1883,7 +1941,7 @@ mod recover_tests {
         ])
         .await?;
 
-        let n = 3;
+        let n = 20;
         let mut tasks = Vec::with_capacity(n);
         for i in 0..n {
             let client = taos.client_cloned();
