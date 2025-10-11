@@ -1415,8 +1415,7 @@ mod cloud_tests {
     }
 }
 
-#[cfg(test)]
-mod ws_proxy {
+pub mod ws_proxy {
     use std::net::SocketAddr;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -2055,6 +2054,7 @@ mod recover_tests {
                 let cols = vec![ColumnView::from_ints(vec![c1])];
                 let param = Stmt2BindParam::new(None, None, Some(cols));
                 stmt2.bind(&[param]).await?;
+
                 stmt2.exec().await?;
 
                 #[derive(Debug, Deserialize)]
