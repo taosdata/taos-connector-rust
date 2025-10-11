@@ -2203,4 +2203,96 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recover_stmt2() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, _ctx| {
+                if let Message::Text(text) = msg {
+                    if text.contains("stmt") {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8821", "ws://localhost:6041/ws", intercept_fn).await;
+
+        unsafe {
+            let taos = taos_connect(
+                c"localhost".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                ptr::null(),
+                8821,
+            );
+            assert!(!taos.is_null());
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1760167825",
+                    "create database test_1760167825",
+                    "use test_1760167825",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into test_1760167825.t0 values(?, ?)";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let n = 10;
+            let mut ts_buffer = Vec::with_capacity(n);
+            let mut c1_buffer = Vec::with_capacity(n);
+            for i in 0..n {
+                ts_buffer.push(1726803356466 + i as i64);
+                c1_buffer.push(100 + i as i32);
+            }
+
+            let mut length = vec![8; n];
+            let mut is_null = vec![0; n];
+            let ts = new_bind!(Ty::Timestamp, ts_buffer, length, is_null);
+
+            let mut length = vec![4; n];
+            let mut is_null = vec![0; n];
+            let c1 = new_bind!(Ty::Int, c1_buffer, length, is_null);
+
+            let mut col = vec![ts, c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            for _ in 0..1000 {
+                let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+                assert_eq!(code, 0);
+
+                let mut affected_rows = 0;
+                let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+                assert_eq!(code, 0);
+                assert_eq!(affected_rows, 10);
+            }
+
+            test_exec(taos, "drop database test_1760167825");
+        }
+
+        Ok(())
+    }
 }

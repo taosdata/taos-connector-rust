@@ -2088,4 +2088,72 @@ mod recover_tests {
 
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recover_stmt2() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, _ctx| {
+                if let Message::Text(text) = msg {
+                    if text.contains("stmt") {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8820", "ws://localhost:6041/ws", intercept_fn).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:8820")?
+            .build()
+            .await?;
+
+        taos.exec_many(&[
+            "drop database if exists test_1760166989",
+            "create database test_1760166989",
+            "use test_1760166989",
+            "create table t0 (ts timestamp, c1 int)",
+        ])
+        .await?;
+
+        let client = taos.client_cloned();
+        let stmt2 = Stmt2::new(client);
+        stmt2.init().await?;
+        stmt2
+            .prepare("insert into test_1760166989.t0 values(?, ?)")
+            .await?;
+
+        let n = 10;
+        let mut tss = Vec::with_capacity(n);
+        let mut c1s = Vec::with_capacity(n);
+        for i in 0..n {
+            tss.push(1726803356466 + i as i64);
+            c1s.push(100 + i as i32);
+        }
+
+        let cols = vec![
+            ColumnView::from_millis_timestamp(tss),
+            ColumnView::from_ints(c1s),
+        ];
+        let param = Stmt2BindParam::new(None, None, Some(cols));
+
+        for _ in 0..1000 {
+            stmt2.bind(&[param.clone()]).await?;
+            let affected = stmt2.exec().await?;
+            assert_eq!(affected, 10);
+        }
+
+        taos.exec("drop database test_1760166989").await?;
+
+        Ok(())
+    }
 }
