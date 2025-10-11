@@ -1587,45 +1587,52 @@ impl RawRes {
             Poll::Ready(item)
         } else {
             current.in_use = true;
-            let param = Box::new((state.clone(), self.c.clone(), cx.waker().clone()));
+            let param = Box::new((
+                Rc::downgrade(state),
+                Arc::downgrade(&self.c),
+                cx.waker().clone(),
+            ));
             #[no_mangle]
             unsafe extern "C" fn taos_optin_fetch_rows_callback(
                 param: *mut c_void,
                 res: *mut TAOS_RES,
                 num_of_rows: c_int,
             ) {
-                let param = param as *mut (Arc<UnsafeCell<BlockState>>, Arc<ApiEntry>, Waker);
+                // use weak pointer in case that the result is freed earlier than callback received.
+                let param = param as *mut (Weak<UnsafeCell<BlockState>>, Weak<ApiEntry>, Waker);
                 let param = Box::from_raw(param);
-                let state = param.0;
-                let state = &mut *state.get();
-                let api = &*param.1;
-                // state.done = true;
-                state.in_use = false;
-                if num_of_rows < 0 {
-                    // error
-                    let old = state.result.replace(Err(RawError::new_with_context(
-                        num_of_rows,
-                        api.err_str(res),
-                        "fetch_rows_a",
-                    )));
-                    drop(old);
-                } else {
-                    // success
-                    if num_of_rows > 0 {
-                        // has a block
-                        let block = match param.1.taos_result_block {
-                            Some(f) => (f)(res).read() as _,
-                            None => todo!(),
-                        };
-                        state
-                            .result
-                            .replace(Ok(Some((block, num_of_rows as usize))));
+
+                if let (Some(state), Some(api)) = (param.0.upgrade(), param.1.upgrade()) {
+                    let state = &mut *state.get();
+                    let api = &*api;
+                    // state.done = true;
+                    state.in_use = false;
+                    if num_of_rows < 0 {
+                        // error
+                        let old = state.result.replace(Err(RawError::new_with_context(
+                            num_of_rows,
+                            api.err_str(res),
+                            "fetch_rows_a",
+                        )));
+                        drop(old);
                     } else {
-                        // retrieving completed
-                        state.result.replace(Ok(None));
+                        // success
+                        if num_of_rows > 0 {
+                            // has a block
+                            let block = match api.taos_result_block {
+                                Some(f) => (f)(res).read() as _,
+                                None => todo!(),
+                            };
+                            state
+                                .result
+                                .replace(Ok(Some((block, num_of_rows as usize))));
+                        } else {
+                            // retrieving completed
+                            state.result.replace(Ok(None));
+                        }
                     }
+                    param.2.wake();
                 }
-                param.2.wake();
             }
             unsafe {
                 (self.c.taos_fetch_rows_a)(
@@ -1664,7 +1671,11 @@ impl RawRes {
             Poll::Ready(item)
         } else {
             current.in_use = true;
-            let param = Box::new((Rc::downgrade(state), self.c.clone(), cx.waker().clone()));
+            let param = Box::new((
+                Rc::downgrade(state),
+                Arc::downgrade(&self.c),
+                cx.waker().clone(),
+            ));
             #[no_mangle]
             unsafe extern "C" fn taos_optin_fetch_raw_block_callback(
                 param: *mut c_void,
@@ -1672,33 +1683,35 @@ impl RawRes {
                 num_of_rows: c_int,
             ) {
                 // use weak pointer in case that the result is freed earlier than callback received.
-                let param: Box<(Weak<UnsafeCell<BlockState>>, Arc<ApiEntry>, Waker)> =
+                let param: Box<(Weak<UnsafeCell<BlockState>>, Weak<ApiEntry>, Waker)> =
                     Box::from_raw(param as _);
                 if let Some(state) = param.0.upgrade() {
-                    let state = &mut *state.get();
-                    let api = &*param.1;
-                    // state.done = true;
-                    state.in_use = false;
-                    if num_of_rows < 0 {
-                        // state.code = num_of_rows;
-                        // state.num = 0;
-                        state.result.replace(Err(RawError::new_with_context(
-                            num_of_rows,
-                            api.err_str(res),
-                            "taos_fetch_raw_block_a",
-                        )));
-                    } else {
-                        // state.num = num_of_rows as _;
-                        if num_of_rows > 0 {
-                            let block = (param.1.taos_get_raw_block.unwrap())(res) as _;
-                            state
-                                .result
-                                .replace(Ok(Some((block, num_of_rows as usize))));
+                    if let Some(api) = param.1.upgrade() {
+                        let state = &mut *state.get();
+                        let api = &*api;
+                        // state.done = true;
+                        state.in_use = false;
+                        if num_of_rows < 0 {
+                            // state.code = num_of_rows;
+                            // state.num = 0;
+                            state.result.replace(Err(RawError::new_with_context(
+                                num_of_rows,
+                                api.err_str(res),
+                                "taos_fetch_raw_block_a",
+                            )));
                         } else {
-                            state.result.replace(Ok(None));
+                            // state.num = num_of_rows as _;
+                            if num_of_rows > 0 {
+                                let block = (api.taos_get_raw_block.unwrap())(res) as _;
+                                state
+                                    .result
+                                    .replace(Ok(Some((block, num_of_rows as usize))));
+                            } else {
+                                state.result.replace(Ok(None));
+                            }
                         }
+                        param.2.wake();
                     }
-                    param.2.wake();
                 }
             }
             unsafe {
