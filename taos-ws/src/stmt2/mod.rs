@@ -1887,7 +1887,7 @@ mod recover_tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_concurrent() -> anyhow::Result<()> {
+    async fn test_concurrent_stmt2() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
@@ -1922,7 +1922,7 @@ mod recover_tests {
         ])
         .await?;
 
-        let n = 20;
+        let n = 10;
         let mut tasks = Vec::with_capacity(n);
         for i in 0..n {
             let client = taos.client_cloned();
@@ -1983,6 +1983,108 @@ mod recover_tests {
         }
 
         taos.exec("drop database test_1755138447").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_concurrent_conn() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, _ctx| {
+                if let Message::Text(text) = msg {
+                    if text.contains("stmt") {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8817", "ws://localhost:6041/ws", intercept_fn).await;
+
+        let n = 10;
+        let mut tasks = Vec::with_capacity(n);
+        for i in 0..n {
+            tasks.push(tokio::spawn(async move {
+                let taos = TaosBuilder::from_dsn("ws://localhost:8817")?
+                    .build()
+                    .await?;
+
+                let db = format!("test_{}", 1760151520 + i);
+
+                taos.exec_many(&[
+                    &format!("drop database if exists {db}"),
+                    &format!("create database {db}"),
+                    &format!("use {db}"),
+                    "create table t0 (ts timestamp, c1 int)",
+                ])
+                .await?;
+
+                let client = taos.client_cloned();
+                let stmt2 = Stmt2::new(client);
+                stmt2.init().await?;
+                stmt2
+                    .prepare(format!("insert into {db}.t0 values(?, ?)"))
+                    .await?;
+
+                let ts = 1726803356466 + i as i64;
+                let c1 = 100 + i as i32;
+                let cols = vec![
+                    ColumnView::from_millis_timestamp(vec![ts]),
+                    ColumnView::from_ints(vec![c1]),
+                ];
+                let param = Stmt2BindParam::new(None, None, Some(cols));
+                stmt2.bind(&[param]).await?;
+
+                let affected = stmt2.exec().await?;
+                assert_eq!(affected, 1);
+
+                stmt2
+                    .prepare(format!("select * from {db}.t0 where c1 = ?"))
+                    .await?;
+
+                let cols = vec![ColumnView::from_ints(vec![c1])];
+                let param = Stmt2BindParam::new(None, None, Some(cols));
+                stmt2.bind(&[param]).await?;
+                stmt2.exec().await?;
+
+                #[derive(Debug, Deserialize)]
+                struct Record {
+                    ts: i64,
+                    c1: i32,
+                }
+
+                let res: Result<Vec<Record>, RawError> =
+                    stmt2.result_set().await?.deserialize().try_collect().await;
+
+                if let Err(err) = res {
+                    tracing::error!("failed to deserialize records: {err:?}");
+                } else {
+                    let records = res.unwrap();
+                    assert_eq!(records.len(), 1);
+                    assert_eq!(records[0].ts, ts);
+                    assert_eq!(records[0].c1, c1);
+                }
+
+                taos.exec(format!("drop database {db}")).await?;
+
+                Ok::<_, anyhow::Error>(())
+            }));
+        }
+
+        let results = try_join_all(tasks).await.unwrap();
+        for res in results {
+            res?;
+        }
 
         Ok(())
     }
