@@ -1474,11 +1474,11 @@ pub mod ws_proxy {
                     if running.load(Ordering::Relaxed) {
                         tracing::info!("stopping WebSocket proxy...");
                         break;
-                    } else {
-                        tracing::info!("restarting WebSocket proxy...");
-                        running.store(true, Ordering::Relaxed);
-                        tokio::time::sleep(Duration::from_millis(200)).await;
                     }
+
+                    tracing::info!("restarting WebSocket proxy...");
+                    running.store(true, Ordering::Relaxed);
+                    tokio::time::sleep(Duration::from_millis(200)).await;
                 }
             });
 
@@ -1541,7 +1541,7 @@ pub mod ws_proxy {
                             while let Some(Ok(msg)) = client_stream.next().await {
                                 tracing::trace!("received message from client: {msg:?}");
                                 let mut ctx = ctx.lock().await;
-                                match intercept_fn(&msg, &mut *ctx) {
+                                match intercept_fn(&msg, &mut ctx) {
                                     ProxyAction::Restart => {
                                         running.store(false, Ordering::Relaxed);
                                         stop_notify.notify_waiters();
