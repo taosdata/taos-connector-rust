@@ -186,12 +186,7 @@ impl Stmt2Inner {
             self.stmt_id(),
         );
 
-        let resp = if recovering {
-            self.client.send_request(req).await?
-        } else {
-            self.send_request(req).await?
-        };
-
+        let resp = self.send_request(req, recovering).await?;
         if let WsRecvData::Stmt2Init { stmt_id, .. } = resp {
             self.stmt_id.store(stmt_id, Ordering::Release);
             tracing::trace!(
@@ -231,12 +226,7 @@ impl Stmt2Inner {
         };
         tracing::trace!("stmt2 prepare, id: {}, req: {req:?}", self.id);
 
-        let resp = if recovering {
-            self.client.send_request(req).await?
-        } else {
-            self.send_request(req).await?
-        };
-
+        let resp = self.send_request(req, recovering).await?;
         if let WsRecvData::Stmt2Prepare {
             is_insert,
             fields,
@@ -301,17 +291,10 @@ impl Stmt2Inner {
     async fn _bind_bytes(&self, bytes: Vec<u8>, recovering: bool) -> RawResult<()> {
         let req = WsSend::Binary(bytes);
         tracing::trace!("stmt2 bind, id: {}, req: {req:?}", self.id);
-
-        let resp = if recovering {
-            self.client.send_request(req).await?
-        } else {
-            self.send_request(req).await?
-        };
-
+        let resp = self.send_request(req, recovering).await?;
         if let WsRecvData::Stmt2Bind { .. } = resp {
             return Ok(());
         }
-
         unreachable!("unexpected stmt2 bind response: {resp:?}");
     }
 
@@ -333,13 +316,7 @@ impl Stmt2Inner {
             stmt_id: self.stmt_id(),
         };
         tracing::trace!("stmt2 exec, id: {}, req: {req:?}", self.id);
-
-        let resp = if recovering {
-            self.client.send_request(req).await?
-        } else {
-            self.send_request(req).await?
-        };
-
+        let resp = self.send_request(req, recovering).await?;
         if let WsRecvData::Stmt2Exec { affected, .. } = resp {
             if self.is_insert() {
                 self.cache.lock().await.bind_bytes.clear();
@@ -398,7 +375,7 @@ impl Stmt2Inner {
             stmt_id: self.stmt_id(),
         };
         tracing::trace!("stmt2 result, id: {}, req: {req:?}", self.id);
-        let resp = self.send_request(req).await?;
+        let resp = self.send_request(req, false).await?;
         if let WsRecvData::Stmt2Result {
             id,
             precision,
@@ -559,20 +536,24 @@ impl Stmt2Inner {
         Ok(())
     }
 
-    async fn send_request(&self, req: WsSend) -> RawResult<WsRecvData> {
-        self.set_complete(false);
+    async fn send_request(&self, req: WsSend, recovering: bool) -> RawResult<WsRecvData> {
         let req_id = req.req_id();
         tracing::trace!(
-            "send_request, id: {}, req_id: {req_id}, req: {req:?}",
+            "stmt2 send request start, id: {}, req_id: {req_id}, recovering: {recovering}, req: {req:?}",
             self.id
         );
-        let res = self.client.send_request(req).await;
+        if !recovering {
+            self.set_complete(false);
+        }
+        let resp = self.client.send_request(req).await;
+        if !recovering {
+            self.set_complete(true);
+        }
         tracing::trace!(
-            "send_request completed, id: {}, req_id: {req_id}, resp: {res:?}",
+            "stmt2 send request end, id: {}, req_id: {req_id}, resp: {resp:?}",
             self.id
         );
-        self.set_complete(true);
-        res
+        resp
     }
 
     fn set_complete(&self, completed: bool) {
