@@ -274,8 +274,10 @@ impl Stmt2Inner {
         self._bind_bytes(bytes, false).await
     }
 
-    async fn bind_bytes(&self, req_id: ReqId, bytes: Vec<u8>) -> RawResult<()> {
+    async fn bind_bytes(&self, req_id: ReqId, mut bytes: Vec<u8>) -> RawResult<()> {
         self.client.wait_for_reconnect().await?;
+
+        LittleEndian::write_u64(&mut bytes[bind::STMT_ID_POS..], self.stmt_id());
 
         let mut cache = self.cache.lock().await;
         cache.req_id = req_id;

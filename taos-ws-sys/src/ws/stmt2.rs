@@ -2082,7 +2082,7 @@ mod tests {
         let _ = tracing_subscriber::fmt()
             .with_file(true)
             .with_line_number(true)
-            .with_max_level(tracing::Level::ERROR)
+            .with_max_level(tracing::Level::TRACE)
             .compact()
             .try_init();
 
