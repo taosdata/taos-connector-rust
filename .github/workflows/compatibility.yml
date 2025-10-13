@@ -61,10 +61,6 @@ jobs:
           path: target
           key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
 
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 30
-
       - name: Run tests
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
