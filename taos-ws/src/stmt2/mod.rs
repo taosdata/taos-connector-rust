@@ -1902,6 +1902,13 @@ mod recover_tests {
                             return ProxyAction::Restart;
                         }
                     }
+                } else if let Message::Binary(bytes) = msg {
+                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+                    if action == 9 {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
                 }
                 ProxyAction::Forward
             })
@@ -1999,6 +2006,13 @@ mod recover_tests {
             Arc::new(move |msg, _ctx| {
                 if let Message::Text(text) = msg {
                     if text.contains("stmt") {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                } else if let Message::Binary(bytes) = msg {
+                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+                    if action == 9 {
                         if rand::rng().random_bool(0.03) {
                             return ProxyAction::Restart;
                         }
@@ -2102,6 +2116,13 @@ mod recover_tests {
             Arc::new(move |msg, _ctx| {
                 if let Message::Text(text) = msg {
                     if text.contains("stmt") {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                } else if let Message::Binary(bytes) = msg {
+                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+                    if action == 9 {
                         if rand::rng().random_bool(0.03) {
                             return ProxyAction::Restart;
                         }
