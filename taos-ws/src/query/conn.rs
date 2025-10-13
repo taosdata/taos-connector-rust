@@ -1,14 +1,9 @@
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Weak;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
-use std::{
-    collections::HashSet,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-};
 
 use flume::{Receiver, Sender};
 use futures::{SinkExt, StreamExt, TryStreamExt};
@@ -20,14 +15,9 @@ use tokio::time;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tracing::Instrument;
 
-use crate::query::asyn::ConnState;
-use crate::query::messages::{ToMessage, WsSend};
-use crate::query::{
-    asyn::{WsQuerySender, WS_ERROR_NO},
-    messages::{MessageId, ReqId, WsMessage, WsRecv, WsRecvData},
-    Error,
-};
-use crate::query::{WsConnReq, WsTaos};
+use crate::query::asyn::{ConnState, WsQuerySender, WS_ERROR_NO};
+use crate::query::messages::{MessageId, ReqId, ToMessage, WsMessage, WsRecv, WsRecvData, WsSend};
+use crate::query::{Error, WsConnReq, WsTaos};
 use crate::{
     handle_disconnect_error, send_request_with_timeout, TaosBuilder, WsStream, WsStreamReader,
     WsStreamSender,
@@ -608,6 +598,7 @@ fn cleanup_stmt2(
             if !message.is_stmt2_close() {
                 req_ids.push(message.req_id());
             }
+            tracing::trace!("drop stmt2 message: {message:?}");
         } else {
             kept_messages.push(message);
         }

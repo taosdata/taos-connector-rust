@@ -222,7 +222,8 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
         col_cnt = stmt2.fields_count().unwrap();
     }
 
-    let bytes = match bindv.to_bytes(generate_req_id(), stmt2.stmt_id(), tag_cnt, col_cnt) {
+    let req_id = generate_req_id();
+    let bytes = match bindv.to_bytes(req_id, stmt2.stmt_id(), tag_cnt, col_cnt) {
         Ok(bytes) => bytes,
         Err(err) => {
             error!("taos_stmt2_bind_param failed, err: {err:?}");
@@ -234,7 +235,7 @@ pub unsafe extern "C" fn taos_stmt2_bind_param(
 
     trace!("taos_stmt2_bind_param, bind bytes: {bytes:?}");
 
-    match block_in_place_or_global(stmt2.bind_bytes(bytes)) {
+    match block_in_place_or_global(stmt2.bind_bytes(req_id, bytes)) {
         Ok(_) => {
             debug!("taos_stmt2_bind_param succ");
             maybe_err.clear_err();
@@ -870,10 +871,17 @@ impl From<&Stmt2Field> for TAOS_FIELD_ALL {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::CString;
     use std::ptr;
+    use std::sync::Arc;
+
+    use futures::future::try_join_all;
+    use rand::Rng;
+    use taos_ws::stmt2::ws_proxy::{InterceptFn, ProxyAction, WsProxy};
+    use tokio_tungstenite::tungstenite::Message;
 
     use super::*;
-    use crate::ws::query::*;
+    use crate::ws::{query::*, taos_connect};
     use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
 
     macro_rules! new_bind {
@@ -1931,5 +1939,381 @@ mod tests {
             test_exec(taos, "drop database test_1753168041");
             taos_close(taos);
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_concurrent_conn() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, _ctx| {
+                if let Message::Text(text) = msg {
+                    if text.contains("stmt") {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                } else if let Message::Binary(bytes) = msg {
+                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+                    if action == 9 {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8818", "ws://localhost:6041/ws", intercept_fn).await;
+
+        let n = 10;
+        let mut tasks = Vec::with_capacity(n);
+        for i in 0..n {
+            tasks.push(tokio::spawn(async move {
+                unsafe {
+                    let taos = taos_connect(
+                        c"localhost".as_ptr(),
+                        c"root".as_ptr(),
+                        c"taosdata".as_ptr(),
+                        ptr::null(),
+                        8818,
+                    );
+                    assert!(!taos.is_null());
+
+                    let db = format!("test_{}", 1760161589 + i);
+
+                    test_exec_many(
+                        taos,
+                        &[
+                            &format!("drop database if exists {db}"),
+                            &format!("create database {db}"),
+                            &format!("use {db}"),
+                            "create table t0 (ts timestamp, c1 int)",
+                        ],
+                    );
+
+                    let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+                    assert!(!stmt2.is_null());
+
+                    let sql = CString::new(format!("insert into {db}.t0 values(?, ?)")).unwrap();
+                    let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+                    assert_eq!(code, 0);
+
+                    let mut buffer = vec![1739521477831i64];
+                    let mut length = vec![8];
+                    let mut is_null = vec![0];
+                    let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+
+                    let mut buffer = vec![1i32];
+                    let mut length = vec![4];
+                    let mut is_null = vec![0];
+                    let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+                    let mut col = vec![ts, c1];
+                    let mut cols = vec![col.as_mut_ptr()];
+                    let mut bindv = TAOS_STMT2_BINDV {
+                        count: 1,
+                        tbnames: ptr::null_mut(),
+                        tags: ptr::null_mut(),
+                        bind_cols: cols.as_mut_ptr(),
+                    };
+
+                    let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+                    assert_eq!(code, 0);
+
+                    let mut affected_rows = 0;
+                    let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+                    assert_eq!(code, 0);
+                    assert_eq!(affected_rows, 1);
+
+                    let sql = CString::new(format!("select * from {db}.t0 where c1 = ?")).unwrap();
+                    let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+                    assert_eq!(code, 0);
+
+                    let mut buffer = vec![1];
+                    let mut length = vec![4];
+                    let mut is_null = vec![0];
+                    let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+                    let mut col = vec![c1];
+                    let mut cols = vec![col.as_mut_ptr()];
+                    let mut bindv = TAOS_STMT2_BINDV {
+                        count: 1,
+                        tbnames: ptr::null_mut(),
+                        tags: ptr::null_mut(),
+                        bind_cols: cols.as_mut_ptr(),
+                    };
+
+                    let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+                    assert_eq!(code, 0);
+
+                    let mut affected_rows = 0;
+                    let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+                    assert_eq!(code, 0);
+                    assert_eq!(affected_rows, 0);
+
+                    let code = taos_stmt2_close(stmt2);
+                    assert_eq!(code, 0);
+
+                    test_exec(taos, format!("drop database {db}"));
+                    taos_close(taos);
+                }
+
+                Ok::<_, anyhow::Error>(())
+            }));
+        }
+
+        let results = try_join_all(tasks).await.unwrap();
+        for res in results {
+            res?;
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_concurrent_stmt2() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, _ctx| {
+                if let Message::Text(text) = msg {
+                    if text.contains("stmt") {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                } else if let Message::Binary(bytes) = msg {
+                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+                    if action == 9 {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8819", "ws://localhost:6041/ws", intercept_fn).await;
+
+        let taos = unsafe {
+            taos_connect(
+                c"localhost".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                ptr::null(),
+                8819,
+            )
+        };
+        assert!(!taos.is_null());
+
+        test_exec_many(
+            taos,
+            &[
+                "drop database if exists test_1760164460",
+                "create database test_1760164460",
+                "use test_1760164460",
+                "create table t0 (ts timestamp, c1 int)",
+            ],
+        );
+
+        let taos_ptr = SafePtr(taos);
+
+        let n = 10;
+        let mut tasks = Vec::with_capacity(n);
+        for i in 0..n {
+            let taos_ptr = taos_ptr.clone();
+            tasks.push(tokio::spawn(async move {
+                unsafe {
+                    let taos_ptr = taos_ptr;
+                    let taos = taos_ptr.0;
+                    let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+                    assert!(!stmt2.is_null());
+
+                    let sql = c"insert into test_1760164460.t0 values(?, ?)";
+                    let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+                    assert_eq!(code, 0);
+
+                    let mut buffer = vec![1739521477831i64];
+                    let mut length = vec![8];
+                    let mut is_null = vec![0];
+                    let ts = new_bind!(Ty::Timestamp, buffer, length, is_null);
+
+                    let mut buffer = vec![1i32];
+                    let mut length = vec![4];
+                    let mut is_null = vec![0];
+                    let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+                    let mut col = vec![ts, c1];
+                    let mut cols = vec![col.as_mut_ptr()];
+                    let mut bindv = TAOS_STMT2_BINDV {
+                        count: 1,
+                        tbnames: ptr::null_mut(),
+                        tags: ptr::null_mut(),
+                        bind_cols: cols.as_mut_ptr(),
+                    };
+
+                    let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+                    assert_eq!(code, 0);
+
+                    let mut affected_rows = 0;
+                    let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+                    assert_eq!(code, 0);
+                    assert_eq!(affected_rows, 1);
+
+                    let sql = c"select * from test_1760164460.t0 where c1 = ?";
+                    let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+                    assert_eq!(code, 0);
+
+                    let mut buffer = vec![1];
+                    let mut length = vec![4];
+                    let mut is_null = vec![0];
+                    let c1 = new_bind!(Ty::Int, buffer, length, is_null);
+
+                    let mut col = vec![c1];
+                    let mut cols = vec![col.as_mut_ptr()];
+                    let mut bindv = TAOS_STMT2_BINDV {
+                        count: 1,
+                        tbnames: ptr::null_mut(),
+                        tags: ptr::null_mut(),
+                        bind_cols: cols.as_mut_ptr(),
+                    };
+
+                    let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+                    assert_eq!(code, 0);
+
+                    let mut affected_rows = 0;
+                    let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+                    assert_eq!(code, 0);
+                    assert_eq!(affected_rows, 0);
+
+                    let code = taos_stmt2_close(stmt2);
+                    assert_eq!(code, 0);
+                }
+
+                Ok::<_, anyhow::Error>(())
+            }));
+        }
+
+        let results = try_join_all(tasks).await.unwrap();
+        for res in results {
+            res?;
+        }
+
+        test_exec(taos, "drop database test_1760164460");
+        unsafe { taos_close(taos) };
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recover_stmt2() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .compact()
+            .try_init();
+
+        let intercept_fn: InterceptFn = {
+            Arc::new(move |msg, _ctx| {
+                if let Message::Text(text) = msg {
+                    if text.contains("stmt") {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                } else if let Message::Binary(bytes) = msg {
+                    let action = unsafe { *(bytes.as_ptr().offset(16) as *const u64) };
+                    if action == 9 {
+                        if rand::rng().random_bool(0.03) {
+                            return ProxyAction::Restart;
+                        }
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8821", "ws://localhost:6041/ws", intercept_fn).await;
+
+        unsafe {
+            let taos = taos_connect(
+                c"localhost".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                ptr::null(),
+                8821,
+            );
+            assert!(!taos.is_null());
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1760167825",
+                    "create database test_1760167825",
+                    "use test_1760167825",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into test_1760167825.t0 values(?, ?)";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let n = 10;
+            let mut ts_buffer = Vec::with_capacity(n);
+            let mut c1_buffer = Vec::with_capacity(n);
+            for i in 0..n {
+                ts_buffer.push(1726803356466 + i as i64);
+                c1_buffer.push(100 + i as i32);
+            }
+
+            let mut length = vec![8; n];
+            let mut is_null = vec![0; n];
+            let ts = new_bind!(Ty::Timestamp, ts_buffer, length, is_null);
+
+            let mut length = vec![4; n];
+            let mut is_null = vec![0; n];
+            let c1 = new_bind!(Ty::Int, c1_buffer, length, is_null);
+
+            let mut col = vec![ts, c1];
+            let mut cols = vec![col.as_mut_ptr()];
+            let mut bindv = TAOS_STMT2_BINDV {
+                count: 1,
+                tbnames: ptr::null_mut(),
+                tags: ptr::null_mut(),
+                bind_cols: cols.as_mut_ptr(),
+            };
+
+            for _ in 0..1000 {
+                let code = taos_stmt2_bind_param(stmt2, &mut bindv, -1);
+                assert_eq!(code, 0);
+
+                let mut affected_rows = 0;
+                let code = taos_stmt2_exec(stmt2, &mut affected_rows);
+                assert_eq!(code, 0);
+                assert_eq!(affected_rows, 10);
+            }
+
+            test_exec(taos, "drop database test_1760167825");
+        }
+
+        Ok(())
     }
 }

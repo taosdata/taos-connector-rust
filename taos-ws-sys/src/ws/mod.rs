@@ -76,6 +76,7 @@ pub enum TSDB_OPTION_CONNECTION {
 
 type TaosResult<T> = Result<T, TaosError>;
 
+#[derive(Debug, Clone)]
 pub struct SafePtr<T>(pub T);
 
 unsafe impl<T> Send for SafePtr<T> {}
