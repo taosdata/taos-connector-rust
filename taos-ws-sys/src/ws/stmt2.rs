@@ -1941,7 +1941,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_concurrent_conn() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
@@ -2071,7 +2070,6 @@ mod tests {
         Ok(())
     }
 
-    #[ignore]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_concurrent_stmt2() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
@@ -2206,7 +2204,6 @@ mod tests {
         Ok(())
     }
 
-    #[ignore]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_recover_stmt2() -> anyhow::Result<()> {
         let _ = tracing_subscriber::fmt()
