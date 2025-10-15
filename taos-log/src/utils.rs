@@ -3,8 +3,6 @@ use tracing_subscriber::Registry;
 
 use crate::QidManager;
 
-pub const QID_HEADER_KEY: &str = "x-qid";
-
 pub struct Span;
 
 mod private {
@@ -22,85 +20,6 @@ pub trait QidMetadataSetter: private::Sealed {
     where
         Q: QidManager;
 }
-
-impl QidMetadataGetter for actix_web::http::header::HeaderMap {
-    fn get_qid<Q>(&self) -> Option<Q>
-    where
-        Q: QidManager,
-    {
-        self.get(QID_HEADER_KEY)
-            .and_then(|x| x.to_str().ok())
-            .and_then(|x| x.get(2..))
-            .and_then(|x| u64::from_str_radix(x, 16).ok())
-            .map(|x| Q::from(x))
-    }
-}
-
-impl QidMetadataSetter for actix_web::http::header::HeaderMap {
-    fn set_qid<Q>(&mut self, qid: &Q)
-    where
-        Q: QidManager,
-    {
-        self.insert(
-            actix_web::http::header::HeaderName::from_static(QID_HEADER_KEY),
-            actix_web::http::header::HeaderValue::from_str(&format!("{}", qid.display())).unwrap(),
-        );
-    }
-}
-
-impl private::Sealed for actix_web::http::header::HeaderMap {}
-
-impl QidMetadataGetter for http::header::HeaderMap {
-    fn get_qid<Q>(&self) -> Option<Q>
-    where
-        Q: QidManager,
-    {
-        self.get(QID_HEADER_KEY)
-            .and_then(|x| x.to_str().ok())
-            .and_then(|x| x.get(2..))
-            .and_then(|x| u64::from_str_radix(x, 16).ok())
-            .map(|x| Q::from(x))
-    }
-}
-
-impl QidMetadataSetter for http::header::HeaderMap {
-    fn set_qid<Q>(&mut self, qid: &Q)
-    where
-        Q: QidManager,
-    {
-        self.insert(
-            QID_HEADER_KEY,
-            http::header::HeaderValue::from_str(&format!("{}", qid.display())).unwrap(),
-        );
-    }
-}
-
-impl private::Sealed for http::header::HeaderMap {}
-
-impl QidMetadataGetter for arrow_schema::Schema {
-    fn get_qid<Q>(&self) -> Option<Q>
-    where
-        Q: QidManager,
-    {
-        self.metadata
-            .get(QID_HEADER_KEY)
-            .and_then(|x| x.get(2..))
-            .and_then(|x| u64::from_str_radix(x, 16).ok())
-            .map(|x| Q::from(x))
-    }
-}
-
-impl QidMetadataSetter for arrow_schema::Schema {
-    fn set_qid<Q>(&mut self, qid: &Q)
-    where
-        Q: QidManager,
-    {
-        self.metadata
-            .insert(QID_HEADER_KEY.to_owned(), format!("{}", qid.display()));
-    }
-}
-
-impl private::Sealed for arrow_schema::Schema {}
 
 impl QidMetadataGetter for Span {
     fn get_qid<Q>(&self) -> Option<Q>
@@ -180,7 +99,6 @@ impl private::Sealed for tracing::Span {}
 
 #[cfg(test)]
 mod tests {
-
     use tracing::info_span;
 
     use super::*;
@@ -190,39 +108,6 @@ mod tests {
     fn qid_set_get_test() {
         let qid_u64 = 9223372036854775807;
         let qid = Qid::from(qid_u64);
-
-        {
-            let mut header = actix_web::http::header::HeaderMap::new();
-            header.set_qid(&qid);
-
-            assert_eq!(header.get(QID_HEADER_KEY).unwrap(), "0x7fffffffffffffff");
-
-            let qid: Qid = header.get_qid().unwrap();
-            assert_eq!(qid.get(), qid_u64);
-        }
-
-        {
-            let mut header = http::header::HeaderMap::new();
-            header.set_qid(&qid);
-
-            assert_eq!(header.get(QID_HEADER_KEY).unwrap(), "0x7fffffffffffffff");
-
-            let qid: Qid = header.get_qid().unwrap();
-            assert_eq!(qid.get(), qid_u64);
-        }
-
-        {
-            let mut schema = arrow_schema::Schema::empty();
-            schema.set_qid(&qid);
-
-            assert_eq!(
-                schema.metadata.get(QID_HEADER_KEY).unwrap(),
-                "0x7fffffffffffffff"
-            );
-
-            let qid: Qid = schema.get_qid().unwrap();
-            assert_eq!(qid.get(), qid_u64);
-        }
 
         {
             use tracing_subscriber::layer::SubscriberExt;

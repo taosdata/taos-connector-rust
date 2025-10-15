@@ -150,7 +150,7 @@ jobs:
         id: setup-rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.87.0
+          toolchain: 1.90.0
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -197,7 +197,7 @@ jobs:
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
-        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 4 --workspace --features ws-rustls-aws-lc-crypto-provider,test-new-feat --lcov --output-path lcov.info --no-fail-fast
+        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 1 --workspace --features ws-rustls-aws-lc-crypto-provider,test-new-feat --lcov --output-path lcov.info --no-fail-fast
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

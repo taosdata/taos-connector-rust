@@ -188,7 +188,7 @@ async fn send_messages(
                 }
             }
             _ = close_reader.changed() => {
-                tracing::info!("WebSocket sender received close signal");
+                tracing::trace!("WebSocket sender received close signal");
                 send_close_message(&mut ws_stream_sender).await;
                 break;
             }
@@ -287,7 +287,7 @@ async fn read_messages(
                 }
             }
             _ = close_reader.changed() => {
-                tracing::info!("WebSocket reader received close signal");
+                tracing::trace!("WebSocket reader received close signal");
                 closed_normally = true;
                 break;
             }
@@ -297,7 +297,11 @@ async fn read_messages(
     drop(message_tx);
 
     if let Err(err) = message_handle.await {
-        tracing::error!("handle messages task failed: {err:?}");
+        if err.is_cancelled() {
+            tracing::trace!("handle messages task was cancelled");
+        } else {
+            tracing::error!("handle messages task panicked: {err:?}");
+        }
     }
 
     if closed_normally {

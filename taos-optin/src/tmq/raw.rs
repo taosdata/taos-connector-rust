@@ -40,7 +40,7 @@ pub(super) mod tmq {
             tmq_ptr: *mut tmq_t,
             timeout: i64,
         ) -> Self {
-            let (sender, receiver) = flume::bounded(10);
+            let (sender, receiver) = flume::bounded(1);
             Self {
                 api,
                 tmq_api,
@@ -427,8 +427,8 @@ pub(super) mod tmq {
             self.tmq_api.clone()
         }
 
-        pub(crate) fn sender(&self) -> flume::Sender<oneshot::Sender<RawResult<Option<RawRes>>>> {
-            self.sender.clone()
+        pub(crate) fn sender(&self) -> &flume::Sender<oneshot::Sender<RawResult<Option<RawRes>>>> {
+            &self.sender
         }
     }
 
@@ -676,7 +676,7 @@ pub(super) mod list {
             Ok(Self { api, ptr })
         }
 
-        pub fn iter(&self) -> Iter {
+        pub fn iter(&self) -> Iter<'_> {
             let inner = self.api.as_c_str_slice(self.as_ptr());
             let len = inner.len();
             Iter {

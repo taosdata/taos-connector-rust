@@ -169,6 +169,7 @@ impl<T> WsMaybeError<T> {
         unsafe { self.data.as_ref() }
     }
 
+    #[allow(clippy::mut_from_ref)]
     pub fn safe_deref_mut(&self) -> Option<&mut T> {
         unsafe { self.data.as_mut() }
     }

@@ -1,5 +1,7 @@
 #![recursion_limit = "256"]
 
+use chrono_tz::Tz;
+use dashmap::DashMap;
 use futures::stream::{SplitSink, SplitStream};
 use futures::StreamExt;
 use futures_util::SinkExt;
@@ -15,7 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use taos_query::prelude::Code;
-use taos_query::util::Edition;
+use taos_query::util::{generate_req_id, Edition};
 use taos_query::{DsnError, IntoDsn, RawError, RawResult};
 use tokio::time;
 use tokio_tungstenite::tungstenite::error::ProtocolError;
@@ -28,6 +30,7 @@ pub use stmt::Stmt;
 
 pub mod stmt2;
 pub use stmt2::Stmt2;
+pub(crate) use stmt2::Stmt2Inner;
 
 pub mod consumer;
 pub use consumer::{Consumer, Offset, TmqBuilder};
@@ -42,7 +45,7 @@ use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStre
 
 use crate::query::asyn::WS_ERROR_NO;
 use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
-use crate::query::send_conn_request;
+use crate::query::{send_conn_request, ConnOption};
 
 type Version = String;
 
@@ -78,6 +81,8 @@ pub struct TaosBuilder {
     conn_mode: Option<u32>,
     compression: bool,
     retry_policy: RetryPolicy,
+    tz: Option<Tz>,
+    conn_options: DashMap<i32, Option<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +102,7 @@ impl Error {
     pub const fn errno(&self) -> Code {
         self.code
     }
+
     pub fn errstr(&self) -> String {
         self.source.to_string()
     }
@@ -116,6 +122,7 @@ impl From<DsnError> for Error {
         }
     }
 }
+
 impl From<query::asyn::Error> for Error {
     fn from(err: query::asyn::Error) -> Self {
         Error {
@@ -451,33 +458,35 @@ impl TaosBuilder {
             backoff_max_ms,
         };
 
-        if let Some(token) = token {
-            Ok(TaosBuilder {
-                https,
-                addrs,
-                auth: WsAuth::Token(token),
-                database: dsn.subject,
-                server_version: OnceCell::new(),
-                conn_mode,
-                compression,
-                retry_policy,
-                current_addr_index: Arc::new(AtomicUsize::new(0)),
+        let tz = dsn
+            .remove("timezone")
+            .map(|s| {
+                s.parse::<Tz>()
+                    .map_err(|_| DsnError::InvalidParam("timezone".to_string(), s.clone()))
             })
+            .transpose()?;
+
+        let auth = if let Some(token) = token {
+            WsAuth::Token(token)
         } else {
             let username = dsn.username.unwrap_or_else(|| "root".to_string());
             let password = dsn.password.unwrap_or_else(|| "taosdata".to_string());
-            Ok(TaosBuilder {
-                https,
-                addrs,
-                auth: WsAuth::Plain(username, password),
-                database: dsn.subject,
-                server_version: OnceCell::new(),
-                conn_mode,
-                compression,
-                retry_policy,
-                current_addr_index: Arc::new(AtomicUsize::new(0)),
-            })
-        }
+            WsAuth::Plain(username, password)
+        };
+
+        Ok(TaosBuilder {
+            https,
+            addrs,
+            auth,
+            database: dsn.subject,
+            server_version: OnceCell::new(),
+            conn_mode,
+            compression,
+            retry_policy,
+            current_addr_index: Arc::new(AtomicUsize::new(0)),
+            tz,
+            conn_options: DashMap::new(),
+        })
     }
 
     pub(crate) async fn connect(&self) -> RawResult<(WsStream, Version)> {
@@ -537,29 +546,37 @@ impl TaosBuilder {
                             return Ok((ws_stream, String::new()));
                         }
 
-                        let version = match self.send_version_request(&mut ws_stream).await {
-                            Ok(ver) => ver,
-                            Err(err) => {
-                                tracing::warn!("failed to send version request: {err}");
-                                let code = err.code();
-                                last_err = Some(err);
-                                if code != WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code() {
-                                    break;
+                        macro_rules! call {
+                            ($func:expr, $ctx:expr) => {
+                                match $func.await {
+                                    Ok(res) => res,
+                                    Err(err) => {
+                                        tracing::warn!("failed to {:?}: {}", $ctx, err);
+                                        let code = err.code();
+                                        last_err = Some(err);
+                                        if code != WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code() {
+                                            break;
+                                        }
+                                        continue;
+                                    }
                                 }
-                                continue;
-                            }
-                        };
+                            };
+                        }
+
+                        let version = call!(
+                            self.send_version_request(&mut ws_stream),
+                            "send version request"
+                        );
 
                         if let Some(ref cb) = cb {
-                            if let Err(err) = cb(&mut ws_stream).await {
-                                tracing::warn!("failed to call callback: {err}");
-                                let code = err.code();
-                                last_err = Some(err);
-                                if code != WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code() {
-                                    break;
-                                }
-                                continue;
-                            }
+                            call!(cb(&mut ws_stream), "call callback");
+                        }
+
+                        if !self.conn_options.is_empty() {
+                            call!(
+                                self.send_options_connection_request(&mut ws_stream),
+                                "send options_connection request"
+                            );
                         }
 
                         return Ok((ws_stream, version));
@@ -623,14 +640,7 @@ impl TaosBuilder {
         ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> RawResult<Version> {
         let timeout = Duration::from_secs(8);
-
-        time::timeout(timeout, ws_stream.send(WsSend::Version.to_msg()))
-            .await
-            .map_err(|_| {
-                RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
-                    .context("timeout sending version request")
-            })?
-            .map_err(handle_disconnect_error)?;
+        send_request_with_timeout(ws_stream, WsSend::Version.to_msg(), timeout).await?;
 
         let version_fut = async {
             let max_non_version_cnt = 5;
@@ -687,25 +697,89 @@ impl TaosBuilder {
         Ok(version)
     }
 
-    pub(crate) fn build_conn_request(&self) -> WsConnReq {
-        let mode = match self.conn_mode {
-            Some(1) => Some(0), // for adapter, 0 is bi mode
-            _ => None,
+    async fn send_options_connection_request(
+        &self,
+        ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    ) -> RawResult<()> {
+        let mut options = Vec::with_capacity(self.conn_options.len());
+        for entry in &self.conn_options {
+            options.push(ConnOption {
+                option: *entry.key(),
+                value: entry.value().clone(),
+            });
+        }
+
+        let req = WsSend::OptionsConnection {
+            req_id: generate_req_id(),
+            options,
         };
 
-        match &self.auth {
-            WsAuth::Token(_) => WsConnReq {
-                user: Some("root".to_string()),
-                password: Some("taosdata".to_string()),
-                db: self.database.clone(),
-                mode,
-            },
-            WsAuth::Plain(user, pass) => WsConnReq {
-                user: Some(user.to_string()),
-                password: Some(pass.to_string()),
-                db: self.database.clone(),
-                mode,
-            },
+        let timeout = Duration::from_secs(8);
+        send_request_with_timeout(ws_stream, req.to_msg(), timeout).await?;
+
+        loop {
+            let res = time::timeout(timeout, ws_stream.next())
+                .await
+                .map_err(|_| {
+                    RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
+                        .context("timeout waiting for options_connection response")
+                })?;
+
+            let Some(res) = res else {
+                return Err(RawError::from_code(
+                    WS_ERROR_NO::WEBSOCKET_DISCONNECTED.as_code(),
+                ));
+            };
+
+            let message = res.map_err(handle_disconnect_error)?;
+            tracing::trace!("send_options_connection_request, received message: {message}");
+
+            match message {
+                Message::Text(text) => {
+                    let resp: WsRecv = serde_json::from_str(&text).map_err(|err| {
+                        RawError::any(err)
+                            .with_code(WS_ERROR_NO::DE_ERROR.as_code())
+                            .context("invalid json response")
+                    })?;
+                    let (_, data, ok) = resp.ok();
+                    ok?;
+                    match data {
+                        WsRecvData::OptionsConnection { .. } => return Ok(()),
+                        WsRecvData::Version { .. } => {}
+                        _ => {
+                            return Err(RawError::from_string(format!(
+                                "unexpected options_connection response: {data:?}"
+                            )))
+                        }
+                    }
+                }
+                Message::Ping(bytes) => {
+                    ws_stream
+                        .send(Message::Pong(bytes))
+                        .await
+                        .map_err(handle_disconnect_error)?;
+                }
+                _ => {
+                    return Err(RawError::from_string(format!(
+                        "unexpected message during options_connection: {message:?}"
+                    )))
+                }
+            }
+        }
+    }
+
+    pub(crate) fn build_conn_request(&self) -> WsConnReq {
+        let (user, password) = match &self.auth {
+            WsAuth::Token(_) => ("root", "taosdata"),
+            WsAuth::Plain(user, pass) => (user.as_str(), pass.as_str()),
+        };
+
+        WsConnReq {
+            user: Some(user.to_string()),
+            password: Some(password.to_string()),
+            db: self.database.clone(),
+            mode: (self.conn_mode == Some(1)).then_some(0), // for adapter, 0 is bi mode
+            tz: self.tz.map(|s| s.to_string()),
         }
     }
 
@@ -756,6 +830,22 @@ impl TaosBuilder {
     }
 }
 
+async fn send_request_with_timeout(
+    ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    message: Message,
+    timeout: Duration,
+) -> RawResult<()> {
+    tracing::trace!("sending request, message: {message:?}");
+
+    time::timeout(timeout, ws_stream.send(message))
+        .await
+        .map_err(|_| {
+            RawError::from_code(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT.as_code())
+                .context("timeout sending request")
+        })?
+        .map_err(handle_disconnect_error)
+}
+
 #[inline]
 fn handle_disconnect_error(err: WsError) -> RawError {
     match err {
@@ -776,6 +866,7 @@ fn handle_disconnect_error(err: WsError) -> RawError {
 #[cfg(test)]
 mod tests {
     use futures::{SinkExt, StreamExt};
+    use taos_query::prelude::*;
 
     use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
     use crate::*;
