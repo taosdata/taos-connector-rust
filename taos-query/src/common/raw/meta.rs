@@ -8,6 +8,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use super::RawData;
 use crate::common::{Field, Ty};
 use crate::helpers::CompressOptions;
+use crate::util::sql_value_escape;
 
 pub type RawMeta = RawData;
 
@@ -119,7 +120,7 @@ impl Display for MetaCreate {
                                 match t.field.ty() {
                                     Ty::Json => format!("'{}'", t.value.as_str().unwrap()),
                                     Ty::VarChar | Ty::NChar => {
-                                        t.value.as_str().unwrap().to_string()
+                                        sql_value_escape(t.value.as_str().unwrap())
                                     }
                                     _ => format!("{}", t.value),
                                 }
@@ -400,7 +401,7 @@ impl JsonMeta {
         matches!(self, JsonMeta::Plural { .. })
     }
 
-    pub fn iter(&self) -> JsonMetaIter {
+    pub fn iter(&self) -> JsonMetaIter<'_> {
         match self {
             JsonMeta::Plural { metas, .. } => JsonMetaIter {
                 iter: Either::Left(metas.iter()),
@@ -411,7 +412,7 @@ impl JsonMeta {
         }
     }
 
-    pub fn iter_mut(&mut self) -> JsonMetaIterMut {
+    pub fn iter_mut(&mut self) -> JsonMetaIterMut<'_> {
         match self {
             JsonMeta::Plural { metas, .. } => JsonMetaIterMut {
                 iter: Either::Left(metas.iter_mut()),
@@ -559,6 +560,28 @@ impl<'a> IntoIterator for &'a mut JsonMeta {
 mod tests {
     use super::{JsonMeta, MetaUnit};
     use crate::itypes::IsJson;
+
+    #[test]
+    fn test_json_meta() {
+        let json = r#"{
+            "type": "create",
+            "tableType": "child",
+            "tableName": "ss1",
+            "using": "sss",
+            "tags": [
+                { "name": "t1", "type": 4, "length": 4, "value": 1},
+                { "name": "t2", "type": 7, "length": 8, "value": 1.1},
+                { "name": "t3", "type": 8, "length": 20, "value": "AAAA"}
+            ],
+            "tagNum": 3
+        }"#;
+        let meta = serde_json::from_str::<MetaUnit>(json).unwrap();
+        println!("{}", meta);
+        assert_eq!(
+            meta.to_string(),
+            "CREATE TABLE IF NOT EXISTS `ss1` USING `sss` (`t1`, `t2`, `t3`) TAGS(1, 1.1, 'AAAA')"
+        );
+    }
 
     #[test]
     fn test_json_meta_compress() {

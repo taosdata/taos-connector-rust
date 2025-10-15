@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use chrono_tz::Tz;
 use dashmap::DashMap as HashMap;
 use itertools::Itertools;
 use messages::*;
@@ -68,10 +69,7 @@ impl WsTmqSender {
 
         tracing::trace!("tmq send_recv, message sent, waiting for response, req_id: {req_id}");
 
-        let data = tokio::time::timeout(Duration::from_secs(60), data_rx.recv())
-            .await
-            .map_err(WsTmqError::from)?
-            .ok_or(WsTmqError::ChannelClosedError)?;
+        let data = data_rx.recv().await.ok_or(WsTmqError::ChannelClosedError)?;
 
         tracing::trace!("tmq send_recv, req_id: {req_id}, received data: {data:?}");
 
@@ -269,24 +267,33 @@ struct WsMessageBase {
     sender: WsTmqSender,
     message_id: MessageId,
     raw_blocks: Arc<Mutex<Option<VecDeque<RawBlock>>>>,
+    tz: Option<Tz>,
 }
 
 impl WsMessageBase {
-    fn new(is_support_fetch_raw: bool, sender: WsTmqSender, message_id: MessageId) -> Self {
+    fn new(
+        is_support_fetch_raw: bool,
+        sender: WsTmqSender,
+        message_id: MessageId,
+        tz: Option<Tz>,
+    ) -> Self {
         Self {
             is_support_fetch_raw,
             sender,
             message_id,
             raw_blocks: Arc::new(Mutex::new(None)),
+            tz,
         }
     }
 
     async fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
-        if self.is_support_fetch_raw {
-            self.fetch_raw_block_new().await
+        let block = if self.is_support_fetch_raw {
+            self.fetch_raw_block_new().await?
         } else {
-            self.fetch_raw_block_old().await
-        }
+            self.fetch_raw_block_old().await?
+        };
+
+        Ok(block.map(|b| b.with_timezone(self.tz)))
     }
 
     async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
@@ -594,8 +601,12 @@ impl Consumer {
 
             self.message_id.store(message_id, Ordering::Relaxed);
 
-            let message =
-                WsMessageBase::new(self.support_fetch_raw(), self.sender.clone(), message_id);
+            let message = WsMessageBase::new(
+                self.support_fetch_raw(),
+                self.sender.clone(),
+                message_id,
+                self.tz,
+            );
 
             return match message_type {
                 MessageType::Meta => Some((offset, MessageSet::Meta(Meta(message)))),
@@ -608,6 +619,7 @@ impl Consumer {
                             self.support_fetch_raw(),
                             self.sender.clone(),
                             message_id,
+                            self.tz,
                         )),
                     ),
                 )),
@@ -1168,6 +1180,7 @@ impl TmqBuilder {
             cache_sender: poll_cache_tx,
             cache_reader: Mutex::new(poll_cache_rx),
             last_poll_time: AtomicU64::new(0),
+            tz: self.info.tz,
         })
     }
 }
@@ -1189,6 +1202,7 @@ pub struct Consumer {
     cache_sender: mpsc::Sender<Option<TmqRecvData>>,
     cache_reader: Mutex<mpsc::Receiver<Option<TmqRecvData>>>,
     last_poll_time: AtomicU64,
+    tz: Option<Tz>,
 }
 
 impl Drop for Consumer {
@@ -2962,6 +2976,36 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_recv_timeout_never() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1758855878",
+            "drop database if exists test_1758855878",
+            "create database test_1758855878",
+            "create topic topic_1758855878 as database test_1758855878",
+        ])
+        .await?;
+
+        let handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let tmq = TmqBuilder::from_dsn("ws://localhost:6041?group.id=10")?;
+            let mut consumer = tmq.build().await?;
+            consumer.subscribe(["topic_1758855878"]).await?;
+            let _ = consumer.recv_timeout(Timeout::Never).await?;
+            Ok(())
+        });
+
+        let res = tokio::time::timeout(Duration::from_secs(90), handle).await;
+        assert!(res.is_err());
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "rustls-aws-lc-crypto-provider")]
@@ -2973,7 +3017,7 @@ mod cloud_tests {
     use tokio::sync::{mpsc, oneshot};
 
     use crate::consumer::{Data, Meta};
-    use crate::TmqBuilder;
+    use crate::{TaosBuilder, TmqBuilder};
 
     #[tokio::test]
     async fn test_poll() -> anyhow::Result<()> {
@@ -3049,6 +3093,15 @@ mod cloud_tests {
 
         poll_handle.await??;
         cnt_handle.await??;
+
+        let taos = TaosBuilder::from_dsn(format!("{url}/rust_test?token={token}"))?
+            .build()
+            .await?;
+
+        taos.exec(format!(
+            "drop consumer group `{group_id}` on rust_tmq_test_topic"
+        ))
+        .await?;
 
         Ok(())
     }

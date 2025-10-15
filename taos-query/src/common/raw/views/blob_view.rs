@@ -40,7 +40,7 @@ impl BlobView {
 
     /// A iterator only decide if the value at some row index is NULL or not.
     #[inline]
-    pub fn is_null_iter(&self) -> BlobNullsIter {
+    pub fn is_null_iter(&self) -> BlobNullsIter<'_> {
         BlobNullsIter { view: self, row: 0 }
     }
 
@@ -83,7 +83,7 @@ impl BlobView {
 
     /// Get the value at `row` index.
     #[inline]
-    pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
+    pub(crate) unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue<'_> {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::Blob), |b| {
                 BorrowedValue::Blob(Cow::Borrowed(b.as_bytes()))
@@ -129,7 +129,7 @@ impl BlobView {
 
     /// Get an iterator for the `BlobView`.
     #[inline]
-    pub fn iter(&self) -> BlobIter {
+    pub fn iter(&self) -> BlobIter<'_> {
         BlobIter { view: self, row: 0 }
     }
 

@@ -92,7 +92,7 @@ impl UIntView {
     }
 
     /// A iterator only decide if the value at some row index is NULL or not.
-    pub fn is_null_iter(&self) -> NullsIter {
+    pub fn is_null_iter(&self) -> NullsIter<'_> {
         NullsIter {
             nulls: &self.nulls,
             row: 0,
@@ -145,7 +145,7 @@ impl UIntView {
         }
     }
 
-    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue {
+    pub unsafe fn get_value_unchecked(&self, row: usize) -> BorrowedValue<'_> {
         self.get_unchecked(row)
             .map_or(BorrowedValue::Null(Ty::UInt), BorrowedValue::UInt)
     }
@@ -182,7 +182,7 @@ impl UIntView {
     }
 
     /// A iterator to nullable values of current row.
-    pub fn iter(&self) -> UIntViewIter {
+    pub fn iter(&self) -> UIntViewIter<'_> {
         UIntViewIter { view: self, row: 0 }
     }
 

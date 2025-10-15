@@ -1777,6 +1777,71 @@ mod tests {
     }
 
     #[test]
+    fn test_print_nchar() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1758525503",
+                    "create database test_1758525503",
+                    "use test_1758525503",
+                    "create table t0 (ts timestamp, c1 nchar(50))",
+                    "insert into t0 values (1741780784752, null)",
+                    "insert into t0 values (1741780784753, 'hello, world')",
+                    "insert into t0 values (1741780784754, '你好，世界')",
+                    "insert into t0 values (1741780784755, '你好，世界 hello, world 1234567890')",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 2);
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut bytes = vec![0 as c_char; 1024];
+            let len = taos_print_row(bytes.as_mut_ptr(), row, fields, num_fields);
+            let str = CStr::from_ptr(bytes.as_ptr()).to_str().unwrap();
+            assert_eq!(str, "1741780784752 NULL");
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut bytes = vec![0 as c_char; 1024];
+            let len = taos_print_row(bytes.as_mut_ptr(), row, fields, num_fields);
+            let str = CStr::from_ptr(bytes.as_ptr()).to_str().unwrap();
+            assert_eq!(str, "1741780784753 hello, world");
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut bytes = vec![0 as c_char; 1024];
+            let len = taos_print_row(bytes.as_mut_ptr(), row, fields, num_fields);
+            let str = CStr::from_ptr(bytes.as_ptr()).to_str().unwrap();
+            assert_eq!(str, "1741780784754 你好，世界");
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let mut bytes = vec![0 as c_char; 1024];
+            let len = taos_print_row(bytes.as_mut_ptr(), row, fields, num_fields);
+            let str = CStr::from_ptr(bytes.as_ptr()).to_str().unwrap();
+            assert_eq!(str, "1741780784755 你好，世界 hello, world 1234567890");
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1758525503");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
     fn test_write_to_cstr() {
         unsafe fn write_to_cstr(size: &mut usize, str: *mut c_char, content: &str) -> i32 {
             if content.len() > *size {
@@ -2598,16 +2663,18 @@ mod tests {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset((r * 8) as isize) as *mut i64;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset((r * 8) as isize) as *mut i64;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_INT => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut i32;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset((r * 4) as isize) as *mut i32;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_VARCHAR => {
@@ -2631,7 +2698,6 @@ mod tests {
             }
 
             taos_free_result(res);
-
             test_exec(taos, "drop database test_1741779708");
             taos_close(taos);
         }
@@ -2682,96 +2748,108 @@ mod tests {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset((r * 8) as isize) as *mut i64;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset((r * 8) as isize) as *mut i64;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_BOOL => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset(r as isize) as *mut bool;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset(r as isize) as *mut bool;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_TINYINT => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset(r as isize) as *mut i8;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset(r as isize) as *mut i8;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_SMALLINT => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset(r as isize) as *mut i16;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset(r as isize) as *mut i16;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_INT => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut i32;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset((r * 4) as isize) as *mut i32;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_BIGINT => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut i64;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset((r * 4) as isize) as *mut i64;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_UTINYINT => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset(r as isize) as *mut u8;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset(r as isize) as *mut u8;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_USMALLINT => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset(r as isize) as *mut u16;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset(r as isize) as *mut u16;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_UINT => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut u32;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset((r * 4) as isize) as *mut u32;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_UBIGINT => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut u64;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset((r * 4) as isize) as *mut u64;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_FLOAT => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset((r * 4) as isize) as *mut f32;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset((r * 4) as isize) as *mut f32;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_DOUBLE => {
                                 if taos_is_null(res, r as _, c as _) {
                                     println!("col: {}, row: {}, val: NULL", c, r);
                                 } else {
-                                    let val = rows[c].offset((r * 8) as isize) as *mut f64;
-                                    println!("col: {}, row: {}, val: {}", c, r, *val);
+                                    let ptr = rows[c].offset((r * 8) as isize) as *mut f64;
+                                    let val = ptr::read_unaligned(ptr);
+                                    println!("col: {}, row: {}, val: {}", c, r, val);
                                 }
                             }
                             TSDB_DATA_TYPE_VARCHAR => {
@@ -2839,8 +2917,106 @@ mod tests {
             }
 
             taos_free_result(res);
-
             test_exec(taos, "drop database test_1741782821");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_fetch_block_nchar() {
+        fn nchar_bytes_to_string(bytes: &[u8]) -> String {
+            bytes
+                .chunks_exact(4)
+                .filter_map(|chunk| {
+                    let code = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    std::char::from_u32(code)
+                })
+                .collect()
+        }
+
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1758526794",
+                    "create database test_1758526794",
+                    "use test_1758526794",
+                    "create table t0 (ts timestamp, c1 nchar(50))",
+                    "insert into t0 values (1741780784752, null)",
+                    "insert into t0 values (1741780784753, 'hello, world')",
+                    "insert into t0 values (1741780784754, '你好，世界')",
+                    "insert into t0 values (1741780784755, '你好，世界 hello, world 1234567890')",
+                ],
+            );
+
+            let res = taos_query(taos, c"select * from t0".as_ptr());
+            assert!(!res.is_null());
+
+            let num_fields = taos_num_fields(res);
+            let fields = taos_fetch_fields(res);
+            let fields = slice::from_raw_parts(fields, num_fields as _);
+
+            let mut actual = Vec::with_capacity(8);
+            let expected = vec![
+                "1741780784752",
+                "NULL",
+                "1741780784753",
+                "hello, world",
+                "1741780784754",
+                "你好，世界",
+                "1741780784755",
+                "你好，世界 hello, world 1234567890",
+            ];
+
+            loop {
+                let mut num_of_rows = 0;
+                let mut rows = ptr::null_mut();
+                let code = taos_fetch_block_s(res, &mut num_of_rows, &mut rows);
+                assert_eq!(code, 0);
+                if num_of_rows == 0 {
+                    break;
+                }
+
+                let rows = slice::from_raw_parts(rows, num_fields as _);
+
+                for r in 0..num_of_rows as usize {
+                    for (c, field) in fields.iter().enumerate() {
+                        match field.r#type as usize {
+                            TSDB_DATA_TYPE_TIMESTAMP => {
+                                if taos_is_null(res, r as _, c as _) {
+                                    actual.push("NULL".to_string());
+                                } else {
+                                    let ptr = rows[c].offset((r * 8) as isize) as *const i64;
+                                    let val = ptr::read_unaligned(ptr);
+                                    actual.push(val.to_string());
+                                }
+                            }
+                            TSDB_DATA_TYPE_NCHAR => {
+                                let offsets = taos_get_column_data_offset(res, c as _);
+                                let offsets = slice::from_raw_parts(offsets, num_of_rows as _);
+                                if offsets[r] == -1 {
+                                    actual.push("NULL".to_string());
+                                } else {
+                                    let ptr = rows[c].offset(offsets[r] as isize) as *const i16;
+                                    let len = ptr::read_unaligned(ptr);
+                                    let ptr =
+                                        rows[c].offset((offsets[r] + 2) as isize) as *const u8;
+                                    let slice = slice::from_raw_parts(ptr, len as usize);
+                                    let val = nchar_bytes_to_string(slice);
+                                    actual.push(val);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            assert_eq!(actual, expected);
+
+            taos_free_result(res);
+            test_exec(taos, "drop database test_1758526794");
             taos_close(taos);
         }
     }

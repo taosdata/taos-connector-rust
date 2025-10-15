@@ -33,10 +33,9 @@ impl From<u64> for Qid {
 
 fn main() {
     let rand_id: usize = rand::thread_rng().gen_range(100..999);
-    let appender = RollingFileAppender::builder(".", "rustc", 16)
+    let appender = RollingFileAppender::builder(".")
         .compress(true)
         .reserved_disk_size("1GB")
-        .rotation_count(10)
         .keep_days(10)
         .rotation_size("1KB")
         .stop_logging_threadhold(50)

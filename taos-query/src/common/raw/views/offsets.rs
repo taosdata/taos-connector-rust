@@ -26,7 +26,7 @@ impl Offsets {
         OffsetsMut::from_offsets(iter).into_offsets()
     }
 
-    pub fn iter(&self) -> OffsetsIter {
+    pub fn iter(&self) -> OffsetsIter<'_> {
         OffsetsIter {
             offsets: self,
             index: 0,

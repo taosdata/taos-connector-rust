@@ -15,7 +15,7 @@ use taos_query::common::{Field, Precision, Ty};
 use taos_query::util::generate_req_id;
 use taos_query::TBuilder;
 use taos_ws::query::asyn::WS_ERROR_NO;
-use taos_ws::query::Error;
+use taos_ws::query::{ConnOption, Error};
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
 use tracing::{debug, error, instrument};
@@ -63,19 +63,20 @@ pub enum TSDB_OPTION {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum TSDB_OPTION_CONNECTION {
     TSDB_OPTION_CONNECTION_CLEAR = -1,
-    TSDB_OPTION_CONNECTION_CHARSET = 0,
-    TSDB_OPTION_CONNECTION_TIMEZONE = 1,
-    TSDB_OPTION_CONNECTION_USER_IP = 2,
-    TSDB_OPTION_CONNECTION_USER_APP = 3,
-    TSDB_MAX_OPTIONS_CONNECTION = 4,
+    TSDB_OPTION_CONNECTION_CHARSET,
+    TSDB_OPTION_CONNECTION_TIMEZONE,
+    TSDB_OPTION_CONNECTION_USER_IP,
+    TSDB_OPTION_CONNECTION_USER_APP,
+    TSDB_MAX_OPTIONS_CONNECTION,
 }
 
 type TaosResult<T> = Result<T, TaosError>;
 
+#[derive(Debug, Clone)]
 pub struct SafePtr<T>(pub T);
 
 unsafe impl<T> Send for SafePtr<T> {}
@@ -203,11 +204,14 @@ unsafe fn connect(
     };
 
     let compression = config::compression();
+    let conn_retries = config::conn_retries();
+    let retry_backoff_ms = config::retry_backoff_ms();
+    let retry_backoff_max_ms = config::retry_backoff_max_ms();
 
     let dsn = if util::is_cloud_host(&addr) && user == "token" {
-        format!("wss://{addr}/{db}?token={pass}&compression={compression}")
+        format!("wss://{addr}/{db}?token={pass}&compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
     } else {
-        format!("ws://{user}:{pass}@{addr}/{db}?compression={compression}")
+        format!("ws://{user}:{pass}@{addr}/{db}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
     };
 
     debug!("taos_connect, dsn: {:?}", dsn);
@@ -273,6 +277,68 @@ pub unsafe extern "C" fn taos_options(option: TSDB_OPTION, arg: *const c_void, .
     }
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn taos_options_connection(
+    taos: *mut TAOS,
+    option: TSDB_OPTION_CONNECTION,
+    arg: *const c_void,
+) -> c_int {
+    debug!("taos_options_connection start, taos: {taos:?}, option: {option:?}, arg: {arg:?}");
+
+    if taos.is_null() {
+        error!("taos_options_connection failed, taos is null");
+        return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "taos is null"));
+    }
+
+    let value = if !arg.is_null() {
+        Some(match CStr::from_ptr(arg as *const c_char).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                error!("taos_options_connection failed, arg is invalid utf-8");
+                return set_err_and_get_code(TaosError::new(
+                    Code::INVALID_PARA,
+                    "arg is invalid utf-8",
+                ));
+            }
+        })
+    } else {
+        None
+    };
+
+    if option == TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CHARSET {
+        let valid = value
+            .as_deref()
+            .is_none_or(|v| v.eq_ignore_ascii_case("utf-8"));
+
+        if !valid {
+            let charset = value.unwrap();
+            error!("taos_options_connection failed, unsupported charset: {charset}",);
+            return set_err_and_get_code(TaosError::new(
+                Code::INVALID_PARA,
+                &format!("unsupported charset: {charset}"),
+            ));
+        }
+        return 0;
+    }
+
+    let taos = &mut *(taos as *mut Taos);
+    let option = ConnOption {
+        option: option as i32,
+        value,
+    };
+
+    match taos_query::block_in_place_or_global(taos.client().options_connection(&[option])) {
+        Ok(()) => {
+            debug!("taos_options_connection succ");
+            0
+        }
+        Err(err) => {
+            error!("taos_options_connection failed, err: {err:?}");
+            set_err_and_get_code(err.into())
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Qid(u64);
 
@@ -325,18 +391,14 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
         return Err(TaosError::new(Code::FAILED, &err).into());
     }
 
-    if let Some(timezone) = config::timezone() {
-        unsafe { std::env::set_var("TZ", timezone.as_str()) };
-    }
+    unsafe { std::env::set_var("TZ", config::timezone().as_str()) };
 
     let mut layers = Vec::new();
     let log_dir = config::log_dir();
 
-    let appender = RollingFileAppender::builder(log_dir.as_str(), "taos", 16)
-        .compress(true)
-        .reserved_disk_size("1GB")
-        .rotation_count(3)
-        .rotation_size("1GB")
+    let appender = RollingFileAppender::builder(log_dir.as_str())
+        .keep_days(config::log_keep_days())
+        .rotation_size(&config::rotation_size())
         .build()?;
 
     layers.push(
@@ -356,11 +418,9 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tracing_subscriber::registry().with(layers).init();
-
     LogTracer::init()?;
-
     debug!("taos_init, config: {:?}", config::config());
-
+    config::print();
     Ok(())
 }
 
@@ -625,6 +685,7 @@ mod tests {
 
     use super::*;
     use crate::ws::error::{taos_errno, taos_errstr};
+    use crate::ws::query::*;
 
     #[test]
     fn test_taos_connect() {
@@ -751,6 +812,144 @@ mod tests {
             drop(arg);
             let cfg_dir = config::config_dir();
             assert_eq!(cfg_dir, FastStr::new("/etc/taos"));
+        }
+    }
+
+    #[test]
+    fn test_taos_options_connection() {
+        let taos = test_connect();
+
+        unsafe {
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CLEAR,
+                ptr::null(),
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CHARSET,
+                c"UTF-8".as_ptr() as *const c_void,
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CHARSET,
+                ptr::null(),
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_USER_IP,
+                c"127.0.0.1".as_ptr() as *const c_void,
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_USER_APP,
+                c"test".as_ptr() as *const c_void,
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_USER_APP,
+                ptr::null(),
+            );
+            assert_eq!(code, 0);
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CLEAR,
+                c"clear".as_ptr() as *const c_void,
+            );
+            assert_eq!(code, 0);
+        }
+
+        unsafe {
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CHARSET,
+                c"GB2312".as_ptr() as *const c_void,
+            );
+            assert_eq!(code, 0x80000118u32 as i32);
+
+            let errstr = taos_errstr(ptr::null_mut());
+            assert_eq!(
+                CStr::from_ptr(errstr).to_str().unwrap(),
+                "unsupported charset: GB2312"
+            );
+        }
+
+        unsafe { taos_close(taos) };
+    }
+
+    #[test]
+    fn test_timezone_default() {
+        unsafe {
+            let taos = test_connect();
+
+            let res = taos_query(taos, c"select timezone()".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 1);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "Asia/Shanghai (CST, +0800)"
+            );
+
+            taos_free_result(res);
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_timezone_custom() {
+        unsafe {
+            let taos = test_connect();
+
+            let code = taos_options_connection(
+                taos,
+                TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_TIMEZONE,
+                c"America/New_York".as_ptr() as *const c_void,
+            );
+            assert_eq!(code, 0);
+
+            let res = taos_query(taos, c"select timezone()".as_ptr());
+            assert!(!res.is_null());
+
+            let row = taos_fetch_row(res);
+            assert!(!row.is_null());
+
+            let fields = taos_fetch_fields(res);
+            assert!(!fields.is_null());
+
+            let num_fields = taos_num_fields(res);
+            assert_eq!(num_fields, 1);
+
+            let mut str = vec![0 as c_char; 1024];
+            let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+            assert_eq!(
+                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                "America/New_York (EDT, -0400)"
+            );
+
+            taos_free_result(res);
+            taos_close(taos);
         }
     }
 }

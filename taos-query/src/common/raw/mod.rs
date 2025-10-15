@@ -13,6 +13,7 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicU32;
 
 use bytes::Bytes;
+use chrono_tz::Tz;
 pub use data::*;
 use derive_builder::Builder;
 use itertools::Itertools;
@@ -34,7 +35,6 @@ pub mod meta;
 pub mod views;
 
 mod data;
-mod de;
 mod rows;
 
 #[derive(Debug, Clone, Copy)]
@@ -121,6 +121,8 @@ pub struct RawBlock {
     lengths: Lengths,
     /// A vector of [ColumnView] that represent column of values efficiently.
     columns: Vec<ColumnView>,
+    /// Time zone for the block, if applicable.
+    tz: Option<Tz>,
 }
 
 unsafe impl Send for RawBlock {}
@@ -248,9 +250,9 @@ impl RawBlock {
 
         let mut schemas_bytes =
             bytes::BytesMut::with_capacity(cols * std::mem::size_of::<DataType>());
-        fields
-            .iter()
-            .for_each(|f| schemas_bytes.put(f.to_column_schema().as_bytes()));
+        for field in fields.iter() {
+            schemas_bytes.put(field.to_column_schema().as_bytes());
+        }
         let schemas = Schemas::from(schemas_bytes);
 
         let mut data_lengths = LengthsMut::new(cols);
@@ -419,6 +421,7 @@ impl RawBlock {
             fields: fields.iter().map(|s| s.name().to_string()).collect(),
             columns,
             group_id: 0,
+            tz: None,
         }
     }
 
@@ -559,6 +562,7 @@ impl RawBlock {
             table: None,
             fields: Vec::new(),
             columns,
+            tz: None,
         }
     }
 
@@ -646,9 +650,19 @@ impl RawBlock {
         self
     }
 
+    pub fn with_timezone(mut self, tz: Option<Tz>) -> Self {
+        self.tz = tz;
+        self
+    }
+
     fn with_layout(mut self, layout: Layout) -> Self {
         self.layout = Rc::new(AtomicU32::new(layout.as_inner()));
         self
+    }
+
+    #[inline]
+    pub fn timezone(&self) -> Option<Tz> {
+        self.tz
     }
 
     /// Number of columns
@@ -696,7 +710,7 @@ impl RawBlock {
 
     /// Data view in columns.
     #[inline]
-    pub fn columns(&self) -> std::slice::Iter<ColumnView> {
+    pub fn columns(&self) -> std::slice::Iter<'_, ColumnView> {
         self.columns.iter()
     }
 
@@ -710,6 +724,7 @@ impl RawBlock {
         RowsIter {
             raw: NonNull::new(self as *const Self as *mut Self).unwrap(),
             row: 0,
+            tz: self.tz,
             _marker: std::marker::PhantomData,
         }
     }
@@ -719,9 +734,11 @@ impl RawBlock {
     where
         Self: 'a,
     {
+        let tz = self.tz;
         IntoRowsIter {
             raw: self,
             row: 0,
+            tz,
             _marker: std::marker::PhantomData,
         }
     }
@@ -842,7 +859,7 @@ impl RawBlock {
         view.get_raw_value_unchecked(row)
     }
 
-    pub fn get_ref(&self, row: usize, col: usize) -> Option<BorrowedValue> {
+    pub fn get_ref(&self, row: usize, col: usize) -> Option<BorrowedValue<'_>> {
         if row >= self.nrows() || col >= self.ncols() {
             return None;
         }
@@ -855,7 +872,7 @@ impl RawBlock {
     ///
     /// Ensure that `row` and `col` not exceed the limit of the block.
     #[inline]
-    pub unsafe fn get_ref_unchecked(&self, row: usize, col: usize) -> BorrowedValue {
+    pub unsafe fn get_ref_unchecked(&self, row: usize, col: usize) -> BorrowedValue<'_> {
         self.columns.get_unchecked(col).get_ref_unchecked(row)
     }
 
@@ -870,6 +887,7 @@ impl RawBlock {
     fn layout(&self) -> Layout {
         unsafe { *(self.layout.as_ptr() as *mut Layout) }
     }
+
     fn set_layout(&self, layout: Layout) {
         unsafe { *(self.layout.as_ptr() as *mut Layout) = layout }
     }
@@ -882,7 +900,7 @@ impl RawBlock {
             .collect_vec()
     }
 
-    pub fn pretty_format(&self) -> PrettyBlock {
+    pub fn pretty_format(&self) -> PrettyBlock<'_> {
         PrettyBlock::new(self)
     }
 

@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 pub mod layer;
-pub mod middleware;
 pub mod utils;
 pub mod writer;
 
@@ -44,14 +43,15 @@ pub enum Error {
     GetLogAbsolutePath { source: std::io::Error },
     #[snafu(display("Get CPU nums error: {source}"))]
     GetCpuNums { source: std::io::Error },
+    #[snafu(display("Lock file {} error: {source}", path.display()))]
+    FileLock {
+        path: PathBuf,
+        source: std::fs::TryLockError,
+    },
 }
 
 pub trait QidManager: Send + Sync + 'static + Clone + From<u64> {
     fn init() -> Self;
-
-    fn init_on_request(_request: &actix_web::dev::ServiceRequest) -> Self {
-        Self::init()
-    }
 
     fn get(&self) -> u64;
 

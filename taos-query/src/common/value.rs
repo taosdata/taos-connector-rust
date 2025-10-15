@@ -335,9 +335,11 @@ impl BorrowedValue<'_> {
     pub(crate) fn to_i8(&self) -> Option<i8> {
         borrowed_value_to_native!(self)
     }
+
     pub(crate) fn to_i16(&self) -> Option<i16> {
         borrowed_value_to_native!(self)
     }
+
     pub(crate) fn to_i32(&self) -> Option<i32> {
         borrowed_value_to_native!(self)
     }
@@ -345,9 +347,11 @@ impl BorrowedValue<'_> {
     pub(crate) fn to_i64(&self) -> Option<i64> {
         borrowed_value_to_native!(self)
     }
+
     pub(crate) fn to_u8(&self) -> Option<u8> {
         borrowed_value_to_native!(self)
     }
+
     pub(crate) fn to_u16(&self) -> Option<u16> {
         borrowed_value_to_native!(self)
     }
@@ -363,11 +367,12 @@ impl BorrowedValue<'_> {
     pub(crate) fn to_f32(&self) -> Option<f32> {
         borrowed_value_to_float!(self)
     }
+
     pub(crate) fn to_f64(&self) -> Option<f64> {
         borrowed_value_to_float!(self)
     }
 
-    pub(crate) fn to_str(&self) -> Option<Cow<str>> {
+    pub(crate) fn to_str(&self) -> Option<Cow<'_, str>> {
         match self {
             BorrowedValue::Null(_) => None,
             BorrowedValue::Bool(v) => Some(v.to_string().into()),
@@ -521,7 +526,7 @@ impl Value {
         }
     }
 
-    pub fn to_borrowed_value(&self) -> BorrowedValue {
+    pub fn to_borrowed_value(&self) -> BorrowedValue<'_> {
         use Value::*;
         match self {
             Null(ty) => BorrowedValue::Null(*ty),

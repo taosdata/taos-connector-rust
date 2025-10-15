@@ -5,8 +5,9 @@ use std::ptr;
 
 use crate::ws::query::{__taos_notify_fn_t, TAOS_DB_ROUTE_INFO};
 use crate::ws::tmq::{tmq_raw_data, tmq_t};
-use crate::ws::{TAOS, TAOS_FIELD, TAOS_RES, TSDB_OPTION_CONNECTION};
+use crate::ws::{TAOS, TAOS_FIELD, TAOS_RES};
 
+#[allow(non_snake_case)]
 #[allow(non_camel_case_types)]
 pub type __taos_async_whitelist_fn_t = extern "C" fn(
     param: *mut c_void,
@@ -16,6 +17,7 @@ pub type __taos_async_whitelist_fn_t = extern "C" fn(
     pWhiteLists: *mut u64,
 );
 
+#[allow(non_snake_case)]
 #[allow(non_camel_case_types)]
 pub type __taos_async_whitelist_dual_stack_fn_t = extern "C" fn(
     param: *mut c_void,
@@ -244,15 +246,6 @@ pub extern "C" fn getBuildInfo() -> *const c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn taos_options_connection(
-    taos: *mut TAOS,
-    option: TSDB_OPTION_CONNECTION,
-    arg: *const c_void,
-) -> c_int {
-    0
-}
-
-#[no_mangle]
 #[allow(non_snake_case)]
 pub extern "C" fn taos_write_crashinfo(signum: c_int, sigInfo: *mut c_void, context: *mut c_void) {}
 
@@ -406,13 +399,6 @@ mod tests {
 
         let build_info = getBuildInfo();
         assert_eq!(build_info, ptr::null());
-
-        let code = taos_options_connection(
-            ptr::null_mut(),
-            TSDB_OPTION_CONNECTION::TSDB_OPTION_CONNECTION_CLEAR,
-            ptr::null(),
-        );
-        assert_eq!(code, 0);
 
         taos_write_crashinfo(0, ptr::null_mut(), ptr::null_mut());
     }
