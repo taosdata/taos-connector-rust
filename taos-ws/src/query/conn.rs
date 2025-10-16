@@ -293,7 +293,7 @@ async fn send_messages(
                         }
                     }
                     Err(err) => {
-                        tracing::error!("failed to receive message from channel: {err}");
+                        tracing::info!("failed to receive message from channel: {err}");
                         let _ = err_sender.send(Error::CommonError(err.to_string())).await;
                         break;
                     }
