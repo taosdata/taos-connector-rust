@@ -292,9 +292,8 @@ async fn send_messages(
                             break;
                         }
                     }
-                    Err(err) => {
-                        tracing::error!("failed to receive message from channel: {err}");
-                        let _ = err_sender.send(Error::CommonError(err.to_string())).await;
+                    Err(_) => {
+                        tracing::info!("message channel closed, client is shutting down");
                         break;
                     }
                 }
