@@ -1684,7 +1684,7 @@ mod recover_tests {
             .prepare("select * from test_1755136975.t0 where c1 > ?")
             .await?;
 
-        taos.exec("drop database test_1755136975").await?;
+        taos.exec("drop database if exists test_1755136975").await?;
 
         Ok(())
     }
@@ -1740,7 +1740,7 @@ mod recover_tests {
         let param = Stmt2BindParam::new(None, None, Some(cols));
         stmt2.bind(&[param]).await?;
 
-        taos.exec("drop database test_1755137215").await?;
+        taos.exec("drop database if exists test_1755137215").await?;
 
         Ok(())
     }
@@ -1807,7 +1807,7 @@ mod recover_tests {
         let rows = stmt2.exec().await?;
         assert_eq!(rows, 4);
 
-        taos.exec("drop database test_1755137720").await?;
+        taos.exec("drop database if exists test_1755137720").await?;
 
         Ok(())
     }
@@ -1882,7 +1882,7 @@ mod recover_tests {
         assert_eq!(records[0].ts, 1726803357466);
         assert_eq!(records[0].c1, 100);
 
-        taos.exec("drop database test_1755138202").await?;
+        taos.exec("drop database if exists test_1755138202").await?;
 
         Ok(())
     }
@@ -1990,7 +1990,7 @@ mod recover_tests {
             res?;
         }
 
-        taos.exec("drop database test_1755138447").await?;
+        taos.exec("drop database if exists test_1755138447").await?;
 
         Ok(())
     }
@@ -2091,7 +2091,7 @@ mod recover_tests {
                     assert_eq!(records[0].c1, c1);
                 }
 
-                taos.exec(format!("drop database {db}")).await?;
+                taos.exec(format!("drop database if exists {db}")).await?;
 
                 Ok::<_, anyhow::Error>(())
             }));
@@ -2175,7 +2175,7 @@ mod recover_tests {
             assert_eq!(affected, 10);
         }
 
-        taos.exec("drop database test_1760166989").await?;
+        taos.exec("drop database if exists test_1760166989").await?;
 
         Ok(())
     }

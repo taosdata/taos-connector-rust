@@ -2061,7 +2061,7 @@ mod tests {
                     let code = taos_stmt2_close(stmt2);
                     assert_eq!(code, 0);
 
-                    test_exec(taos, format!("drop database {db}"));
+                    test_exec(taos, format!("drop database if exists {db}"));
                     taos_close(taos);
                 }
 
@@ -2212,7 +2212,7 @@ mod tests {
             res?;
         }
 
-        test_exec(taos, "drop database test_1760164460");
+        test_exec(taos, "drop database if exists test_1760164460");
         unsafe { taos_close(taos) };
 
         Ok(())
@@ -2311,7 +2311,7 @@ mod tests {
                 assert_eq!(affected_rows, 10);
             }
 
-            test_exec(taos, "drop database test_1760167825");
+            test_exec(taos, "drop database if exists test_1760167825");
         }
 
         Ok(())
