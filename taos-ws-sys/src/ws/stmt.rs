@@ -667,28 +667,14 @@ pub unsafe extern "C" fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c
     }
 
     let stmt2 = &mut taos_stmt.stmt2;
-
-    match stmt2.is_insert() {
-        Some(true) => {
-            *nums = taos_stmt
-                .col_fields
-                .as_ref()
-                .map_or(0, |fields| fields.len() as _);
-        }
-        Some(false) => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_num_params can only be called for insertion",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-        None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_prepare is not called",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
+    if stmt2.is_insert().is_some() {
+        *nums = stmt2.fields_count().unwrap_or(0) as _;
+    } else {
+        maybe_err.with_err(Some(TaosError::new(
+            Code::FAILED,
+            "taos_stmt_prepare is not called",
+        )));
+        return format_errno(Code::FAILED.into());
     }
 
     debug!("taos_stmt_num_params succ");
@@ -2353,6 +2339,47 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1741438739");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt_num_params() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1760944015",
+                    "create database test_1760944015",
+                    "use test_1760944015",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt = taos_stmt_init(taos);
+            assert!(!stmt.is_null());
+
+            let sql = c"insert into t0 values(?, ?)";
+            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut nums = 0;
+            let num_params = taos_stmt_num_params(stmt, &mut nums);
+            assert_eq!(nums, 2);
+
+            let sql = c"select * from t0 where ts > ? and c1 > ?";
+            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut nums = 0;
+            let num_params = taos_stmt_num_params(stmt, &mut nums);
+            assert_eq!(nums, 2);
+
+            let code = taos_stmt_close(stmt);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database if exists test_1760944015");
             taos_close(taos);
         }
     }
