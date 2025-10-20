@@ -1530,7 +1530,7 @@ mod tests {
             let mut nums = 0;
             let code = taos_stmt_num_params(stmt, &mut nums);
             assert_eq!(code, 0);
-            assert_eq!(nums, 2);
+            assert_eq!(nums, 4);
 
             let mut ty = 0;
             let mut bytes = 0;
