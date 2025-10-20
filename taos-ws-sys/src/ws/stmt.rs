@@ -2375,7 +2375,8 @@ mod tests {
             assert_eq!(code, 0);
 
             let mut nums = 0;
-            let num_params = taos_stmt_num_params(stmt, &mut nums);
+            let code = taos_stmt_num_params(stmt, &mut nums);
+            assert_eq!(code, 0);
             assert_eq!(nums, 2);
 
             let sql = c"select * from t0 where ts > ? and c1 > ?";
@@ -2383,7 +2384,8 @@ mod tests {
             assert_eq!(code, 0);
 
             let mut nums = 0;
-            let num_params = taos_stmt_num_params(stmt, &mut nums);
+            let code = taos_stmt_num_params(stmt, &mut nums);
+            assert_eq!(code, 0);
             assert_eq!(nums, 2);
 
             let code = taos_stmt_close(stmt);
