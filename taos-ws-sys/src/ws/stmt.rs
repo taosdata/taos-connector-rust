@@ -783,6 +783,11 @@ pub unsafe extern "C" fn taos_stmt_bind_param(
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
     };
 
+    if bind.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "bind is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
     let stmt2 = &mut taos_stmt.stmt2;
 
     let col_cnt = match stmt2.is_insert() {
@@ -839,6 +844,11 @@ pub unsafe extern "C" fn taos_stmt_bind_param_batch(
         Some(taos_stmt) => taos_stmt,
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
     };
+
+    if bind.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "bind is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
     let stmt2 = &mut taos_stmt.stmt2;
 
