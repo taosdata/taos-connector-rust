@@ -667,8 +667,8 @@ pub unsafe extern "C" fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c
     }
 
     let stmt2 = &mut taos_stmt.stmt2;
-    if stmt2.is_insert().is_some() {
-        *nums = stmt2.fields_count().unwrap_or(0) as _;
+    if let Some(cnt) = stmt2.fields_count() {
+        *nums = cnt as _;
     } else {
         maybe_err.with_err(Some(TaosError::new(
             Code::FAILED,
