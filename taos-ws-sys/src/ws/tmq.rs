@@ -2901,7 +2901,7 @@ mod tests {
     #[ignore]
     fn test_tmq_consumer_new_usessl() {
         unsafe {
-            std::env::set_var("TAOS_USESSL", "true");
+            std::env::set_var("TAOS_USESSL", "1");
             std::env::set_var("TAOS_DEBUG_FLAG", "199");
 
             taos_init();

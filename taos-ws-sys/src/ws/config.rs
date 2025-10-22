@@ -95,8 +95,10 @@ pub fn init() -> Result<(), String> {
         }
 
         if let Ok(s) = std::env::var("TAOS_USESSL") {
-            if let Ok(usessl) = s.parse() {
-                config.set_usessl(usessl);
+            match s.as_str() {
+                "1" => config.set_usessl(true),
+                "0" => config.set_usessl(false),
+                _ => {}
             }
         }
 
@@ -747,6 +749,7 @@ mod tests {
             set_var("TAOS_RETRY_BACKOFF_MAX_MS", "1000");
             set_var("TAOS_LOG_KEEP_DAYS", "30");
             set_var("TAOS_ROTATION_SIZE", "1GB");
+            set_var("TAOS_USESSL", "0");
         }
 
         init()?;
