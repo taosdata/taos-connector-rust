@@ -11,6 +11,7 @@ use taos_query::common::{Precision, RawBlock as Block, Ty};
 use taos_query::tmq::{self, AsConsumer, IsData, IsOffset};
 use taos_query::{global_tokio_runtime, Dsn, TBuilder};
 use taos_ws::consumer::Data;
+use taos_ws::query::asyn::WS_ERROR_NO;
 use taos_ws::query::Error;
 use taos_ws::{Consumer, Offset, TmqBuilder};
 use tracing::{debug, error, warn, Instrument};
@@ -371,18 +372,33 @@ pub unsafe extern "C" fn tmq_consumer_new(
             debug!("tmq_consumer_new succ, tmq: {tmq:?}");
             tmq
         }
-        Err(err) => {
+        Err(mut err) => {
             error!("tmq_consumer_new failed, err: {err:?}");
-            if errstrLen > 0 && !errstr.is_null() {
-                let message = CString::new(err.to_string()).unwrap();
-                let count = message.to_bytes().len().min(errstrLen as usize - 1);
-                ptr::copy(message.as_ptr(), errstr, count);
-                *errstr.add(count) = 0;
+
+            if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
+                err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
+                write_errstr(errstr, errstrLen, "Unable to establish connection");
+            } else {
+                let msg = err.to_string();
+                write_errstr(errstr, errstrLen, &msg);
             }
+
             set_err_and_get_code(err);
             ptr::null_mut()
         }
     }
+}
+
+#[inline]
+unsafe fn write_errstr(dst: *mut c_char, dst_len: i32, msg: &str) {
+    if dst.is_null() || dst_len <= 0 {
+        return;
+    }
+    let buf_len = (dst_len as usize).saturating_sub(1);
+    let bytes = msg.as_bytes();
+    let n = bytes.len().min(buf_len);
+    ptr::copy_nonoverlapping(bytes.as_ptr(), dst as *mut u8, n);
+    *dst.add(n) = 0;
 }
 
 unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
@@ -425,12 +441,15 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
             let conn_retries = config::conn_retries();
             let retry_backoff_ms = config::retry_backoff_ms();
             let retry_backoff_max_ms = config::retry_backoff_max_ms();
+            let driver = if config::usessl() { "wss" } else { "ws" };
 
             let dsn = if util::is_cloud_host(&addr) && user == "token" {
                 format!("wss://{addr}?token={pass}&compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
             } else {
-                format!("ws://{user}:{pass}@{addr}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
+                format!("{driver}://{user}:{pass}@{addr}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
             };
+
+            tracing::debug!("tmq_consumer_new, dsn: {dsn}");
 
             let mut dsn = Dsn::from_str(&dsn)?;
 
@@ -1588,10 +1607,11 @@ mod tests {
     use std::thread::sleep;
 
     use super::*;
+    use crate::ws::error::taos_errno;
     use crate::ws::query::{
         taos_fetch_fields, taos_fetch_row, taos_free_result, taos_num_fields, taos_print_row,
     };
-    use crate::ws::{taos_close, test_connect, test_exec, test_exec_many};
+    use crate::ws::{taos_close, taos_init, test_connect, test_exec, test_exec_many};
 
     #[test]
     fn test_tmq_conf() {
@@ -2874,6 +2894,59 @@ mod tests {
             );
 
             taos_close(taos);
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_tmq_consumer_new_usessl() {
+        unsafe {
+            std::env::set_var("TAOS_USESSL", "true");
+            std::env::set_var("TAOS_DEBUG_FLAG", "199");
+
+            taos_init();
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(consumer.is_null());
+
+            let code = taos_errno(ptr::null_mut());
+            assert_eq!(Code::from(code), Code::new(0x000B));
+            assert_eq!(
+                CStr::from_ptr(errstr.as_ptr()).to_str().unwrap(),
+                "Unable to establish connection"
+            );
+
+            std::env::remove_var("TAOS_USESSL");
+            std::env::remove_var("TAOS_DEBUG_FLAG");
+        }
+    }
+
+    #[test]
+    fn test_tmq_consumer_new_return_error() {
+        unsafe {
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(consumer.is_null());
+
+            let errstr = CStr::from_ptr(errstr.as_ptr()).to_str().unwrap();
+            assert!(!errstr.is_empty());
         }
     }
 }
