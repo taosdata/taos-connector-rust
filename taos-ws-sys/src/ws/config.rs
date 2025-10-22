@@ -94,6 +94,12 @@ pub fn init() -> Result<(), String> {
             config.set_rotation_size(s);
         }
 
+        if let Ok(s) = std::env::var("TAOS_USESSL") {
+            if let Ok(usessl) = s.parse() {
+                config.set_usessl(usessl);
+            }
+        }
+
         let cfg_dir = if let Some(dir) = &config.config_dir {
             dir.to_string()
         } else if let Ok(dir) = std::env::var("TAOS_CONFIG_DIR") {
@@ -181,6 +187,10 @@ pub fn rotation_size() -> FastStr {
     CONFIG.read().unwrap().rotation_size().clone()
 }
 
+pub fn usessl() -> bool {
+    CONFIG.read().unwrap().usessl()
+}
+
 pub fn set_config_dir<T: Into<FastStr>>(cfg_dir: T) {
     CONFIG.write().unwrap().set_config_dir(cfg_dir);
 }
@@ -216,6 +226,7 @@ const DEFAULT_RETRY_BACKOFF_MAX_MS: u64 = 2000;
 const DEFAULT_LOG_KEEP_DAYS: u16 = 30;
 const DEFAULT_ROTATION_SIZE: &str = "1GB";
 const DEFAULT_DEBUG_FLAG: u16 = 0;
+const DEFAULT_USESSL: bool = false;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -233,6 +244,7 @@ pub struct Config {
     retry_backoff_max_ms: Option<u64>,
     log_keep_days: Option<u16>,
     rotation_size: Option<FastStr>,
+    usessl: Option<bool>,
 }
 
 impl Config {
@@ -252,6 +264,7 @@ impl Config {
             retry_backoff_max_ms: None,
             log_keep_days: None,
             rotation_size: None,
+            usessl: None,
         }
     }
 
@@ -316,6 +329,10 @@ impl Config {
     fn rotation_size(&self) -> &FastStr {
         static ROTATION_SIZE: FastStr = FastStr::from_static_str(DEFAULT_ROTATION_SIZE);
         self.rotation_size.as_ref().unwrap_or(&ROTATION_SIZE)
+    }
+
+    fn usessl(&self) -> bool {
+        self.usessl.unwrap_or(DEFAULT_USESSL)
     }
 
     fn debug_flag(&self) -> Option<u16> {
@@ -414,6 +431,10 @@ impl Config {
         self.rotation_size = Some(size.into());
     }
 
+    fn set_usessl(&mut self, usessl: bool) {
+        self.usessl = Some(usessl);
+    }
+
     fn load_from_path(&mut self, path: &str) -> Result<(), TaosError> {
         let path = Path::new(path);
         let config_file = if path.is_file() {
@@ -470,7 +491,8 @@ impl Config {
             retry_backoff_ms,
             retry_backoff_max_ms,
             log_keep_days,
-            rotation_size
+            rotation_size,
+            usessl
         );
     }
 
@@ -510,6 +532,7 @@ impl Config {
             "retryBackoffMaxMs",
             DEFAULT_RETRY_BACKOFF_MAX_MS
         );
+        show!(self.usessl, "usessl", DEFAULT_USESSL);
 
         tracing::info!("{}", "=".repeat(76));
     }
@@ -604,6 +627,16 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                 "rotationSize" => {
                     config.rotation_size = Some(value.to_string().into());
                 }
+                "usessl" => match value {
+                    "1" => config.usessl = Some(true),
+                    "0" => config.usessl = Some(false),
+                    _ => {
+                        return Err(TaosError::new(
+                            Code::INVALID_PARA,
+                            &format!("invalid value for usessl: {value}"),
+                        ));
+                    }
+                },
                 _ => {}
             }
         }
@@ -635,6 +668,7 @@ mod tests {
         assert_eq!(config.retry_backoff_max_ms(), 2000);
         assert_eq!(config.log_keep_days(), 30);
         assert_eq!(config.rotation_size(), "1GB");
+        assert_eq!(config.usessl(), false);
     }
 
     #[test]
@@ -655,6 +689,7 @@ mod tests {
             assert_eq!(config.retry_backoff_max_ms(), 2000);
             assert_eq!(config.log_keep_days(), 30);
             assert_eq!(config.rotation_size(), "1GB");
+            assert_eq!(config.usessl(), false);
         }
 
         {
@@ -673,6 +708,7 @@ mod tests {
             assert_eq!(config.retry_backoff_max_ms(), 2000);
             assert_eq!(config.log_keep_days(), 30);
             assert_eq!(config.rotation_size(), "1GB");
+            assert_eq!(config.usessl(), false);
         }
 
         Ok(())
@@ -723,6 +759,7 @@ mod tests {
         assert_eq!(retry_backoff_max_ms(), 1000);
         assert_eq!(log_keep_days(), 30);
         assert_eq!(rotation_size(), FastStr::from("1GB"));
+        assert_eq!(usessl(), false);
 
         Ok(())
     }

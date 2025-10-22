@@ -207,11 +207,12 @@ unsafe fn connect(
     let conn_retries = config::conn_retries();
     let retry_backoff_ms = config::retry_backoff_ms();
     let retry_backoff_max_ms = config::retry_backoff_max_ms();
+    let driver = if config::usessl() { "wss" } else { "ws" };
 
     let dsn = if util::is_cloud_host(&addr) && user == "token" {
         format!("wss://{addr}/{db}?token={pass}&compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
     } else {
-        format!("ws://{user}:{pass}@{addr}/{db}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
+        format!("{driver}://{user}:{pass}@{addr}/{db}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
     };
 
     debug!("taos_connect, dsn: {:?}", dsn);
@@ -718,6 +719,37 @@ mod tests {
 
             let taos = taos_connect(ptr::null(), ptr::null(), ptr::null(), invalid_utf8_ptr, 0);
             assert!(taos.is_null());
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_taos_connect_usessl() {
+        unsafe {
+            std::env::set_var("TAOS_USESSL", "true");
+            std::env::set_var("TAOS_DEBUG_FLAG", "199");
+
+            taos_init();
+
+            let taos = taos_connect(
+                c"localhost".as_ptr(),
+                c"root".as_ptr(),
+                c"taosdata".as_ptr(),
+                ptr::null(),
+                6041,
+            );
+            assert!(taos.is_null());
+
+            let code = taos_errno(ptr::null_mut());
+            let errstr = taos_errstr(ptr::null_mut());
+            assert_eq!(Code::from(code), Code::new(0x000B));
+            assert_eq!(
+                CStr::from_ptr(errstr).to_str().unwrap(),
+                "Unable to establish connection"
+            );
+
+            std::env::remove_var("TAOS_USESSL");
+            std::env::remove_var("TAOS_DEBUG_FLAG");
         }
     }
 
