@@ -256,8 +256,8 @@ impl BorrowedValue<'_> {
             USmallInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             UInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             UBigInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
-            Float(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v as f64).unwrap()),
-            Double(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v).unwrap()),
+            Float(v) => json_number_or_null(*v as f64),
+            Double(v) => json_number_or_null(*v),
             VarChar(v) => serde_json::Value::String((*v).to_string()),
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => serde_json::from_slice(v).expect("json should always be deserialized"),
@@ -659,8 +659,8 @@ impl Value {
             USmallInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             UInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             UBigInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
-            Float(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v as f64).unwrap()),
-            Double(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v).unwrap()),
+            Float(v) => json_number_or_null(*v as f64),
+            Double(v) => json_number_or_null(*v),
             VarChar(v) => serde_json::Value::String(v.to_string()),
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => v.clone(),
@@ -771,6 +771,14 @@ _impl_primitive_from!(u64, UBigInt);
 _impl_primitive_from!(f32, Float);
 _impl_primitive_from!(f64, Double);
 _impl_primitive_from!(Timestamp, Timestamp);
+
+#[inline]
+fn json_number_or_null(x: f64) -> serde_json::Value {
+    match serde_json::Number::from_f64(x) {
+        Some(n) => serde_json::Value::Number(n),
+        None => serde_json::Value::Null,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1941,5 +1949,63 @@ mod tests {
         assert_eq!(blob_value_borrowed, &blob_value);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_nonfinite_float_value() {
+        assert_eq!(
+            Value::Float(f32::NAN).to_json_value(),
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            Value::Float(f32::INFINITY).to_json_value(),
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            Value::Float(f32::NEG_INFINITY).to_json_value(),
+            serde_json::Value::Null
+        );
+
+        assert_eq!(
+            BorrowedValue::Float(f32::NAN).to_json_value(),
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            BorrowedValue::Float(f32::INFINITY).to_json_value(),
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            BorrowedValue::Float(f32::NEG_INFINITY).to_json_value(),
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn test_nonfinite_double_value() {
+        assert_eq!(
+            Value::Double(f64::NAN).to_json_value(),
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            Value::Double(f64::INFINITY).to_json_value(),
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            Value::Double(f64::NEG_INFINITY).to_json_value(),
+            serde_json::Value::Null
+        );
+
+        assert_eq!(
+            BorrowedValue::Double(f64::NAN).to_json_value(),
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            BorrowedValue::Double(f64::INFINITY).to_json_value(),
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            BorrowedValue::Double(f64::NEG_INFINITY).to_json_value(),
+            serde_json::Value::Null
+        );
     }
 }
