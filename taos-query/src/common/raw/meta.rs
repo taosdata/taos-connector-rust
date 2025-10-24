@@ -55,6 +55,7 @@ impl FieldMore {
 pub struct TagWithValue {
     #[serde(flatten)]
     pub field: Field,
+    #[serde(default)]
     pub value: serde_json::Value,
 }
 
