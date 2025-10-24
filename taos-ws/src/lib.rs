@@ -542,6 +542,12 @@ impl TaosBuilder {
                 tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
                 match connect_async_with_config(&url, Some(config), false).await {
                     Ok((mut ws_stream, _)) => {
+                        Self::enable_nodelay(&mut ws_stream).map_err(|err| {
+                            RawError::any(err)
+                                .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
+                                .context("failed to set nodelay on websocket stream")
+                        })?;
+
                         if ty == EndpointType::Stmt {
                             return Ok((ws_stream, String::new()));
                         }
@@ -632,6 +638,27 @@ impl TaosBuilder {
         } else {
             Err(RawError::from_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
                 .context("failed to connect to all addresses"))
+        }
+    }
+
+    fn enable_nodelay(ws: &mut WsStream) -> std::io::Result<()> {
+        match ws.get_mut() {
+            MaybeTlsStream::Plain(s) => s.set_nodelay(true),
+            // rustls 后端
+            #[cfg(any(feature = "rustls-aws-lc-crypto-provider", feature = "rustls"))]
+            MaybeTlsStream::Rustls(s) => {
+                // tokio_rustls::TlsStream<TcpStream>
+                let (io, _) = s.get_mut();
+                io.set_nodelay(true)
+            }
+            // native-tls 后端
+            #[cfg(feature = "native-tls")]
+            MaybeTlsStream::NativeTls(s) => {
+                // tokio_native_tls::TlsStream<TcpStream>
+                s.get_ref().set_nodelay(true)
+            }
+            #[allow(unreachable_patterns)]
+            _ => Ok(()),
         }
     }
 

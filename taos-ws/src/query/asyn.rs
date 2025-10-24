@@ -61,6 +61,215 @@ pub struct WsTaos {
     recover_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
+#[derive(Copy, Clone)]
+enum TimingStep {
+    BuildBinaryReq,
+    BuildTextReq,
+    SendRecv,
+    ParseResp,
+    BuildFields,
+    SpawnCloserTask,
+    SpawnFetch,
+    BuildRsWithFields,
+    BuildRsNoFields,
+    SendEnqueue,   // send_recv
+    AwaitResponse, // send_recv
+}
+
+struct Counter {
+    sum_ns: AtomicU64,
+    count: AtomicU64,
+}
+impl Counter {
+    const fn new() -> Self {
+        Self {
+            sum_ns: AtomicU64::new(0),
+            count: AtomicU64::new(0),
+        }
+    }
+    fn add(&self, d: Duration) {
+        self.sum_ns
+            .fetch_add(d.as_nanos() as u64, Ordering::Relaxed);
+        self.count.fetch_add(1, Ordering::Relaxed);
+    }
+    fn snapshot(&self) -> (u64, u64) {
+        (
+            self.sum_ns.load(Ordering::Relaxed),
+            self.count.load(Ordering::Relaxed),
+        )
+    }
+}
+
+struct QueryTimingAgg {
+    total_calls: AtomicU64,
+    build_binary: Counter,
+    build_text: Counter,
+    send_recv: Counter,
+    parse_resp: Counter,
+    build_fields: Counter,
+    spawn_closer_task: Counter,
+    spawn_fetch: Counter,
+    build_rs_with_fields: Counter,
+    build_rs_no_fields: Counter,
+    total_elapsed_ns: AtomicU64,
+    send_enqueue: Counter,
+    await_response: Counter,
+}
+impl QueryTimingAgg {
+    const fn new() -> Self {
+        Self {
+            total_calls: AtomicU64::new(0),
+            build_binary: Counter::new(),
+            build_text: Counter::new(),
+            send_recv: Counter::new(),
+            parse_resp: Counter::new(),
+            build_fields: Counter::new(),
+            spawn_closer_task: Counter::new(),
+            spawn_fetch: Counter::new(),
+            build_rs_with_fields: Counter::new(),
+            build_rs_no_fields: Counter::new(),
+            total_elapsed_ns: AtomicU64::new(0),
+            send_enqueue: Counter::new(),
+            await_response: Counter::new(),
+        }
+    }
+    fn inc_call(&self) {
+        self.total_calls.fetch_add(1, Ordering::Relaxed);
+    }
+    fn record(&self, step: TimingStep, d: Duration) {
+        match step {
+            TimingStep::BuildBinaryReq => self.build_binary.add(d),
+            TimingStep::BuildTextReq => self.build_text.add(d),
+            TimingStep::SendRecv => self.send_recv.add(d),
+            TimingStep::ParseResp => self.parse_resp.add(d),
+            TimingStep::BuildFields => self.build_fields.add(d),
+            TimingStep::SpawnCloserTask => self.spawn_closer_task.add(d),
+            TimingStep::SpawnFetch => self.spawn_fetch.add(d),
+            TimingStep::BuildRsWithFields => self.build_rs_with_fields.add(d),
+            TimingStep::BuildRsNoFields => self.build_rs_no_fields.add(d),
+            TimingStep::SendEnqueue => self.send_enqueue.add(d),
+            TimingStep::AwaitResponse => self.await_response.add(d),
+        }
+    }
+    fn add_total(&self, d: Duration) {
+        self.total_elapsed_ns
+            .fetch_add(d.as_nanos() as u64, Ordering::Relaxed);
+    }
+    fn dump(&self) {
+        let calls = self.total_calls.load(Ordering::Relaxed);
+        let fmt = |ns: u64, n: u64| -> (u64, u64) {
+            let total_ms = ns / 1_000_000;
+            let avg_us = if n > 0 { ns / n / 1_000 } else { 0 };
+            (total_ms, avg_us)
+        };
+        let (bb_ns, bb_n) = self.build_binary.snapshot();
+        let (tx_ns, tx_n) = self.build_text.snapshot();
+        let (sr_ns, sr_n) = self.send_recv.snapshot();
+        let (pr_ns, pr_n) = self.parse_resp.snapshot();
+        let (bf_ns, bf_n) = self.build_fields.snapshot();
+        let (sct_ns, sct_n) = self.spawn_closer_task.snapshot();
+        let (sp_ns, sp_n) = self.spawn_fetch.snapshot();
+        let (rw_ns, rw_n) = self.build_rs_with_fields.snapshot();
+        let (rn_ns, rn_n) = self.build_rs_no_fields.snapshot();
+        let (se_ns, se_n) = self.send_enqueue.snapshot();
+        let (aw_ns, aw_n) = self.await_response.snapshot();
+
+        let total_ns = self.total_elapsed_ns.load(Ordering::Relaxed);
+
+        let pct = |part_ns: u64, total_ns: u64| -> f64 {
+            if total_ns == 0 {
+                0.0
+            } else {
+                (part_ns as f64) * 100.0 / (total_ns as f64)
+            }
+        };
+        let build_req_ns = bb_ns.saturating_add(tx_ns);
+        let sum_steps = build_req_ns
+            .saturating_add(sr_ns)
+            .saturating_add(pr_ns)
+            .saturating_add(bf_ns)
+            .saturating_add(sct_ns)
+            .saturating_add(sp_ns)
+            .saturating_add(rw_ns)
+            .saturating_add(rn_ns);
+        let other_ns = total_ns.saturating_sub(sum_steps);
+
+        let (bb_ms, bb_avg) = fmt(bb_ns, bb_n);
+        let (tx_ms, tx_avg) = fmt(tx_ns, tx_n);
+        let (sr_ms, sr_avg) = fmt(sr_ns, sr_n);
+        let (pr_ms, pr_avg) = fmt(pr_ns, pr_n);
+        let (bf_ms, bf_avg) = fmt(bf_ns, bf_n);
+        let (sct_ms, sct_avg) = fmt(sct_ns, sct_n);
+        let (sp_ms, sp_avg) = fmt(sp_ns, sp_n);
+        let (rw_ms, rw_avg) = fmt(rw_ns, rw_n);
+        let (rn_ms, rn_avg) = fmt(rn_ns, rn_n);
+        let (se_ms, se_avg) = fmt(se_ns, se_n);
+        let (aw_ms, aw_avg) = fmt(aw_ns, aw_n);
+        let total_ms = total_ns / 1_000_000;
+
+        tracing::info!(
+            calls,
+            total_elapsed_ms = total_ms,
+            build_binary_total_ms = bb_ms,
+            build_binary_avg_us = bb_avg,
+            build_binary_pct = pct(bb_ns, total_ns),
+            build_binary_n = bb_n,
+            build_text_total_ms = tx_ms,
+            build_text_avg_us = tx_avg,
+            build_text_pct = pct(tx_ns, total_ns),
+            build_text_n = tx_n,
+            build_req_total_ms = build_req_ns / 1_000_000,
+            build_req_pct = pct(build_req_ns, total_ns),
+            send_recv_total_ms = sr_ms,
+            send_recv_avg_us = sr_avg,
+            send_recv_pct = pct(sr_ns, total_ns),
+            send_recv_n = sr_n,
+            send_enqueue_total_ms = se_ms,
+            send_enqueue_avg_us = se_avg,
+            send_enqueue_pct = pct(se_ns, total_ns),
+            send_enqueue_n = se_n,
+            await_response_total_ms = aw_ms,
+            await_response_avg_us = aw_avg,
+            await_response_pct = pct(aw_ns, total_ns),
+            await_response_n = aw_n,
+            parse_resp_total_ms = pr_ms,
+            parse_resp_avg_us = pr_avg,
+            parse_resp_pct = pct(pr_ns, total_ns),
+            parse_resp_n = pr_n,
+            build_fields_total_ms = bf_ms,
+            build_fields_avg_us = bf_avg,
+            build_fields_pct = pct(bf_ns, total_ns),
+            build_fields_n = bf_n,
+            spawn_closer_task_total_ms = sct_ms,
+            spawn_closer_task_avg_us = sct_avg,
+            spawn_closer_task_pct = pct(sct_ns, total_ns),
+            spawn_closer_task_n = sct_n,
+            spawn_fetch_total_ms = sp_ms,
+            spawn_fetch_avg_us = sp_avg,
+            spawn_fetch_pct = pct(sp_ns, total_ns),
+            spawn_fetch_n = sp_n,
+            rs_with_fields_total_ms = rw_ms,
+            rs_with_fields_avg_us = rw_avg,
+            rs_with_fields_pct = pct(rw_ns, total_ns),
+            rs_with_fields_n = rw_n,
+            rs_no_fields_total_ms = rn_ms,
+            rs_no_fields_avg_us = rn_avg,
+            rs_no_fields_pct = pct(rn_ns, total_ns),
+            rs_no_fields_n = rn_n,
+            other_total_ms = other_ns / 1_000_000,
+            other_pct = pct(other_ns, total_ns),
+            "s_query_with_req_id aggregated timings"
+        );
+    }
+}
+
+static TIMINGS: QueryTimingAgg = QueryTimingAgg::new();
+
+/// 手动在进程/测试结束时调用，输出累计统计
+pub fn dump_s_query_timings() {
+    TIMINGS.dump();
+}
+
 impl WsTaos {
     /// Build TDengine WebSocket client from dsn.
     ///
@@ -180,7 +389,25 @@ impl WsTaos {
 
     #[instrument(skip(self))]
     pub async fn s_query_with_req_id(&self, sql: &str, req_id: u64) -> RawResult<ResultSet> {
+        TIMINGS.inc_call();
+        let total_start = Instant::now();
+
+        let mark = |step: TimingStep, start: Instant| {
+            TIMINGS.record(step, start.elapsed());
+        };
+
+        // let mark = |step: &'static str, start: Instant| {
+        //     let elapsed = start.elapsed();
+        //     tracing::debug!(
+        //         req_id,
+        //         step,
+        //         elapsed_us = elapsed.as_micros(),
+        //         "s_query_with_req_id timing"
+        //     );
+        // };
+
         let data = if self.is_support_binary_sql() {
+            let t_build = Instant::now();
             let mut bytes = Vec::with_capacity(sql.len() + 30);
             bytes.write_u64_le(req_id).map_err(Error::from)?;
             bytes.write_u64_le(0).map_err(Error::from)?; // result ID, uesless here
@@ -188,7 +415,14 @@ impl WsTaos {
             bytes.write_u16_le(1).map_err(Error::from)?; // version
             bytes.write_u32_le(sql.len() as _).map_err(Error::from)?;
             bytes.write_all(sql.as_bytes()).map_err(Error::from)?;
-            self.sender.send_recv(WsSend::Binary(bytes)).await?
+            // mark("build_binary_request", t_build);
+            mark(TimingStep::BuildBinaryReq, t_build);
+
+            let t_send = Instant::now();
+            let out = self.sender.send_recv(WsSend::Binary(bytes)).await?;
+            // mark("send_recv", t_send);
+            mark(TimingStep::SendRecv, t_send);
+            out
         } else {
             let action = WsSend::Query {
                 req_id,
@@ -197,26 +431,33 @@ impl WsTaos {
             self.sender.send_recv(action).await?
         };
 
+        let t_parse = Instant::now();
         let resp = match data {
             WsRecvData::Query(resp) => resp,
             _ => unreachable!(),
         };
+        // mark("parse_response", t_parse);
+        mark(TimingStep::ParseResp, t_parse);
 
         let res_id = resp.id;
         let args = WsResArgs { id: res_id, req_id };
 
         let (close_tx, close_rx) = oneshot::channel();
 
-        tokio::task::spawn(
-            async move {
-                let now = Instant::now();
-                let _ = close_rx.await;
-                tracing::trace!("result {} lived for {:?}", res_id, now.elapsed());
-            }
-            .in_current_span(),
-        );
+        // let t_spawn = Instant::now();
+        // tokio::task::spawn(
+        //     async move {
+        //         let now = Instant::now();
+        //         let _ = close_rx.await;
+        //         tracing::trace!("result {} lived for {:?}", res_id, now.elapsed());
+        //     }
+        //     .in_current_span(),
+        // );
+        // mark("spawn_closer_task", t_spawn);
+        // mark(TimingStep::SpawnCloserTask, t_spawn);
 
         if resp.fields_count > 0 {
+            let t_fields = Instant::now();
             let names = resp.fields_names.unwrap();
             let types = resp.fields_types.unwrap();
             let lens = resp.fields_lengths.unwrap();
@@ -226,6 +467,8 @@ impl WsTaos {
                 .zip(lens)
                 .map(|((name, ty), len)| Field::new(name, ty, len))
                 .collect();
+            // mark("build_fields", t_fields);
+            mark(TimingStep::BuildFields, t_fields);
 
             let precision = resp.precision;
             let sender = self.sender.clone();
@@ -233,6 +476,7 @@ impl WsTaos {
             let (raw_block_tx, raw_block_rx) = mpsc::channel(64);
             let (fetch_done_tx, fetch_done_rx) = mpsc::channel(1);
 
+            let t_spawn = Instant::now();
             if sender.version_info.support_binary_sql() {
                 fetch_binary(
                     sender,
@@ -255,8 +499,11 @@ impl WsTaos {
                 )
                 .await;
             }
+            // mark("spawn_fetch", t_spawn);
+            mark(TimingStep::SpawnFetch, t_spawn);
 
-            Ok(ResultSet {
+            let t_build_rs = Instant::now();
+            let rs = ResultSet {
                 sender: self.sender.clone(),
                 args,
                 fields: Some(fields),
@@ -273,7 +520,11 @@ impl WsTaos {
                 fields_scales: resp.fields_scales,
                 fetch_done_reader: Some(fetch_done_rx),
                 tz: self.tz,
-            })
+            };
+            // mark("build_resultset_with_fields", t_build_rs);
+            mark(TimingStep::BuildRsWithFields, t_build_rs);
+            TIMINGS.add_total(total_start.elapsed());
+            Ok(rs)
         } else {
             Ok(ResultSet {
                 sender: self.sender.clone(),
@@ -643,6 +894,8 @@ impl Drop for WsTaos {
         self.set_state(ConnState::Disconnected);
         // Send close signal to reader/writer spawned tasks.
         let _ = self.close_signal.send(true);
+
+        dump_s_query_timings();
     }
 }
 
@@ -685,7 +938,9 @@ pub(crate) async fn fetch_binary(
 
                         if block_code != 0 {
                             let err = RawError::new(block_code, block_message);
-                            tracing::debug!("fetch binary failed, result id: {res_id}, err: {err:?}");
+                            tracing::debug!(
+                                "fetch binary failed, result id: {res_id}, err: {err:?}"
+                            );
                             let _ = raw_block_sender.send(Err(err)).await;
                             break;
                         }
@@ -705,14 +960,18 @@ pub(crate) async fn fetch_binary(
                             .await
                             .is_err()
                         {
-                            tracing::warn!("fetch binary, failed to send raw block to receiver, result id: {res_id}");
+                            tracing::warn!(
+                        "fetch binary, failed to send raw block to receiver, result id: {res_id}"
+                    );
                             break;
                         }
                     }
                     Ok(_) => unreachable!("unexpected response for result: {res_id}"),
                     Err(err) => {
                         if raw_block_sender.send(Err(err)).await.is_err() {
-                            tracing::warn!("fetch binary, failed to send error to receiver, result id: {res_id}");
+                            tracing::warn!(
+                        "fetch binary, failed to send error to receiver, result id: {res_id}"
+                    );
                             break;
                         }
                     }
@@ -916,7 +1175,7 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl WsQuerySender {
     fn req_id(&self) -> ReqId {
-        self.req_id.fetch_add(1, Ordering::SeqCst)
+        self.req_id.fetch_add(1, Ordering::Relaxed)
     }
 
     #[instrument(skip_all)]
@@ -953,6 +1212,7 @@ impl WsQuerySender {
 
         tracing::trace!("send_recv, req_id: {req_id}, sending message: {message:?}");
 
+        let t_enq = Instant::now();
         timeout(
             SEND_TIMEOUT,
             self.sender.send_async(WsMessage::Command(message)),
@@ -963,9 +1223,11 @@ impl WsQuerySender {
             Error::from(e)
         })?
         .map_err(Error::from)?;
+        TIMINGS.record(TimingStep::SendEnqueue, t_enq.elapsed());
 
         tracing::trace!("send_recv, message sent, waiting for response, req_id: {req_id}");
 
+        let t_wait = Instant::now();
         let data = timeout(Duration::from_secs(60), data_rx)
             .await
             .map_err(|e| {
@@ -974,6 +1236,7 @@ impl WsQuerySender {
             })?
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
             .map_err(Error::from)?;
+        TIMINGS.record(TimingStep::AwaitResponse, t_wait.elapsed());
 
         tracing::trace!("send_recv, req_id: {req_id}, received data: {data:?}");
 
