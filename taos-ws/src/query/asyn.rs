@@ -12,7 +12,6 @@ use byteorder::{ByteOrder, LittleEndian};
 use chrono_tz::Tz;
 use dashmap::DashMap;
 use faststr::FastStr;
-use futures::channel::oneshot;
 use futures::{future, FutureExt, SinkExt, StreamExt};
 use itertools::Itertools;
 use taos_query::common::{Field, Precision, RawBlock, RawMeta, SmlData};
@@ -23,6 +22,7 @@ use taos_query::{
 };
 use thiserror::Error;
 use tokio::select;
+use tokio::sync::oneshot;
 use tokio::sync::{mpsc, watch, Mutex, Notify, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::{self, timeout};
