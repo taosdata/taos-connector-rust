@@ -4,12 +4,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, LittleEndian};
-use futures::channel::oneshot;
 use taos_query::common::{Field, Precision};
 use taos_query::stmt2::{Stmt2AsyncBindable, Stmt2BindParam, Stmt2Bindable};
 use taos_query::util::generate_req_id;
 use taos_query::{block_in_place_or_global, AsyncQueryable, Queryable, RawResult};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tracing::Instrument;
 
 use crate::query::asyn::{fetch_binary, ConnState, QueryMetrics};

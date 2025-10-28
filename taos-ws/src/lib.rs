@@ -83,6 +83,7 @@ pub struct TaosBuilder {
     retry_policy: RetryPolicy,
     tz: Option<Tz>,
     conn_options: DashMap<i32, Option<String>>,
+    tcp_nodelay: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -466,6 +467,17 @@ impl TaosBuilder {
             })
             .transpose()?;
 
+        let tcp_nodelay = dsn
+            .remove("tcp_nodelay")
+            .and_then(|s| {
+                if s.trim().is_empty() {
+                    Some(true)
+                } else {
+                    s.trim().parse::<bool>().ok()
+                }
+            })
+            .unwrap_or(true);
+
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
         } else {
@@ -486,6 +498,7 @@ impl TaosBuilder {
             current_addr_index: Arc::new(AtomicUsize::new(0)),
             tz,
             conn_options: DashMap::new(),
+            tcp_nodelay,
         })
     }
 
@@ -542,6 +555,12 @@ impl TaosBuilder {
                 tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
                 match connect_async_with_config(&url, Some(config), false).await {
                     Ok((mut ws_stream, _)) => {
+                        if self.tcp_nodelay {
+                            if let Err(err) = self.enable_tcp_nodelay(&ws_stream) {
+                                tracing::warn!("failed to enable TCP_NODELAY: {err}");
+                            }
+                        }
+
                         if ty == EndpointType::Stmt {
                             return Ok((ws_stream, String::new()));
                         }
@@ -632,6 +651,17 @@ impl TaosBuilder {
         } else {
             Err(RawError::from_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
                 .context("failed to connect to all addresses"))
+        }
+    }
+
+    fn enable_tcp_nodelay(&self, ws: &WsStream) -> std::io::Result<()> {
+        match ws.get_ref() {
+            MaybeTlsStream::Plain(s) => s.set_nodelay(true),
+            #[cfg(feature = "rustls")]
+            MaybeTlsStream::Rustls(s) => s.get_ref().0.set_nodelay(true),
+            #[cfg(feature = "native-tls")]
+            MaybeTlsStream::NativeTls(s) => s.get_ref().get_ref().get_ref().set_nodelay(true),
+            _ => Ok(()),
         }
     }
 
