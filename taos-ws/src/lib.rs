@@ -83,6 +83,7 @@ pub struct TaosBuilder {
     retry_policy: RetryPolicy,
     tz: Option<Tz>,
     conn_options: DashMap<i32, Option<String>>,
+    tcp_nodelay: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -466,6 +467,17 @@ impl TaosBuilder {
             })
             .transpose()?;
 
+        let tcp_nodelay = dsn
+            .remove("tcp_nodelay")
+            .and_then(|s| {
+                if s.trim().is_empty() {
+                    Some(true)
+                } else {
+                    s.trim().parse::<bool>().ok()
+                }
+            })
+            .unwrap_or(true);
+
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
         } else {
@@ -486,6 +498,7 @@ impl TaosBuilder {
             current_addr_index: Arc::new(AtomicUsize::new(0)),
             tz,
             conn_options: DashMap::new(),
+            tcp_nodelay,
         })
     }
 
@@ -542,6 +555,12 @@ impl TaosBuilder {
                 tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
                 match connect_async_with_config(&url, Some(config), false).await {
                     Ok((mut ws_stream, _)) => {
+                        if self.tcp_nodelay {
+                            if let Err(err) = self.enable_tcp_nodelay(&ws_stream) {
+                                tracing::warn!("failed to enable TCP_NODELAY: {err}");
+                            }
+                        }
+
                         if ty == EndpointType::Stmt {
                             return Ok((ws_stream, String::new()));
                         }
@@ -632,6 +651,17 @@ impl TaosBuilder {
         } else {
             Err(RawError::from_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
                 .context("failed to connect to all addresses"))
+        }
+    }
+
+    fn enable_tcp_nodelay(&self, ws: &WsStream) -> std::io::Result<()> {
+        match ws.get_ref() {
+            MaybeTlsStream::Plain(s) => s.set_nodelay(true),
+            #[cfg(feature = "rustls")]
+            MaybeTlsStream::Rustls(s) => s.get_ref().0.set_nodelay(true),
+            #[cfg(feature = "native-tls")]
+            MaybeTlsStream::NativeTls(s) => s.get_ref().get_ref().get_ref().set_nodelay(true),
+            _ => Ok(()),
         }
     }
 
@@ -900,6 +930,90 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_connect_enable_tcp_nodelay() -> Result<(), anyhow::Error> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let cases = ["true", "false", ""];
+        for tcp_nodelay_val in cases {
+            let dsn = format!("ws://localhost:6041?tcp_nodelay={tcp_nodelay_val}");
+            let builder = TaosBuilder::from_dsn(dsn)?;
+            let (ws, _) = builder.connect().await?;
+            let (mut sender, mut reader) = ws.split();
+
+            sender.send(WsSend::Version.to_msg()).await?;
+
+            loop {
+                if let Some(Ok(message)) = reader.next().await {
+                    let text = message.to_text().unwrap();
+                    let recv: WsRecv = serde_json::from_str(text).unwrap();
+                    assert_eq!(recv.code, 0);
+                    if let WsRecvData::Version { version, .. } = recv.data {
+                        tracing::info!("server version: {version}");
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "native-tls")]
+    async fn test_connect_cloud_enable_tcp_nodelay() -> Result<(), anyhow::Error> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_conncet");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_conncet");
+            return Ok(());
+        }
+
+        let url = url.unwrap();
+        let token = token.unwrap();
+
+        let cases = ["true", "false", ""];
+        for tcp_nodelay_val in cases {
+            let dsn = format!("{url}/rust_test?token={token}&tcp_nodelay={tcp_nodelay_val}");
+            let builder = TaosBuilder::from_dsn(dsn)?;
+            let (ws, _) = builder.connect().await?;
+            let (mut sender, mut reader) = ws.split();
+
+            sender.send(WsSend::Version.to_msg()).await?;
+
+            loop {
+                if let Some(Ok(message)) = reader.next().await {
+                    let text = message.to_text().unwrap();
+                    let recv: WsRecv = serde_json::from_str(text).unwrap();
+                    assert_eq!(recv.code, 0);
+                    if let WsRecvData::Version { version, .. } = recv.data {
+                        tracing::info!("server version: {version}");
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "rustls-aws-lc-crypto-provider")]
@@ -946,6 +1060,55 @@ mod cloud_tests {
                 if let WsRecvData::Version { version, .. } = recv.data {
                     tracing::info!("server version: {version}");
                     break;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connect_enable_tcp_nodelay() -> Result<(), anyhow::Error> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_conncet");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_conncet");
+            return Ok(());
+        }
+
+        let url = url.unwrap();
+        let token = token.unwrap();
+
+        let cases = ["true", "false", ""];
+        for tcp_nodelay_val in cases {
+            let dsn = format!("{url}/rust_test?token={token}&tcp_nodelay={tcp_nodelay_val}");
+            let builder = TaosBuilder::from_dsn(dsn)?;
+            let (ws, _) = builder.connect().await?;
+            let (mut sender, mut reader) = ws.split();
+
+            sender.send(WsSend::Version.to_msg()).await?;
+
+            loop {
+                if let Some(Ok(message)) = reader.next().await {
+                    let text = message.to_text().unwrap();
+                    let recv: WsRecv = serde_json::from_str(text).unwrap();
+                    assert_eq!(recv.code, 0);
+                    if let WsRecvData::Version { version, .. } = recv.data {
+                        tracing::info!("server version: {version}");
+                        break;
+                    }
                 }
             }
         }
