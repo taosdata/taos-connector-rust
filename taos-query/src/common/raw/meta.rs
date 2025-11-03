@@ -83,6 +83,22 @@ pub enum MetaCreate {
     },
 }
 
+#[test]
+fn test_meta_create_deserialize() {
+    let meta = MetaCreate::Child {
+        table_name: "T1".to_string(),
+        using: "ST".to_string(),
+        tags: vec![TagWithValue {
+            field: Field::new("t1", Ty::VarChar, 16),
+            value: serde_json::json!("\"ab\""),
+        }],
+        tag_num: Some(1),
+    };
+    assert_eq!(
+        meta.to_string(),
+        "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`) TAGS('ab')"
+    );
+}
 impl Display for MetaCreate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("CREATE TABLE IF NOT EXISTS ")?;
@@ -121,7 +137,17 @@ impl Display for MetaCreate {
                                 match t.field.ty() {
                                     Ty::Json => format!("'{}'", t.value.as_str().unwrap()),
                                     Ty::VarChar | Ty::NChar => {
-                                        sql_value_escape(t.value.as_str().unwrap())
+                                        if let Some(s) = t.value.as_str() {
+                                            // String representation: "\"content\"".
+                                            // s== "\"": 3.1.1.x empty string bug compatibility
+                                            if s.starts_with('"') && s.ends_with('"') || s == "\"" {
+                                                sql_value_escape(s.trim_matches('"'))
+                                            } else {
+                                                sql_value_escape(s)
+                                            }
+                                        } else {
+                                            sql_value_escape(t.value.to_string().as_str())
+                                        }
                                     }
                                     _ => format!("{}", t.value),
                                 }
