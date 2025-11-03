@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
         let inserted = taos
             .exec(
                 // insert and automatically create table with tags if not exists
-                "INSERT INTO `d1` USING `meters` TAGS(\"\") values(now - 9s,1)",
+                "INSERT INTO `d1` USING `meters` TAGS(\"ab\") values(now - 9s,1)",
             )
             .await?;
 
@@ -76,7 +76,10 @@ async fn main() -> anyhow::Result<()> {
         match message {
             MessageSet::Meta(meta) => {
                 let json = meta.as_json_meta().await?;
-                dbg!(json);
+                dbg!(&json);
+                for meta in json.iter() {
+                    println!("meta: {}", meta);
+                }
             }
             MessageSet::Data(data) => {
                 println!("data message:");
@@ -102,7 +105,10 @@ async fn main() -> anyhow::Result<()> {
             }
             MessageSet::MetaData(meta, data) => {
                 let json = meta.as_json_meta().await?;
-                dbg!(json);
+                dbg!(&json);
+                for meta in json.iter() {
+                    println!("meta: {}", meta);
+                }
                 has_consumed_meta = true;
                 println!("metadata message:");
                 while let Some(block) = data.fetch_raw_block().await? {
