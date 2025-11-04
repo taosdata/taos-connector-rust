@@ -120,7 +120,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     strategy:
       matrix:
-        platform: [ubuntu-latest, ubuntu-24.04-arm]
+        platform: [ubuntu-24.04-arm]
     needs: build-tdengine
     steps:
       - name: Get cache server by push
