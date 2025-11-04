@@ -90,6 +90,20 @@ fn test_meta_create_deserialize() {
         using: "ST".to_string(),
         tags: vec![TagWithValue {
             field: Field::new("t1", Ty::VarChar, 16),
+            value: serde_json::json!("\""),
+        }],
+        tag_num: Some(1),
+    };
+    assert_eq!(
+        meta.to_string(),
+        "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`) TAGS('')"
+    );
+
+    let meta = MetaCreate::Child {
+        table_name: "T1".to_string(),
+        using: "ST".to_string(),
+        tags: vec![TagWithValue {
+            field: Field::new("t1", Ty::VarChar, 16),
             value: serde_json::json!("\"ab\""),
         }],
         tag_num: Some(1),
