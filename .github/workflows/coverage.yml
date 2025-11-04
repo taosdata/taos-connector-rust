@@ -15,7 +15,7 @@ env:
 
 jobs:
   build-tdengine:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     outputs:
       commit_id: ${{ steps.get_commit_id.outputs.commit_id }}
     steps:
@@ -47,7 +47,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: server.tar.gz
-          key: ${{ runner.os }}-build-main-${{ steps.get_commit_id.outputs.commit_id }}
+          key: arm-${{ runner.os }}-build-main-${{ steps.get_commit_id.outputs.commit_id }}
 
       - name: Cache server manually
         if: github.event_name == 'workflow_dispatch'
@@ -161,21 +161,21 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
 
-      - name: Cache .cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ steps.setup-rust.outputs.rustc_hash }}
+      # - name: Cache .cargo
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: |
+      #       ~/.cargo/bin/
+      #       ~/.cargo/registry/index/
+      #       ~/.cargo/registry/cache/
+      #       ~/.cargo/git/db/
+      #     key: ${{ runner.os }}-cargo-${{ steps.setup-rust.outputs.rustc_hash }}
 
-      - name: Cache target
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
+      # - name: Cache target
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: target
+      #     key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.rustc_hash }}
 
       - name: Prepare development tools
         run: |
