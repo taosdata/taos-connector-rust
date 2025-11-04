@@ -85,6 +85,7 @@ pub enum MetaCreate {
 
 #[test]
 fn test_meta_create_deserialize() {
+    // Test for 3.1.1.x empty string bug compatibility.
     let meta = MetaCreate::Child {
         table_name: "T1".to_string(),
         using: "ST".to_string(),
@@ -99,18 +100,25 @@ fn test_meta_create_deserialize() {
         "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`) TAGS('')"
     );
 
+    // Test normal string value.
     let meta = MetaCreate::Child {
         table_name: "T1".to_string(),
         using: "ST".to_string(),
-        tags: vec![TagWithValue {
-            field: Field::new("t1", Ty::VarChar, 16),
-            value: serde_json::json!("\"ab\""),
-        }],
+        tags: vec![
+            TagWithValue {
+                field: Field::new("t1", Ty::VarChar, 16),
+                value: serde_json::json!("\"ab\""),
+            },
+            TagWithValue {
+                field: Field::new("t2", Ty::NChar, 16),
+                value: serde_json::json!("cd"),
+            },
+        ],
         tag_num: Some(1),
     };
     assert_eq!(
         meta.to_string(),
-        "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`) TAGS('ab')"
+        "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`, `t2`) TAGS('ab', 'cd')"
     );
 }
 impl Display for MetaCreate {
