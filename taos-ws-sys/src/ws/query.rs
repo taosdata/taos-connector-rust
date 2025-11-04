@@ -1762,13 +1762,16 @@ mod tests {
             let mut str = vec![0 as c_char; 1024];
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
             assert_eq!(len, 35);
-            assert_eq!(
-                &str[..len as _],
-                &[
-                    49, 55, 52, 49, 54, 54, 48, 48, 55, 57, 50, 50, 56, 32, 1, 1, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, -16, 63, 0, 0, 0, 0, 0, 0, -16, 63
-                ]
-            );
+
+            let expected: Vec<c_char> = [
+                49u8, 55, 52, 49, 54, 54, 48, 48, 55, 57, 50, 50, 56, 32, 1, 1, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 240, 63,
+            ]
+            .iter()
+            .map(|&b| b as c_char)
+            .collect();
+
+            assert_eq!(&str[..len as _], expected.as_slice());
 
             taos_free_result(res);
             test_exec(taos, "drop database test_1753257608");
