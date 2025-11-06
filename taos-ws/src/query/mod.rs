@@ -732,14 +732,16 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_recv_resp_timeout() -> anyhow::Result<()> {
         use crate::stmt2::ws_proxy::*;
         use taos_query::prelude::*;
 
         let intercept: InterceptFn = {
             Arc::new(move |_msg, _ctx| {
-                std::thread::sleep(std::time::Duration::from_secs(2));
+                tokio::task::block_in_place(|| {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                });
                 ProxyAction::Forward
             })
         };

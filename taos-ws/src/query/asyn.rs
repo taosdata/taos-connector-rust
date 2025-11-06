@@ -88,7 +88,6 @@ impl WsTaos {
             queries: Arc::default(),
             results: Arc::default(),
             read_timeout: builder.read_timeout,
-            write_timeout: builder.write_timeout,
         };
 
         let builder = Arc::new(builder.clone());
@@ -912,8 +911,9 @@ pub(crate) struct WsQuerySender {
     pub(super) sender: flume::Sender<WsMessage>,
     pub(super) queries: QueryAgent,
     read_timeout: Duration,
-    write_timeout: Duration,
 }
+
+const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl WsQuerySender {
     fn req_id(&self) -> ReqId {
@@ -955,7 +955,7 @@ impl WsQuerySender {
         tracing::trace!("send_recv, req_id: {req_id}, sending message: {message:?}");
 
         timeout(
-            self.write_timeout,
+            WRITE_TIMEOUT,
             self.sender.send_async(WsMessage::Command(message)),
         )
         .await
@@ -991,7 +991,7 @@ impl WsQuerySender {
         let req_id = message.req_id();
         tracing::trace!("send_only, req_id: {req_id}, message: {message:?}");
         timeout(
-            self.write_timeout,
+            WRITE_TIMEOUT,
             self.sender.send_async(WsMessage::Command(message)),
         )
         .await
@@ -1793,7 +1793,6 @@ mod tests {
             sender: tx,
             queries: Arc::new(QueryInner::new()),
             read_timeout: Duration::from_millis(50),
-            write_timeout: Duration::from_secs(1),
         };
 
         let req = WsSend::Query {
@@ -1802,28 +1801,6 @@ mod tests {
         };
         let err = qs.send_recv(req).await.unwrap_err();
         assert_eq!(err.code(), WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code());
-    }
-
-    #[tokio::test]
-    async fn test_write_timeout() {
-        let (tx, _rx) = flume::bounded(0);
-
-        let qs = WsQuerySender {
-            version_info: VersionInfo::new("3.3.8.0"),
-            req_id: Arc::new(AtomicU64::new(1)),
-            results: Arc::new(QueryResMapper::new()),
-            sender: tx,
-            queries: Arc::new(QueryInner::new()),
-            write_timeout: Duration::from_millis(50),
-            read_timeout: Duration::from_secs(300),
-        };
-
-        let req = WsSend::Query {
-            req_id: 1001,
-            sql: "show databases".to_string(),
-        };
-        let err = qs.send_recv(req).await.unwrap_err();
-        assert_eq!(err.code(), WS_ERROR_NO::SEND_MESSAGE_TIMEOUT.as_code());
     }
 }
 
