@@ -483,14 +483,12 @@ impl TaosBuilder {
         let read_timeout = dsn
             .remove("read_timeout")
             .and_then(|s| s.parse::<u64>().ok())
-            .map(Duration::from_secs)
-            .unwrap_or(Duration::from_secs(300));
+            .map_or(Duration::from_secs(300), Duration::from_secs);
 
         let write_timeout = dsn
             .remove("write_timeout")
             .and_then(|s| s.parse::<u64>().ok())
-            .map(Duration::from_secs)
-            .unwrap_or(Duration::from_secs(1));
+            .map_or(Duration::from_secs(1), Duration::from_secs);
 
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
