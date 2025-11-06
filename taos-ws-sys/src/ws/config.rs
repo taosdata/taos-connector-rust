@@ -667,7 +667,7 @@ mod tests {
 
     #[test]
     fn test_read_config_from_path() {
-        let config = read_config_from_path("./tests/taos.cfg".as_ref()).unwrap();
+        let config = read_config_from_path("./tests/cfg/taos.cfg".as_ref()).unwrap();
         assert_eq!(config.compression(), true);
         assert_eq!(config.log_dir(), "/path/to/logDir/");
         assert_eq!(config.log_level(), LevelFilter::DEBUG);
@@ -688,7 +688,7 @@ mod tests {
     fn test_config_load_from_path() -> Result<(), TaosError> {
         {
             let mut config = Config::new();
-            config.load_from_path("./tests")?;
+            config.load_from_path("./tests/cfg")?;
             assert_eq!(config.compression(), true);
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
@@ -707,7 +707,7 @@ mod tests {
 
         {
             let mut config = Config::new();
-            config.load_from_path("./tests/taos.cfg")?;
+            config.load_from_path("./tests/cfg/taos.cfg")?;
             assert_eq!(config.compression(), true);
             assert_eq!(config.log_dir(), "/path/to/logDir/");
             assert_eq!(config.log_level(), LevelFilter::DEBUG);
@@ -734,7 +734,7 @@ mod tests {
             let code = taos_options(TSDB_OPTION::TSDB_OPTION_TIMEZONE, timezone.as_ptr() as _);
             assert_eq!(code, 0);
 
-            let config_dir = c"./tests/taos.cfg";
+            let config_dir = c"./tests/cfg/taos.cfg";
             let code = taos_options(TSDB_OPTION::TSDB_OPTION_CONFIGDIR, config_dir.as_ptr() as _);
             assert_eq!(code, 0);
         }

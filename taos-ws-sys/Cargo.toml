@@ -6,7 +6,7 @@ publish = false
 
 [lib]
 name = "taosws"
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
 anyhow = "1"
