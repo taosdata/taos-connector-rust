@@ -2685,12 +2685,6 @@ mod tests {
     #[test]
     fn test_show_consumers() {
         unsafe {
-            let _ = tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::TRACE)
-                .with_line_number(true)
-                .with_file(true)
-                .try_init();
-
             let taos = test_connect();
             test_exec_many(
                 taos,
@@ -2782,12 +2776,6 @@ mod tests {
     #[test]
     fn test_poll_blob() {
         unsafe {
-            let _ = tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::INFO)
-                .with_line_number(true)
-                .with_file(true)
-                .try_init();
-
             let taos = test_connect();
             test_exec_many(
                 taos,
