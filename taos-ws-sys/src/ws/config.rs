@@ -181,6 +181,10 @@ pub fn rotation_size() -> FastStr {
     CONFIG.read().unwrap().rotation_size().clone()
 }
 
+pub fn ws_tls_mode() -> WsTlsMode {
+    CONFIG.read().unwrap().ws_tls_mode()
+}
+
 pub fn set_config_dir<T: Into<FastStr>>(cfg_dir: T) {
     CONFIG.write().unwrap().set_config_dir(cfg_dir);
 }
@@ -216,6 +220,26 @@ const DEFAULT_RETRY_BACKOFF_MAX_MS: u64 = 2000;
 const DEFAULT_LOG_KEEP_DAYS: u16 = 30;
 const DEFAULT_ROTATION_SIZE: &str = "1GB";
 const DEFAULT_DEBUG_FLAG: u16 = 0;
+const DEFAULT_WS_TLS_MODE: WsTlsMode = WsTlsMode::Disabled;
+
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WsTlsMode {
+    Disabled,
+    Required,
+}
+
+impl From<WsTlsMode> for i32 {
+    fn from(mode: WsTlsMode) -> Self {
+        mode as i32
+    }
+}
+
+impl std::fmt::Display for WsTlsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", *self as i32)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -233,6 +257,7 @@ pub struct Config {
     retry_backoff_max_ms: Option<u64>,
     log_keep_days: Option<u16>,
     rotation_size: Option<FastStr>,
+    ws_tls_mode: Option<WsTlsMode>,
 }
 
 impl Config {
@@ -252,6 +277,7 @@ impl Config {
             retry_backoff_max_ms: None,
             log_keep_days: None,
             rotation_size: None,
+            ws_tls_mode: None,
         }
     }
 
@@ -316,6 +342,10 @@ impl Config {
     fn rotation_size(&self) -> &FastStr {
         static ROTATION_SIZE: FastStr = FastStr::from_static_str(DEFAULT_ROTATION_SIZE);
         self.rotation_size.as_ref().unwrap_or(&ROTATION_SIZE)
+    }
+
+    fn ws_tls_mode(&self) -> WsTlsMode {
+        self.ws_tls_mode.unwrap_or(DEFAULT_WS_TLS_MODE)
     }
 
     fn debug_flag(&self) -> Option<u16> {
@@ -414,6 +444,10 @@ impl Config {
         self.rotation_size = Some(size.into());
     }
 
+    fn set_ws_tls_mode(&mut self, mode: WsTlsMode) {
+        self.ws_tls_mode = Some(mode);
+    }
+
     fn load_from_path(&mut self, path: &str) -> Result<(), TaosError> {
         let path = Path::new(path);
         let config_file = if path.is_file() {
@@ -470,7 +504,8 @@ impl Config {
             retry_backoff_ms,
             retry_backoff_max_ms,
             log_keep_days,
-            rotation_size
+            rotation_size,
+            ws_tls_mode
         );
     }
 
@@ -510,6 +545,7 @@ impl Config {
             "retryBackoffMaxMs",
             DEFAULT_RETRY_BACKOFF_MAX_MS
         );
+        show!(self.ws_tls_mode, "wsTlsMode", self.ws_tls_mode() as i32);
 
         tracing::info!("{}", "=".repeat(76));
     }
@@ -604,6 +640,16 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                 "rotationSize" => {
                     config.rotation_size = Some(value.to_string().into());
                 }
+                "wsTlsMode" => match value {
+                    "0" => config.set_ws_tls_mode(WsTlsMode::Disabled),
+                    "1" => config.set_ws_tls_mode(WsTlsMode::Required),
+                    _ => {
+                        return Err(TaosError::new(
+                            Code::INVALID_PARA,
+                            &format!("invalid value for wsTlsMode: {value}"),
+                        ));
+                    }
+                },
                 _ => {}
             }
         }
@@ -635,6 +681,7 @@ mod tests {
         assert_eq!(config.retry_backoff_max_ms(), 2000);
         assert_eq!(config.log_keep_days(), 30);
         assert_eq!(config.rotation_size(), "1GB");
+        assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
     }
 
     #[test]
@@ -655,6 +702,7 @@ mod tests {
             assert_eq!(config.retry_backoff_max_ms(), 2000);
             assert_eq!(config.log_keep_days(), 30);
             assert_eq!(config.rotation_size(), "1GB");
+            assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
         }
 
         {
@@ -673,6 +721,7 @@ mod tests {
             assert_eq!(config.retry_backoff_max_ms(), 2000);
             assert_eq!(config.log_keep_days(), 30);
             assert_eq!(config.rotation_size(), "1GB");
+            assert_eq!(config.ws_tls_mode(), WsTlsMode::Disabled);
         }
 
         Ok(())
@@ -723,6 +772,7 @@ mod tests {
         assert_eq!(retry_backoff_max_ms(), 1000);
         assert_eq!(log_keep_days(), 30);
         assert_eq!(rotation_size(), FastStr::from("1GB"));
+        assert_eq!(ws_tls_mode(), WsTlsMode::Disabled);
 
         Ok(())
     }
