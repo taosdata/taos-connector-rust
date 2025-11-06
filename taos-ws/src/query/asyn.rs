@@ -973,7 +973,10 @@ impl WsQuerySender {
                 tracing::error!("send_recv, receive response timeout, req_id: {req_id}, err: {e}");
                 RawError::new(
                     WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code(),
-                    "Receive data via websocket timeout",
+                    format!(
+                        "Receive data via websocket timeout after {:?}",
+                        self.read_timeout
+                    ),
                 )
             })?
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
