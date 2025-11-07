@@ -774,4 +774,21 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_wstlsmode() {
+        use std::str::FromStr;
+
+        assert_eq!(i32::from(WsTlsMode::Disabled), 0);
+        assert_eq!(i32::from(WsTlsMode::Required), 1);
+
+        assert_eq!(WsTlsMode::Disabled.to_string(), "0");
+        assert_eq!(WsTlsMode::Required.to_string(), "1");
+
+        assert_eq!(WsTlsMode::from_str("0").unwrap(), WsTlsMode::Disabled);
+        assert_eq!(WsTlsMode::from_str("1").unwrap(), WsTlsMode::Required);
+
+        let err = WsTlsMode::from_str("9").unwrap_err();
+        assert_eq!(err.code(), Code::INVALID_PARA);
+    }
 }
