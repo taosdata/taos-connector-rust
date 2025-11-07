@@ -235,6 +235,21 @@ impl From<WsTlsMode> for i32 {
     }
 }
 
+impl std::str::FromStr for WsTlsMode {
+    type Err = TaosError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "0" => Ok(WsTlsMode::Disabled),
+            "1" => Ok(WsTlsMode::Required),
+            _ => Err(TaosError::new(
+                Code::INVALID_PARA,
+                &format!("invalid value for wsTlsMode: {s}"),
+            )),
+        }
+    }
+}
+
 impl std::fmt::Display for WsTlsMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", *self as i32)
@@ -444,10 +459,6 @@ impl Config {
         self.rotation_size = Some(size.into());
     }
 
-    fn set_ws_tls_mode(&mut self, mode: WsTlsMode) {
-        self.ws_tls_mode = Some(mode);
-    }
-
     fn load_from_path(&mut self, path: &str) -> Result<(), TaosError> {
         let path = Path::new(path);
         let config_file = if path.is_file() {
@@ -602,9 +613,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                         )
                     })?);
                 }
-                "adapterList" => {
-                    config.adapter_list = Some(value.to_string().into());
-                }
+                "adapterList" => config.adapter_list = Some(value.to_string().into()),
                 "connRetries" => {
                     config.conn_retries = Some(value.parse::<u32>().map_err(|_| {
                         TaosError::new(
@@ -637,19 +646,8 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                         )
                     })?);
                 }
-                "rotationSize" => {
-                    config.rotation_size = Some(value.to_string().into());
-                }
-                "wsTlsMode" => match value {
-                    "0" => config.set_ws_tls_mode(WsTlsMode::Disabled),
-                    "1" => config.set_ws_tls_mode(WsTlsMode::Required),
-                    _ => {
-                        return Err(TaosError::new(
-                            Code::INVALID_PARA,
-                            &format!("invalid value for wsTlsMode: {value}"),
-                        ));
-                    }
-                },
+                "rotationSize" => config.rotation_size = Some(value.to_string().into()),
+                "wsTlsMode" => config.ws_tls_mode = Some(value.parse()?),
                 _ => {}
             }
         }
