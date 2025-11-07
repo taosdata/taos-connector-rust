@@ -87,6 +87,7 @@ impl WsTaos {
             sender: message_tx,
             queries: Arc::default(),
             results: Arc::default(),
+            read_timeout: builder.read_timeout,
         };
 
         let builder = Arc::new(builder.clone());
@@ -909,9 +910,10 @@ pub(crate) struct WsQuerySender {
     pub(super) results: Arc<QueryResMapper>,
     pub(super) sender: flume::Sender<WsMessage>,
     pub(super) queries: QueryAgent,
+    read_timeout: Duration,
 }
 
-const SEND_TIMEOUT: Duration = Duration::from_secs(1);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl WsQuerySender {
     fn req_id(&self) -> ReqId {
@@ -953,7 +955,7 @@ impl WsQuerySender {
         tracing::trace!("send_recv, req_id: {req_id}, sending message: {message:?}");
 
         timeout(
-            SEND_TIMEOUT,
+            WRITE_TIMEOUT,
             self.sender.send_async(WsMessage::Command(message)),
         )
         .await
@@ -965,11 +967,17 @@ impl WsQuerySender {
 
         tracing::trace!("send_recv, message sent, waiting for response, req_id: {req_id}");
 
-        let data = timeout(Duration::from_secs(60), data_rx)
+        let data = timeout(self.read_timeout, data_rx)
             .await
             .map_err(|e| {
                 tracing::error!("send_recv, receive response timeout, req_id: {req_id}, err: {e}");
-                Error::from(e)
+                RawError::new(
+                    WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code(),
+                    format!(
+                        "Receive data via websocket timeout after {:?}",
+                        self.read_timeout
+                    ),
+                )
             })?
             .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
             .map_err(Error::from)?;
@@ -983,7 +991,7 @@ impl WsQuerySender {
         let req_id = message.req_id();
         tracing::trace!("send_only, req_id: {req_id}, message: {message:?}");
         timeout(
-            SEND_TIMEOUT,
+            WRITE_TIMEOUT,
             self.sender.send_async(WsMessage::Command(message)),
         )
         .await
@@ -1772,6 +1780,27 @@ mod tests {
         taos.exec("drop database test_1748241233").await?;
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_read_timeout() {
+        let (tx, _rx) = flume::bounded(1);
+
+        let qs = WsQuerySender {
+            version_info: VersionInfo::new("3.3.8.0"),
+            req_id: Arc::new(AtomicU64::new(1)),
+            results: Arc::new(QueryResMapper::new()),
+            sender: tx,
+            queries: Arc::new(QueryInner::new()),
+            read_timeout: Duration::from_millis(50),
+        };
+
+        let req = WsSend::Query {
+            req_id: 1001,
+            sql: "show databases".to_string(),
+        };
+        let err = qs.send_recv(req).await.unwrap_err();
+        assert_eq!(err.code(), WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code());
     }
 }
 

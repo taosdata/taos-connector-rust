@@ -84,6 +84,7 @@ pub struct TaosBuilder {
     tz: Option<Tz>,
     conn_options: DashMap<i32, Option<String>>,
     tcp_nodelay: bool,
+    read_timeout: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -478,6 +479,11 @@ impl TaosBuilder {
             })
             .unwrap_or(true);
 
+        let read_timeout = dsn
+            .remove("read_timeout")
+            .and_then(|s| s.parse::<u64>().ok())
+            .map_or(Duration::from_secs(300), Duration::from_secs);
+
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
         } else {
@@ -499,6 +505,7 @@ impl TaosBuilder {
             tz,
             conn_options: DashMap::new(),
             tcp_nodelay,
+            read_timeout,
         })
     }
 
