@@ -518,9 +518,10 @@ fn send_subscribe_request(
 }
 
 async fn send_recv(ws_stream: &mut WsStream, message: Message) -> RawResult<TmqRecvData> {
-    let timeout = Duration::from_secs(8);
+    let write_timeout = Duration::from_secs(8);
+    let read_timeout = Duration::from_secs(300);
 
-    time::timeout(timeout, ws_stream.send(message))
+    time::timeout(write_timeout, ws_stream.send(message))
         .await
         .map_err(|_| {
             RawError::from_code(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT.as_code())
@@ -529,7 +530,7 @@ async fn send_recv(ws_stream: &mut WsStream, message: Message) -> RawResult<TmqR
         .map_err(handle_disconnect_error)?;
 
     loop {
-        let res = time::timeout(timeout, ws_stream.next())
+        let res = time::timeout(read_timeout, ws_stream.next())
             .await
             .map_err(|_| {
                 RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())

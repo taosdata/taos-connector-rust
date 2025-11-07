@@ -512,7 +512,7 @@ impl TaosBuilder {
     pub(crate) async fn connect(&self) -> RawResult<(WsStream, Version)> {
         self.connect_with_cb(
             EndpointType::Ws,
-            send_conn_request(self.build_conn_request()),
+            send_conn_request(self.build_conn_request(), self.read_timeout),
         )
         .await
     }
@@ -676,8 +676,8 @@ impl TaosBuilder {
         &self,
         ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> RawResult<Version> {
-        let timeout = Duration::from_secs(8);
-        send_request_with_timeout(ws_stream, WsSend::Version.to_msg(), timeout).await?;
+        let write_timeout = Duration::from_secs(8);
+        send_request_with_timeout(ws_stream, WsSend::Version.to_msg(), write_timeout).await?;
 
         let version_fut = async {
             let max_non_version_cnt = 5;
@@ -723,7 +723,7 @@ impl TaosBuilder {
             }
         };
 
-        let version = match time::timeout(timeout, version_fut).await {
+        let version = match time::timeout(self.read_timeout, version_fut).await {
             Ok(Ok(ver)) => ver,
             Ok(Err(err)) => return Err(err),
             Err(_) => "2.x".to_string(),
@@ -751,11 +751,11 @@ impl TaosBuilder {
             options,
         };
 
-        let timeout = Duration::from_secs(8);
-        send_request_with_timeout(ws_stream, req.to_msg(), timeout).await?;
+        let write_timeout = Duration::from_secs(8);
+        send_request_with_timeout(ws_stream, req.to_msg(), write_timeout).await?;
 
         loop {
-            let res = time::timeout(timeout, ws_stream.next())
+            let res = time::timeout(self.read_timeout, ws_stream.next())
                 .await
                 .map_err(|_| {
                     RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())

@@ -25,6 +25,7 @@ use crate::{
 
 pub fn send_conn_request(
     conn_req: WsConnReq,
+    read_timeout: Duration,
 ) -> impl for<'a> Fn(&'a mut WsStream) -> Pin<Box<dyn Future<Output = RawResult<()>> + Send + 'a>> {
     move |ws_stream| {
         let conn_req = conn_req.clone();
@@ -35,11 +36,11 @@ pub fn send_conn_request(
                 req: conn_req,
             };
 
-            let timeout = Duration::from_secs(8);
-            send_request_with_timeout(ws_stream, req.to_msg(), timeout).await?;
+            let write_timeout = Duration::from_secs(8);
+            send_request_with_timeout(ws_stream, req.to_msg(), write_timeout).await?;
 
             loop {
-                let res = time::timeout(timeout, ws_stream.next())
+                let res = time::timeout(read_timeout, ws_stream.next())
                     .await
                     .map_err(|_| {
                         RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
