@@ -36,6 +36,42 @@ jobs:
           taosd &
           taosadapter &
 
+      - name: Generate self-signed cert
+        run: |
+          sudo mkdir -p /etc/nginx/certs
+          sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -subj "/CN=localhost" \
+            -keyout /etc/nginx/certs/server.key \
+            -out /etc/nginx/certs/server.crt
+
+      - name: Configure Nginx WSS -> WS proxy
+        run: |
+          sudo tee /etc/nginx/conf.d/taos-wss.conf > /dev/null <<'NGINX'
+          server {
+              listen 6443 ssl;
+              server_name localhost;
+
+              ssl_certificate     /etc/nginx/certs/server.crt;
+              ssl_certificate_key /etc/nginx/certs/server.key;
+              ssl_protocols       TLSv1.2 TLSv1.3;
+
+              location / {
+                  proxy_pass http://127.0.0.1:6041;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_read_timeout 600s;
+                  proxy_send_timeout 600s;
+              }
+          }
+          NGINX
+
+          sudo rm -f /etc/nginx/sites-enabled/default
+          sudo nginx -t
+          sudo systemctl restart nginx
+          sudo ss -ltnp | grep ':6443' || (echo 'nginx not listening on 6443' && exit 1)
+
       - name: Set up Rust
         id: setup-rust
         uses: dtolnay/rust-toolchain@stable
