@@ -11,7 +11,7 @@ fn test_taos_connect() {
     unsafe {
         let code = taos_options(
             TSDB_OPTION::TSDB_OPTION_CONFIGDIR,
-            c"./tests/cfg/test_tls_required.cfg".as_ptr() as _,
+            c"./tests/cfg/test_tls.cfg".as_ptr() as _,
         );
         assert_eq!(code, 0);
 
@@ -39,34 +39,29 @@ fn test_taos_connect() {
 }
 
 #[test]
-fn test_taos_connect_upgrade() {
+fn test_taos_connect_failed() {
     unsafe {
         let code = taos_options(
             TSDB_OPTION::TSDB_OPTION_CONFIGDIR,
-            c"./tests/cfg/test_tls_disabled.cfg".as_ptr() as _,
+            c"./tests/cfg/test_tls.cfg".as_ptr() as _,
         );
         assert_eq!(code, 0);
 
-        let taos = test_connect();
-        test_exec_many(
-            taos,
-            &[
-                "drop database if exists test_1762411679",
-                "create database test_1762411679",
-                "use test_1762411679",
-                "create table t0 (ts timestamp, c1 int)",
-            ],
+        let taos = taos_connect(
+            c"localhost".as_ptr(),
+            c"root".as_ptr(),
+            c"taosdata".as_ptr(),
+            ptr::null(),
+            6041,
         );
+        assert!(taos.is_null());
 
-        let res = taos_query(taos, c"insert into t0 values (now, 1)".as_ptr());
-        assert!(!res.is_null());
+        let code = taos_errno(taos);
+        assert_eq!(code, 0x8000000Bu32 as i32);
 
-        let rows = taos_affected_rows(res);
-        assert_eq!(rows, 1);
-
-        taos_free_result(res);
-        test_exec(taos, "drop database test_1762411679");
-        taos_close(taos);
+        let err = taos_errstr(taos);
+        let err_str = CStr::from_ptr(err).to_str().unwrap();
+        assert_eq!(err_str, "Unable to establish connection");
     }
 }
 
@@ -75,7 +70,7 @@ fn test_tmq_connect() {
     unsafe {
         let code = taos_options(
             TSDB_OPTION::TSDB_OPTION_CONFIGDIR,
-            c"./tests/cfg/test_tls_required.cfg".as_ptr() as _,
+            c"./tests/cfg/test_tls.cfg".as_ptr() as _,
         );
         assert_eq!(code, 0);
 
