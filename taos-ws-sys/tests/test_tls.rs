@@ -97,7 +97,7 @@ fn test_tmq_connect() {
         assert!(!conf.is_null());
 
         let key = c"td.connect.port".as_ptr();
-        let value = c"443".as_ptr();
+        let value = c"6443".as_ptr();
         let res = tmq_conf_set(conf, key, value);
         assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
 
@@ -187,7 +187,7 @@ unsafe fn test_connect() -> *mut TAOS {
         c"root".as_ptr(),
         c"taosdata".as_ptr(),
         ptr::null(),
-        443,
+        6443,
     );
     assert!(!taos.is_null());
     taos
