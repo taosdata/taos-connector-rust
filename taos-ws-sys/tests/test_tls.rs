@@ -1,4 +1,4 @@
-#[cfg(feature = "test-new-feat")]
+#[cfg(feature = "test-tls")]
 mod tests {
     use std::ffi::{c_char, CStr, CString};
     use std::ptr;

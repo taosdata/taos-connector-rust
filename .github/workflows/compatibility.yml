@@ -101,4 +101,7 @@ jobs:
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
-        run: RUST_BACKTRACE=1 cargo nextest run -j 4 --workspace --features ws-rustls-aws-lc-crypto-provider --no-fail-fast
+        run: |
+          sed -i 's/crate-type = \["cdylib", "staticlib"\]/crate-type = ["rlib"]/' taos-ws-sys/Cargo.toml
+          RUST_BACKTRACE=1 cargo nextest run -j 4 --workspace \
+            --features ws-rustls-aws-lc-crypto-provider,test-tls --no-fail-fast
