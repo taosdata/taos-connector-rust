@@ -407,9 +407,9 @@ mod tests {
     #[test]
     fn test_itimestamp() {
         let ts = ITimestamp(1234567890);
-        assert_eq!(ts.as_timestamp(), 1234567890);
         assert_eq!(<ITimestamp as IValue>::is_null(&ts), false);
         assert_eq!(ts.is_primitive(), true);
+        assert_eq!(ts.as_timestamp(), 1234567890);
 
         let ts = Some(ts);
         assert_eq!(ts.is_null(), false);
