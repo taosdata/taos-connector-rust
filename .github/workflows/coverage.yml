@@ -186,17 +186,12 @@ jobs:
           sudo mkdir -p /etc/taos
           sudo cp ./.github/workflows/taos.cfg /etc/taos/taos.cfg
 
-      - name: Create taosd start script
-        run: |
-          cat > start.sh <<'EOF'
-          ulimit -n 65535 && TAOS_SUPPORT_VNODES=256 taosd
-          EOF
-
       - name: Start TDengine
         run: |
           mkdir -p /tmp/taos/v3/log /tmp/taos/v3/data
-          nohup sh ./start.sh &
+          taosd &
           TAOS_ADAPTER_LOG_PATH=/tmp/taos/v3/log taosadapter &
+          sleep 1
 
       - name: Generate self-signed cert
         run: |
