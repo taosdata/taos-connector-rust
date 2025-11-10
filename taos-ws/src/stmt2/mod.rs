@@ -1250,7 +1250,7 @@ mod tests {
         ])
         .await?;
 
-        let mut stmt2 = Stmt2::new(taos.client_cloned());
+        let stmt2 = Stmt2::new(taos.client_cloned());
         stmt2.init().await?;
         stmt2.prepare("insert into t0 values(?, ?)").await?;
 
