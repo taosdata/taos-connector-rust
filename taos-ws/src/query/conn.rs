@@ -627,7 +627,6 @@ mod tests {
     use warp::ws::Message;
     use warp::Filter;
 
-    use crate::query::asyn::WS_ERROR_NO;
     use crate::query::ConnOption;
     use crate::TaosBuilder;
 
@@ -1021,33 +1020,6 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(500)).await;
         assert!(conn_dropped.load(Ordering::Relaxed));
         let _ = shutdown_tx.send(());
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_recv_conn_resp_timeout() -> anyhow::Result<()> {
-        use crate::stmt2::ws_proxy::*;
-
-        let intercept: InterceptFn = {
-            Arc::new(move |_msg, _ctx| {
-                tokio::task::block_in_place(|| {
-                    std::thread::sleep(std::time::Duration::from_secs(2));
-                });
-                ProxyAction::Forward
-            })
-        };
-
-        WsProxy::start("127.0.0.1:8901", "ws://localhost:6041/ws", intercept).await;
-
-        let err = TaosBuilder::from_dsn("ws://localhost:8901?read_timeout=1")?
-            .build()
-            .await
-            .unwrap_err();
-        assert_eq!(err.code(), WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code());
-        assert!(err
-            .to_string()
-            .contains("timeout waiting for conn response"));
-
         Ok(())
     }
 }

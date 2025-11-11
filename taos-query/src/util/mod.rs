@@ -8,6 +8,7 @@ mod inline_read;
 mod inline_write;
 
 pub mod req_id;
+pub mod ws_proxy;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};

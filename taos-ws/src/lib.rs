@@ -691,10 +691,7 @@ impl TaosBuilder {
         }
     }
 
-    async fn send_version_request(
-        &self,
-        ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-    ) -> RawResult<Version> {
+    async fn send_version_request(&self, ws_stream: &mut WsStream) -> RawResult<Version> {
         send_request_with_timeout(ws_stream, WsSend::Version.to_msg(), self.conn_timeout).await?;
 
         let version_fut = async {
@@ -752,10 +749,7 @@ impl TaosBuilder {
         Ok(version)
     }
 
-    async fn send_options_connection_request(
-        &self,
-        ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-    ) -> RawResult<()> {
+    async fn send_options_connection_request(&self, ws_stream: &mut WsStream) -> RawResult<()> {
         let mut options = Vec::with_capacity(self.conn_options.len());
         for entry in &self.conn_options {
             options.push(ConnOption {
@@ -885,7 +879,7 @@ impl TaosBuilder {
 }
 
 async fn send_request_with_timeout(
-    ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    ws_stream: &mut WsStream,
     message: Message,
     timeout: Duration,
 ) -> RawResult<()> {
@@ -1035,6 +1029,379 @@ mod tests {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_conn_timeout() -> Result<(), anyhow::Error> {
+        let builder = TaosBuilder::from_dsn("ws://localhost:6041?conn_timeout=20")?;
+        assert_eq!(builder.conn_timeout, Duration::from_secs(20));
+
+        let builder = TaosBuilder::from_dsn("ws://localhost:6041")?;
+        assert_eq!(builder.conn_timeout, Duration::from_secs(10));
+
+        let builder = TaosBuilder::from_dsn("ws://localhost:6041?conn_timeout=2x")?;
+        assert_eq!(builder.conn_timeout, Duration::from_secs(10));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_version_prefer() -> Result<(), anyhow::Error> {
+        let builder = TaosBuilder::from_dsn("ws://localhost:6041")?;
+        assert_eq!(builder.version_prefer, "2.x");
+
+        let builder = TaosBuilder::from_dsn("ws://localhost:6041?version_prefer=2.x")?;
+        assert_eq!(builder.version_prefer, "2.x");
+
+        let builder = TaosBuilder::from_dsn("ws://localhost:6041?version_prefer=3.x")?;
+        assert_eq!(builder.version_prefer, "3.x");
+
+        let err = TaosBuilder::from_dsn("ws://localhost:6041?version_prefer=4.x").unwrap_err();
+        assert!(err
+            .message()
+            .contains("invalid parameter for version_prefer: 4.x"),);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_version_resp_timeout() -> anyhow::Result<()> {
+        use serde::Deserialize;
+        use taos_query::util::ws_proxy::*;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .try_init();
+
+        let intercept: InterceptFn = {
+            Arc::new(move |msg, _ctx| {
+                if let Message::Text(text) = msg {
+                    if text.contains("version") {
+                        tokio::task::block_in_place(|| {
+                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                        });
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8901", "ws://localhost:6041/ws", intercept).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:8901?conn_timeout=1&version_prefer=3.x")?
+            .build()
+            .await?;
+        assert_eq!(taos.version(), "3.x");
+
+        taos.exec_many([
+            "drop database if exists test_1762842183",
+            "create database test_1762842183",
+            "use test_1762842183",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values (1726803356466, 1)",
+        ])
+        .await?;
+
+        #[derive(Debug, Deserialize)]
+        struct Row {
+            ts: i64,
+            c1: i32,
+        }
+
+        let rows: Vec<Row> = taos
+            .query("select * from t0")
+            .await?
+            .deserialize()
+            .try_collect()
+            .await?;
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].ts, 1726803356466);
+        assert_eq!(rows[0].c1, 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_version_resp_ping() -> anyhow::Result<()> {
+        use serde_json::{json, Value};
+        use warp::ws::Message;
+        use warp::Filter;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .try_init();
+
+        let routes = warp::path("ws")
+            .and(warp::ws())
+            .map(move |ws: warp::ws::Ws| {
+                ws.on_upgrade(move |ws| async move {
+                    let (mut ws_tx, mut ws_rx) = ws.split();
+
+                    for _ in 0..5 {
+                        let _ = ws_tx.send(Message::ping(b"HELLO")).await;
+                    }
+
+                    while let Some(res) = ws_rx.next().await {
+                        let message = res.unwrap();
+                        tracing::info!("ws recv message: {message:?}");
+
+                        if message.is_text() {
+                            let text = message.to_str().unwrap();
+                            let req: Value = serde_json::from_str(text).unwrap();
+                            let req_id = req
+                                .get("args")
+                                .and_then(|v| v.get("req_id"))
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0);
+
+                            if text.contains("conn") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "message",
+                                    "action": "conn",
+                                    "req_id": req_id
+                                });
+                                let _ = ws_tx.send(Message::text(data.to_string())).await;
+                            }
+                        }
+                    }
+                })
+            });
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let (_, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 8902), async move {
+                let _ = shutdown_rx.await;
+            });
+
+        tokio::spawn(server);
+
+        let taos = TaosBuilder::from_dsn("ws://127.0.0.1:8902?version_prefer=3.x")?
+            .build()
+            .await?;
+        assert_eq!(taos.version(), "3.x");
+
+        let _ = shutdown_tx.send(());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_version_resp_pong() -> anyhow::Result<()> {
+        use serde_json::{json, Value};
+        use warp::ws::Message;
+        use warp::Filter;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .try_init();
+
+        let routes = warp::path("ws")
+            .and(warp::ws())
+            .map(move |ws: warp::ws::Ws| {
+                ws.on_upgrade(move |ws| async move {
+                    let (mut ws_tx, mut ws_rx) = ws.split();
+
+                    let _ = ws_tx.send(Message::pong(b"HELLO")).await;
+
+                    while let Some(res) = ws_rx.next().await {
+                        let message = res.unwrap();
+                        tracing::info!("ws recv message: {message:?}");
+
+                        if message.is_text() {
+                            let text = message.to_str().unwrap();
+                            let req: Value = serde_json::from_str(text).unwrap();
+                            let req_id = req
+                                .get("args")
+                                .and_then(|v| v.get("req_id"))
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0);
+
+                            if text.contains("conn") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "message",
+                                    "action": "conn",
+                                    "req_id": req_id
+                                });
+                                let _ = ws_tx.send(Message::text(data.to_string())).await;
+                            }
+                        }
+                    }
+                })
+            });
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let (_, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 8903), async move {
+                let _ = shutdown_rx.await;
+            });
+
+        tokio::spawn(server);
+
+        let taos = TaosBuilder::from_dsn("ws://127.0.0.1:8903?version_prefer=3.x")?
+            .build()
+            .await?;
+        assert_eq!(taos.version(), "3.x");
+
+        let _ = shutdown_tx.send(());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_version_resp_conn() -> anyhow::Result<()> {
+        use serde_json::{json, Value};
+        use warp::ws::Message;
+        use warp::Filter;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .try_init();
+
+        let routes = warp::path("ws")
+            .and(warp::ws())
+            .map(move |ws: warp::ws::Ws| {
+                ws.on_upgrade(move |ws| async move {
+                    let (mut ws_tx, mut ws_rx) = ws.split();
+
+                    while let Some(res) = ws_rx.next().await {
+                        let message = res.unwrap();
+                        tracing::info!("ws recv message: {message:?}");
+
+                        if message.is_text() {
+                            let text = message.to_str().unwrap();
+                            let req: Value = serde_json::from_str(text).unwrap();
+                            let req_id = req
+                                .get("args")
+                                .and_then(|v| v.get("req_id"))
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0);
+
+                            if text.contains("version") || text.contains("conn") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "message",
+                                    "action": "conn",
+                                    "req_id": req_id
+                                });
+                                let _ = ws_tx.send(Message::text(data.to_string())).await;
+                            }
+                        }
+                    }
+                })
+            });
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let (_, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 8903), async move {
+                let _ = shutdown_rx.await;
+            });
+
+        tokio::spawn(server);
+
+        let taos = TaosBuilder::from_dsn("ws://127.0.0.1:8903?version_prefer=3.x")?
+            .build()
+            .await?;
+        assert_eq!(taos.version(), "3.x");
+
+        let _ = shutdown_tx.send(());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_conn_resp_timeout() -> anyhow::Result<()> {
+        use taos_query::util::ws_proxy::*;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .try_init();
+
+        let intercept: InterceptFn = {
+            Arc::new(move |_msg, _ctx| {
+                tokio::task::block_in_place(|| {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                });
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8904", "ws://localhost:6041/ws", intercept).await;
+
+        let err = TaosBuilder::from_dsn("ws://localhost:8904?conn_timeout=1")?
+            .build()
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code());
+        assert!(err
+            .to_string()
+            .contains("timeout waiting for conn response"));
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_options_connection_resp_timeout() -> anyhow::Result<()> {
+        use serde_json::Value;
+        use taos_query::util::ws_proxy::*;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .try_init();
+
+        let intercept: InterceptFn = {
+            Arc::new(move |msg, ctx| {
+                if let Message::Text(text) = msg {
+                    let req = serde_json::from_str::<Value>(text).unwrap();
+                    let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                    if action == "options_connection" {
+                        ctx.req_count += 1;
+                        if ctx.req_count == 2 {
+                            tokio::task::block_in_place(|| {
+                                std::thread::sleep(std::time::Duration::from_secs(2));
+                            });
+                        }
+                    }
+                } else if let Message::Binary(_) = msg {
+                    return ProxyAction::Restart;
+                }
+
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8905", "ws://localhost:6041/ws", intercept).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:8905?conn_timeout=1")?
+            .build()
+            .await?;
+
+        taos.client()
+            .options_connection(&[ConnOption {
+                option: 1,
+                value: Some("UTC".to_string()),
+            }])
+            .await?;
+
+        let err = taos.exec("show databases").await.unwrap_err();
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        assert!(err.to_string().contains("WebSocket connection is closed"));
 
         Ok(())
     }
