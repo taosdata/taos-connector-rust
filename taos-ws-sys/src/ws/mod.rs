@@ -153,6 +153,8 @@ pub unsafe extern "C" fn taos_connect(
     db: *const c_char,
     port: u16,
 ) -> *mut TAOS {
+    taos_init();
+
     match connect(ip, user, pass, db, port) {
         Ok(taos) => Box::into_raw(Box::new(taos)) as _,
         Err(mut err) => {
@@ -207,11 +209,15 @@ unsafe fn connect(
     let conn_retries = config::conn_retries();
     let retry_backoff_ms = config::retry_backoff_ms();
     let retry_backoff_max_ms = config::retry_backoff_max_ms();
+    let protocol = match config::ws_tls_mode() {
+        config::WsTlsMode::Disabled => "ws",
+        config::WsTlsMode::Required => "wss",
+    };
 
     let dsn = if util::is_cloud_host(&addr) && user == "token" {
         format!("wss://{addr}/{db}?token={pass}&compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
     } else {
-        format!("ws://{user}:{pass}@{addr}/{db}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
+        format!("{protocol}://{user}:{pass}@{addr}/{db}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
     };
 
     debug!("taos_connect, dsn: {:?}", dsn);
@@ -955,7 +961,6 @@ mod tests {
     }
 }
 
-#[cfg(feature = "rustls-aws-lc-crypto-provider")]
 #[cfg(test)]
 mod cloud_tests {
     use std::ffi::CString;
@@ -964,13 +969,6 @@ mod cloud_tests {
 
     #[test]
     fn test_taos_connect() {
-        let _ = tracing_subscriber::fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(tracing::Level::INFO)
-            .compact()
-            .try_init();
-
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
             tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_taos_connect");

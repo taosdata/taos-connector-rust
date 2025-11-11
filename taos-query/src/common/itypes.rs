@@ -366,3 +366,71 @@ impl IValue for ITimestamp {
         self.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ivarchar() {
+        let vc = IVarChar::new();
+        assert_eq!(<IVarChar as AsRef<str>>::as_ref(&vc), "");
+        assert_eq!(<IVarChar as AsRef<[u8]>>::as_ref(&vc), b"");
+
+        let vc = IVarChar::with_capacity(10);
+        assert_eq!(<IVarChar as AsRef<str>>::as_ref(&vc), "");
+        assert_eq!(<IVarChar as AsRef<[u8]>>::as_ref(&vc), b"");
+
+        let vc: IVarChar = "hello".to_string().into();
+        let s: String = vc.into();
+        assert_eq!(s, "hello");
+
+        let vc: IVarChar = "hello".to_string().into();
+        assert_eq!(<IVarChar as IsVarChar>::as_var_char(&vc), "hello");
+    }
+
+    #[test]
+    fn test_inchar() {
+        let nc: INChar = "world".to_string().into();
+        let s: String = nc.clone().into();
+        assert_eq!(s, "world");
+        assert_eq!(<INChar as AsRef<str>>::as_ref(&nc), "world");
+        assert_eq!(<INChar as AsRef<[u8]>>::as_ref(&nc), b"world");
+
+        let nc: INChar = "world".to_string().into();
+        assert_eq!(<INChar as IsNChar>::as_nchar(&nc), "world");
+
+        let nc: INChar = "world".to_string().into();
+        assert_eq!(<INChar as IsValue>::as_nchar(&nc), "world");
+    }
+
+    #[test]
+    fn test_itimestamp() {
+        let ts = ITimestamp(1234567890);
+        assert_eq!(<ITimestamp as IValue>::is_null(&ts), false);
+        assert_eq!(ts.is_primitive(), true);
+        assert_eq!(ts.as_timestamp(), 1234567890);
+
+        let ts = Some(ts);
+        assert_eq!(ts.is_null(), false);
+        assert_eq!(ts.is_primitive(), true);
+        assert_eq!(ts.as_timestamp(), 1234567890);
+    }
+
+    #[test]
+    fn test_inull() {
+        let n: INull = ();
+        assert_eq!(<INull as IValue>::is_null(&n), true);
+        assert_eq!(n.into_inner(), ());
+        assert_eq!(n.into_value(), Value::Null(Ty::Null));
+    }
+
+    #[test]
+    fn test_prim_values() {
+        let b: IBool = true;
+        assert_eq!(<IBool as IValue>::TY, Ty::Bool);
+        assert_eq!(<IBool as IValue>::is_null(&b), false);
+        assert_eq!(b.into_inner(), true);
+        assert_eq!(b.into_value(), Value::Bool(b));
+    }
+}

@@ -425,11 +425,15 @@ unsafe fn consumer_new(conf: *mut tmq_conf_t) -> TaosResult<Tmq> {
             let conn_retries = config::conn_retries();
             let retry_backoff_ms = config::retry_backoff_ms();
             let retry_backoff_max_ms = config::retry_backoff_max_ms();
+            let protocol = match config::ws_tls_mode() {
+                config::WsTlsMode::Disabled => "ws",
+                config::WsTlsMode::Required => "wss",
+            };
 
             let dsn = if util::is_cloud_host(&addr) && user == "token" {
                 format!("wss://{addr}?token={pass}&compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
             } else {
-                format!("ws://{user}:{pass}@{addr}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
+                format!("{protocol}://{user}:{pass}@{addr}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
             };
 
             let mut dsn = Dsn::from_str(&dsn)?;
@@ -2681,12 +2685,6 @@ mod tests {
     #[test]
     fn test_show_consumers() {
         unsafe {
-            let _ = tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::TRACE)
-                .with_line_number(true)
-                .with_file(true)
-                .try_init();
-
             let taos = test_connect();
             test_exec_many(
                 taos,
@@ -2778,12 +2776,6 @@ mod tests {
     #[test]
     fn test_poll_blob() {
         unsafe {
-            let _ = tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::INFO)
-                .with_line_number(true)
-                .with_file(true)
-                .try_init();
-
             let taos = test_connect();
             test_exec_many(
                 taos,
@@ -2878,7 +2870,6 @@ mod tests {
     }
 }
 
-#[cfg(feature = "rustls-aws-lc-crypto-provider")]
 #[cfg(test)]
 mod cloud_tests {
     use std::ffi::CString;
@@ -2893,13 +2884,6 @@ mod cloud_tests {
 
     #[test]
     fn test_tmq_poll() {
-        let _ = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
-            .with_line_number(true)
-            .with_file(true)
-            .compact()
-            .try_init();
-
         let url = std::env::var("TDENGINE_CLOUD_URL");
         if url.is_err() {
             tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_tmq_poll");
