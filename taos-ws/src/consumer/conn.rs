@@ -136,6 +136,7 @@ pub(super) async fn run(
                 builder.build_conn_request(),
                 tmq_conf.clone(),
                 topics.clone(),
+                builder.conn_timeout,
             );
             builder.connect_with_cb(EndpointType::Tmq, cb).await
         } else {
@@ -477,6 +478,7 @@ fn send_subscribe_request(
     conn_req: WsConnReq,
     tmq_conf: TmqInit,
     topics: Arc<RwLock<Vec<String>>>,
+    conn_timeout: Duration,
 ) -> impl for<'a> Fn(&'a mut WsStream) -> Pin<Box<dyn Future<Output = RawResult<()>> + Send + 'a>> {
     move |ws_stream| {
         let conn_req = conn_req.clone();
@@ -492,7 +494,7 @@ fn send_subscribe_request(
                 conn: conn_req.clone(),
             };
 
-            if let Err(err) = send_recv(ws_stream, req.to_msg()).await {
+            if let Err(err) = send_recv(ws_stream, req.to_msg(), conn_timeout).await {
                 tracing::error!("subscribe error: {err:?}");
                 if tmq_conf.enable_batch_meta.is_none() {
                     return Err(err);
@@ -506,7 +508,7 @@ fn send_subscribe_request(
                         topics,
                         conn: conn_req,
                     };
-                    let _ = send_recv(ws_stream, req.to_msg()).await?;
+                    let _ = send_recv(ws_stream, req.to_msg(), conn_timeout).await?;
                 } else {
                     return Err(err);
                 }
@@ -517,11 +519,12 @@ fn send_subscribe_request(
     }
 }
 
-async fn send_recv(ws_stream: &mut WsStream, message: Message) -> RawResult<TmqRecvData> {
-    let write_timeout = Duration::from_secs(8);
-    let read_timeout = Duration::from_secs(300);
-
-    time::timeout(write_timeout, ws_stream.send(message))
+async fn send_recv(
+    ws_stream: &mut WsStream,
+    message: Message,
+    conn_timeout: Duration,
+) -> RawResult<TmqRecvData> {
+    time::timeout(conn_timeout, ws_stream.send(message))
         .await
         .map_err(|_| {
             RawError::from_code(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT.as_code())
@@ -530,7 +533,7 @@ async fn send_recv(ws_stream: &mut WsStream, message: Message) -> RawResult<TmqR
         .map_err(handle_disconnect_error)?;
 
     loop {
-        let res = time::timeout(read_timeout, ws_stream.next())
+        let res = time::timeout(conn_timeout, ws_stream.next())
             .await
             .map_err(|_| {
                 RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())

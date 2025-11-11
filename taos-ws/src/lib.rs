@@ -85,6 +85,8 @@ pub struct TaosBuilder {
     conn_options: DashMap<i32, Option<String>>,
     tcp_nodelay: bool,
     read_timeout: Duration,
+    conn_timeout: Duration,
+    version_prefer: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -484,6 +486,21 @@ impl TaosBuilder {
             .and_then(|s| s.parse::<u64>().ok())
             .map_or(Duration::from_secs(300), Duration::from_secs);
 
+        let conn_timeout = dsn
+            .remove("conn_timeout")
+            .and_then(|s| s.parse::<u64>().ok())
+            .map_or(Duration::from_secs(10), Duration::from_secs);
+
+        let version_prefer = match dsn.remove("version_prefer").as_deref().map(str::trim) {
+            None | Some("2.x") => "2.x".to_string(),
+            Some("3.x") => "3.x".to_string(),
+            Some(v) => {
+                return Err(
+                    DsnError::InvalidParam("version_prefer".to_string(), v.to_string()).into(),
+                )
+            }
+        };
+
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
         } else {
@@ -506,13 +523,15 @@ impl TaosBuilder {
             conn_options: DashMap::new(),
             tcp_nodelay,
             read_timeout,
+            conn_timeout,
+            version_prefer,
         })
     }
 
     pub(crate) async fn connect(&self) -> RawResult<(WsStream, Version)> {
         self.connect_with_cb(
             EndpointType::Ws,
-            send_conn_request(self.build_conn_request(), self.read_timeout),
+            send_conn_request(self.build_conn_request(), self.conn_timeout),
         )
         .await
     }
@@ -676,8 +695,7 @@ impl TaosBuilder {
         &self,
         ws_stream: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> RawResult<Version> {
-        let write_timeout = Duration::from_secs(8);
-        send_request_with_timeout(ws_stream, WsSend::Version.to_msg(), write_timeout).await?;
+        send_request_with_timeout(ws_stream, WsSend::Version.to_msg(), self.conn_timeout).await?;
 
         let version_fut = async {
             let max_non_version_cnt = 5;
@@ -699,7 +717,7 @@ impl TaosBuilder {
                                 WsRecvData::Version { version } => {
                                     return Ok(version);
                                 }
-                                _ => return Ok("2.x".to_string()),
+                                _ => return Ok(self.version_prefer.clone()),
                             }
                         }
                         Message::Ping(bytes) => {
@@ -710,10 +728,10 @@ impl TaosBuilder {
 
                             non_version_cnt += 1;
                             if non_version_cnt >= max_non_version_cnt {
-                                return Ok("2.x".to_string());
+                                return Ok(self.version_prefer.clone());
                             }
                         }
-                        _ => return Ok("2.x".to_string()),
+                        _ => return Ok(self.version_prefer.clone()),
                     }
                 } else {
                     return Err(RawError::from_code(
@@ -723,10 +741,10 @@ impl TaosBuilder {
             }
         };
 
-        let version = match time::timeout(self.read_timeout, version_fut).await {
+        let version = match time::timeout(self.conn_timeout, version_fut).await {
             Ok(Ok(ver)) => ver,
             Ok(Err(err)) => return Err(err),
-            Err(_) => "2.x".to_string(),
+            Err(_) => self.version_prefer.clone(),
         };
 
         tracing::trace!("send_version_request, server version: {version}");
@@ -751,11 +769,10 @@ impl TaosBuilder {
             options,
         };
 
-        let write_timeout = Duration::from_secs(8);
-        send_request_with_timeout(ws_stream, req.to_msg(), write_timeout).await?;
+        send_request_with_timeout(ws_stream, req.to_msg(), self.conn_timeout).await?;
 
         loop {
-            let res = time::timeout(self.read_timeout, ws_stream.next())
+            let res = time::timeout(self.conn_timeout, ws_stream.next())
                 .await
                 .map_err(|_| {
                     RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
