@@ -391,11 +391,11 @@ async fn parse_text_message(
     let (req_id, data, ok) = resp.ok();
 
     match &data {
+        TmqRecvData::Version { .. } => {}
         TmqRecvData::FetchBlock { .. }
         | TmqRecvData::Bytes(..)
         | TmqRecvData::FetchRawData { .. }
         | TmqRecvData::Block(..)
-        | TmqRecvData::Version { .. }
         | TmqRecvData::Close => unreachable!("unexpected data type: {:?}", data),
         TmqRecvData::Poll(_) => {
             cache.remove().await;
@@ -883,6 +883,146 @@ mod tests {
         tokio::join!(server1, server2);
 
         poll_handle.await??;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_subscribe_resp_timeout() -> anyhow::Result<()> {
+        use crate::query::asyn::WS_ERROR_NO;
+        use crate::TaosBuilder;
+        use serde_json::Value;
+        use taos_query::prelude::*;
+        use taos_query::util::ws_proxy::*;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .try_init();
+
+        let intercept: InterceptFn = {
+            Arc::new(move |msg, ctx| {
+                if let Message::Text(text) = msg {
+                    let req = serde_json::from_str::<Value>(text).unwrap();
+                    let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                    if action == "poll" {
+                        return ProxyAction::Restart;
+                    } else if action == "subscribe" {
+                        ctx.req_count += 1;
+                        if ctx.req_count == 2 {
+                            tokio::task::block_in_place(|| {
+                                std::thread::sleep(std::time::Duration::from_secs(2));
+                            });
+                        }
+                    }
+                }
+
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8907", "ws://localhost:6041/rest/tmq", intercept).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1762848301",
+            "drop database if exists test_1762848301",
+            "create database test_1762848301",
+            "create topic topic_1762848301 as database test_1762848301",
+            "use test_1762848301",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values (now, 1)",
+        ])
+        .await?;
+
+        let tmq = TmqBuilder::from_dsn("ws://localhost:8907?group.id=123424&conn_timeout=1")?;
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["topic_1762848301"]).await?;
+
+        let timeout = Timeout::Duration(std::time::Duration::from_secs(5));
+        let err = consumer.recv_timeout(timeout).await.unwrap_err();
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        assert!(err.to_string().contains("WebSocket connection is closed"));
+
+        consumer.unsubscribe().await;
+
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            "drop topic if exists topic_1762848301",
+            "drop database if exists test_1762848301",
+        ])
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_version_resp_timeout() -> anyhow::Result<()> {
+        use crate::TaosBuilder;
+        use taos_query::prelude::*;
+        use taos_query::util::ws_proxy::*;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .try_init();
+
+        let intercept: InterceptFn = {
+            Arc::new(move |msg, _ctx| {
+                if let Message::Text(text) = msg {
+                    if text.contains("version") {
+                        tokio::task::block_in_place(|| {
+                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                        });
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8908", "ws://localhost:6041/rest/tmq", intercept).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1762850286",
+            "drop database if exists test_1762850286",
+            "create database test_1762850286",
+            "create topic topic_1762850286 as database test_1762850286",
+            "use test_1762850286",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values (now, 1)",
+        ])
+        .await?;
+
+        let tmq = TmqBuilder::from_dsn(
+            "ws://localhost:8908?group.id=132324&conn_timeout=1&version_prefer=3.x&auto.offset.reset=earliest",
+        )?;
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["topic_1762850286"]).await?;
+
+        let timeout = Timeout::Duration(std::time::Duration::from_secs(5));
+        let _ = consumer.recv_timeout(timeout).await?;
+
+        consumer.unsubscribe().await;
+
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            "drop topic if exists topic_1762850286",
+            "drop database if exists test_1762850286",
+        ])
+        .await?;
 
         Ok(())
     }

@@ -1123,11 +1123,13 @@ mod tests {
         assert_eq!(rows[0].ts, 1726803356466);
         assert_eq!(rows[0].c1, 1);
 
+        taos.exec("drop database if exists test_1762842183").await?;
+
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_recv_version_resp_ping() -> anyhow::Result<()> {
+    async fn test_recv_version_resp_return_ping() -> anyhow::Result<()> {
         use serde_json::{json, Value};
         use warp::ws::Message;
         use warp::Filter;
@@ -1194,7 +1196,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_recv_version_resp_pong() -> anyhow::Result<()> {
+    async fn test_recv_version_resp_return_pong() -> anyhow::Result<()> {
         use serde_json::{json, Value};
         use warp::ws::Message;
         use warp::Filter;
@@ -1259,7 +1261,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_recv_version_resp_conn() -> anyhow::Result<()> {
+    async fn test_recv_version_resp_return_conn() -> anyhow::Result<()> {
         use serde_json::{json, Value};
         use warp::ws::Message;
         use warp::Filter;
@@ -1305,13 +1307,13 @@ mod tests {
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let (_, server) =
-            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 8903), async move {
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 8906), async move {
                 let _ = shutdown_rx.await;
             });
 
         tokio::spawn(server);
 
-        let taos = TaosBuilder::from_dsn("ws://127.0.0.1:8903?version_prefer=3.x")?
+        let taos = TaosBuilder::from_dsn("ws://127.0.0.1:8906?version_prefer=3.x")?
             .build()
             .await?;
         assert_eq!(taos.version(), "3.x");
