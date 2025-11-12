@@ -76,6 +76,7 @@ pub enum TSDB_OPTION_CONNECTION {
 
 type TaosResult<T> = Result<T, TaosError>;
 
+#[derive(Debug, Clone)]
 pub struct SafePtr<T>(pub T);
 
 unsafe impl<T> Send for SafePtr<T> {}
@@ -203,11 +204,14 @@ unsafe fn connect(
     };
 
     let compression = config::compression();
+    let conn_retries = config::conn_retries();
+    let retry_backoff_ms = config::retry_backoff_ms();
+    let retry_backoff_max_ms = config::retry_backoff_max_ms();
 
     let dsn = if util::is_cloud_host(&addr) && user == "token" {
-        format!("wss://{addr}/{db}?token={pass}&compression={compression}")
+        format!("wss://{addr}/{db}?token={pass}&compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
     } else {
-        format!("ws://{user}:{pass}@{addr}/{db}?compression={compression}")
+        format!("ws://{user}:{pass}@{addr}/{db}?compression={compression}&conn_retries={conn_retries}&retry_backoff_ms={retry_backoff_ms}&retry_backoff_max_ms={retry_backoff_max_ms}")
     };
 
     debug!("taos_connect, dsn: {:?}", dsn);
@@ -387,18 +391,14 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
         return Err(TaosError::new(Code::FAILED, &err).into());
     }
 
-    if let Some(timezone) = config::timezone() {
-        unsafe { std::env::set_var("TZ", timezone.as_str()) };
-    }
+    unsafe { std::env::set_var("TZ", config::timezone().as_str()) };
 
     let mut layers = Vec::new();
     let log_dir = config::log_dir();
 
-    let appender = RollingFileAppender::builder(log_dir.as_str(), "taos", 16)
-        .compress(true)
-        .reserved_disk_size("1GB")
-        .rotation_count(3)
-        .rotation_size("1GB")
+    let appender = RollingFileAppender::builder(log_dir.as_str())
+        .keep_days(config::log_keep_days())
+        .rotation_size(&config::rotation_size())
         .build()?;
 
     layers.push(
@@ -418,11 +418,9 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tracing_subscriber::registry().with(layers).init();
-
     LogTracer::init()?;
-
     debug!("taos_init, config: {:?}", config::config());
-
+    config::print();
     Ok(())
 }
 
@@ -945,10 +943,11 @@ mod tests {
 
             let mut str = vec![0 as c_char; 1024];
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            assert_eq!(
-                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
-                "America/New_York (EDT, -0400)"
-            );
+            let tz = CStr::from_ptr(str.as_ptr()).to_str().unwrap();
+            assert!(matches!(
+                tz,
+                "America/New_York (EST, -0500)" | "America/New_York (EDT, -0400)"
+            ));
 
             taos_free_result(res);
             taos_close(taos);

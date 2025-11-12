@@ -56,13 +56,11 @@ impl taos_query::TBuilder for TaosBuilder {
         }
         use taos_query::TBuilder;
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
-            ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(
-                TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
-            )),
             ("taos" | "tmq", None) => Ok(Self(TaosBuilderInner::Native(
                 <crate::sys::TaosBuilder as TBuilder>::from_dsn(dsn)?,
             ))),
-            ("taos" | "tmq", Some("ws" | "wss" | "http" | "https")) => Ok(Self(
+            ("taos" | "tmq", Some("ws" | "wss" | "http" | "https"))
+            | ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(
                 TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
             )),
             (driver, _) => Err(DsnError::InvalidDriver(driver.to_string()).into()),
@@ -154,13 +152,11 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
             dsn.protocol.replace("wss".to_string());
         }
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
-            ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(
-                TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
-            )),
             ("taos" | "tmq", None) => Ok(Self(TaosBuilderInner::Native(
                 <crate::sys::TaosBuilder as TBuilder>::from_dsn(dsn)?,
             ))),
-            ("taos" | "tmq", Some("ws" | "wss" | "http" | "https")) => Ok(Self(
+            ("taos" | "tmq", Some("ws" | "wss" | "http" | "https"))
+            | ("ws" | "wss" | "http" | "https" | "taosws" | "taoswss", _) => Ok(Self(
                 TaosBuilderInner::Ws(taos_ws::TaosBuilder::from_dsn(dsn)?),
             )),
             (driver, _) => Err(DsnError::InvalidDriver(driver.to_string()).into()),

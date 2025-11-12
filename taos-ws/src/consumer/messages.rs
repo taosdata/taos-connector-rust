@@ -15,8 +15,6 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::query::messages::{ToMessage, WsConnReq};
 
 pub type ReqId = u64;
-pub type ResId = u64;
-pub type ConsumerId = u64;
 pub type MessageId = u64;
 
 #[derive(Debug, Serialize, Default, Clone)]
@@ -101,13 +99,6 @@ impl TmqInit {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TmqArgs {
-    pub req_id: ReqId,
-    #[serde(default)]
-    pub message_id: ConsumerId,
-}
-
 #[derive(Debug, Serialize)]
 #[serde(tag = "action", content = "args")]
 #[serde(rename_all = "snake_case")]
@@ -163,12 +154,6 @@ impl TmqSend {
             TmqSend::Committed(args) | TmqSend::Position(args) => args.req_id,
         }
     }
-}
-
-#[derive(Debug, Serialize)]
-pub struct WsFetchArgs {
-    req_id: ReqId,
-    id: ResId,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]

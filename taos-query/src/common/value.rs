@@ -256,8 +256,10 @@ impl BorrowedValue<'_> {
             USmallInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             UInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             UBigInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
-            Float(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v as f64).unwrap()),
-            Double(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v).unwrap()),
+            Float(v) => serde_json::Number::from_f64(*v as f64)
+                .map_or(serde_json::Value::Null, serde_json::Value::Number),
+            Double(v) => serde_json::Number::from_f64(*v)
+                .map_or(serde_json::Value::Null, serde_json::Value::Number),
             VarChar(v) => serde_json::Value::String((*v).to_string()),
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => serde_json::from_slice(v).expect("json should always be deserialized"),
@@ -372,7 +374,7 @@ impl BorrowedValue<'_> {
         borrowed_value_to_float!(self)
     }
 
-    pub(crate) fn to_str(&self) -> Option<Cow<str>> {
+    pub(crate) fn to_str(&self) -> Option<Cow<'_, str>> {
         match self {
             BorrowedValue::Null(_) => None,
             BorrowedValue::Bool(v) => Some(v.to_string().into()),
@@ -526,7 +528,7 @@ impl Value {
         }
     }
 
-    pub fn to_borrowed_value(&self) -> BorrowedValue {
+    pub fn to_borrowed_value(&self) -> BorrowedValue<'_> {
         use Value::*;
         match self {
             Null(ty) => BorrowedValue::Null(*ty),
@@ -659,8 +661,10 @@ impl Value {
             USmallInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             UInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
             UBigInt(v) => serde_json::Value::Number(serde_json::Number::from(*v)),
-            Float(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v as f64).unwrap()),
-            Double(v) => serde_json::Value::Number(serde_json::Number::from_f64(*v).unwrap()),
+            Float(v) => serde_json::Number::from_f64(*v as f64)
+                .map_or(serde_json::Value::Null, serde_json::Value::Number),
+            Double(v) => serde_json::Number::from_f64(*v)
+                .map_or(serde_json::Value::Null, serde_json::Value::Number),
             VarChar(v) => serde_json::Value::String(v.to_string()),
             Timestamp(v) => serde_json::Value::Number(serde_json::Number::from(v.as_raw_i64())),
             Json(v) => v.clone(),
@@ -1941,5 +1945,29 @@ mod tests {
         assert_eq!(blob_value_borrowed, &blob_value);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_nonfinite_float_value() {
+        let cases = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
+        for &v in &cases {
+            assert_eq!(Value::Float(v).to_json_value(), serde_json::Value::Null);
+            assert_eq!(
+                BorrowedValue::Float(v).to_json_value(),
+                serde_json::Value::Null
+            );
+        }
+    }
+
+    #[test]
+    fn test_nonfinite_double_value() {
+        let cases = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
+        for &v in &cases {
+            assert_eq!(Value::Double(v).to_json_value(), serde_json::Value::Null);
+            assert_eq!(
+                BorrowedValue::Double(v).to_json_value(),
+                serde_json::Value::Null
+            );
+        }
     }
 }

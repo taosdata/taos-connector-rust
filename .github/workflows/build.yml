@@ -26,8 +26,8 @@ jobs:
         id: setup-rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.87.0
-          components: clippy
+          toolchain: 1.90.0
+          components: clippy, rustfmt
 
       - uses: actions/cache@v4
         id: cache-rust
@@ -44,13 +44,21 @@ jobs:
           path: target
           key: ${{ runner.os }}-taos-target-${{ steps.setup-rust.outputs.cachekey }}
 
-      - name: Cargo Build
+      - name: Format check
+        run: cargo fmt --check --all
+
+      - name: Audit check
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clippy check
+        run: cargo clippy -- -D warnings
+
+      - name: Build taos and taos-ws-sys
         run: |
           cargo build -p taos --no-default-features --features ws-rustls
           cargo build -p taos-ws-sys
-
-      - name: Run Clippy
-        run: cargo clippy -- -D warnings
 
   test:
     runs-on: ubuntu-latest

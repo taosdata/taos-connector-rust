@@ -26,11 +26,8 @@ pub struct Taos {
 
 impl Taos {
     pub(super) async fn from_builder(builder: TaosBuilder) -> RawResult<Self> {
-        let ws_taos = WsTaos::from_builder(&builder).await?;
-        Ok(Self {
-            builder,
-            client: Arc::new(ws_taos),
-        })
+        let client = WsTaos::from_builder(&builder).await?;
+        Ok(Self { builder, client })
     }
 
     pub fn version(&self) -> FastStr {
@@ -41,7 +38,11 @@ impl Taos {
         self.client.get_req_id()
     }
 
-    pub fn client(&self) -> Arc<WsTaos> {
+    pub fn client(&self) -> &Arc<WsTaos> {
+        &self.client
+    }
+
+    pub fn client_cloned(&self) -> Arc<WsTaos> {
         self.client.clone()
     }
 }
@@ -131,11 +132,13 @@ impl taos_query::Queryable for Taos {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use bytes::Bytes;
     use serde::Deserialize;
     use taos_query::util::hex::*;
 
-    use crate::TaosBuilder;
+    use crate::{query::asyn::WS_ERROR_NO, TaosBuilder};
 
     #[test]
     fn ws_sync_json() -> anyhow::Result<()> {
@@ -725,6 +728,32 @@ mod tests {
         assert_eq!(records[1].c18, None);
 
         taos.exec("drop database test_1753079609").await?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_resp_timeout() -> anyhow::Result<()> {
+        use crate::stmt2::ws_proxy::*;
+        use taos_query::prelude::*;
+
+        let intercept: InterceptFn = {
+            Arc::new(move |_msg, _ctx| {
+                tokio::task::block_in_place(|| {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                });
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8900", "ws://localhost:6041/ws", intercept).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:8900?read_timeout=1")?
+            .build()
+            .await?;
+
+        let err = taos.exec("show databases").await.unwrap_err();
+        assert_eq!(err.code(), WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code());
 
         Ok(())
     }

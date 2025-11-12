@@ -857,7 +857,7 @@ impl Display for Dsn {
         }
 
         if !self.params.is_empty() {
-            fn percent_encode_or_not(v: &str) -> Cow<str> {
+            fn percent_encode_or_not(v: &str) -> Cow<'_, str> {
                 if v.contains(['=', '&', '#', '@']) {
                     urlencoding::encode(v)
                 } else {

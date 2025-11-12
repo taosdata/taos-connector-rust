@@ -40,7 +40,7 @@ jobs:
         id: setup-rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.87.0
+          toolchain: 1.90.0
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest

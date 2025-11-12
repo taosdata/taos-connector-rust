@@ -234,7 +234,7 @@ pub mod sync {
         }
 
         /// Short for `SELECT server_version()` as [String].
-        fn server_version(&self) -> RawResult<Cow<str>> {
+        fn server_version(&self) -> RawResult<Cow<'_, str>> {
             Ok(self
                 .query_one::<_, String>("SELECT server_version()")?
                 .expect("should always has result")

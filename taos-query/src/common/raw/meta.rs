@@ -8,6 +8,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use super::RawData;
 use crate::common::{Field, Ty};
 use crate::helpers::CompressOptions;
+use crate::util::sql_value_escape;
 
 pub type RawMeta = RawData;
 
@@ -54,6 +55,7 @@ impl FieldMore {
 pub struct TagWithValue {
     #[serde(flatten)]
     pub field: Field,
+    #[serde(default)]
     pub value: serde_json::Value,
 }
 
@@ -81,6 +83,22 @@ pub enum MetaCreate {
     },
 }
 
+#[test]
+fn test_meta_create_deserialize() {
+    let meta = MetaCreate::Child {
+        table_name: "T1".to_string(),
+        using: "ST".to_string(),
+        tags: vec![TagWithValue {
+            field: Field::new("t1", Ty::VarChar, 16),
+            value: serde_json::json!("\"ab\""),
+        }],
+        tag_num: Some(1),
+    };
+    assert_eq!(
+        meta.to_string(),
+        "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`) TAGS('ab')"
+    );
+}
 impl Display for MetaCreate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("CREATE TABLE IF NOT EXISTS ")?;
@@ -119,7 +137,17 @@ impl Display for MetaCreate {
                                 match t.field.ty() {
                                     Ty::Json => format!("'{}'", t.value.as_str().unwrap()),
                                     Ty::VarChar | Ty::NChar => {
-                                        t.value.as_str().unwrap().to_string()
+                                        if let Some(s) = t.value.as_str() {
+                                            // String representation: "\"content\"".
+                                            // s== "\"": 3.1.1.x empty string bug compatibility
+                                            if s.starts_with('"') && s.ends_with('"') || s == "\"" {
+                                                sql_value_escape(s.trim_matches('"'))
+                                            } else {
+                                                sql_value_escape(s)
+                                            }
+                                        } else {
+                                            sql_value_escape(t.value.to_string().as_str())
+                                        }
                                     }
                                     _ => format!("{}", t.value),
                                 }
@@ -400,7 +428,7 @@ impl JsonMeta {
         matches!(self, JsonMeta::Plural { .. })
     }
 
-    pub fn iter(&self) -> JsonMetaIter {
+    pub fn iter(&self) -> JsonMetaIter<'_> {
         match self {
             JsonMeta::Plural { metas, .. } => JsonMetaIter {
                 iter: Either::Left(metas.iter()),
@@ -411,7 +439,7 @@ impl JsonMeta {
         }
     }
 
-    pub fn iter_mut(&mut self) -> JsonMetaIterMut {
+    pub fn iter_mut(&mut self) -> JsonMetaIterMut<'_> {
         match self {
             JsonMeta::Plural { metas, .. } => JsonMetaIterMut {
                 iter: Either::Left(metas.iter_mut()),
@@ -559,6 +587,28 @@ impl<'a> IntoIterator for &'a mut JsonMeta {
 mod tests {
     use super::{JsonMeta, MetaUnit};
     use crate::itypes::IsJson;
+
+    #[test]
+    fn test_json_meta() {
+        let json = r#"{
+            "type": "create",
+            "tableType": "child",
+            "tableName": "ss1",
+            "using": "sss",
+            "tags": [
+                { "name": "t1", "type": 4, "length": 4, "value": 1},
+                { "name": "t2", "type": 7, "length": 8, "value": 1.1},
+                { "name": "t3", "type": 8, "length": 20, "value": "AAAA"}
+            ],
+            "tagNum": 3
+        }"#;
+        let meta = serde_json::from_str::<MetaUnit>(json).unwrap();
+        println!("{}", meta);
+        assert_eq!(
+            meta.to_string(),
+            "CREATE TABLE IF NOT EXISTS `ss1` USING `sss` (`t1`, `t2`, `t3`) TAGS(1, 1.1, 'AAAA')"
+        );
+    }
 
     #[test]
     fn test_json_meta_compress() {

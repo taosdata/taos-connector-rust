@@ -1,15 +1,11 @@
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
-use std::{
-    collections::HashSet,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-};
 
-use flume::Receiver;
+use flume::{Receiver, Sender};
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use taos_query::prelude::RawError;
 use taos_query::util::generate_req_id;
@@ -19,13 +15,9 @@ use tokio::time;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tracing::Instrument;
 
-use crate::query::messages::{ToMessage, WsSend};
-use crate::query::WsConnReq;
-use crate::query::{
-    asyn::{WsQuerySender, WS_ERROR_NO},
-    messages::{MessageId, ReqId, WsMessage, WsRecv, WsRecvData},
-    Error,
-};
+use crate::query::asyn::{ConnState, WsQuerySender, WS_ERROR_NO};
+use crate::query::messages::{MessageId, ReqId, ToMessage, WsMessage, WsRecv, WsRecvData, WsSend};
+use crate::query::{Error, WsConnReq, WsTaos};
 use crate::{
     handle_disconnect_error, send_request_with_timeout, TaosBuilder, WsStream, WsStreamReader,
     WsStreamSender,
@@ -136,6 +128,7 @@ impl MessageCache {
 }
 
 pub(super) async fn run(
+    ws_taos: Weak<WsTaos>,
     builder: Arc<TaosBuilder>,
     mut ws_stream: WsStream,
     query_sender: WsQuerySender,
@@ -178,6 +171,9 @@ pub(super) async fn run(
                     let _ = close_tx.send(true);
                     if !is_disconnect_error(&err) {
                         tracing::error!("non-disconnect error detected, cleaning up all pending queries");
+                        if let Some(taos) = ws_taos.upgrade() {
+                            taos.set_state(ConnState::Disconnected);
+                        }
                         cleanup_after_disconnect(query_sender.clone());
                         return;
                     }
@@ -189,6 +185,10 @@ pub(super) async fn run(
                 let _ = close_tx.send(true);
                 return;
             }
+        }
+
+        if let Some(taos) = ws_taos.upgrade() {
+            taos.set_state(ConnState::Reconnecting);
         }
 
         if let Err(err) = send_handle.await {
@@ -207,6 +207,9 @@ pub(super) async fn run(
             }
             Err(err) => {
                 tracing::error!("WebSocket reconnection failed: {err}");
+                if let Some(taos) = ws_taos.upgrade() {
+                    taos.set_state(ConnState::Disconnected);
+                }
                 cleanup_after_disconnect(query_sender.clone());
                 return;
             }
@@ -214,7 +217,14 @@ pub(super) async fn run(
 
         tracing::info!("WebSocket reconnected successfully");
 
-        cleanup_after_reconnect(query_sender.clone(), cache.clone());
+        if let Some(taos) = ws_taos.upgrade() {
+            taos.wait_for_previous_recover_stmt2().await;
+            let mut stmt2_req_ids =
+                cleanup_stmt2(query_sender.sender.clone(), message_reader.clone());
+            taos.clone().recover_stmt2().await;
+            stmt2_req_ids.extend(taos.stmt2_req_ids().await);
+            cleanup_after_reconnect(query_sender.clone(), cache.clone(), stmt2_req_ids);
+        }
     }
 }
 
@@ -282,9 +292,8 @@ async fn send_messages(
                             break;
                         }
                     }
-                    Err(err) => {
-                        tracing::error!("failed to receive message from channel: {err}");
-                        let _ = err_sender.send(Error::CommonError(err.to_string())).await;
+                    Err(_) => {
+                        tracing::info!("message channel closed, client is shutting down");
                         break;
                     }
                 }
@@ -327,8 +336,6 @@ async fn read_messages(
     let message_handle =
         tokio::spawn(handle_messages(message_rx, query_sender.clone(), cache).in_current_span());
 
-    let mut closed_normally = false;
-
     loop {
         tokio::select! {
             res = ws_stream_reader.try_next() => {
@@ -342,7 +349,6 @@ async fn read_messages(
                     }
                     Ok(None) => {
                         tracing::info!("WebSocket stream closed by peer");
-                        closed_normally = true;
                         break;
                     }
                     Err(err) => {
@@ -354,7 +360,6 @@ async fn read_messages(
             }
             _ = close_reader.changed() => {
                 tracing::info!("WebSocket reader received close signal");
-                closed_normally = true;
                 break;
             }
         }
@@ -364,10 +369,6 @@ async fn read_messages(
 
     if let Err(err) = message_handle.await {
         tracing::error!("handle messages task failed: {err:?}");
-    }
-
-    if closed_normally {
-        cleanup_after_disconnect(query_sender.clone());
     }
 
     tracing::trace!("stop reading messages from WebSocket stream");
@@ -550,16 +551,20 @@ fn cleanup_after_disconnect(query_sender: WsQuerySender) {
     for req_id in req_ids {
         if let Some((_, sender)) = query_sender.queries.remove(&req_id) {
             let _ = sender.send(Err(RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
-                .context("WebSocket connection is closed")));
+                .context("WebSocket connection is closed (disconnect)")));
         }
     }
 }
 
-fn cleanup_after_reconnect(query_sender: WsQuerySender, cache: MessageCache) {
+fn cleanup_after_reconnect(
+    query_sender: WsQuerySender,
+    cache: MessageCache,
+    stmt2_req_ids: Vec<ReqId>,
+) {
     let mut req_ids = HashSet::new();
 
     query_sender.queries.scan(|req_id, _| {
-        if !cache.req_to_msg.contains(req_id) {
+        if !cache.req_to_msg.contains(req_id) && !stmt2_req_ids.contains(req_id) {
             req_ids.insert(*req_id);
         }
     });
@@ -573,14 +578,45 @@ fn cleanup_after_reconnect(query_sender: WsQuerySender, cache: MessageCache) {
     for req_id in req_ids {
         if let Some((_, sender)) = query_sender.queries.remove(&req_id) {
             let _ = sender.send(Err(RawError::from_code(WS_ERROR_NO::CONN_CLOSED.as_code())
-                .context("WebSocket connection is closed")));
+                .context("WebSocket connection is closed (reconnect)")));
         }
     }
 }
 
+fn cleanup_stmt2(
+    message_sender: Sender<WsMessage>,
+    message_reader: Receiver<WsMessage>,
+) -> Vec<ReqId> {
+    let mut dropped_cnt = 0;
+    let mut req_ids = Vec::new();
+    let mut kept_messages = Vec::new();
+
+    while let Ok(message) = message_reader.try_recv() {
+        if message.is_stmt2() {
+            dropped_cnt += 1;
+            if !message.is_stmt2_close() {
+                req_ids.push(message.req_id());
+            }
+            tracing::trace!("drop stmt2 message: {message:?}");
+        } else {
+            kept_messages.push(message);
+        }
+    }
+
+    for message in kept_messages {
+        let _ = message_sender.send(message);
+    }
+
+    if dropped_cnt > 0 {
+        tracing::info!("dropped {dropped_cnt} stmt2 messages during cleanup");
+    }
+
+    req_ids
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -905,6 +941,85 @@ mod tests {
         let errstr = res.unwrap_err().to_string();
         assert!(errstr.contains("IO error: Connection refused"));
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_wstaos_drop_closes_connection() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .try_init();
+
+        let conn_dropped = Arc::new(AtomicBool::new(false));
+        let conn_dropped_clone = conn_dropped.clone();
+
+        let routes = warp::path("ws")
+            .and(warp::ws())
+            .map(move |ws: warp::ws::Ws| {
+                let conn_dropped = conn_dropped_clone.clone();
+                ws.on_upgrade(move |ws| async move {
+                    let (mut ws_tx, mut ws_rx) = ws.split();
+
+                    while let Some(res) = ws_rx.next().await {
+                        let message = res.unwrap();
+                        tracing::debug!("ws recv message: {message:?}");
+
+                        if message.is_text() {
+                            let text = message.to_str().unwrap();
+                            let req: Value = serde_json::from_str(text).unwrap();
+                            let req_id = req
+                                .get("args")
+                                .and_then(|v| v.get("req_id"))
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0);
+
+                            if text.contains("version") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "message",
+                                    "action": "version",
+                                    "req_id": req_id,
+                                    "version": "3.0"
+                                });
+                                let _ = ws_tx.send(Message::text(data.to_string())).await;
+                            } else if text.contains("conn") {
+                                let data = json!({
+                                    "code": 0,
+                                    "message": "message",
+                                    "action": "conn",
+                                    "req_id": req_id
+                                });
+                                let _ = ws_tx.send(Message::text(data.to_string())).await;
+                            }
+                        } else if message.is_close() {
+                            tracing::info!("received close message from client");
+                            conn_dropped.store(true, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                })
+            });
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let (_, server) =
+            warp::serve(routes).bind_with_graceful_shutdown(([127, 0, 0, 1], 9984), async move {
+                let _ = shutdown_rx.await;
+            });
+
+        tokio::spawn(server);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        {
+            let _taos = TaosBuilder::from_dsn("ws://127.0.0.1:9984")?
+                .build()
+                .await?;
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(conn_dropped.load(Ordering::Relaxed));
+        let _ = shutdown_tx.send(());
         Ok(())
     }
 }

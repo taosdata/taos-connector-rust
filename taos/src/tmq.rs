@@ -58,17 +58,14 @@ impl taos_query::TBuilder for TmqBuilder {
 
     fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
-        // dbg!(&dsn);
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
-            ("ws" | "wss" | "http" | "https" | "taosws", _) => Ok(Self(TmqBuilderInner::Ws(
-                taos_ws::consumer::TmqBuilder::from_dsn(dsn)?,
-            ))),
             ("taos" | "tmq", None) => Ok(Self(TmqBuilderInner::Native(
                 crate::sys::TmqBuilder::from_dsn(dsn)?,
             ))),
-            ("taos" | "tmq", Some("ws" | "wss" | "http" | "https")) => Ok(Self(
-                TmqBuilderInner::Ws(taos_ws::consumer::TmqBuilder::from_dsn(dsn)?),
-            )),
+            ("taos" | "tmq", Some("ws" | "wss" | "http" | "https"))
+            | ("ws" | "wss" | "http" | "https" | "taosws", _) => Ok(Self(TmqBuilderInner::Ws(
+                taos_ws::consumer::TmqBuilder::from_dsn(dsn)?,
+            ))),
             (driver, _) => Err(taos_query::DsnError::InvalidDriver(driver.to_string()).into()),
         }
     }
@@ -127,15 +124,13 @@ impl taos_query::AsyncTBuilder for TmqBuilder {
     fn from_dsn<D: taos_query::IntoDsn>(dsn: D) -> RawResult<Self> {
         let dsn = dsn.into_dsn()?;
         match (dsn.driver.as_str(), dsn.protocol.as_deref()) {
-            ("ws" | "wss" | "http" | "https" | "taosws", _) => Ok(Self(TmqBuilderInner::Ws(
-                taos_ws::consumer::TmqBuilder::from_dsn(dsn)?,
-            ))),
             ("taos" | "tmq", None) => Ok(Self(TmqBuilderInner::Native(
                 crate::sys::TmqBuilder::from_dsn(dsn)?,
             ))),
-            ("taos" | "tmq", Some("ws" | "wss" | "http" | "https")) => Ok(Self(
-                TmqBuilderInner::Ws(taos_ws::consumer::TmqBuilder::from_dsn(dsn)?),
-            )),
+            ("taos" | "tmq", Some("ws" | "wss" | "http" | "https"))
+            | ("ws" | "wss" | "http" | "https" | "taosws", _) => Ok(Self(TmqBuilderInner::Ws(
+                taos_ws::consumer::TmqBuilder::from_dsn(dsn)?,
+            ))),
             (driver, _) => Err(taos_query::DsnError::InvalidDriver(driver.to_string()).into()),
         }
     }

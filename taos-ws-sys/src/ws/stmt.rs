@@ -189,7 +189,7 @@ unsafe fn stmt_init(
         .as_mut()
         .ok_or(TaosError::new(Code::FAILED, "taos is null"))?;
 
-    let mut stmt2 = Stmt2::new(taos.client());
+    let stmt2 = Stmt2::new(taos.client_cloned());
 
     block_in_place_or_global(stmt2.init_with_options(
         req_id,
@@ -667,28 +667,14 @@ pub unsafe extern "C" fn taos_stmt_num_params(stmt: *mut TAOS_STMT, nums: *mut c
     }
 
     let stmt2 = &mut taos_stmt.stmt2;
-
-    match stmt2.is_insert() {
-        Some(true) => {
-            *nums = taos_stmt
-                .col_fields
-                .as_ref()
-                .map_or(0, |fields| fields.len() as _);
-        }
-        Some(false) => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_num_params can only be called for insertion",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
-        None => {
-            maybe_err.with_err(Some(TaosError::new(
-                Code::FAILED,
-                "taos_stmt_prepare is not called",
-            )));
-            return format_errno(Code::FAILED.into());
-        }
+    if let Some(cnt) = stmt2.fields_count() {
+        *nums = cnt as _;
+    } else {
+        maybe_err.with_err(Some(TaosError::new(
+            Code::FAILED,
+            "taos_stmt_prepare is not called",
+        )));
+        return format_errno(Code::FAILED.into());
     }
 
     debug!("taos_stmt_num_params succ");
@@ -797,6 +783,11 @@ pub unsafe extern "C" fn taos_stmt_bind_param(
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
     };
 
+    if bind.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "bind is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
+
     let stmt2 = &mut taos_stmt.stmt2;
 
     let col_cnt = match stmt2.is_insert() {
@@ -853,6 +844,11 @@ pub unsafe extern "C" fn taos_stmt_bind_param_batch(
         Some(taos_stmt) => taos_stmt,
         None => return set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "stmt is invalid")),
     };
+
+    if bind.is_null() {
+        maybe_err.with_err(Some(TaosError::new(Code::INVALID_PARA, "bind is null")));
+        return format_errno(Code::INVALID_PARA.into());
+    }
 
     let stmt2 = &mut taos_stmt.stmt2;
 
@@ -1534,7 +1530,7 @@ mod tests {
             let mut nums = 0;
             let code = taos_stmt_num_params(stmt, &mut nums);
             assert_eq!(code, 0);
-            assert_eq!(nums, 2);
+            assert_eq!(nums, 4);
 
             let mut ty = 0;
             let mut bytes = 0;
@@ -2353,6 +2349,49 @@ mod tests {
             assert_eq!(code, 0);
 
             test_exec(taos, "drop database test_1741438739");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt_num_params() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1760944015",
+                    "create database test_1760944015",
+                    "use test_1760944015",
+                    "create table t0 (ts timestamp, c1 int)",
+                ],
+            );
+
+            let stmt = taos_stmt_init(taos);
+            assert!(!stmt.is_null());
+
+            let sql = c"insert into t0 values(?, ?)";
+            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut nums = 0;
+            let code = taos_stmt_num_params(stmt, &mut nums);
+            assert_eq!(code, 0);
+            assert_eq!(nums, 2);
+
+            let sql = c"select * from t0 where ts > ? and c1 > ?";
+            let code = taos_stmt_prepare(stmt, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut nums = 0;
+            let code = taos_stmt_num_params(stmt, &mut nums);
+            assert_eq!(code, 0);
+            assert_eq!(nums, 2);
+
+            let code = taos_stmt_close(stmt);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database if exists test_1760944015");
             taos_close(taos);
         }
     }

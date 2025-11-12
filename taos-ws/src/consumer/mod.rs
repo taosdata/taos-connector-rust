@@ -69,10 +69,7 @@ impl WsTmqSender {
 
         tracing::trace!("tmq send_recv, message sent, waiting for response, req_id: {req_id}");
 
-        let data = tokio::time::timeout(Duration::from_secs(60), data_rx.recv())
-            .await
-            .map_err(WsTmqError::from)?
-            .ok_or(WsTmqError::ChannelClosedError)?;
+        let data = data_rx.recv().await.ok_or(WsTmqError::ChannelClosedError)?;
 
         tracing::trace!("tmq send_recv, req_id: {req_id}, received data: {data:?}");
 
@@ -2979,6 +2976,36 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_recv_timeout_never() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1758855878",
+            "drop database if exists test_1758855878",
+            "create database test_1758855878",
+            "create topic topic_1758855878 as database test_1758855878",
+        ])
+        .await?;
+
+        let handle: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::spawn(async move {
+            let tmq = TmqBuilder::from_dsn("ws://localhost:6041?group.id=10")?;
+            let mut consumer = tmq.build().await?;
+            consumer.subscribe(["topic_1758855878"]).await?;
+            let _ = consumer.recv_timeout(Timeout::Never).await?;
+            Ok(())
+        });
+
+        let res = tokio::time::timeout(Duration::from_secs(90), handle).await;
+        assert!(res.is_err());
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "rustls-aws-lc-crypto-provider")]
@@ -2990,7 +3017,7 @@ mod cloud_tests {
     use tokio::sync::{mpsc, oneshot};
 
     use crate::consumer::{Data, Meta};
-    use crate::TmqBuilder;
+    use crate::{TaosBuilder, TmqBuilder};
 
     #[tokio::test]
     async fn test_poll() -> anyhow::Result<()> {
@@ -3066,6 +3093,15 @@ mod cloud_tests {
 
         poll_handle.await??;
         cnt_handle.await??;
+
+        let taos = TaosBuilder::from_dsn(format!("{url}/rust_test?token={token}"))?
+            .build()
+            .await?;
+
+        taos.exec(format!(
+            "drop consumer group `{group_id}` on rust_tmq_test_topic"
+        ))
+        .await?;
 
         Ok(())
     }
