@@ -877,7 +877,7 @@ mod tests {
 
     use futures::future::try_join_all;
     use rand::Rng;
-    use taos_ws::stmt2::ws_proxy::{InterceptFn, ProxyAction, WsProxy};
+    use taos_query::util::ws_proxy::{InterceptFn, ProxyAction, WsProxy};
     use tokio_tungstenite::tungstenite::Message;
 
     use super::*;
