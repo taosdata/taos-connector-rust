@@ -8,6 +8,8 @@ mod inline_read;
 mod inline_write;
 
 pub mod req_id;
+
+#[cfg(feature = "test")]
 pub mod ws_proxy;
 
 use std::collections::BTreeMap;
