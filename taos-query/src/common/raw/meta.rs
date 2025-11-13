@@ -100,6 +100,66 @@ fn test_meta_create_deserialize() {
         "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`) TAGS('')"
     );
 
+    let meta = MetaCreate::Child {
+        table_name: "T1".to_string(),
+        using: "ST".to_string(),
+        tags: vec![TagWithValue {
+            field: Field::new("t1", Ty::VarChar, 16),
+            value: serde_json::Value::Null,
+        }],
+        tag_num: Some(1),
+    };
+    assert_eq!(
+        meta.to_string(),
+        "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`) TAGS(NULL)",
+        "Failed for type {:?}",
+        Ty::VarChar
+    );
+    let meta = MetaCreate::Child {
+        table_name: "T1".to_string(),
+        using: "ST".to_string(),
+        tags: vec![TagWithValue {
+            field: Field::new("t1", Ty::NChar, 16),
+            value: serde_json::Value::Null,
+        }],
+        tag_num: Some(1),
+    };
+    assert_eq!(
+        meta.to_string(),
+        "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`) TAGS(NULL)",
+        "Failed for type {:?}",
+        Ty::NChar
+    );
+    let meta = MetaCreate::Child {
+        table_name: "T1".to_string(),
+        using: "ST".to_string(),
+        tags: vec![TagWithValue {
+            field: Field::new("t1", Ty::Json, 16),
+            value: serde_json::Value::Null,
+        }],
+        tag_num: Some(1),
+    };
+    assert_eq!(
+        meta.to_string(),
+        "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`) TAGS(NULL)",
+        "Failed for type {:?}",
+        Ty::Json
+    );
+    let meta = MetaCreate::Child {
+        table_name: "T1".to_string(),
+        using: "ST".to_string(),
+        tags: vec![TagWithValue {
+            field: Field::new("t1", Ty::Json, 16),
+            value: serde_json::Value::String("{\"a\":\"b\"}".to_string()),
+        }],
+        tag_num: Some(1),
+    };
+    assert_eq!(
+        meta.to_string(),
+        "CREATE TABLE IF NOT EXISTS `T1` USING `ST` (`t1`) TAGS('{\\\"a\\\":\\\"b\\\"}')",
+        "Failed for valued type JSON"
+    );
+
     // Test normal string value.
     let meta = MetaCreate::Child {
         table_name: "T1".to_string(),
@@ -157,7 +217,13 @@ impl Display for MetaCreate {
                         tags.iter()
                             .map(|t| {
                                 match t.field.ty() {
-                                    Ty::Json => format!("'{}'", t.value.as_str().unwrap()),
+                                    Ty::Json => {
+                                        if let Some(s) = t.value.as_str() {
+                                            sql_value_escape(s)
+                                        } else {
+                                            "NULL".to_string()
+                                        }
+                                    }
                                     Ty::VarChar | Ty::NChar => {
                                         if let Some(s) = t.value.as_str() {
                                             // String representation: "\"content\"".
@@ -168,7 +234,7 @@ impl Display for MetaCreate {
                                                 sql_value_escape(s)
                                             }
                                         } else {
-                                            sql_value_escape(t.value.to_string().as_str())
+                                            "NULL".to_string()
                                         }
                                     }
                                     _ => format!("{}", t.value),
