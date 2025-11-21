@@ -166,7 +166,7 @@ impl Drop for FetchPrintMetrics {
         } else {
             Duration::ZERO
         };
-        tracing::info!(
+        tracing::warn!(
             "FetchPrintMetrics: fetch_count={}, total_fetch={:?}, avg_fetch={:?}, print_count={}, total_print={:?}, avg_print={:?}",
             self.fetch_count,
             self.fetch_total,

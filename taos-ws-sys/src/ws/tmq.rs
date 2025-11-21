@@ -1635,7 +1635,7 @@ impl Drop for PollMetrics {
             Duration::ZERO
         };
 
-        tracing::info!(
+        tracing::warn!(
             target: "tmq.poll",
             "tmq_ptr={:#x} calls={} total_poll_ms={} avg_poll_ms={} total_interval_ms={} avg_interval_ms={} min_interval_ms={} max_interval_ms={}",
             self.tmq_ptr,
@@ -2978,7 +2978,7 @@ mod tests {
     }
 }
 
-// #[cfg(feature = "rustls-aws-lc-crypto-provider")]
+#[cfg(feature = "rustls-aws-lc-crypto-provider")]
 #[cfg(test)]
 mod cloud_tests {
     use std::ffi::CString;
