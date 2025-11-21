@@ -6,6 +6,39 @@ use syn::visit::Visit;
 use syn::{ItemConst, ItemFn, Visibility};
 
 fn main() -> Result<(), Box<dyn Error>> {
+    println!("cargo:rerun-if-env-changed=TD_VERSION");
+
+    // 读取并尝试转换为 UTF-8
+    // let raw = env::var_os("TD_VERSION")
+    //     .and_then(|s| s.into_string().ok()) // 非 UTF-8 => None
+    //     // .map(|s| s.trim().to_string())
+    //     .filter(|s| !s.is_empty());
+
+    // 允许的字符（可按需放宽）
+    // let sanitized = raw
+    //     // .filter(|s| {
+    //     //     s.chars()
+    //     //         .all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c))
+    //     // })
+    //     .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+
+    // println!("cargo:rustc-env=TD_VERSION={sanitized}");
+
+    // println!("cargo:rustc-env=TD_VERSION=111");
+    if let Some(td_ver) = env::var_os("TD_VERSION")
+        .and_then(|s| s.into_string().ok())
+        // .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
+        println!("cargo:rustc-env=TD_VERSION=${td_ver}");
+    } else {
+        println!("cargo:rustc-env=TD_VERSION=1111111");
+    }
+    // // println!("cargo:rerun-if-env-changed=TD_VERSION");
+    // if let Ok(td_ver) = env::var("TD_VERSION") {
+    //     println!("cargo:rustc-env=TD_VERSION={td_ver}");
+    // }
+
     write_header("taos.h", "src/ws", "cbindgen_ws.toml")?;
     write_header("taosws.h", "src/old_ws", "cbindgen_old_ws.toml")?;
     Ok(())

@@ -894,10 +894,14 @@ pub unsafe extern "C" fn taos_get_server_info(taos: *mut TAOS) -> *const c_char 
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
+    let version = option_env!("TD_VERSION");
+    dbg!(version);
     debug!("taos_get_client_info");
     static VERSION: OnceLock<CString> = OnceLock::new();
     VERSION
         .get_or_init(|| {
+            // let version = option_env!("TD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+            // let version = oenv!("TD_VERSION");
             let version = env!("CARGO_PKG_VERSION");
             CString::new(version).unwrap()
         })
@@ -2026,6 +2030,7 @@ mod tests {
             let client_info = taos_get_client_info();
             assert!(!client_info.is_null());
             let client_info = CStr::from_ptr(client_info).to_str().unwrap();
+            // assert_eq!(client_info, env!("CARGO_PKG_VERSION"));
             assert_eq!(client_info, "0.2.1");
         }
     }
