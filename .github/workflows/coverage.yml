@@ -193,6 +193,13 @@ jobs:
           TAOS_ADAPTER_LOG_PATH=/tmp/taos/v3/log taosadapter &
           sleep 1
 
+      - name: Test C WebSocket version info
+        run: |
+          TD_VERSION=3.9.9.9 cargo nextest run -p taos-ws-sys test_taos_get_client_info_td_version
+          TD_VERSION=3.9.9.9.alpha cargo nextest run -p taos-ws-sys test_taos_get_client_info_td_version
+          TD_VERSION="$(printf '\xff\xfe')" cargo nextest run -p taos-ws-sys test_taos_get_client_info_default
+          TD_VERSION="$(printf '3.9\0.9.9')" cargo nextest run -p taos-ws-sys test_taos_get_client_info_td_version
+
       - name: Generate code coverage
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
