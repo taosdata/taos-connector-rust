@@ -132,8 +132,58 @@ unsafe fn query(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> TaosResult<
     Ok(ResultSet::Query(QueryResultSet::new(rs)))
 }
 
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
+
+#[derive(Default, Debug)]
+pub struct FetchPrintMetrics {
+    fetch_total: Duration,
+    fetch_count: u64,
+    print_total: Duration,
+    print_count: u64,
+}
+
+impl FetchPrintMetrics {
+    fn record_fetch(&mut self, d: Duration) {
+        self.fetch_total += d;
+        self.fetch_count += 1;
+    }
+    fn record_print(&mut self, d: Duration) {
+        self.print_total += d;
+        self.print_count += 1;
+    }
+}
+
+impl Drop for FetchPrintMetrics {
+    fn drop(&mut self) {
+        let avg_fetch = if self.fetch_count > 0 {
+            self.fetch_total / self.fetch_count as u32
+        } else {
+            Duration::ZERO
+        };
+        let avg_print = if self.print_count > 0 {
+            self.print_total / self.print_count as u32
+        } else {
+            Duration::ZERO
+        };
+        tracing::info!(
+            "FetchPrintMetrics: fetch_count={}, total_fetch={:?}, avg_fetch={:?}, print_count={}, total_print={:?}, avg_print={:?}",
+            self.fetch_count,
+            self.fetch_total,
+            avg_fetch,
+            self.print_count,
+            self.print_total,
+            avg_print,
+        );
+    }
+}
+
+pub static FP_METRICS: Lazy<DashMap<usize, FetchPrintMetrics>> = Lazy::new(DashMap::new);
+
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
+    let fetch_start = std::time::Instant::now();
+
     fn handle_error(code: Code, msg: &str) -> TAOS_ROW {
         error!("taos_fetch_row failed, code: {code:?}, msg: {msg}");
         set_err_and_get_code(TaosError::new(code, msg));
@@ -152,13 +202,23 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
         None => return handle_error(Code::INVALID_PARA, "res is invalid"),
     };
 
-    match rs.fetch_row() {
+    let ret = match rs.fetch_row() {
         Ok(row) => {
             debug!("taos_fetch_row succ, row: {row:?}");
             row
         }
         Err(err) => handle_error(err.errno(), &err.errstr()),
+    };
+
+    let fetch_duration = fetch_start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_fetch(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
@@ -326,7 +386,18 @@ pub unsafe extern "C" fn taos_print_row(
     fields: *mut TAOS_FIELD,
     num_fields: c_int,
 ) -> c_int {
-    taos_print_row_with_size(str, i32::MAX as _, row, fields, num_fields)
+    let print_start = std::time::Instant::now();
+    let ret = taos_print_row_with_size(str, i32::MAX as _, row, fields, num_fields);
+
+    let print_duration = print_start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_print(print_duration);
+    }
+
+    ret
 }
 
 #[no_mangle]
