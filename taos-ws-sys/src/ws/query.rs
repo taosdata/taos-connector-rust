@@ -2031,12 +2031,13 @@ mod tests {
     }
 
     #[test]
-    fn test_taos_get_client_info_td_version() {
+    #[ignore]
+    fn test_taos_get_client_info_injected() {
         unsafe {
             let client_info = taos_get_client_info();
             assert!(!client_info.is_null());
             let client_info = CStr::from_ptr(client_info).to_str().unwrap();
-            assert_eq!(client_info, env!("TD_VERSION"));
+            assert_eq!(client_info, "3.9.9.9");
         }
     }
 

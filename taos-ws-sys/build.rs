@@ -8,8 +8,8 @@ use syn::{ItemConst, ItemFn, Visibility};
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=TD_VERSION");
 
-    let td_ver = env::var_os("TD_VERSION")
-        .and_then(|s| s.into_string().ok())
+    let td_ver = env::var("TD_VERSION")
+        .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());

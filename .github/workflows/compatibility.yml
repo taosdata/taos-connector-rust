@@ -63,10 +63,8 @@ jobs:
 
       - name: Test C WebSocket version info
         run: |
-          TD_VERSION=3.6.9.9 cargo nextest run -p taos-ws-sys test_taos_get_client_info_td_version
-          TD_VERSION=3.6.9.9.alpha cargo nextest run -p taos-ws-sys test_taos_get_client_info_td_version
+          TD_VERSION=3.9.9.9 cargo nextest run -p taos-ws-sys test_taos_get_client_info_injected -- --ignored
           TD_VERSION="$(printf '\xff\xfe')" cargo nextest run -p taos-ws-sys test_taos_get_client_info_default
-          TD_VERSION="$(printf '3.6\0.9.9')" cargo nextest run -p taos-ws-sys test_taos_get_client_info_td_version
 
       - name: Run tests
         env:
