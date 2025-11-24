@@ -898,7 +898,7 @@ pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
     static VERSION: OnceLock<CString> = OnceLock::new();
     VERSION
         .get_or_init(|| {
-            let version = env!("CARGO_PKG_VERSION");
+            let version = env!("TD_VERSION");
             CString::new(version).unwrap()
         })
         .as_ptr()
@@ -2021,12 +2021,23 @@ mod tests {
     }
 
     #[test]
-    fn test_taos_get_client_info() {
+    fn test_taos_get_client_info_default() {
         unsafe {
             let client_info = taos_get_client_info();
             assert!(!client_info.is_null());
             let client_info = CStr::from_ptr(client_info).to_str().unwrap();
-            assert_eq!(client_info, "0.2.1");
+            assert_eq!(client_info, env!("CARGO_PKG_VERSION"));
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_taos_get_client_info_injected() {
+        unsafe {
+            let client_info = taos_get_client_info();
+            assert!(!client_info.is_null());
+            let client_info = CStr::from_ptr(client_info).to_str().unwrap();
+            assert_eq!(client_info, "3.9.9.9");
         }
     }
 
