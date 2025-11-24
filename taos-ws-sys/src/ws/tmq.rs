@@ -18,10 +18,10 @@ use tracing::{debug, error, warn, Instrument};
 use crate::ws::error::{
     errno, errstr, format_errno, set_err_and_get_code, TaosError, TaosMaybeError, EMPTY,
 };
-use crate::ws::query::FP_METRICS;
+use crate::ws::query::{FetchPrintMetrics, FP_METRICS};
 use crate::ws::{
-    self, config, util, ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD,
-    TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
+    self, config, taos_init, util, ResultSet, ResultSetOperations, Row, SafePtr, TaosResult,
+    TAOS_FIELD, TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
 };
 
 #[allow(non_camel_case_types)]
@@ -601,12 +601,18 @@ pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mu
     };
 
     let poll_end = Instant::now();
+    let elapsed = poll_start.elapsed();
     {
         let key = tmq as usize;
         let mut entry = POLL_METRICS
             .entry(key)
             .or_insert_with(|| PollMetrics::new(key));
         entry.record(poll_start, poll_end);
+
+        let mut fp_entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        fp_entry.record_tmq_poll(elapsed);
     }
 
     ret
@@ -1254,7 +1260,10 @@ pub unsafe extern "C" fn tmq_committed(
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_table_name start, res: {res:?}");
-    match (res as *const TaosMaybeError<ResultSet>)
+
+    let start = Instant::now();
+
+    let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
@@ -1266,7 +1275,17 @@ pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char
             warn!("tmq_get_table_name failed, err: res is null");
             ptr::null()
         }
+    };
+
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_table_name(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
@@ -1283,7 +1302,10 @@ pub extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_topic_name start, res: {res:?}");
-    match (res as *const TaosMaybeError<ResultSet>)
+
+    let start = Instant::now();
+
+    let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
@@ -1295,13 +1317,26 @@ pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char
             error!("tmq_get_topic_name failed, err: res is null");
             ptr::null()
         }
+    };
+
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_topic_name(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_db_name start, res: {res:?}");
-    match (res as *const TaosMaybeError<ResultSet>)
+
+    let start = Instant::now();
+
+    let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
@@ -1313,13 +1348,26 @@ pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
             error!("tmq_get_db_name failed, err: res is null");
             ptr::null()
         }
+    };
+
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_db_name(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
     debug!("tmq_get_vgroup_id start, res: {res:?}");
-    match (res as *const TaosMaybeError<ResultSet>)
+
+    let start = Instant::now();
+
+    let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
@@ -1331,7 +1379,17 @@ pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
             error!("tmq_get_vgroup_id failed, err: res is null");
             set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null"))
         }
+    };
+
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_vgroup_id(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]

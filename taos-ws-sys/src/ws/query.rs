@@ -137,43 +137,166 @@ use once_cell::sync::Lazy;
 
 #[derive(Default, Debug)]
 pub struct FetchPrintMetrics {
-    fetch_total: Duration,
-    fetch_count: u64,
-    print_total: Duration,
-    print_count: u64,
+    taos_fetch_row_total: Duration,
+    taos_fetch_row_count: u64,
+    taos_print_row_total: Duration,
+    taos_print_row_count: u64,
+    taos_fetch_fields_total: Duration,
+    taos_fetch_fields_count: u64,
+    taos_field_count_total: Duration,
+    taos_field_count_count: u64,
+    tmq_get_vgroup_id_total: Duration,
+    tmq_get_vgroup_id_count: u64,
+    tmq_get_db_name_total: Duration,
+    tmq_get_db_name_count: u64,
+    tmq_get_table_name_total: Duration,
+    tmq_get_table_name_count: u64,
+    tmq_get_topic_name_total: Duration,
+    tmq_get_topic_name_count: u64,
+    tmq_poll_total: Duration,
+    tmq_poll_count: u64,
 }
 
 impl FetchPrintMetrics {
-    fn record_fetch(&mut self, d: Duration) {
-        self.fetch_total += d;
-        self.fetch_count += 1;
+    pub fn record_taos_fetch_row(&mut self, d: Duration) {
+        self.taos_fetch_row_total += d;
+        self.taos_fetch_row_count += 1;
     }
-    fn record_print(&mut self, d: Duration) {
-        self.print_total += d;
-        self.print_count += 1;
+
+    pub fn record_taos_print_row(&mut self, d: Duration) {
+        self.taos_print_row_total += d;
+        self.taos_print_row_count += 1;
+    }
+
+    pub fn record_taos_fetch_fields(&mut self, d: Duration) {
+        self.taos_fetch_fields_total += d;
+        self.taos_fetch_fields_count += 1;
+    }
+
+    pub fn record_taos_field_count(&mut self, d: Duration) {
+        self.taos_field_count_total += d;
+        self.taos_field_count_count += 1;
+    }
+
+    pub fn record_tmq_get_vgroup_id(&mut self, d: Duration) {
+        self.tmq_get_vgroup_id_total += d;
+        self.tmq_get_vgroup_id_count += 1;
+    }
+
+    pub fn record_tmq_get_db_name(&mut self, d: Duration) {
+        self.tmq_get_db_name_total += d;
+        self.tmq_get_db_name_count += 1;
+    }
+
+    pub fn record_tmq_get_table_name(&mut self, d: Duration) {
+        self.tmq_get_table_name_total += d;
+        self.tmq_get_table_name_count += 1;
+    }
+
+    pub fn record_tmq_get_topic_name(&mut self, d: Duration) {
+        self.tmq_get_topic_name_total += d;
+        self.tmq_get_topic_name_count += 1;
+    }
+
+    pub fn record_tmq_poll(&mut self, d: Duration) {
+        self.tmq_poll_total += d;
+        self.tmq_poll_count += 1;
     }
 }
 
 impl Drop for FetchPrintMetrics {
     fn drop(&mut self) {
-        let avg_fetch = if self.fetch_count > 0 {
-            self.fetch_total / self.fetch_count as u32
+        let avg_taos_fetch_row = if self.taos_fetch_row_count > 0 {
+            self.taos_fetch_row_total / self.taos_fetch_row_count as u32
         } else {
             Duration::ZERO
         };
-        let avg_print = if self.print_count > 0 {
-            self.print_total / self.print_count as u32
+
+        let avg_taos_print_row = if self.taos_print_row_count > 0 {
+            self.taos_print_row_total / self.taos_print_row_count as u32
         } else {
             Duration::ZERO
         };
+
+        let avg_taos_fetch_fields = if self.taos_fetch_fields_count > 0 {
+            self.taos_fetch_fields_total / self.taos_fetch_fields_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_taos_field_count = if self.taos_field_count_count > 0 {
+            self.taos_field_count_total / self.taos_field_count_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_vgroup_id = if self.tmq_get_vgroup_id_count > 0 {
+            self.tmq_get_vgroup_id_total / self.tmq_get_vgroup_id_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_db_name = if self.tmq_get_db_name_count > 0 {
+            self.tmq_get_db_name_total / self.tmq_get_db_name_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_table_name = if self.tmq_get_table_name_count > 0 {
+            self.tmq_get_table_name_total / self.tmq_get_table_name_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_topic_name = if self.tmq_get_topic_name_count > 0 {
+            self.tmq_get_topic_name_total / self.tmq_get_topic_name_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_poll = if self.tmq_poll_count > 0 {
+            self.tmq_poll_total / self.tmq_poll_count as u32
+        } else {
+            Duration::ZERO
+        };
+
         tracing::warn!(
-            "FetchPrintMetrics: fetch_count={}, total_fetch={:?}, avg_fetch={:?}, print_count={}, total_print={:?}, avg_print={:?}",
-            self.fetch_count,
-            self.fetch_total,
-            avg_fetch,
-            self.print_count,
-            self.print_total,
-            avg_print,
+            "FetchPrintMetrics: taos_fetch_row_count={}, total_taos_fetch_row={:?}, avg_taos_fetch_row={:?}, \
+            taos_print_row_count={}, total_taos_print_row={:?}, avg_taos_print_row={:?}, \
+            taos_fetch_fields_count={}, total_taos_fetch_fields={:?}, avg_taos_fetch_fields={:?}, \
+            taos_field_count_count={}, total_taos_field_count={:?}, avg_taos_field_count={:?}, \
+            tmq_get_vgroup_id_count={}, total_tmq_get_vgroup_id={:?}, avg_tmq_get_vgroup_id={:?}, \
+            tmq_get_db_name_count={}, total_tmq_get_db_name={:?}, avg_tmq_get_db_name={:?}, \
+            tmq_get_table_name_count={}, total_tmq_get_table_name={:?}, avg_tmq_get_table_name={:?}, \
+            tmq_get_topic_name_count={}, total_tmq_get_topic_name={:?}, avg_tmq_get_topic_name={:?}, \
+            tmq_poll_count={}, total_tmq_poll={:?}, avg_tmq_poll={:?}",
+            self.taos_fetch_row_count,
+            self.taos_fetch_row_total,
+            avg_taos_fetch_row,
+            self.taos_print_row_count,
+            self.taos_print_row_total,
+            avg_taos_print_row,
+            self.taos_fetch_fields_count,
+            self.taos_fetch_fields_total,
+            avg_taos_fetch_fields,
+            self.taos_field_count_count,
+            self.taos_field_count_total,
+            avg_taos_field_count,
+            self.tmq_get_vgroup_id_count,
+            self.tmq_get_vgroup_id_total,
+            avg_tmq_get_vgroup_id,
+            self.tmq_get_db_name_count,
+            self.tmq_get_db_name_total,
+            avg_tmq_get_db_name,
+            self.tmq_get_table_name_count,
+            self.tmq_get_table_name_total,
+            avg_tmq_get_table_name,
+            self.tmq_get_topic_name_count,
+            self.tmq_get_topic_name_total,
+            avg_tmq_get_topic_name,
+            self.tmq_poll_count,
+            self.tmq_poll_total,
+            avg_tmq_poll
         );
     }
 }
@@ -215,7 +338,7 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
         let mut entry = FP_METRICS
             .entry(12345usize)
             .or_insert_with(|| FetchPrintMetrics::default());
-        entry.record_fetch(fetch_duration);
+        entry.record_taos_fetch_row(fetch_duration);
     }
 
     ret
@@ -250,7 +373,10 @@ pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
 #[no_mangle]
 pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
     debug!("taos_field_count start, res: {res:?}");
-    match (res as *mut TaosMaybeError<ResultSet>)
+
+    let field_count_start = std::time::Instant::now();
+
+    let ret = match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
@@ -263,7 +389,17 @@ pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
             error!("taos_field_count failed, res is null");
             set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null"))
         }
+    };
+
+    let field_count_duration = field_count_start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_taos_field_count(field_count_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
@@ -310,7 +446,9 @@ pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIELD {
     debug!("taos_fetch_fields start, res: {res:?}");
-    match (res as *mut TaosMaybeError<ResultSet>)
+    let fetch_start = std::time::Instant::now();
+
+    let ret = match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
         .and_then(|rs| rs.deref_mut())
     {
@@ -323,7 +461,17 @@ pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIEL
             set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null"));
             ptr::null_mut()
         }
+    };
+
+    let fetch_duration = fetch_start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_taos_fetch_fields(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
@@ -394,7 +542,7 @@ pub unsafe extern "C" fn taos_print_row(
         let mut entry = FP_METRICS
             .entry(12345usize)
             .or_insert_with(|| FetchPrintMetrics::default());
-        entry.record_print(print_duration);
+        entry.record_taos_print_row(print_duration);
     }
 
     ret
