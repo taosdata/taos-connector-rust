@@ -610,11 +610,11 @@ pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mu
     let poll_end = Instant::now();
     let elapsed = poll_start.elapsed();
     {
-        // let key = tmq as usize;
-        // let mut entry = POLL_METRICS
-        //     .entry(key)
-        //     .or_insert_with(|| PollMetrics::new(key));
-        // entry.record(poll_start, poll_end);
+        let key = tmq as usize;
+        let mut entry = POLL_METRICS
+            .entry(key)
+            .or_insert_with(|| PollMetrics::new(key));
+        entry.record(poll_start, poll_end);
 
         let mut fp_entry = FP_METRICS
             .entry(12345usize)
@@ -1269,7 +1269,7 @@ pub unsafe extern "C" fn tmq_committed(
 pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_table_name start, res: {res:?}");
 
-    // let start = Instant::now();
+    let start = Instant::now();
 
     let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
@@ -1285,13 +1285,13 @@ pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char
         }
     };
 
-    // let fetch_duration = start.elapsed();
-    // {
-    //     let mut entry = FP_METRICS
-    //         .entry(12345usize)
-    //         .or_insert_with(|| FetchPrintMetrics::default());
-    //     entry.record_tmq_get_table_name(fetch_duration);
-    // }
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_table_name(fetch_duration);
+    }
 
     ret
 }
@@ -1311,7 +1311,7 @@ pub extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
 pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_topic_name start, res: {res:?}");
 
-    // let start = Instant::now();
+    let start = Instant::now();
 
     let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
@@ -1327,13 +1327,13 @@ pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char
         }
     };
 
-    // let fetch_duration = start.elapsed();
-    // {
-    //     let mut entry = FP_METRICS
-    //         .entry(12345usize)
-    //         .or_insert_with(|| FetchPrintMetrics::default());
-    //     entry.record_tmq_get_topic_name(fetch_duration);
-    // }
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_topic_name(fetch_duration);
+    }
 
     ret
 }
@@ -1342,7 +1342,7 @@ pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char
 pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_db_name start, res: {res:?}");
 
-    // let start = Instant::now();
+    let start = Instant::now();
 
     let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
@@ -1358,13 +1358,13 @@ pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
         }
     };
 
-    // let fetch_duration = start.elapsed();
-    // {
-    //     let mut entry = FP_METRICS
-    //         .entry(12345usize)
-    //         .or_insert_with(|| FetchPrintMetrics::default());
-    //     entry.record_tmq_get_db_name(fetch_duration);
-    // }
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_db_name(fetch_duration);
+    }
 
     ret
 }
@@ -1373,7 +1373,7 @@ pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
 pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
     debug!("tmq_get_vgroup_id start, res: {res:?}");
 
-    // let start = Instant::now();
+    let start = Instant::now();
 
     let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
@@ -1389,13 +1389,13 @@ pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
         }
     };
 
-    // let fetch_duration = start.elapsed();
-    // {
-    //     let mut entry = FP_METRICS
-    //         .entry(12345usize)
-    //         .or_insert_with(|| FetchPrintMetrics::default());
-    //     entry.record_tmq_get_vgroup_id(fetch_duration);
-    // }
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_vgroup_id(fetch_duration);
+    }
 
     ret
 }

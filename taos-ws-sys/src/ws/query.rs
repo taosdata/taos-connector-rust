@@ -394,7 +394,7 @@ pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
 pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
     debug!("taos_field_count start, res: {res:?}");
 
-    // let field_count_start = std::time::Instant::now();
+    let field_count_start = std::time::Instant::now();
 
     let ret = match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
@@ -411,13 +411,13 @@ pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
         }
     };
 
-    // let field_count_duration = field_count_start.elapsed();
-    // {
-    //     let mut entry = FP_METRICS
-    //         .entry(12345usize)
-    //         .or_insert_with(|| FetchPrintMetrics::default());
-    //     entry.record_taos_field_count(field_count_duration);
-    // }
+    let field_count_duration = field_count_start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_taos_field_count(field_count_duration);
+    }
 
     ret
 }
@@ -466,7 +466,7 @@ pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIELD {
     debug!("taos_fetch_fields start, res: {res:?}");
-    // let fetch_start = std::time::Instant::now();
+    let fetch_start = std::time::Instant::now();
 
     let ret = match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
@@ -483,13 +483,13 @@ pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIEL
         }
     };
 
-    // let fetch_duration = fetch_start.elapsed();
-    // {
-    //     let mut entry = FP_METRICS
-    //         .entry(12345usize)
-    //         .or_insert_with(|| FetchPrintMetrics::default());
-    //     entry.record_taos_fetch_fields(fetch_duration);
-    // }
+    let fetch_duration = fetch_start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_taos_fetch_fields(fetch_duration);
+    }
 
     ret
 }
