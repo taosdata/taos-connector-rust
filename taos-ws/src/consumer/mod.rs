@@ -268,6 +268,7 @@ struct WsMessageBase {
     message_id: MessageId,
     raw_blocks: Arc<Mutex<Option<VecDeque<RawBlock>>>>,
     tz: Option<Tz>,
+    raw_block_receiver: Arc<Mutex<Option<mpsc::Receiver<RawResult<RawBlock>>>>>,
 }
 
 impl WsMessageBase {
@@ -276,6 +277,7 @@ impl WsMessageBase {
         sender: WsTmqSender,
         message_id: MessageId,
         tz: Option<Tz>,
+        raw_block_receiver: Option<mpsc::Receiver<RawResult<RawBlock>>>,
     ) -> Self {
         Self {
             is_support_fetch_raw,
@@ -283,6 +285,7 @@ impl WsMessageBase {
             message_id,
             raw_blocks: Arc::new(Mutex::new(None)),
             tz,
+            raw_block_receiver: Arc::new(Mutex::new(raw_block_receiver)),
         }
     }
 
@@ -297,30 +300,50 @@ impl WsMessageBase {
     }
 
     async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
-        let raw_blocks_option = &mut *self.raw_blocks.lock().await;
-        if let Some(raw_blocks) = raw_blocks_option {
-            if !raw_blocks.is_empty() {
-                return Ok(raw_blocks.pop_front());
-            }
+        let raw_block_receiver = &mut *self.raw_block_receiver.lock().await;
+        if raw_block_receiver.is_none() {
             return Ok(None);
         }
 
-        let req_id = self.sender.req_id();
-        let msg = TmqSend::FetchRawData(MessageArgs {
-            req_id,
-            message_id: self.message_id,
-        });
-        let data = self.sender.send_recv(msg).await?;
+        // let now = Instant::now();
+        raw_block_receiver
+            .as_mut()
+            .unwrap()
+            .recv()
+            .await
+            .map(|res| {
+                res.map(|raw| {
+                    // self.metrics.time_cost_in_flume += now.elapsed();
+                    // self.timing = timing;
+                    raw
+                })
+            })
+            .transpose()
 
-        if let TmqRecvData::Bytes(bytes) = data {
-            let raw = RawBlock::parse_from_multi_raw_block(bytes)
-                .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
-            if !raw.is_empty() {
-                raw_blocks_option.replace(raw);
-                return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
-            }
-        }
-        Ok(None)
+        // let raw_blocks_option = &mut *self.raw_blocks.lock().await;
+        // if let Some(raw_blocks) = raw_blocks_option {
+        //     if !raw_blocks.is_empty() {
+        //         return Ok(raw_blocks.pop_front());
+        //     }
+        //     return Ok(None);
+        // }
+
+        // let req_id = self.sender.req_id();
+        // let msg = TmqSend::FetchRawData(MessageArgs {
+        //     req_id,
+        //     message_id: self.message_id,
+        // });
+        // let data = self.sender.send_recv(msg).await?;
+
+        // if let TmqRecvData::Bytes(bytes) = data {
+        //     let raw = RawBlock::parse_from_multi_raw_block(bytes)
+        //         .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
+        //     if !raw.is_empty() {
+        //         raw_blocks_option.replace(raw);
+        //         return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
+        //     }
+        // }
+        // Ok(None)
     }
 
     async fn fetch_raw_block_old(&self) -> RawResult<Option<RawBlock>> {
@@ -458,6 +481,42 @@ impl WsMessageSet {
     }
 }
 
+async fn fetch(
+    tmq_sender: WsTmqSender,
+    message_id: MessageId,
+    raw_block_sender: mpsc::Sender<Result<RawBlock, RawError>>,
+) {
+    tokio::spawn(
+        async move {
+            // loop {
+            let req_id = tmq_sender.req_id();
+            let msg = TmqSend::FetchRawData(MessageArgs { req_id, message_id });
+            // TODO: handle errors
+            let data = tmq_sender.send_recv(msg).await.unwrap();
+            if let TmqRecvData::Bytes(bytes) = data {
+                let blocks = RawBlock::parse_from_multi_raw_block(bytes)
+                    .map_err(|_| RawError::from_string("parse multi raw blocks error!"))
+                    // TODO: handle errors
+                    .unwrap();
+                // if blocks.is_empty() {
+                // break;
+                // }
+                for block in blocks {
+                    let _ = raw_block_sender.send(Ok(block)).await;
+                }
+                // if !raw.is_empty() {
+                //     raw_blocks_option.replace(raw);
+                //     return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
+                // }
+            }
+            drop(raw_block_sender);
+
+            // }
+        }
+        .in_current_span(),
+    );
+}
+
 impl Consumer {
     pub(crate) async fn poll_timeout(
         &self,
@@ -501,7 +560,7 @@ impl Consumer {
             if let Some(Some(data)) = guard.recv().await {
                 tracing::trace!("poll data from cache, data: {data:?}");
                 permit.send(None);
-                return Ok(self.parse_data(data));
+                return Ok(self.parse_data(data).await);
             }
         } else {
             let now = now();
@@ -511,7 +570,7 @@ impl Consumer {
                 if let Some(Some(data)) = guard.recv().await {
                     tracing::trace!("poll data wait cache, data: {data:?}");
                     permit.send(None);
-                    return Ok(self.parse_data(data));
+                    return Ok(self.parse_data(data).await);
                 }
             }
 
@@ -534,7 +593,7 @@ impl Consumer {
             "poll received data: {data:?}, elapsed: {}ms",
             now.elapsed().as_millis()
         );
-        Ok(self.parse_data(data))
+        Ok(self.parse_data(data).await)
     }
 
     async fn auto_commit(&self) {
@@ -563,7 +622,7 @@ impl Consumer {
         }
     }
 
-    fn parse_data(&self, data: TmqRecvData) -> Option<(Offset, MessageSet<Meta, Data>)> {
+    async fn parse_data(&self, data: TmqRecvData) -> Option<(Offset, MessageSet<Meta, Data>)> {
         if let TmqRecvData::Poll(TmqPoll {
             message_id,
             database,
@@ -601,26 +660,41 @@ impl Consumer {
 
             self.message_id.store(message_id, Ordering::Relaxed);
 
-            let message = WsMessageBase::new(
+            let meta_message = WsMessageBase::new(
                 self.support_fetch_raw(),
                 self.sender.clone(),
                 message_id,
                 self.tz,
+                None,
             );
 
+            let (raw_block_tx, raw_block_rx) = mpsc::channel(64);
+
+            let data_message = WsMessageBase::new(
+                self.support_fetch_raw(),
+                self.sender.clone(),
+                message_id,
+                self.tz,
+                Some(raw_block_rx),
+            );
+
+            fetch(self.sender.clone(), message_id, raw_block_tx).await;
+
             return match message_type {
-                MessageType::Meta => Some((offset, MessageSet::Meta(Meta(message)))),
-                MessageType::Data => Some((offset, MessageSet::Data(Data(message)))),
+                MessageType::Meta => Some((offset, MessageSet::Meta(Meta(meta_message)))),
+                MessageType::Data => Some((offset, MessageSet::Data(Data(data_message)))),
                 MessageType::MetaData => Some((
                     offset,
                     MessageSet::MetaData(
-                        Meta(message),
-                        Data(WsMessageBase::new(
-                            self.support_fetch_raw(),
-                            self.sender.clone(),
-                            message_id,
-                            self.tz,
-                        )),
+                        Meta(meta_message),
+                        Data(
+                            data_message, //     WsMessageBase::new(
+                                          //     self.support_fetch_raw(),
+                                          //     self.sender.clone(),
+                                          //     message_id,
+                                          //     self.tz,
+                                          // )
+                        ),
                     ),
                 )),
                 MessageType::Invalid => unreachable!(),
@@ -2373,6 +2447,7 @@ mod tests {
         Ok(())
     }
 
+    // test
     #[tokio::test]
     async fn test_poll() -> anyhow::Result<()> {
         use taos_query::prelude::*;
