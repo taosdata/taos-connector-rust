@@ -326,110 +326,110 @@ impl FetchPrintMetrics {
     }
 }
 
-impl Drop for FetchPrintMetrics {
-    fn drop(&mut self) {
-        let avg_taos_fetch_row = if self.taos_fetch_row_count > 0 {
-            self.taos_fetch_row_total / self.taos_fetch_row_count as u32
-        } else {
-            Duration::ZERO
-        };
+// impl Drop for FetchPrintMetrics {
+//     fn drop(&mut self) {
+//         let avg_taos_fetch_row = if self.taos_fetch_row_count > 0 {
+//             self.taos_fetch_row_total / self.taos_fetch_row_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
 
-        let avg_taos_print_row = if self.taos_print_row_count > 0 {
-            self.taos_print_row_total / self.taos_print_row_count as u32
-        } else {
-            Duration::ZERO
-        };
+//         let avg_taos_print_row = if self.taos_print_row_count > 0 {
+//             self.taos_print_row_total / self.taos_print_row_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
 
-        let avg_taos_fetch_fields = if self.taos_fetch_fields_count > 0 {
-            self.taos_fetch_fields_total / self.taos_fetch_fields_count as u32
-        } else {
-            Duration::ZERO
-        };
+//         let avg_taos_fetch_fields = if self.taos_fetch_fields_count > 0 {
+//             self.taos_fetch_fields_total / self.taos_fetch_fields_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
 
-        let avg_taos_field_count = if self.taos_field_count_count > 0 {
-            self.taos_field_count_total / self.taos_field_count_count as u32
-        } else {
-            Duration::ZERO
-        };
+//         let avg_taos_field_count = if self.taos_field_count_count > 0 {
+//             self.taos_field_count_total / self.taos_field_count_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
 
-        let avg_tmq_get_vgroup_id = if self.tmq_get_vgroup_id_count > 0 {
-            self.tmq_get_vgroup_id_total / self.tmq_get_vgroup_id_count as u32
-        } else {
-            Duration::ZERO
-        };
+//         let avg_tmq_get_vgroup_id = if self.tmq_get_vgroup_id_count > 0 {
+//             self.tmq_get_vgroup_id_total / self.tmq_get_vgroup_id_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
 
-        let avg_tmq_get_db_name = if self.tmq_get_db_name_count > 0 {
-            self.tmq_get_db_name_total / self.tmq_get_db_name_count as u32
-        } else {
-            Duration::ZERO
-        };
+//         let avg_tmq_get_db_name = if self.tmq_get_db_name_count > 0 {
+//             self.tmq_get_db_name_total / self.tmq_get_db_name_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
 
-        let avg_tmq_get_table_name = if self.tmq_get_table_name_count > 0 {
-            self.tmq_get_table_name_total / self.tmq_get_table_name_count as u32
-        } else {
-            Duration::ZERO
-        };
+//         let avg_tmq_get_table_name = if self.tmq_get_table_name_count > 0 {
+//             self.tmq_get_table_name_total / self.tmq_get_table_name_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
 
-        let avg_tmq_get_topic_name = if self.tmq_get_topic_name_count > 0 {
-            self.tmq_get_topic_name_total / self.tmq_get_topic_name_count as u32
-        } else {
-            Duration::ZERO
-        };
+//         let avg_tmq_get_topic_name = if self.tmq_get_topic_name_count > 0 {
+//             self.tmq_get_topic_name_total / self.tmq_get_topic_name_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
 
-        let avg_tmq_poll = if self.tmq_poll_count > 0 {
-            self.tmq_poll_total / self.tmq_poll_count as u32
-        } else {
-            Duration::ZERO
-        };
+//         let avg_tmq_poll = if self.tmq_poll_count > 0 {
+//             self.tmq_poll_total / self.tmq_poll_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
 
-        let total_time = match (self.tmq_poll_first_time, self.tmq_poll_last_time) {
-            (Some(first), Some(last)) => last.checked_duration_since(first).unwrap_or_default(),
-            _ => Duration::ZERO,
-        };
+//         let total_time = match (self.tmq_poll_first_time, self.tmq_poll_last_time) {
+//             (Some(first), Some(last)) => last.checked_duration_since(first).unwrap_or_default(),
+//             _ => Duration::ZERO,
+//         };
 
-        tracing::warn!(
-            "FetchPrintMetrics: \
-            taos_fetch_row_count={}, total_taos_fetch_row={:?}, avg_taos_fetch_row={:?}, \
-            taos_print_row_count={}, total_taos_print_row={:?}, avg_taos_print_row={:?}, \
-            taos_fetch_fields_count={}, total_taos_fetch_fields={:?}, avg_taos_fetch_fields={:?}, \
-            taos_field_count_count={}, total_taos_field_count={:?}, avg_taos_field_count={:?}, \
-            tmq_get_vgroup_id_count={}, total_tmq_get_vgroup_id={:?}, avg_tmq_get_vgroup_id={:?}, \
-            tmq_get_db_name_count={}, total_tmq_get_db_name={:?}, avg_tmq_get_db_name={:?}, \
-            tmq_get_table_name_count={}, total_tmq_get_table_name={:?}, avg_tmq_get_table_name={:?}, \
-            tmq_get_topic_name_count={}, total_tmq_get_topic_name={:?}, avg_tmq_get_topic_name={:?}, \
-            tmq_poll_count={}, total_tmq_poll={:?}, avg_tmq_poll={:?}, \
-            total_time={:?}",
-            self.taos_fetch_row_count,
-            self.taos_fetch_row_total,
-            avg_taos_fetch_row,
-            self.taos_print_row_count,
-            self.taos_print_row_total,
-            avg_taos_print_row,
-            self.taos_fetch_fields_count,
-            self.taos_fetch_fields_total,
-            avg_taos_fetch_fields,
-            self.taos_field_count_count,
-            self.taos_field_count_total,
-            avg_taos_field_count,
-            self.tmq_get_vgroup_id_count,
-            self.tmq_get_vgroup_id_total,
-            avg_tmq_get_vgroup_id,
-            self.tmq_get_db_name_count,
-            self.tmq_get_db_name_total,
-            avg_tmq_get_db_name,
-            self.tmq_get_table_name_count,
-            self.tmq_get_table_name_total,
-            avg_tmq_get_table_name,
-            self.tmq_get_topic_name_count,
-            self.tmq_get_topic_name_total,
-            avg_tmq_get_topic_name,
-            self.tmq_poll_count,
-            self.tmq_poll_total,
-            avg_tmq_poll,
-            total_time
-        );
-    }
-}
+//         tracing::warn!(
+//             "FetchPrintMetrics: \
+//             taos_fetch_row_count={}, total_taos_fetch_row={:?}, avg_taos_fetch_row={:?}, \
+//             taos_print_row_count={}, total_taos_print_row={:?}, avg_taos_print_row={:?}, \
+//             taos_fetch_fields_count={}, total_taos_fetch_fields={:?}, avg_taos_fetch_fields={:?}, \
+//             taos_field_count_count={}, total_taos_field_count={:?}, avg_taos_field_count={:?}, \
+//             tmq_get_vgroup_id_count={}, total_tmq_get_vgroup_id={:?}, avg_tmq_get_vgroup_id={:?}, \
+//             tmq_get_db_name_count={}, total_tmq_get_db_name={:?}, avg_tmq_get_db_name={:?}, \
+//             tmq_get_table_name_count={}, total_tmq_get_table_name={:?}, avg_tmq_get_table_name={:?}, \
+//             tmq_get_topic_name_count={}, total_tmq_get_topic_name={:?}, avg_tmq_get_topic_name={:?}, \
+//             tmq_poll_count={}, total_tmq_poll={:?}, avg_tmq_poll={:?}, \
+//             total_time={:?}",
+//             self.taos_fetch_row_count,
+//             self.taos_fetch_row_total,
+//             avg_taos_fetch_row,
+//             self.taos_print_row_count,
+//             self.taos_print_row_total,
+//             avg_taos_print_row,
+//             self.taos_fetch_fields_count,
+//             self.taos_fetch_fields_total,
+//             avg_taos_fetch_fields,
+//             self.taos_field_count_count,
+//             self.taos_field_count_total,
+//             avg_taos_field_count,
+//             self.tmq_get_vgroup_id_count,
+//             self.tmq_get_vgroup_id_total,
+//             avg_tmq_get_vgroup_id,
+//             self.tmq_get_db_name_count,
+//             self.tmq_get_db_name_total,
+//             avg_tmq_get_db_name,
+//             self.tmq_get_table_name_count,
+//             self.tmq_get_table_name_total,
+//             avg_tmq_get_table_name,
+//             self.tmq_get_topic_name_count,
+//             self.tmq_get_topic_name_total,
+//             avg_tmq_get_topic_name,
+//             self.tmq_poll_count,
+//             self.tmq_poll_total,
+//             avg_tmq_poll,
+//             total_time
+//         );
+//     }
+// }
 
 pub static FP_METRICS: Lazy<DashMap<usize, FetchPrintMetrics>> = Lazy::new(DashMap::new);
 
@@ -709,6 +709,9 @@ pub unsafe extern "C" fn taos_print_row_with_size(
     let mut len: usize = 0;
     let mut size = (size - 1) as usize;
 
+    let mut itoa_buf = itoa::Buffer::new();
+    let mut ryu_buf = ryu::Buffer::new();
+
     for i in 0..num_fields as usize {
         if i > 0 && size > 0 {
             *str.add(len) = ' ' as c_char;
@@ -725,29 +728,68 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                     write_to_cstr(
                         &mut size,
                         str.add(len as usize),
-                        format!("{value}").as_str().as_bytes(),
+                        // format!("{value}").as_str().as_bytes(),
+                        itoa_buf.format(value).as_bytes(),
                     )
                 }};
             }
 
             match Ty::from(fields[i].r#type) {
                 Ty::TinyInt => read_and_write!(i8),
+                // Ty::TinyInt => {
+                // let value = ptr::read_unaligned(row[i] as *const i8);
+                // let mut buf = itoa::Buffer::new();
+                // write_to_cstr(&mut size, str.add(len), buf.format(value).as_bytes())
+                // }
                 Ty::UTinyInt => read_and_write!(u8),
                 Ty::SmallInt => read_and_write!(i16),
                 Ty::USmallInt => read_and_write!(u16),
                 Ty::Int => read_and_write!(i32),
+                // Ty::Int => {
+                //     let value = ptr::read_unaligned(row[i] as *const i32);
+                //     let mut buf = itoa::Buffer::new();
+                //     write_to_cstr(&mut size, str.add(len), buf.format(value).as_bytes())
+                // }
                 Ty::UInt => read_and_write!(u32),
                 Ty::BigInt | Ty::Timestamp => read_and_write!(i64),
                 Ty::UBigInt => read_and_write!(u64),
-                Ty::Float => read_and_write!(f32),
-                Ty::Double => read_and_write!(f64),
-                Ty::Bool => {
-                    let value = ptr::read_unaligned(row[i] as *const bool);
+                // Ty::Float => read_and_write!(f32),
+                // Ty::Double => read_and_write!(f64),
+                Ty::Float => {
+                    let value = ptr::read_unaligned(row[i] as *const f32);
                     write_to_cstr(
                         &mut size,
                         str.add(len),
-                        format!("{}", value as i32).as_str().as_bytes(),
+                        // TODO: use format or format_finite
+                        ryu_buf.format_finite(value).as_bytes(),
                     )
+                }
+                Ty::Double => {
+                    let value = ptr::read_unaligned(row[i] as *const f64);
+                    write_to_cstr(
+                        &mut size,
+                        str.add(len),
+                        ryu_buf.format_finite(value).as_bytes(),
+                    )
+                }
+                // Ty::Bool => {
+                //     let value = ptr::read_unaligned(row[i] as *const bool);
+                //     write_to_cstr(
+                //         &mut size,
+                //         str.add(len),
+                //         format!("{}", value as i32).as_str().as_bytes(),
+                //     )
+                // }
+                Ty::Bool => {
+                    let value = ptr::read_unaligned(row[i] as *const bool);
+                    // let b = if value { b"true" } else { b"false" };
+                    let b = if value { b"1" } else { b"0" };
+                    write_to_cstr(&mut size, str.add(len), b)
+                    // if value {
+                    //     write_to_cstr(&mut size, str.add(len), b"true")
+                    // } else {
+                    //     write_to_cstr(&mut size, str.add(len), b"false")
+                    // }
                 }
                 Ty::VarBinary => {
                     let data = row[i].offset(-2) as *const InlineBytes;
@@ -3568,4 +3610,13 @@ mod tests {
             taos_close(taos);
         }
     }
+}
+
+#[test]
+fn test_iota() {
+    let mut buf = itoa::Buffer::new();
+    let s = buf.format(1234567890);
+    dbg!(s);
+    let s = buf.format(12345);
+    dbg!(s);
 }
