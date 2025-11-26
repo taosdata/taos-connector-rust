@@ -155,6 +155,8 @@ pub struct FetchPrintMetrics {
     tmq_get_topic_name_count: u64,
     tmq_poll_total: Duration,
     tmq_poll_count: u64,
+    tmq_poll_first_time: Option<std::time::Instant>,
+    tmq_poll_last_time: Option<std::time::Instant>,
 }
 
 impl FetchPrintMetrics {
@@ -201,6 +203,16 @@ impl FetchPrintMetrics {
     pub fn record_tmq_poll(&mut self, d: Duration) {
         self.tmq_poll_total += d;
         self.tmq_poll_count += 1;
+    }
+
+    pub fn record_first_tmq_poll(&mut self, d: std::time::Instant) {
+        if self.tmq_poll_first_time.is_none() {
+            self.tmq_poll_first_time = Some(d);
+        }
+    }
+
+    pub fn record_last_tmq_poll(&mut self, d: std::time::Instant) {
+        self.tmq_poll_last_time = Some(d);
     }
 }
 
@@ -260,8 +272,14 @@ impl Drop for FetchPrintMetrics {
             Duration::ZERO
         };
 
+        let total_time = match (self.tmq_poll_first_time, self.tmq_poll_last_time) {
+            (Some(first), Some(last)) => last.checked_duration_since(first).unwrap_or_default(),
+            _ => Duration::ZERO,
+        };
+
         tracing::warn!(
-            "FetchPrintMetrics: taos_fetch_row_count={}, total_taos_fetch_row={:?}, avg_taos_fetch_row={:?}, \
+            "FetchPrintMetrics: \
+            taos_fetch_row_count={}, total_taos_fetch_row={:?}, avg_taos_fetch_row={:?}, \
             taos_print_row_count={}, total_taos_print_row={:?}, avg_taos_print_row={:?}, \
             taos_fetch_fields_count={}, total_taos_fetch_fields={:?}, avg_taos_fetch_fields={:?}, \
             taos_field_count_count={}, total_taos_field_count={:?}, avg_taos_field_count={:?}, \
@@ -269,7 +287,8 @@ impl Drop for FetchPrintMetrics {
             tmq_get_db_name_count={}, total_tmq_get_db_name={:?}, avg_tmq_get_db_name={:?}, \
             tmq_get_table_name_count={}, total_tmq_get_table_name={:?}, avg_tmq_get_table_name={:?}, \
             tmq_get_topic_name_count={}, total_tmq_get_topic_name={:?}, avg_tmq_get_topic_name={:?}, \
-            tmq_poll_count={}, total_tmq_poll={:?}, avg_tmq_poll={:?}",
+            tmq_poll_count={}, total_tmq_poll={:?}, avg_tmq_poll={:?}, \
+            total_time={:?}",
             self.taos_fetch_row_count,
             self.taos_fetch_row_total,
             avg_taos_fetch_row,
@@ -296,7 +315,8 @@ impl Drop for FetchPrintMetrics {
             avg_tmq_get_topic_name,
             self.tmq_poll_count,
             self.tmq_poll_total,
-            avg_tmq_poll
+            avg_tmq_poll,
+            total_time
         );
     }
 }
@@ -374,7 +394,7 @@ pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
 pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
     debug!("taos_field_count start, res: {res:?}");
 
-    let field_count_start = std::time::Instant::now();
+    // let field_count_start = std::time::Instant::now();
 
     let ret = match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
@@ -391,13 +411,13 @@ pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
         }
     };
 
-    let field_count_duration = field_count_start.elapsed();
-    {
-        let mut entry = FP_METRICS
-            .entry(12345usize)
-            .or_insert_with(|| FetchPrintMetrics::default());
-        entry.record_taos_field_count(field_count_duration);
-    }
+    // let field_count_duration = field_count_start.elapsed();
+    // {
+    //     let mut entry = FP_METRICS
+    //         .entry(12345usize)
+    //         .or_insert_with(|| FetchPrintMetrics::default());
+    //     entry.record_taos_field_count(field_count_duration);
+    // }
 
     ret
 }
@@ -446,7 +466,7 @@ pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIELD {
     debug!("taos_fetch_fields start, res: {res:?}");
-    let fetch_start = std::time::Instant::now();
+    // let fetch_start = std::time::Instant::now();
 
     let ret = match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
@@ -463,13 +483,13 @@ pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIEL
         }
     };
 
-    let fetch_duration = fetch_start.elapsed();
-    {
-        let mut entry = FP_METRICS
-            .entry(12345usize)
-            .or_insert_with(|| FetchPrintMetrics::default());
-        entry.record_taos_fetch_fields(fetch_duration);
-    }
+    // let fetch_duration = fetch_start.elapsed();
+    // {
+    //     let mut entry = FP_METRICS
+    //         .entry(12345usize)
+    //         .or_insert_with(|| FetchPrintMetrics::default());
+    //     entry.record_taos_fetch_fields(fetch_duration);
+    // }
 
     ret
 }
