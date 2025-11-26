@@ -157,6 +157,7 @@ pub struct FetchPrintMetrics {
     tmq_poll_count: u64,
     tmq_poll_first_time: Option<std::time::Instant>,
     tmq_poll_last_time: Option<std::time::Instant>,
+    is_print: bool,
 }
 
 impl FetchPrintMetrics {
@@ -213,6 +214,115 @@ impl FetchPrintMetrics {
 
     pub fn record_last_tmq_poll(&mut self, d: std::time::Instant) {
         self.tmq_poll_last_time = Some(d);
+    }
+
+    pub fn print(&mut self) {
+        if self.is_print {
+            return;
+        }
+
+        self.is_print = true;
+
+        let avg_taos_fetch_row = if self.taos_fetch_row_count > 0 {
+            self.taos_fetch_row_total / self.taos_fetch_row_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_taos_print_row = if self.taos_print_row_count > 0 {
+            self.taos_print_row_total / self.taos_print_row_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_taos_fetch_fields = if self.taos_fetch_fields_count > 0 {
+            self.taos_fetch_fields_total / self.taos_fetch_fields_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_taos_field_count = if self.taos_field_count_count > 0 {
+            self.taos_field_count_total / self.taos_field_count_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_vgroup_id = if self.tmq_get_vgroup_id_count > 0 {
+            self.tmq_get_vgroup_id_total / self.tmq_get_vgroup_id_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_db_name = if self.tmq_get_db_name_count > 0 {
+            self.tmq_get_db_name_total / self.tmq_get_db_name_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_table_name = if self.tmq_get_table_name_count > 0 {
+            self.tmq_get_table_name_total / self.tmq_get_table_name_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_topic_name = if self.tmq_get_topic_name_count > 0 {
+            self.tmq_get_topic_name_total / self.tmq_get_topic_name_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_poll = if self.tmq_poll_count > 0 {
+            self.tmq_poll_total / self.tmq_poll_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let total_time = match (self.tmq_poll_first_time, self.tmq_poll_last_time) {
+            (Some(first), Some(last)) => last.checked_duration_since(first).unwrap_or_default(),
+            _ => Duration::ZERO,
+        };
+
+        tracing::warn!(
+            "FetchPrintMetrics: \
+            taos_fetch_row_count={}, total_taos_fetch_row={:?}, avg_taos_fetch_row={:?}, \
+            taos_print_row_count={}, total_taos_print_row={:?}, avg_taos_print_row={:?}, \
+            taos_fetch_fields_count={}, total_taos_fetch_fields={:?}, avg_taos_fetch_fields={:?}, \
+            taos_field_count_count={}, total_taos_field_count={:?}, avg_taos_field_count={:?}, \
+            tmq_get_vgroup_id_count={}, total_tmq_get_vgroup_id={:?}, avg_tmq_get_vgroup_id={:?}, \
+            tmq_get_db_name_count={}, total_tmq_get_db_name={:?}, avg_tmq_get_db_name={:?}, \
+            tmq_get_table_name_count={}, total_tmq_get_table_name={:?}, avg_tmq_get_table_name={:?}, \
+            tmq_get_topic_name_count={}, total_tmq_get_topic_name={:?}, avg_tmq_get_topic_name={:?}, \
+            tmq_poll_count={}, total_tmq_poll={:?}, avg_tmq_poll={:?}, \
+            total_time={:?}",
+            self.taos_fetch_row_count,
+            self.taos_fetch_row_total,
+            avg_taos_fetch_row,
+            self.taos_print_row_count,
+            self.taos_print_row_total,
+            avg_taos_print_row,
+            self.taos_fetch_fields_count,
+            self.taos_fetch_fields_total,
+            avg_taos_fetch_fields,
+            self.taos_field_count_count,
+            self.taos_field_count_total,
+            avg_taos_field_count,
+            self.tmq_get_vgroup_id_count,
+            self.tmq_get_vgroup_id_total,
+            avg_tmq_get_vgroup_id,
+            self.tmq_get_db_name_count,
+            self.tmq_get_db_name_total,
+            avg_tmq_get_db_name,
+            self.tmq_get_table_name_count,
+            self.tmq_get_table_name_total,
+            avg_tmq_get_table_name,
+            self.tmq_get_topic_name_count,
+            self.tmq_get_topic_name_total,
+            avg_tmq_get_topic_name,
+            self.tmq_poll_count,
+            self.tmq_poll_total,
+            avg_tmq_poll,
+            total_time
+        );
     }
 }
 

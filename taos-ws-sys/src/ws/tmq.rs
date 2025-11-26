@@ -707,8 +707,8 @@ pub extern "C" fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
     }
 
     let key = 12345usize;
-    if let Some((_k, metrics)) = FP_METRICS.remove(&key) {
-        drop(metrics);
+    if let Some((_k, mut metrics)) = FP_METRICS.remove(&key) {
+        metrics.print();
     }
 
     let _ = unsafe { Box::from_raw(tmq as *mut TaosMaybeError<Tmq>) };
