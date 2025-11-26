@@ -1,0 +1,5 @@
+taos_print_row 性能优化
+
+1. 使用 itoa and ryu crate 优化整数和浮点数
+2. 优化 bool
+1 + 2 单线程从 360s -> 330s

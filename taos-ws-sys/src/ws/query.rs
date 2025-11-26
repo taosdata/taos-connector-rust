@@ -794,14 +794,30 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                 Ty::VarBinary => {
                     let data = row[i].offset(-2) as *const InlineBytes;
                     let data = Bytes::from((*data).as_bytes());
-                    let content = format!("\\x{}", hex::bytes_to_hex_string_upper(data));
-                    write_to_cstr(&mut size, str.add(len), content.as_bytes())
+                    let hex_str = hex::bytes_to_hex_string_upper(data);
+                    let mut buf = Vec::with_capacity(2 + hex_str.len());
+                    buf.extend_from_slice(b"\\x");
+                    buf.extend_from_slice(hex_str.as_bytes());
+                    write_to_cstr(&mut size, str.add(len), &buf)
+
+                    // let data = row[i].offset(-2) as *const InlineBytes;
+                    // let data = Bytes::from((*data).as_bytes());
+                    // let content = format!("\\x{}", hex::bytes_to_hex_string_upper(data));
+                    // write_to_cstr(&mut size, str.add(len), content.as_bytes())
                 }
                 Ty::Blob => {
                     let data = row[i].offset(-4) as *const InlineBytes<u32>;
                     let data = Bytes::from((*data).as_bytes());
-                    let content = format!("\\x{}", hex::bytes_to_hex_string_upper(data));
-                    write_to_cstr(&mut size, str.add(len), content.as_bytes())
+                    let hex_str = hex::bytes_to_hex_string_upper(data);
+                    let mut buf = Vec::with_capacity(2 + hex_str.len());
+                    buf.extend_from_slice(b"\\x");
+                    buf.extend_from_slice(hex_str.as_bytes());
+                    write_to_cstr(&mut size, str.add(len), &buf)
+
+                    // let data = row[i].offset(-4) as *const InlineBytes<u32>;
+                    // let data = Bytes::from((*data).as_bytes());
+                    // let content = format!("\\x{}", hex::bytes_to_hex_string_upper(data));
+                    // write_to_cstr(&mut size, str.add(len), content.as_bytes())
                 }
                 Ty::Geometry => {
                     let data = row[i].offset(-2) as *const InlineBytes;
