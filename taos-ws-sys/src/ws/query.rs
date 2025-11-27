@@ -303,7 +303,7 @@ impl FetchPrintMetrics {
             tmq_get_table_name_count={}, total_tmq_get_table_name={:?}, avg_tmq_get_table_name={:?}, \
             tmq_get_topic_name_count={}, total_tmq_get_topic_name={:?}, avg_tmq_get_topic_name={:?}, \
             tmq_poll_count={}, total_tmq_poll={:?}, avg_tmq_poll={:?}, \
-            total_time={:?}",
+            total_time={:?}, poll_time={:?}, fetch_block_time={:?}",
             self.taos_fetch_row_count,
             self.taos_fetch_row_total,
             avg_taos_fetch_row,
@@ -331,7 +331,9 @@ impl FetchPrintMetrics {
             self.tmq_poll_count,
             self.tmq_poll_total,
             avg_tmq_poll,
-            total_time
+            total_time,
+            self.poll_time,
+            self.fetch_block_time
         );
     }
 }
