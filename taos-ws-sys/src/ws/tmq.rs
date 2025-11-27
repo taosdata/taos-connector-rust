@@ -662,7 +662,16 @@ unsafe fn consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Option<
                     }
                 }
 
+                let start = Instant::now();
                 let res = consumer.recv_timeout(timeout)?;
+                let elapsed = start.elapsed();
+                {
+                    let mut fp_entry = FP_METRICS
+                        .entry(12345usize)
+                        .or_insert_with(|| FetchPrintMetrics::default());
+                    fp_entry.record_poll_time(elapsed);
+                }
+
                 match res {
                     Some((offset, message_set)) => {
                         if tmq.auto_commit {
@@ -678,7 +687,18 @@ unsafe fn consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Option<
                         }
 
                         let data = message_set.into_data().unwrap();
-                        match data.fetch_raw_block()? {
+
+                        let start = Instant::now();
+                        let block = data.fetch_raw_block()?;
+                        let elapsed = start.elapsed();
+                        {
+                            let mut fp_entry = FP_METRICS
+                                .entry(12345usize)
+                                .or_insert_with(|| FetchPrintMetrics::default());
+                            fp_entry.record_fetch_block_time(elapsed);
+                        }
+
+                        match block {
                             Some(block) => {
                                 Ok(Some(ResultSet::Tmq(TmqResultSet::new(block, offset, data))))
                             }

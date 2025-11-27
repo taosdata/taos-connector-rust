@@ -158,6 +158,8 @@ pub struct FetchPrintMetrics {
     tmq_poll_first_time: Option<std::time::Instant>,
     tmq_poll_last_time: Option<std::time::Instant>,
     is_print: bool,
+    poll_time: Duration,
+    fetch_block_time: Duration,
 }
 
 impl FetchPrintMetrics {
@@ -214,6 +216,14 @@ impl FetchPrintMetrics {
 
     pub fn record_last_tmq_poll(&mut self, d: std::time::Instant) {
         self.tmq_poll_last_time = Some(d);
+    }
+
+    pub fn record_poll_time(&mut self, d: Duration) {
+        self.poll_time += d;
+    }
+
+    pub fn record_fetch_block_time(&mut self, d: Duration) {
+        self.fetch_block_time += d;
     }
 
     pub fn print(&mut self) {
