@@ -299,48 +299,21 @@ impl WsMessageBase {
         Ok(block.map(|b| b.with_timezone(self.tz)))
     }
 
-    async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
-        let raw_blocks_option = &mut *self.raw_blocks.lock().await;
-        if let Some(raw_blocks) = raw_blocks_option {
-            if !raw_blocks.is_empty() {
-                return Ok(raw_blocks.pop_front());
-            }
-            return Ok(None);
+    async fn fetch_raw_block_new_(&mut self) -> RawResult<Option<VecDeque<RawBlock>>> {
+        let msg = TmqSend::FetchRawData(MessageArgs {
+            req_id: self.sender.req_id(),
+            message_id: self.message_id,
+        });
+        let data = self.sender.send_recv(msg).await?;
+        if let TmqRecvData::Bytes(bytes) = data {
+            let blocks = RawBlock::parse_from_multi_raw_block(bytes)
+                .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
+            return Ok(Some(blocks));
         }
-
-        let raw_block_receiver = &mut *self.raw_block_receiver.lock().await;
-        if let Some(receiver) = raw_block_receiver {
-            let raw_blocks = receiver.recv().await;
-            if let Some(raw_blocks) = raw_blocks {
-                let raw_blocks = raw_blocks?;
-                if !raw_blocks.is_empty() {
-                    raw_blocks_option.replace(raw_blocks);
-                    return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
-                }
-            }
-        }
-
         Ok(None)
+    }
 
-        // if raw_block_receiver.is_none() {
-        //     return Ok(None);
-        // }
-
-        // let now = Instant::now();
-        // raw_block_receiver
-        //     .as_mut()
-        //     .unwrap()
-        //     .recv()
-        //     .await
-        //     .map(|res| {
-        //         res.map(|raw| {
-        //             // self.metrics.time_cost_in_flume += now.elapsed();
-        //             // self.timing = timing;
-        //             raw
-        //         })
-        //     })
-        //     .transpose()
-
+    async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
         // let raw_blocks_option = &mut *self.raw_blocks.lock().await;
         // if let Some(raw_blocks) = raw_blocks_option {
         //     if !raw_blocks.is_empty() {
@@ -349,22 +322,44 @@ impl WsMessageBase {
         //     return Ok(None);
         // }
 
-        // let req_id = self.sender.req_id();
-        // let msg = TmqSend::FetchRawData(MessageArgs {
-        //     req_id,
-        //     message_id: self.message_id,
-        // });
-        // let data = self.sender.send_recv(msg).await?;
-
-        // if let TmqRecvData::Bytes(bytes) = data {
-        //     let raw = RawBlock::parse_from_multi_raw_block(bytes)
-        //         .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
-        //     if !raw.is_empty() {
-        //         raw_blocks_option.replace(raw);
-        //         return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
+        // let raw_block_receiver = &mut *self.raw_block_receiver.lock().await;
+        // if let Some(receiver) = raw_block_receiver {
+        //     let raw_blocks = receiver.recv().await;
+        //     if let Some(raw_blocks) = raw_blocks {
+        //         let raw_blocks = raw_blocks?;
+        //         if !raw_blocks.is_empty() {
+        //             raw_blocks_option.replace(raw_blocks);
+        //             return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
+        //         }
         //     }
         // }
+
         // Ok(None)
+
+        let raw_blocks_option = &mut *self.raw_blocks.lock().await;
+        if let Some(raw_blocks) = raw_blocks_option {
+            if !raw_blocks.is_empty() {
+                return Ok(raw_blocks.pop_front());
+            }
+            return Ok(None);
+        }
+
+        let req_id = self.sender.req_id();
+        let msg = TmqSend::FetchRawData(MessageArgs {
+            req_id,
+            message_id: self.message_id,
+        });
+        let data = self.sender.send_recv(msg).await?;
+
+        if let TmqRecvData::Bytes(bytes) = data {
+            let raw = RawBlock::parse_from_multi_raw_block(bytes)
+                .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
+            if !raw.is_empty() {
+                raw_blocks_option.replace(raw);
+                return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
+            }
+        }
+        Ok(None)
     }
 
     async fn fetch_raw_block_old(&self) -> RawResult<Option<RawBlock>> {
@@ -457,6 +452,10 @@ impl Data {
     pub async fn fetch_block(&self) -> RawResult<Option<RawBlock>> {
         self.0.fetch_raw_block().await
     }
+
+    pub async fn fetch_block_new(&mut self) -> RawResult<Option<VecDeque<RawBlock>>> {
+        self.0.fetch_raw_block_new_().await
+    }
 }
 
 impl Iterator for Data {
@@ -485,6 +484,10 @@ impl IsData for Data {
 
     fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>> {
         taos_query::block_in_place_or_global(self.fetch_block())
+    }
+
+    fn fetch_raw_block_new(&mut self) -> RawResult<Option<VecDeque<RawBlock>>> {
+        taos_query::block_in_place_or_global(self.fetch_block_new())
     }
 }
 
@@ -699,7 +702,7 @@ impl Consumer {
                 Some(raw_block_rx),
             );
 
-            fetch(self.sender.clone(), message_id, raw_block_tx).await;
+            // fetch(self.sender.clone(), message_id, raw_block_tx).await;
 
             return match message_type {
                 MessageType::Meta => Some((offset, MessageSet::Meta(Meta(meta_message)))),

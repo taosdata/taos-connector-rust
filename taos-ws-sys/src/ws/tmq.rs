@@ -690,6 +690,8 @@ unsafe fn consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Option<
 
                         let start = Instant::now();
                         let block = data.fetch_raw_block()?;
+                        // let blocks = data.fetch_raw_block_new()?;
+
                         let elapsed = start.elapsed();
                         {
                             let mut fp_entry = FP_METRICS
@@ -1456,6 +1458,7 @@ pub unsafe extern "C" fn tmq_err2str(code: i32) -> *const c_char {
 #[derive(Debug)]
 pub struct TmqResultSet {
     block: Option<Block>,
+    // blocks: Vec<Block>,
     fields: Vec<TAOS_FIELD>,
     num_of_fields: i32,
     precision: Precision,

@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -207,6 +208,7 @@ pub trait IsAsyncData {
 pub trait IsData {
     fn as_raw_data(&self) -> RawResult<RawData>;
     fn fetch_raw_block(&self) -> RawResult<Option<RawBlock>>;
+    fn fetch_raw_block_new(&mut self) -> RawResult<Option<VecDeque<RawBlock>>>;
 }
 
 #[async_trait::async_trait]
