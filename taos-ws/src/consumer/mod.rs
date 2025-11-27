@@ -360,11 +360,19 @@ impl WsMessageBase {
             req_id,
             message_id: self.message_id,
         });
+
+        let t0 = std::time::Instant::now();
         let data = self.sender.send_recv(msg).await?;
+        let elapsed = t0.elapsed().as_millis() as u64;
+        SEND_RECV_TOTAL.fetch_add(elapsed, Ordering::Relaxed);
 
         if let TmqRecvData::Bytes(bytes) = data {
+            let t0 = std::time::Instant::now();
             let raw = RawBlock::parse_from_multi_raw_block(bytes)
                 .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
+            let elapsed = t0.elapsed().as_millis() as u64;
+            PARSE_BLOCK_TOTAL.fetch_add(elapsed, Ordering::Relaxed);
+
             if !raw.is_empty() {
                 raw_blocks_option.replace(raw);
                 return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
