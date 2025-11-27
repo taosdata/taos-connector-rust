@@ -268,7 +268,7 @@ struct WsMessageBase {
     message_id: MessageId,
     raw_blocks: Arc<Mutex<Option<VecDeque<RawBlock>>>>,
     tz: Option<Tz>,
-    raw_block_receiver: Arc<Mutex<Option<mpsc::Receiver<RawResult<RawBlock>>>>>,
+    raw_block_receiver: Arc<Mutex<Option<mpsc::Receiver<RawResult<VecDeque<RawBlock>>>>>>,
 }
 
 impl WsMessageBase {
@@ -277,7 +277,7 @@ impl WsMessageBase {
         sender: WsTmqSender,
         message_id: MessageId,
         tz: Option<Tz>,
-        raw_block_receiver: Option<mpsc::Receiver<RawResult<RawBlock>>>,
+        raw_block_receiver: Option<mpsc::Receiver<RawResult<VecDeque<RawBlock>>>>,
     ) -> Self {
         Self {
             is_support_fetch_raw,
@@ -300,25 +300,46 @@ impl WsMessageBase {
     }
 
     async fn fetch_raw_block_new(&self) -> RawResult<Option<RawBlock>> {
-        let raw_block_receiver = &mut *self.raw_block_receiver.lock().await;
-        if raw_block_receiver.is_none() {
+        let raw_blocks_option = &mut *self.raw_blocks.lock().await;
+        if let Some(raw_blocks) = raw_blocks_option {
+            if !raw_blocks.is_empty() {
+                return Ok(raw_blocks.pop_front());
+            }
             return Ok(None);
         }
 
+        let raw_block_receiver = &mut *self.raw_block_receiver.lock().await;
+        if let Some(receiver) = raw_block_receiver {
+            let raw_blocks = receiver.recv().await;
+            if let Some(raw_blocks) = raw_blocks {
+                let raw_blocks = raw_blocks?;
+                if !raw_blocks.is_empty() {
+                    raw_blocks_option.replace(raw_blocks);
+                    return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
+                }
+            }
+        }
+
+        Ok(None)
+
+        // if raw_block_receiver.is_none() {
+        //     return Ok(None);
+        // }
+
         // let now = Instant::now();
-        raw_block_receiver
-            .as_mut()
-            .unwrap()
-            .recv()
-            .await
-            .map(|res| {
-                res.map(|raw| {
-                    // self.metrics.time_cost_in_flume += now.elapsed();
-                    // self.timing = timing;
-                    raw
-                })
-            })
-            .transpose()
+        // raw_block_receiver
+        //     .as_mut()
+        //     .unwrap()
+        //     .recv()
+        //     .await
+        //     .map(|res| {
+        //         res.map(|raw| {
+        //             // self.metrics.time_cost_in_flume += now.elapsed();
+        //             // self.timing = timing;
+        //             raw
+        //         })
+        //     })
+        //     .transpose()
 
         // let raw_blocks_option = &mut *self.raw_blocks.lock().await;
         // if let Some(raw_blocks) = raw_blocks_option {
@@ -484,7 +505,7 @@ impl WsMessageSet {
 async fn fetch(
     tmq_sender: WsTmqSender,
     message_id: MessageId,
-    raw_block_sender: mpsc::Sender<Result<RawBlock, RawError>>,
+    raw_block_sender: mpsc::Sender<Result<VecDeque<RawBlock>, RawError>>,
 ) {
     tokio::spawn(
         async move {
@@ -501,9 +522,9 @@ async fn fetch(
                 // if blocks.is_empty() {
                 // break;
                 // }
-                for block in blocks {
-                    let _ = raw_block_sender.send(Ok(block)).await;
-                }
+                // for block in blocks {
+                let _ = raw_block_sender.send(Ok(blocks)).await;
+                // }
                 // if !raw.is_empty() {
                 //     raw_blocks_option.replace(raw);
                 //     return Ok(raw_blocks_option.as_mut().unwrap().pop_front());
