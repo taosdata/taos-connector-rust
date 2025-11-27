@@ -10,6 +10,7 @@ use taos_query::util::{generate_req_id, hex, InlineBytes, InlineStr};
 use taos_query::{
     block_in_place_or_global, global_tokio_runtime, Fetchable, Queryable, RawBlock as Block,
 };
+use taos_ws::consumer::{PARSE_BLOCK_TOTAL, SEND_RECV_TOTAL};
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
 use tracing::{debug, error, Instrument};
@@ -292,6 +293,9 @@ impl FetchPrintMetrics {
             _ => Duration::ZERO,
         };
 
+        let fetch_send_recv_time = SEND_RECV_TOTAL.load(std::sync::atomic::Ordering::Relaxed);
+        let parse_block_time = PARSE_BLOCK_TOTAL.load(std::sync::atomic::Ordering::Relaxed);
+
         tracing::warn!(
             "FetchPrintMetrics: \
             taos_fetch_row_count={}, total_taos_fetch_row={:?}, avg_taos_fetch_row={:?}, \
@@ -303,7 +307,8 @@ impl FetchPrintMetrics {
             tmq_get_table_name_count={}, total_tmq_get_table_name={:?}, avg_tmq_get_table_name={:?}, \
             tmq_get_topic_name_count={}, total_tmq_get_topic_name={:?}, avg_tmq_get_topic_name={:?}, \
             tmq_poll_count={}, total_tmq_poll={:?}, avg_tmq_poll={:?}, \
-            total_time={:?}, poll_time={:?}, fetch_block_time={:?}",
+            total_time={:?}, \
+            poll_time={:?}, fetch_block_time={:?}, fetch_send_recv_time={:?}, parse_block_time={:?}",
             self.taos_fetch_row_count,
             self.taos_fetch_row_total,
             avg_taos_fetch_row,
@@ -333,7 +338,9 @@ impl FetchPrintMetrics {
             avg_tmq_poll,
             total_time,
             self.poll_time,
-            self.fetch_block_time
+            self.fetch_block_time,
+            fetch_send_recv_time,
+            parse_block_time
         );
     }
 }

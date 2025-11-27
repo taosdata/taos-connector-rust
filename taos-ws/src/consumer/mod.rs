@@ -271,6 +271,9 @@ struct WsMessageBase {
     raw_block_receiver: Arc<Mutex<Option<mpsc::Receiver<RawResult<VecDeque<RawBlock>>>>>>,
 }
 
+pub static SEND_RECV_TOTAL: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
+pub static PARSE_BLOCK_TOTAL: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
+
 impl WsMessageBase {
     fn new(
         is_support_fetch_raw: bool,
@@ -304,10 +307,18 @@ impl WsMessageBase {
             req_id: self.sender.req_id(),
             message_id: self.message_id,
         });
+
+        let t0 = std::time::Instant::now();
         let data = self.sender.send_recv(msg).await?;
+        let elapsed = t0.elapsed().as_millis() as u64;
+        SEND_RECV_TOTAL.fetch_add(elapsed, Ordering::Relaxed);
+
         if let TmqRecvData::Bytes(bytes) = data {
+            let t0 = std::time::Instant::now();
             let blocks = RawBlock::parse_from_multi_raw_block(bytes)
                 .map_err(|_| RawError::from_string("parse multi raw blocks error!"))?;
+            let elapsed = t0.elapsed().as_millis() as u64;
+            PARSE_BLOCK_TOTAL.fetch_add(elapsed, Ordering::Relaxed);
             return Ok(Some(blocks));
         }
         Ok(None)
