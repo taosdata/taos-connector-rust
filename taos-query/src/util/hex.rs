@@ -32,6 +32,17 @@ pub fn bytes_to_hex_string_upper(bytes: Bytes) -> String {
     res
 }
 
+pub fn slice_to_hex_upper_with_prefix(slice: &[u8]) -> Vec<u8> {
+    const HEX_CHARS: &[u8] = b"0123456789ABCDEF";
+    let mut hex_buf = Vec::with_capacity(2 + slice.len() * 2);
+    hex_buf.extend_from_slice(b"\\x");
+    for &byte in slice.iter() {
+        hex_buf.push(HEX_CHARS[(byte >> 4) as usize]);
+        hex_buf.push(HEX_CHARS[(byte & 0xf) as usize]);
+    }
+    hex_buf
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
@@ -70,5 +81,14 @@ mod tests {
         ]);
         let hex_string = bytes_to_hex_string_upper(bytes);
         assert_eq!(hex_string, "000110123456789ABCDEFF");
+    }
+
+    #[test]
+    fn test_slice_to_hex_upper_with_prefix() {
+        let slice = &[
+            0x00, 0x01, 0x10, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xFF,
+        ];
+        let hex = slice_to_hex_upper_with_prefix(slice);
+        assert_eq!(hex, b"\\x000110123456789ABCDEFF");
     }
 }
