@@ -3,3 +3,13 @@ taos_print_row 性能优化
 1. 使用 itoa and ryu crate 优化整数和浮点数
 2. 优化 bool
 1 + 2 单线程从 360s -> 330s
+
+tmq_get_vgroup_id       从 offset 获取 vgroup_id ok
+tmq_get_db_name         从 offset 获取 vgroup_id ok
+tmq_get_table_name
+tmq_get_topic_name
+taos_fetch_row
+taos_fetch_fields
+taos_field_count
+tmq_get_table_name
+taos_print_row
