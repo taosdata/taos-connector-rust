@@ -1735,6 +1735,8 @@ pub fn init_env() {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     #[test]
@@ -2596,6 +2598,37 @@ mod tests {
             execute!(b"drop database test_1748918714\0");
             ws_close(taos);
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_resp_timeout() -> anyhow::Result<()> {
+        use taos_ws::stmt2::ws_proxy::*;
+
+        let intercept: InterceptFn = {
+            Arc::new(move |_msg, _ctx| {
+                tokio::task::block_in_place(|| {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                });
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8912", "ws://localhost:6041/ws", intercept).await;
+
+        unsafe {
+            let taos = ws_connect(b"ws://localhost:8912?read_timeout=1\0" as *const u8 as _);
+            assert!(taos.is_null());
+
+            let errno = ws_errno(std::ptr::null_mut());
+            let code = (u32::from(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code()) | 0x80000000) as i32;
+            assert_eq!(errno, code);
+
+            let errstr = ws_errstr(std::ptr::null_mut());
+            let errstr = CStr::from_ptr(errstr).to_str().unwrap();
+            assert!(errstr.contains("Receive data via websocket timeout"));
+        }
+
+        Ok(())
     }
 }
 
