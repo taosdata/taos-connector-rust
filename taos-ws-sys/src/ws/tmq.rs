@@ -18,6 +18,7 @@ use tracing::{debug, error, warn, Instrument};
 use crate::ws::error::{
     errno, errstr, format_errno, set_err_and_get_code, TaosError, TaosMaybeError, EMPTY,
 };
+use crate::ws::query::{FetchPrintMetrics, FP_METRICS};
 use crate::ws::{
     self, config, util, ResultSet, ResultSetOperations, Row, SafePtr, TaosResult, TAOS_FIELD,
     TAOS_FIELD_E, TAOS_RES, TAOS_ROW,
@@ -574,13 +575,22 @@ pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq
 pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mut TAOS_RES {
     debug!("tmq_consumer_poll start, tmq: {tmq:?}, timeout: {timeout}");
 
+    {
+        let mut fp_entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        fp_entry.record_first_tmq_poll(Instant::now());
+    }
+
+    let poll_start = Instant::now();
+
     if tmq.is_null() {
         error!("tmq_consumer_poll failed, err: tmq is null");
         set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "tmq is null"));
         return ptr::null_mut();
     }
 
-    match consumer_poll(tmq, timeout) {
+    let ret = match consumer_poll(tmq, timeout) {
         Ok(Some(rs)) => {
             let rs: TaosMaybeError<ResultSet> = rs.into();
             debug!("tmq_consumer_poll succ, rs: {rs:?}");
@@ -595,7 +605,25 @@ pub unsafe extern "C" fn tmq_consumer_poll(tmq: *mut tmq_t, timeout: i64) -> *mu
             set_err_and_get_code(err);
             ptr::null_mut()
         }
+    };
+
+    let poll_end = Instant::now();
+    let elapsed = poll_start.elapsed();
+    {
+        let key = tmq as usize;
+        let mut entry = POLL_METRICS
+            .entry(key)
+            .or_insert_with(|| PollMetrics::new(key));
+        entry.record(poll_start, poll_end);
+
+        let mut fp_entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        fp_entry.record_tmq_poll(elapsed);
+        fp_entry.record_last_tmq_poll(Instant::now());
     }
+
+    ret
 }
 
 unsafe fn consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Option<ResultSet>> {
@@ -634,7 +662,16 @@ unsafe fn consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Option<
                     }
                 }
 
+                let start = Instant::now();
                 let res = consumer.recv_timeout(timeout)?;
+                let elapsed = start.elapsed();
+                {
+                    let mut fp_entry = FP_METRICS
+                        .entry(12345usize)
+                        .or_insert_with(|| FetchPrintMetrics::default());
+                    fp_entry.record_poll_time(elapsed);
+                }
+
                 match res {
                     Some((offset, message_set)) => {
                         if tmq.auto_commit {
@@ -650,7 +687,20 @@ unsafe fn consumer_poll(tmq_ptr: *mut tmq_t, timeout: i64) -> TaosResult<Option<
                         }
 
                         let data = message_set.into_data().unwrap();
-                        match data.fetch_raw_block()? {
+
+                        let start = Instant::now();
+                        let block = data.fetch_raw_block()?;
+                        // let blocks = data.fetch_raw_block_new()?;
+
+                        let elapsed = start.elapsed();
+                        {
+                            let mut fp_entry = FP_METRICS
+                                .entry(12345usize)
+                                .or_insert_with(|| FetchPrintMetrics::default());
+                            fp_entry.record_fetch_block_time(elapsed);
+                        }
+
+                        match block {
                             Some(block) => {
                                 Ok(Some(ResultSet::Tmq(TmqResultSet::new(block, offset, data))))
                             }
@@ -673,6 +723,16 @@ pub extern "C" fn tmq_consumer_close(tmq: *mut tmq_t) -> i32 {
         error!("tmq_consumer_close failed, err: tmq is null");
         return format_errno(Code::INVALID_PARA.into());
     }
+    let key = tmq as usize;
+    if let Some((_k, metrics)) = POLL_METRICS.remove(&key) {
+        drop(metrics);
+    }
+
+    let key = 12345usize;
+    if let Some((_k, mut metrics)) = FP_METRICS.remove(&key) {
+        metrics.print();
+    }
+
     let _ = unsafe { Box::from_raw(tmq as *mut TaosMaybeError<Tmq>) };
     0
 }
@@ -1230,7 +1290,10 @@ pub unsafe extern "C" fn tmq_committed(
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_table_name start, res: {res:?}");
-    match (res as *const TaosMaybeError<ResultSet>)
+
+    let start = Instant::now();
+
+    let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
@@ -1242,7 +1305,17 @@ pub unsafe extern "C" fn tmq_get_table_name(res: *mut TAOS_RES) -> *const c_char
             warn!("tmq_get_table_name failed, err: res is null");
             ptr::null()
         }
+    };
+
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_table_name(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
@@ -1259,7 +1332,10 @@ pub extern "C" fn tmq_get_res_type(res: *mut TAOS_RES) -> tmq_res_t {
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_topic_name start, res: {res:?}");
-    match (res as *const TaosMaybeError<ResultSet>)
+
+    let start = Instant::now();
+
+    let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
@@ -1271,13 +1347,26 @@ pub unsafe extern "C" fn tmq_get_topic_name(res: *mut TAOS_RES) -> *const c_char
             error!("tmq_get_topic_name failed, err: res is null");
             ptr::null()
         }
+    };
+
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_topic_name(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
     debug!("tmq_get_db_name start, res: {res:?}");
-    match (res as *const TaosMaybeError<ResultSet>)
+
+    let start = Instant::now();
+
+    let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
@@ -1289,13 +1378,26 @@ pub unsafe extern "C" fn tmq_get_db_name(res: *mut TAOS_RES) -> *const c_char {
             error!("tmq_get_db_name failed, err: res is null");
             ptr::null()
         }
+    };
+
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_db_name(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
     debug!("tmq_get_vgroup_id start, res: {res:?}");
-    match (res as *const TaosMaybeError<ResultSet>)
+
+    let start = Instant::now();
+
+    let ret = match (res as *const TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
@@ -1307,7 +1409,17 @@ pub unsafe extern "C" fn tmq_get_vgroup_id(res: *mut TAOS_RES) -> i32 {
             error!("tmq_get_vgroup_id failed, err: res is null");
             set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null"))
         }
+    };
+
+    let fetch_duration = start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_tmq_get_vgroup_id(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
@@ -1346,6 +1458,7 @@ pub unsafe extern "C" fn tmq_err2str(code: i32) -> *const c_char {
 #[derive(Debug)]
 pub struct TmqResultSet {
     block: Option<Block>,
+    // blocks: Vec<Block>,
     fields: Vec<TAOS_FIELD>,
     num_of_fields: i32,
     precision: Precision,
@@ -1547,6 +1660,82 @@ impl TmqList {
     fn set_c_array(&mut self, arr: Vec<*mut c_char>) {
         self.free_c_array();
         self.c_array = Some(arr);
+    }
+}
+
+static POLL_METRICS: Lazy<DashMap<usize, PollMetrics>> = Lazy::new(DashMap::new);
+
+#[derive(Debug)]
+struct PollMetrics {
+    tmq_ptr: usize,
+    first_call: Option<Instant>,
+    last_end: Option<Instant>,
+    call_count: u64,
+    total_poll_time: Duration,
+    total_interval_time: Duration,
+    min_interval: Option<Duration>,
+    max_interval: Option<Duration>,
+}
+
+impl PollMetrics {
+    fn new(tmq_ptr: usize) -> Self {
+        Self {
+            tmq_ptr,
+            first_call: None,
+            last_end: None,
+            call_count: 0,
+            total_poll_time: Duration::ZERO,
+            total_interval_time: Duration::ZERO,
+            min_interval: None,
+            max_interval: None,
+        }
+    }
+
+    fn record(&mut self, start: Instant, end: Instant) {
+        let elapsed = end - start;
+        self.call_count += 1;
+        self.total_poll_time += elapsed;
+
+        if let Some(prev_end) = self.last_end {
+            let interval = start - prev_end;
+            self.total_interval_time += interval;
+            self.min_interval = Some(self.min_interval.map_or(interval, |m| m.min(interval)));
+            self.max_interval = Some(self.max_interval.map_or(interval, |m| m.max(interval)));
+        } else {
+            self.first_call = Some(start);
+        }
+
+        self.last_end = Some(end);
+    }
+}
+
+impl Drop for PollMetrics {
+    fn drop(&mut self) {
+        // 平均耗时与平均间隔
+        let avg_poll = if self.call_count > 0 {
+            self.total_poll_time / self.call_count as u32
+        } else {
+            Duration::ZERO
+        };
+        let interval_count = self.call_count.saturating_sub(1);
+        let avg_interval = if interval_count > 0 {
+            self.total_interval_time / interval_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        tracing::warn!(
+            target: "tmq.poll",
+            "tmq_ptr={:#x} calls={} total_poll_ms={} avg_poll_ms={} total_interval_ms={} avg_interval_ms={} min_interval_ms={} max_interval_ms={}",
+            self.tmq_ptr,
+            self.call_count,
+            self.total_poll_time.as_millis(),
+            avg_poll.as_millis(),
+            self.total_interval_time.as_millis(),
+            avg_interval.as_millis(),
+            self.min_interval.map(|d| d.as_millis()).unwrap_or(0),
+            self.max_interval.map(|d| d.as_millis()).unwrap_or(0),
+        );
     }
 }
 

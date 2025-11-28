@@ -35,6 +35,8 @@ tracing-log = "0.2.0"
 tracing-subscriber = { version = "0.3.18", default-features = false, features = [
     "env-filter",
 ] }
+itoa = "1.0.15"
+ryu = "1.0.20"
 
 [build-dependencies]
 cbindgen = "0.27.0"

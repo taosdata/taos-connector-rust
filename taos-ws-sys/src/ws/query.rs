@@ -10,6 +10,7 @@ use taos_query::util::{generate_req_id, hex, InlineBytes, InlineStr};
 use taos_query::{
     block_in_place_or_global, global_tokio_runtime, Fetchable, Queryable, RawBlock as Block,
 };
+use taos_ws::consumer::{PARSE_BLOCK_TOTAL, SEND_RECV_TOTAL};
 use taos_ws::query::Error;
 use taos_ws::{Offset, Taos};
 use tracing::{debug, error, Instrument};
@@ -132,8 +133,329 @@ unsafe fn query(taos: *mut TAOS, sql: *const c_char, req_id: u64) -> TaosResult<
     Ok(ResultSet::Query(QueryResultSet::new(rs)))
 }
 
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
+
+#[derive(Default, Debug)]
+pub struct FetchPrintMetrics {
+    taos_fetch_row_total: Duration,
+    taos_fetch_row_count: u64,
+    taos_print_row_total: Duration,
+    taos_print_row_count: u64,
+    taos_fetch_fields_total: Duration,
+    taos_fetch_fields_count: u64,
+    taos_field_count_total: Duration,
+    taos_field_count_count: u64,
+    tmq_get_vgroup_id_total: Duration,
+    tmq_get_vgroup_id_count: u64,
+    tmq_get_db_name_total: Duration,
+    tmq_get_db_name_count: u64,
+    tmq_get_table_name_total: Duration,
+    tmq_get_table_name_count: u64,
+    tmq_get_topic_name_total: Duration,
+    tmq_get_topic_name_count: u64,
+    tmq_poll_total: Duration,
+    tmq_poll_count: u64,
+    tmq_poll_first_time: Option<std::time::Instant>,
+    tmq_poll_last_time: Option<std::time::Instant>,
+    is_print: bool,
+    poll_time: Duration,
+    fetch_block_time: Duration,
+}
+
+impl FetchPrintMetrics {
+    pub fn record_taos_fetch_row(&mut self, d: Duration) {
+        self.taos_fetch_row_total += d;
+        self.taos_fetch_row_count += 1;
+    }
+
+    pub fn record_taos_print_row(&mut self, d: Duration) {
+        self.taos_print_row_total += d;
+        self.taos_print_row_count += 1;
+    }
+
+    pub fn record_taos_fetch_fields(&mut self, d: Duration) {
+        self.taos_fetch_fields_total += d;
+        self.taos_fetch_fields_count += 1;
+    }
+
+    pub fn record_taos_field_count(&mut self, d: Duration) {
+        self.taos_field_count_total += d;
+        self.taos_field_count_count += 1;
+    }
+
+    pub fn record_tmq_get_vgroup_id(&mut self, d: Duration) {
+        self.tmq_get_vgroup_id_total += d;
+        self.tmq_get_vgroup_id_count += 1;
+    }
+
+    pub fn record_tmq_get_db_name(&mut self, d: Duration) {
+        self.tmq_get_db_name_total += d;
+        self.tmq_get_db_name_count += 1;
+    }
+
+    pub fn record_tmq_get_table_name(&mut self, d: Duration) {
+        self.tmq_get_table_name_total += d;
+        self.tmq_get_table_name_count += 1;
+    }
+
+    pub fn record_tmq_get_topic_name(&mut self, d: Duration) {
+        self.tmq_get_topic_name_total += d;
+        self.tmq_get_topic_name_count += 1;
+    }
+
+    pub fn record_tmq_poll(&mut self, d: Duration) {
+        self.tmq_poll_total += d;
+        self.tmq_poll_count += 1;
+    }
+
+    pub fn record_first_tmq_poll(&mut self, d: std::time::Instant) {
+        if self.tmq_poll_first_time.is_none() {
+            self.tmq_poll_first_time = Some(d);
+        }
+    }
+
+    pub fn record_last_tmq_poll(&mut self, d: std::time::Instant) {
+        self.tmq_poll_last_time = Some(d);
+    }
+
+    pub fn record_poll_time(&mut self, d: Duration) {
+        self.poll_time += d;
+    }
+
+    pub fn record_fetch_block_time(&mut self, d: Duration) {
+        self.fetch_block_time += d;
+    }
+
+    pub fn print(&mut self) {
+        if self.is_print {
+            return;
+        }
+
+        self.is_print = true;
+
+        let avg_taos_fetch_row = if self.taos_fetch_row_count > 0 {
+            self.taos_fetch_row_total / self.taos_fetch_row_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_taos_print_row = if self.taos_print_row_count > 0 {
+            self.taos_print_row_total / self.taos_print_row_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_taos_fetch_fields = if self.taos_fetch_fields_count > 0 {
+            self.taos_fetch_fields_total / self.taos_fetch_fields_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_taos_field_count = if self.taos_field_count_count > 0 {
+            self.taos_field_count_total / self.taos_field_count_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_vgroup_id = if self.tmq_get_vgroup_id_count > 0 {
+            self.tmq_get_vgroup_id_total / self.tmq_get_vgroup_id_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_db_name = if self.tmq_get_db_name_count > 0 {
+            self.tmq_get_db_name_total / self.tmq_get_db_name_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_table_name = if self.tmq_get_table_name_count > 0 {
+            self.tmq_get_table_name_total / self.tmq_get_table_name_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_get_topic_name = if self.tmq_get_topic_name_count > 0 {
+            self.tmq_get_topic_name_total / self.tmq_get_topic_name_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let avg_tmq_poll = if self.tmq_poll_count > 0 {
+            self.tmq_poll_total / self.tmq_poll_count as u32
+        } else {
+            Duration::ZERO
+        };
+
+        let total_time = match (self.tmq_poll_first_time, self.tmq_poll_last_time) {
+            (Some(first), Some(last)) => last.checked_duration_since(first).unwrap_or_default(),
+            _ => Duration::ZERO,
+        };
+
+        let fetch_send_recv_time = SEND_RECV_TOTAL.load(std::sync::atomic::Ordering::Relaxed);
+        let parse_block_time = PARSE_BLOCK_TOTAL.load(std::sync::atomic::Ordering::Relaxed);
+
+        tracing::warn!(
+            "FetchPrintMetrics: \
+            taos_fetch_row_count={}, total_taos_fetch_row={:?}, avg_taos_fetch_row={:?}, \
+            taos_print_row_count={}, total_taos_print_row={:?}, avg_taos_print_row={:?}, \
+            taos_fetch_fields_count={}, total_taos_fetch_fields={:?}, avg_taos_fetch_fields={:?}, \
+            taos_field_count_count={}, total_taos_field_count={:?}, avg_taos_field_count={:?}, \
+            tmq_get_vgroup_id_count={}, total_tmq_get_vgroup_id={:?}, avg_tmq_get_vgroup_id={:?}, \
+            tmq_get_db_name_count={}, total_tmq_get_db_name={:?}, avg_tmq_get_db_name={:?}, \
+            tmq_get_table_name_count={}, total_tmq_get_table_name={:?}, avg_tmq_get_table_name={:?}, \
+            tmq_get_topic_name_count={}, total_tmq_get_topic_name={:?}, avg_tmq_get_topic_name={:?}, \
+            tmq_poll_count={}, total_tmq_poll={:?}, avg_tmq_poll={:?}, \
+            total_time={:?}, \
+            poll_time={:?}, fetch_block_time={:?}, fetch_send_recv_time={:?}, parse_block_time={:?}",
+            self.taos_fetch_row_count,
+            self.taos_fetch_row_total,
+            avg_taos_fetch_row,
+            self.taos_print_row_count,
+            self.taos_print_row_total,
+            avg_taos_print_row,
+            self.taos_fetch_fields_count,
+            self.taos_fetch_fields_total,
+            avg_taos_fetch_fields,
+            self.taos_field_count_count,
+            self.taos_field_count_total,
+            avg_taos_field_count,
+            self.tmq_get_vgroup_id_count,
+            self.tmq_get_vgroup_id_total,
+            avg_tmq_get_vgroup_id,
+            self.tmq_get_db_name_count,
+            self.tmq_get_db_name_total,
+            avg_tmq_get_db_name,
+            self.tmq_get_table_name_count,
+            self.tmq_get_table_name_total,
+            avg_tmq_get_table_name,
+            self.tmq_get_topic_name_count,
+            self.tmq_get_topic_name_total,
+            avg_tmq_get_topic_name,
+            self.tmq_poll_count,
+            self.tmq_poll_total,
+            avg_tmq_poll,
+            total_time,
+            self.poll_time,
+            self.fetch_block_time,
+            fetch_send_recv_time,
+            parse_block_time
+        );
+    }
+}
+
+// impl Drop for FetchPrintMetrics {
+//     fn drop(&mut self) {
+//         let avg_taos_fetch_row = if self.taos_fetch_row_count > 0 {
+//             self.taos_fetch_row_total / self.taos_fetch_row_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
+
+//         let avg_taos_print_row = if self.taos_print_row_count > 0 {
+//             self.taos_print_row_total / self.taos_print_row_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
+
+//         let avg_taos_fetch_fields = if self.taos_fetch_fields_count > 0 {
+//             self.taos_fetch_fields_total / self.taos_fetch_fields_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
+
+//         let avg_taos_field_count = if self.taos_field_count_count > 0 {
+//             self.taos_field_count_total / self.taos_field_count_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
+
+//         let avg_tmq_get_vgroup_id = if self.tmq_get_vgroup_id_count > 0 {
+//             self.tmq_get_vgroup_id_total / self.tmq_get_vgroup_id_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
+
+//         let avg_tmq_get_db_name = if self.tmq_get_db_name_count > 0 {
+//             self.tmq_get_db_name_total / self.tmq_get_db_name_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
+
+//         let avg_tmq_get_table_name = if self.tmq_get_table_name_count > 0 {
+//             self.tmq_get_table_name_total / self.tmq_get_table_name_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
+
+//         let avg_tmq_get_topic_name = if self.tmq_get_topic_name_count > 0 {
+//             self.tmq_get_topic_name_total / self.tmq_get_topic_name_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
+
+//         let avg_tmq_poll = if self.tmq_poll_count > 0 {
+//             self.tmq_poll_total / self.tmq_poll_count as u32
+//         } else {
+//             Duration::ZERO
+//         };
+
+//         let total_time = match (self.tmq_poll_first_time, self.tmq_poll_last_time) {
+//             (Some(first), Some(last)) => last.checked_duration_since(first).unwrap_or_default(),
+//             _ => Duration::ZERO,
+//         };
+
+//         tracing::warn!(
+//             "FetchPrintMetrics: \
+//             taos_fetch_row_count={}, total_taos_fetch_row={:?}, avg_taos_fetch_row={:?}, \
+//             taos_print_row_count={}, total_taos_print_row={:?}, avg_taos_print_row={:?}, \
+//             taos_fetch_fields_count={}, total_taos_fetch_fields={:?}, avg_taos_fetch_fields={:?}, \
+//             taos_field_count_count={}, total_taos_field_count={:?}, avg_taos_field_count={:?}, \
+//             tmq_get_vgroup_id_count={}, total_tmq_get_vgroup_id={:?}, avg_tmq_get_vgroup_id={:?}, \
+//             tmq_get_db_name_count={}, total_tmq_get_db_name={:?}, avg_tmq_get_db_name={:?}, \
+//             tmq_get_table_name_count={}, total_tmq_get_table_name={:?}, avg_tmq_get_table_name={:?}, \
+//             tmq_get_topic_name_count={}, total_tmq_get_topic_name={:?}, avg_tmq_get_topic_name={:?}, \
+//             tmq_poll_count={}, total_tmq_poll={:?}, avg_tmq_poll={:?}, \
+//             total_time={:?}",
+//             self.taos_fetch_row_count,
+//             self.taos_fetch_row_total,
+//             avg_taos_fetch_row,
+//             self.taos_print_row_count,
+//             self.taos_print_row_total,
+//             avg_taos_print_row,
+//             self.taos_fetch_fields_count,
+//             self.taos_fetch_fields_total,
+//             avg_taos_fetch_fields,
+//             self.taos_field_count_count,
+//             self.taos_field_count_total,
+//             avg_taos_field_count,
+//             self.tmq_get_vgroup_id_count,
+//             self.tmq_get_vgroup_id_total,
+//             avg_tmq_get_vgroup_id,
+//             self.tmq_get_db_name_count,
+//             self.tmq_get_db_name_total,
+//             avg_tmq_get_db_name,
+//             self.tmq_get_table_name_count,
+//             self.tmq_get_table_name_total,
+//             avg_tmq_get_table_name,
+//             self.tmq_get_topic_name_count,
+//             self.tmq_get_topic_name_total,
+//             avg_tmq_get_topic_name,
+//             self.tmq_poll_count,
+//             self.tmq_poll_total,
+//             avg_tmq_poll,
+//             total_time
+//         );
+//     }
+// }
+
+pub static FP_METRICS: Lazy<DashMap<usize, FetchPrintMetrics>> = Lazy::new(DashMap::new);
+
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
+    let fetch_start = std::time::Instant::now();
+
     fn handle_error(code: Code, msg: &str) -> TAOS_ROW {
         error!("taos_fetch_row failed, code: {code:?}, msg: {msg}");
         set_err_and_get_code(TaosError::new(code, msg));
@@ -152,13 +474,23 @@ pub unsafe extern "C" fn taos_fetch_row(res: *mut TAOS_RES) -> TAOS_ROW {
         None => return handle_error(Code::INVALID_PARA, "res is invalid"),
     };
 
-    match rs.fetch_row() {
+    let ret = match rs.fetch_row() {
         Ok(row) => {
             debug!("taos_fetch_row succ, row: {row:?}");
             row
         }
         Err(err) => handle_error(err.errno(), &err.errstr()),
+    };
+
+    let fetch_duration = fetch_start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_taos_fetch_row(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
@@ -190,7 +522,10 @@ pub unsafe extern "C" fn taos_free_result(res: *mut TAOS_RES) {
 #[no_mangle]
 pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
     debug!("taos_field_count start, res: {res:?}");
-    match (res as *mut TaosMaybeError<ResultSet>)
+
+    let field_count_start = std::time::Instant::now();
+
+    let ret = match (res as *mut TaosMaybeError<ResultSet>)
         .as_ref()
         .and_then(|rs| rs.deref())
     {
@@ -203,7 +538,17 @@ pub unsafe extern "C" fn taos_field_count(res: *mut TAOS_RES) -> c_int {
             error!("taos_field_count failed, res is null");
             set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null"))
         }
+    };
+
+    let field_count_duration = field_count_start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_taos_field_count(field_count_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
@@ -250,7 +595,9 @@ pub unsafe extern "C" fn taos_affected_rows64(res: *mut TAOS_RES) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIELD {
     debug!("taos_fetch_fields start, res: {res:?}");
-    match (res as *mut TaosMaybeError<ResultSet>)
+    let fetch_start = std::time::Instant::now();
+
+    let ret = match (res as *mut TaosMaybeError<ResultSet>)
         .as_mut()
         .and_then(|rs| rs.deref_mut())
     {
@@ -263,7 +610,17 @@ pub unsafe extern "C" fn taos_fetch_fields(res: *mut TAOS_RES) -> *mut TAOS_FIEL
             set_err_and_get_code(TaosError::new(Code::INVALID_PARA, "res is null"));
             ptr::null_mut()
         }
+    };
+
+    let fetch_duration = fetch_start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_taos_fetch_fields(fetch_duration);
     }
+
+    ret
 }
 
 #[no_mangle]
@@ -326,7 +683,18 @@ pub unsafe extern "C" fn taos_print_row(
     fields: *mut TAOS_FIELD,
     num_fields: c_int,
 ) -> c_int {
-    taos_print_row_with_size(str, i32::MAX as _, row, fields, num_fields)
+    let print_start = std::time::Instant::now();
+    let ret = taos_print_row_with_size(str, i32::MAX as _, row, fields, num_fields);
+
+    let print_duration = print_start.elapsed();
+    {
+        let mut entry = FP_METRICS
+            .entry(12345usize)
+            .or_insert_with(|| FetchPrintMetrics::default());
+        entry.record_taos_print_row(print_duration);
+    }
+
+    ret
 }
 
 #[no_mangle]
@@ -360,6 +728,9 @@ pub unsafe extern "C" fn taos_print_row_with_size(
     let mut len: usize = 0;
     let mut size = (size - 1) as usize;
 
+    let mut itoa_buf = itoa::Buffer::new();
+    let mut ryu_buf = ryu::Buffer::new();
+
     for i in 0..num_fields as usize {
         if i > 0 && size > 0 {
             *str.add(len) = ' ' as c_char;
@@ -376,41 +747,96 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                     write_to_cstr(
                         &mut size,
                         str.add(len as usize),
-                        format!("{value}").as_str().as_bytes(),
+                        // format!("{value}").as_str().as_bytes(),
+                        itoa_buf.format(value).as_bytes(),
                     )
                 }};
             }
 
             match Ty::from(fields[i].r#type) {
                 Ty::TinyInt => read_and_write!(i8),
+                // Ty::TinyInt => {
+                // let value = ptr::read_unaligned(row[i] as *const i8);
+                // let mut buf = itoa::Buffer::new();
+                // write_to_cstr(&mut size, str.add(len), buf.format(value).as_bytes())
+                // }
                 Ty::UTinyInt => read_and_write!(u8),
                 Ty::SmallInt => read_and_write!(i16),
                 Ty::USmallInt => read_and_write!(u16),
                 Ty::Int => read_and_write!(i32),
+                // Ty::Int => {
+                //     let value = ptr::read_unaligned(row[i] as *const i32);
+                //     let mut buf = itoa::Buffer::new();
+                //     write_to_cstr(&mut size, str.add(len), buf.format(value).as_bytes())
+                // }
                 Ty::UInt => read_and_write!(u32),
                 Ty::BigInt | Ty::Timestamp => read_and_write!(i64),
                 Ty::UBigInt => read_and_write!(u64),
-                Ty::Float => read_and_write!(f32),
-                Ty::Double => read_and_write!(f64),
-                Ty::Bool => {
-                    let value = ptr::read_unaligned(row[i] as *const bool);
+                // Ty::Float => read_and_write!(f32),
+                // Ty::Double => read_and_write!(f64),
+                Ty::Float => {
+                    let value = ptr::read_unaligned(row[i] as *const f32);
                     write_to_cstr(
                         &mut size,
                         str.add(len),
-                        format!("{}", value as i32).as_str().as_bytes(),
+                        // TODO: use format or format_finite
+                        ryu_buf.format_finite(value).as_bytes(),
                     )
+                }
+                Ty::Double => {
+                    let value = ptr::read_unaligned(row[i] as *const f64);
+                    write_to_cstr(
+                        &mut size,
+                        str.add(len),
+                        ryu_buf.format_finite(value).as_bytes(),
+                    )
+                }
+                // Ty::Bool => {
+                //     let value = ptr::read_unaligned(row[i] as *const bool);
+                //     write_to_cstr(
+                //         &mut size,
+                //         str.add(len),
+                //         format!("{}", value as i32).as_str().as_bytes(),
+                //     )
+                // }
+                Ty::Bool => {
+                    let value = ptr::read_unaligned(row[i] as *const bool);
+                    // let b = if value { b"true" } else { b"false" };
+                    let b = if value { b"1" } else { b"0" };
+                    write_to_cstr(&mut size, str.add(len), b)
+                    // if value {
+                    //     write_to_cstr(&mut size, str.add(len), b"true")
+                    // } else {
+                    //     write_to_cstr(&mut size, str.add(len), b"false")
+                    // }
                 }
                 Ty::VarBinary => {
                     let data = row[i].offset(-2) as *const InlineBytes;
                     let data = Bytes::from((*data).as_bytes());
-                    let content = format!("\\x{}", hex::bytes_to_hex_string_upper(data));
-                    write_to_cstr(&mut size, str.add(len), content.as_bytes())
+                    let hex_str = hex::bytes_to_hex_string_upper(data);
+                    let mut buf = Vec::with_capacity(2 + hex_str.len());
+                    buf.extend_from_slice(b"\\x");
+                    buf.extend_from_slice(hex_str.as_bytes());
+                    write_to_cstr(&mut size, str.add(len), &buf)
+
+                    // let data = row[i].offset(-2) as *const InlineBytes;
+                    // let data = Bytes::from((*data).as_bytes());
+                    // let content = format!("\\x{}", hex::bytes_to_hex_string_upper(data));
+                    // write_to_cstr(&mut size, str.add(len), content.as_bytes())
                 }
                 Ty::Blob => {
                     let data = row[i].offset(-4) as *const InlineBytes<u32>;
                     let data = Bytes::from((*data).as_bytes());
-                    let content = format!("\\x{}", hex::bytes_to_hex_string_upper(data));
-                    write_to_cstr(&mut size, str.add(len), content.as_bytes())
+                    let hex_str = hex::bytes_to_hex_string_upper(data);
+                    let mut buf = Vec::with_capacity(2 + hex_str.len());
+                    buf.extend_from_slice(b"\\x");
+                    buf.extend_from_slice(hex_str.as_bytes());
+                    write_to_cstr(&mut size, str.add(len), &buf)
+
+                    // let data = row[i].offset(-4) as *const InlineBytes<u32>;
+                    // let data = Bytes::from((*data).as_bytes());
+                    // let content = format!("\\x{}", hex::bytes_to_hex_string_upper(data));
+                    // write_to_cstr(&mut size, str.add(len), content.as_bytes())
                 }
                 Ty::Geometry => {
                     let data = row[i].offset(-2) as *const InlineBytes;
@@ -3230,4 +3656,13 @@ mod tests {
             taos_close(taos);
         }
     }
+}
+
+#[test]
+fn test_iota() {
+    let mut buf = itoa::Buffer::new();
+    let s = buf.format(1234567890);
+    dbg!(s);
+    let s = buf.format(12345);
+    dbg!(s);
 }
