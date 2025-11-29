@@ -83,6 +83,8 @@ pub struct TaosBuilder {
     retry_policy: RetryPolicy,
     tz: Option<Tz>,
     conn_options: DashMap<i32, Option<String>>,
+    tcp_nodelay: bool,
+    read_timeout: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -466,6 +468,22 @@ impl TaosBuilder {
             })
             .transpose()?;
 
+        let tcp_nodelay = dsn
+            .remove("tcp_nodelay")
+            .and_then(|s| {
+                if s.trim().is_empty() {
+                    Some(true)
+                } else {
+                    s.trim().parse::<bool>().ok()
+                }
+            })
+            .unwrap_or(true);
+
+        let read_timeout = dsn
+            .remove("read_timeout")
+            .and_then(|s| s.parse::<u64>().ok())
+            .map_or(Duration::from_secs(300), Duration::from_secs);
+
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
         } else {
@@ -486,6 +504,8 @@ impl TaosBuilder {
             current_addr_index: Arc::new(AtomicUsize::new(0)),
             tz,
             conn_options: DashMap::new(),
+            tcp_nodelay,
+            read_timeout,
         })
     }
 
@@ -540,7 +560,7 @@ impl TaosBuilder {
             let mut url = self.to_url(ty);
             for i in 0..=self.retry_policy.retries {
                 tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
-                match connect_async_with_config(&url, Some(config), false).await {
+                match connect_async_with_config(&url, Some(config), self.tcp_nodelay).await {
                     Ok((mut ws_stream, _)) => {
                         if ty == EndpointType::Stmt {
                             return Ok((ws_stream, String::new()));
@@ -894,6 +914,40 @@ mod tests {
                 if let WsRecvData::Version { version, .. } = recv.data {
                     tracing::info!("server version: {version}");
                     break;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connect_enable_tcp_nodelay() -> Result<(), anyhow::Error> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let cases = ["true", "false", ""];
+        for tcp_nodelay_val in cases {
+            let dsn = format!("ws://localhost:6041?tcp_nodelay={tcp_nodelay_val}");
+            let builder = TaosBuilder::from_dsn(dsn)?;
+            let (ws, _) = builder.connect().await?;
+            let (mut sender, mut reader) = ws.split();
+
+            sender.send(WsSend::Version.to_msg()).await?;
+
+            loop {
+                if let Some(Ok(message)) = reader.next().await {
+                    let text = message.to_text().unwrap();
+                    let recv: WsRecv = serde_json::from_str(text).unwrap();
+                    assert_eq!(recv.code, 0);
+                    if let WsRecvData::Version { version, .. } = recv.data {
+                        tracing::info!("server version: {version}");
+                        break;
+                    }
                 }
             }
         }
