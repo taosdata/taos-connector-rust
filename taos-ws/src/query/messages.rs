@@ -23,6 +23,8 @@ pub struct WsConnReq {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) mode: Option<u32>,
     pub(crate) tz: Option<String>,
+    pub(crate) app: String,
+    pub(crate) connector: String,
 }
 
 impl WsConnReq {
@@ -34,6 +36,8 @@ impl WsConnReq {
             db: None,
             mode: None,
             tz: None,
+            app: "Rust WebSocket Connector".to_string(),
+            connector: env!("CARGO_PKG_VERSION").to_string(),
         }
     }
 }

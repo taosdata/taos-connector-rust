@@ -85,6 +85,8 @@ pub struct TaosBuilder {
     conn_options: DashMap<i32, Option<String>>,
     tcp_nodelay: bool,
     read_timeout: Duration,
+    connector_name: String,
+    connector_version: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -484,6 +486,16 @@ impl TaosBuilder {
             .and_then(|s| s.parse::<u64>().ok())
             .map_or(Duration::from_secs(300), Duration::from_secs);
 
+        let connector_name = match dsn.remove("connector_name") {
+            Some(name) => name,
+            None => "Rust WebSocket Connector".to_string(),
+        };
+
+        let connector_version = match dsn.remove("connector_version") {
+            Some(version) => version,
+            None => env!("CARGO_PKG_VERSION").to_string(),
+        };
+
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
         } else {
@@ -506,6 +518,8 @@ impl TaosBuilder {
             conn_options: DashMap::new(),
             tcp_nodelay,
             read_timeout,
+            connector_name,
+            connector_version,
         })
     }
 
@@ -817,6 +831,8 @@ impl TaosBuilder {
             db: self.database.clone(),
             mode: (self.conn_mode == Some(1)).then_some(0), // for adapter, 0 is bi mode
             tz: self.tz.map(|s| s.to_string()),
+            app: self.connector_name.clone(),
+            connector: self.connector_version.clone(),
         }
     }
 
