@@ -945,10 +945,11 @@ mod tests {
 
             let mut str = vec![0 as c_char; 1024];
             let len = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
-            assert_eq!(
-                CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
-                "America/New_York (EDT, -0400)"
-            );
+            let tz = CStr::from_ptr(str.as_ptr()).to_str().unwrap();
+            assert!(matches!(
+                tz,
+                "America/New_York (EST, -0500)" | "America/New_York (EDT, -0400)"
+            ));
 
             taos_free_result(res);
             taos_close(taos);
