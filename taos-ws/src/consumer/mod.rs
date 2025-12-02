@@ -2979,6 +2979,86 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_report_connector_version() -> anyhow::Result<()> {
+        use taos_query::prelude::*;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::TRACE)
+            .try_init();
+
+        #[derive(Debug, serde::Deserialize)]
+        struct Record {
+            user_app: String,
+            connector_info: String,
+        }
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1764581863",
+            "drop database if exists test_1764581863",
+            "create database test_1764581863",
+            "create topic topic_1764581863 as database test_1764581863",
+        ])
+        .await?;
+
+        {
+            let tmq = TmqBuilder::from_dsn("ws://localhost:6041?group.id=10")?;
+            let mut consumer = tmq.build().await?;
+            consumer.subscribe(["topic_1764581863"]).await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+
+            let mut cnt = 0;
+            for record in records {
+                if record.user_app == "Rust WS Connector"
+                    && record.connector_info == env!("CARGO_PKG_VERSION")
+                {
+                    cnt += 1;
+                }
+            }
+            assert_eq!(cnt, 2);
+        }
+
+        {
+            let tmq = TmqBuilder::from_dsn(
+                "ws://localhost:6041?group.id=10&connector_name=rust_tmq&connector_version=0.0.1",
+            )?;
+            let mut consumer = tmq.build().await?;
+            consumer.subscribe(["topic_1764581863"]).await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+
+            let mut found = false;
+            for record in records {
+                if record.user_app == "rust_tmq" && record.connector_info == "tmq_0.0.1" {
+                    found = true;
+                }
+            }
+            assert!(found);
+        }
+
+        taos.exec_many([
+            "drop topic if exists topic_1764581863",
+            "drop database if exists test_1764581863",
+        ])
+        .await?;
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "rustls-aws-lc-crypto-provider")]
