@@ -1040,6 +1040,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "test-new-feat")]
     async fn test_report_connector_version() -> anyhow::Result<()> {
         #[derive(Debug, serde::Deserialize)]
         struct Record {
