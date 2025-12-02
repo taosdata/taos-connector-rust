@@ -3045,21 +3045,19 @@ mod tests {
 
             let mut rs = taos.query("show connections").await?;
             let records: Vec<Record> = rs.deserialize().try_collect().await?;
-
-            let mut cnt = 0;
-            for record in records {
-                if record.user_app == "Rust WS Connector"
-                    && record.connector_info == env!("CARGO_PKG_VERSION")
-                {
-                    cnt += 1;
-                }
-            }
+            let cnt = records
+                .iter()
+                .filter(|record| {
+                    record.user_app == crate::CONNECTOR_NAME
+                        && record.connector_info == crate::CONNECTOR_VERSION
+                })
+                .count();
             assert_eq!(cnt, 2);
         }
 
         {
             let tmq = TmqBuilder::from_dsn(
-                "ws://localhost:6041?group.id=10&connector_name=rust_tmq&connector_version=0.0.1",
+                "ws://localhost:6041?group.id=10&connector_name=rust_tmq&connector_version=tmq_0.0.1",
             )?;
             let mut consumer = tmq.build().await?;
             consumer.subscribe(["topic_1764581863"]).await?;
@@ -3068,13 +3066,9 @@ mod tests {
 
             let mut rs = taos.query("show connections").await?;
             let records: Vec<Record> = rs.deserialize().try_collect().await?;
-
-            let mut found = false;
-            for record in records {
-                if record.user_app == "rust_tmq" && record.connector_info == "tmq_0.0.1" {
-                    found = true;
-                }
-            }
+            let found = records.iter().any(|record| {
+                record.user_app == "rust_tmq" && record.connector_info == "tmq_0.0.1"
+            });
             assert!(found);
         }
 

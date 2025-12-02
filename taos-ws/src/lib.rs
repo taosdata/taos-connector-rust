@@ -53,6 +53,9 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsStreamReader = SplitStream<WsStream>;
 type WsStreamSender = SplitSink<WsStream, Message>;
 
+const CONNECTOR_NAME: &str = "Rust WS Connector";
+const CONNECTOR_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Debug, Clone)]
 pub enum WsAuth {
     Token(String),
@@ -486,15 +489,13 @@ impl TaosBuilder {
             .and_then(|s| s.parse::<u64>().ok())
             .map_or(Duration::from_secs(300), Duration::from_secs);
 
-        let connector_name = match dsn.remove("connector_name") {
-            Some(name) => name,
-            None => "Rust WS Connector".to_string(),
-        };
+        let connector_name = dsn
+            .remove("connector_name")
+            .unwrap_or_else(|| CONNECTOR_NAME.to_string());
 
-        let connector_version = match dsn.remove("connector_version") {
-            Some(version) => version,
-            None => env!("CARGO_PKG_VERSION").to_string(),
-        };
+        let connector_version = dsn
+            .remove("connector_version")
+            .unwrap_or_else(|| CONNECTOR_VERSION.to_string());
 
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
@@ -1055,15 +1056,9 @@ mod tests {
 
             let mut rs = taos.query("show connections").await?;
             let records: Vec<Record> = rs.deserialize().try_collect().await?;
-
-            let mut found = false;
-            for record in records {
-                if record.user_app == "Rust WS Connector"
-                    && record.connector_info == env!("CARGO_PKG_VERSION")
-                {
-                    found = true;
-                }
-            }
+            let found = records.iter().any(|record| {
+                record.user_app == CONNECTOR_NAME && record.connector_info == CONNECTOR_VERSION
+            });
             assert!(found);
         }
 
@@ -1078,13 +1073,9 @@ mod tests {
 
             let mut rs = taos.query("show connections").await?;
             let records: Vec<Record> = rs.deserialize().try_collect().await?;
-
-            let mut found = false;
-            for record in records {
-                if record.user_app == "rust" && record.connector_info == "0.0.1" {
-                    found = true;
-                }
-            }
+            let found = records
+                .iter()
+                .any(|record| record.user_app == "rust" && record.connector_info == "0.0.1");
             assert!(found);
         }
 

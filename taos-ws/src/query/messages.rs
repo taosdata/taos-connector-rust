@@ -36,8 +36,8 @@ impl WsConnReq {
             db: None,
             mode: None,
             tz: None,
-            app: "Rust WS Connector".to_string(),
-            connector: env!("CARGO_PKG_VERSION").to_string(),
+            app: crate::CONNECTOR_NAME.to_string(),
+            connector: crate::CONNECTOR_VERSION.to_string(),
         }
     }
 }
@@ -492,8 +492,8 @@ mod tests {
                 "password": "taosdata",
                 "db": "",
                 "tz": null,
-                "app": "Rust WS Connector",
-                "connector": env!("CARGO_PKG_VERSION"),
+                "app": crate::CONNECTOR_NAME,
+                "connector": crate::CONNECTOR_VERSION
             }
         });
         assert_eq!(v, j);
