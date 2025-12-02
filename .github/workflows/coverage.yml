@@ -25,7 +25,7 @@ jobs:
         with:
           repository: "taosdata/TDengine"
           path: "TDengine"
-          ref: "main"
+          ref: "3.0"
 
       - name: Checkout TDengine manually
         if: github.event_name == 'workflow_dispatch'
@@ -80,7 +80,7 @@ jobs:
           cd TDengine
           mkdir debug
           cd debug
-          cmake .. -DBUILD_TEST=off -DBUILD_HTTP=false -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false
+          cmake .. -DBUILD_TEST=off -DBUILD_HTTP=false -DVERNUMBER=3.9.9.9 -DBUILD_DEPENDENCY_TESTS=false -DTAOSADAPTER_GIT_TAG=3.0
           make -j 8
 
       - name: Package
@@ -197,7 +197,7 @@ jobs:
         env:
           TDENGINE_CLOUD_URL: ${{ secrets.TDENGINE_CLOUD_URL }}
           TDENGINE_CLOUD_TOKEN: ${{ secrets.TDENGINE_CLOUD_TOKEN }}
-        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 1 --workspace --features ws-rustls-aws-lc-crypto-provider,test-new-feat --lcov --output-path lcov.info --no-fail-fast
+        run: RUST_BACKTRACE=1 cargo llvm-cov nextest -j 4 --workspace --features ws-rustls-aws-lc-crypto-provider,test-new-feat --lcov --output-path lcov.info --no-fail-fast
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
