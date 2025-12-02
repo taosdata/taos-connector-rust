@@ -6,6 +6,16 @@ use syn::visit::Visit;
 use syn::{ItemConst, ItemFn, Visibility};
 
 fn main() -> Result<(), Box<dyn Error>> {
+    println!("cargo:rerun-if-env-changed=TD_VERSION");
+
+    let td_ver = env::var("TD_VERSION")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+
+    println!("cargo:rustc-env=TD_VERSION={td_ver}");
+
     write_header("taos.h", "src/ws", "cbindgen_ws.toml")?;
     write_header("taosws.h", "src/old_ws", "cbindgen_old_ws.toml")?;
     Ok(())

@@ -3,7 +3,6 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use std::{ptr, slice};
 
-use bytes::Bytes;
 use taos_error::Code;
 use taos_query::common::{Precision, Ty};
 use taos_query::util::{generate_req_id, hex, InlineBytes, InlineStr};
@@ -360,6 +359,9 @@ pub unsafe extern "C" fn taos_print_row_with_size(
     let mut len: usize = 0;
     let mut size = (size - 1) as usize;
 
+    let mut int_buf = itoa::Buffer::new();
+    let mut float_buf = ryu::Buffer::new();
+
     for i in 0..num_fields as usize {
         if i > 0 && size > 0 {
             *str.add(len) = ' ' as c_char;
@@ -376,7 +378,7 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                     write_to_cstr(
                         &mut size,
                         str.add(len as usize),
-                        format!("{value}").as_str().as_bytes(),
+                        int_buf.format(value).as_bytes(),
                     )
                 }};
             }
@@ -390,27 +392,38 @@ pub unsafe extern "C" fn taos_print_row_with_size(
                 Ty::UInt => read_and_write!(u32),
                 Ty::BigInt | Ty::Timestamp => read_and_write!(i64),
                 Ty::UBigInt => read_and_write!(u64),
-                Ty::Float => read_and_write!(f32),
-                Ty::Double => read_and_write!(f64),
-                Ty::Bool => {
-                    let value = ptr::read_unaligned(row[i] as *const bool);
+                Ty::Float => {
+                    let value = ptr::read_unaligned(row[i] as *const f32);
                     write_to_cstr(
                         &mut size,
                         str.add(len),
-                        format!("{}", value as i32).as_str().as_bytes(),
+                        float_buf.format_finite(value).as_bytes(),
                     )
+                }
+                Ty::Double => {
+                    let value = ptr::read_unaligned(row[i] as *const f64);
+                    write_to_cstr(
+                        &mut size,
+                        str.add(len),
+                        float_buf.format_finite(value).as_bytes(),
+                    )
+                }
+                Ty::Bool => {
+                    let value = ptr::read_unaligned(row[i] as *const bool);
+                    let b = if value { b"1" } else { b"0" };
+                    write_to_cstr(&mut size, str.add(len), b)
                 }
                 Ty::VarBinary => {
                     let data = row[i].offset(-2) as *const InlineBytes;
-                    let data = Bytes::from((*data).as_bytes());
-                    let content = format!("\\x{}", hex::bytes_to_hex_string_upper(data));
-                    write_to_cstr(&mut size, str.add(len), content.as_bytes())
+                    let data = (*data).as_bytes();
+                    let content = hex::slice_to_hex_upper_with_prefix(data);
+                    write_to_cstr(&mut size, str.add(len), &content)
                 }
                 Ty::Blob => {
                     let data = row[i].offset(-4) as *const InlineBytes<u32>;
-                    let data = Bytes::from((*data).as_bytes());
-                    let content = format!("\\x{}", hex::bytes_to_hex_string_upper(data));
-                    write_to_cstr(&mut size, str.add(len), content.as_bytes())
+                    let data = (*data).as_bytes();
+                    let content = hex::slice_to_hex_upper_with_prefix(data);
+                    write_to_cstr(&mut size, str.add(len), &content)
                 }
                 Ty::Geometry => {
                     let data = row[i].offset(-2) as *const InlineBytes;
@@ -898,7 +911,7 @@ pub unsafe extern "C" fn taos_get_client_info() -> *const c_char {
     static VERSION: OnceLock<CString> = OnceLock::new();
     VERSION
         .get_or_init(|| {
-            let version = env!("CARGO_PKG_VERSION");
+            let version = env!("TD_VERSION");
             CString::new(version).unwrap()
         })
         .as_ptr()
@@ -2021,12 +2034,23 @@ mod tests {
     }
 
     #[test]
-    fn test_taos_get_client_info() {
+    fn test_taos_get_client_info_default() {
         unsafe {
             let client_info = taos_get_client_info();
             assert!(!client_info.is_null());
             let client_info = CStr::from_ptr(client_info).to_str().unwrap();
-            assert_eq!(client_info, "0.2.1");
+            assert_eq!(client_info, env!("CARGO_PKG_VERSION"));
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_taos_get_client_info_injected() {
+        unsafe {
+            let client_info = taos_get_client_info();
+            assert!(!client_info.is_null());
+            let client_info = CStr::from_ptr(client_info).to_str().unwrap();
+            assert_eq!(client_info, "3.9.9.9");
         }
     }
 

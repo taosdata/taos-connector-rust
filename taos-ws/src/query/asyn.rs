@@ -880,6 +880,9 @@ impl VersionInfo {
 }
 
 pub(crate) fn is_support_binary_sql(v1: &str) -> bool {
+    if v1 == "3.x" {
+        return true;
+    }
     is_greater_than_or_equal_to(v1, "3.3.2.0")
 }
 
@@ -1621,7 +1624,6 @@ mod tests {
     #[tokio::test]
     async fn ws_async_data_flow() -> anyhow::Result<()> {
         unsafe { std::env::set_var("RUST_LOG", "debug") };
-        // pretty_env_logger::init();
         let client = WsTaos::from_dsn("taosws://localhost:6041/").await?;
         let db = "ws_async_data_flow";
         assert_eq!(
