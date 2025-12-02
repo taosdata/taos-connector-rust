@@ -726,7 +726,7 @@ impl AsAsyncConsumer for Consumer {
 
     async fn unsubscribe(self) {
         let req_id = self.sender.req_id();
-        tracing::trace!("unsubscribe {} start", req_id);
+        tracing::trace!("unsubscribe req_id:{} start", req_id);
         let action = TmqSend::Unsubscribe { req_id };
         if let Err(err) = self.sender.send_recv(action).await {
             tracing::warn!("unsubscribe error: {err:?}");

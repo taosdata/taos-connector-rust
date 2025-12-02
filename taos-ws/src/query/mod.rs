@@ -734,8 +734,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_recv_resp_timeout() -> anyhow::Result<()> {
-        use crate::stmt2::ws_proxy::*;
         use taos_query::prelude::*;
+        use taos_query::util::ws_proxy::*;
 
         let intercept: InterceptFn = {
             Arc::new(move |_msg, _ctx| {

@@ -136,6 +136,7 @@ pub(super) async fn run(
                 builder.build_conn_request(),
                 tmq_conf.clone(),
                 topics.clone(),
+                builder.conn_timeout,
             );
             builder.connect_with_cb(EndpointType::Tmq, cb).await
         } else {
@@ -390,11 +391,11 @@ async fn parse_text_message(
     let (req_id, data, ok) = resp.ok();
 
     match &data {
+        TmqRecvData::Version { .. } => {}
         TmqRecvData::FetchBlock { .. }
         | TmqRecvData::Bytes(..)
         | TmqRecvData::FetchRawData { .. }
         | TmqRecvData::Block(..)
-        | TmqRecvData::Version { .. }
         | TmqRecvData::Close => unreachable!("unexpected data type: {:?}", data),
         TmqRecvData::Poll(_) => {
             cache.remove().await;
@@ -477,6 +478,7 @@ fn send_subscribe_request(
     conn_req: WsConnReq,
     tmq_conf: TmqInit,
     topics: Arc<RwLock<Vec<String>>>,
+    conn_timeout: Duration,
 ) -> impl for<'a> Fn(&'a mut WsStream) -> Pin<Box<dyn Future<Output = RawResult<()>> + Send + 'a>> {
     move |ws_stream| {
         let conn_req = conn_req.clone();
@@ -492,7 +494,7 @@ fn send_subscribe_request(
                 conn: conn_req.clone(),
             };
 
-            if let Err(err) = send_recv(ws_stream, req.to_msg()).await {
+            if let Err(err) = send_recv(ws_stream, req.to_msg(), conn_timeout).await {
                 tracing::error!("subscribe error: {err:?}");
                 if tmq_conf.enable_batch_meta.is_none() {
                     return Err(err);
@@ -506,7 +508,7 @@ fn send_subscribe_request(
                         topics,
                         conn: conn_req,
                     };
-                    let _ = send_recv(ws_stream, req.to_msg()).await?;
+                    let _ = send_recv(ws_stream, req.to_msg(), conn_timeout).await?;
                 } else {
                     return Err(err);
                 }
@@ -517,10 +519,12 @@ fn send_subscribe_request(
     }
 }
 
-async fn send_recv(ws_stream: &mut WsStream, message: Message) -> RawResult<TmqRecvData> {
-    let timeout = Duration::from_secs(8);
-
-    time::timeout(timeout, ws_stream.send(message))
+async fn send_recv(
+    ws_stream: &mut WsStream,
+    message: Message,
+    conn_timeout: Duration,
+) -> RawResult<TmqRecvData> {
+    time::timeout(conn_timeout, ws_stream.send(message))
         .await
         .map_err(|_| {
             RawError::from_code(WS_ERROR_NO::SEND_MESSAGE_TIMEOUT.as_code())
@@ -529,7 +533,7 @@ async fn send_recv(ws_stream: &mut WsStream, message: Message) -> RawResult<TmqR
         .map_err(handle_disconnect_error)?;
 
     loop {
-        let res = time::timeout(timeout, ws_stream.next())
+        let res = time::timeout(conn_timeout, ws_stream.next())
             .await
             .map_err(|_| {
                 RawError::from_code(WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code())
@@ -879,6 +883,146 @@ mod tests {
         tokio::join!(server1, server2);
 
         poll_handle.await??;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_subscribe_resp_timeout() -> anyhow::Result<()> {
+        use crate::query::asyn::WS_ERROR_NO;
+        use crate::TaosBuilder;
+        use serde_json::Value;
+        use taos_query::prelude::*;
+        use taos_query::util::ws_proxy::*;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .try_init();
+
+        let intercept: InterceptFn = {
+            Arc::new(move |msg, ctx| {
+                if let Message::Text(text) = msg {
+                    let req = serde_json::from_str::<Value>(text).unwrap();
+                    let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                    if action == "poll" {
+                        return ProxyAction::Restart;
+                    } else if action == "subscribe" {
+                        ctx.req_count += 1;
+                        if ctx.req_count == 2 {
+                            tokio::task::block_in_place(|| {
+                                std::thread::sleep(std::time::Duration::from_secs(2));
+                            });
+                        }
+                    }
+                }
+
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8907", "ws://localhost:6041/rest/tmq", intercept).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1762848301",
+            "drop database if exists test_1762848301",
+            "create database test_1762848301",
+            "create topic topic_1762848301 as database test_1762848301",
+            "use test_1762848301",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values (now, 1)",
+        ])
+        .await?;
+
+        let tmq = TmqBuilder::from_dsn("ws://localhost:8907?group.id=123424&conn_timeout=1")?;
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["topic_1762848301"]).await?;
+
+        let timeout = Timeout::Duration(std::time::Duration::from_secs(5));
+        let err = consumer.recv_timeout(timeout).await.unwrap_err();
+        assert_eq!(err.code(), WS_ERROR_NO::CONN_CLOSED.as_code());
+        assert!(err.to_string().contains("WebSocket connection is closed"));
+
+        consumer.unsubscribe().await;
+
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            "drop topic if exists topic_1762848301",
+            "drop database if exists test_1762848301",
+        ])
+        .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recv_version_resp_timeout() -> anyhow::Result<()> {
+        use crate::TaosBuilder;
+        use taos_query::prelude::*;
+        use taos_query::util::ws_proxy::*;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::ERROR)
+            .try_init();
+
+        let intercept: InterceptFn = {
+            Arc::new(move |msg, _ctx| {
+                if let Message::Text(text) = msg {
+                    if text.contains("version") {
+                        tokio::task::block_in_place(|| {
+                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                        });
+                    }
+                }
+                ProxyAction::Forward
+            })
+        };
+
+        WsProxy::start("127.0.0.1:8908", "ws://localhost:6041/rest/tmq", intercept).await;
+
+        let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+            .build()
+            .await?;
+
+        taos.exec_many([
+            "drop topic if exists topic_1762850286",
+            "drop database if exists test_1762850286",
+            "create database test_1762850286",
+            "create topic topic_1762850286 as database test_1762850286",
+            "use test_1762850286",
+            "create table t0 (ts timestamp, c1 int)",
+            "insert into t0 values (now, 1)",
+        ])
+        .await?;
+
+        let tmq = TmqBuilder::from_dsn(
+            "ws://localhost:8908?group.id=132324&conn_timeout=1&version_prefer=3.x&auto.offset.reset=earliest",
+        )?;
+        let mut consumer = tmq.build().await?;
+        consumer.subscribe(["topic_1762850286"]).await?;
+
+        let timeout = Timeout::Duration(std::time::Duration::from_secs(5));
+        let _ = consumer.recv_timeout(timeout).await?;
+
+        consumer.unsubscribe().await;
+
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        taos.exec_many([
+            "drop topic if exists topic_1762850286",
+            "drop database if exists test_1762850286",
+        ])
+        .await?;
 
         Ok(())
     }
