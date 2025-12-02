@@ -27,6 +27,26 @@ pub type __taos_async_whitelist_dual_stack_fn_t = extern "C" fn(
     pWhiteLists: *mut *mut c_char,
 );
 
+#[allow(non_snake_case)]
+#[allow(non_camel_case_types)]
+pub type __taos_async_ip_whitelist_fn_t = extern "C" fn(
+    param: *mut c_void,
+    code: c_int,
+    taos: *mut TAOS,
+    numOfWhiteLists: c_int,
+    pWhiteLists: *mut *mut c_char,
+);
+
+#[allow(non_snake_case)]
+#[allow(non_camel_case_types)]
+pub type __taos_async_datetime_whitelist_fn_t = extern "C" fn(
+    param: *mut c_void,
+    code: c_int,
+    taos: *mut TAOS,
+    numOfWhiteLists: c_int,
+    pWhiteLists: *mut *mut c_char,
+);
+
 #[no_mangle]
 pub extern "C" fn taos_cleanup() {}
 
@@ -249,6 +269,22 @@ pub extern "C" fn getBuildInfo() -> *const c_char {
 #[allow(non_snake_case)]
 pub extern "C" fn taos_write_crashinfo(signum: c_int, sigInfo: *mut c_void, context: *mut c_void) {}
 
+#[no_mangle]
+pub extern "C" fn taos_fetch_ip_whitelist_a(
+    taos: *mut TAOS,
+    fp: __taos_async_ip_whitelist_fn_t,
+    param: *mut c_void,
+) {
+}
+
+#[no_mangle]
+pub extern "C" fn taos_fetch_datetime_whitelist_a(
+    taos: *mut TAOS,
+    fp: __taos_async_datetime_whitelist_fn_t,
+    param: *mut c_void,
+) {
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,5 +437,37 @@ mod tests {
         assert_eq!(build_info, ptr::null());
 
         taos_write_crashinfo(0, ptr::null_mut(), ptr::null_mut());
+
+        #[allow(non_snake_case)]
+        extern "C" fn taos_fetch_ip_whitelist_a_cb(
+            param: *mut c_void,
+            code: c_int,
+            taos: *mut TAOS,
+            numOfWhiteLists: c_int,
+            pWhiteLists: *mut *mut c_char,
+        ) {
+        }
+
+        taos_fetch_ip_whitelist_a(
+            ptr::null_mut(),
+            taos_fetch_ip_whitelist_a_cb,
+            ptr::null_mut(),
+        );
+
+        #[allow(non_snake_case)]
+        extern "C" fn taos_fetch_datetime_whitelist_a_cb(
+            param: *mut c_void,
+            code: c_int,
+            taos: *mut TAOS,
+            numOfWhiteLists: c_int,
+            pWhiteLists: *mut *mut c_char,
+        ) {
+        }
+
+        taos_fetch_datetime_whitelist_a(
+            ptr::null_mut(),
+            taos_fetch_datetime_whitelist_a_cb,
+            ptr::null_mut(),
+        );
     }
 }
