@@ -488,7 +488,7 @@ impl TaosBuilder {
 
         let connector_name = match dsn.remove("connector_name") {
             Some(name) => name,
-            None => "Rust WebSocket Connector".to_string(),
+            None => "Rust WS Connector".to_string(),
         };
 
         let connector_version = match dsn.remove("connector_version") {
@@ -1033,6 +1033,59 @@ mod tests {
                     }
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_report_connector_version() -> anyhow::Result<()> {
+        #[derive(Debug, serde::Deserialize)]
+        struct Record {
+            user_app: String,
+            connector_info: String,
+        }
+
+        {
+            let taos = TaosBuilder::from_dsn("ws://localhost:6041")?
+                .build()
+                .await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+
+            let mut found = false;
+            for record in records {
+                if record.user_app == "Rust WS Connector"
+                    && record.connector_info == env!("CARGO_PKG_VERSION")
+                {
+                    found = true;
+                }
+            }
+            assert!(found);
+        }
+
+        {
+            let taos = TaosBuilder::from_dsn(
+                "ws://localhost:6041?connector_name=rust&connector_version=0.0.1",
+            )?
+            .build()
+            .await?;
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            let mut rs = taos.query("show connections").await?;
+            let records: Vec<Record> = rs.deserialize().try_collect().await?;
+
+            let mut found = false;
+            for record in records {
+                if record.user_app == "rust" && record.connector_info == "0.0.1" {
+                    found = true;
+                }
+            }
+            assert!(found);
         }
 
         Ok(())
