@@ -3008,8 +3008,9 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "test-new-feat")]
     #[ignore]
-    async fn test_report_connector_version() -> anyhow::Result<()> {
+    async fn test_report_connector_info() -> anyhow::Result<()> {
         use taos_query::prelude::*;
 
         let _ = tracing_subscriber::fmt()
@@ -3020,7 +3021,6 @@ mod tests {
 
         #[derive(Debug, serde::Deserialize)]
         struct Record {
-            user_app: String,
             connector_info: String,
         }
 
@@ -3047,17 +3047,14 @@ mod tests {
             let records: Vec<Record> = rs.deserialize().try_collect().await?;
             let cnt = records
                 .iter()
-                .filter(|record| {
-                    record.user_app == crate::CONNECTOR_NAME
-                        && record.connector_info == crate::CONNECTOR_VERSION
-                })
+                .filter(|record| record.connector_info == crate::CONNECTOR_INFO)
                 .count();
             assert_eq!(cnt, 2);
         }
 
         {
             let tmq = TmqBuilder::from_dsn(
-                "ws://localhost:6041?group.id=10&connector_name=rust_tmq&connector_version=tmq_0.0.1",
+                "ws://localhost:6041?group.id=10&connector_info=rust_tmq-0.0.1",
             )?;
             let mut consumer = tmq.build().await?;
             consumer.subscribe(["topic_1764581863"]).await?;
@@ -3066,11 +3063,13 @@ mod tests {
 
             let mut rs = taos.query("show connections").await?;
             let records: Vec<Record> = rs.deserialize().try_collect().await?;
-            let found = records.iter().any(|record| {
-                record.user_app == "rust_tmq" && record.connector_info == "tmq_0.0.1"
-            });
+            let found = records
+                .iter()
+                .any(|record| record.connector_info == "rust_tmq-0.0.1");
             assert!(found);
         }
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
         taos.exec_many([
             "drop topic if exists topic_1764581863",

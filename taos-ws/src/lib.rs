@@ -53,8 +53,7 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsStreamReader = SplitStream<WsStream>;
 type WsStreamSender = SplitSink<WsStream, Message>;
 
-const CONNECTOR_NAME: &str = "Rust WS Connector";
-const CONNECTOR_VERSION: &str = env!("CARGO_PKG_VERSION");
+const CONNECTOR_INFO: &str = concat!("RustWS-", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Clone)]
 pub enum WsAuth {
@@ -88,8 +87,7 @@ pub struct TaosBuilder {
     conn_options: DashMap<i32, Option<String>>,
     tcp_nodelay: bool,
     read_timeout: Duration,
-    connector_name: String,
-    connector_version: String,
+    connector_info: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -489,13 +487,9 @@ impl TaosBuilder {
             .and_then(|s| s.parse::<u64>().ok())
             .map_or(Duration::from_secs(300), Duration::from_secs);
 
-        let connector_name = dsn
-            .remove("connector_name")
-            .unwrap_or_else(|| CONNECTOR_NAME.to_string());
-
-        let connector_version = dsn
-            .remove("connector_version")
-            .unwrap_or_else(|| CONNECTOR_VERSION.to_string());
+        let connector_info = dsn
+            .remove("connector_info")
+            .unwrap_or_else(|| CONNECTOR_INFO.to_string());
 
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
@@ -519,8 +513,7 @@ impl TaosBuilder {
             conn_options: DashMap::new(),
             tcp_nodelay,
             read_timeout,
-            connector_name,
-            connector_version,
+            connector_info,
         })
     }
 
@@ -832,8 +825,7 @@ impl TaosBuilder {
             db: self.database.clone(),
             mode: (self.conn_mode == Some(1)).then_some(0), // for adapter, 0 is bi mode
             tz: self.tz.map(|s| s.to_string()),
-            app: self.connector_name.clone(),
-            connector: self.connector_version.clone(),
+            connector: self.connector_info.clone(),
         }
     }
 
@@ -1041,10 +1033,9 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "test-new-feat")]
-    async fn test_report_connector_version() -> anyhow::Result<()> {
+    async fn test_report_connector_info() -> anyhow::Result<()> {
         #[derive(Debug, serde::Deserialize)]
         struct Record {
-            user_app: String,
             connector_info: String,
         }
 
@@ -1057,18 +1048,16 @@ mod tests {
 
             let mut rs = taos.query("show connections").await?;
             let records: Vec<Record> = rs.deserialize().try_collect().await?;
-            let found = records.iter().any(|record| {
-                record.user_app == CONNECTOR_NAME && record.connector_info == CONNECTOR_VERSION
-            });
+            let found = records
+                .iter()
+                .any(|record| record.connector_info == CONNECTOR_INFO);
             assert!(found);
         }
 
         {
-            let taos = TaosBuilder::from_dsn(
-                "ws://localhost:6041?connector_name=rust&connector_version=0.0.1",
-            )?
-            .build()
-            .await?;
+            let taos = TaosBuilder::from_dsn("ws://localhost:6041?connector_info=rust-0.0.1")?
+                .build()
+                .await?;
 
             tokio::time::sleep(Duration::from_secs(2)).await;
 
@@ -1076,7 +1065,7 @@ mod tests {
             let records: Vec<Record> = rs.deserialize().try_collect().await?;
             let found = records
                 .iter()
-                .any(|record| record.user_app == "rust" && record.connector_info == "0.0.1");
+                .any(|record| record.connector_info == "rust-0.0.1");
             assert!(found);
         }
 

@@ -23,7 +23,6 @@ pub struct WsConnReq {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) mode: Option<u32>,
     pub(crate) tz: Option<String>,
-    pub(crate) app: String,
     pub(crate) connector: String,
 }
 
@@ -36,8 +35,7 @@ impl WsConnReq {
             db: None,
             mode: None,
             tz: None,
-            app: crate::CONNECTOR_NAME.to_string(),
-            connector: crate::CONNECTOR_VERSION.to_string(),
+            connector: crate::CONNECTOR_INFO.to_string(),
         }
     }
 }
@@ -492,8 +490,7 @@ mod tests {
                 "password": "taosdata",
                 "db": "",
                 "tz": null,
-                "app": crate::CONNECTOR_NAME,
-                "connector": crate::CONNECTOR_VERSION
+                "connector": crate::CONNECTOR_INFO
             }
         });
         assert_eq!(v, j);
