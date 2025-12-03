@@ -183,7 +183,7 @@ unsafe fn stmt_init(
     single_stb_insert: bool,
     single_table_bind_once: bool,
 ) -> TaosResult<TaosStmt> {
-    debug!("stmt_init start, req_id: {req_id}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}");
+    debug!("stmt_init start, req_id: 0x{req_id:x}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}");
 
     let taos = (taos as *mut Taos)
         .as_mut()

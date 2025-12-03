@@ -133,7 +133,7 @@ impl WsTaos {
         meta.write_all(raw.raw_slice()).map_err(Error::from)?;
         let len = meta.len();
 
-        tracing::trace!("write meta with req_id: {req_id}, raw data length: {len}",);
+        tracing::trace!("write meta with req_id: 0x{req_id:x}, raw data length: {len}",);
 
         let h = self
             .sender
@@ -545,7 +545,7 @@ impl WsTaos {
             meta.write_all(raw.as_raw_bytes()).map_err(Error::from)?;
 
             let len = meta.len();
-            tracing::trace!("write block with req_id: {req_id}, raw data len: {len}",);
+            tracing::trace!("write block with req_id: 0x{req_id:x}, raw data len: {len}",);
 
             match self.sender.send_recv(WsSend::Binary(meta)).await? {
                 WsRecvData::WriteRawBlock | WsRecvData::WriteRawBlockWithFields => Ok(()),
@@ -572,7 +572,7 @@ impl WsTaos {
                 unsafe { std::slice::from_raw_parts(fields.as_ptr() as _, fields.len() * 72) };
             meta.write_all(fields).map_err(Error::from)?;
             let len = meta.len();
-            tracing::trace!("write block with req_id: {req_id}, raw data len: {len}",);
+            tracing::trace!("write block with req_id: 0x{req_id:x}, raw data len: {len}",);
 
             let recv = time::timeout(
                 Duration::from_secs(60),
@@ -705,7 +705,7 @@ pub(crate) async fn fetch_binary(
                             .await
                             .is_err()
                         {
-                            tracing::warn!("fetch binary, failed to send raw block to receiver, result id: {res_id}");
+                            tracing::debug!("fetch binary, failed to send raw block to receiver, result id: {res_id}");
                             break;
                         }
                     }
@@ -931,7 +931,7 @@ impl WsQuerySender {
 
         let cleanup = || {
             let res = self.queries.remove(&req_id);
-            tracing::trace!("send_recv, clean up queries, req_id: {req_id}, res: {res:?}");
+            tracing::trace!("send_recv, clean up queries, req_id: 0x{req_id:x}, res: {res:?}");
         };
         let _cleanup_queries = CleanUp { f: Some(cleanup) };
 
@@ -955,7 +955,7 @@ impl WsQuerySender {
 
         let _ = cleanup_results;
 
-        tracing::trace!("send_recv, req_id: {req_id}, sending message: {message:?}");
+        tracing::trace!("sending message with req_id 0x{req_id:x}: {message:?}");
 
         timeout(
             WRITE_TIMEOUT,
@@ -963,17 +963,20 @@ impl WsQuerySender {
         )
         .await
         .map_err(|e| {
-            tracing::error!("send_recv, send request timeout, req_id: {req_id}, err: {e}");
+            tracing::error!("send request timeout, req_id: 0x{req_id:x}, err: {e}");
             Error::from(e)
         })?
         .map_err(Error::from)?;
 
-        tracing::trace!("send_recv, message sent, waiting for response, req_id: {req_id}");
+        tracing::trace!("message sent, waiting for response, req_id: 0x{req_id:x}");
 
         let data = timeout(self.read_timeout, data_rx)
             .await
             .map_err(|e| {
-                tracing::error!("send_recv, receive response timeout, req_id: {req_id}, err: {e}");
+                tracing::error!(
+                    "receive response timeout, req_id: 0x{req_id:x}, timeout: {:?}, error: {e:#}",
+                    self.read_timeout
+                );
                 RawError::new(
                     WS_ERROR_NO::RECV_MESSAGE_TIMEOUT.as_code(),
                     format!(
@@ -982,24 +985,24 @@ impl WsQuerySender {
                     ),
                 )
             })?
-            .map_err(|_| RawError::from_string(format!("{req_id} request cancelled")))?
+            .map_err(|_| RawError::from_string(format!("0x{req_id:x} request cancelled")))?
             .map_err(Error::from)?;
 
-        tracing::trace!("send_recv, req_id: {req_id}, received data: {data:?}");
+        tracing::trace!("send_recv, req_id: 0x{req_id:x}, received data: {data:?}");
 
         Ok(data)
     }
 
     async fn send_only(&self, message: WsSend) -> RawResult<()> {
         let req_id = message.req_id();
-        tracing::trace!("send_only, req_id: {req_id}, message: {message:?}");
+        tracing::trace!("send_only, req_id: 0x{req_id:x}, message: {message:?}");
         timeout(
             WRITE_TIMEOUT,
             self.sender.send_async(WsMessage::Command(message)),
         )
         .await
         .map_err(|e| {
-            tracing::error!("send_only, send request timeout, req_id: {req_id}, err: {e}");
+            tracing::error!("send_only, send request timeout, req_id: 0x{req_id:x}, err: {e}");
             Error::from(e)
         })?
         .map_err(Error::from)?;

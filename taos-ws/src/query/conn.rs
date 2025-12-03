@@ -105,13 +105,13 @@ impl MessageCache {
 
     fn insert(&self, req_id: ReqId, message: Message) {
         let msg_id = self.next_msg_id.fetch_add(1, Ordering::Relaxed);
-        tracing::trace!("insert message into cache, req_id: {req_id}, msg_id: {msg_id}");
+        tracing::trace!("insert message into cache, req_id: 0x{req_id:x}, msg_id: {msg_id}");
         let _ = self.req_to_msg.insert(req_id, msg_id);
         let _ = self.messages.insert(msg_id, message);
     }
 
     fn remove(&self, req_id: &ReqId) {
-        tracing::trace!("remove message from cache, req_id: {req_id}");
+        tracing::trace!("remove message from cache, req_id: 0x{req_id:x}");
         if let Some((_, msg_id)) = self.req_to_msg.remove(req_id) {
             self.messages.remove(&msg_id);
         }
@@ -433,10 +433,10 @@ fn parse_text_message(text: String, query_sender: WsQuerySender, cache: MessageC
         _ => {
             if let Some((_, sender)) = query_sender.queries.remove(&req_id) {
                 if let Err(err) = sender.send(ok.map(|_| data)) {
-                    tracing::warn!("failed to send data, req_id: {req_id}, err: {err:?}");
+                    tracing::warn!("failed to send data, req_id: 0x{req_id:x}, err: {err:?}");
                 }
             } else {
-                tracing::warn!("no sender found for req_id: {req_id}, the message may be lost");
+                tracing::warn!("no sender found for req_id: 0x{req_id:x}, the message may be lost");
             }
         }
     }
@@ -520,10 +520,10 @@ fn parse_binary_message(data: Vec<u8>, query_sender: WsQuerySender, cache: Messa
 
         if let Some((_, sender)) = query_sender.queries.remove(&req_id) {
             if let Err(err) = sender.send(Ok(data)) {
-                tracing::warn!("failed to send data, req_id: {req_id}, err: {err:?}");
+                tracing::warn!("failed to send data, req_id: 0x{req_id:x}, err: {err:?}");
             }
         } else {
-            tracing::warn!("no sender found for req_id: {req_id}, the message may be lost");
+            tracing::warn!("no sender found for req_id: 0x{req_id:x}, the message may be lost");
         }
     });
 }
