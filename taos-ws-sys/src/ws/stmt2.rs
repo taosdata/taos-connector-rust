@@ -110,7 +110,7 @@ unsafe fn stmt2_init(taos: *mut TAOS, option: *mut TAOS_STMT2_OPTION) -> TaosRes
             None => (generate_req_id(), false, false, None, ptr::null_mut()),
         };
 
-    debug!("stmt2_init, req_id: {req_id}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}, async_exec_fn: {async_exec_fn:?}, userdata: {userdata:?}");
+    debug!("stmt2_init, req_id: 0x{req_id:x}, single_stb_insert: {single_stb_insert}, single_table_bind_once: {single_table_bind_once}, async_exec_fn: {async_exec_fn:?}, userdata: {userdata:?}");
 
     block_in_place_or_global(stmt2.init_with_options(
         req_id,
@@ -582,7 +582,7 @@ impl TAOS_STMT2_BINDV {
         tag_cnt: usize,
         col_cnt: usize,
     ) -> TaosResult<Vec<u8>> {
-        debug!("to_bytes, req_id: {req_id}, stmt_id: {stmt_id}, tag_cnt: {tag_cnt}, col_cnt: {col_cnt}");
+        debug!("to_bytes, req_id: 0x{req_id:x}, stmt_id: {stmt_id}, tag_cnt: {tag_cnt}, col_cnt: {col_cnt}");
 
         let (tbname_buf_len, tbname_lens) = if !self.tbnames.is_null() {
             self.calc_tbname_lens()?
