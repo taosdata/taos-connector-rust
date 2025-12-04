@@ -41,6 +41,7 @@ pub type TAOS_ROW = *mut *mut c_void;
 #[allow(non_camel_case_types)]
 pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
 
+const DEFAULT_DSN: &str = "ws://localhost:6041";
 const DEFAULT_HOST: &str = "localhost";
 const DEFAULT_PORT: u16 = 6041;
 const DEFAULT_CLOUD_PORT: u16 = 443;
@@ -226,6 +227,63 @@ unsafe fn connect(
     let mut taos = builder.build()?;
     builder.ping(&mut taos)?;
     Ok(taos)
+}
+
+#[no_mangle]
+#[instrument(level = "debug", ret)]
+pub unsafe extern "C" fn taos_connect_with_dsn(dsn: *const c_char) -> *mut TAOS {
+    match connect_with_dsn(dsn) {
+        Ok(taos) => Box::into_raw(Box::new(taos)) as _,
+        Err(mut err) => {
+            error!("taos_connect_with_dsn failed, err: {err:?}");
+            if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
+                err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
+            }
+            set_err_and_get_code(err);
+            ptr::null_mut()
+        }
+    }
+}
+
+unsafe fn connect_with_dsn(dsn: *const c_char) -> TaosResult<Taos> {
+    let dsn = if !dsn.is_null() {
+        CStr::from_ptr(dsn).to_str()?
+    } else {
+        DEFAULT_DSN
+    };
+
+    tracing::debug!("taos_connect_with_dsn, dsn: {dsn}");
+
+    let builder = TaosBuilder::from_dsn(dsn)?;
+
+    #[cfg(all(windows, target_pointer_width = "32"))]
+    {
+        tracing::debug!(
+            "Connecting with dsn: {dsn}, spawning thread to avoid stack overflow on 32-bit Windows"
+        );
+        const STACK_SIZE: usize = 4 * 1024 * 1024;
+        let handle = std::thread::Builder::new()
+            .stack_size(STACK_SIZE)
+            .spawn(move || {
+                builder.build().and_then(|mut taos| {
+                    builder.ping(&mut taos)?;
+                    Ok(taos)
+                })
+            })
+            .map_err(|e| TaosError::new(Code::FAILED, &format!("spawn thread failed: {e}")))?;
+        match handle.join() {
+            Ok(Ok(taos)) => Ok(taos),
+            Ok(Err(e)) => Err(e.into()),
+            Err(_) => Err(TaosError::new(Code::FAILED, "connect thread panicked")),
+        }
+    }
+
+    #[cfg(not(all(windows, target_pointer_width = "32")))]
+    {
+        let mut taos = builder.build()?;
+        builder.ping(&mut taos)?;
+        Ok(taos)
+    }
 }
 
 #[no_mangle]
@@ -959,6 +1017,28 @@ mod tests {
             taos_close(taos);
         }
     }
+
+    #[test]
+    fn test_taos_connect_with_dsn() {
+        unsafe {
+            let taos = taos_connect_with_dsn(ptr::null());
+            assert!(!taos.is_null());
+            taos_close(taos);
+
+            let taos = taos_connect_with_dsn(c"ws://root:taosdata@localhost:6041".as_ptr());
+            assert!(!taos.is_null());
+            taos_close(taos);
+
+            let taos =
+                taos_connect_with_dsn(c"ws://root:taosdata@localhost:6041?read_timeout=1".as_ptr());
+            assert!(!taos.is_null());
+            taos_close(taos);
+
+            let invalid_utf8 = CString::new([0xff, 0xfe, 0xfd]).unwrap();
+            let taos = taos_connect_with_dsn(invalid_utf8.as_ptr());
+            assert!(taos.is_null());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1006,5 +1086,34 @@ mod cloud_tests {
             assert!(!taos.is_null());
             taos_close(taos);
         }
+    }
+
+    #[test]
+    fn test_taos_connect_with_dsn() -> anyhow::Result<()> {
+        let _ = tracing_subscriber::fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(tracing::Level::INFO)
+            .compact()
+            .try_init();
+
+        let url = std::env::var("TDENGINE_CLOUD_URL");
+        if url.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_URL is not set, skip test_taos_connect_with_dsn");
+            return Ok(());
+        }
+
+        let token = std::env::var("TDENGINE_CLOUD_TOKEN");
+        if token.is_err() {
+            tracing::warn!("TDENGINE_CLOUD_TOKEN is not set, skip test_taos_connect_with_dsn");
+            return Ok(());
+        }
+
+        let dsn = format!("{}?token={}", url.unwrap(), token.unwrap());
+        let dsn = CString::new(dsn).unwrap();
+        let taos = unsafe { taos_connect_with_dsn(dsn.as_ptr()) };
+        assert!(!taos.is_null());
+
+        Ok(())
     }
 }
