@@ -424,6 +424,80 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// #[repr(C)]
+// #[derive(Debug)]
+// pub struct Options {
+//     pub keys: *mut *const c_char,
+//     pub values: *mut *const c_char,
+//     pub count: c_int,
+// }
+
+// pub type Options = c_void;
+#[repr(C)]
+pub struct Options {
+    keys: *mut *const c_char,
+    values: *mut *const c_char,
+    count: c_int,
+}
+
+impl Options {
+    unsafe fn iter(&self) -> impl Iterator<Item = (&CStr, &CStr)> {
+        (0..self.count).map(move |i| {
+            let k = *self.keys.add(i as usize);
+            let v = *self.values.add(i as usize);
+            (CStr::from_ptr(k), CStr::from_ptr(v))
+        })
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn taos_set_option(options: *mut Options, key: *const c_char, value: *const c_char) {
+    if options.is_null() || key.is_null() || value.is_null() {
+        return;
+    }
+    unsafe {
+        let opt = &mut *options;
+        let idx = opt.count as usize;
+        *opt.keys.add(idx) = key;
+        *opt.values.add(idx) = value;
+        opt.count += 1;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn taos_connect_with(options: *const Options) -> *mut TAOS {
+    if options.is_null() {
+        return ptr::null_mut();
+    }
+    unsafe {
+        let mut dsn = String::from("ws://localhost:6041");
+        for (k, v) in (&*options).iter() {
+            dsn.push('?');
+            dsn.push_str(k.to_str().unwrap_or_default());
+            dsn.push('=');
+            dsn.push_str(v.to_str().unwrap_or_default());
+        }
+        match TaosBuilder::from_dsn(dsn).and_then(|b| b.build()) {
+            Ok(taos) => Box::into_raw(Box::new(taos)) as _,
+            Err(_) => ptr::null_mut(),
+        }
+    }
+}
+
+/*
+options options;
+taos_set_option(&options, key, value);
+taos_connect_with(&options);
+
+struct options {
+   char** keys;
+   char** values;
+}
+
+void taos_set_option(options* options, char* key, char* value);
+taos_connect_with(options* options);
+ */
+
 #[derive(Debug)]
 struct Row {
     data: Vec<*const c_void>,

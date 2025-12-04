@@ -5,6 +5,8 @@ use std::str::FromStr;
 use std::sync::{OnceLock, RwLock};
 
 use faststr::FastStr;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::CertificateDer;
 use taos_error::Code;
 use tracing::level_filters::LevelFilter;
 
@@ -181,6 +183,18 @@ pub fn rotation_size() -> FastStr {
     CONFIG.read().unwrap().rotation_size().clone()
 }
 
+pub fn tls_mode() -> WsTlsMode {
+    CONFIG.read().unwrap().tls_mode()
+}
+
+pub fn tls_versions() -> Vec<WsTlsVersion> {
+    CONFIG.read().unwrap().tls_versions().to_vec()
+}
+
+pub fn tls_certs() -> Option<Vec<CertificateDer<'static>>> {
+    CONFIG.read().unwrap().tls_certs().map(|v| v.to_vec())
+}
+
 pub fn set_config_dir<T: Into<FastStr>>(cfg_dir: T) {
     CONFIG.write().unwrap().set_config_dir(cfg_dir);
 }
@@ -216,7 +230,8 @@ const DEFAULT_RETRY_BACKOFF_MAX_MS: u64 = 2000;
 const DEFAULT_LOG_KEEP_DAYS: u16 = 30;
 const DEFAULT_ROTATION_SIZE: &str = "1GB";
 const DEFAULT_DEBUG_FLAG: u16 = 0;
-const DEFAULT_WS_TLS_MODE: WsTlsMode = WsTlsMode::Disabled;
+const DEFAULT_TLS_MODE: WsTlsMode = WsTlsMode::Disabled;
+const DEFAULT_TLS_VERSIONS: &[WsTlsVersion] = &[WsTlsVersion::TlsV1_3];
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -294,9 +309,9 @@ pub struct Config {
     retry_backoff_max_ms: Option<u64>,
     log_keep_days: Option<u16>,
     rotation_size: Option<FastStr>,
-    ws_tls_mode: Option<WsTlsMode>,
-    ws_tls_version: Option<Vec<WsTlsVersion>>,
-    ws_tls_ca: Option<FastStr>,
+    tls_mode: Option<WsTlsMode>,
+    tls_versions: Option<Vec<WsTlsVersion>>,
+    tls_certs: Option<Vec<CertificateDer<'static>>>,
 }
 
 impl Config {
@@ -316,9 +331,9 @@ impl Config {
             retry_backoff_max_ms: None,
             log_keep_days: None,
             rotation_size: None,
-            ws_tls_mode: None,
-            ws_tls_version: None,
-            ws_tls_ca: None,
+            tls_mode: None,
+            tls_versions: None,
+            tls_certs: None,
         }
     }
 
@@ -383,6 +398,18 @@ impl Config {
     fn rotation_size(&self) -> &FastStr {
         static ROTATION_SIZE: FastStr = FastStr::from_static_str(DEFAULT_ROTATION_SIZE);
         self.rotation_size.as_ref().unwrap_or(&ROTATION_SIZE)
+    }
+
+    fn tls_mode(&self) -> WsTlsMode {
+        self.tls_mode.unwrap_or(DEFAULT_TLS_MODE)
+    }
+
+    fn tls_versions(&self) -> &[WsTlsVersion] {
+        self.tls_versions.as_deref().unwrap_or(DEFAULT_TLS_VERSIONS)
+    }
+
+    fn tls_certs(&self) -> Option<&[CertificateDer<'static>]> {
+        self.tls_certs.as_deref()
     }
 
     fn debug_flag(&self) -> Option<u16> {
@@ -481,49 +508,46 @@ impl Config {
         self.rotation_size = Some(size.into());
     }
 
-    fn set_ws_tls_mode(&mut self, mode: &str) -> Result<(), TaosError> {
-        self.ws_tls_mode = Some(mode.parse()?);
+    fn set_tls_mode(&mut self, mode: &str) -> Result<(), TaosError> {
+        self.tls_mode = Some(mode.parse()?);
         Ok(())
     }
 
-    fn set_ws_tls_version(&mut self, version: &str) -> Result<(), TaosError> {
+    fn set_tls_versions(&mut self, version: &str) -> Result<(), TaosError> {
         let versions: Vec<WsTlsVersion> = version
             .split(',')
             .map(|s| s.trim().parse())
             .collect::<Result<_, TaosError>>()?;
-        self.ws_tls_version = Some(versions);
+        self.tls_versions = Some(versions);
         Ok(())
     }
 
-    fn set_ws_tls_ca(&mut self, ca: &str) -> Result<(), TaosError> {
-        let ca = ca.trim();
-        if ca.contains("-----BEGIN CERTIFICATE-----") {
-            self.ws_tls_ca = Some(FastStr::from(ca));
-            return Ok(());
+    fn set_tls_certs(&mut self, pem: &str) -> Result<(), TaosError> {
+        let pem = pem.trim();
+        let certs: Vec<CertificateDer<'static>> = if pem.contains("-----BEGIN CERTIFICATE-----") {
+            CertificateDer::pem_slice_iter(pem.as_bytes())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| {
+                    TaosError::new(Code::INVALID_PARA, &format!("parse PEM failed: {e}"))
+                })?
+        } else {
+            CertificateDer::pem_file_iter(Path::new(pem))
+                .map_err(|e| {
+                    TaosError::new(Code::INVALID_PARA, &format!("open PEM file failed: {e}"))
+                })?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| {
+                    TaosError::new(Code::INVALID_PARA, &format!("parse PEM file failed: {e}"))
+                })?
+        };
+        if certs.is_empty() {
+            return Err(TaosError::new(
+                Code::INVALID_PARA,
+                "no certificate found in PEM (file)",
+            ));
         }
-
-        let path = Path::new(ca);
-        if path.exists() && path.is_file() {
-            let pem = std::fs::read_to_string(path).map_err(|e| {
-                TaosError::new(
-                    Code::INVALID_PARA,
-                    &format!("read wsTlsCa file failed: {e}"),
-                )
-            })?;
-            if !pem.contains("-----BEGIN CERTIFICATE-----") {
-                return Err(TaosError::new(
-                    Code::INVALID_PARA,
-                    "wsTlsCa file does not look like a PEM certificate",
-                ));
-            }
-            self.ws_tls_ca = Some(FastStr::from(pem));
-            return Ok(());
-        }
-        Err(TaosError::new(
-            Code::INVALID_PARA,
-            &format!("wsTlsCa is neither PEM content nor an existing file: {ca}"),
-        ))
-        //    self.ws_tls_ca = Some(ca.to_string().into());
+        self.tls_certs = Some(certs);
+        return Ok(());
     }
 
     fn load_from_path(&mut self, path: &str) -> Result<(), TaosError> {
@@ -712,9 +736,9 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                     })?);
                 }
                 "rotationSize" => config.rotation_size = Some(value.to_string().into()),
-                "wsTlsMode" => config.set_ws_tls_mode(value)?,
-                "wsTlsVersion" => config.set_ws_tls_version(value)?,
-                "wsTlsCa" => config.ws_tls_ca = Some(value.to_string().into()),
+                "wsTlsMode" => config.set_tls_mode(value)?,
+                "wsTlsVersion" => config.set_tls_versions(value)?,
+                "wsTlsCa" => config.set_tls_certs(value)?,
                 _ => {}
             }
         }
