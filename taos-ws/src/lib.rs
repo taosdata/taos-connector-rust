@@ -87,6 +87,8 @@ pub struct TaosBuilder {
     read_timeout: Duration,
     conn_timeout: Duration,
     version_prefer: String,
+    user_ip: Option<String>,
+    user_app: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -501,6 +503,9 @@ impl TaosBuilder {
             }
         };
 
+        let user_ip = dsn.remove("user_ip");
+        let user_app = dsn.remove("user_app");
+
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
         } else {
@@ -525,6 +530,8 @@ impl TaosBuilder {
             read_timeout,
             conn_timeout,
             version_prefer,
+            user_ip,
+            user_app,
         })
     }
 
@@ -828,6 +835,8 @@ impl TaosBuilder {
             db: self.database.clone(),
             mode: (self.conn_mode == Some(1)).then_some(0), // for adapter, 0 is bi mode
             tz: self.tz.map(|s| s.to_string()),
+            ip: self.user_ip.clone(),
+            app: self.user_app.clone(),
         }
     }
 

@@ -22,7 +22,12 @@ pub struct WsConnReq {
     pub(crate) db: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) mode: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) tz: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) app: Option<String>,
 }
 
 impl WsConnReq {
@@ -34,6 +39,8 @@ impl WsConnReq {
             db: None,
             mode: None,
             tz: None,
+            ip: None,
+            app: None,
         }
     }
 }

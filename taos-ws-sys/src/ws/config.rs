@@ -5,10 +5,23 @@ use std::str::FromStr;
 use std::sync::{OnceLock, RwLock};
 
 use faststr::FastStr;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::CertificateDer;
 use taos_error::Code;
 use tracing::level_filters::LevelFilter;
 
+use crate::ws::{WS_TLS_CA, WS_TLS_MODE, WS_TLS_VERSION};
+
 use super::error::TaosError;
+
+// TODO: const
+// fqdn
+// serverPort
+// timezone
+// logDir
+// logKeepDays
+// rotationSize
+// debugFlag
 
 static CONFIG: RwLock<Config> = RwLock::new(Config::new());
 
@@ -181,6 +194,18 @@ pub fn rotation_size() -> FastStr {
     CONFIG.read().unwrap().rotation_size().clone()
 }
 
+pub fn tls_mode() -> WsTlsMode {
+    CONFIG.read().unwrap().tls_mode()
+}
+
+pub fn tls_versions() -> Vec<WsTlsVersion> {
+    CONFIG.read().unwrap().tls_versions().to_vec()
+}
+
+pub fn tls_certs() -> Option<Vec<CertificateDer<'static>>> {
+    CONFIG.read().unwrap().tls_certs().map(|v| v.to_vec())
+}
+
 pub fn set_config_dir<T: Into<FastStr>>(cfg_dir: T) {
     CONFIG.write().unwrap().set_config_dir(cfg_dir);
 }
@@ -216,6 +241,68 @@ const DEFAULT_RETRY_BACKOFF_MAX_MS: u64 = 2000;
 const DEFAULT_LOG_KEEP_DAYS: u16 = 30;
 const DEFAULT_ROTATION_SIZE: &str = "1GB";
 const DEFAULT_DEBUG_FLAG: u16 = 0;
+const DEFAULT_TLS_MODE: WsTlsMode = WsTlsMode::Disabled;
+const DEFAULT_TLS_VERSIONS: &[WsTlsVersion] = &[WsTlsVersion::TlsV1_3];
+
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WsTlsMode {
+    Disabled,
+    Required,
+    VerifyCa,
+    VerifyIdentity,
+}
+
+impl From<WsTlsMode> for i32 {
+    fn from(mode: WsTlsMode) -> Self {
+        mode as i32
+    }
+}
+
+impl std::str::FromStr for WsTlsMode {
+    type Err = TaosError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "0" => Ok(WsTlsMode::Disabled),
+            "1" => Ok(WsTlsMode::Required),
+            "2" => Ok(WsTlsMode::VerifyCa),
+            "3" => Ok(WsTlsMode::VerifyIdentity),
+            _ => Err(TaosError::new(
+                Code::INVALID_PARA,
+                &format!("invalid value for {WS_TLS_MODE}: {s}"),
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for WsTlsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", *self as i32)
+    }
+}
+
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WsTlsVersion {
+    TlsV1_2,
+    TlsV1_3,
+}
+
+impl std::str::FromStr for WsTlsVersion {
+    type Err = TaosError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "TLSv1.2" => Ok(WsTlsVersion::TlsV1_2),
+            "TLSv1.3" => Ok(WsTlsVersion::TlsV1_3),
+            _ => Err(TaosError::new(
+                Code::INVALID_PARA,
+                &format!("invalid value for wsTlsVersion: {s}"),
+            )),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -233,6 +320,9 @@ pub struct Config {
     retry_backoff_max_ms: Option<u64>,
     log_keep_days: Option<u16>,
     rotation_size: Option<FastStr>,
+    tls_mode: Option<WsTlsMode>,
+    tls_versions: Option<Vec<WsTlsVersion>>,
+    tls_certs: Option<Vec<CertificateDer<'static>>>,
 }
 
 impl Config {
@@ -252,6 +342,9 @@ impl Config {
             retry_backoff_max_ms: None,
             log_keep_days: None,
             rotation_size: None,
+            tls_mode: None,
+            tls_versions: None,
+            tls_certs: None,
         }
     }
 
@@ -316,6 +409,18 @@ impl Config {
     fn rotation_size(&self) -> &FastStr {
         static ROTATION_SIZE: FastStr = FastStr::from_static_str(DEFAULT_ROTATION_SIZE);
         self.rotation_size.as_ref().unwrap_or(&ROTATION_SIZE)
+    }
+
+    fn tls_mode(&self) -> WsTlsMode {
+        self.tls_mode.unwrap_or(DEFAULT_TLS_MODE)
+    }
+
+    fn tls_versions(&self) -> &[WsTlsVersion] {
+        self.tls_versions.as_deref().unwrap_or(DEFAULT_TLS_VERSIONS)
+    }
+
+    fn tls_certs(&self) -> Option<&[CertificateDer<'static>]> {
+        self.tls_certs.as_deref()
     }
 
     fn debug_flag(&self) -> Option<u16> {
@@ -412,6 +517,48 @@ impl Config {
 
     fn set_rotation_size<T: Into<FastStr>>(&mut self, size: T) {
         self.rotation_size = Some(size.into());
+    }
+
+    fn set_tls_mode(&mut self, mode: &str) -> Result<(), TaosError> {
+        self.tls_mode = Some(mode.parse()?);
+        Ok(())
+    }
+
+    fn set_tls_versions(&mut self, version: &str) -> Result<(), TaosError> {
+        let versions: Vec<WsTlsVersion> = version
+            .split(',')
+            .map(|s| s.trim().parse())
+            .collect::<Result<_, TaosError>>()?;
+        self.tls_versions = Some(versions);
+        Ok(())
+    }
+
+    fn set_tls_certs(&mut self, pem: &str) -> Result<(), TaosError> {
+        let pem = pem.trim();
+        let certs: Vec<CertificateDer<'static>> = if pem.contains("-----BEGIN CERTIFICATE-----") {
+            CertificateDer::pem_slice_iter(pem.as_bytes())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| {
+                    TaosError::new(Code::INVALID_PARA, &format!("parse PEM failed: {e}"))
+                })?
+        } else {
+            CertificateDer::pem_file_iter(Path::new(pem))
+                .map_err(|e| {
+                    TaosError::new(Code::INVALID_PARA, &format!("open PEM file failed: {e}"))
+                })?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| {
+                    TaosError::new(Code::INVALID_PARA, &format!("parse PEM file failed: {e}"))
+                })?
+        };
+        if certs.is_empty() {
+            return Err(TaosError::new(
+                Code::INVALID_PARA,
+                "no certificate found in PEM (file)",
+            ));
+        }
+        self.tls_certs = Some(certs);
+        return Ok(());
     }
 
     fn load_from_path(&mut self, path: &str) -> Result<(), TaosError> {
@@ -566,9 +713,7 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                         )
                     })?);
                 }
-                "adapterList" => {
-                    config.adapter_list = Some(value.to_string().into());
-                }
+                "adapterList" => config.adapter_list = Some(value.to_string().into()),
                 "connRetries" => {
                     config.conn_retries = Some(value.parse::<u32>().map_err(|_| {
                         TaosError::new(
@@ -601,9 +746,10 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                         )
                     })?);
                 }
-                "rotationSize" => {
-                    config.rotation_size = Some(value.to_string().into());
-                }
+                "rotationSize" => config.rotation_size = Some(value.to_string().into()),
+                WS_TLS_MODE => config.set_tls_mode(value)?,
+                WS_TLS_VERSION => config.set_tls_versions(value)?,
+                WS_TLS_CA => config.set_tls_certs(value)?,
                 _ => {}
             }
         }
