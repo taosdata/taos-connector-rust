@@ -340,9 +340,9 @@ pub struct Stmt2Field {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BindType {
-    Column,
-    Tag,
-    TableName,
+    Column = 1,
+    Tag = 2,
+    TableName = 4,
 }
 
 impl<'de> Deserialize<'de> for BindType {
