@@ -1,5 +1,6 @@
 #![allow(unused_variables)]
 
+use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
 use std::sync::OnceLock;
@@ -41,6 +42,8 @@ pub type TAOS_ROW = *mut *mut c_void;
 #[allow(non_camel_case_types)]
 pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
 
+const DEFAULT_PROTOCOL: &str = "ws";
+const DEFAULT_DSN: &str = "ws://localhost:6041";
 const DEFAULT_HOST: &str = "localhost";
 const DEFAULT_PORT: u16 = 6041;
 const DEFAULT_CLOUD_PORT: u16 = 443;
@@ -424,79 +427,164 @@ fn taos_init_impl() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// #[repr(C)]
-// #[derive(Debug)]
-// pub struct Options {
-//     pub keys: *mut *const c_char,
-//     pub values: *mut *const c_char,
-//     pub count: c_int,
-// }
-
-// pub type Options = c_void;
 #[repr(C)]
-pub struct Options {
-    keys: *mut *const c_char,
-    values: *mut *const c_char,
-    count: c_int,
-}
-
-impl Options {
-    unsafe fn iter(&self) -> impl Iterator<Item = (&CStr, &CStr)> {
-        (0..self.count).map(move |i| {
-            let k = *self.keys.add(i as usize);
-            let v = *self.values.add(i as usize);
-            (CStr::from_ptr(k), CStr::from_ptr(v))
-        })
-    }
+pub struct OPTIONS {
+    keys: [*const c_char; 256],
+    values: [*const c_char; 256],
+    count: u16,
 }
 
 #[no_mangle]
-pub extern "C" fn taos_set_option(options: *mut Options, key: *const c_char, value: *const c_char) {
+pub unsafe extern "C" fn taos_set_option(
+    options: *mut OPTIONS,
+    key: *const c_char,
+    value: *const c_char,
+) {
     if options.is_null() || key.is_null() || value.is_null() {
         return;
     }
-    unsafe {
-        let opt = &mut *options;
-        let idx = opt.count as usize;
-        *opt.keys.add(idx) = key;
-        *opt.values.add(idx) = value;
-        opt.count += 1;
+    let opts = &mut *options;
+    if (opts.count as usize) < opts.keys.len() {
+        opts.keys[opts.count as usize] = key;
+        opts.values[opts.count as usize] = value;
+        opts.count += 1;
     }
 }
+
+const IP: &str = "ip";
+const PORT: &str = "port";
+const USER: &str = "user";
+const PASS: &str = "pass";
+const DB: &str = "db";
+
+const PROTOCOL: &str = "protocol";
+const COMPRESSION: &str = "compression";
+const ADAPTER_LIST: &str = "adapterList";
+const CONN_RETRIES: &str = "connRetries";
+const RETRY_BACKOFF_MS: &str = "retryBackoffMs";
+const RETRY_BACKOFF_MAX_MS: &str = "retryBackoffMaxMs";
+const WS_TLS_MODE: &str = "wsTlsMode";
+const WS_TLS_VERSION: &str = "wsTlsVersion";
+const WS_TLS_CA: &str = "wsTlsCa";
 
 #[no_mangle]
-pub extern "C" fn taos_connect_with(options: *const Options) -> *mut TAOS {
+pub unsafe extern "C" fn taos_connect_with(options: *const OPTIONS) -> *mut TAOS {
+    // TODO: call build_dsn_from_options to connect_with
+    let dsn = build_dsn_from_options(options).unwrap();
+    let taos = connect_with(&dsn).unwrap();
+    todo!()
+}
+
+unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> {
     if options.is_null() {
-        return ptr::null_mut();
+        return Ok(DEFAULT_DSN.to_string());
     }
-    unsafe {
-        let mut dsn = String::from("ws://localhost:6041");
-        for (k, v) in (&*options).iter() {
-            dsn.push('?');
-            dsn.push_str(k.to_str().unwrap_or_default());
-            dsn.push('=');
-            dsn.push_str(v.to_str().unwrap_or_default());
-        }
-        match TaosBuilder::from_dsn(dsn).and_then(|b| b.build()) {
-            Ok(taos) => Box::into_raw(Box::new(taos)) as _,
-            Err(_) => ptr::null_mut(),
+
+    let opts = &*options;
+    let mut map = HashMap::with_capacity(opts.count as usize);
+    for i in 0..opts.count as usize {
+        let key = CStr::from_ptr(opts.keys[i]).to_str()?;
+        let value = CStr::from_ptr(opts.values[i]).to_str()?;
+        map.insert(key, value);
+    }
+
+    let protocol = map.remove(PROTOCOL).unwrap_or(DEFAULT_PROTOCOL);
+    let user = map.remove(USER).unwrap_or(DEFAULT_USER);
+    let pass = map.remove(PASS).unwrap_or(DEFAULT_PASS);
+    let db = map.remove(DB).unwrap_or(DEFAULT_DB);
+
+    let port = match map.remove(PORT) {
+        Some(s) => s
+            .parse::<u16>()
+            .map_err(|_| TaosError::new(Code::INVALID_PARA, &format!("invalid port value: {s}")))?,
+        None => 0,
+    };
+
+    let addr = match map.remove(ADAPTER_LIST) {
+        Some(addr) => addr.to_string(),
+        None => match map.remove(IP) {
+            Some(host) => {
+                let port = util::resolve_port(host, port);
+                format!("{host}:{port}")
+            }
+            None => match config::adapter_list() {
+                Some(addr) => addr.to_string(),
+                None => {
+                    let host = DEFAULT_HOST;
+                    let port = util::resolve_port(host, port);
+                    format!("{host}:{port}")
+                }
+            },
+        },
+    };
+
+    let compression = config::compression().to_string();
+    let conn_retries = config::conn_retries().to_string();
+    let retry_backoff_ms = config::retry_backoff_ms().to_string();
+    let retry_backoff_max_ms = config::retry_backoff_max_ms().to_string();
+    let _tls_mode = config::tls_mode();
+    let _tls_version = config::tls_versions();
+    let _tls_certs = config::tls_certs();
+
+    if !map.contains_key(COMPRESSION) {
+        map.insert(COMPRESSION, &compression);
+    }
+    if !map.contains_key(CONN_RETRIES) {
+        map.insert(CONN_RETRIES, &conn_retries);
+    }
+    if !map.contains_key(RETRY_BACKOFF_MS) {
+        map.insert(RETRY_BACKOFF_MS, &retry_backoff_ms);
+    }
+    if !map.contains_key(RETRY_BACKOFF_MAX_MS) {
+        map.insert(RETRY_BACKOFF_MAX_MS, &retry_backoff_max_ms);
+    }
+
+    let mut params = String::new();
+    for (i, (&key, &value)) in map.iter().enumerate() {
+        let key = util::camel_to_snake(key);
+        params.push_str(&format!("{key}={value}"));
+        if i + 1 < map.len() {
+            params.push('&');
         }
     }
+
+    Ok(format!("{protocol}://{addr}/{db}?{params}"))
 }
 
-/*
-options options;
-taos_set_option(&options, key, value);
-taos_connect_with(&options);
+unsafe fn connect_with(dsn: &str) -> TaosResult<Taos> {
+    tracing::debug!("taos_connect_with, dsn: {dsn}");
 
-struct options {
-   char** keys;
-   char** values;
+    let builder = TaosBuilder::from_dsn(dsn)?;
+
+    #[cfg(all(windows, target_pointer_width = "32"))]
+    {
+        tracing::debug!(
+            "Connecting with dsn: {dsn}, spawning thread to avoid stack overflow on 32-bit Windows"
+        );
+        const STACK_SIZE: usize = 4 * 1024 * 1024;
+        let handle = std::thread::Builder::new()
+            .stack_size(STACK_SIZE)
+            .spawn(move || {
+                builder.build().and_then(|mut taos| {
+                    builder.ping(&mut taos)?;
+                    Ok(taos)
+                })
+            })
+            .map_err(|e| TaosError::new(Code::FAILED, &format!("spawn thread failed: {e}")))?;
+        match handle.join() {
+            Ok(Ok(taos)) => Ok(taos),
+            Ok(Err(e)) => Err(e.into()),
+            Err(_) => Err(TaosError::new(Code::FAILED, "connect thread panicked")),
+        }
+    }
+
+    #[cfg(not(all(windows, target_pointer_width = "32")))]
+    {
+        let mut taos = builder.build()?;
+        builder.ping(&mut taos)?;
+        Ok(taos)
+    }
 }
-
-void taos_set_option(options* options, char* key, char* value);
-taos_connect_with(options* options);
- */
 
 #[derive(Debug)]
 struct Row {

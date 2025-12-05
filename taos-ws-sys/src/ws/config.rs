@@ -10,7 +10,18 @@ use rustls::pki_types::CertificateDer;
 use taos_error::Code;
 use tracing::level_filters::LevelFilter;
 
+use crate::ws::{WS_TLS_CA, WS_TLS_MODE, WS_TLS_VERSION};
+
 use super::error::TaosError;
+
+// TODO: const
+// fqdn
+// serverPort
+// timezone
+// logDir
+// logKeepDays
+// rotationSize
+// debugFlag
 
 static CONFIG: RwLock<Config> = RwLock::new(Config::new());
 
@@ -259,7 +270,7 @@ impl std::str::FromStr for WsTlsMode {
             "3" => Ok(WsTlsMode::VerifyIdentity),
             _ => Err(TaosError::new(
                 Code::INVALID_PARA,
-                &format!("invalid value for wsTlsMode: {s}"),
+                &format!("invalid value for {WS_TLS_MODE}: {s}"),
             )),
         }
     }
@@ -736,9 +747,9 @@ fn parse_config(lines: Vec<String>) -> Result<Config, TaosError> {
                     })?);
                 }
                 "rotationSize" => config.rotation_size = Some(value.to_string().into()),
-                "wsTlsMode" => config.set_tls_mode(value)?,
-                "wsTlsVersion" => config.set_tls_versions(value)?,
-                "wsTlsCa" => config.set_tls_certs(value)?,
+                WS_TLS_MODE => config.set_tls_mode(value)?,
+                WS_TLS_VERSION => config.set_tls_versions(value)?,
+                WS_TLS_CA => config.set_tls_certs(value)?,
                 _ => {}
             }
         }

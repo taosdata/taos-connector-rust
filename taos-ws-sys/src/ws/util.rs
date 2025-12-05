@@ -40,6 +40,19 @@ pub fn resolve_port(host: &str, port: u16) -> u16 {
     }
 }
 
+pub fn camel_to_snake(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            out.push('_');
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -50,5 +63,13 @@ mod tests {
         println!("system locale: {}", locale);
         #[cfg(not(target_os = "windows"))]
         assert!(!locale.is_empty());
+    }
+
+    #[test]
+    fn test_camel_to_snake() {
+        assert_eq!(camel_to_snake("CamelCase"), "_camel_case");
+        assert_eq!(camel_to_snake("camelCaseTest"), "camel_case_test");
+        assert_eq!(camel_to_snake("lowercase"), "lowercase");
+        assert_eq!(camel_to_snake("UPPERCASE"), "_u_p_p_e_r_c_a_s_e");
     }
 }
