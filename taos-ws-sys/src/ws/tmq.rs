@@ -259,8 +259,9 @@ pub unsafe extern "C" fn tmq_conf_set_auto_commit_cb(
 #[no_mangle]
 pub extern "C" fn tmq_list_new() -> *mut tmq_list_t {
     let tmq_list: TaosMaybeError<TmqList> = TmqList::new().into();
-    debug!("tmq_list_new, tmq_list: {tmq_list:?}");
-    Box::into_raw(Box::new(tmq_list)) as _
+    let tmq = Box::into_raw(Box::new(tmq_list)) as _;
+    debug!("tmq_list_new, tmq: {tmq:?}");
+    tmq
 }
 
 #[no_mangle]
@@ -304,7 +305,7 @@ pub extern "C" fn tmq_list_destroy(list: *mut tmq_list_t) {
     debug!("tmq_list_destroy start, list: {list:?}");
     if !list.is_null() {
         let list = unsafe { Box::from_raw(list as *mut TaosMaybeError<TmqList>) };
-        debug!("tmq_list_destroy succ, list: {list:?}");
+        debug!("tmq_list_destroy succ");
     }
 }
 
@@ -316,8 +317,9 @@ pub unsafe extern "C" fn tmq_list_get_size(list: *const tmq_list_t) -> i32 {
         .and_then(|list| list.deref_mut())
     {
         Some(list) => {
-            debug!("tmq_list_get_size succ, list: {list:?}");
-            list.topics.len() as i32
+            let size = list.topics.len() as i32;
+            debug!("tmq_list_get_size succ, size: {size}");
+            size
         }
         None => {
             error!("tmq_list_get_size failed, err: list is null");
@@ -341,7 +343,10 @@ pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *m
                     .iter()
                     .map(|s| CString::new(&**s).unwrap().into_raw())
                     .collect::<Vec<_>>();
-                debug!("tmq_list_to_c_array succ, arr: {arr:?}, list: {list:?}");
+                debug!(
+                    "tmq_list_to_c_array succ, arr: {:?}, list: {list:?}",
+                    list.topics
+                );
                 list.set_c_array(arr);
                 list.c_array.as_mut().unwrap().as_mut_ptr()
             } else {
