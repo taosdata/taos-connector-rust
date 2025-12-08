@@ -1363,6 +1363,7 @@ pub struct TmqResultSet {
     table_name: Option<CString>,
     topic_name: Option<CString>,
     db_name: Option<CString>,
+    rows: Vec<*const c_void>,
 }
 
 impl TmqResultSet {
@@ -1388,6 +1389,7 @@ impl TmqResultSet {
             table_name,
             topic_name,
             db_name,
+            rows: vec![ptr::null(); num_of_fields],
         }
     }
 }
@@ -1466,7 +1468,23 @@ impl ResultSetOperations for TmqResultSet {
     }
 
     unsafe fn fetch_block(&mut self, rows: *mut TAOS_ROW, num: *mut c_int) -> Result<(), Error> {
-        todo!()
+        if self.block.is_none() || self.row.current_row >= self.block.as_ref().unwrap().nrows() {
+            self.block = self.data.fetch_raw_block()?;
+            self.row.current_row = 0;
+        }
+
+        if let Some(block) = self.block.as_ref() {
+            if block.nrows() > 0 {
+                for (i, col) in block.columns().enumerate() {
+                    self.rows[i] = col.as_raw_ptr();
+                }
+                self.row.current_row = block.nrows();
+                *rows = self.rows.as_ptr() as _;
+                *num = block.nrows() as _;
+            }
+        }
+
+        Ok(())
     }
 
     unsafe fn fetch_row(&mut self) -> Result<TAOS_ROW, Error> {
@@ -1482,8 +1500,8 @@ impl ResultSetOperations for TmqResultSet {
                 }
 
                 for col in 0..block.ncols() {
-                    let value = block.get_raw_value_unchecked(self.row.current_row, col);
-                    self.row.data[col] = value.2;
+                    let res = block.get_raw_value_unchecked(self.row.current_row, col);
+                    self.row.data[col] = res.2;
                 }
 
                 self.row.current_row += 1;
