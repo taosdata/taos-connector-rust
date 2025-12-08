@@ -2295,4 +2295,82 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_taos_stmt2_get_fields_insert() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1764847750",
+                    "create database test_1764847750",
+                    "use test_1764847750",
+                    "create table s0 (ts timestamp, c1 int) tags (t1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"insert into ? using s0 tags(?) values(?, ?)";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut count = 0;
+            let mut fields = ptr::null_mut();
+            let code = taos_stmt2_get_fields(stmt2, &mut count, &mut fields);
+            assert_eq!(code, 0);
+            assert_eq!(count, 4);
+            assert!(!fields.is_null());
+
+            let field_slice = slice::from_raw_parts(fields, count as usize);
+            let field_types = field_slice.iter().map(|f| f.field_type).collect::<Vec<_>>();
+            assert_eq!(field_types, vec![4, 2, 1, 1]);
+
+            taos_stmt2_free_fields(stmt2, fields);
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database if exists test_1764847750");
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_stmt2_get_fields_query() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop database if exists test_1765161954",
+                    "create database test_1765161954",
+                    "use test_1765161954",
+                    "create table s0 (ts timestamp, c1 int) tags (t1 int)",
+                ],
+            );
+
+            let stmt2 = taos_stmt2_init(taos, ptr::null_mut());
+            assert!(!stmt2.is_null());
+
+            let sql = c"select * from s0 where tbname = ? and t1 = ? and ts > ?";
+            let code = taos_stmt2_prepare(stmt2, sql.as_ptr(), 0);
+            assert_eq!(code, 0);
+
+            let mut count = 0;
+            let mut fields = ptr::null_mut();
+            let code = taos_stmt2_get_fields(stmt2, &mut count, &mut fields);
+            assert_eq!(code, 0);
+            assert_eq!(count, 3);
+            assert!(fields.is_null());
+
+            let code = taos_stmt2_close(stmt2);
+            assert_eq!(code, 0);
+
+            test_exec(taos, "drop database if exists test_1765161954");
+            taos_close(taos);
+        }
+    }
 }
