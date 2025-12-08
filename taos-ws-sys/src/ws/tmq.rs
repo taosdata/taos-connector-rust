@@ -343,10 +343,7 @@ pub unsafe extern "C" fn tmq_list_to_c_array(list: *const tmq_list_t) -> *mut *m
                     .iter()
                     .map(|s| CString::new(&**s).unwrap().into_raw())
                     .collect::<Vec<_>>();
-                debug!(
-                    "tmq_list_to_c_array succ, arr: {:?}, list: {list:?}",
-                    list.topics
-                );
+                debug!("tmq_list_to_c_array succ, arr: {:?}", list.topics);
                 list.set_c_array(arr);
                 list.c_array.as_mut().unwrap().as_mut_ptr()
             } else {
@@ -551,22 +548,41 @@ pub unsafe extern "C" fn tmq_subscription(tmq: *mut tmq_t, topics: *mut *mut tmq
         .and_then(|tmq| tmq.deref_mut())
     {
         Some(tmq) => {
-            if let Some(consumer) = tmq.consumer.take() {
-                let topic_list = consumer.list_topics().unwrap();
-                *topics = tmq_list_new();
-                for topic in topic_list {
-                    let value = CString::new(topic).unwrap();
-                    let code = tmq_list_append(*topics, value.as_ptr());
-                    if code != 0 {
-                        error!(
-                            "tmq_subscription failed, err: tmq_list_append failed, code: {code}"
-                        );
-                        return code;
-                    }
-                }
+            if let Some(consumer) = &mut tmq.consumer {
+                let topics = consumer.list_topics().unwrap();
+                // match consumer.subscribe(&tmq_list.topics) {
+                //     Ok(_) => {
+                //         debug!("tmq_subscribe succ");
+                //         0
+                //     }
+                //     Err(err) => {
+                //         error!("tmq_subscribe failed, err: {err:?}");
+                //         set_err_and_get_code(TaosError::new(Code::FAILED, &err.message()))
+                //     }
+                // }
+                0
+            } else {
+                error!("tmq_subscription failed, err: consumer is none");
+                set_err_and_get_code(TaosError::new(Code::FAILED, "consumer is none"))
             }
-            debug!("tmq_subscription succ");
-            0
+
+            // take consumer
+            // if let Some(consumer) = tmq.consumer.take() {
+            //     let topic_list = consumer.list_topics().unwrap();
+            //     *topics = tmq_list_new();
+            //     for topic in topic_list {
+            //         let value = CString::new(topic).unwrap();
+            //         let code = tmq_list_append(*topics, value.as_ptr());
+            //         if code != 0 {
+            //             error!(
+            //                 "tmq_subscription failed, err: tmq_list_append failed, code: {code}"
+            //             );
+            //             return code;
+            //         }
+            //     }
+            // }
+            // debug!("tmq_subscription succ");
+            // 0
         }
         None => {
             error!("tmq_subscription failed, err: tmq is null");
