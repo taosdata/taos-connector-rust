@@ -469,10 +469,53 @@ const WS_TLS_CA: &str = "wsTlsCa";
 
 #[no_mangle]
 pub unsafe extern "C" fn taos_connect_with(options: *const OPTIONS) -> *mut TAOS {
-    // TODO: call build_dsn_from_options to connect_with
-    let dsn = build_dsn_from_options(options).unwrap();
-    let taos = connect_with(&dsn).unwrap();
-    todo!()
+    match connect_with(options) {
+        Ok(taos) => Box::into_raw(Box::new(taos)) as _,
+        Err(mut err) => {
+            error!("taos_connect_with failed, err: {err:?}");
+            if err.code() == WS_ERROR_NO::WEBSOCKET_ERROR.as_code() {
+                err = TaosError::new(Code::new(0x000B), "Unable to establish connection");
+            }
+            set_err_and_get_code(err);
+            ptr::null_mut()
+        }
+    }
+}
+
+unsafe fn connect_with(options: *const OPTIONS) -> TaosResult<Taos> {
+    let dsn = build_dsn_from_options(options)?;
+    tracing::debug!("taos_connect_with, dsn: {dsn}");
+
+    let builder = TaosBuilder::from_dsn(dsn)?;
+
+    #[cfg(all(windows, target_pointer_width = "32"))]
+    {
+        tracing::debug!(
+            "Connecting with dsn: {dsn}, spawning thread to avoid stack overflow on 32-bit Windows"
+        );
+        const STACK_SIZE: usize = 4 * 1024 * 1024;
+        let handle = std::thread::Builder::new()
+            .stack_size(STACK_SIZE)
+            .spawn(move || {
+                builder.build().and_then(|mut taos| {
+                    builder.ping(&mut taos)?;
+                    Ok(taos)
+                })
+            })
+            .map_err(|e| TaosError::new(Code::FAILED, &format!("spawn thread failed: {e}")))?;
+        match handle.join() {
+            Ok(Ok(taos)) => Ok(taos),
+            Ok(Err(e)) => Err(e.into()),
+            Err(_) => Err(TaosError::new(Code::FAILED, "connect thread panicked")),
+        }
+    }
+
+    #[cfg(not(all(windows, target_pointer_width = "32")))]
+    {
+        let mut taos = builder.build()?;
+        builder.ping(&mut taos)?;
+        Ok(taos)
+    }
 }
 
 unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> {
@@ -522,9 +565,9 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     let conn_retries = config::conn_retries().to_string();
     let retry_backoff_ms = config::retry_backoff_ms().to_string();
     let retry_backoff_max_ms = config::retry_backoff_max_ms().to_string();
-    let _tls_mode = config::tls_mode();
-    let _tls_version = config::tls_versions();
-    let _tls_certs = config::tls_certs();
+    let _ws_tls_mode = config::ws_tls_mode();
+    let _ws_tls_version = config::ws_tls_versions();
+    let _ws_tls_certs = config::ws_tls_certs();
 
     if !map.contains_key(COMPRESSION) {
         map.insert(COMPRESSION, &compression);
@@ -549,41 +592,6 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     }
 
     Ok(format!("{protocol}://{addr}/{db}?{params}"))
-}
-
-unsafe fn connect_with(dsn: &str) -> TaosResult<Taos> {
-    tracing::debug!("taos_connect_with, dsn: {dsn}");
-
-    let builder = TaosBuilder::from_dsn(dsn)?;
-
-    #[cfg(all(windows, target_pointer_width = "32"))]
-    {
-        tracing::debug!(
-            "Connecting with dsn: {dsn}, spawning thread to avoid stack overflow on 32-bit Windows"
-        );
-        const STACK_SIZE: usize = 4 * 1024 * 1024;
-        let handle = std::thread::Builder::new()
-            .stack_size(STACK_SIZE)
-            .spawn(move || {
-                builder.build().and_then(|mut taos| {
-                    builder.ping(&mut taos)?;
-                    Ok(taos)
-                })
-            })
-            .map_err(|e| TaosError::new(Code::FAILED, &format!("spawn thread failed: {e}")))?;
-        match handle.join() {
-            Ok(Ok(taos)) => Ok(taos),
-            Ok(Err(e)) => Err(e.into()),
-            Err(_) => Err(TaosError::new(Code::FAILED, "connect thread panicked")),
-        }
-    }
-
-    #[cfg(not(all(windows, target_pointer_width = "32")))]
-    {
-        let mut taos = builder.build()?;
-        builder.ping(&mut taos)?;
-        Ok(taos)
-    }
 }
 
 #[derive(Debug)]
