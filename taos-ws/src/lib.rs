@@ -71,6 +71,14 @@ struct RetryPolicy {
 }
 
 #[derive(Debug, Clone)]
+struct TlsConfig {
+    mode: String,
+    versions: Vec<String>,
+    ca: String,
+    certs: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
 pub struct TaosBuilder {
     https: Arc<AtomicBool>,
     addrs: Vec<String>,
