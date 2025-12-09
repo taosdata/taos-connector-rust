@@ -1353,7 +1353,7 @@ pub unsafe extern "C" fn tmq_err2str(code: i32) -> *const c_char {
 
 #[derive(Debug)]
 pub struct TmqResultSet {
-    block: Option<Block>,
+    pub(crate) block: Option<Block>,
     fields: Vec<TAOS_FIELD>,
     num_of_fields: i32,
     precision: Precision,
@@ -1364,6 +1364,7 @@ pub struct TmqResultSet {
     topic_name: Option<CString>,
     db_name: Option<CString>,
     rows: Vec<*const c_void>,
+    pub(crate) offsets: Option<Vec<i32>>,
 }
 
 impl TmqResultSet {
@@ -1390,6 +1391,7 @@ impl TmqResultSet {
             topic_name,
             db_name,
             rows: vec![ptr::null(); num_of_fields],
+            offsets: None,
         }
     }
 }
@@ -3052,6 +3054,105 @@ mod tests {
             assert!(!list.is_null());
 
             let topic = c"topic_1753174098";
+            let code = tmq_list_append(list, topic.as_ptr());
+            assert_eq!(code, 0);
+
+            let code = tmq_subscribe(consumer, list);
+            assert_eq!(code, 0);
+
+            tmq_conf_destroy(conf);
+            tmq_list_destroy(list);
+
+            loop {
+                let res = tmq_consumer_poll(consumer, 1000);
+                tracing::debug!("poll res: {res:?}");
+                if res.is_null() {
+                    break;
+                }
+
+                if !res.is_null() {
+                    let fields = taos_fetch_fields(res);
+                    assert!(!fields.is_null());
+
+                    let num_fields = taos_num_fields(res);
+                    assert_eq!(num_fields, 3);
+
+                    let row = taos_fetch_row(res);
+                    assert!(!row.is_null());
+
+                    let mut str = vec![0 as c_char; 1024];
+                    let _ = taos_print_row(str.as_mut_ptr(), row, fields, num_fields);
+                    assert_eq!(
+                        CStr::from_ptr(str.as_ptr()).to_str().unwrap(),
+                        "1753174694276 1 \\x12345678"
+                    );
+
+                    let code = tmq_commit_sync(consumer, res);
+                    assert_eq!(code, 0);
+
+                    taos_free_result(res);
+                }
+            }
+
+            let code = tmq_unsubscribe(consumer);
+            assert_eq!(code, 0);
+
+            let code = tmq_consumer_close(consumer);
+            assert_eq!(code, 0);
+
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic topic_1753174098",
+                    "drop database test_1753174098",
+                ],
+            );
+
+            taos_close(taos);
+        }
+    }
+
+    #[test]
+    fn test_taos_fetch_block() {
+        unsafe {
+            let taos = test_connect();
+            test_exec_many(
+                taos,
+                &[
+                    "drop topic if exists topic_1765285608",
+                    "drop database if exists test_1765285608",
+                    "create database test_1765285608",
+                    "create topic topic_1765285608 as database test_1765285608",
+                    "use test_1765285608",
+                    "create table t0 (ts timestamp, c1 int, c2 varchar(20))",
+                    "insert into t0 values (1741780784749, 2025, 'hello')",
+                    "insert into t0 values (1741780784750, 999, null)",
+                    "insert into t0 values (1741780784751, null, 'world')",
+                    "insert into t0 values (1741780784752, null, null)",
+                ],
+            );
+
+            let conf = tmq_conf_new();
+            assert!(!conf.is_null());
+
+            let key = c"group.id".as_ptr();
+            let value = c"10".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let key = c"auto.offset.reset".as_ptr();
+            let value = c"earliest".as_ptr();
+            let res = tmq_conf_set(conf, key, value);
+            assert_eq!(res, tmq_conf_res_t::TMQ_CONF_OK);
+
+            let mut errstr = [0; 256];
+            let consumer = tmq_consumer_new(conf, errstr.as_mut_ptr(), errstr.len() as _);
+            assert!(!consumer.is_null());
+
+            let list = tmq_list_new();
+            assert!(!list.is_null());
+
+            let topic = c"topic_1765285608";
             let code = tmq_list_append(list, topic.as_ptr());
             assert_eq!(code, 0);
 
