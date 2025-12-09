@@ -1,5 +1,13 @@
 #![recursion_limit = "256"]
 
+use std::cmp;
+use std::fmt::{Debug, Display};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
 use chrono_tz::Tz;
 use dashmap::DashMap;
 use futures::stream::{SplitSink, SplitStream};
@@ -9,13 +17,10 @@ use once_cell::sync::OnceCell;
 use query::Error as QueryError;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use std::cmp;
-use std::fmt::{Debug, Display};
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::client::WebPkiServerVerifier;
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConfig, DigitallySignedStruct};
 use taos_query::prelude::Code;
 use taos_query::util::{generate_req_id, Edition};
 use taos_query::{DsnError, IntoDsn, RawError, RawResult};
@@ -41,7 +46,9 @@ pub use query::{ResultSet, Taos};
 pub(crate) use taos_query::block_in_place_or_global;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+    connect_async_tls_with_config, Connector, MaybeTlsStream, WebSocketStream,
+};
 
 use crate::query::asyn::WS_ERROR_NO;
 use crate::query::messages::{ToMessage, WsRecv, WsRecvData, WsSend};
@@ -70,12 +77,26 @@ struct RetryPolicy {
     backoff_max_ms: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TlsMode {
+    // Disabled,
+    // Required,
+    VerifyCa,
+    VerifyIdentity,
+}
+
+#[derive(Debug, Clone)]
+enum TlsVersion {
+    TLSv1_2,
+    TLSv1_3,
+}
+
 #[derive(Debug, Clone)]
 struct TlsConfig {
-    mode: String,
-    versions: Vec<String>,
-    ca: String,
-    certs: Option<Vec<String>>,
+    mode: Option<TlsMode>,
+    versions: Option<Vec<TlsVersion>>,
+    ca: Option<String>,
+    certs: Option<Vec<CertificateDer<'static>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +118,11 @@ pub struct TaosBuilder {
     version_prefer: String,
     user_ip: Option<String>,
     user_app: Option<String>,
+    // tls_config: Option<TlsConfig>,
+    tls_mode: Option<TlsMode>,
+    tls_versions: Option<Vec<TlsVersion>>,
+    tls_ca: Option<String>,
+    tls_certs: Option<Vec<CertificateDer<'static>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,7 +417,7 @@ impl taos_query::AsyncTBuilder for TaosBuilder {
 
 impl TaosBuilder {
     fn scheme(&self) -> &'static str {
-        if self.https.load(Ordering::SeqCst) {
+        if self.https() {
             "wss"
         } else {
             "ws"
@@ -400,6 +426,10 @@ impl TaosBuilder {
 
     fn set_https(&self, https: bool) {
         self.https.store(https, Ordering::SeqCst);
+    }
+
+    fn https(&self) -> bool {
+        self.https.load(Ordering::SeqCst)
     }
 
     pub fn from_dsn<T: IntoDsn>(dsn: T) -> RawResult<Self> {
@@ -514,6 +544,20 @@ impl TaosBuilder {
         let user_ip = dsn.remove("user_ip");
         let user_app = dsn.remove("user_app");
 
+        let tls_mode = dsn.remove("tls_mode");
+        let tls_version = dsn.remove("tls_version");
+        let tls_ca = dsn.remove("tls_ca");
+        let tls_config = Some(TlsConfig {
+            mode: None,
+            versions: None,
+            ca: None,
+            certs: None,
+        });
+
+        let tls_mode = None;
+        let tls_versions = None;
+        let tls_certs = None;
+
         let auth = if let Some(token) = token {
             WsAuth::Token(token)
         } else {
@@ -540,6 +584,11 @@ impl TaosBuilder {
             version_prefer,
             user_ip,
             user_app,
+            // tls_config,
+            tls_mode,
+            tls_versions,
+            tls_ca,
+            tls_certs,
         })
     }
 
@@ -589,19 +638,21 @@ impl TaosBuilder {
         }
 
         let mut last_err = None;
+        let connector = self.build_tls_client_config().unwrap_or(None);
 
         for _ in 0..self.addrs.len() {
             let mut url = self.to_url(ty);
             for i in 0..=self.retry_policy.retries {
                 tracing::trace!("connecting to TDengine WebSocket server, url: {url}");
-                match connect_async_with_config(&url, Some(config), false).await {
+                match connect_async_tls_with_config(
+                    &url,
+                    Some(config),
+                    self.tcp_nodelay,
+                    connector.clone(),
+                )
+                .await
+                {
                     Ok((mut ws_stream, _)) => {
-                        if self.tcp_nodelay {
-                            if let Err(err) = self.enable_tcp_nodelay(&ws_stream) {
-                                tracing::warn!("failed to enable TCP_NODELAY: {err}");
-                            }
-                        }
-
                         if ty == EndpointType::Stmt {
                             return Ok((ws_stream, String::new()));
                         }
@@ -695,15 +746,54 @@ impl TaosBuilder {
         }
     }
 
-    fn enable_tcp_nodelay(&self, ws: &WsStream) -> std::io::Result<()> {
-        match ws.get_ref() {
-            MaybeTlsStream::Plain(s) => s.set_nodelay(true),
-            #[cfg(feature = "rustls")]
-            MaybeTlsStream::Rustls(s) => s.get_ref().0.set_nodelay(true),
-            #[cfg(feature = "native-tls")]
-            MaybeTlsStream::NativeTls(s) => s.get_ref().get_ref().get_ref().set_nodelay(true),
-            _ => Ok(()),
+    // #[cfg(feature = "rustls")]
+    fn build_tls_client_config(&self) -> Result<Option<Connector>, rustls::Error> {
+        if !self.https() {
+            return Ok(None);
         }
+
+        let protocol_versions = if let Some(versions) = &self.tls_versions {
+            let mut out = Vec::with_capacity(versions.len());
+            for version in versions {
+                match version {
+                    TlsVersion::TLSv1_2 => out.push(&rustls::version::TLS12),
+                    TlsVersion::TLSv1_3 => out.push(&rustls::version::TLS13),
+                }
+            }
+            out
+        } else {
+            vec![&rustls::version::TLS13]
+        };
+
+        let mut root_store = rustls::RootCertStore::empty();
+        if self.tls_mode.is_some() {
+            if let Some(certs) = &self.tls_certs {
+                for cert in certs {
+                    root_store.add(cert.clone())?;
+                }
+            }
+        }
+
+        let root_store = Arc::new(root_store);
+        let mut client_config = ClientConfig::builder_with_protocol_versions(&protocol_versions)
+            .with_root_certificates(root_store.clone())
+            .with_no_client_auth();
+
+        if let Some(mode) = self.tls_mode {
+            if mode == TlsMode::VerifyCa {
+                // TODO: remove unwrap
+                let inner = WebPkiServerVerifier::builder(root_store.clone())
+                    .build()
+                    .unwrap();
+                let verifier = Arc::new(NoServerNameVerification::new(inner));
+                client_config.dangerous().set_certificate_verifier(verifier);
+            }
+        } else {
+            let verifier = Arc::new(NoCertificateVerification {});
+            client_config.dangerous().set_certificate_verifier(verifier);
+        }
+
+        Ok(Some(Connector::Rustls(Arc::new(client_config))))
     }
 
     async fn send_version_request(&self, ws_stream: &mut WsStream) -> RawResult<Version> {
@@ -926,6 +1016,144 @@ fn handle_disconnect_error(err: WsError) -> RawError {
             .with_code(WS_ERROR_NO::WEBSOCKET_ERROR.as_code())
             .context("WebSocket error"),
     }
+}
+
+#[derive(Debug)]
+pub struct NoCertificateVerification;
+
+impl ServerCertVerifier for NoCertificateVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        use rustls::SignatureScheme::*;
+        vec![
+            RSA_PKCS1_SHA1,
+            ECDSA_SHA1_Legacy,
+            RSA_PKCS1_SHA256,
+            ECDSA_NISTP256_SHA256,
+            RSA_PKCS1_SHA384,
+            ECDSA_NISTP384_SHA384,
+            RSA_PKCS1_SHA512,
+            ECDSA_NISTP521_SHA512,
+            RSA_PSS_SHA256,
+            RSA_PSS_SHA384,
+            RSA_PSS_SHA512,
+            ED25519,
+            ED448,
+        ]
+    }
+}
+
+#[derive(Debug)]
+pub struct NoServerNameVerification {
+    inner: Arc<WebPkiServerVerifier>,
+}
+
+impl NoServerNameVerification {
+    pub fn new(inner: Arc<WebPkiServerVerifier>) -> Self {
+        Self { inner }
+    }
+}
+
+impl ServerCertVerifier for NoServerNameVerification {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
+        ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        match self.inner.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        ) {
+            Ok(scv) => Ok(scv),
+            Err(rustls::Error::InvalidCertificate(cert_error)) => {
+                println!("Certificate verification error (ignored): {:?}", cert_error);
+                if let rustls::CertificateError::NotValidForName = cert_error {
+                    Ok(ServerCertVerified::assertion())
+                } else if let rustls::CertificateError::NotValidForNameContext { .. } = cert_error {
+                    Ok(ServerCertVerified::assertion())
+                } else {
+                    Err(rustls::Error::InvalidCertificate(cert_error))
+                }
+            }
+            Err(e) => {
+                println!("Certificate verification error: {:?}", e);
+                Err(e)
+            }
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
+}
+
+// Helper to parse tls_ca to DERs
+fn parse_ca_to_der(input: &str) -> RawResult<Vec<rustls::pki_types::CertificateDer<'static>>> {
+    todo!()
+
+    // let s = input.trim();
+    // if s.contains("-----BEGIN CERTIFICATE-----") {
+    //     rustls::pki_types::CertificateDer::pem_slice_iter(s.as_bytes())
+    //         .collect::<Result<Vec<_>, _>>()
+    //         .map_err(|e| TaosError::new(Code::INVALID_PARA, &format!("invalid PEM: {e}")))
+    // } else {
+    //     rustls::pki_types::CertificateDer::pem_file_iter(std::path::Path::new(s))
+    //         .map_err(|e| TaosError::new(Code::INVALID_PARA, &format!("open CA file failed: {e}")))?
+    //         .collect::<Result<Vec<_>, _>>()
+    //         .map_err(|e| TaosError::new(Code::INVALID_PARA, &format!("parse CA file failed: {e}")))
+    // }
 }
 
 #[cfg(test)]

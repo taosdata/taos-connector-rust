@@ -3415,6 +3415,7 @@ dependencies = [
  "once_cell",
  "pretty_env_logger",
  "rand 0.9.1",
+ "rustls",
  "scc",
  "serde",
  "serde_json",
