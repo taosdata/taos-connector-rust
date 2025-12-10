@@ -21,6 +21,8 @@ use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
 use tracing::{debug, error, instrument, trace, warn};
 
+use crate::ws::config::WsTlsMode;
+
 mod config;
 pub mod error;
 pub mod query;
@@ -42,7 +44,6 @@ pub type TAOS_ROW = *mut *mut c_void;
 #[allow(non_camel_case_types)]
 pub type __taos_async_fn_t = extern "C" fn(param: *mut c_void, res: *mut TAOS_RES, code: c_int);
 
-const DEFAULT_PROTOCOL: &str = "ws";
 const DEFAULT_DSN: &str = "ws://localhost:6041";
 const DEFAULT_HOST: &str = "localhost";
 const DEFAULT_PORT: u16 = 6041;
@@ -457,7 +458,6 @@ const USER: &str = "user";
 const PASS: &str = "pass";
 const DB: &str = "db";
 
-const PROTOCOL: &str = "protocol";
 const COMPRESSION: &str = "compression";
 const ADAPTER_LIST: &str = "adapterList";
 const CONN_RETRIES: &str = "connRetries";
@@ -553,15 +553,17 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     }
     trace!("build_dsn_from_options, raw options: {map:?}");
 
-    let protocol = map.remove(PROTOCOL).unwrap_or(DEFAULT_PROTOCOL);
     let user = map.remove(USER).unwrap_or(DEFAULT_USER);
     let pass = map.remove(PASS).unwrap_or(DEFAULT_PASS);
     let db = map.remove(DB).unwrap_or(DEFAULT_DB);
 
     let port = match map.remove(PORT) {
-        Some(s) => s
-            .parse::<u16>()
-            .map_err(|_| TaosError::new(Code::INVALID_PARA, &format!("invalid port value: {s}")))?,
+        Some(s) => s.parse::<u16>().map_err(|_| {
+            TaosError::new(
+                Code::INVALID_PARA,
+                &format!("invalid value for {PORT}: {s}"),
+            )
+        })?,
         None => 0,
     };
 
@@ -599,9 +601,6 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     let conn_retries = config::conn_retries().to_string();
     let retry_backoff_ms = config::retry_backoff_ms().to_string();
     let retry_backoff_max_ms = config::retry_backoff_max_ms().to_string();
-    let _ws_tls_mode = config::ws_tls_mode();
-    let _ws_tls_version = config::ws_tls_versions();
-    let _ws_tls_certs = config::ws_tls_certs();
 
     if !map.contains_key(COMPRESSION) {
         map.insert(COMPRESSION, &compression);
@@ -614,6 +613,40 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     }
     if !map.contains_key(RETRY_BACKOFF_MAX_MS) {
         map.insert(RETRY_BACKOFF_MAX_MS, &retry_backoff_max_ms);
+    }
+
+    let ws_tls_mode = map
+        .remove(WS_TLS_MODE)
+        .map(|s| s.parse::<WsTlsMode>())
+        .transpose()?
+        .unwrap_or(config::ws_tls_mode());
+
+    let protocol = match ws_tls_mode {
+        WsTlsMode::Disabled => "ws",
+        _ => "wss",
+    };
+
+    if ws_tls_mode == WsTlsMode::VerifyCa {
+        map.insert("tls_mode", "verify_ca");
+    } else if ws_tls_mode == WsTlsMode::VerifyIdentity {
+        map.insert("tls_mode", "verify_identity");
+    };
+
+    let tls_version = map
+        .remove(WS_TLS_VERSION)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| config::ws_tls_version().to_string());
+    map.insert("tls_version", &tls_version);
+
+    let tls_ca = match map.remove(WS_TLS_CA) {
+        Some(ca) => Some(ca.to_string()),
+        None => match config::ws_tls_ca() {
+            Some(ca) => Some(ca.to_string()),
+            None => None,
+        },
+    };
+    if let Some(ca) = &tls_ca {
+        map.insert("tls_ca", ca);
     }
 
     let mut params = String::with_capacity(64);
