@@ -51,7 +51,7 @@ rev = "3420353"
 
 [dev-dependencies]
 pretty_env_logger = "0.5.0"
-tracing-subscriber = { version = "0.3.18", default-features = false, features = [
+tracing-subscriber = { version = "0.3.20", default-features = false, features = [
     "fmt",
 ] }
 taos-query = { version = "0.12.4", path = "../taos-query", default-features = false, features = [
