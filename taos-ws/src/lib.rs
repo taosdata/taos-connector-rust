@@ -1177,9 +1177,7 @@ impl ServerCertVerifier for NoServerNameVerification {
     }
 }
 
-fn parse_ca_to_certs(
-    input: &str,
-) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>, DsnError> {
+fn parse_ca_to_certs(input: &str) -> Result<Vec<CertificateDer<'static>>, DsnError> {
     use rustls::pki_types::pem::PemObject;
 
     if input.contains("-----BEGIN CERTIFICATE-----") {

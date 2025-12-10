@@ -19,7 +19,7 @@ use taos_ws::query::asyn::WS_ERROR_NO;
 use taos_ws::query::{ConnOption, Error};
 use taos_ws::{Offset, Taos, TaosBuilder};
 use tmq::TmqResultSet;
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, instrument, trace, warn};
 
 mod config;
 pub mod error;
@@ -520,16 +520,38 @@ unsafe fn connect_with(options: *const OPTIONS) -> TaosResult<Taos> {
 
 unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> {
     if options.is_null() {
+        debug!("build_dsn_from_options, options is null, use default dsn: {DEFAULT_DSN}");
         return Ok(DEFAULT_DSN.to_string());
     }
 
     let opts = &*options;
-    let mut map = HashMap::with_capacity(opts.count as usize);
-    for i in 0..opts.count as usize {
+    let count = opts.count as usize;
+    if count > opts.keys.len() || count > opts.values.len() {
+        error!(
+            "build_dsn_from_options, invalid count: {count}, exceeds arrays len: {}",
+            opts.keys.len()
+        );
+        return Err(TaosError::new(
+            Code::INVALID_PARA,
+            "options count out of range",
+        ));
+    }
+
+    let mut map = HashMap::with_capacity(count);
+    for i in 0..count {
+        if opts.keys[i].is_null() || opts.values[i].is_null() {
+            warn!("build_dsn_from_options, index {i} has null key/value, skip");
+            continue;
+        }
         let key = CStr::from_ptr(opts.keys[i]).to_str()?;
         let value = CStr::from_ptr(opts.values[i]).to_str()?;
-        map.insert(key, value);
+        if let Some(value) = map.insert(key, value) {
+            debug!(
+                "build_dsn_from_options, duplicate key: {key}, overwrite previous value: {value}"
+            );
+        }
     }
+    trace!("build_dsn_from_options, raw options: {map:?}");
 
     let protocol = map.remove(PROTOCOL).unwrap_or(DEFAULT_PROTOCOL);
     let user = map.remove(USER).unwrap_or(DEFAULT_USER);
@@ -544,21 +566,33 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
     };
 
     let addr = match map.remove(ADAPTER_LIST) {
-        Some(addr) => addr.to_string(),
-        None => match map.remove(IP) {
-            Some(host) => {
-                let port = util::resolve_port(host, port);
-                format!("{host}:{port}")
-            }
-            None => match config::adapter_list() {
-                Some(addr) => addr.to_string(),
-                None => {
-                    let host = DEFAULT_HOST;
+        Some(addr) => {
+            debug!("build_dsn_from_options, use adapterList option: {addr}");
+            addr.to_string()
+        }
+        None => {
+            match map.remove(IP) {
+                Some(host) => {
                     let port = util::resolve_port(host, port);
-                    format!("{host}:{port}")
+                    let addr = format!("{host}:{port}");
+                    debug!("build_dsn_from_options, use host: {host}, address: {addr}");
+                    addr
                 }
-            },
-        },
+                None => match config::adapter_list() {
+                    Some(addr) => {
+                        debug!("build_dsn_from_options, use adapterList config: {addr}");
+                        addr.to_string()
+                    }
+                    None => {
+                        let host = DEFAULT_HOST;
+                        let port = util::resolve_port(host, port);
+                        let addr = format!("{host}:{port}");
+                        debug!("build_dsn_from_options, fallback default host: {host}, address: {addr}");
+                        addr
+                    }
+                },
+            }
+        }
     };
 
     let compression = config::compression().to_string();
@@ -582,13 +616,15 @@ unsafe fn build_dsn_from_options(options: *const OPTIONS) -> TaosResult<String> 
         map.insert(RETRY_BACKOFF_MAX_MS, &retry_backoff_max_ms);
     }
 
-    let mut params = String::new();
+    let mut params = String::with_capacity(64);
     for (i, (&key, &value)) in map.iter().enumerate() {
         let key = util::camel_to_snake(key);
-        params.push_str(&format!("{key}={value}"));
-        if i + 1 < map.len() {
+        if i > 0 {
             params.push('&');
         }
+        params.push_str(&key);
+        params.push('=');
+        params.push_str(value);
     }
 
     Ok(format!("{protocol}://{addr}/{db}?{params}"))
