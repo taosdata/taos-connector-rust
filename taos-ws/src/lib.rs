@@ -116,7 +116,7 @@ impl std::str::FromStr for TlsVersion {
 #[derive(Debug, Clone)]
 struct TlsConfig {
     mode: Option<TlsMode>,
-    versions: Vec<TlsVersion>,
+    versions: Option<Vec<TlsVersion>>,
     certs: Option<Vec<CertificateDer<'static>>>,
 }
 
@@ -563,8 +563,7 @@ impl TaosBuilder {
             let versions = dsn
                 .remove("tls_version")
                 .map(|s| s.split(',').map(|s| s.parse()).collect())
-                .transpose()?
-                .unwrap_or(vec![TlsVersion::TLSv1_3]);
+                .transpose()?;
 
             let certs = mode
                 .as_ref()
@@ -575,11 +574,14 @@ impl TaosBuilder {
                 })
                 .transpose()?;
 
-            Some(TlsConfig {
-                mode,
-                versions,
-                certs,
-            })
+            match (mode, versions, certs) {
+                (None, None, None) => None,
+                (mode, versions, certs) => Some(TlsConfig {
+                    mode,
+                    versions,
+                    certs,
+                }),
+            }
         } else {
             None
         };
@@ -768,20 +770,25 @@ impl TaosBuilder {
         }
     }
 
-    // #[cfg(feature = "rustls")]
     fn build_tls_connector(&self) -> RawResult<Option<Connector>> {
         if self.tls_config.is_none() {
             return Ok(None);
         }
 
         let tls_cfg = self.tls_config.as_ref().unwrap();
-        let mut protocol_versions = Vec::with_capacity(tls_cfg.versions.len());
-        for version in &tls_cfg.versions {
-            match version {
-                TlsVersion::TLSv1_2 => protocol_versions.push(&rustls::version::TLS12),
-                TlsVersion::TLSv1_3 => protocol_versions.push(&rustls::version::TLS13),
+        let protocol_versions = match &tls_cfg.versions {
+            Some(versions) => {
+                let mut protocol_versions = Vec::with_capacity(versions.len());
+                for version in versions {
+                    match version {
+                        TlsVersion::TLSv1_2 => protocol_versions.push(&rustls::version::TLS12),
+                        TlsVersion::TLSv1_3 => protocol_versions.push(&rustls::version::TLS13),
+                    }
+                }
+                protocol_versions
             }
-        }
+            None => vec![&rustls::version::TLS13],
+        };
 
         let mut root_store = rustls::RootCertStore::empty();
         if tls_cfg.mode.is_some() {
