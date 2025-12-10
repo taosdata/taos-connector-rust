@@ -285,6 +285,40 @@ pub extern "C" fn taos_fetch_datetime_whitelist_a(
 ) {
 }
 
+#[no_mangle]
+pub extern "C" fn taos_connect_totp(
+    ip: *const c_char,
+    user: *const c_char,
+    pass: *const c_char,
+    totp: *const c_char,
+    db: *const c_char,
+    port: u16,
+) -> *mut TAOS {
+    ptr::null_mut()
+}
+
+#[no_mangle]
+pub extern "C" fn taos_connect_test(
+    ip: *const c_char,
+    user: *const c_char,
+    pass: *const c_char,
+    totp: *const c_char,
+    db: *const c_char,
+    port: u16,
+) -> c_int {
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn taos_connect_token(
+    ip: *const c_char,
+    token: *const c_char,
+    db: *const c_char,
+    port: u16,
+) -> *mut TAOS {
+    ptr::null_mut()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,5 +503,28 @@ mod tests {
             taos_fetch_datetime_whitelist_a_cb,
             ptr::null_mut(),
         );
+
+        let taos = taos_connect_totp(
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+            0,
+        );
+        assert_eq!(taos, ptr::null_mut());
+
+        let code = taos_connect_test(
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+            0,
+        );
+        assert_eq!(code, 0);
+
+        let taos = taos_connect_token(ptr::null(), ptr::null(), ptr::null(), 0);
+        assert_eq!(taos, ptr::null_mut());
     }
 }
